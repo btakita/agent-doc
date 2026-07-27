@@ -47,9 +47,7 @@ use agent_doc_controller::command_line::{
 use agent_doc_state_scope::LocalReadScope;
 use lazily::{Computed, Source, SourceMap};
 
-use crate::proc_table::{
-    TreeProcess, observe_proc_children, observe_process_tree, tree_cmdlines,
-};
+use crate::proc_table::{TreeProcess, observe_proc_children, observe_process_tree, tree_cmdlines};
 
 /// A pane's observed process tree, shared by every derived cell that reads it.
 type TreeObservation = Rc<Vec<TreeProcess>>;
@@ -94,10 +92,8 @@ impl ProcessObservationState {
             return handle;
         }
         self.observations += 1;
-        let observed: TreeObservation = Rc::new(observe_process_tree(
-            &observe_proc_children(),
-            root_pid,
-        ));
+        let observed: TreeObservation =
+            Rc::new(observe_process_tree(&observe_proc_children(), root_pid));
         self.trees
             .entry_with(self.scope.ctx(), root_pid.to_string(), || observed)
     }
@@ -277,7 +273,10 @@ pub fn record_tree_observation(root_pid: &str, tree: Vec<TreeProcess>) {
 }
 
 /// Read a pane's observed process tree, from the active scope when there is one.
-pub(crate) fn with_tree_observation<R>(root_pid: &str, read: impl FnOnce(&[TreeProcess]) -> R) -> R {
+pub(crate) fn with_tree_observation<R>(
+    root_pid: &str,
+    read: impl FnOnce(&[TreeProcess]) -> R,
+) -> R {
     let scoped = SCOPE.with(|scope| {
         scope
             .borrow_mut()
@@ -392,7 +391,10 @@ mod tests {
     #[test]
     fn agent_doc_owner_document_prefers_the_route_owned_wrapper() {
         let observed = tree(&[
-            ("10", "agent-doc start --route-owned /repo/tasks/selected.md"),
+            (
+                "10",
+                "agent-doc start --route-owned /repo/tasks/selected.md",
+            ),
             ("20", "codex resume --last"),
         ]);
         assert_eq!(
@@ -495,7 +497,10 @@ mod tests {
         record_tree_observation(
             "100",
             tree(&[
-                ("100", "agent-doc start --route-owned /repo/tasks/claimed.md"),
+                (
+                    "100",
+                    "agent-doc start --route-owned /repo/tasks/claimed.md",
+                ),
                 ("102", "claude"),
             ]),
         );

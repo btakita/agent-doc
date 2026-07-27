@@ -2819,7 +2819,10 @@ impl DocumentProjection {
             return None;
         }
         let stage = converged.source.closeout_stage()?;
-        intent.source.superseded_by(&converged.source).then_some(stage)
+        intent
+            .source
+            .superseded_by(&converged.source)
+            .then_some(stage)
     }
 
     fn seed_pending_write_journal_from_legacy_projection(&mut self) {
@@ -3208,7 +3211,8 @@ impl QueueDrainStallMachine {
     /// the isolated form, and every long-lived owner should prefer this one so cells
     /// can eventually derive from one another and invalidate together.
     pub fn new_in(scope: &DocumentScope, initial: QueueDrainStallPhase) -> Self {
-        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_queue_drain_stall);
+        let machine =
+            ThreadSafeStateMachine::new(scope.ctx(), initial, transition_queue_drain_stall);
         Self {
             ctx: scope.ctx().clone(),
             machine,
@@ -3220,7 +3224,6 @@ impl QueueDrainStallMachine {
     pub fn state_in(&self, ctx: &ThreadSafeContext) -> QueueDrainStallPhase {
         self.machine.state(ctx)
     }
-
 
     pub fn send(&self, event: QueueDrainStallEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -3370,7 +3373,8 @@ impl QueueContextClearMachine {
     /// the isolated form, and every long-lived owner should prefer this one so cells
     /// can eventually derive from one another and invalidate together.
     pub fn new_in(scope: &DocumentScope, initial: QueueContextClearPhase) -> Self {
-        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_queue_context_clear);
+        let machine =
+            ThreadSafeStateMachine::new(scope.ctx(), initial, transition_queue_context_clear);
         Self {
             ctx: scope.ctx().clone(),
             machine,
@@ -3382,7 +3386,6 @@ impl QueueContextClearMachine {
     pub fn state_in(&self, ctx: &ThreadSafeContext) -> QueueContextClearPhase {
         self.machine.state(ctx)
     }
-
 
     pub fn send(&self, event: QueueContextClearEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4422,7 +4425,8 @@ impl SupervisorRecycleMachine {
     /// the isolated form, and every long-lived owner should prefer this one so cells
     /// can eventually derive from one another and invalidate together.
     pub fn new_in(scope: &DocumentScope, initial: SupervisorRecyclePhase) -> Self {
-        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_supervisor_recycle);
+        let machine =
+            ThreadSafeStateMachine::new(scope.ctx(), initial, transition_supervisor_recycle);
         Self {
             ctx: scope.ctx().clone(),
             machine,
@@ -4434,7 +4438,6 @@ impl SupervisorRecycleMachine {
     pub fn state_in(&self, ctx: &ThreadSafeContext) -> SupervisorRecyclePhase {
         self.machine.state(ctx)
     }
-
 
     pub fn send(&self, event: SupervisorRecycleEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4628,7 +4631,6 @@ impl RouteSubmitMachine {
     pub fn state_in(&self, ctx: &ThreadSafeContext) -> RouteSubmitPhase {
         self.machine.state(ctx)
     }
-
 
     pub fn send(&self, event: RouteSubmitEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4861,7 +4863,6 @@ impl QueueHeadMachine {
         self.machine.state(ctx)
     }
 
-
     pub fn send(&self, event: QueueHeadEvent) -> bool {
         self.machine.send(&self.ctx, event)
     }
@@ -4976,7 +4977,6 @@ impl TransportPatchMachine {
     pub fn state_in(&self, ctx: &ThreadSafeContext) -> TransportPatchPhase {
         self.machine.state(ctx)
     }
-
 
     pub fn send(&self, event: TransportPatchEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -5113,7 +5113,6 @@ impl ActorLifecycleMachine {
     pub fn state_in(&self, ctx: &ThreadSafeContext) -> ActorLifecyclePhase {
         self.machine.state(ctx)
     }
-
 
     pub fn send(&self, event: ActorLifecycleEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -5270,7 +5269,6 @@ impl RouteReadinessMachine {
         self.machine.state(ctx)
     }
 
-
     pub fn send(&self, event: RouteReadinessEvent) -> bool {
         self.machine.send(&self.ctx, event)
     }
@@ -5399,7 +5397,6 @@ impl ProofGateMachine {
         self.machine.state(ctx)
     }
 
-
     pub fn send(&self, event: ProofGateEvent) -> bool {
         self.machine.send(&self.ctx, event)
     }
@@ -5474,7 +5471,10 @@ mod tests {
         // closeout out from under the process actually writing it.
         let owner = owner_at("cycle-open", 1_000, CLOSEOUT_OWNER_LEASE_SECS);
 
-        assert_eq!(owner.release_reason("cycle-open", 1_010, Some(true), true), None);
+        assert_eq!(
+            owner.release_reason("cycle-open", 1_010, Some(true), true),
+            None
+        );
         assert_eq!(
             owner.release_reason("cycle-open", 1_010, Some(false), true),
             Some(CloseoutOwnerRelease::OwnerProcessGone),
@@ -5494,7 +5494,10 @@ mod tests {
             .release_reason("cycle-open", expired, Some(true), true)
             .expect("an expired lease must release");
         assert_eq!(reason, CloseoutOwnerRelease::LeaseExpired);
-        assert!(reason.is_stopgap(), "the clock path must be flagged as the stopgap");
+        assert!(
+            reason.is_stopgap(),
+            "the clock path must be flagged as the stopgap"
+        );
         assert!(!CloseoutOwnerRelease::SupersededByNewTurn.is_stopgap());
         assert!(!CloseoutOwnerRelease::OwnerProcessGone.is_stopgap());
     }
@@ -7446,7 +7449,10 @@ mod tests {
         // A transition on one machine is visible through the shared context, and does
         // not disturb its neighbour in the same graph.
         assert!(drain.send(QueueDrainStallEvent::Recorded));
-        assert_eq!(drain.state_in(document.ctx()), QueueDrainStallPhase::Pending);
+        assert_eq!(
+            drain.state_in(document.ctx()),
+            QueueDrainStallPhase::Pending
+        );
         assert_eq!(
             head.state_in(document.ctx()),
             QueueHeadPhase::Pending,
@@ -7462,7 +7468,6 @@ mod tests {
             "a second scope starts its own graph"
         );
     }
-
 
     #[test]
     fn retained_capture_effect_rejects_overtaking_preflight_until_convergence() {

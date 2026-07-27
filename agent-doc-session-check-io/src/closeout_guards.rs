@@ -207,7 +207,9 @@ pub fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardRe
 /// Timed at the definition so every branch that reaches it is attributed
 /// to one total (`#sessioncheckprofile`).
 pub fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {
-    crate::profile::timed("detect_active_session_post_commit_drift", || detect_active_session_post_commit_drift_inner(file))
+    crate::profile::timed("detect_active_session_post_commit_drift", || {
+        detect_active_session_post_commit_drift_inner(file)
+    })
 }
 
 fn detect_active_session_post_commit_drift_inner(file: &Path) -> Result<Option<String>> {
@@ -262,7 +264,9 @@ fn detect_active_session_post_commit_drift_inner(file: &Path) -> Result<Option<S
 /// Timed at the definition so every branch that reaches it is attributed
 /// to one total (`#sessioncheckprofile`).
 pub fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> {
-    crate::profile::timed("detect_uncommitted_exchange_drift", || detect_uncommitted_exchange_drift_inner(file))
+    crate::profile::timed("detect_uncommitted_exchange_drift", || {
+        detect_uncommitted_exchange_drift_inner(file)
+    })
 }
 
 fn detect_uncommitted_exchange_drift_inner(file: &Path) -> Result<Option<String>> {
@@ -356,7 +360,9 @@ pub fn open_cycle_manual_patchback_message(
 /// Timed at the definition so every branch that reaches it is attributed
 /// to one total (`#sessioncheckprofile`).
 pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
-    crate::profile::timed("detect_bypassed_response_write", || detect_bypassed_response_write_inner(file))
+    crate::profile::timed("detect_bypassed_response_write", || {
+        detect_bypassed_response_write_inner(file)
+    })
 }
 
 fn detect_bypassed_response_write_inner(file: &Path) -> Result<Option<String>> {

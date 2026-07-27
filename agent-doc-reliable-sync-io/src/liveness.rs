@@ -894,8 +894,14 @@ mod tests {
         }));
 
         // Ghost: with no death fact the crashed editor reads as fully live.
-        assert!(p.pid_alive(930287), "no death fact ⇒ presumed alive (the bug)");
-        assert!(p.live_docs().contains("docA"), "ghost holds live_editors>=1");
+        assert!(
+            p.pid_alive(930287),
+            "no death fact ⇒ presumed alive (the bug)"
+        );
+        assert!(
+            p.live_docs().contains("docA"),
+            "ghost holds live_editors>=1"
+        );
         assert_eq!(
             p.live_registrations("docA").len(),
             1,
@@ -915,7 +921,10 @@ mod tests {
             stamp: stamp(100, 0),
         });
 
-        assert!(!p.pid_alive(930287), "reap publishes the missing Alive{{false}}");
+        assert!(
+            !p.pid_alive(930287),
+            "reap publishes the missing Alive{{false}}"
+        );
         assert!(
             !p.live_docs().contains("docA"),
             "reaped ghost drops from live_docs ⇒ disk authority ⇒ convergence"

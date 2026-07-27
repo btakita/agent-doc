@@ -39,7 +39,8 @@
 //! `item-id` is the durable child key.
 
 use lazily::{
-    SourceMap, SourceTree, Context, DiffOp, SemTree, TextCrdt, apply_to_map, apply_to_tree, reconcile,
+    Context, DiffOp, SemTree, SourceMap, SourceTree, TextCrdt, apply_to_map, apply_to_tree,
+    reconcile,
 };
 use std::fmt;
 

@@ -282,7 +282,9 @@ impl DynamicContextProjection {
     }
 
     pub fn set_candidate_chunks(&self, candidate_chunks: Vec<ContextChunk>) {
-        self.scope.ctx().set(&self.candidate_chunks, candidate_chunks);
+        self.scope
+            .ctx()
+            .set(&self.candidate_chunks, candidate_chunks);
     }
 
     pub fn set_ledger_snapshot(&self, ledger_snapshot: InjectionLedgerSnapshot) {

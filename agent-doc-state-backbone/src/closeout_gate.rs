@@ -98,7 +98,12 @@ pub fn closeout_gate(
             reason: CloseoutOwnerRelease::SupersededByNewTurn,
         };
     };
-    match owner.release_reason(open_cycle_id, now_secs, owner_alive, allow_dead_owner_takeover) {
+    match owner.release_reason(
+        open_cycle_id,
+        now_secs,
+        owner_alive,
+        allow_dead_owner_takeover,
+    ) {
         Some(reason) => CloseoutGate::Released {
             owner: Box::new(owner.clone()),
             reason,
@@ -304,7 +309,10 @@ mod tests {
                 fired.lock().unwrap().push(owner.owner_id.clone());
             })
         };
-        assert!(fired.lock().unwrap().is_empty(), "nothing to report while blocked");
+        assert!(
+            fired.lock().unwrap().is_empty(),
+            "nothing to report while blocked"
+        );
 
         state.observe_now(1_000 + CLOSEOUT_OWNER_LEASE_SECS);
 

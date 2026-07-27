@@ -100,7 +100,11 @@ pub(crate) fn invalidate_current_document_pass(file: &Path) {
         };
         let key = file.to_path_buf();
         let ctx = graph.scope.ctx();
-        let next = graph.version.observe(ctx, &key).unwrap_or(0).wrapping_add(1);
+        let next = graph
+            .version
+            .observe(ctx, &key)
+            .unwrap_or(0)
+            .wrapping_add(1);
         graph.version.set(ctx, key, next);
     });
 }
@@ -135,10 +139,12 @@ pub(crate) fn pass_resolved(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
-    fn counting_resolve(calls: &Arc<AtomicU32>) -> impl Fn() -> Option<CurrentDocument> + Send + Sync + 'static {
+    fn counting_resolve(
+        calls: &Arc<AtomicU32>,
+    ) -> impl Fn() -> Option<CurrentDocument> + Send + Sync + 'static {
         let calls = Arc::clone(calls);
         move || {
             calls.fetch_add(1, Ordering::SeqCst);

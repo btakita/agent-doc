@@ -213,7 +213,6 @@ where
     })
 }
 
-
 /// Report a context read that is slow enough to matter (`#sessioncheckprofile`).
 ///
 /// The slots behind these accessors are memoized, so each cost is paid once per
@@ -561,7 +560,9 @@ impl<Schema: 'static> AgentDocContextExt for TypedContext<Schema> {
     }
 
     fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus {
-        timed_read("snapshot_commit_status", || self.get(snapshot_commit_status_slot(self)))
+        timed_read("snapshot_commit_status", || {
+            self.get(snapshot_commit_status_slot(self))
+        })
     }
 
     fn harness(&self) -> String {

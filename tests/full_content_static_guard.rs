@@ -107,7 +107,10 @@ fn vscode_manifest_exposes_jetbrains_parity_commands() {
             .expect("EDITOR_PLUGIN_VERSION must be a quoted literal")
             .to_string()
     };
-    assert_source_contains(package_json, &format!("\"version\": \"{reported_version}\""));
+    assert_source_contains(
+        package_json,
+        &format!("\"version\": \"{reported_version}\""),
+    );
     assert_source_contains(package_json, "\"command\": \"agentDoc.fixDocument\"");
     assert_source_contains(package_json, "\"command\": \"agentDoc.loadTmuxWindow\"");
     assert_source_contains(

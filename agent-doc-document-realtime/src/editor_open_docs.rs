@@ -24,7 +24,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use lazily::{Computed, Source, ThreadSafeSourceMap, ThreadSafeContext};
+use lazily::{Computed, Source, ThreadSafeContext, ThreadSafeSourceMap};
 
 /// Per-document open state held in the reactive family.
 ///

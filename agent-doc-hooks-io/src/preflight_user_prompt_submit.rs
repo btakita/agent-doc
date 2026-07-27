@@ -133,7 +133,10 @@ mod tests {
     fn a_prompt_that_merely_mentions_the_command_is_not_a_trigger() {
         // The damage here is opening a cycle the operator did not ask for, so
         // only the first line counts.
-        assert_eq!(invoked_document("can you run agent-doc tasks/plan.md?"), None);
+        assert_eq!(
+            invoked_document("can you run agent-doc tasks/plan.md?"),
+            None
+        );
         assert_eq!(
             invoked_document("Here is what I did:\nagent-doc tasks/plan.md"),
             None
@@ -143,7 +146,14 @@ mod tests {
 
     #[test]
     fn non_cycle_subcommands_own_their_own_flow() {
-        for subcommand in ["claim", "compact", "reset", "repair", "session-check", "respond"] {
+        for subcommand in [
+            "claim",
+            "compact",
+            "reset",
+            "repair",
+            "session-check",
+            "respond",
+        ] {
             assert_eq!(
                 invoked_document(&format!("/agent-doc {subcommand} tasks/plan.md")),
                 None,

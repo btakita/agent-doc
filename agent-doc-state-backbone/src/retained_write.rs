@@ -246,8 +246,11 @@ pub fn intent_added_lines<'a>(expected: Option<&str>, target: &'a str) -> Vec<&'
     let Some(expected) = expected else {
         return Vec::new();
     };
-    let baseline: std::collections::HashSet<&str> =
-        expected.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    let baseline: std::collections::HashSet<&str> = expected
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
     let mut seen = std::collections::HashSet::new();
     target
         .lines()
@@ -265,8 +268,11 @@ pub fn added_lines_materialized_in(added: &[&str], content: &str) -> bool {
     if added.is_empty() {
         return false;
     }
-    let present: std::collections::HashSet<&str> =
-        content.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    let present: std::collections::HashSet<&str> = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
     added.iter().all(|line| present.contains(line.trim()))
 }
 
@@ -445,7 +451,11 @@ mod tests {
 
     #[test]
     fn no_intent_never_blocks() {
-        let verdict = settlement_verdict(None, Some(&observed("a", false)), Some(&observed("a", false)));
+        let verdict = settlement_verdict(
+            None,
+            Some(&observed("a", false)),
+            Some(&observed("a", false)),
+        );
         assert_eq!(verdict, SettlementVerdict::NoRetainedIntent);
         assert!(!verdict.blocks_new_cycle());
         assert!(!verdict.should_clear_intent());
@@ -559,8 +569,11 @@ mod tests {
         let mut converged = observed("queue_mirror_target", false);
         converged.intent_delta_materialized = true;
 
-        let verdict =
-            settlement_verdict(Some(&superseded), Some(&converged), Some(&converged.clone()));
+        let verdict = settlement_verdict(
+            Some(&superseded),
+            Some(&converged),
+            Some(&converged.clone()),
+        );
         assert!(
             verdict.should_clear_intent(),
             "an intent whose successor carried its content must not block every future cycle"
@@ -597,8 +610,12 @@ mod tests {
         let mut materialized = observed("other", false);
         materialized.intent_delta_materialized = true;
         assert!(
-            settlement_verdict(Some(&no_delta), Some(&materialized), Some(&materialized.clone()))
-                .blocks_new_cycle(),
+            settlement_verdict(
+                Some(&no_delta),
+                Some(&materialized),
+                Some(&materialized.clone())
+            )
+            .blocks_new_cycle(),
             "a deletion-only or unknown-delta intent must stay on exact bytes"
         );
     }
@@ -620,8 +637,11 @@ mod tests {
         superseded.superseding_stage = Some(CloseoutStage::QueueMirror);
         let converged = observed("queue_mirror_target", false);
 
-        let verdict =
-            settlement_verdict(Some(&superseded), Some(&converged), Some(&converged.clone()));
+        let verdict = settlement_verdict(
+            Some(&superseded),
+            Some(&converged),
+            Some(&converged.clone()),
+        );
         assert!(
             verdict.should_clear_intent(),
             "the queue mirror converging must settle the response write it superseded"
@@ -716,7 +736,10 @@ mod tests {
             &added,
             "preamble\nadded one\nalpha\nadded two\nbeta\n"
         ));
-        assert!(!added_lines_materialized_in(&added, "alpha\nbeta\nadded one\n"));
+        assert!(!added_lines_materialized_in(
+            &added,
+            "alpha\nbeta\nadded one\n"
+        ));
 
         // No baseline means the delta is UNKNOWN, not empty-and-satisfied.
         assert!(intent_added_lines(None, target).is_empty());
@@ -787,7 +810,7 @@ mod tests {
 
 #[cfg(test)]
 mod reactive_map_probe {
-    use lazily::{ThreadSafeSourceMap, ThreadSafeContext, ThreadSafeComputedMap};
+    use lazily::{ThreadSafeComputedMap, ThreadSafeContext, ThreadSafeSourceMap};
 
     /// Does a `ThreadSafeComputedMap` entry that reads a `ThreadSafeSourceMap`
     /// through its own tracking view actually subscribe to that cell?

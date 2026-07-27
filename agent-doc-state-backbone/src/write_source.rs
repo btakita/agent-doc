@@ -116,7 +116,9 @@ impl DocumentWriteSource {
             Self::SerializedAtomicWriteEditorSavePending => {
                 "serialized_atomic_write_editor_save_pending"
             }
-            Self::SerializedAtomicWriteProjectionRebase => "serialized_atomic_write_projection_rebase",
+            Self::SerializedAtomicWriteProjectionRebase => {
+                "serialized_atomic_write_projection_rebase"
+            }
             Self::ForceDisk => "force_disk",
             Self::RepairForceDisk => "repair_force_disk",
             Self::Unknown(token) => token,
@@ -210,7 +212,9 @@ impl From<&str> for DocumentWriteSource {
             "serialized_atomic_write_editor_save_pending" => {
                 Self::SerializedAtomicWriteEditorSavePending
             }
-            "serialized_atomic_write_projection_rebase" => Self::SerializedAtomicWriteProjectionRebase,
+            "serialized_atomic_write_projection_rebase" => {
+                Self::SerializedAtomicWriteProjectionRebase
+            }
             "force_disk" => Self::ForceDisk,
             "repair_force_disk" => Self::RepairForceDisk,
             token => Self::Unknown(token.to_string()),
@@ -369,16 +373,27 @@ mod tests {
             DocumentWriteSource::SerializedAtomicWrite,
             DocumentWriteSource::Unknown("whatever".to_string()),
         ] {
-            assert!(!staged.superseded_by(&unstaged), "{unstaged} must not supersede");
-            assert!(!unstaged.superseded_by(&staged), "{unstaged} must not be superseded");
+            assert!(
+                !staged.superseded_by(&unstaged),
+                "{unstaged} must not supersede"
+            );
+            assert!(
+                !unstaged.superseded_by(&staged),
+                "{unstaged} must not be superseded"
+            );
         }
     }
 
     #[test]
     fn typed_predicates_replace_the_string_prefix_checks() {
         assert!(DocumentWriteSource::SerializedAtomicWrite.is_serialized_atomic_write());
-        assert!(DocumentWriteSource::SerializedAtomicWriteEditorSavePending.is_serialized_atomic_write());
-        assert!(DocumentWriteSource::SerializedAtomicWriteProjectionRebase.is_serialized_atomic_write());
+        assert!(
+            DocumentWriteSource::SerializedAtomicWriteEditorSavePending
+                .is_serialized_atomic_write()
+        );
+        assert!(
+            DocumentWriteSource::SerializedAtomicWriteProjectionRebase.is_serialized_atomic_write()
+        );
         assert!(!DocumentWriteSource::PostCommitReposition.is_serialized_atomic_write());
         assert!(DocumentWriteSource::ForceDisk.is_force_disk());
         assert!(!DocumentWriteSource::PendingWrite.is_force_disk());

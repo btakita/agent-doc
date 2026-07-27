@@ -215,7 +215,10 @@ impl DocumentRealtimeMachine {
     ///
     /// The scope owns the context, so dropping the scope drops this machine's cells —
     /// teardown is the scope's lifetime, not a separate deregistration step.
-    pub fn new_in(scope: &agent_doc_state_scope::DocumentScope, initial: DocumentRealtimeState) -> Self {
+    pub fn new_in(
+        scope: &agent_doc_state_scope::DocumentScope,
+        initial: DocumentRealtimeState,
+    ) -> Self {
         let ctx = scope.ctx().clone();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_document_realtime);
         Self { ctx, machine }

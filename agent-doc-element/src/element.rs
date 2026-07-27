@@ -2229,11 +2229,17 @@ actual content
 
         // Single quotes too.
         let attrs = parse_attrs("archive='tasks/x.done.md'");
-        assert_eq!(attrs.get("archive").map(|s| s.as_str()), Some("tasks/x.done.md"));
+        assert_eq!(
+            attrs.get("archive").map(|s| s.as_str()),
+            Some("tasks/x.done.md")
+        );
 
         // The unquoted form every other session document uses keeps working.
         let attrs = parse_attrs("archive=tasks/x.done.md");
-        assert_eq!(attrs.get("archive").map(|s| s.as_str()), Some("tasks/x.done.md"));
+        assert_eq!(
+            attrs.get("archive").map(|s| s.as_str()),
+            Some("tasks/x.done.md")
+        );
 
         // Both forms must agree — that they did not is the whole defect.
         assert_eq!(
@@ -2273,7 +2279,10 @@ actual content
         // marker — the same class of outage this fix removes. Take the rest of the
         // input as the value instead.
         let attrs = parse_attrs(r#"archive="tasks/x.done.md"#);
-        assert_eq!(attrs.get("archive").map(|s| s.as_str()), Some("tasks/x.done.md"));
+        assert_eq!(
+            attrs.get("archive").map(|s| s.as_str()),
+            Some("tasks/x.done.md")
+        );
     }
 
     #[test]

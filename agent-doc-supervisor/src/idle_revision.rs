@@ -256,8 +256,12 @@ impl IdleRevisionState {
     pub fn new_in(scope: LocalProcessScope) -> Self {
         let machine = StateMachine::new(scope.ctx(), RevisionTracking::default(), advance);
         let state = machine.state_handle();
-        let projection_stale = scope.ctx().computed(move |ctx| ctx.get(&state).projection_stale());
-        let probe_health = scope.ctx().computed(move |ctx| ctx.get(&state).probe_health());
+        let projection_stale = scope
+            .ctx()
+            .computed(move |ctx| ctx.get(&state).projection_stale());
+        let probe_health = scope
+            .ctx()
+            .computed(move |ctx| ctx.get(&state).probe_health());
         let should_probe_controller = scope
             .ctx()
             .computed(move |ctx| ctx.get(&state).should_probe_controller());
@@ -329,10 +333,11 @@ mod tests {
     /// Fold the whole stream with no graph involved. This is the layer the two
     /// original ordering bugs lived in, so it is pinned without cells.
     fn fold(observations: &[RevisionObservation]) -> RevisionTracking {
-        observations.iter().fold(
-            RevisionTracking::default(),
-            |state, observation| advance(&state, observation).expect("the fold is total"),
-        )
+        observations
+            .iter()
+            .fold(RevisionTracking::default(), |state, observation| {
+                advance(&state, observation).expect("the fold is total")
+            })
     }
 
     #[test]
@@ -407,7 +412,10 @@ mod tests {
         );
 
         state.observe(RevisionObservation::observed("rev-1"));
-        assert!(!state.projection_stale(), "an unchanged revision is not stale");
+        assert!(
+            !state.projection_stale(),
+            "an unchanged revision is not stale"
+        );
 
         state.observe(RevisionObservation::Unresolved);
         assert!(
@@ -571,7 +579,10 @@ mod tests {
         };
 
         let initial = seen.borrow().len();
-        assert!(initial >= 1, "an effect materializes with its current value");
+        assert!(
+            initial >= 1,
+            "an effect materializes with its current value"
+        );
 
         for _ in 0..UNRESOLVED_STREAK_DEGRADED * 3 {
             state.observe(RevisionObservation::Unresolved);

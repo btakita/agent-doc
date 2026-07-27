@@ -200,9 +200,13 @@ impl VisibleWriteCommitCandidateMachine {
     /// A visible write's commit candidacy belongs to the document: the proof can arrive after the turn that produced it has closed.
     ///
     /// The scope owns the context, so dropping the scope drops this machine's cells.
-    pub fn new_in(scope: &agent_doc_state_scope::DocumentScope, initial: VisibleWriteCommitCandidateState) -> Self {
+    pub fn new_in(
+        scope: &agent_doc_state_scope::DocumentScope,
+        initial: VisibleWriteCommitCandidateState,
+    ) -> Self {
         let ctx = scope.ctx().clone();
-        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_visible_write_commit_candidate);
+        let machine =
+            ThreadSafeStateMachine::new(&ctx, initial, transition_visible_write_commit_candidate);
         Self { ctx, machine }
     }
 
@@ -340,9 +344,16 @@ impl VisibleWriteMaterializedCarryForwardMachine {
     /// Carry-forward exists precisely to survive a turn boundary, so a turn-scoped graph would drop it at exactly the moment it is needed.
     ///
     /// The scope owns the context, so dropping the scope drops this machine's cells.
-    pub fn new_in(scope: &agent_doc_state_scope::DocumentScope, initial: VisibleWriteMaterializedCarryForwardState) -> Self {
+    pub fn new_in(
+        scope: &agent_doc_state_scope::DocumentScope,
+        initial: VisibleWriteMaterializedCarryForwardState,
+    ) -> Self {
         let ctx = scope.ctx().clone();
-        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_visible_write_materialized_carry_forward);
+        let machine = ThreadSafeStateMachine::new(
+            &ctx,
+            initial,
+            transition_visible_write_materialized_carry_forward,
+        );
         Self { ctx, machine }
     }
 

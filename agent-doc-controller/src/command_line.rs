@@ -259,9 +259,7 @@ pub fn cmdline_is_unmanaged_harness_session(cmdline: &str) -> bool {
 
 /// True when `cmdline` is the `agent-doc` binary itself.
 pub fn cmdline_runs_agent_doc_binary(cmdline: &str) -> bool {
-    cmdline
-        .split_whitespace()
-        .any(token_is_agent_doc_binary)
+    cmdline.split_whitespace().any(token_is_agent_doc_binary)
 }
 
 /// Tree-level form of [`cmdline_is_unmanaged_harness_session`]: true when a whole

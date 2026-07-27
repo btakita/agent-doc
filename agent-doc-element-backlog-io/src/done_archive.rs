@@ -210,8 +210,9 @@ mod tests {
     /// path that broke.
     fn archive_attr(marker: &str) -> String {
         // Markers must sit at column 0 — an indented marker is not recognised.
-        let content =
-            format!("## Completed / Reaped\n\n<!-- agent:done {marker} -->\n<!-- /agent:done -->\n");
+        let content = format!(
+            "## Completed / Reaped\n\n<!-- agent:done {marker} -->\n<!-- /agent:done -->\n"
+        );
         let components = agent_doc_element::element::parse(&content).expect("parse");
         components
             .into_iter()

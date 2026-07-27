@@ -1402,16 +1402,11 @@ mod tests {
     /// hard-erroring on a wedged/overloaded controller.
     #[test]
     fn unanswered_actor_read_classifies_as_timeout_not_protocol() {
-        use interprocess::local_socket::{
-            ListenerOptions, ToFsName, traits::Listener as _,
-        };
+        use interprocess::local_socket::{ListenerOptions, ToFsName, traits::Listener as _};
 
         let dir = tempfile::TempDir::new().unwrap();
         let socket_path = dir.path().join("actor.sock");
-        let name = socket_path
-            .clone()
-            .to_fs_name::<GenericFilePath>()
-            .unwrap();
+        let name = socket_path.clone().to_fs_name::<GenericFilePath>().unwrap();
         let listener = ListenerOptions::new().name(name).create_sync().unwrap();
         // Accept the connection but hold it open without ever writing a response,
         // so the client's recv timeout fires.
@@ -1422,12 +1417,8 @@ mod tests {
 
         let request = serde_json::json!({ "command": "document_state_projection" });
         let started = std::time::Instant::now();
-        let err = send_ndjson_request_to_actor(
-            &socket_path,
-            &request,
-            Duration::from_millis(150),
-        )
-        .expect_err("an unanswered actor read must error");
+        let err = send_ndjson_request_to_actor(&socket_path, &request, Duration::from_millis(150))
+            .expect_err("an unanswered actor read must error");
 
         assert!(
             started.elapsed() < Duration::from_secs(2),

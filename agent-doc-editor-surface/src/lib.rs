@@ -324,8 +324,8 @@ mod tests {
 
     #[test]
     fn the_first_observation_reconciles_the_layout() {
-        let (tracking, intent) =
-            SurfaceTracking::default().advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
+        let (tracking, intent) = SurfaceTracking::default()
+            .advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
         assert!(matches!(intent, SurfaceIntent::Sync { .. }));
         assert_eq!(intent.document(), Some("/a.md"));
         assert_eq!(tracking.focused_document.as_deref(), Some("/a.md"));
@@ -345,8 +345,8 @@ mod tests {
 
     #[test]
     fn moving_focus_within_an_unchanged_layout_is_a_focus_move() {
-        let (tracking, _) =
-            SurfaceTracking::default().advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
+        let (tracking, _) = SurfaceTracking::default()
+            .advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
         let (_, intent) = tracking.advance(&surface("/b.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
         assert_eq!(
             intent,
@@ -359,8 +359,8 @@ mod tests {
 
     #[test]
     fn a_changed_layout_reconciles_even_with_unchanged_focus() {
-        let (tracking, _) =
-            SurfaceTracking::default().advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
+        let (tracking, _) = SurfaceTracking::default()
+            .advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
         let (_, intent) = tracking.advance(&surface("/a.md", &[&["/a.md"]]), MATCHES);
         assert!(matches!(intent, SurfaceIntent::Sync { .. }));
     }
@@ -395,10 +395,7 @@ mod tests {
             columns: editor.columns.clone(),
         };
         let swapped = TmuxLayout {
-            columns: vec![
-                SurfaceColumn::new(["/b.md"]),
-                SurfaceColumn::new(["/a.md"]),
-            ],
+            columns: vec![SurfaceColumn::new(["/b.md"]), SurfaceColumn::new(["/a.md"])],
         };
 
         assert_eq!(layout_matches(&editor, Some(&same)), Some(true));
@@ -493,7 +490,11 @@ mod tests {
     fn without_a_detected_layout_the_signature_is_the_sorted_visible_set() {
         let unordered = EditorSurface {
             focused: "/a.md".to_string(),
-            visible: vec!["/b.md".to_string(), "/a.md".to_string(), "/b.md".to_string()],
+            visible: vec![
+                "/b.md".to_string(),
+                "/a.md".to_string(),
+                "/b.md".to_string(),
+            ],
             ..EditorSurface::default()
         };
         let reordered = EditorSurface {

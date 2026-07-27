@@ -418,7 +418,9 @@ impl PendingLayout {
         let mut dropped = Vec::new();
         for segment in &self.segments {
             match segment {
-                PendingSegment::Text(raw) if text_is_splice_debris(raw) => dropped.push(raw.clone()),
+                PendingSegment::Text(raw) if text_is_splice_debris(raw) => {
+                    dropped.push(raw.clone())
+                }
                 other => segments.push(other.clone()),
             }
         }
@@ -2913,7 +2915,10 @@ fn text_is_bare_queue_directive_reference(text: &str) -> bool {
             rest = stripped.trim_start();
         }
     }
-    let Some(rest) = rest.strip_prefix("do ").or_else(|| rest.strip_prefix("do\t")) else {
+    let Some(rest) = rest
+        .strip_prefix("do ")
+        .or_else(|| rest.strip_prefix("do\t"))
+    else {
         return false;
     };
     let rest = rest.trim();
@@ -4687,10 +4692,13 @@ mod tests {
             "This remains an operator/live-editor v ] [#fmgc] [focused-cycle] stale duplicate\n",
             "- [ ] [#keep2] another real item\n",
         );
-        let (new_body, changed, dropped) =
-            backfill_reporting_dropped_text(body, DOC_ID, &ids());
+        let (new_body, changed, dropped) = backfill_reporting_dropped_text(body, DOC_ID, &ids());
         assert!(changed);
-        assert_eq!(dropped.len(), 2, "both orphan segments must be reported: {dropped:?}");
+        assert_eq!(
+            dropped.len(),
+            2,
+            "both orphan segments must be reported: {dropped:?}"
+        );
         assert!(dropped.iter().any(|d| d.contains("### Re: #bbpe")));
         assert!(dropped.iter().any(|d| d.contains("[#fmgc]")));
         assert!(!new_body.contains("### Re: #bbpe"));
@@ -4722,9 +4730,11 @@ mod tests {
             "\n",
             "- [ ] [#next] next item\n",
         );
-        let (new_body, _changed, dropped) =
-            backfill_reporting_dropped_text(body, DOC_ID, &ids());
-        assert!(dropped.is_empty(), "nothing legitimate may be dropped: {dropped:?}");
+        let (new_body, _changed, dropped) = backfill_reporting_dropped_text(body, DOC_ID, &ids());
+        assert!(
+            dropped.is_empty(),
+            "nothing legitimate may be dropped: {dropped:?}"
+        );
         assert!(
             new_body.contains("continuation detail that belongs to the parent"),
             "indented continuation must survive: {new_body:?}"

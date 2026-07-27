@@ -413,7 +413,11 @@ mod tests {
         let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
         state.observe_tmux(Some(mirrored(&visible)));
         state.observe(visible.clone());
-        assert_eq!(seen.lock().unwrap().len(), 1, "the first sighting reconciles");
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            1,
+            "the first sighting reconciles"
+        );
         assert_eq!(state.layout_matches(), Some(true));
 
         state.observe_tmux(Some(TmuxLayout {

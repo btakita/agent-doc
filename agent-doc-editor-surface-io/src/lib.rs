@@ -68,8 +68,7 @@ pub type IntentRunner = Arc<dyn Fn(&Path, &SurfaceIntent) -> Result<String> + Se
 ///
 /// `None` means "not asked, or no answer" — deliberately distinct from "tmux
 /// matches" and from "tmux drifted" (`#idlerevisionreactive`).
-pub type TmuxLayoutProbe =
-    Arc<dyn Fn(&Path, &EditorSurface) -> Option<TmuxLayout> + Send + Sync>;
+pub type TmuxLayoutProbe = Arc<dyn Fn(&Path, &EditorSurface) -> Option<TmuxLayout> + Send + Sync>;
 
 struct RootSurface {
     state: EditorSurfaceState,
@@ -121,7 +120,11 @@ impl Registry {
     ///
     /// The plugin's entire job. Whether tmux does anything, and what, is derived
     /// here — the caller does not decide, debounce, or dedup.
-    pub fn observe(&self, project_root: &Path, surface: EditorSurface) -> SurfaceObservationReceipt {
+    pub fn observe(
+        &self,
+        project_root: &Path,
+        surface: EditorSurface,
+    ) -> SurfaceObservationReceipt {
         // Probe before taking the registry lock: it is a controller round trip,
         // and holding the lock across it would serialize every other root's
         // observations behind this one.
@@ -290,19 +293,18 @@ fn probe_tmux_via_controller(root: &Path, surface: &EditorSurface) -> Option<Tmu
             window: None,
             focus: Some(surface.focused.clone()),
         };
-    let report = match agent_doc_controller_io::project_controller::tmux_layout_sync_state(
-        root,
-        invocation,
-    ) {
-        Ok(report) => report,
-        Err(err) => {
-            // Not knowing is a distinct answer from "drifted". Treating an
-            // unreachable controller as drift would reconcile the layout on
-            // every editor event while the controller is down.
-            eprintln!("[editor-surface] tmux layout probe unavailable: {err:#}");
-            return None;
-        }
-    };
+    let report =
+        match agent_doc_controller_io::project_controller::tmux_layout_sync_state(root, invocation)
+        {
+            Ok(report) => report,
+            Err(err) => {
+                // Not knowing is a distinct answer from "drifted". Treating an
+                // unreachable controller as drift would reconcile the layout on
+                // every editor event while the controller is down.
+                eprintln!("[editor-surface] tmux layout probe unavailable: {err:#}");
+                return None;
+            }
+        };
     if report.synced {
         return Some(TmuxLayout {
             columns: surface.columns.clone(),
@@ -312,7 +314,9 @@ fn probe_tmux_via_controller(root: &Path, surface: &EditorSurface) -> Option<Tmu
         columns: report
             .actual_documents
             .into_iter()
-            .map(|document| SurfaceColumn { files: vec![document] })
+            .map(|document| SurfaceColumn {
+                files: vec![document],
+            })
             .collect(),
     })
 }
@@ -330,10 +334,7 @@ pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservatio
 }
 
 /// Record a tmux-layout observation for the process-wide registry.
-pub fn observe_tmux(
-    project_root: &Path,
-    layout: Option<TmuxLayout>,
-) -> SurfaceObservationReceipt {
+pub fn observe_tmux(project_root: &Path, layout: Option<TmuxLayout>) -> SurfaceObservationReceipt {
     REGISTRY.observe_tmux(project_root, layout)
 }
 
@@ -390,7 +391,9 @@ mod tests {
         let runner = {
             let ran = Arc::clone(&ran);
             move |root: &Path, intent: &SurfaceIntent| {
-                ran.lock().unwrap().push((root.to_path_buf(), intent.clone()));
+                ran.lock()
+                    .unwrap()
+                    .push((root.to_path_buf(), intent.clone()));
                 Ok("ok".to_string())
             }
         };
@@ -404,7 +407,9 @@ mod tests {
         let runner = {
             let ran = Arc::clone(&ran);
             move |root: &Path, intent: &SurfaceIntent| {
-                ran.lock().unwrap().push((root.to_path_buf(), intent.clone()));
+                ran.lock()
+                    .unwrap()
+                    .push((root.to_path_buf(), intent.clone()));
                 Ok("ok".to_string())
             }
         };
@@ -445,17 +450,19 @@ mod tests {
             "an unchanged editor surface must still reconcile once tmux is known to have drifted"
         );
         assert!(matches!(second.intent, SurfaceIntent::Sync { .. }));
-        assert_eq!(*probes.lock().unwrap(), 2, "every observation pulls the mirror");
+        assert_eq!(
+            *probes.lock().unwrap(),
+            2,
+            "every observation pulls the mirror"
+        );
         assert_eq!(ran.lock().unwrap().len(), 2);
     }
 
     #[test]
     fn a_pulled_matching_layout_leaves_a_repeated_surface_idle() {
         let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
-        let (registry, ran, _) = registry_with_probe(vec![
-            Some(mirrored(&visible)),
-            Some(mirrored(&visible)),
-        ]);
+        let (registry, ran, _) =
+            registry_with_probe(vec![Some(mirrored(&visible)), Some(mirrored(&visible))]);
 
         registry.observe(Path::new("/p"), visible.clone());
         let second = registry.observe(Path::new("/p"), visible);

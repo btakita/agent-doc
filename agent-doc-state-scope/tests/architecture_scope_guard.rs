@@ -170,10 +170,7 @@ fn scan(patterns: &[&'static str], marker: &str, skip: &dyn Fn(&Path) -> bool) -
                 continue;
             }
             findings.push(Finding {
-                file: file
-                    .strip_prefix(&root)
-                    .unwrap_or(&file)
-                    .to_path_buf(),
+                file: file.strip_prefix(&root).unwrap_or(&file).to_path_buf(),
                 line: number,
                 text: line.trim().to_string(),
                 pattern,
@@ -239,7 +236,9 @@ fn no_unjustified_bare_reactive_context() {
 /// it got reached for.
 #[test]
 fn no_deprecated_reactive_vocabulary() {
-    let findings = scan(&DEPRECATED_REACTIVE_API, DEPRECATED_ALLOW_MARKER, &|_| false);
+    let findings = scan(&DEPRECATED_REACTIVE_API, DEPRECATED_ALLOW_MARKER, &|_| {
+        false
+    });
 
     assert!(
         findings.is_empty(),
@@ -265,13 +264,17 @@ fn no_deprecated_reactive_vocabulary() {
 #[test]
 fn the_guard_detects_what_it_claims_to() {
     assert!(
-        cfg_test_lines("#[cfg(test)]\nmod tests {\n    let ctx = Context::new();\n}\nlet after = 1;\n")
-            .contains(&3),
+        cfg_test_lines(
+            "#[cfg(test)]\nmod tests {\n    let ctx = Context::new();\n}\nlet after = 1;\n"
+        )
+        .contains(&3),
         "a construction inside #[cfg(test)] must be recognized as test code"
     );
     assert!(
-        !cfg_test_lines("#[cfg(test)]\nmod tests {\n    let a = 1;\n}\nlet ctx = Context::new();\n")
-            .contains(&5),
+        !cfg_test_lines(
+            "#[cfg(test)]\nmod tests {\n    let a = 1;\n}\nlet ctx = Context::new();\n"
+        )
+        .contains(&5),
         "code after the test block must NOT be treated as test code"
     );
     assert!(

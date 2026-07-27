@@ -42,7 +42,7 @@ use parking_lot::Mutex;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-use lazily::{Computed, Source, ThreadSafeSourceMap, ThreadSafeContext};
+use lazily::{Computed, Source, ThreadSafeContext, ThreadSafeSourceMap};
 
 /// A source of process-exit **events** (not a poll on the hot path).
 ///

@@ -707,14 +707,24 @@ Focused verification passed: `command_submit_selected_text_uses_the_plain_editor
 ### Re: Session status — gpt-5.6-sol
 
 No new unresolved exchange prompt or runnable queue head was present. The document currently ends with the completed `#steergateidle` response, so no repository changes, tests, backlog mutations, or escalation were needed. Confidence is high: agent-doc admission, planning, and exchange inspection all found no actionable target.
-<!-- agent:boundary:7d9247b9 -->
+
+### Re: Live JetBrains Compact Exchange commit proof — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> 📌 do [#jbcompactcommit]
+
+Verified and closed `#jbcompactcommit` from live JetBrains evidence; no new implementation was needed.
+
+At `2026-07-26T05:39:09Z`, the controller recorded Compact Exchange for this attached document with `component=exchange`, `commit=true`, and `barrier_ready=true`. The live editor/CRDT projection was converged. Commit `8b614693b` then landed the compacted document as exactly 4 insertions and 183 deletions, and recovery recorded `reconcile_compacted_committed_capture` for the same cycle. A complete ops-log search found no `compact_commit_head_mismatch` marker.
+
+Changed paths this cycle: none. Commands/evidence: bounded ops-log inspection plus Git history/stat verification for `8b614693b`. Confidence: high—the live editor action, commit boundary, compact-sized diff, and absence of the fail-closed mismatch marker all agree. Escalation: none.
+<!-- agent:boundary:42f483a4 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#backlogqueuepopulation]~~
-- ~~do [#steergateidle]~~
-- 📌 do [#jbcompactcommit]
+- ~~📌 do [#jbcompactcommit]~~
 - 📌 do [#tmuxsynccrashlog]
 - 📌 do [#60ev]
 - 📌 do [#2y8j]
@@ -764,7 +774,6 @@ No new unresolved exchange prompt or runnable queue head was present. The docume
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
-- [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
 - [ ] [#60ev] [focused-cycle] plan-dynamic-context-injection-ledger.md — TRIAGED 2026-07-19: entirely unstarted 5-phase build (#adctxreactive / #adctxledger / #adctxpreflight / #adctxorchestrate / #adctxcompact); none of those tags appear anywhere in the Rust tree. This is greenfield architecture, not a drainable queue item — it needs its own cycle per phase. Best entry point is Phase 1 (#adctxreactive): the plan specifies it as a PURE, testable lazily-rs-backed projection module that performs no SQLite writes and does not call tsift (callers feed it snapshots), with three named memoization tests. That phase can land and be verified in isolation with no runtime risk to live documents, and everything else sequences behind it.
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.

@@ -159,12 +159,40 @@ Delivery:
 The fix is implemented, tested, pushed, tagged as `v0.35.32`, and published to PyPI.
 
 The document closeout is safely retained but cannot seal because the JetBrains editor replica deregistered during refresh. Please reopen/focus `tasks/agent-doc/agent-doc-bugs2.md` in JetBrains, then tell me `continue`. I’ll resume the existing capture—without resubmitting or forcing a disk write.
-<!-- agent:boundary:f6e2f822 -->
+
+### Re: lazily concurrent closeout and restart recovery — gpt-5.6-sol
+
+Implemented, verified, installed, and released the full concurrent-closeout and restart recovery as agent-doc 0.35.35.
+
+The restart error had two coupled causes. First, the document retained a dead Codex `resume:` session ID after `codex resume <id>` reported `No saved session found`; stale-resume cleanup could not clear it while live authority contained a duplicated structural tail. Second, JetBrains reconnect registered the exact editor cut but did not replay the retained semantic closeout afterward. Production recovery then exposed two narrower defects: duplicate-tail recognition needed to accept every UTF-8 character boundary, and session-check had to publish the proven repaired prefix through an exact-current authority CAS instead of component-merging it back against the invalid editor generation.
+
+Delivered fixes:
+- stale Codex resume cleanup repairs the narrowly proven duplicate-tail shape and removes the matching dead ID in the same authority CAS;
+- JetBrains 0.2.298 performs post-registration retained semantic replay under generation, typing, disk, and replica fences;
+- duplicate-suffix recovery accepts exact mid-line and mid-token UTF-8 cuts while preserving all structural, scaffolding, and exact-equality fail-closed gates;
+- session-check publishes that proof-bearing repair through an exact-current CAS, never the ordinary semantic merge path.
+
+Verification and live proof:
+- focused Rust and JetBrains regressions passed, including a test that rejects use of the generic semantic write for replay self-heal;
+- the final full `make check` passed after an isolated controller-socket collision was reproduced green and the complete suite reran green;
+- `make install-full` passed for the editor/reconnect release and final `make install` promoted CLI, cdylib, and plugin generation 0.35.35/0.2.298;
+- the running editor accepted `agent-doc admin reload-lib` on 1/1 endpoint;
+- this live document then repaired the duplicated authority through the exact CAS and reached committed state without force-disk;
+- CI run 30290535843 was in progress at the required single inspection and was not polled.
+
+Delivery:
+- agent-doc commits `9cb38cdd5`, `0c3c1a346`, and final `c37600482` are pushed to `main`;
+- tag `v0.35.35` is pushed;
+- PyPI 0.35.35 is published through the repository's Zig/`manylinux_2_17` path;
+- parent gitlink commit `e0b2c7c84` points at 0.35.35 and will be pushed with this document closeout commit.
+
+`#lazilyconcurrentcloseout` is complete and reaped. Confidence: high. Escalation: none.
+<!-- agent:boundary:22c81156 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#lazilyconcurrentcloseout]
+- ~~do [#lazilyconcurrentcloseout]~~
 - do [#tmuxsyncnewpane]
 - do [#compactreactiveprojection]
 - do [#adctxledger]
@@ -293,31 +321,3 @@ The document closeout is safely retained but cannot seal because the JetBrains e
 
 <!-- completed work archived in tasks/agent-doc-bugs2.done.md -->
 <!-- /agent:done -->
-recovery — gpt-5.6-sol
-
-> **Queue prompt:**
-> do [#lazilyconcurrentcloseout]
-
-Implemented and shipped the concurrent-closeout recovery, then fixed the restart failure exposed by the dead Codex session ID.
-
-Root cause: a live replica refresh had appended an exact partial duplicate of the document tail, leaving an unmatched review close marker. The missing-session handler correctly recognized Codex's `No saved session found` error, but its compare-and-swap resume cleanup failed closed because that malformed live authority could not pass structural validation. The dead `resume:` ID therefore survived and was retried on later restarts.
-
-The fix adds a deliberately narrow structural repair: collapse a duplicated partial tail only when the retained prefix is structurally sound, the appended bytes are an exact suffix of that prefix, and the suffix contains agent-doc component scaffolding. Ordinary prose and non-exact corruption still fail closed. Real-time recovery now applies that repair, and stale Codex resume cleanup normalizes the same recoverable shape before removing the matching ID in one authority CAS target.
-
-Proof:
-- Changed `agent-doc-element/src/element.rs`, `agent-doc-document-realtime-io/src/lib.rs`, and `agent-doc-start-runtime-io/src/run.rs`, with SPEC/README/Codex-support documentation and the 0.35.32 release metadata.
-- Added positive and fail-closed suffix-repair tests plus a start-runtime regression proving repair and stale-ID removal occur in the same target.
-- Targeted tests passed.
-- `make check`: 8,220 passed, 241 skipped.
-- `make install` and the one-time `make install-full` release-parity build passed.
-- Live proof: with JetBrains 0.2.297 connected, preflight repaired this session's malformed CRDT authority and preserved all seven operator-authored queue entries.
-- Latest inspected CI was green; the current `v0.35.32` cross-platform Release workflow is in progress without polling.
-- Confidence: high. The repair accepted the exact production corruption shape and rejects non-exact lookalikes.
-- Escalation: none.
-
-Delivery:
-- agent-doc commit `eaef7adef` pushed to `main`.
-- parent gitlink commit `f39727bf5` pushed to `main`.
-- tag `v0.35.32` pushed.
-- PyPI 0.35.32 published through the repository's Zig/`manylinux_2_17` path.
-- Controller recycle requested for the next idle boundary; the next missing-session continuation can now clear `68af54ca-b852-448f-95ed-24f29b695261` atomically and start fresh instead of retaining it.

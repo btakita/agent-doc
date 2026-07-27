@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -59,15 +59,21 @@ This preserves the staged-peer rule: queue presence does not admit an implementa
 Explicit backlog-to-queue synchronization materialized all eleven active `do [#id]` prompts in the dependency order recorded above. The first runnable queue target is `#lzcsqueues`, followed by `#lzcscrdt`, `#lzcsipc`, `#lzcssync`, and `#lzinteropcs`.
 
 No implementation files changed in this repair cycle; it only completes the requested session-document scheduling state.
-<!-- agent:boundary:52b706c3 -->
+
+### Re: controller recycle boundary — gpt-5
+
+Queue repair is complete: preflight auto-struck the answered free-text triage row and confirmed all eleven ID-backed work prompts are active in priority order.
+
+The operator requested `agent-doc admin recycle`, and preflight reports the installed controller is one committed fix behind. No C# implementation work is starting in this maintenance cycle; `#lzcscrdt` remains open and should resume after the scheduled controller recycle completes.
+<!-- agent:boundary:401565d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Please look at the review items and add actionables into the backlog + queue in priority order.
-- do [#lzcsqueues]
-- do [#lzcscrdt]
+- ~~Please look at the review items and add actionables into the backlog + queue in priority order.~~
+- ⏭️ do [#lzcsqueues]
+- 🚧 do [#lzcscrdt]
 - do [#lzcsipc]
 - do [#lzcssync]
 - do [#lzinteropcs]
@@ -83,7 +89,7 @@ No implementation files changed in this repair cycle; it only completes the requ
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell shipped at 01d2cf3 and replays all five canonical queuecell fixtures; keep C# eligible only for an exact QueueCell capability. Still implement QueueStorage, TopicCell, WorkQueueCell, and RelayCell with BackpressurePolicy/SpillStore/Transport, then replay their canonical corpora before admitting C# to those peer/feature groups — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16).
-- [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
+- [ ] 🚧 [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: resume after the operator-requested agent-doc controller recycle completes.)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.

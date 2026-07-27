@@ -810,6 +810,7 @@ For your debt and homeownership goals, the best risk-adjusted structure remains 
 
 The full analysis and expanded `#acadianterms` diligence are committed in [job-offers.md](</home/brian/work/btakita/agent-loop/tasks/professional/job-offers.md:769>). Session closeout passed.
 <!-- agent:boundary:6ae03a53 -->
+What about the 1% equity? What is Haiven's chances of reaching Discord levels or near Discord levels within year 1, 2, 3, 4, 5+?
 <!-- /agent:exchange -->
 
 ## Queue

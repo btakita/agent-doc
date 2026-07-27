@@ -1675,6 +1675,25 @@ fn append_boundary_marker(content: &str, target: &str, old_content: &str) -> Str
     out
 }
 
+fn append_durable_context_reference(
+    file: &Path,
+    document: &str,
+    content: &mut String,
+) -> Result<()> {
+    let Some(reference) =
+        agent_doc_dynamic_context_io::durable_context_reference_for_document(file, document)?
+    else {
+        return Ok(());
+    };
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push('\n');
+    content.push_str(&reference);
+    content.push('\n');
+    Ok(())
+}
+
 /// Returns both the live compacted document and the committed snapshot. They differ
 /// only when unresolved input follows the exchange boundary.
 fn run_component_compact_with_options(
@@ -1712,7 +1731,7 @@ fn run_component_compact_with_options(
     )?;
 
     // Build summary marker
-    let summary = match message {
+    let mut summary = match message {
         Some(msg) => format!("{}\n", msg),
         None if target == "exchange" => {
             let summary_source = comp.replace_content(content, &archive_content);
@@ -1723,6 +1742,9 @@ fn run_component_compact_with_options(
             archive_path.display()
         ),
     };
+    if target == "exchange" {
+        append_durable_context_reference(file, content, &mut summary)?;
+    }
 
     let mut visible_content = summary.clone();
     if !trailing.trim().is_empty() {
@@ -1876,6 +1898,9 @@ fn run_component_compact_partial(
         to_archive.len(),
         archive_path.display()
     ));
+    if target == "exchange" {
+        append_durable_context_reference(file, content, &mut base_new_content)?;
+    }
 
     // Kept sections
     for section in to_keep {
@@ -3575,6 +3600,74 @@ mod tests {
         assert!(!exchange.contains("Queue:"));
         assert!(!exchange.contains("Icebox:"));
         assert!(!exchange.contains("### Re: topic one"));
+    }
+
+    #[test]
+    fn exchange_compact_preserves_durable_context_handles_without_payload() {
+        let doc = concat!(
+            "---\nagent_doc_session: context-session\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first topic\n\nFirst response.\n\n",
+            "### Re: second topic\n\nSecond response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        agent_doc_sqlite::context_injection_ledger::record_context_manifest(
+            &mut conn,
+            &agent_doc_sqlite::context_injection_ledger::ContextManifestWrite {
+                document_id: agent_doc_hash::document_id_for_path(&file),
+                session_id: "context-session".to_string(),
+                cycle_id: "cycle-context".to_string(),
+                cycle_state: "preflight_started".to_string(),
+                harness: "codex".to_string(),
+                prompt_fingerprint: "fingerprint-context".to_string(),
+                pack_ids: vec!["pack-context".to_string()],
+                token_count: 12,
+                injections: vec![
+                    agent_doc_sqlite::context_injection_ledger::ContextInjectionWrite {
+                        pack_id: "pack-context".to_string(),
+                        chunk_id: "chunk-context".to_string(),
+                        content_hash: "hash-context".to_string(),
+                        source_uri: "src/context.rs".to_string(),
+                        range_start: Some(4),
+                        range_end: Some(8),
+                        injection_mode:
+                            agent_doc_sqlite::context_injection_ledger::ContextInjectionMode::Expanded,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        drop(conn);
+
+        run_component_compact_force_disk(&file, doc, "exchange", None, false).unwrap();
+
+        let compacted = std::fs::read_to_string(&file).unwrap();
+        let components = element::parse(&compacted).unwrap();
+        let exchange = components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&compacted);
+        assert!(exchange.contains("<dynamic_context_ref"));
+        assert!(exchange.contains("tsift://pack-context/chunk-context"));
+        assert!(exchange.contains("modes=\"expanded:1\""));
+        assert!(!exchange.contains("<context_chunk"));
+        assert!(!exchange.contains("First response."));
+        assert!(!exchange.contains("Second response."));
     }
 
     #[test]

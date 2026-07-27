@@ -690,6 +690,7 @@ pub fn clear(file: &Path) -> Result<()> {
             ),
         );
         reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
+        clear_durable_context_on_explicit_clear(&ctx)?;
         println!(
             "Cleared session context for {} (already no live session; controller stage {}).",
             ctx.canonical_file.display(),
@@ -833,6 +834,7 @@ pub fn clear(file: &Path) -> Result<()> {
     // preflight cycle the cleared run left behind so the next Run Agent Doc
     // starts fresh instead of waiting on a stale open cycle.
     reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
+    clear_durable_context_on_explicit_clear(&ctx)?;
     println!(
         "Cleared session context for {} (controller stage {}).",
         ctx.canonical_file.display(),
@@ -872,6 +874,30 @@ fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_turn::repair::Cance
             agent_doc_turn::repair::CancelOutcome::NoOpenCycle
         }
     }
+}
+
+fn clear_durable_context_on_explicit_clear(ctx: &SessionContext) -> Result<()> {
+    let cleared = agent_doc_dynamic_context_io::clear_durable_context_session(
+        &ctx.canonical_file,
+        &ctx.session_id,
+    )
+    .with_context(|| {
+        format!(
+            "clear durable dynamic-context session for {}",
+            ctx.canonical_file.display()
+        )
+    })?;
+    agent_doc_ops_log_io::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "session_clear_dynamic_context file={} session={} manifests={} injections={}",
+            ctx.canonical_file.display(),
+            ctx.session_id,
+            cleared.manifests,
+            cleared.injections,
+        ),
+    );
+    Ok(())
 }
 
 fn supervisor_clear_inject_available(ctx: &SessionContext) -> bool {
@@ -1775,6 +1801,7 @@ fn force_interrupt_clear(file: &Path) -> Result<()> {
     report.socket_removed = remove_supervisor_socket_for_force_clear(&ctx);
 
     reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
+    let dynamic_context_clear = clear_durable_context_on_explicit_clear(&ctx);
 
     agent_doc_ops_log_io::log_op(
         &ctx.canonical_file,
@@ -1797,6 +1824,7 @@ fn force_interrupt_clear(file: &Path) -> Result<()> {
             report.cooldown_written,
         ),
     );
+    dynamic_context_clear?;
     println!(
         "{}",
         force_interrupt_clear_summary(&ctx.canonical_file, pane.as_deref(), report)

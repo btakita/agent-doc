@@ -431,6 +431,7 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
+ "agent-doc-dynamic-context-io",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-frontmatter",

@@ -4,7 +4,7 @@
 //! been recorded, subsequent callers reconstruct compact handle references from
 //! SQLite without launching tsift again.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -16,9 +16,10 @@ use agent_doc_prompt_context::dynamic_context::{
     InjectionLedgerSnapshot, InjectionMode, PromptTargetInputs,
 };
 use agent_doc_sqlite::context_injection_ledger::{
-    ContextInjectionMode, ContextInjectionWrite, ContextLookupScope, ContextManifestWrite,
-    StoredContextInjection, already_injected, context_injections_for_cycle,
-    context_manifest_for_cycle, record_context_manifest,
+    ClearedContextRows, ContextClearScope, ContextInjectionMode, ContextInjectionWrite,
+    ContextLookupScope, ContextManifestWrite, StoredContextInjection, already_injected,
+    clear_context_scope, context_injections_for_cycle, context_manifest_for_cycle,
+    latest_context_manifest_for_session, record_context_manifest,
 };
 use agent_doc_sqlite::state_store::Connection;
 use anyhow::{Context, Result, bail};
@@ -100,6 +101,47 @@ impl DynamicContextSnapshot {
         self.as_orchestration_child_section(0, 1)
     }
 
+    /// Render durable context identity without replaying any expanded payload.
+    ///
+    /// Compaction and document transfer use this projection so a later agent
+    /// can resolve the exact tsift handles while SQLite remains authoritative
+    /// for prior injection decisions.
+    pub fn as_reference_section(&self) -> Option<String> {
+        if self.chunks.is_empty() {
+            return None;
+        }
+        let mut mode_counts = BTreeMap::<&str, usize>::new();
+        for chunk in &self.chunks {
+            *mode_counts.entry(&chunk.injection_mode).or_default() += 1;
+        }
+        let modes = mode_counts
+            .into_iter()
+            .map(|(mode, count)| format!("{mode}:{count}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut lines = vec![format!(
+            "<dynamic_context_ref contract=\"{}\" session=\"{}\" cycle=\"{}\" fingerprint=\"{}\" token_count=\"{}\" modes=\"{}\">",
+            CONTRACT_VERSION,
+            escape_attribute(&self.session_id),
+            escape_attribute(&self.cycle_id),
+            escape_attribute(&self.prompt_fingerprint),
+            self.token_count,
+            escape_attribute(&modes),
+        )];
+        for chunk in &self.chunks {
+            lines.push(format!(
+                "<context_ref handle=\"{}\" hash=\"{}\" source=\"{}\" mode=\"{}\" expand=\"{}\" />",
+                escape_attribute(&chunk.handle_reference),
+                escape_attribute(&chunk.content_hash),
+                escape_attribute(&chunk.source_uri),
+                escape_attribute(&chunk.injection_mode),
+                escape_attribute(&chunk.expansion_command)
+            ));
+        }
+        lines.push("</dynamic_context_ref>".to_string());
+        Some(lines.join("\n"))
+    }
+
     /// Render one orchestration child view of this manifest.
     ///
     /// Every child receives every durable handle. First-use excerpts are
@@ -152,6 +194,71 @@ impl DynamicContextSnapshot {
     }
 }
 
+/// Load the latest durable context manifest for this document session and
+/// render it as handle-only continuity metadata.
+pub fn durable_context_reference_for_document(
+    file: &Path,
+    document: &str,
+) -> Result<Option<String>> {
+    let Some(session_id) = session_id_for_document(file, document)? else {
+        return Ok(None);
+    };
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let root = project_root_for_document(&canonical);
+    if !agent_doc_sqlite::state_store::state_db_path(&root).is_file() {
+        return Ok(None);
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
+        &root,
+        Duration::from_millis(250),
+    )
+    .with_context(|| format!("open dynamic-context state for {}", file.display()))?;
+    let document_id = agent_doc_hash::document_id_for_path(file);
+    let Some(manifest) = latest_context_manifest_for_session(&conn, &document_id, &session_id)?
+    else {
+        return Ok(None);
+    };
+    let chunks = context_injections_for_cycle(&conn, &document_id, &manifest.cycle_id)?
+        .into_iter()
+        .map(stored_chunk_manifest)
+        .collect();
+    Ok(DynamicContextSnapshot {
+        contract_version: CONTRACT_VERSION.to_string(),
+        status: "durable_session_reference".to_string(),
+        document_id,
+        session_id,
+        cycle_id: manifest.cycle_id,
+        pack_ids: manifest.pack_ids,
+        prompt_fingerprint: manifest.prompt_fingerprint,
+        token_count: usize::try_from(manifest.token_count).unwrap_or_default(),
+        chunks,
+        diagnostics: Vec::new(),
+    }
+    .as_reference_section())
+}
+
+/// Reset only the dynamic-context injection memory for an explicit successful
+/// session clear. Cycle lifecycle rows remain owned by the turn state machine.
+pub fn clear_durable_context_session(file: &Path, session_id: &str) -> Result<ClearedContextRows> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let root = project_root_for_document(&canonical);
+    if !agent_doc_sqlite::state_store::state_db_path(&root).is_file() {
+        return Ok(ClearedContextRows::default());
+    }
+    let mut conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
+        &root,
+        Duration::from_millis(250),
+    )
+    .with_context(|| format!("open dynamic-context state for {}", file.display()))?;
+    clear_context_scope(
+        &mut conn,
+        ContextClearScope::Session {
+            document_id: &agent_doc_hash::document_id_for_path(file),
+            session_id,
+        },
+    )
+}
+
 #[derive(Debug, Clone)]
 struct CandidatePayload {
     chunk: ContextChunk,
@@ -174,8 +281,7 @@ pub fn build_dynamic_context_snapshot(
         return Ok(None);
     };
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = agent_doc_fs::find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let root = project_root_for_document(&canonical);
     let mut conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
         &root,
         Duration::from_millis(250),
@@ -372,11 +478,11 @@ fn identity_for_active_cycle(
     if !cycle.phase.is_open() {
         return Ok(None);
     }
-    let (frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file(document, file)
-        .or_else(|_| agent_doc_frontmatter::frontmatter::parse(document))?;
-    let Some(session_id) = frontmatter.session.filter(|value| !value.trim().is_empty()) else {
+    let Some(session_id) = session_id_for_document(file, document)? else {
         return Ok(None);
     };
+    let (frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file(document, file)
+        .or_else(|_| agent_doc_frontmatter::frontmatter::parse(document))?;
     Ok(Some(DynamicContextIdentity {
         document_id: agent_doc_hash::document_id_for_path(file),
         session_id,
@@ -384,6 +490,17 @@ fn identity_for_active_cycle(
         cycle_state: cycle.phase.as_str().to_string(),
         harness: frontmatter.agent.unwrap_or_else(|| "unknown".to_string()),
     }))
+}
+
+fn session_id_for_document(file: &Path, document: &str) -> Result<Option<String>> {
+    let (frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file(document, file)
+        .or_else(|_| agent_doc_frontmatter::frontmatter::parse(document))?;
+    Ok(frontmatter.session.filter(|value| !value.trim().is_empty()))
+}
+
+fn project_root_for_document(file: &Path) -> std::path::PathBuf {
+    agent_doc_fs::find_project_root(file)
+        .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf())
 }
 
 fn component_hashes(document: &str) -> Vec<ComponentHash> {
@@ -927,5 +1044,94 @@ mod tests {
         assert!(!prompt.contains("\"summary\":\"shared source\""));
         assert!(prompt.contains("tsift://"));
         assert!(prompt.contains("expand=\"tsift --envelope source-read"));
+    }
+
+    #[test]
+    fn durable_reference_survives_reopen_and_never_replays_expanded_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: session-1\n",
+            "agent: codex\n",
+            "---\n\n",
+            "# Session\n"
+        );
+        std::fs::write(&file, document).unwrap();
+        let mut first_identity = identity("cycle-1");
+        first_identity.document_id = agent_doc_hash::document_id_for_path(&file);
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        project_and_record_report(
+            &mut conn,
+            &first_identity,
+            components(),
+            &["do work".to_string()],
+            &report("expanded secret payload"),
+        )
+        .unwrap();
+        drop(conn);
+
+        let reference = durable_context_reference_for_document(&file, document)
+            .unwrap()
+            .unwrap();
+        assert!(reference.contains("<dynamic_context_ref"));
+        assert!(reference.contains("<context_ref"));
+        assert!(reference.contains("tsift://"));
+        assert!(reference.contains("modes=\"expanded:"));
+        assert!(!reference.contains("expanded secret payload"));
+        assert!(!reference.contains("<context_chunk"));
+    }
+
+    #[test]
+    fn explicit_session_clear_starts_a_fresh_injection_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: session-1\n",
+            "agent: codex\n",
+            "---\n\n",
+            "# Session\n"
+        );
+        std::fs::write(&file, document).unwrap();
+        let mut first_identity = identity("cycle-1");
+        first_identity.document_id = agent_doc_hash::document_id_for_path(&file);
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        project_and_record_report(
+            &mut conn,
+            &first_identity,
+            components(),
+            &["do work".to_string()],
+            &report("shared source"),
+        )
+        .unwrap();
+        drop(conn);
+
+        let cleared = clear_durable_context_session(&file, "session-1").unwrap();
+        assert_eq!(cleared.manifests, 1);
+        assert!(cleared.injections > 0);
+        assert!(
+            durable_context_reference_for_document(&file, document)
+                .unwrap()
+                .is_none()
+        );
+
+        let mut second_identity = identity("cycle-2");
+        second_identity.document_id = agent_doc_hash::document_id_for_path(&file);
+        let mut reopened = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let fresh = project_and_record_report(
+            &mut reopened,
+            &second_identity,
+            components(),
+            &["do work".to_string()],
+            &report("shared source"),
+        )
+        .unwrap();
+        assert!(
+            fresh
+                .chunks
+                .iter()
+                .all(|chunk| chunk.injection_mode == "expanded")
+        );
     }
 }

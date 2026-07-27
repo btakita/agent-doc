@@ -85,19 +85,27 @@ fn check_target_ownership(target: &Path) -> Result<()> {
 }
 
 /// Format a source annotation blockquote for transferred/extracted content.
-fn format_source_annotation(source: &Path, action: &str) -> String {
+fn format_source_annotation(source: &Path, source_content: &str, action: &str) -> Result<String> {
     let timestamp = Command::new("date")
         .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
         .output()
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    format!(
+    let mut annotation = format!(
         "\n> **[{} from {}]** ({})\n>\n",
         action.to_uppercase(),
         source.display(),
         timestamp,
-    )
+    );
+    if let Some(reference) = agent_doc_dynamic_context_io::durable_context_reference_for_document(
+        source,
+        source_content,
+    )? {
+        annotation.push_str(&reference);
+        annotation.push_str("\n\n");
+    }
+    Ok(annotation)
 }
 
 fn matches_requested_component(component_name: &str, candidate_name: &str) -> bool {
@@ -228,6 +236,7 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     if extracted.trim().is_empty() {
         anyhow::bail!("no exchange entry found to extract");
     }
+    let annotation = format_source_annotation(source, &source_content, "Extract")?;
 
     // Update source: replace exchange content with remaining
     let new_source = exchange.replace_content(&source_content, &remaining);
@@ -239,7 +248,6 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     )?;
 
     // Append extracted content to target's exchange component with source annotation
-    let annotation = format_source_annotation(source, "Extract");
     let annotated_content = format!("{}{}", annotation, extracted.trim_start());
 
     let target_components =
@@ -365,7 +373,7 @@ pub fn transfer(
 
     // Referral mode: insert pointer in target, don't move content
     if referral {
-        return transfer_referral(source, target, component_name);
+        return transfer_referral(source, &source_content, target, component_name);
     }
 
     // Selective pending transfer via --items
@@ -425,6 +433,7 @@ pub fn transfer(
             source.display()
         );
     }
+    let annotation = format_source_annotation(source, &source_content, "Transfer")?;
 
     // Clear source component
     let new_source = comp.replace_content(&source_content, "\n");
@@ -436,7 +445,6 @@ pub fn transfer(
     )?;
 
     // Append to target component (or end of file) with source annotation
-    let annotation = format_source_annotation(source, "Transfer");
     let annotated_content = format!("{}{}", annotation, content.trim_start());
 
     let target_components =
@@ -682,7 +690,12 @@ fn make_relative(source: &Path, target: &Path) -> PathBuf {
 /// Insert a referral pointer in the target document referencing the source.
 /// Content stays in the source — the target gets a structured comment that
 /// preflight can resolve to provide context on demand.
-fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Result<()> {
+fn transfer_referral(
+    source: &Path,
+    source_content: &str,
+    target: &Path,
+    component_name: &str,
+) -> Result<()> {
     if !target.exists() {
         anyhow::bail!(
             "target file not found: {} (auto-create not supported for --referral)",
@@ -706,7 +719,7 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let referral_block = format!(
+    let mut referral_block = format!(
         "\n<!-- agent:referral src=\"{}\" component=\"{}\" created=\"{}\" -->\n*Context from [{}]({}) — read source {} for full history.*\n<!-- /agent:referral -->\n",
         source_rel.display(),
         component_name,
@@ -715,6 +728,13 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
         source_rel.display(),
         component_name,
     );
+    if let Some(reference) = agent_doc_dynamic_context_io::durable_context_reference_for_document(
+        source,
+        source_content,
+    )? {
+        referral_block.push_str(&reference);
+        referral_block.push('\n');
+    }
 
     let target_comp = target_comps.iter().find(|c| c.name == component_name);
     let new_target = if let Some(tc) = target_comp {
@@ -810,6 +830,55 @@ mod tests {
         let (extracted, remaining) = split_last_entry(content);
         assert_eq!(extracted, "Just some text without headers.\n");
         assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn source_annotation_carries_handles_without_expanded_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.md");
+        let source_content = concat!(
+            "---\n",
+            "agent_doc_session: transfer-session\n",
+            "agent: codex\n",
+            "---\n\n",
+            "# Source\n"
+        );
+        std::fs::write(&source, source_content).unwrap();
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        agent_doc_sqlite::context_injection_ledger::record_context_manifest(
+            &mut conn,
+            &agent_doc_sqlite::context_injection_ledger::ContextManifestWrite {
+                document_id: agent_doc_hash::document_id_for_path(&source),
+                session_id: "transfer-session".to_string(),
+                cycle_id: "cycle-transfer".to_string(),
+                cycle_state: "preflight_started".to_string(),
+                harness: "codex".to_string(),
+                prompt_fingerprint: "fingerprint-transfer".to_string(),
+                pack_ids: vec!["pack-transfer".to_string()],
+                token_count: 9,
+                injections: vec![
+                    agent_doc_sqlite::context_injection_ledger::ContextInjectionWrite {
+                        pack_id: "pack-transfer".to_string(),
+                        chunk_id: "chunk-transfer".to_string(),
+                        content_hash: "hash-transfer".to_string(),
+                        source_uri: "src/transfer.rs".to_string(),
+                        range_start: None,
+                        range_end: None,
+                        injection_mode:
+                            agent_doc_sqlite::context_injection_ledger::ContextInjectionMode::Expanded,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        drop(conn);
+
+        let annotation = format_source_annotation(&source, source_content, "Transfer").unwrap();
+        assert!(annotation.contains("<dynamic_context_ref"));
+        assert!(annotation.contains("tsift://pack-transfer/chunk-transfer"));
+        assert!(annotation.contains("expand=\"tsift --envelope source-read"));
+        assert!(!annotation.contains("<context_chunk"));
+        assert!(!annotation.contains("expanded_text"));
     }
 
     /// Test the pending merge logic used by transfer.

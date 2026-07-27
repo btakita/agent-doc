@@ -353,6 +353,53 @@ pub fn context_manifest_for_cycle(
     context_manifest_for_cycle_in_tx(conn, document_id, cycle_id)
 }
 
+/// Returns the most recently recorded manifest in one document session.
+///
+/// Session-scoped lookup is the durable continuity boundary used by compact,
+/// process restart, and transfer/extract projections. Explicit clear removes
+/// these rows, so a subsequent cycle starts with a fresh injection scope.
+pub fn latest_context_manifest_for_session(
+    conn: &Connection,
+    document_id: &str,
+    session_id: &str,
+) -> Result<Option<StoredContextManifest>> {
+    let raw = conn
+        .query_row(
+            r#"
+            SELECT
+                document_id,
+                session_id,
+                cycle_id,
+                harness,
+                prompt_fingerprint,
+                pack_ids_json,
+                chunk_ids_json,
+                token_count,
+                created_at
+            FROM context_manifest
+            WHERE document_id = ?1 AND session_id = ?2
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT 1
+            "#,
+            params![document_id, session_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                ))
+            },
+        )
+        .optional()?;
+    stored_manifest_from_raw(raw)
+}
+
 pub fn context_injections_for_cycle(
     conn: &Connection,
     document_id: &str,
@@ -572,6 +619,23 @@ fn context_manifest_for_cycle_in_tx(
             },
         )
         .optional()?;
+    stored_manifest_from_raw(raw)
+}
+
+#[allow(clippy::type_complexity)]
+fn stored_manifest_from_raw(
+    raw: Option<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        i64,
+    )>,
+) -> Result<Option<StoredContextManifest>> {
     raw.map(
         |(
             document_id,
@@ -828,6 +892,45 @@ mod tests {
             context_injections_for_cycle(&connection, "doc-a", "cycle-a")?[0].content_hash,
             "hash-a"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn latest_session_manifest_tracks_compaction_continuity_scope() -> Result<()> {
+        let mut connection = connection()?;
+        record_context_manifest(
+            &mut connection,
+            &manifest(
+                "session-a",
+                "cycle-a",
+                "prompt-a",
+                vec![injection("pack-a", "chunk-a", "hash-a")],
+            ),
+        )?;
+        record_context_manifest(
+            &mut connection,
+            &manifest(
+                "session-a",
+                "cycle-b",
+                "prompt-b",
+                vec![injection("pack-b", "chunk-b", "hash-b")],
+            ),
+        )?;
+        record_context_manifest(
+            &mut connection,
+            &manifest(
+                "session-b",
+                "cycle-other",
+                "prompt-other",
+                vec![injection("pack-other", "chunk-other", "hash-other")],
+            ),
+        )?;
+
+        let latest = latest_context_manifest_for_session(&connection, "doc-a", "session-a")?
+            .context("latest session manifest")?;
+        assert_eq!(latest.cycle_id, "cycle-b");
+        assert_eq!(latest.prompt_fingerprint, "prompt-b");
+        assert!(latest_context_manifest_for_session(&connection, "doc-a", "missing")?.is_none());
         Ok(())
     }
 

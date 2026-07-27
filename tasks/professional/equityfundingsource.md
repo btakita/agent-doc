@@ -208,7 +208,28 @@ The Contact markup already requested padding, but the deployed stylesheet was a 
 - The isolated deployment worktree was removed. Existing unrelated TMO worktree changes were preserved and excluded from the commit and deployment bundles.
 
 Confidence: high.
-<!-- agent:boundary:7c5a1cf5 -->
+
+Confidence: high.
+### Re: Production Funded Deals — gpt-5
+
+> **Queue prompt:** None of the Funded Deals are showing up on https://www.equityfundingsource.com/funded-deals. Please copy the funded deals from staging into production.
+
+The Funded Deals are already present and rendering in production, so I did not issue a redundant or potentially risky production write.
+
+- Changed paths: none. Production D1 writes: none.
+- Database verification: read-only full-row queries of `funded_deals` in staging and production returned the same 18 records across id, slug, title, location, amount, amount cents, image, status, sort order, and timestamps. Both environments report 18 total rows, all 18 `visible`, with the same ordered ID list and sort range 10–180.
+- Live verification: `https://equityfundingsource.com/funded-deals`, `https://www.equityfundingsource.com/funded-deals`, and the staging Worker URL each return HTTP 200 and render 18 funded-deal `<article>` cards.
+- Image verification: each host exposes 18 unique deal-image URLs and all 18 return HTTP 200.
+- Browser verification: fresh 1440×3000 Chromium screenshots of staging and production both show the funded-deal cards and are byte-identical (`sha256 9607bae5aa2ad981dc6321ad72b5087acba379fd5321522ec22c94e8820b66d4`).
+- Commands: read-only staging/production `cf:d1:query:remote` queries, cache-busted HTTP/HTML and image probes, and headless Chromium screenshots. No test suite or CI lookup was needed because no source, test, build, instruction, or data changes were made.
+- Escalation: none. The queue report had already converged by the time this cycle ran; rewriting identical rows would add risk without changing the site.
+
+### Re: Response
+
+Production already matches staging and renders all 18 funded deals with working images. No database write was needed.
+
+Closeout is durably captured but awaiting editor registration. Please refresh/reopen the agent-doc editor integration; then I can complete the pending session check without duplicating the response.
+<!-- agent:boundary:e0045eed -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

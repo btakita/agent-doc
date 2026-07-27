@@ -149,7 +149,43 @@ Changed paths: none in this cycle. The prior package and workflow changes remain
 Required external signal to ungate: add repository secret `NUGET_API_KEY` to `lazily-hub/lazily-cs` and authorize the immutable public version (`0.2.0`, currently package-ready and unregistered, or a newer version). Once supplied, rerun this item to dispatch `.github/workflows/release.yml` and verify the NuGet listing.
 
 Confidence: high that credential absence is the only immediate publication blocker. Escalation: repository/NuGet owner action is required because the secret cannot be derived safely from repository state.
-<!-- agent:boundary:5adf08bd -->
+
+### Re: do [#asyncplanenever] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#asyncplanenever]
+
+
+Implemented and shipped the async-v2 kernel naming migration for C++, Go, Python, and Zig, with the shared contract enforced from lazily-spec.
+
+- Canonical public value kinds are now `AsyncSource<T>` and `AsyncComputed<T>` in all four bindings. Published legacy `AsyncCellHandle` / `AsyncSlotHandle` names remain deprecated compatibility aliases or forwarding surfaces.
+- Canonical constructors, maps, queues, disposal paths, and conformance models now use source/computed vocabulary. Deprecated memo constructors forward to guarded computed behavior rather than creating another node kind.
+- Public state projection is documented and exposed as `AsyncComputedState`; formal-model vocabulary remains `AsyncSlotState` and is not mechanically renamed.
+- Zig now uses generation-checked canonical handles and rejects stale/disposed handles; legacy raw-id methods remain compatibility coverage.
+- `scripts/check_async_v2_names.py` verifies the canonical pair across the eight available bindings while staging absent sibling checkouts. It explicitly requires deprecated/compatibility markers on legacy declarations and does not affect network-suite capability admission.
+- Mutation proof: temporarily removing C++'s canonical `AsyncSource` declaration made the checker fail at lazily-cpp; restoring it returned the complete suite to green.
+- Synced the generated coverage tables required by the aggregate spec gate. This produced documentation-only commits in Kotlin and Dart.
+
+Verification:
+
+- `make check` passed in lazily-spec, lazily-cpp, lazily-go, lazily-py, lazily-zig, lazily-kt, and lazily-dart.
+- The spec gate includes 151 pytest cases, the Lean build, coverage synchronization, and the eight-binding async-v2 naming check.
+- Latest CI after push: spec `30308404104`, C++ `30308403755`, Go `30308403752`, Zig `30308404543`, Kotlin `30308403858`, and Dart `30308403712` were in progress. lazily-py has no workflow named `CI`.
+
+Pushed commits:
+
+- lazily-spec `07edb9a`
+- lazily-cpp `994fdf8`
+- lazily-go `7337a6c`
+- lazily-py `d63c4a2`
+- lazily-zig `c767164`
+- lazily-kt `8ea153a`
+- lazily-dart `82f58cf`
+- root pointer advance `acedeef05`
+
+Unrelated Python worktree state and Zig's pre-existing `AGENTS.md` edit were preserved and excluded from commits.
+<!-- agent:boundary:b923b371 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -157,7 +193,7 @@ Confidence: high that credential absence is the only immediate publication block
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzcsnugetpublish]~~
 - ~~do [#lzcspackage]~~
-- do [#asyncplanenever]
+- ~~do [#asyncplanenever]~~
 - do [#lazilyconformancecoverag]
 - /goal Add missing lazily-cs features
 - release + publish all lazily packages
@@ -171,7 +207,6 @@ Confidence: high that credential absence is the only immediate publication block
 - [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
 - [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
 - [ ] [#lzcsplane] lazily-cs: PARTIAL/STAGED — CausalReceipt/CausalReceipts schema/projection shipped at 967c44e; all 17 typed signaling frames, strict exact codec, authoritative SignalingRoom, anti-spoof server-stamped sender, sorted self-excluding rosters, unknown-target handling, and leave semantics shipped at d663074 with canonical signaling client/server fixture replay. Runtime coverage is now 61/124 with 63 known-uncovered. Admit C# only to the exact causal-receipts and signaling-wire/open-room peer groups. Still implement general state projection/mirror, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay service, agent-doc, and remaining message-passing corpora. Plan rows 33-39. (stays open: state mirror, command plane, FFI, permissions, handshake, instrumentation/benchmarks, and remaining corpora.)
-- [ ] [#asyncplanenever] STAGED implementation — finish the async v2 kernel naming migration in C++, Go, Python, and Zig per tasks/plan-lazily-async-v2-migration.md. Rust, JavaScript, Kotlin, and C# already expose AsyncSource/AsyncComputed. Preserve deprecated aliases in published bindings, collapse live memo constructors into guarded computed, and settle the public AsyncComputedState vs formal AsyncSlotState distinction without renaming the formal model mechanically.
 - [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-27: 92/124 canonical fixtures opened, 32 known-uncovered. Membership (1), coordination (5), presence (3), resilience (4), and service (4) are now runtime-opened at 6afe762 alongside the previously admitted reactive graph, collections, statechart, materialization, queue, IPC, durable-outbox, causal-receipts, signaling, temporal, rate-shaping, and windowing slices. Keep open and work the remaining ledger down only by shipping explicit tasks in tasks/software/lazily-cs-parity-plan.md; admit C# to each capability group only when that production surface and canonical replay ship.
 <!-- /agent:backlog -->
 

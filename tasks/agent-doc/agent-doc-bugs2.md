@@ -72,13 +72,38 @@ Repository effects:
 - Verification: `cargo test --manifest-path src/agent-doc/Cargo.toml -p agent-doc-prompt-context dynamic_context` passed. The first digest-runner attempt omitted `--manifest-path` and failed only because the superproject root has no `Cargo.toml`; the corrected invocation passed.
 - Compact evidence: ops log shows barrier and compact at 05:08:45Z, writeback and `commit_success` at 05:08:46Z; the JetBrains widget returned to idle at 01:08:47.458.
 - Confidence: high for the Phase 1 status and measured Compact Exchange envelope. The fast-path implementation remains intentionally isolated in its own focused cycle because it touches authority and commit semantics.
-<!-- agent:boundary:6e35a648 -->
+
+> **Queue prompt:**
+> Improve the performance of Compact Exchange.
+
+### Re: Compact Exchange performance — gpt-5
+
+Implemented and pushed the Compact Exchange closeout optimization in agent-doc commit `28377eb30` (`perf: reduce compact closeout latency`).
+
+The binary now reuses the current document content already resolved by terminal cycle closeout when clearing pipeline frontmatter, while leaving the convergence port responsible for rebasing concurrent operator edits. Once the primary pipeline transition has made the cycle terminal, post-commit cleanup also folds the redundant capture `WriteApplied` + `Committed` transitions into that terminal cycle instead of repeating command-plane round trips. Recovery retains the old capture transition when the primary terminal transition did not succeed. Per-phase compact, commit, and finalization telemetry was added so later work can target the remaining waits.
+
+Cold forced-disk benchmark on the same isolated document:
+
+- End-to-end Compact Exchange: about 1.05 s before, 844 ms after (about 20% faster).
+- Commit finalization: about 445 ms before, 244 ms after.
+- Redundant capture phase: about 250 ms before, 49 ms after.
+
+Verification passed:
+
+- Targeted cycle-state, git, and commit library tests.
+- Full `make check`: 8,210 tests passed, 241 skipped; formal closeout, tmux-sync, CRDT-lineage, and response-checkpoint models passed.
+- Latest pre-push CI run was green.
+- Pushed `28377eb30` to `origin/main`.
+
+The broader reactive refactor remains separate: durable document text should stay under the Yrs/CRDT authority, while a pass-scoped Lazily `CurrentDocument` projection keyed by CRDT revision can cache derived closeout/queue views and invalidate whenever the operator types. That preserves concurrent edits instead of creating a second text authority.
+
+The reported `lazily.md` failures are captured as one write-safety follow-up: operator queue additions and deletions were lost or resurrected during closeout/repair; combined gate mutation and a malformed closing exchange marker triggered File Cache Conflict/churn; retained intent then required installing a one-repair-newer local binary/library and recycling the controller. The required invariant is that binary-owned repair/retry rebases on the current CRDT state vector, preserves operator edits, repairs structural markers idempotently, negotiates implementation-version skew itself, and never direct-replaces or resurrects stale text.
+<!-- agent:boundary:0bba7e41 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~📌 do [#60ev]~~
-- Improve the performance of Compact Exchange.
+- ~~Improve the performance of Compact Exchange.~~
 - 📌 do [#2y8j]
 - 📌 do [#cdtcutover]
 - 📌 do [#coredecomp]
@@ -111,7 +136,9 @@ Repository effects:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#compactexchangelatency] [focused-cycle] Speed up Compact Exchange without weakening binary-owned committed closeout. Live evidence on agent-doc-bugs2.md (2026-07-27): JetBrains widget busy for 1.834s (01:08:45.624–01:08:47.458); controller barrier+compact at 05:08:45Z and writeback+commit_success by 05:08:46Z. Profile and collapse repeated detached-authority resolution, visible-write readiness checks, and redundant baseline checkpoints into one transaction snapshot; avoid recovery-driven repeat work when the first compact already committed; retain the CRDT barrier, fail-closed convergence, git commit, and final editor refresh. Add per-phase latency telemetry and a regression benchmark/test with a sub-second warm detached-authority target.
+- [ ] [#lazilyconcurrentcloseout] [focused-cycle] Fix binary-owned closeout/repair under concurrent lazily.md editor mutation. Reproduce operator queue additions and deletions during a running turn, combined gate mutation, Compact Exchange, File Cache Conflict, and a malformed closing exchange marker. Closeout and repair must CAS/rebase from the current Yrs/CRDT state vector, preserve additions and honor deletions, never resurrect or direct-replace stale text, restore structural markers from retained intent/current authority idempotently, and retry without a second direct document mutation. Negotiate live controller/library build or protocol skew inside agent-doc and refresh/recycle automatically when safe rather than requiring agent-narrated install/replay. Add binary, controller/plugin, malformed-marker, version-skew, and concurrent-edit regression tests.
+- [ ] [#tmuxsyncnewpane] [focused-cycle] Reproduce opening tasks/monsterrodholders.md and invoking Sync Tmux Pane when no pane exists. Trace document actor/route ownership and the tmux pane registry; make Sync Tmux Pane create and associate a new pane in the intended tmux session, submit the document route, and fail visibly if creation cannot complete. Add controller/plugin regression coverage and a live pane proof.
+- [ ] [#compactreactiveprojection] [focused-cycle] Generalize the pass-scoped Lazily CurrentDocument projection already used by session-check into shared compact/commit/closeout infrastructure. Cache derived document, pipeline, and queue projections per CRDT revision/state vector; invalidate on every operator edit; keep Yrs/CRDT as the sole durable text authority. Reuse the recent ThreadSafeQueue and ThreadSafeSourceMap/ThreadSafeComputedMap support, remove remaining duplicate authority resolutions, and add latency plus concurrent-typing tests proving cached projections never hide operator additions or deletions.
 - [ ] [#adctxledger] [focused-cycle] Dynamic-context injection ledger Phase 2: implement the durable SQLite schema and helpers for context_injections, atomic per-turn insertion with cycle state, and indexed duplicate/diagnostic queries. Preserve lazily as live in-process state and SQLite as durable replay memory. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxpreflight] [focused-cycle] Dynamic-context injection ledger Phase 3 after #adctxledger: wire preflight/plan to build candidate context snapshots, use tsift context packs when applicable, consult the durable injection ledger, and emit the expanded/referenced/skipped context manifest without replaying unchanged chunks. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxorchestrate] [focused-cycle] Dynamic-context injection ledger Phase 4 after #adctxpreflight: integrate child-dispatch and queue-continuation behavior so context projection/ledger decisions remain correct across orchestration boundaries and do not duplicate injected context. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md

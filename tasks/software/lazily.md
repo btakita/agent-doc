@@ -164,15 +164,32 @@ Completed the core-register and reactive-bridge subphase of lazily-cs CRDT parit
 - Preserved pre-existing lazily-cs changes to `AGENTS.md`, `README.md`, and untracked `build/`.
 
 Confidence is high for this bounded slice; no escalation was required. `#lzcscrdt` stays staged because TextCrdt/delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt with frontier/concurrent-merge corpora remain unimplemented, so C# must not enter those peer groups yet.
-<!-- agent:boundary:130c6bc7 -->
+
+### Re: do [#lzcsipc] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzcsipc]
+
+
+Completed the schema-defined IPC wire subphase for lazily-cs.
+
+- Added `src/Lazily/IpcWire.cs` with typed externally tagged `SnapshotMessage`, `DeltaMessage`, and `CrdtSyncMessage` records; all 10 DeltaOp variants; NodeState/IpcValue unions; WireStamp/frontier/CRDT ops; numeric byte arrays; optional-vs-required key handling; frontier suppression; and shm/Arrow/in-process blob backend discriminators.
+- Added `IpcWireConformanceTests.cs` and a test-only JsonSchema.Net 9.4.0 dependency. The runner discovers and opens all 3 Snapshot fixtures, 4 Delta fixtures, and the 4 frames in the CrdtSync corpus, round-trips exact JSON, and validates emitted messages against the Draft 2020-12 lazily-spec schemas with the shared definitions registry.
+- Updated the known-uncovered ledger only after runtime replay proved those 8 canonical files were opened. Coverage advanced from 48/124 with 76 known-uncovered to 56/124 with 68 known-uncovered.
+- Mutation check: changing numeric byte arrays to base64 made 6/7 targeted tests fail through exact fixture comparison, strict decode, and schema rejection; restoring numeric arrays returned all 7 tests to green.
+- Verification: targeted IPC tests passed; lazily-cs `make check` passed with 119 tests and 56/124 runtime-opened fixtures; `make format-check` passed; root `make check` passed with 8,208 agent-doc tests plus TLA and corky suites.
+- Published lazily-cs commit `13e8d67` and root submodule pointer `b02e929dc`. The one-shot lazily-cs CI run completed successfully; the root repository has no workflow named `CI`.
+- Preserved pre-existing lazily-cs changes to `AGENTS.md`, `README.md`, and untracked `build/`.
+
+Confidence is high for the wire/schema capability; no escalation was required. `#lzcsipc` stays staged because `ShmBlobArena` and executable `BlobBackend` zero-copy resolution are not implemented, so C# must remain outside those peer groups.
+<!-- agent:boundary:0229cf13 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~⏭️ do [#lzcsqueues]~~
-- ~~do [#lzcscrdt]~~
-- do [#lzcsipc]
+- ~~do [#lzcsipc]~~
 - do [#lzcssync]
 - do [#lzinteropcs]
 - do [#lzcsplane]
@@ -189,7 +206,7 @@ Confidence is high for this bounded slice; no escalation was required. `#lzcscrd
 <!-- agent:backlog priority queue -->
 - [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell + QueueStorage shipped at 01d2cf3; WorkQueueCell shipped at fafb88f; TopicCell shipped at 17256ce; Relay core and Count BackpressurePolicy shipped at 5ac24cc; SpillStore shipped at 3e79b92; Relay Transport shipped at 0cca2e6; Spill overflow integration shipped at c5d678d with idempotent-or-deduplicated replay guard and lossless cold+hot reconstruction. Keep C# eligible only for exact capabilities. Still add Bytes/Keys/Age meters before admitting C# to the full RelayCell peer group. (stays open: Bytes/Keys/Age metering and normative integration tests remain.)
 - [ ] 🚧 [#lzcscrdt] lazily-cs: PARTIAL/STAGED — HLC, ICellCrdt/IRegisterCrdt, LWW/MV registers, PnCounter, and the ReplicatedCell reactive bridge shipped at f1f32e2 with algebraic, replay-idempotence, and invalidation-suppression tests. Keep C# eligible only for these exact CRDT register capabilities. Still implement TextCrdt + delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt including dotted-frontier anti-entropy and concurrent-merge convergence, then replay the textcrdt, seqcrdt, crdt-tree, and lossless-tree corpora before full CRDT peer admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: TextCrdt/delta, SeqCrdt, CrdtTree, LosslessTreeCrdt, and their conformance runners remain.)
-- [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
+- [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
 - [ ] [#lzcsplane] lazily-cs: state projection/mirror, CausalReceipts, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay receipts + signaling + agent-doc corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 33-39)

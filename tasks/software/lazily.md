@@ -94,15 +94,46 @@ Changed paths: `src/Lazily/{ClusterCollections,Membership,Coordination,Presence,
 Committed and pushed lazily-cs `6afe762` (`feat: add cluster coordination primitives`) and root pointer `b5a7dc9c8` (`chore: advance lazily-cs cluster features`).
 
 Confidence: high. Escalation: none. C# remains excluded from unsupported peer groups; only these now-proven cluster capabilities are eligible.
-<!-- agent:boundary:d8cee586 -->
+
+### Re: do [#lzcspackage] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzcspackage]
+
+
+Completed the package-ready implementation of `#lzcspackage`; credentialed first publication is captured separately as `#lzcsnugetpublish`.
+
+Shipped in `lazily-cs`:
+
+- Multi-targeting for `netstandard2.1`, `net8.0`, and `net10.0`, including compatibility shims for the older target.
+- A package gate that inspects the built `.nupkg` for all three framework assemblies and the README.
+- A tag/manual GitHub Release workflow that restores, builds, tests, packs, uploads the package artifact, validates `NUGET_API_KEY`, and pushes to NuGet.
+- The generic numeric floor implementation now avoids `INumber<T>`, preserving the API on `netstandard2.1`.
+
+Proof:
+
+- `make check`: green; 141/141 tests, 92/124 conformance capabilities exercised, 32 explicitly staged as known-uncovered.
+- `make format-check`: green.
+- Package archive verified with all three TFM DLLs/XML docs plus README.
+- Mutation proof: removing `netstandard2.1` made `make package-check` fail on the missing archive entry; restoring it returned the gate to green.
+- lazily-cs CI run `30305847353`: success.
+- lazily-cs commit `813983e` (`feat: multi-target and automate NuGet releases`) pushed.
+- workspace pointer commit `f7431f0a5` (`chore: advance lazily-cs packaging`) pushed.
+
+Publication was intentionally not triggered: the repository has no `NUGET_API_KEY`, `v0.2.0` already exists as a GitHub tag/release, and the NuGet flat-container lookup returned 404 for package ID `Lazily`. The new `#lzcsnugetpublish` follow-up owns adding the secret, authorizing `0.2.0` or a newer version, running the workflow, and verifying the first public package.
+
+The root workspace `make check` was also attempted. It is blocked only by two reproducible, unrelated tests in the already-dirty `src/agent-doc` submodule (`managed_capability_proof_status_tracks_pending_and_failed` and `managed_capability_proof_status_requires_post_restart_proof`); lazily-cs checks and CI are green.
+
+Confidence: high for package construction and release automation. Escalation: an operator must provide the NuGet credential and version authorization for `#lzcsnugetpublish`.
+<!-- agent:boundary:858fdd56 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzcstemporal]~~
-- 🚧 do [#lzcscluster]
-- do [#lzcspackage]
+- do [#lzcsnugetpublish]
+- ~~do [#lzcspackage]~~
 - do [#asyncplanenever]
 - do [#lazilyconformancecoverag]
 - /goal Add missing lazily-cs features
@@ -112,15 +143,14 @@ Confidence: high. Escalation: none. C# remains excluded from unsupported peer gr
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcsnugetpublish] lazily-cs: add repository secret NUGET_API_KEY, choose and authorize the NuGet version (0.2.0 is package-ready and currently unregistered, or create a newer tag), run the Release workflow, and verify the first Lazily publication on NuGet.
 - [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell + QueueStorage shipped at 01d2cf3; WorkQueueCell shipped at fafb88f; TopicCell shipped at 17256ce; Relay core and Count BackpressurePolicy shipped at 5ac24cc; SpillStore shipped at 3e79b92; Relay Transport shipped at 0cca2e6; Spill overflow integration shipped at c5d678d with idempotent-or-deduplicated replay guard and lossless cold+hot reconstruction. Keep C# eligible only for exact capabilities. Still add Bytes/Keys/Age meters before admitting C# to the full RelayCell peer group. (stays open: Bytes/Keys/Age metering and normative integration tests remain.)
 - [ ] [#lzcscrdt] lazily-cs: PARTIAL/STAGED — HLC, ICellCrdt/IRegisterCrdt, LWW/MV registers, PnCounter, and the ReplicatedCell reactive bridge shipped at f1f32e2 with algebraic, replay-idempotence, and invalidation-suppression tests. Keep C# eligible only for these exact CRDT register capabilities. Still implement TextCrdt + delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt including dotted-frontier anti-entropy and concurrent-merge convergence, then replay the textcrdt, seqcrdt, crdt-tree, and lossless-tree corpora before full CRDT peer admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: TextCrdt/delta, SeqCrdt, CrdtTree, LosslessTreeCrdt, and their conformance runners remain.)
 - [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
 - [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
 - [ ] [#lzcsplane] lazily-cs: PARTIAL/STAGED — CausalReceipt/CausalReceipts schema/projection shipped at 967c44e; all 17 typed signaling frames, strict exact codec, authoritative SignalingRoom, anti-spoof server-stamped sender, sorted self-excluding rosters, unknown-target handling, and leave semantics shipped at d663074 with canonical signaling client/server fixture replay. Runtime coverage is now 61/124 with 63 known-uncovered. Admit C# only to the exact causal-receipts and signaling-wire/open-room peer groups. Still implement general state projection/mirror, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay service, agent-doc, and remaining message-passing corpora. Plan rows 33-39. (stays open: state mirror, command plane, FFI, permissions, handshake, instrumentation/benchmarks, and remaining corpora.)
-- [ ] 🚧 [#lzcscluster] lazily-cs: MembershipCell (SWIM + Phi-accrual), LeaseCell/LeaderCell/LockCell/SemaphoreCell/BarrierCell, presence/awareness/ephemeral, circuit breaker/retry/bulkhead/timeout, health/readiness/discovery/registry; replay membership + coordination + presence + resilience + service corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 42-44, 46-47)
-- [ ] [#lzcspackage] lazily-cs: multi-target netstandard2.1 / net8.0 alongside net10.0 (INumber<T> in the merge algebra needs a shim or policy split), add a release workflow, publish Lazily to NuGet — needs a NuGet API key from the operator
 - [ ] [#asyncplanenever] STAGED implementation — finish the async v2 kernel naming migration in C++, Go, Python, and Zig per tasks/plan-lazily-async-v2-migration.md. Rust, JavaScript, Kotlin, and C# already expose AsyncSource/AsyncComputed. Preserve deprecated aliases in published bindings, collapse live memo constructors into guarded computed, and settle the public AsyncComputedState vs formal AsyncSlotState distinction without renaming the formal model mechanically.
-- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-27: 75/124 canonical fixtures opened, 49 known-uncovered. Temporal (4), rate-shaping (6), and windowing (4) are now runtime-opened at d5bba73 alongside the previously admitted reactive graph, collections, statechart, materialization, queue, IPC, durable-outbox, causal-receipts, and signaling slices. Keep open and work the remaining ledger down only by shipping explicit tasks in tasks/software/lazily-cs-parity-plan.md; admit C# to each capability group only when that production surface and canonical replay ship.
+- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-27: 92/124 canonical fixtures opened, 32 known-uncovered. Membership (1), coordination (5), presence (3), resilience (4), and service (4) are now runtime-opened at 6afe762 alongside the previously admitted reactive graph, collections, statechart, materialization, queue, IPC, durable-outbox, causal-receipts, signaling, temporal, rate-shaping, and windowing slices. Keep open and work the remaining ledger down only by shipping explicit tasks in tasks/software/lazily-cs-parity-plan.md; admit C# to each capability group only when that production surface and canonical replay ship.
 <!-- /agent:backlog -->
 
 ## Review

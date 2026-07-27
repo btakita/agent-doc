@@ -265,22 +265,40 @@ Normative proof:
 Commits are complete and exact-path staged history is clean: lazily-cs `e3bed9d` + `e89fce4`, lazily-spec `ae03868`, generated one-line coverage commits in the other bindings, and root pointer commit `a9a275f4f`. The required pushes follow this binary-owned document closeout. Pre-existing C# `AGENTS.md`, queue-flavor README hunks, JavaScript size-report hunks, build trees, and unrelated workspace changes remain uncommitted and unstaged.
 
 Confidence is high. No escalation was required. The umbrella C# staging ledger now depends only on `#lzcscrdt`, `#lzcsipc`, `#lzcssync`, and `#lzcsplane`.
-<!-- agent:boundary:4a4fbb52 -->
+
+### Re: complete [#lzcscrdt] — gpt-5
+
+Completed and shipped the remaining lazily-cs CRDT parity phase.
+
+Production support now includes:
+
+- `TextCrdt` with Unicode-scalar elements, Fugue/RGA ordering, sticky tombstones, deterministic merge, version vectors, delta extraction/application, identity-preserving replay, and conservative stable-leaf GC.
+- The generic `ICrdtTree` contract plus canonical CrdtTree algebra coverage.
+- Move-aware `SeqCrdt<TKey,TValue>` with fractional positions, independently merged value/position/deletion registers, deterministic HLC behavior, reordering, merge, and GC.
+- `LosslessTreeCrdt` with exact byte rendering, element/leaf structure, edit/split/merge/reorder/tombstone operations, UTF-8 boundary checks, dotted version frontiers with sparse holes, dependency buffering, anti-entropy deltas, fork/copy, and deterministic concurrent convergence.
+
+Canonical proof is strict and runtime-backed: the C# suite now replays 10 TextCrdt scenarios (46 steps), 6 SeqCrdt scenarios (33 steps), 3 CrdtTree algebra scenarios, all 14 LosslessTree scenarios (41 steps), plus dedicated GC, Unicode-boundary, and dotted-hole-repair regressions. A mutation replacing dotted membership with per-peer maximum semantics made both the canonical repair fixture and the dedicated hole regression fail, then both passed after restoring sparse-dot membership.
+
+Validation is green: focused CRDT tests 6/6; lazily-cs `make check` 160/160 with zero skips across netstandard2.1, net8, and net10 plus package checks; format verification; lazily-spec `make check`; every regenerated sibling coverage-table gate; and root `make check` (8,241/8,241 agent-doc tests plus the remaining workspace gates). Runtime conformance advanced from 92/124 opened with 32 known-uncovered to 105/124 opened with 19 known-uncovered. All eight C# CRDT coverage rows are now admitted.
+
+Shipped commits are lazily-cs `f25c632`, lazily-spec `c24151e`, generated sibling coverage commits `9f3026f`, `2df2a19`, `c0e50b6`, `bc10922`, `85e0b9a`, `ed99582`, `d3acd6b`, `cc9db9e`, and `a344ddc`, with root pointer commit `b66c1bff2`; all were pushed. The required one-shot CI inspection found the spec and JavaScript runs successful, C#/Rust/Kotlin/Dart/Go/C++ in progress, Zig queued, and no CI workflow in Python/formal. It was not polled further.
+
+Pre-existing worktree changes, including the staged queue-family README work and build directories, were preserved and excluded from these commits. C# may now join all eight exact CRDT feature groups; incomplete IPC, sync, and plane features remain staged.
+<!-- agent:boundary:69ac7bfa -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcscrdt] lazily-cs: PARTIAL/STAGED — HLC, ICellCrdt/IRegisterCrdt, LWW/MV registers, PnCounter, and the ReplicatedCell reactive bridge shipped at f1f32e2 with algebraic, replay-idempotence, and invalidation-suppression tests. Keep C# eligible only for these exact CRDT register capabilities. Still implement TextCrdt + delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt including dotted-frontier anti-entropy and concurrent-merge convergence, then replay the textcrdt, seqcrdt, crdt-tree, and lossless-tree corpora before full CRDT peer admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: TextCrdt/delta, SeqCrdt, CrdtTree, LosslessTreeCrdt, and their conformance runners remain.)
 - [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
 - [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
 - [ ] [#lzcsplane] lazily-cs: PARTIAL/STAGED — CausalReceipt/CausalReceipts schema/projection shipped at 967c44e; all 17 typed signaling frames, strict exact codec, authoritative SignalingRoom, anti-spoof server-stamped sender, sorted self-excluding rosters, unknown-target handling, and leave semantics shipped at d663074 with canonical signaling client/server fixture replay. Runtime coverage is now 61/124 with 63 known-uncovered. Admit C# only to the exact causal-receipts and signaling-wire/open-room peer groups. Still implement general state projection/mirror, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay service, agent-doc, and remaining message-passing corpora. Plan rows 33-39. (stays open: state mirror, command plane, FFI, permissions, handshake, instrumentation/benchmarks, and remaining corpora.)
-- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Reverified 2026-07-27 at lazily-cs e89fce4: 92/124 canonical fixtures are runtime-opened and 32 are explicitly known-uncovered; 154/154 tests, all three target frameworks, package checks, and the conformance guard pass. RelayCell is now fully admitted, including Count/Bytes/Keys/Age metering, Inbox/Outbox, SpillStore/Transport, Rate/Window/Expiry/Priority, and keyed sharding, alongside the previously shipped exact slices. (stays open: close only after #lzcscrdt, #lzcsipc, #lzcssync, and #lzcsplane ship their remaining production surfaces and canonical replays; until then admit C# only to exact feature groups whose implementation and fixture replay are present.)
+- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Reverified 2026-07-27 at lazily-cs f25c632: 105/124 canonical fixtures are runtime-opened and 19 are explicitly known-uncovered; 160/160 tests, all three target frameworks, package checks, and the conformance guard pass. All eight CRDT rows are now admitted (registers, TextCrdt + delta, CrdtTree, SeqCrdt, LosslessTreeCrdt core, dotted-frontier anti-entropy, and concurrent convergence), alongside the previously shipped exact slices. (stays open: close only after #lzcsipc, #lzcssync, and #lzcsplane ship their remaining production surfaces and canonical replays; until then admit C# only to exact feature groups whose implementation and fixture replay are present.)
 <!-- /agent:backlog -->
 
 ## Review

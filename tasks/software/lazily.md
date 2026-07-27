@@ -31,6 +31,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> do [#prototypeunifiedreactive]
+
+
+> **Queue prompt:**
+>
 > do [#firstunificationwire]
 
 
@@ -89,7 +94,15 @@ Resolved `#firstunificationwire` as already completed; the queue item predates t
 Current-tree audit finds dedicated collections-family conformance runners in all nine bindings: Rust, Zig, C++, Go, Python, JavaScript, Dart, Kotlin, and C#. Each runner names both `cellmap_atomic_move.json` and `cellmap_independence.json` and drives the three execution flavors that binding ships (sync, thread-safe, async; C# uses its shipped SourceMap plus thread-safe/async computed-map flavors). In particular, the two gaps named by this item are closed: Zig has explicit SourceMap/ThreadSafeSourceMap/AsyncSourceMap fixture tests, and JavaScript has a reactive `collections-family-conformance.test.js` over SourceMap/ThreadSafeSourceMap/AsyncSourceMap rather than relying on the non-reactive collections model.
 
 `tasks/plan-lazily-reactivemap-unification.md` is now status **complete** and records the per-binding commits, full-suite verification, and mutation checks. No repository changes were needed in this cycle.
-<!-- agent:boundary:cc396030 -->
+
+### Re: Response
+
+Resolved `#prototypeunifiedreactive` as already completed by the finished ReactiveMap unification plan.
+
+The current Zig and C++ trees contain the intended prototype seam: a shared graph-agnostic `KeyedOrder` core is consumed by sync, thread-safe, and async map implementations (`keyed_order.zig` across all three Zig map modules; `keyed_order.hpp` across all three C++ family headers). Their family conformance runners replay both atomic-move fixtures across those three flavors. The plan records Zig commits `5327635`/`529b20c` and C++ commit `90767b1`, their green full suites, and mutation checks. C# was correctly excluded as the prototype target and remains feature-staged where its map flavors are absent.
+
+No repository changes were needed in this cycle.
+<!-- agent:boundary:0111a1d3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -99,7 +112,7 @@ Current-tree audit finds dedicated collections-family conformance runners in all
 - ~~do [#lazilycppcollections]~~
 - ~~do [#trackedcopieslazily]~~
 - ~~do [#firstunificationwire]~~
-- do [#prototypeunifiedreactive]
+- ~~do [#prototypeunifiedreactive]~~
 - do [#lazilyphaseextract]
 - do [#unifythreemap]
 - do [#lazilymapunification]
@@ -115,7 +128,6 @@ Current-tree audit finds dedicated collections-family conformance runners in all
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
-- [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#unifythreemap] Unify all three map families in lazily-zig and lazily-cpp — both can fold async in, unlike the rest. zig: fn ReactiveMap(comptime Ctx,K,V,kind) with Ctx.Handle/Ctx.Observed/Ctx.Lock projections; the proof already exists in-tree as Engine(comptime Model) at reactive_graph_conformance.zig:1206 over SyncModel/TsModel/AsyncModel. cpp: traits class + existing duck-typed Cx param; only Source::clear_dependents(Context&) and Computed::clear(Context&) block it, and AsyncSlotHandle needs one added clear_dependents. Neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilymapunification] lazily-go map unification BEFORE it hits v1 — still v0.22.0 on an unversioned module path, so a breaking change costs nothing now; after v1 it costs a /v2 module path plus every import rewrite. Mechanism: closure fields (already proven in-repo at reactive_map.go:92-96) or one extra type param. Plan: tasks/plan-lazily-reactivemap-unification.md

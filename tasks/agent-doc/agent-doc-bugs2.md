@@ -217,14 +217,30 @@ Changed paths: controller/sync/route Rust crates, CLI/FFI wiring, JetBrains comm
 Commands/evidence: focused controller, sync, route, and JetBrains regressions; `cargo check --workspace`; final `make check` (8,225 passed, 241 skipped plus all formal models); `make tmux-ci`; `make install-full` once; final `make install`; live sync/status/tmux/ops-log proof; `agent-doc admin recycle --all-projects`; PyPI and GitHub release publication. The latest required single CI inspection was green.
 
 Verification: green. Confidence: high. Escalation: none. Release: `v0.35.37` is pushed, PyPI `0.35.37` is published, and the GitHub release is live.
-<!-- agent:boundary:e7000df5 -->
+
+### Re: `#compactreactiveprojection` and IDEA hang — shipped
+
+> **Queue prompt:**
+>
+> do [#compactreactiveprojection]
+
+
+Implemented and released agent-doc 0.35.38 with JetBrains plugin 0.2.300.
+
+- Compact, commit, closeout, and session-check now share one pass-scoped current-document projection keyed by the live Yrs state vector (or detached disk hash). The projection caches authoritative document, frontmatter/pipeline, and queue-derived views for the pass; operator edits advance the revision, so additions and deletions cannot be hidden by an old cached projection.
+- The IDEA hang was confirmed from a live thread dump: `agent-doc-native-generation` had remained inside reliable-sync push for more than 27 minutes, while current-document reporting and CRDT delivery blocked behind the same serialized native worker. Native calls now have a 10-second bound; a timeout quarantines that generation and makes later work fail fast until restart, without unsafe `dlclose` of a still-running native frame.
+- Stale native-baseline recovery is now coalesced across a typing burst. Repeated document events replace one 150 ms quiet-period task, then adopt and re-register the latest exact editor cut once instead of rebuilding roughly 10 MB of retained state for each intermediate keystroke.
+- Coverage includes one-authority-resolution latency, operator addition/deletion invalidation, JetBrains native-timeout fail-closed structure, and coalesced typing recovery. `make check`, the full Gradle test suite, `buildPlugin`, the one-time full release-profile install, and the fast local install all passed.
+- Release commit `e8711d21e` is on `main`; tag and GitHub release `v0.35.38` are published, the PyPI wheel uploaded successfully, and plugin 0.2.300 is installed into all four existing JetBrains installations.
+- The requested `job-offers.md` recovery is complete: pane `%23` had an empty composer by inspection, then dispatch-only reroute rescued it from stash and submitted the reopen with consumed dispatch proof.
+
+The already-running IntelliJ IDEA 2026.1 process still contains the historically wedged native frame and was deliberately not killed, to avoid risking unsaved editor buffers. Save open work and restart IDEA once to activate plugin 0.2.300; that live responsiveness check remains operator verification, not a release blocker.
+<!-- agent:boundary:811fd0cc -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#lazilyconcurrentcloseout]~~
-- ~~do [#tmuxsyncnewpane]~~
-- do [#compactreactiveprojection]
+- ~~do [#compactreactiveprojection]~~
 - do [#adctxledger]
 - do [#adctxpreflight]
 - do [#adctxorchestrate]
@@ -261,7 +277,7 @@ Verification: green. Confidence: high. Escalation: none. Release: `v0.35.37` is 
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#compactreactiveprojection] [focused-cycle] Generalize the pass-scoped Lazily CurrentDocument projection already used by session-check into shared compact/commit/closeout infrastructure. Cache derived document, pipeline, and queue projections per CRDT revision/state vector; invalidate on every operator edit; keep Yrs/CRDT as the sole durable text authority. Reuse the recent ThreadSafeQueue and ThreadSafeSourceMap/ThreadSafeComputedMap support, remove remaining duplicate authority resolutions, and add latency plus concurrent-typing tests proving cached projections never hide operator additions or deletions.
+- [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
 - [ ] [#adctxledger] [focused-cycle] Dynamic-context injection ledger Phase 2: implement the durable SQLite schema and helpers for context_injections, atomic per-turn insertion with cycle state, and indexed duplicate/diagnostic queries. Preserve lazily as live in-process state and SQLite as durable replay memory. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxpreflight] [focused-cycle] Dynamic-context injection ledger Phase 3 after #adctxledger: wire preflight/plan to build candidate context snapshots, use tsift context packs when applicable, consult the durable injection ledger, and emit the expanded/referenced/skipped context manifest without replaying unchanged chunks. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxorchestrate] [focused-cycle] Dynamic-context injection ledger Phase 4 after #adctxpreflight: integrate child-dispatch and queue-continuation behavior so context projection/ledger decisions remain correct across orchestration boundaries and do not duplicate injected context. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md

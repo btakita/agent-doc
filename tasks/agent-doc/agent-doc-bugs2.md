@@ -235,12 +235,31 @@ Implemented and released agent-doc 0.35.38 with JetBrains plugin 0.2.300.
 - The requested `job-offers.md` recovery is complete: pane `%23` had an empty composer by inspection, then dispatch-only reroute rescued it from stash and submitted the reopen with consumed dispatch proof.
 
 The already-running IntelliJ IDEA 2026.1 process still contains the historically wedged native frame and was deliberately not killed, to avoid risking unsaved editor buffers. Save open work and restart IDEA once to activate plugin 0.2.300; that live responsiveness check remains operator verification, not a release blocker.
-<!-- agent:boundary:811fd0cc -->
+
+### Re: #adctxledger — gpt-5.6-sol
+
+Implemented and released the durable dynamic-context injection ledger as agent-doc 0.35.39.
+
+The canonical `.agent-doc/state.db` now owns `context_manifest` and `context_injections`. The typed API in `agent-doc-sqlite` is the policy owner for recording a cycle manifest, detecting prior document/session injections by chunk id or content hash, querying per-cycle evidence and mode counts, and explicitly clearing document/session/cycle context memory without deleting lifecycle state. Each row records the document, session, cycle, harness, pack/chunk identity, content hash, source URI/range, timestamp, and one of `expanded`, `referenced`, `skipped_duplicate`, or `stale_ignored`.
+
+The enforced invariant is: cycle state, the immutable manifest, and every injection decision commit in one SQLite transaction or none commit. Exact retries are idempotent; a reused cycle with altered manifest or injection evidence fails closed; later cycles append without mutating prior-cycle evidence. Duplicate and diagnostic paths have document/session/cycle indexes. Lazily remains the live prompt-projection owner; SQLite is durable replay memory, not a competing live authority.
+
+Verification is green: the focused ledger suite covers same-chunk and same-content duplicates, append-only cycles, exact retries and conflicting reuse, trigger-induced rollback of all three state surfaces, scoped clear behavior, declared index use, and mode diagnostics. Repository-wide `make check` passed 8,228 tests plus simulator, Lean, and TLA+ checks. The required one-time CI snapshot was green.
+
+Released artifacts:
+
+- Source commit `a49ced2a5`, parent gitlink commit `b7ba2bbaf`
+- PyPI wheel `agent-doc 0.35.39`
+- GitHub release: https://github.com/btakita/agent-doc/releases/tag/v0.35.39
+- Linux binary archive SHA-256: `94aa91150bfbea72e504e8b84ec81f1abff42efe0fec2388e437e8b4908e866a`
+- Local CLI and shared library installed as 0.35.39; JetBrains plugin 0.2.300 reinstalled into the four detected IDE installations
+<!-- agent:boundary:e71e02c9 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#compactreactiveprojection]~~
+- Please make the Codex managed capacity proof off by default with an opt-in based on the frontmatter. Please also improve the latency of the managed capacity proof.
 - do [#adctxledger]
 - do [#adctxpreflight]
 - do [#adctxorchestrate]
@@ -278,7 +297,7 @@ The already-running IntelliJ IDEA 2026.1 process still contains the historically
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
-- [ ] [#adctxledger] [focused-cycle] Dynamic-context injection ledger Phase 2: implement the durable SQLite schema and helpers for context_injections, atomic per-turn insertion with cycle state, and indexed duplicate/diagnostic queries. Preserve lazily as live in-process state and SQLite as durable replay memory. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
+- [x] [#adctxledger] [focused-cycle] Dynamic-context injection ledger Phase 2: implement the durable SQLite schema and helpers for context_injections, atomic per-turn insertion with cycle state, and indexed duplicate/diagnostic queries. Preserve lazily as live in-process state and SQLite as durable replay memory. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxpreflight] [focused-cycle] Dynamic-context injection ledger Phase 3 after #adctxledger: wire preflight/plan to build candidate context snapshots, use tsift context packs when applicable, consult the durable injection ledger, and emit the expanded/referenced/skipped context manifest without replaying unchanged chunks. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxorchestrate] [focused-cycle] Dynamic-context injection ledger Phase 4 after #adctxpreflight: integrate child-dispatch and queue-continuation behavior so context projection/ledger decisions remain correct across orchestration boundaries and do not duplicate injected context. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxcompact] [focused-cycle] Dynamic-context injection ledger Phase 5 after #adctxorchestrate: define and implement Compact Exchange/restart semantics for projected context and the durable ledger, preserving explainable expanded/referenced/skipped diagnostics without replay after compact or process restart. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md

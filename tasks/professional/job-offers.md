@@ -738,7 +738,33 @@ The hard prerequisite is **Acadian clearance**. Do not promise Haiven a start da
 
 **Changed paths:** none outside this session response. **Commands/evidence:** reviewed the current job-offer session, the Haiven SDK session, and the proposal’s commercial model. **Verification:** the prepared proposal already specifies a 10–15 hour/week band, weekly demos, milestone authorization, Haiven-owned repositories, 50/50 milestone payments, background-IP protection, and Acadian clearance as a prerequisite. **Confidence:** high on the call sequencing and positioning; medium on feasibility until Acadian’s agreement and Haiven’s budget are known. **Escalation:** written Acadian conflict/moonlighting/IP clearance before any Haiven commitment.
 The call will be 30 minutes. Should I bring up the contracting early? I think I want to go with Acadian for my full time role. But this would be a great side project. See haiven-sdk.md
-<!-- agent:boundary:a0c3343a -->
+
+### Re: avoiding a contracting-path ambush — gpt-5
+
+Since Luke and Craig are preparing for a full-time compensation discussion and have had no notice of your shift, **send them a short heads-up before the call**. Do not make the contracting path a surprise at minute five if you can prevent it.
+
+A good text is:
+
+> Quick heads-up before tonight: after going through my family finances more carefully, I’m leaning toward Acadian as my primary engagement. I still very much want to work with Haiven, and I’d like to discuss whether a bounded SDK contracting arrangement could be the right way to do that. I know you and Luke may be preparing to discuss full-time compensation, and I didn’t want this shift to surprise you. I’m still happy to hear the framework you’ve prepared.
+
+Use **“leaning toward”** only if a Haiven package could still change your mind. If you have actually decided, replace it with **“I’ve decided to make Acadian my primary engagement.”** Ambiguous wording is kind only when the decision is genuinely open.
+
+On the call, acknowledge their preparation directly:
+
+> “I realize you both prepared for a full-time compensation conversation, and I appreciate that. I’m sorry I didn’t give you this context sooner; my conclusion only became clear after I worked through the family finances honestly. I’m happy to hear the framework you prepared, but I don’t want to mislead you about where I’m leaning. I’d also like us to spend meaningful time on whether the SDK contract could be a serious path.”
+
+Your personal explanation should be **candid but bounded**. I would say:
+
+> “At this stage of my life, with a family and a goal of owning a home, I need more near-term financial predictability than I can responsibly ask Haiven to provide while the team is taking below-market pay. That is why Acadian is likely the right primary engagement for me. It doesn’t reduce my conviction about Haiven; I want to find a structure where I can contribute excellent work without putting my family under financial strain.”
+
+I would **not** tell them that you are 46 or that you are behind on payments. “At this stage of my life” supplies the relevant context without turning age into a negotiating fact. “Behind on payments” is too vulnerable and too specific: it can make the discussion feel guilt-driven, signal financial distress, and weaken your ability to price the contract professionally. If they ask for more detail, “I have meaningful debt obligations and need predictable near-term cash flow” is enough. Mentioning that you rent and want to buy a home is fine, but the homeownership goal already communicates it cleanly.
+
+The key distinction is that your circumstances are **the reason for choosing a structure**, not leverage to extract more money from Haiven. You are not asking them to fix your finances. You are explaining why a discounted startup salary is not responsible for you, while offering a bounded way to build together.
+
+For the 30 minutes, let them summarize the FTE framework for roughly five minutes if they still want to; receive it respectfully, do not negotiate it reflexively, and then spend the majority of the call testing the contracting path. That honors the work they prepared without allowing the meeting to remain organized around a role you probably will not take.
+
+**Changed paths:** none outside this session response. **Verification:** reconciled this clarification with the prepared Haiven SDK proposal and the revised call objective. **Confidence:** high. **Escalation:** send the heads-up before the call if time permits; obtain Acadian conflict/moonlighting/IP clearance before promising Haiven hours or a start date.
+<!-- agent:boundary:c85c8685 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -749,7 +775,7 @@ The call will be 30 minutes. Should I bring up the contracting early? I think I 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#haivencall] Tonight 8pm ET: 30-minute call with Luke + Craig; by minute 5 state strong preference for Acadian as the primary engagement and propose a bounded Haiven SDK consulting path; test fit for Milestone 0; do not accept or promise hours/start live
+- [ ] [#haivencall] Tonight 8pm ET: before the call, send Luke + Craig a short heads-up that Acadian is the likely primary engagement and the SDK contract is the preferred Haiven path; on the 30-minute call acknowledge their FTE-comp preparation, hear a brief outline if useful, then spend most of the time testing Milestone 0 fit; do not accept or promise hours/start live
 - [ ] [#sdkcontract] Active path: if Luke + Craig are receptive, send/refine tasks/recruit/haiven/sdk-proposal-2026-07-26.md and scope only Milestone 0; 10–15 hours/week and any start date remain subject to Acadian conflict-of-interest, moonlighting, confidentiality, and IP clearance
 - [ ] [#acadiansend] Acadian is now the preferred primary engagement: resolve #acadianterms, confirm the acceptance deadline, and obtain written moonlighting/conflict/invention-assignment clearance before promising Haiven SDK hours
 <!-- /agent:backlog -->

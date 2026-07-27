@@ -53,13 +53,30 @@ Review now retains only genuine operator-owned gates:
 - `#lzjsnpmtrustedpub`: complete npm authentication/trusted-publisher registration, then prove the next tagged release.
 
 This preserves the staged-peer rule: queue presence does not admit an implementation to a feature peer group; production support plus canonical replay remains the admission condition.
-<!-- agent:boundary:312557a0 -->
+
+### Re: queue materialization repair — gpt-5
+
+Explicit backlog-to-queue synchronization materialized all eleven active `do [#id]` prompts in the dependency order recorded above. The first runnable queue target is `#lzcsqueues`, followed by `#lzcscrdt`, `#lzcsipc`, `#lzcssync`, and `#lzinteropcs`.
+
+No implementation files changed in this repair cycle; it only completes the requested session-document scheduling state.
+<!-- agent:boundary:52b706c3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - Please look at the review items and add actionables into the backlog + queue in priority order.
+- do [#lzcsqueues]
+- do [#lzcscrdt]
+- do [#lzcsipc]
+- do [#lzcssync]
+- do [#lzinteropcs]
+- do [#lzcsplane]
+- do [#lzcstemporal]
+- do [#lzcscluster]
+- do [#lzcspackage]
+- do [#asyncplanenever]
+- do [#lazilyconformancecoverag]
 <!-- /agent:queue -->
 
 ## Backlog

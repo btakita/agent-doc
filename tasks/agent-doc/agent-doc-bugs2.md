@@ -292,14 +292,27 @@ Released and installed agent-doc 0.35.40.
 [GitHub release v0.35.40](https://github.com/btakita/agent-doc/releases/tag/v0.35.40)
 
 One controller anomaly remains: closeout committed successfully but reported the same free-text queue head again, so I did not execute it twice.
-<!-- agent:boundary:490337e7 -->
+
+### Re: #adctxledger stale queue cleanup — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> do [#adctxledger]
+
+
+`#adctxledger` was already completed, verified, installed, and released as agent-doc 0.35.39. This cycle does not rerun or duplicate that implementation.
+
+The durable done archive contains the completed item, while the live backlog no longer contains `#adctxledger`; only the ID-backed queue mirror remained unstruck. I am repeating the binary-owned `done` mutation so closeout consumes that stale queue head and advances to the next genuinely open phase.
+
+Changed paths: no product source changes; the version-drift rule refreshed the project-local Codex agent-doc skill from 0.35.39 to 0.35.40, and this closeout adds only the session response/queue lifecycle mutation. Commands/evidence: `agent-doc skill install --harness codex`, full skill reread, fresh `tsift status`, connected admit/plan, and connected reads of queue, backlog, and exchange. Verification: the done archive records `#adctxledger` at release commit `a49ced2a5`, the active backlog omits it, and the queue still showed `do [#adctxledger]` as the current unstruck head. Confidence: high. Escalation: none.
+<!-- agent:boundary:d1c0ef7e -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#compactreactiveprojection]~~
 - ~~Please make the Codex managed capacity proof off by default with an opt-in based on the frontmatter. Please also improve the latency of the managed capacity proof.~~
-- do [#adctxledger]
+- ~~do [#adctxledger]~~
 - do [#adctxpreflight]
 - do [#adctxorchestrate]
 - do [#adctxcompact]

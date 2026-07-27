@@ -458,7 +458,29 @@ Changed paths:
 Verification covered the new shared-policy identity/newest-binding test, all 47 exchange tests, response-cell tests, the Haiven prompt-order regression, and the repeated-heading DAG orchestration regression. The full repository gate passed 8,184 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA.
 
 Commits `c4f4ae9c7` (agent-doc) and `c34e8e4df` (parent gitlink) are pushed to `main`. CI run `30227334860` was in progress at the single required inspection, with no completed failure. Confidence is high: identity and order binding now share one pure policy and all affected path-specific regressions remain green. No escalation was needed, and unrelated `src/tmux-router` staging was preserved untouched.
-<!-- agent:boundary:45fb0935 -->
+
+### Re: Split CRDT convergence waits — gpt-5
+
+> **Queue prompt:**
+>
+> do [#crdtwaitsplit]
+
+
+Completed `#crdtwaitsplit`.
+
+The 0.35.30 `ThreadSafeQueueCell` subscription work had already separated the normal remedies: delivery waits subscribe for editor ACK changes while controller/CAS contention backs off and retries the frontier. This pass removed the remaining shared state:
+
+- delivery subscription time is excluded from the 60-second controller/frontier deadline and is charged only to the dedicated ACK-recovery deadline;
+- ACK subscription fallback owns its own backoff value and policy instead of borrowing or mutating the controller/CAS frontier backoff;
+- controller/CAS retries retain the `advanced` rule from `#crdtcasraced`, so only a genuinely changed canonical content hash resets the frontier backoff floor;
+- timeout diagnostics now report the controller budget and accumulated delivery-subscription time separately.
+
+Changed path: `agent-doc-document-realtime-io/src/lib.rs`.
+
+Verification included two new budget/backoff-independence tests, all 95 realtime-I/O tests, the delayed-ACK subscription convergence test, and the retained-success-at-ACK-deadline test. The full repository gate passed 8,186 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA.
+
+Commits `5b204ed04` (agent-doc) and `1cb2a3658` (parent gitlink) are pushed to `main`. CI run `30227784741` was in progress at the single required inspection, with no completed failure. Confidence is high: normal delivery remains subscription-driven, fallback state is independent, and the existing anti-hot-loop `advanced` behavior is unchanged. No escalation was needed; unrelated Lazily Kotlin and tmux-router partial staging remained untouched.
+<!-- agent:boundary:7dfbff79 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -468,7 +490,7 @@ Commits `c4f4ae9c7` (agent-doc) and `c34e8e4df` (parent gitlink) are pushed to `
 - ~~do [#responseordercell]~~
 - ~~do [#haivenresponseorder]~~
 - ~~do [#crdtwaitsubscribe]~~
-- do [#crdtwaitsplit]
+- ~~do [#crdtwaitsplit]~~
 - do [#sessioncheckguardsweep]
 - do [#crdtdeliverybatch]
 - do [#closeoutgitsubmodulescan]
@@ -513,7 +535,6 @@ Commits `c4f4ae9c7` (agent-doc) and `c34e8e4df` (parent gitlink) are pushed to `
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#crdtwaitsplit] #agent-doc-feature Separate controller backpressure from CRDT delivery convergence in the write wait. ControllerModelBackpressure and DeliveryAckPending are different conditions with different remedies (back off the controller vs wait on the editor) but currently share one loop, one backoff schedule and one 60s budget, so the wrong remedy is applied to whichever one is actually blocking. Partial coalescing already exists and must be preserved: #crdtcasraced added the `advanced` flag so a non-advancing apply does not reset the backoff floor - without it a contended write pinned at 25ms for the whole 60s budget (~2400 merge+CAS attempts, each worsening the contention it retried). Land after #crdtwaitsubscribe, whose per-condition subscription makes the split natural rather than two parallel poll loops.
 - [ ] [#sessioncheckguardsweep] #agent-doc-bug session_check is the second-largest closeout phase - a flat 2.9-4.2s, observed once at 11,271ms - and it is a per-invocation ~30-guard sweep. Measured attribution from one run: inspect_with_warnings 2665ms (the nesting parent), guard_partial_staging_closeout 817ms, inspect_core 607ms, self_heal_response_replay_duplication 385ms, resolve_current_document_content 350ms/13x. The partial-staging guard is the concrete target: companion_findings iterates candidate_repos, which on this superproject enumerates every dirty submodule and then runs several git diffs per repo. candidate_repos legitimately needs --ignore-submodules=none (it is hunting dirty submodule repos, 341ms) and narrowing it with --untracked-files=no was measured at only 13ms and discarded, so the real question is a SEMANTICS decision: must a WARN-only narrow guard run on every closeout, or only when the cycle actually staged something beyond the session document? Related: #closeoutgitsubmodulescan (9e7ce2f79 fixed two 47x submodule scans in tracked_modified_paths that were NOT the dominant cost).
 - [ ] [#crdtdeliverybatch] #agent-doc-feature [recommended] Opportunistic client-side batching of CRDT deliveries. GATED ON #ackeditorstamps - do not start this until the profile says it applies. Current evidence points the other way: the measured shape is ONE delivery waiting a long time for a single ACK (delivery_ack_pending is 457 of 522 waits), and batching improves throughput across many writes rather than the latency of one, so it would not shorten the wait we actually have. It becomes the right lever only if the per-state profile shows delivery_ack_pending accumulating as many short delivery cycles instead of one long stretch. Filed to keep the option recorded with its precondition, not as agreed work.
 - [ ] [#replicareloadincremental] #agent-doc-bug CORRECTED 2026-07-26 - originally filed as THE cause of commit_authority latency; the data does not support that. Measured across 522 convergence waits: delivery_ack_pending 457 (88%), controller_model_backpressure 53 (10%), compare_and_swap_raced 12 (2%). commit_authority is 11-15s of a 15-17s closeout and it is the EDITOR confirming delivery. Correlation test: only 64/210 waits had a crdt_replica_register within 8s, so full-bootstrap-on-reload explains about 30% - real and worth fixing, but a MINORITY factor, not the cause. Ruled out by measurement: git (commit-io internal timer 9-19ms, plumbing 1-4ms each), the controller baseline round trip (record_committed_baseline 72-88ms), and poll oversleep (CRDT_WRITE_BACKOFF_POLICY is 25ms initial / 250ms max). REMAINING ~70% UNEXPLAINED. NEXT STEP IS INSTRUMENTATION, NOT A FOURTH HYPOTHESIS: decompose the ACK round trip with editor-side timestamps - plugin receives intent, applies to buffer, emits visible receipt, binary observes it. Two wrong guesses on this class today (supervisor status snapshot, controller watchdog tick) each cost a build+install+recycle and both collapsed immediately once a log line carried an attribution field. DO NOT background commit_authority to hide this: it is already the slow-path fallback, and making it the default turns 'captured but not committed' into the normal state - the gap every wedge repaired today lived in - and lets queue item N+1 start while N commits, which is the concurrent-cycle splice generator.

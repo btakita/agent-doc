@@ -145,14 +145,33 @@ Completed the RelayCell Spill-overflow subphase for lazily-cs.
 - Preserved pre-existing lazily-cs changes to `AGENTS.md`, `README.md`, and untracked `build/`.
 
 `#lzcsqueues` stays open only for Bytes/Keys/Age metering and its normative integration tests. C# remains eligible solely for exact capabilities it currently implements.
-<!-- agent:boundary:ee08492c -->
+
+### Re: 🚧 do [#lzcscrdt] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzcscrdt]
+
+
+Completed the core-register and reactive-bridge subphase of lazily-cs CRDT parity.
+
+- Added `src/Lazily/Crdt.cs` with deterministic HLC send/receive ordering, `ICellCrdt`/`IRegisterCrdt`, `LwwRegister`, version-vector `MvRegister`, component-max `PnCounter`, and `ReplicatedCell` reactive projection.
+- The LWW merge advances causal state without falsely reporting an observable change; MV retains concurrent values and collapses them after an observed causal write; PN-counter merge is commutative, associative, and idempotent by per-peer maximum.
+- Added `tests/Lazily.Tests/CrdtRegisterTests.cs` with 9 normative tests covering HLC causality, total LWW convergence, MV convergence/algebra, PN-counter replay, merge-mechanism declarations, and redundant-merge invalidation suppression in the reactive graph.
+- Mutation check: replacing PN-counter component maximum with addition made the targeted suite fail in both idempotent replay and reactive no-op suppression; restoring maximum returned all 9 tests to green.
+- Verification: targeted CRDT tests passed; lazily-cs `make check` passed with 112 tests and 48/124 runtime-opened canonical fixtures (76 known-uncovered); `make format-check` passed; root `make check` passed with 8,208 agent-doc tests plus TLA and corky suites.
+- Published lazily-cs commit `f1f32e2` and root submodule pointer `c78f943f8`. The one-shot lazily-cs CI run completed successfully; the root repository has no workflow named `CI`.
+- Preserved pre-existing lazily-cs changes to `AGENTS.md`, `README.md`, and untracked `build/`.
+
+Confidence is high for this bounded slice; no escalation was required. `#lzcscrdt` stays staged because TextCrdt/delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt with frontier/concurrent-merge corpora remain unimplemented, so C# must not enter those peer groups yet.
+<!-- agent:boundary:130c6bc7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~⏭️ do [#lzcsqueues]~~
-- 🚧 do [#lzcscrdt]
+- ~~do [#lzcscrdt]~~
 - do [#lzcsipc]
 - do [#lzcssync]
 - do [#lzinteropcs]
@@ -162,13 +181,14 @@ Completed the RelayCell Spill-overflow subphase for lazily-cs.
 - do [#lzcspackage]
 - do [#asyncplanenever]
 - do [#lazilyconformancecoverag]
+- release + publish all lazily packages
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell + QueueStorage shipped at 01d2cf3; WorkQueueCell shipped at fafb88f; TopicCell shipped at 17256ce; Relay core and Count BackpressurePolicy shipped at 5ac24cc; SpillStore shipped at 3e79b92; Relay Transport shipped at 0cca2e6; Spill overflow integration shipped at c5d678d with idempotent-or-deduplicated replay guard and lossless cold+hot reconstruction. Keep C# eligible only for exact capabilities. Still add Bytes/Keys/Age meters before admitting C# to the full RelayCell peer group. (stays open: Bytes/Keys/Age metering and normative integration tests remain.)
-- [ ] 🚧 [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: resume after the operator-requested agent-doc controller recycle completes.)
+- [ ] 🚧 [#lzcscrdt] lazily-cs: PARTIAL/STAGED — HLC, ICellCrdt/IRegisterCrdt, LWW/MV registers, PnCounter, and the ReplicatedCell reactive bridge shipped at f1f32e2 with algebraic, replay-idempotence, and invalidation-suppression tests. Keep C# eligible only for these exact CRDT register capabilities. Still implement TextCrdt + delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt including dotted-frontier anti-entropy and concurrent-merge convergence, then replay the textcrdt, seqcrdt, crdt-tree, and lossless-tree corpora before full CRDT peer admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: TextCrdt/delta, SeqCrdt, CrdtTree, LosslessTreeCrdt, and their conformance runners remain.)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.

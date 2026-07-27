@@ -172,6 +172,14 @@ const CRDT_WRITE_BACKOFF_POLICY: agent_doc_document_realtime::convergence_gate::
         CRDT_WRITE_BACKOFF_INITIAL_MS,
         CRDT_WRITE_BACKOFF_MAX_MS,
     );
+const CRDT_ACK_FALLBACK_BACKOFF_INITIAL_MS: u64 = 25;
+const CRDT_ACK_FALLBACK_BACKOFF_MAX_MS: u64 = 250;
+const CRDT_ACK_FALLBACK_BACKOFF_POLICY:
+    agent_doc_document_realtime::convergence_gate::CrdtWriteBackoff =
+    agent_doc_document_realtime::convergence_gate::CrdtWriteBackoff::new(
+        CRDT_ACK_FALLBACK_BACKOFF_INITIAL_MS,
+        CRDT_ACK_FALLBACK_BACKOFF_MAX_MS,
+    );
 const CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS: u64 = 250;
 #[cfg(test)]
 const CRDT_ACK_FORCE_REFRESH_AFTER_MS: u64 = 500;
@@ -181,9 +189,7 @@ const CRDT_ACK_FORCE_REFRESH_AFTER_MS: u64 = 2_000;
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 1_800;
 #[cfg(not(test))]
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 8_000;
-const _: () = assert!(
-    CRDT_WRITE_CONVERGENCE_TIMEOUT_MS > CRDT_ACK_RECOVERY_TIMEOUT_MS + CRDT_WRITE_BACKOFF_MAX_MS
-);
+const _: () = assert!(CRDT_ACK_RECOVERY_TIMEOUT_MS > CRDT_ACK_FALLBACK_BACKOFF_MAX_MS);
 
 #[derive(Debug)]
 struct AwaitEditorReplicaNoDiskWrite(String);
@@ -507,12 +513,24 @@ fn reconcile_stalled_replicas(file: &Path, source: &str) -> Result<()> {
     }
 }
 
-#[derive(Default)]
 struct AckRecoveryState {
     started: Option<std::time::Instant>,
     last_signal: Option<std::time::Instant>,
     force_refresh_sent: bool,
     recovery_signal_observed: bool,
+    fallback_backoff_ms: u64,
+}
+
+impl Default for AckRecoveryState {
+    fn default() -> Self {
+        Self {
+            started: None,
+            last_signal: None,
+            force_refresh_sent: false,
+            recovery_signal_observed: false,
+            fallback_backoff_ms: CRDT_ACK_FALLBACK_BACKOFF_INITIAL_MS,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -526,9 +544,11 @@ struct DeliveryChangeWait<'a> {
     source: &'a str,
     live_editors: usize,
     delivery_version: u64,
-    total_remaining_ms: u64,
-    fallback_backoff_ms: u64,
     signal_immediately: bool,
+}
+
+fn exclusive_controller_elapsed_ms(total_elapsed_ms: u64, delivery_wait_elapsed_ms: u64) -> u64 {
+    total_elapsed_ms.saturating_sub(delivery_wait_elapsed_ms)
 }
 
 fn await_delivery_change(
@@ -570,6 +590,7 @@ impl AckRecoveryState {
         &mut self,
         status: &agent_doc_controller_io::project_controller::DeliveryConvergenceStatus,
     ) {
+        self.fallback_backoff_ms = CRDT_ACK_FALLBACK_BACKOFF_INITIAL_MS;
         self.recovery_signal_observed |= status.recovery_signal_observed;
         self.force_refresh_sent |= status.force_refresh_sent;
         if status.recovery_signal_observed {
@@ -630,6 +651,13 @@ impl AckRecoveryState {
         Ok(AckRecoveryWait::Continue)
     }
 
+    fn next_fallback_sleep_ms(&mut self, available_ms: u64) -> u64 {
+        let sleep_ms = self.fallback_backoff_ms.min(available_ms);
+        self.fallback_backoff_ms =
+            CRDT_ACK_FALLBACK_BACKOFF_POLICY.next_ms(self.fallback_backoff_ms, false);
+        sleep_ms
+    }
+
     fn wait_for_delivery_change(
         &mut self,
         request: DeliveryChangeWait<'_>,
@@ -639,8 +667,6 @@ impl AckRecoveryState {
             source,
             live_editors,
             delivery_version,
-            total_remaining_ms,
-            fallback_backoff_ms,
             signal_immediately,
         } = request;
         if signal_immediately {
@@ -656,7 +682,7 @@ impl AckRecoveryState {
 
         let elapsed_ms = self.elapsed_ms();
         let recovery_remaining_ms = CRDT_ACK_RECOVERY_TIMEOUT_MS.saturating_sub(elapsed_ms);
-        let wait_ms = recovery_remaining_ms.min(total_remaining_ms);
+        let wait_ms = recovery_remaining_ms;
         if wait_ms == 0 {
             return Ok(AckRecoveryWait::ForegroundDeadline);
         }
@@ -678,13 +704,26 @@ impl AckRecoveryState {
             Ok(None) | Err(_) => {
                 // Preserve the existing fail-closed fallback when the owning
                 // controller disappears: the accepted intent remains durable
-                // and the caller's absolute deadline still governs.
+                // and the delivery recovery deadline still governs. This
+                // fallback owns its backoff independently from controller/CAS
+                // frontier retries.
                 std::thread::sleep(std::time::Duration::from_millis(
-                    fallback_backoff_ms.min(wait_ms),
+                    self.next_fallback_sleep_ms(wait_ms),
                 ));
             }
         }
         Ok(AckRecoveryWait::Continue)
+    }
+
+    fn wait_for_delivery_change_charged(
+        &mut self,
+        request: DeliveryChangeWait<'_>,
+        delivery_wait_elapsed: &mut std::time::Duration,
+    ) -> Result<AckRecoveryWait> {
+        let started = std::time::Instant::now();
+        let outcome = self.wait_for_delivery_change(request);
+        *delivery_wait_elapsed += started.elapsed();
+        outcome
     }
 }
 
@@ -2144,7 +2183,8 @@ pub fn apply_canonical_replace_if_attached(
     // RPC timeouts are congestion signals inside this larger deadline, not a
     // reason to abandon an already-accepted compact/finalize mutation.
     let mut deadline = DeadlineCore::new(CRDT_WRITE_CONVERGENCE_TIMEOUT_MS);
-    let mut backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+    let mut frontier_backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+    let mut delivery_wait_elapsed = std::time::Duration::ZERO;
     // `#crdtcasraced`: the canonical hash of the last non-converged apply, so the
     // backoff policy can tell a write that is genuinely advancing from one that
     // is re-applying against a moving frontier and racing forever.
@@ -2164,16 +2204,21 @@ pub fn apply_canonical_replace_if_attached(
     loop {
         // Charge the previous iteration to the state it ended in (`#crdtackprofile`).
         profile.tick(wait_state);
-        let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-        deadline.tick(elapsed_ms);
+        let total_elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        let delivery_wait_elapsed_ms =
+            delivery_wait_elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
+        let controller_elapsed_ms =
+            exclusive_controller_elapsed_ms(total_elapsed_ms, delivery_wait_elapsed_ms);
+        deadline.tick(controller_elapsed_ms);
         if deadline.is_expired() {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "{source}_crdt_convergence_timeout file={} reason={} timeout_ms={} profile=[{}] recovery=retry_crdt_merge_no_legacy_replay",
+                    "{source}_crdt_convergence_timeout file={} reason={} controller_timeout_ms={} delivery_wait_ms={} profile=[{}] recovery=retry_crdt_merge_no_legacy_replay",
                     file.display(),
                     wait_state,
                     CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
+                    delivery_wait_elapsed_ms,
                     profile.render(wait_state),
                 ),
             );
@@ -2190,7 +2235,8 @@ pub fn apply_canonical_replace_if_attached(
         // happens in the caller, outside the controller RPC loop, so editor
         // deltas and delivery ACKs remain responsive while typing settles.
         if pending_target.is_none() {
-            let remaining_ms = CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(elapsed_ms);
+            let remaining_ms =
+                CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(controller_elapsed_ms);
             guard_visible_write_current_transition_with_budget(
                 file,
                 source,
@@ -2312,16 +2358,16 @@ pub fn apply_canonical_replace_if_attached(
                             // this poll applies backpressure until that frontier is
                             // visible and ACKed.
                             wait_state = CrdtConvergenceState::DeliveryAckPending;
-                            if ack_recovery.wait_for_delivery_change(DeliveryChangeWait {
-                                file,
-                                source,
-                                live_editors,
-                                delivery_version,
-                                total_remaining_ms: CRDT_WRITE_CONVERGENCE_TIMEOUT_MS
-                                    .saturating_sub(elapsed_ms),
-                                fallback_backoff_ms: backoff_ms,
-                                signal_immediately: true,
-                            })? == AckRecoveryWait::ForegroundDeadline
+                            if ack_recovery.wait_for_delivery_change_charged(
+                                DeliveryChangeWait {
+                                    file,
+                                    source,
+                                    live_editors,
+                                    delivery_version,
+                                    signal_immediately: true,
+                                },
+                                &mut delivery_wait_elapsed,
+                            )? == AckRecoveryWait::ForegroundDeadline
                             {
                                 let relay_write = pending_write
                                     .take()
@@ -2457,7 +2503,7 @@ pub fn apply_canonical_replace_if_attached(
                             pending_target = None;
                             pending_write = None;
                             ack_recovery.reset();
-                            backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+                            frontier_backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
                             wait_state = CrdtConvergenceState::OperatorAdvancedAfterApply;
                             continue;
                         }
@@ -2573,16 +2619,16 @@ pub fn apply_canonical_replace_if_attached(
                                 source,
                             )?;
                             wait_state = CrdtConvergenceState::DeliveryAckPending;
-                            if ack_recovery.wait_for_delivery_change(DeliveryChangeWait {
-                                file,
-                                source,
-                                live_editors,
-                                delivery_version,
-                                total_remaining_ms: CRDT_WRITE_CONVERGENCE_TIMEOUT_MS
-                                    .saturating_sub(elapsed_ms),
-                                fallback_backoff_ms: backoff_ms,
-                                signal_immediately: true,
-                            })? == AckRecoveryWait::ForegroundDeadline
+                            if ack_recovery.wait_for_delivery_change_charged(
+                                DeliveryChangeWait {
+                                    file,
+                                    source,
+                                    live_editors,
+                                    delivery_version,
+                                    signal_immediately: true,
+                                },
+                                &mut delivery_wait_elapsed,
+                            )? == AckRecoveryWait::ForegroundDeadline
                             {
                                 reconcile_stalled_replicas(file, source)?;
                                 let mut relay_write =
@@ -2715,8 +2761,8 @@ pub fn apply_canonical_replace_if_attached(
                                 let advanced = last_applied_hash.as_deref()
                                     != Some(relay_write.content_hash.as_str());
                                 last_applied_hash = Some(relay_write.content_hash.clone());
-                                backoff_ms =
-                                    CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, advanced);
+                                frontier_backoff_ms = CRDT_WRITE_BACKOFF_POLICY
+                                    .next_ms(frontier_backoff_ms, advanced);
                                 pending_write = Some(relay_write);
                                 ack_recovery.reset();
                             }
@@ -2732,7 +2778,7 @@ pub fn apply_canonical_replace_if_attached(
                                             "{source}_crdt_write_coalesced_retry file={} reason={} backoff_ms={} recovery=wait_settle_remerge",
                                             file.display(),
                                             wait_state,
-                                            backoff_ms,
+                                            frontier_backoff_ms,
                                         ),
                                     );
                                 } else {
@@ -2759,32 +2805,37 @@ pub fn apply_canonical_replace_if_attached(
                     file.display(),
                     wait_state,
                     started.elapsed().as_millis(),
-                    backoff_ms,
+                    frontier_backoff_ms,
                 ),
             );
             last_notice = std::time::Instant::now();
         }
-        let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-        let remaining_ms = CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(elapsed_ms);
+        let total_elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        let delivery_wait_elapsed_ms =
+            delivery_wait_elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
+        let controller_elapsed_ms =
+            exclusive_controller_elapsed_ms(total_elapsed_ms, delivery_wait_elapsed_ms);
+        let remaining_ms = CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(controller_elapsed_ms);
         if wait_state == CrdtConvergenceState::DeliveryAckPending
             && let Some((delivery_version, live_editors)) = delivery_wait_cursor
         {
-            let _ = ack_recovery.wait_for_delivery_change(DeliveryChangeWait {
-                file,
-                source,
-                live_editors,
-                delivery_version,
-                total_remaining_ms: remaining_ms,
-                fallback_backoff_ms: backoff_ms,
-                signal_immediately: false,
-            })?;
+            let _ = ack_recovery.wait_for_delivery_change_charged(
+                DeliveryChangeWait {
+                    file,
+                    source,
+                    live_editors,
+                    delivery_version,
+                    signal_immediately: false,
+                },
+                &mut delivery_wait_elapsed,
+            )?;
             continue;
         }
-        let sleep_for = std::time::Duration::from_millis(backoff_ms.min(remaining_ms));
+        let sleep_for = std::time::Duration::from_millis(frontier_backoff_ms.min(remaining_ms));
         if !sleep_for.is_zero() {
             std::thread::sleep(sleep_for);
         }
-        backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, false);
+        frontier_backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(frontier_backoff_ms, false);
     }
 }
 
@@ -6483,6 +6534,55 @@ mod tests {
         assert!(
             rendered.starts_with("delivery_ack_pending="),
             "the breakdown must be ordered by cost: {rendered}"
+        );
+    }
+
+    #[test]
+    fn delivery_subscription_time_does_not_consume_controller_retry_budget() {
+        let total_elapsed_ms = CRDT_WRITE_CONVERGENCE_TIMEOUT_MS
+            .saturating_add(CRDT_ACK_RECOVERY_TIMEOUT_MS)
+            .saturating_sub(500);
+        assert_eq!(
+            exclusive_controller_elapsed_ms(total_elapsed_ms, CRDT_ACK_RECOVERY_TIMEOUT_MS),
+            CRDT_WRITE_CONVERGENCE_TIMEOUT_MS - 500
+        );
+        assert_eq!(exclusive_controller_elapsed_ms(4_000, 8_000), 0);
+
+        let mut controller_deadline = DeadlineCore::new(CRDT_WRITE_CONVERGENCE_TIMEOUT_MS);
+        controller_deadline.tick(exclusive_controller_elapsed_ms(
+            total_elapsed_ms,
+            CRDT_ACK_RECOVERY_TIMEOUT_MS,
+        ));
+        assert!(
+            !controller_deadline.is_expired(),
+            "the delivery subscription owns its recovery budget; only controller/frontier time \
+             may expire the controller deadline"
+        );
+    }
+
+    #[test]
+    fn delivery_fallback_backoff_is_independent_from_frontier_backoff() {
+        let frontier_backoff_ms = CRDT_WRITE_BACKOFF_MAX_MS;
+        let mut ack_recovery = AckRecoveryState::default();
+
+        assert_eq!(
+            ack_recovery.next_fallback_sleep_ms(1_000),
+            CRDT_ACK_FALLBACK_BACKOFF_INITIAL_MS
+        );
+        assert_eq!(
+            ack_recovery.next_fallback_sleep_ms(1_000),
+            CRDT_ACK_FALLBACK_BACKOFF_POLICY.next_ms(CRDT_ACK_FALLBACK_BACKOFF_INITIAL_MS, false)
+        );
+        assert_eq!(
+            frontier_backoff_ms, CRDT_WRITE_BACKOFF_MAX_MS,
+            "delivery fallback must not reset or advance the controller/CAS frontier backoff"
+        );
+
+        ack_recovery.reset();
+        assert_eq!(
+            ack_recovery.next_fallback_sleep_ms(1_000),
+            CRDT_ACK_FALLBACK_BACKOFF_INITIAL_MS,
+            "a new delivery frontier starts its own fallback schedule at the floor"
         );
     }
 

@@ -175,7 +175,7 @@ fn initialize_result(params: Option<&Value>) -> Value {
             "title": "agent-doc MCP Server",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Use agent_doc_admit before answering a live session prompt, then agent_doc_finalize for binary-owned closeout; do not patch session documents directly."
+        "instructions": "Use agent_doc_admit before answering a live session prompt, then agent_doc_finalize for binary-owned closeout; do not patch session documents directly. A successful finalize result is the terminal closeout report and includes any queue continuation, so do not follow it with agent_doc_session_check. That tool remains available for explicit diagnostics."
     })
 }
 
@@ -393,7 +393,7 @@ fn tools_list_result() -> Value {
             {
                 "name": "agent_doc_session_check",
                 "title": "Check agent-doc session state",
-                "description": "Inspect closeout state and active queue continuation for a session document.",
+                "description": "Explicitly diagnose closeout state and active queue continuation. Do not call this after a successful agent_doc_finalize; finalize already returns the terminal closeout report.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -405,7 +405,7 @@ fn tools_list_result() -> Value {
             {
                 "name": "agent_doc_finalize",
                 "title": "Finalize agent-doc response",
-                "description": "Write an assistant response through the strict agent-doc finalize path and require a committed closeout.",
+                "description": "Write an assistant response through the strict agent-doc finalize path, require a committed closeout, and return any next queue continuation without a follow-up session-check.",
                 "inputSchema": finalize_input_schema()
             }
         ]
@@ -561,23 +561,20 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
             (false, "interrupted", message)
         }
     };
-    let continuation_content =
-        agent_doc_document_realtime_io::try_resolve_current_document_content(
-            &file,
-            "mcp_session_check_queue_continuation",
-        )?;
     let continuation =
-        agent_doc_queue_io::queue_continuation::detect_for_content(&file, &continuation_content)?;
-    let structured = json!({
+        resolve_tool_queue_continuation(&file, "mcp_session_check_queue_continuation")?;
+    let mut structured = json!({
         "ok": ok,
         "status": status,
         "message": message,
         "warnings": report.warnings,
-        "queue_continuation_required": continuation.is_some(),
-        "next_queue_prompt": continuation.as_ref().map(|item| item.head_prompt.clone()),
-        "next_queue_head_id": continuation.as_ref().and_then(|item| item.head_id.clone()),
-        "queue_continuation_reason": continuation.as_ref().map(|item| item.reason.clone()),
     });
+    add_queue_continuation_fields(
+        structured
+            .as_object_mut()
+            .expect("session-check result is an object"),
+        continuation.as_ref(),
+    );
     Ok(tool_success_result(
         serde_json::to_string_pretty(&structured)?,
         structured,
@@ -687,16 +684,61 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
             (false, "interrupted", message)
         }
     };
-    let structured = json!({
+    let continuation = resolve_tool_queue_continuation(&file, "mcp_finalize_queue_continuation")?;
+    let mut structured = json!({
         "ok": ok,
         "status": status,
         "message": message,
         "warnings": report.warnings,
     });
+    add_queue_continuation_fields(
+        structured
+            .as_object_mut()
+            .expect("finalize result is an object"),
+        continuation.as_ref(),
+    );
     Ok(tool_success_result(
         serde_json::to_string_pretty(&structured)?,
         structured,
     ))
+}
+
+fn resolve_tool_queue_continuation(
+    file: &Path,
+    resolve_reason: &str,
+) -> Result<Option<agent_doc_queue::queue_continuation::QueueContinuation>> {
+    let content =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, resolve_reason)?;
+    agent_doc_queue_io::queue_continuation::detect_for_content(file, &content)
+}
+
+fn add_queue_continuation_fields(
+    result: &mut Map<String, Value>,
+    continuation: Option<&agent_doc_queue::queue_continuation::QueueContinuation>,
+) {
+    result.insert(
+        "queue_continuation_required".to_string(),
+        Value::Bool(continuation.is_some()),
+    );
+    result.insert(
+        "next_queue_prompt".to_string(),
+        continuation
+            .map(|item| Value::String(item.head_prompt.clone()))
+            .unwrap_or(Value::Null),
+    );
+    result.insert(
+        "next_queue_head_id".to_string(),
+        continuation
+            .and_then(|item| item.head_id.clone())
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    result.insert(
+        "queue_continuation_reason".to_string(),
+        continuation
+            .map(|item| Value::String(item.reason.clone()))
+            .unwrap_or(Value::Null),
+    );
 }
 
 fn ensure_mcp_binary_fresh_for_mutation() -> Result<()> {
@@ -919,6 +961,9 @@ mod tests {
         }));
         assert_eq!(response["result"]["protocolVersion"], "2025-06-18");
         assert!(response["result"]["capabilities"]["tools"].is_object());
+        let instructions = response["result"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("do not follow it with agent_doc_session_check"));
+        assert!(instructions.contains("available for explicit diagnostics"));
     }
 
     #[test]
@@ -940,6 +985,53 @@ mod tests {
         assert!(names.contains(&"agent_doc_plan"));
         assert!(names.contains(&"agent_doc_session_check"));
         assert!(names.contains(&"agent_doc_finalize"));
+
+        let tools = response["result"]["tools"].as_array().unwrap();
+        let finalize = tools
+            .iter()
+            .find(|tool| tool["name"].as_str() == Some("agent_doc_finalize"))
+            .unwrap();
+        assert!(
+            finalize["description"]
+                .as_str()
+                .unwrap()
+                .contains("without a follow-up session-check")
+        );
+        let session_check = tools
+            .iter()
+            .find(|tool| tool["name"].as_str() == Some("agent_doc_session_check"))
+            .unwrap();
+        assert!(
+            session_check["description"]
+                .as_str()
+                .unwrap()
+                .contains("Do not call this after a successful agent_doc_finalize")
+        );
+    }
+
+    #[test]
+    fn finalize_queue_continuation_fields_are_self_contained() {
+        let continuation = agent_doc_queue::queue_continuation::QueueContinuation {
+            head_prompt: "do [#next]".to_string(),
+            head_id: Some("next".to_string()),
+            reason: "queue_auto_continuation".to_string(),
+        };
+        let mut result = Map::new();
+        add_queue_continuation_fields(&mut result, Some(&continuation));
+
+        assert_eq!(result["queue_continuation_required"], true);
+        assert_eq!(result["next_queue_prompt"], "do [#next]");
+        assert_eq!(result["next_queue_head_id"], "next");
+        assert_eq!(
+            result["queue_continuation_reason"],
+            "queue_auto_continuation"
+        );
+
+        add_queue_continuation_fields(&mut result, None);
+        assert_eq!(result["queue_continuation_required"], false);
+        assert!(result["next_queue_prompt"].is_null());
+        assert!(result["next_queue_head_id"].is_null());
+        assert!(result["queue_continuation_reason"].is_null());
     }
 
     #[test]

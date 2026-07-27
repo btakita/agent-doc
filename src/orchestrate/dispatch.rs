@@ -239,7 +239,6 @@ pub(crate) fn run_ordered_task_step(
     };
 
     lifecycle.finalize(file, &finalize_text, mode)?;
-    lifecycle.session_check(file)?;
     Ok(())
 }
 

@@ -18,5 +18,5 @@
 - Inside Codex, Claude Code, or OpenCode, bare `agent-doc <FILE>` remains the harness-native mode-aware entrypoint and must still durably capture the final response before write-back. In a normal shell, use an explicit subcommand such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`.
 - Response turns still close through the strict binary-owned path: write/merge -> snapshot/capture state -> commit -> `session-check`.
 - `start`, `route`, `sync`, and `resync` share the same live-owner proof, startup-miss, stash, and session-resolution model. Do not fork those rules across separate specs.
-- `plan`, `orchestrate`, sequential queue consumption, and normal response cycles all reuse the same `preflight` + `finalize` + `session-check` boundary.
+- `plan`, `orchestrate`, sequential queue consumption, and normal response cycles all reuse the same binary-owned `preflight` + strict `finalize` boundary. Direct-exec harnesses retain the explicit post-finalize `session-check` distrust guard; managed orchestration and connected clients do not spawn a redundant companion check.
 - When command behavior changes, update the focused sibling spec instead of growing this index back into another monolith.

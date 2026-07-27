@@ -9,7 +9,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 - Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, OpenCode `/agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
 - Do **not** treat that turn as successful until the response crosses `agent-doc finalize <FILE>` for the normal path or `agent-doc write --commit <FILE>` for a repair path.
 - Do **not** end a normal harness-native `agent-doc` turn with "not committed" or equivalent wording unless the user explicitly asked to leave the response uncommitted.
-- MCP auth / OAuth steps are part of that same turn. If a tool pauses for authentication or browser approval, resume the managed response afterward and still finish with `finalize` / `write --commit` plus `session-check`; the auth step is not the success boundary.
+- MCP auth / OAuth steps are part of that same turn. If a tool pauses for authentication or browser approval, resume the managed response afterward and still finish through connected `agent_doc_finalize`; its successful result is the terminal closeout report and includes queue continuation. Direct-exec paths still finish with `finalize` / `write --commit` plus `session-check`. The auth step is not the success boundary.
 - If `finalize`, `write --commit`, or `session-check` reports
   `editor_convergence_required` or missing `operator_text_authority_v1`, the
   harness has not proven that delivery preserves operator text. Do not report success, stop, continue an auto-queue, or emit a final answer that implies

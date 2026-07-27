@@ -114,12 +114,12 @@ Sequential orchestration reuses the same document lifecycle once per task:
 3. Expand requested presets into the concrete task prompt.
 4. Send exactly one fresh backend request with no resume/fork carryover.
 5. Persist the final response through `agent-doc finalize <FILE> --baseline-file ...`.
-6. Run `agent-doc session-check <FILE>` and stop on the first failure.
+6. Consume the strict finalize result as the terminal closeout report; it already includes the binary-owned session check. Do not spawn a second `agent-doc session-check <FILE>` from managed orchestration.
 
 Additional rules:
 
 - Sequential orchestration requires normal git-backed finalize; `--no-git` is invalid.
-- CRDT streaming is provisional and non-authoritative until the one final `finalize -> session-check` closeout succeeds. No partial chunk is patched into the session document.
+- CRDT streaming is provisional and non-authoritative until the one strict `finalize` closeout succeeds, including its internal session check. No partial chunk is patched into the session document.
 - While a CRDT streaming step is still generating, partial output may be checkpointed only through the shared `state.db` recovery ledger so pane death does not discard all in-progress assistant text. The finalizer always receives the complete response, never a suffix computed from a document-visible prefix.
 - Template-mode orchestrate closeout must persist through an explicit `patch:exchange` block. If a managed child returns a clean single plain assistant response, orchestrate wraps that body as an exchange patch before `finalize` so closeout does not enter the zero-template-patch write path.
 - Child template responses may be either a clean single assistant response body, which the write path synthesizes into an `exchange` append, or explicit patch blocks that include `patch:exchange`. Orchestration must still fail closed for transcript-shaped output, full-document/component dumps, mixed patch plus unmatched text, or multi-component writes that omit explicit patch blocks.
@@ -139,7 +139,7 @@ Additional rules:
 - Supports `id=` and `after=` / `deps=` metadata prefixes on task lines.
 - Fails fast on unknown deps, duplicate ids, and dependency cycles.
 - Executes in deterministic topological source order.
-- Every ready node still runs through the normal single-document lifecycle: inject prompt -> `preflight` -> fresh agent request -> `finalize` -> `session-check`.
+- Every ready node still runs through the normal single-document lifecycle: inject prompt -> `preflight` -> fresh agent request -> strict `finalize`.
 - DAG mode is dependency-aware but not concurrent against one session document. Real concurrency belongs to `--mode parallel`.
 
 ### Auto-DAG from queue

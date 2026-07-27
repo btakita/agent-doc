@@ -616,7 +616,6 @@ mod tests {
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
@@ -655,7 +654,6 @@ mod tests {
         assert_eq!(*lifecycle.admit_calls.borrow(), 1);
         assert_eq!(*lifecycle.preflight_calls.borrow(), 0);
         assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
-        assert_eq!(*lifecycle.session_checks.borrow(), 1);
         assert!(
             agent.prompts.borrow()[0].contains("<diff>"),
             "sequential prompt should include the document diff"
@@ -679,7 +677,6 @@ mod tests {
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
@@ -751,7 +748,6 @@ mod tests {
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
@@ -798,7 +794,6 @@ mod tests {
         assert!(final_doc.contains("❯ do #opcc"));
         assert!(agent.prompts.borrow()[0].contains("❯ do #opcc"));
         assert_eq!(lifecycle.finalize_calls.borrow().len(), 1);
-        assert_eq!(*lifecycle.session_checks.borrow(), 1);
         assert_eq!(*agent.fresh_calls.borrow(), 1);
         assert_eq!(*agent.streaming_calls.borrow(), 0);
     }
@@ -815,7 +810,6 @@ mod tests {
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
@@ -870,7 +864,6 @@ mod tests {
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = MutatingAgentRunner {
             fresh_calls: RefCell::new(0),
@@ -922,7 +915,6 @@ mod tests {
         assert_eq!(*lifecycle.admit_calls.borrow(), 2);
         assert_eq!(*lifecycle.preflight_calls.borrow(), 0);
         assert_eq!(lifecycle.finalize_calls.borrow().len(), 2);
-        assert_eq!(*lifecycle.session_checks.borrow(), 2);
     }
     #[test]
     fn sequential_orchestration_uses_streaming_backend_for_crdt_docs() {
@@ -937,7 +929,6 @@ mod tests {
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),
@@ -1000,7 +991,6 @@ mod tests {
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
@@ -1055,7 +1045,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(lifecycle.finalize_calls.borrow().len(), 3);
-        assert_eq!(*lifecycle.session_checks.borrow(), 3);
         assert_eq!(*lifecycle.admit_calls.borrow(), 3);
         assert_eq!(*lifecycle.preflight_calls.borrow(), 0);
         let prompts = agent.prompts.borrow();
@@ -1073,7 +1062,6 @@ mod tests {
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
@@ -1162,7 +1150,6 @@ exit 2
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
@@ -1219,7 +1206,6 @@ exit 2
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
@@ -1273,7 +1259,6 @@ exit 2
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
@@ -1324,7 +1309,6 @@ exit 2
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
@@ -1374,7 +1358,6 @@ exit 2
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
@@ -1423,7 +1406,6 @@ exit 2
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
             prompts: RefCell::new(Vec::new()),
@@ -1475,7 +1457,6 @@ exit 2
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
-            session_checks: RefCell::new(0),
         };
         let agent = FakeAgentRunner {
         prompts: RefCell::new(Vec::new()),

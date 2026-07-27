@@ -8,7 +8,7 @@
 //!   fresh prompt, admits the response cycle, sends one fresh agent request with no
 //!   resume/session reuse, streams step responses into `exchange` for CRDT docs
 //!   when the backend supports streaming, then persists the response through
-//!   `finalize` followed by `session-check`.
+//!   strict `finalize`, whose binary-owned closeout includes the session check.
 //! - `--mode parallel` reuses the existing `parallel` worktree fan-out path
 //!   after task resolution, and the legacy `agent-doc parallel` command routes
 //!   through this same orchestrate dispatch surface.
@@ -35,8 +35,9 @@
 //! - DAG orchestration keeps the same single-document write/commit guarantees as
 //!   sequential mode, so dependency ordering is respected without concurrent
 //!   writes to the shared session document.
-//! - `finalize` / `session-check` are the persistence boundary for each step;
-//!   if either fails, orchestration stops immediately.
+//! - Strict `finalize` is the persistence boundary for each step; if its
+//!   binary-owned closeout fails, orchestration stops immediately. Managed
+//!   orchestration never spawns a redundant companion `session-check`.
 //! - Task resolution preserves source order.
 //!
 //! ## Evals
@@ -147,7 +148,6 @@ pub(crate) trait LifecycleOps {
 
     fn preflight(&self, file: &Path) -> Result<PreflightOutput>;
     fn finalize(&self, file: &Path, response: &str, mode: ResolvedMode) -> Result<()>;
-    fn session_check(&self, file: &Path) -> Result<()>;
 }
 
 pub(crate) trait FreshAgentRunner {
@@ -195,21 +195,6 @@ impl CliLifecycleOps {
         }
         serde_json::from_slice(&output.stdout)
             .with_context(|| format!("failed to parse JSON from `{}`", args.join(" ")))
-    }
-
-    fn run_status(&self, args: &[&str]) -> Result<()> {
-        let exe = current_agent_doc_binary()?;
-        let status = Command::new(&exe)
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .with_context(|| format!("failed to run `{}`", args.join(" ")))?;
-        if !status.success() {
-            anyhow::bail!("`{}` failed with {}", args.join(" "), status);
-        }
-        Ok(())
     }
 }
 
@@ -263,11 +248,6 @@ impl LifecycleOps for CliLifecycleOps {
             anyhow::bail!("`agent-doc finalize` failed with {}", status);
         }
         Ok(())
-    }
-
-    fn session_check(&self, file: &Path) -> Result<()> {
-        let file_arg = file.to_string_lossy().into_owned();
-        self.run_status(&["session-check", &file_arg])
     }
 }
 
@@ -831,7 +811,6 @@ Stopped sequential orchestration after {completed_steps} of {total_steps} step(s
                 "failed parent orchestration batch-change closeout after {completed_steps}/{total_steps} step(s)"
             )
         })?;
-    lifecycle.session_check(file)?;
     anyhow::bail!(
         "orchestration batch changed during run after {}/{} step(s); stopped before launching the next step",
         completed_steps,
@@ -885,7 +864,6 @@ mod th {
         pub(crate) admit_calls: RefCell<usize>,
         pub(crate) preflight_calls: RefCell<usize>,
         pub(crate) finalize_calls: RefCell<Vec<String>>,
-        pub(crate) session_checks: RefCell<usize>,
     }
     impl LifecycleOps for FakeLifecycleOps {
         fn admit(&self, file: &Path) -> Result<()> {
@@ -956,11 +934,6 @@ mod th {
                 agent_doc_write_command_io::CommitMode::BestEffort,
                 response.to_string(),
             )
-        }
-
-        fn session_check(&self, _file: &Path) -> Result<()> {
-            *self.session_checks.borrow_mut() += 1;
-            Ok(())
         }
     }
 

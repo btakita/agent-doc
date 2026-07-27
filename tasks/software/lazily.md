@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#lazilycellfamily]
+
+
+> **Queue prompt:**
+>
 > do [#maphandlecleardependents]
 
 
@@ -429,7 +434,32 @@ Durable commits:
 - workspace pointer `c56438eaf` (`lazily-py: dispose removed map handles`).
 
 The pre-existing untracked `.claude/worktrees/agent-af5350b120eaf83f3` was preserved. C# remains staged according to the operator rule; this item does not broaden its peer-suite admission.
-<!-- agent:boundary:6dc715b3 -->
+
+### Re: Response
+
+Completed `#lazilycellfamily`.
+
+Corrected the false grow-only invariant on `present_keys` in both affected Rust map flavors:
+
+- `src/cell_family.rs`
+- `src/thread_safe_reactive_family.rs`
+
+The docs now state the precise contract: materialization only grows the present set, while explicit `remove` shrinks it. The async flavor already used neutral wording and needed no edit.
+
+Verification:
+
+- `git diff --check` — pass.
+- Rust `cargo fmt --all --check`, clippy, build, tests, and all doctests — pass through the repository `make check` run.
+- Aggregate `make check` exits only at `benchmark-check`: `BENCHMARKS.md benchmark results are stale`. This is unrelated to the documentation-only change, and the benchmark file was preserved.
+- Latest GitHub Actions CI run `30229190987` is queued; queried once as required.
+
+Durable commits:
+
+- lazily-rs `707533b` (`docs: scope reactive map growth invariant`), pushed to `origin/main`.
+- workspace pointer `0f5aa0bab` (`lazily-rs: clarify map presence docs`).
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:f293206c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -443,7 +473,7 @@ The pre-existing untracked `.claude/worktrees/agent-af5350b120eaf83f3` was prese
 - ~~do [#lzqfports]~~
 - ~~do [#lzqfzig]~~
 - ~~do [#maphandlecleardependents]~~
-- do [#lazilycellfamily]
+- ~~do [#lazilycellfamily]~~
 - do [#lazilyspecdisagrees]
 - do [#lzjsnpmtrustedpub]
 - do [#lzcsqueues]
@@ -481,7 +511,6 @@ The pre-existing untracked `.claude/worktrees/agent-af5350b120eaf83f3` was prese
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
 - [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-26: 42/124 canonical fixtures opened, 82 known-uncovered (reactive-graph 21, collections 10, statechart 7, materialization 3, familysync 1 are covered). The remaining fixtures are genuinely missing product surfaces, not runner-wiring gaps. Keep open and work it down only by shipping the explicit tasks in tasks/software/lazily-cs-parity-plan.md (#lzcscollections, #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, #lzcstemporal, #lzcscluster, #lzcsplane); admit C# to each capability group only when that production surface and canonical replay ship.
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
-- [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md

@@ -647,15 +647,31 @@ Architecture packet:
 - Migration: the controller RPC is additive; no on-disk or stored-state migration is required.
 
 Verification passed: focused state-backbone/controller/preflight suites (`tart-8f85e30e32`), the owner-pane integration regression (`tart-c1aff1b6cb`), and full `make check` (`tart-0763bc797d`). Commits: agent-doc `84688d924`; parent gitlink `4e08da3ad`. CI run `30233665069` was in progress at the required one-time inspection.
-<!-- agent:boundary:62fbe3a2 -->
+
+### Re: compactcachedeletetombstone and closeoutwaitchurn — gpt-5.6
+
+> **Queue prompt:**
+>
+> do [#compactcachedeletetombstone]
+>
+> do [#closeoutwaitchurn]
+
+
+Implemented and pushed the binary-owned fixes for both failure classes.
+
+- `#compactcachedeletetombstone`: Compact Exchange now replays the exact base-keyed paused editor-op epoch before deriving its compact target. Operator deletions and compaction land as one authoritative mutation, so struck queue rows stay deleted and the stale pre-pause image cannot provoke a JetBrains File Cache Conflict. Agent-doc commit `35ffc3e3c`; parent gitlink `92321534c`.
+- Strict-template File Cache Conflict: stream and IPC routes validate canonical patch markers plus a real response heading before capture or document mutation. Existing complete captures with retired `agent:patch:*` wrappers are normalized only transiently during binary-owned replay. Agent-doc commit `cf085b973`; parent gitlink `da2e5be12`.
+- `#closeoutwaitchurn`: `session-check` now subscribes to the exact controller-owned closeout cycle instead of treating a long-lived supervisor PID or its five-minute lease as the request lifetime. Terminal-cycle and request-owner-release facts wake recovery immediately; owner release, controller reconnect, or a bounded 30-second crashed-owner fallback retries the keyed operation. Agent-doc commit `667b05fbe`; parent gitlink `04286481e`.
+
+Verification passed: all focused controller/closeout/repair suites, all 8,204 repository tests, and every formal model. The matching binary and JetBrains package were installed. CI run `30236403252` was in progress at its required one-time inspection.
+<!-- agent:boundary:de0d6315 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#compactcachedeletetombstone]
-- ~~do [#preflightreactive]~~
+- ~~do [#compactcachedeletetombstone]~~
 - do [#sessioncheckturnreactive]
-- do [#closeoutwaitchurn]
+- ~~do [#closeoutwaitchurn]~~
 - do [#steergateidle]
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
@@ -692,9 +708,7 @@ Verification passed: focused state-backbone/controller/preflight suites (`tart-8
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#compactcachedeletetombstone] #agent-doc-bug Compact Exchange on `tasks/software/lazily.md` hit a File Cache Conflict, compacted the exchange, and resurrected operator-deleted struck queue rows. Keep reconciliation entirely inside the agent-doc binary, make durable operator deletes authoritative through compaction/cache-conflict recovery, and add an end-to-end regression.
 - [ ] [#sessioncheckturnreactive] #agent-doc-bug Track the turn reactively and supersede outstanding checks instead of requiring a separate session-check command. session-check exists as a distrust check on the AGENT: per AGENTS.md it is the direct-exec post-write guard that fails closed on an open cycle, a prompt-only exchange tail with no assistant response, or a likely direct assistant patchback that bypassed the binary write path. That is a real invariant, but it is enforced by a command the agent must remember to run — and which takes a closeout lease, can wedge, and whose own refusal text says 'retry only session-check'. Two changes: (1) the invariant is a property of the turn, and the NEXT turn's preflight already resolves the document, so it can evaluate the same guards without a separate agent-invoked step; (2) an outstanding check for turn N is MOOT once turn N+1 opens — supersession must cancel it and release its lease rather than leaving a dead claim to expire on a clock (the 2026-07-26 wedge was exactly a stale claim from a superseded probe). Keep session-check as an explicit command for direct-exec harnesses and debugging; remove it from the hot path. Related #closeoutterminalreactive, #preflightinbinary.
-- [ ] [#closeoutwaitchurn] #agent-doc-bug A held foreground closeout tells the agent a fact, not what to do, so agents invent a poll loop. Observed 2026-07-26 on tasks/software/lazily.md: one write turn spent 8+ background commands on 'wait then read settle output', 're-run session-check after recycle', 'poll settle output again', plus 'admin recycle' and 'admin reload-lib' — all self-invented recovery. ROOT CAUSE (grounded): agent-doc-closeout-runtime-io/src/lib.rs:75 returns CloseoutOwnerClaimOutcome::HeldByOther as the bare string 'foreground closeout owner {id} pid={pid} role={role} remains active until {expires}' with NO next command, unlike every other fail-closed path (cf. agent-doc-turn/src/closeout_recovery.rs:391, which names the exact command). CycleSuperseded is the same shape. And 'agent-doc session-check' has no blocking wait — its only options are --codex-final-gate and --help — so 'wait for the owner' is not expressible and the agent must re-invoke, choosing its own interval. Each re-invocation pays the full ~30-guard sweep (measured 4.1s, inspect_with_warnings 2.8s of it) to answer one question: is the lease still held. FIX: (1) add 'session-check <FILE> --wait[=secs]' that blocks on the closeout-owner lease / terminal cycle phase, defaulting to CLOSEOUT_OWNER_LEASE_SECS, with a cheap owner-lease-only probe that skips the guard sweep while the owner is still held; (2) make HeldByOther and CycleSuperseded emit a directive — the one command to run, the known deadline from owner.expires_secs, and an explicit 'do NOT run admin recycle / admin reload-lib / write --commit: they perturb the capture you are waiting on'; (3) align SKILL.md and runbooks/commit.md so the shipped instruction says 'wait once with --wait' instead of 'retry session-check', which reads as 'poll'. Regression coverage: a held-lease session-check must return the directive text and must NOT be satisfiable by repeated bare invocations in the test harness.
 - [ ] [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 

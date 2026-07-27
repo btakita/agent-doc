@@ -677,13 +677,25 @@ Completed `#sessioncheckturnreactive`. Managed orchestration no longer launches 
 Regression coverage now verifies the MCP contract, queue fields, managed orchestration behavior, stale-owner supersession, and preflight closeout guards. `make check` passed all 8,205 tests plus every formal model; `make install` installed the matching binary, shared library, and JetBrains package. The new CI run was in progress at the single required inspection.
 
 Pushed agent-doc commit `168a5464c` (`refactor: make managed closeout turn-reactive`) and parent gitlink commit `0af7e284f` (`chore: advance agent-doc reactive closeout`). Unrelated dirty files were preserved and left unstaged.
-<!-- agent:boundary:5b5e2f48 -->
+
+### Re: backlog-to-queue population — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> do [#backlogqueuepopulation]
+
+
+Fixed `#backlogqueuepopulation` in the agent-doc binary. The root cause was that same-closeout queue reconciliation tracked only newly added backlog ids, so triage items that already existed and were ungated in that cycle never became queue candidates.
+
+Closeout now records a separate mutation-scoped `pending_actionable_ids` set for successful adds and ungates, then insert-only mirrors exactly those ids into an explicit go-mode Queue after consuming the current head. The inserted block is ordered by hard `after=#id` dependencies and then priority, while every pre-existing queue byte remains untouched. It intentionally does not sweep all open backlog items, so queue rows the operator deleted are not resurrected.
+
+Verification passed: all 8,208 tests and every formal model are green. The matching binary, shared library, and JetBrains plugin were installed. Pushed agent-doc commit `59fface06` and parent gitlink commit `087824388`; the inspected CI run is in progress.
+<!-- agent:boundary:e39dbffd -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#backlogqueuepopulation]
-- ~~do [#sessioncheckturnreactive]~~
+- ~~do [#backlogqueuepopulation]~~
 - do [#steergateidle]
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
@@ -720,7 +732,6 @@ Pushed agent-doc commit `168a5464c` (`refactor: make managed closeout turn-react
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#backlogqueuepopulation] Make backlog-to-queue population binary-owned: when backlog mutations add or ungate actionable items, reconcile the explicit Queue component in dependency order in the same closeout; do not leave only an answered triage prompt or require a manual repair cycle.
 - [ ] [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 

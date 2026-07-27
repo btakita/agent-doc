@@ -827,7 +827,11 @@ I confirm all of the stated assumptions, probability bands, vesting/dilution mat
 ### Re: Response
 
 <!-- agent-doc maintenance: equity diligence recommendation tracked in backlog -->
-<!-- agent:boundary:52f232b5 -->
+
+### Re: no new document changes — gpt-5
+
+No new edits or unresolved prompts were detected; the document already matches its committed snapshot.
+<!-- agent:boundary:b5d0e2a5 -->
 <!-- /agent:exchange -->
 
 ## Queue

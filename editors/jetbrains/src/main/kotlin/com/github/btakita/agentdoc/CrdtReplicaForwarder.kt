@@ -43,6 +43,7 @@ class CrdtReplicaForwarder(
     private val identity: String,
     private val node: ReplicaNode,
     private val transport: ReplicaTransport,
+    private val resumeState: ReplicaResumeState? = null,
 ) {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaForwarder::class.java)
     private var pushedVersion: ByteArray? = null
@@ -68,7 +69,7 @@ class CrdtReplicaForwarder(
         val started = System.nanoTime()
         try {
             val registerStarted = System.nanoTime()
-            val ack = transport.register(filePath, identity).also {
+            val ack = transport.register(filePath, identity, resumeState?.stateVector).also {
                 logSlow("transport.register", registerStarted, details = "ok=${it != null}")
             }
             if (ack == null) {
@@ -80,18 +81,58 @@ class CrdtReplicaForwarder(
                 log.warn("[crdt-replica] transport.register returned null for ${File(filePath).name}; reason=${transport.lastRegisterError() ?: "unknown"}")
                 return false
             }
-        clientId = ack.clientId
-        lineage = ack.lineage
+            clientId = ack.clientId
+            lineage = ack.lineage
+            val incremental = ack.bootstrapKind == ReplicaBootstrapKind.Delta
+            if (incremental && (resumeState == null || ack.canonicalStateVector == null)) {
+                log.warn(
+                    "[crdt-replica] incremental register response lacked retained state/frontier for " +
+                        "${File(filePath).name}; refusing an unprovable bootstrap",
+                )
+                transport.deregister(filePath, identity)
+                return false
+            }
             val openStarted = System.nanoTime()
-            val opened = node.open(ack.clientId, ack.bootstrap)
-            logSlow("native.open", openStarted, details = "bootstrap_bytes=${ack.bootstrap?.size ?: 0} ok=$opened")
+            val initialState = if (incremental) resumeState?.encodedState else ack.bootstrap
+            val opened = node.open(ack.clientId, initialState)
+            logSlow(
+                "native.open",
+                openStarted,
+                details =
+                    "bootstrap_kind=${ack.bootstrapKind.wireName} " +
+                        "bootstrap_bytes=${ack.bootstrap?.size ?: 0} " +
+                        "retained_bytes=${if (incremental) initialState?.size ?: 0 else 0} ok=$opened",
+            )
             if (!opened) {
                 log.warn("[crdt-replica] native.open rejected the bootstrap for ${File(filePath).name}; bootstrap_bytes=${ack.bootstrap?.size ?: 0} (see prior [native] replica_open WARN for the cause)")
                 transport.deregister(filePath, identity)
                 return false
             }
+            val incrementalBootstrap = ack.bootstrap
+            if (
+                incremental &&
+                incrementalBootstrap != null &&
+                incrementalBootstrap.isNotEmpty() &&
+                !node.applyUpdate(ack.clientId, incrementalBootstrap)
+            ) {
+                log.warn(
+                    "[crdt-replica] native.applyUpdate rejected incremental bootstrap for " +
+                        "${File(filePath).name}; delta_bytes=${incrementalBootstrap.size}",
+                )
+                node.close(ack.clientId)
+                transport.deregister(filePath, identity)
+                return false
+            }
             attached = true
-            pushedVersion = node.stateVector()
+            pushedVersion =
+                if (incremental) ack.canonicalStateVector?.copyOf() else node.stateVector()
+            if (incremental) {
+                // The retained local state can be ahead of the controller (for
+                // example a quiesced native generation). Publish that suffix
+                // relative to the canonical frontier; duplicate CRDT ops are
+                // idempotent, while silently discarding them is not.
+                publishIncremental("resume-register")
+            }
             return true
         } finally {
             logSlow("register", started, warnMs = 100)
@@ -183,6 +224,14 @@ class CrdtReplicaForwarder(
         return node.text().also { text ->
             logSlow("native.text", started, details = "reason=replicaText chars=${text?.length ?: -1}")
         }
+    }
+
+    /** Capture a local replica handoff before replacement/native unload. */
+    fun captureResumeState(): ReplicaResumeState? {
+        if (!attached) return null
+        val encodedState = node.encodeState() ?: return null
+        val stateVector = node.stateVector() ?: return null
+        return ReplicaResumeState(encodedState.copyOf(), stateVector.copyOf())
     }
 
     /** Pull remote updates the document model queued for this replica. */
@@ -284,11 +333,24 @@ class CrdtReplicaForwarder(
     }
 }
 
-/** The CP `register` ack: the minted client-id + canonical bootstrap state. */
+/** Retained local replica state crossing a replacement/native-generation handoff. */
+data class ReplicaResumeState(
+    val encodedState: ByteArray,
+    val stateVector: ByteArray,
+)
+
+enum class ReplicaBootstrapKind(val wireName: String) {
+    Full("full"),
+    Delta("delta"),
+}
+
+/** The CP `register` ack: the minted client-id + canonical bootstrap state/delta. */
 data class ReplicaRegisterAck(
     val clientId: Long,
     val bootstrap: ByteArray?,
     val lineage: String? = null,
+    val bootstrapKind: ReplicaBootstrapKind = ReplicaBootstrapKind.Full,
+    val canonicalStateVector: ByteArray? = null,
 )
 
 /** One queued CP-to-editor CRDT update owned by this replica. */
@@ -361,6 +423,17 @@ interface ReplicaTransport {
     fun register(filePath: String, identity: String): ReplicaRegisterAck?
 
     /**
+     * Replacement registration. New controllers return a canonical delta when
+     * [stateVector] proves what the retained local replica already contains.
+     * The default keeps older test/transport implementations full-bootstrap.
+     */
+    fun register(
+        filePath: String,
+        identity: String,
+        stateVector: ByteArray?,
+    ): ReplicaRegisterAck? = register(filePath, identity)
+
+    /**
      * Human-readable reason the most recent [register] returned null (socket
      * unavailable, `ok=false`, missing `client_id`, …), or null if unknown. Lets the
      * caller log WHY register failed instead of a bare "register failed" WARN.
@@ -419,9 +492,23 @@ class CpSocketReplicaTransport(
 
     override fun lastRegisterError(): String? = lastRegisterError
 
-    override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
+    override fun register(filePath: String, identity: String): ReplicaRegisterAck? =
+        register(filePath, identity, null)
+
+    override fun register(
+        filePath: String,
+        identity: String,
+        stateVector: ByteArray?,
+    ): ReplicaRegisterAck? {
         val response = send(
-            controllerRequest("replica_register", filePath, identity),
+            controllerRequest("replica_register", filePath, identity) {
+                if (stateVector != null) {
+                    it.addProperty(
+                        "state_vector_b64",
+                        Base64.getEncoder().encodeToString(stateVector),
+                    )
+                }
+            },
         )
         if (response == null) {
             lastRegisterError = "socket_unavailable: $lastSendError"
@@ -443,9 +530,22 @@ class CpSocketReplicaTransport(
             return null
         }
         val bootstrap = data.get("bootstrap_b64")?.asString?.let { decodeBase64(it) }
+        val bootstrapKind =
+            when (data.get("bootstrap_kind")?.asString) {
+                ReplicaBootstrapKind.Delta.wireName -> ReplicaBootstrapKind.Delta
+                else -> ReplicaBootstrapKind.Full
+            }
+        val canonicalStateVector =
+            data.get("canonical_state_vector_b64")?.asString?.let { decodeBase64(it) }
         val lineage = data.get("lineage")?.asString
         lastRegisterError = null
-        return ReplicaRegisterAck(clientId, bootstrap, lineage)
+        return ReplicaRegisterAck(
+            clientId = clientId,
+            bootstrap = bootstrap,
+            lineage = lineage,
+            bootstrapKind = bootstrapKind,
+            canonicalStateVector = canonicalStateVector,
+        )
     }
 
     override fun broadcastUpdate(filePath: String, identity: String, update: ByteArray) {

@@ -1417,6 +1417,20 @@ pub struct ReplicaPull {
     pub delivery: ReplicaDeliverySnapshot,
 }
 
+/// Registration payload returned to an editor replica.
+///
+/// `incremental` means `bootstrap` is a CRDT delta relative to the state vector
+/// supplied by the editor. Otherwise it is the complete canonical encoded state.
+/// The canonical frontier accompanies both forms so a resumed editor can publish
+/// any local suffix the controller did not yet observe.
+#[derive(Debug, Clone)]
+pub struct ReplicaRegistration {
+    pub client_id: u64,
+    pub bootstrap: Vec<u8>,
+    pub canonical_state_vector: Vec<u8>,
+    pub incremental: bool,
+}
+
 /// Register an editor replica with the document's per-document hub on the live
 /// IPC path (`#crdtauth5`, plan phase 5), authority-gated.
 ///
@@ -1477,18 +1491,49 @@ fn reseed_editor_attach_if_needed(file: &Path) {
 }
 
 pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(u64, Vec<u8>)>> {
-    register_replica_for_file_with_liveness(
+    register_replica_for_file_incremental(file, identity, None).map(|registration| {
+        registration.map(|registration| (registration.client_id, registration.bootstrap))
+    })
+}
+
+/// Register an editor, returning a state-vector delta when the editor retained
+/// its prior encoded replica state across a controller/native-generation handoff.
+///
+/// An absent or invalid frontier falls back to the full canonical bootstrap.
+/// That compatibility fallback is deliberate: an older/corrupt retained hint
+/// must not make registration unavailable or weaken the canonical authority.
+pub fn register_replica_for_file_incremental(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+) -> Result<Option<ReplicaRegistration>> {
+    register_replica_for_file_incremental_with_liveness(
         file,
         identity,
+        retained_state_vector,
         agent_doc_reliable_sync_io::process_pid_is_live,
     )
 }
 
+#[cfg(test)]
 fn register_replica_for_file_with_liveness(
     file: &Path,
     identity: &str,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<Option<(u64, Vec<u8>)>> {
+    register_replica_for_file_incremental_with_liveness(file, identity, None, is_pid_live).map(
+        |registration| {
+            registration.map(|registration| (registration.client_id, registration.bootstrap))
+        },
+    )
+}
+
+fn register_replica_for_file_incremental_with_liveness(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> Result<Option<ReplicaRegistration>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
         return Ok(None);
@@ -1512,27 +1557,49 @@ fn register_replica_for_file_with_liveness(
     // generation update racing the remainder of registration can safely exercise
     // the existing idempotent reattach path against the same client id.
     record_replica_identity(&document_hash, client_id, identity, &retired_client_ids)?;
-    let (bootstrap, replacement_projection) = with_hub_seeded_from_file(file, |hub| {
-        for retired_client_id in &retired_client_ids {
-            hub.deregister(*retired_client_id);
-        }
-        if !superseded_client_ids.is_empty() {
-            hub.fence_replica_generation();
-        }
-        let bootstrap = if hub.is_registered(client_id) {
-            // Idempotent re-register (e.g. an editor reconnect that re-announces
-            // the same stable identity): reconnect/sync the existing mirror, then
-            // return the current canonical bootstrap state.
-            hub.reconnect(client_id)
-                .map(|()| hub.canonical_encoded_state())
-        } else {
-            hub.register(client_id)
-                .map(|()| hub.canonical_encoded_state())
-        }?;
-        let replacement_projection = (!superseded_client_ids.is_empty())
-            .then(|| (hub.canonical_encoded_state(), hub.lineage().to_string()));
-        Ok::<_, anyhow::Error>((bootstrap, replacement_projection))
-    })??;
+    let (bootstrap, canonical_state_vector, incremental, replacement_projection) =
+        with_hub_seeded_from_file(file, |hub| {
+            for retired_client_id in &retired_client_ids {
+                hub.deregister(*retired_client_id);
+            }
+            if !superseded_client_ids.is_empty() {
+                hub.fence_replica_generation();
+            }
+            if hub.is_registered(client_id) {
+                // Idempotent re-register (e.g. an editor reconnect that re-announces
+                // the same stable identity): reconnect/sync the existing mirror, then
+                // derive the response from the current canonical frontier.
+                hub.reconnect(client_id)?;
+            } else {
+                hub.register(client_id)?;
+            }
+            let canonical_state_vector = hub.canonical_state_vector();
+            let (bootstrap, incremental) = match retained_state_vector {
+                Some(state_vector) => match hub.canonical_diff(state_vector) {
+                    Ok(delta) => (delta, true),
+                    Err(error) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "crdt_replica_register_incremental_fallback file={} client_id={} reason=invalid_state_vector error={error}",
+                                file.display(),
+                                client_id,
+                            ),
+                        );
+                        (hub.canonical_encoded_state(), false)
+                    }
+                },
+                None => (hub.canonical_encoded_state(), false),
+            };
+            let replacement_projection = (!superseded_client_ids.is_empty())
+                .then(|| (hub.canonical_encoded_state(), hub.lineage().to_string()));
+            Ok::<_, anyhow::Error>((
+                bootstrap,
+                canonical_state_vector,
+                incremental,
+                replacement_projection,
+            ))
+        })??;
     if let Some((projection, lineage)) = replacement_projection {
         save_crdt_projection_with_lineage(file, &projection, &lineage)?;
     }
@@ -1547,16 +1614,23 @@ fn register_replica_for_file_with_liveness(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={} dead_members_pruned={} superseded_generations_pruned={} generation_fenced={}",
+            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={} bootstrap_kind={} canonical_state_vector_bytes={} dead_members_pruned={} superseded_generations_pruned={} generation_fenced={}",
             file.display(),
             client_id,
             bootstrap.len(),
+            if incremental { "delta" } else { "full" },
+            canonical_state_vector.len(),
             dead_client_ids.len(),
             superseded_client_ids.len(),
             !superseded_client_ids.is_empty(),
         ),
     );
-    Ok(Some((client_id, bootstrap)))
+    Ok(Some(ReplicaRegistration {
+        client_id,
+        bootstrap,
+        canonical_state_vector,
+        incremental,
+    }))
 }
 
 /// Deregister one editor replica from the document's hub on the live IPC path.
@@ -3789,6 +3863,56 @@ mod tests {
             assert_eq!(hub.member_text(client_id).unwrap(), on_disk);
         })
         .unwrap();
+    }
+
+    #[test]
+    fn replacement_registration_returns_only_the_canonical_delta_from_retained_state() {
+        let (_dir, doc) = temp_doc("incremental-register.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let original = std::fs::read_to_string(&doc).unwrap();
+
+        let (old_client_id, original_bootstrap) =
+            register_replica_for_file(&doc, "intellij:incremental-old")
+                .unwrap()
+                .expect("initial editor should receive the full bootstrap");
+        let original_replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            old_client_id,
+            &original_bootstrap,
+        )
+        .unwrap();
+        let retained_state = original_replica.encode_state();
+        let retained_state_vector = original_replica.state_vector();
+
+        let updated = format!("{original}\ncanonical suffix after controller reload\n");
+        apply_cp_write_for_file(&doc, &original, &updated, "test_incremental_register")
+            .unwrap()
+            .expect("canonical write should use the live relay");
+
+        let registration = register_replica_for_file_incremental(
+            &doc,
+            "intellij:incremental-new",
+            Some(&retained_state_vector),
+        )
+        .unwrap()
+        .expect("replacement editor should receive an incremental registration");
+        assert!(
+            registration.incremental,
+            "a valid retained frontier must not receive another full bootstrap"
+        );
+
+        let resumed = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            registration.client_id,
+            &retained_state,
+        )
+        .unwrap();
+        resumed.apply_update(&registration.bootstrap).unwrap();
+        assert_eq!(resumed.text(), updated);
+        assert_eq!(
+            resumed.state_vector(),
+            registration.canonical_state_vector,
+            "the returned delta and frontier must describe the same canonical cut"
+        );
     }
 
     #[test]

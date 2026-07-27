@@ -21,6 +21,13 @@ export interface ReplicaRegisterAck {
     clientId: number;
     bootstrap?: Uint8Array | null;
     lineage?: string | null;
+    bootstrapKind?: 'full' | 'delta';
+    canonicalStateVector?: Uint8Array | null;
+}
+
+export interface ReplicaResumeState {
+    encodedState: Uint8Array;
+    stateVector: Uint8Array;
 }
 
 export interface ReplicaRemoteUpdate {
@@ -33,7 +40,11 @@ export interface ReplicaRemoteUpdate {
 }
 
 export interface ReplicaTransport {
-    register(filePath: string, identity: string): Promise<ReplicaRegisterAck | null>;
+    register(
+        filePath: string,
+        identity: string,
+        stateVector?: Uint8Array | null,
+    ): Promise<ReplicaRegisterAck | null>;
     broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void>;
     pushDocumentOps?(filePath: string, lineage: string | null, deltaJson: string): Promise<boolean>;
     pushTextAdopt?(filePath: string, text: string): Promise<boolean>;
@@ -226,6 +237,8 @@ export function parseRegisterResponse(response: ControllerResponse): ReplicaRegi
         clientId,
         bootstrap: decodeBase64(response.data.bootstrap_b64),
         lineage: typeof response.data.lineage === 'string' ? response.data.lineage : null,
+        bootstrapKind: response.data.bootstrap_kind === 'delta' ? 'delta' : 'full',
+        canonicalStateVector: decodeBase64(response.data.canonical_state_vector_b64),
     };
 }
 
@@ -279,8 +292,16 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
         private readonly logger: ReplicaLogger = noopLogger,
     ) {}
 
-    async register(filePath: string, identity: string): Promise<ReplicaRegisterAck | null> {
-        const response = await this.send(this.controllerRequest('replica_register', filePath, identity));
+    async register(
+        filePath: string,
+        identity: string,
+        stateVector?: Uint8Array | null,
+    ): Promise<ReplicaRegisterAck | null> {
+        const response = await this.send(this.controllerRequest('replica_register', filePath, identity, {
+            ...(stateVector
+                ? { state_vector_b64: Buffer.from(stateVector).toString('base64') }
+                : {}),
+        }));
         return response ? parseRegisterResponse(response) : null;
     }
 
@@ -425,6 +446,7 @@ export class CrdtReplicaForwarder {
         private readonly identity: string,
         private readonly node: ReplicaNode,
         private readonly transport: ReplicaTransport,
+        private readonly resumeState: ReplicaResumeState | null = null,
     ) {}
 
     get currentClientId(): number {
@@ -432,13 +454,39 @@ export class CrdtReplicaForwarder {
     }
 
     async register(): Promise<boolean> {
-        const ack = await this.transport.register(this.filePath, this.identity);
+        const ack = await this.transport.register(
+            this.filePath,
+            this.identity,
+            this.resumeState?.stateVector,
+        );
         if (!ack) return false;
         this.clientId = ack.clientId;
         this.lineage = ack.lineage ?? null;
-        if (!this.node.open(ack.clientId, ack.bootstrap)) return false;
+        const incremental = ack.bootstrapKind === 'delta';
+        if (incremental && (!this.resumeState || !ack.canonicalStateVector)) {
+            await this.transport.deregister(this.filePath, this.identity);
+            return false;
+        }
+        const initialState = incremental ? this.resumeState?.encodedState : ack.bootstrap;
+        if (!this.node.open(ack.clientId, initialState)) {
+            await this.transport.deregister(this.filePath, this.identity);
+            return false;
+        }
+        if (
+            incremental &&
+            ack.bootstrap &&
+            ack.bootstrap.byteLength > 0 &&
+            !this.node.applyUpdate(ack.clientId, ack.bootstrap)
+        ) {
+            this.node.close(ack.clientId);
+            await this.transport.deregister(this.filePath, this.identity);
+            return false;
+        }
         this.attached = true;
-        this.pushedVersion = this.node.stateVector?.() ?? new Uint8Array();
+        this.pushedVersion = incremental
+            ? ack.canonicalStateVector ?? new Uint8Array()
+            : this.node.stateVector?.() ?? new Uint8Array();
+        if (incremental) await this.publishIncremental();
         return true;
     }
 
@@ -488,6 +536,17 @@ export class CrdtReplicaForwarder {
     replicaText(): string | null {
         if (!this.attached) return null;
         return this.node.text();
+    }
+
+    captureResumeState(): ReplicaResumeState | null {
+        if (!this.attached) return null;
+        const encodedState = this.node.encodeState();
+        const stateVector = this.node.stateVector?.();
+        if (!encodedState || !stateVector) return null;
+        return {
+            encodedState: encodedState.slice(),
+            stateVector: stateVector.slice(),
+        };
     }
 
     pullRemoteUpdates(): Promise<ReplicaRemoteUpdate[]> {
@@ -1304,6 +1363,7 @@ export class CrdtReplicaManager {
             identity,
             this.nodeFactory(),
             this.transport,
+            staleForwarder.captureResumeState(),
         );
         if (!(await replacement.register())) return null;
         await replacement.ensureEditorText(editorText);

@@ -53,6 +53,8 @@ class CrdtReplicaForwarderTest {
 
         override fun encodeState(): ByteArray? = buffer.toString().toByteArray()
 
+        override fun stateVector(): ByteArray? = "sv:${buffer}".toByteArray()
+
         override fun text(): String? = buffer.toString()
 
         override fun close(clientId: Long) {
@@ -65,8 +67,11 @@ class CrdtReplicaForwarderTest {
         private val clientId: Long = 42L,
         private val bootstrap: ByteArray? = null,
         private val lineage: String? = "lineage-test",
+        private val bootstrapKind: ReplicaBootstrapKind = ReplicaBootstrapKind.Full,
+        private val canonicalStateVector: ByteArray? = null,
     ) : ReplicaTransport {
         var registered = false
+        var registeredStateVector: ByteArray? = null
         var deregistered = false
         val sentUpdates = mutableListOf<ByteArray>()
         val sentLineages = mutableListOf<String?>()
@@ -76,9 +81,24 @@ class CrdtReplicaForwarderTest {
         val ackedStamps = mutableListOf<ReplicaAckStamps>()
 
         override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
+            return register(filePath, identity, null)
+        }
+
+        override fun register(
+            filePath: String,
+            identity: String,
+            stateVector: ByteArray?,
+        ): ReplicaRegisterAck? {
             if (refuseRegister) return null
             registered = true
-            return ReplicaRegisterAck(clientId, bootstrap, lineage)
+            registeredStateVector = stateVector
+            return ReplicaRegisterAck(
+                clientId = clientId,
+                bootstrap = bootstrap,
+                lineage = lineage,
+                bootstrapKind = bootstrapKind,
+                canonicalStateVector = canonicalStateVector,
+            )
         }
 
         override fun broadcastUpdate(filePath: String, identity: String, update: ByteArray) {
@@ -124,6 +144,40 @@ class CrdtReplicaForwarderTest {
         assertTrue(transport.registered)
         assertTrue(node.opened)
         assertEquals("BASE", String(node.openedWith!!))
+    }
+
+    @Test
+    fun `replacement register opens retained state and applies only canonical delta`() {
+        val node = FakeNode()
+        val retained =
+            ReplicaResumeState(
+                encodedState = "LOCAL".toByteArray(),
+                stateVector = "LOCAL-SV".toByteArray(),
+            )
+        val transport =
+            CapturingTransport(
+                bootstrap = "-CANONICAL-DELTA".toByteArray(),
+                bootstrapKind = ReplicaBootstrapKind.Delta,
+                canonicalStateVector = "CANONICAL-SV".toByteArray(),
+            )
+        val fwd =
+            CrdtReplicaForwarder(
+                "plan.md",
+                "intellij:refresh-1",
+                node,
+                transport,
+                resumeState = retained,
+            )
+
+        assertTrue(fwd.register())
+        assertEquals("LOCAL", String(node.openedWith!!))
+        assertEquals("LOCAL-CANONICAL-DELTA", node.text())
+        assertEquals("LOCAL-SV", String(transport.registeredStateVector!!))
+        assertEquals(
+            "resume registration must publish any local suffix from the canonical frontier",
+            1,
+            transport.sentUpdates.size,
+        )
     }
 
     @Test

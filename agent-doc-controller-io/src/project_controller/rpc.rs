@@ -5643,6 +5643,8 @@ fn log_controller_current_text_result(
 struct ControllerCrdtReplicaPayload {
     method: String,
     identity: Option<String>,
+    #[serde(default)]
+    state_vector_b64: Option<String>,
     update_b64: Option<String>,
     patch_id: Option<String>,
     generation: Option<u64>,
@@ -6715,10 +6717,24 @@ fn controller_crdt_replica_data(
 ) -> Result<serde_json::Value> {
     match method_name {
         "replica_register" => {
-            match agent_doc_crdt_relay_io::register_replica_for_file(canonical, identity)? {
-                Some((client_id, bootstrap)) => Ok(serde_json::json!({
-                    "client_id": client_id,
-                    "bootstrap_b64": base64_standard_encode(&bootstrap),
+            let retained_state_vector = payload
+                .state_vector_b64
+                .as_deref()
+                .map(base64_standard_decode)
+                .transpose()
+                .context("CRDT replica register payload has invalid state_vector_b64")?;
+            match agent_doc_crdt_relay_io::register_replica_for_file_incremental(
+                canonical,
+                identity,
+                retained_state_vector.as_deref(),
+            )? {
+                Some(registration) => Ok(serde_json::json!({
+                    "client_id": registration.client_id,
+                    "bootstrap_b64": base64_standard_encode(&registration.bootstrap),
+                    "bootstrap_kind": if registration.incremental { "delta" } else { "full" },
+                    "canonical_state_vector_b64": base64_standard_encode(
+                        &registration.canonical_state_vector
+                    ),
                     "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
                         .context("registered replica is missing its canonical lineage")?,
                 })),

@@ -564,6 +564,16 @@ impl RelayHub {
         self.canonical.state_vector()
     }
 
+    /// Encode only the canonical operations missing from `state_vector`.
+    ///
+    /// Registration normally needs a whole canonical bootstrap because a fresh
+    /// editor replica has no prior state. A replacement editor/native generation
+    /// can retain its local encoded state across the handoff, though, so sending
+    /// its frontier lets the controller return only the missing suffix.
+    pub fn canonical_diff(&self, state_vector: &[u8]) -> Result<Vec<u8>> {
+        self.canonical.diff(state_vector)
+    }
+
     /// A registered member's current text (for inspection / tests).
     pub fn member_text(&self, client_id: u64) -> Option<String> {
         self.members.get(&client_id).map(|m| m.replica.text())

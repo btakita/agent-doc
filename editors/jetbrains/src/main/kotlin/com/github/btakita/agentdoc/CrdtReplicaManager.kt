@@ -325,6 +325,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     override fun dispose() {
         disposed.set(true)
+        executor.shutdownNow()
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
         pendingRemoteAckReplays.clear()
@@ -338,7 +339,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         forwarders.values.forEach { it.deregister() }
         forwarders.clear()
         shadows.clear()
-        executor.shutdownNow()
     }
 
     private fun awaitWorkerTermination(timeoutMs: Long): Boolean = try {
@@ -1637,11 +1637,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         } else {
             baseIdentity
         }
+        val retainedResumeState =
+            cached?.captureResumeState() ?: nativeReloadResumeStates[filePath]
         val forwarder = CrdtReplicaForwarder(
             filePath = filePath,
             identity = identity,
             node = NativeReplicaNode(),
             transport = CpSocketReplicaTransport(root),
+            resumeState = retainedResumeState,
         )
         if (!forwarder.register()) {
             recordRegisterFailure(filePath)
@@ -1651,6 +1654,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return null
         }
         clearRegisterFailure(filePath)
+        if (retainedResumeState != null) {
+            nativeReloadResumeStates.remove(filePath, retainedResumeState)
+        }
         if (initialEditorText != null) {
             forwarder.ensureEditorText(initialEditorText)
         }
@@ -1816,6 +1822,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         private val instances = ConcurrentHashMap<Project, CrdtReplicaManager>()
         private val applyingAgentMutations = ConcurrentHashMap.newKeySet<String>()
         private val nonOperatorMutationEpochs = ConcurrentHashMap<String, AtomicLong>()
+        private val nativeReloadResumeStates =
+            ConcurrentHashMap<String, ReplicaResumeState>()
 
         fun getInstance(project: Project): CrdtReplicaManager =
             instances.getOrPut(project) {
@@ -1830,10 +1838,25 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val managers = instances.entries.mapNotNull { (project, manager) ->
                 if (instances.remove(project, manager)) project to manager else null
             }
-            managers.forEach { (_, manager) -> manager.dispose() }
+            // Stop the single owner worker first, but keep native replicas open
+            // long enough to copy their encoded state into JVM-owned memory.
+            managers.forEach { (_, manager) ->
+                manager.disposed.set(true)
+                manager.executor.shutdownNow()
+            }
             val quiesced = managers.map { (_, manager) ->
                 manager.awaitWorkerTermination(NATIVE_RELOAD_WORKER_TIMEOUT_MS)
             }.all { it }
+            if (quiesced) {
+                managers.forEach { (_, manager) ->
+                    manager.forwarders.forEach { (filePath, forwarder) ->
+                        forwarder.captureResumeState()?.let { state ->
+                            nativeReloadResumeStates[filePath] = state
+                        }
+                    }
+                }
+            }
+            managers.forEach { (_, manager) -> manager.dispose() }
             return managers.map { it.first } to quiesced
         }
 

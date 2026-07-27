@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
+    CrdtReplicaForwarder,
     CrdtReplicaManager,
     parsePullResponse,
     parseRegisterResponse,
@@ -19,6 +20,7 @@ import {
 
 class FakeNode implements ReplicaNode {
     opened: number | null = null;
+    openedState: Uint8Array | null | undefined;
     locals: Array<{ clientId: number; offset: number; deleteLen: number; insert: string }> = [];
     updates: Uint8Array[] = [];
     closed: number[] = [];
@@ -27,8 +29,9 @@ class FakeNode implements ReplicaNode {
 
     constructor(private current = 'remote text') {}
 
-    open(clientId: number): boolean {
+    open(clientId: number, initState?: Uint8Array | null): boolean {
         this.opened = clientId;
+        this.openedState = initState == null ? initState : Buffer.from(initState);
         return true;
     }
 
@@ -71,7 +74,11 @@ class FakeTransport implements ReplicaTransport {
     ackFailures = 0;
     textAdopts: string[] = [];
 
-    async register(): Promise<{ clientId: number; bootstrap?: Uint8Array | null }> {
+    async register(
+        _filePath: string,
+        _identity: string,
+        _stateVector?: Uint8Array | null,
+    ): Promise<{ clientId: number; bootstrap?: Uint8Array | null }> {
         this.registerCount += 1;
         if (this.registerCount > 1 && this.registerGate) await this.registerGate;
         return { clientId: 41 + this.registerCount, bootstrap: Buffer.from([9]) };
@@ -124,6 +131,46 @@ class FakeTransport implements ReplicaTransport {
 }
 
 describe('crdt replica manager', () => {
+    it('replacement registration resumes local state and applies only the canonical delta', async () => {
+        const node = new FakeNode('retained');
+        const transport = new FakeTransport();
+        let registeredStateVector: Uint8Array | null | undefined;
+        transport.register = async (
+            _filePath: string,
+            _identity: string,
+            stateVector?: Uint8Array | null,
+        ) => {
+            registeredStateVector = stateVector;
+            return {
+                clientId: 77,
+                bootstrap: Buffer.from([8, 9]),
+                bootstrapKind: 'delta' as const,
+                canonicalStateVector: Buffer.from([4, 5]),
+            };
+        };
+        const resumeState = {
+            encodedState: Buffer.from([1, 2, 3]),
+            stateVector: Buffer.from([6, 7]),
+        };
+        const forwarder = new CrdtReplicaForwarder(
+            '/work/plan.md',
+            'vscode-test:refresh-1',
+            node,
+            transport,
+            resumeState,
+        );
+
+        assert.strictEqual(await forwarder.register(), true);
+        assert.deepStrictEqual(Array.from(node.openedState ?? []), [1, 2, 3]);
+        assert.deepStrictEqual(Array.from(registeredStateVector ?? []), [6, 7]);
+        assert.deepStrictEqual(Array.from(node.updates[0] ?? []), [8, 9]);
+        assert.strictEqual(
+            transport.broadcasts.length,
+            1,
+            'the retained local suffix must be published from the canonical frontier',
+        );
+    });
+
     it('requires visible-content proof before replaying a retained ACK', () => {
         const updates: ReplicaRemoteUpdate[] = [
             {
@@ -778,11 +825,15 @@ describe('crdt replica IPC response parsing', () => {
             ok: true,
             data: {
                 client_id: 42,
-                bootstrap_b64: Buffer.from([1, 2]).toString('base64'),
-                lineage: 'lineage-42',
+            bootstrap_b64: Buffer.from([1, 2]).toString('base64'),
+            bootstrap_kind: 'delta',
+            canonical_state_vector_b64: Buffer.from([5, 6]).toString('base64'),
+            lineage: 'lineage-42',
             },
         });
         assert.deepStrictEqual(register && Array.from(register.bootstrap ?? []), [1, 2]);
+        assert.strictEqual(register?.bootstrapKind, 'delta');
+        assert.deepStrictEqual(register && Array.from(register.canonicalStateVector ?? []), [5, 6]);
         assert.strictEqual(register?.lineage, 'lineage-42');
 
         const pull = parsePullResponse({

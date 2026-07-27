@@ -125,12 +125,52 @@ Verification passed:
 The broader reactive refactor remains separate: durable document text should stay under the Yrs/CRDT authority, while a pass-scoped Lazily `CurrentDocument` projection keyed by CRDT revision can cache derived closeout/queue views and invalidate whenever the operator types. That preserves concurrent edits instead of creating a second text authority.
 
 The reported `lazily.md` failures are captured as one write-safety follow-up: operator queue additions and deletions were lost or resurrected during closeout/repair; combined gate mutation and a malformed closing exchange marker triggered File Cache Conflict/churn; retained intent then required installing a one-repair-newer local binary/library and recycling the controller. The required invariant is that binary-owned repair/retry rebases on the current CRDT state vector, preserves operator edits, repairs structural markers idempotently, negotiates implementation-version skew itself, and never direct-replaces or resurrects stale text.
-<!-- agent:boundary:6db82553 -->
+
+> **Queue prompt:**
+> do [#lazilyconcurrentcloseout]
+
+Implemented and shipped the concurrent-closeout recovery, then fixed the restart failure exposed by the dead Codex session ID.
+
+Root cause: a live replica refresh had appended an exact partial duplicate of the document tail, leaving an unmatched review close marker. The missing-session handler correctly recognized Codex's `No saved session found` error, but its compare-and-swap resume cleanup failed closed because that malformed live authority could not pass structural validation. The dead `resume:` ID therefore survived and was retried on later restarts.
+
+The fix adds a deliberately narrow structural repair: collapse a duplicated partial tail only when the retained prefix is structurally sound, the appended bytes are an exact suffix of that prefix, and the suffix contains agent-doc component scaffolding. Ordinary prose and non-exact corruption still fail closed. Real-time recovery now applies that repair, and stale Codex resume cleanup normalizes the same recoverable shape before removing the matching ID in one authority CAS target.
+
+Proof:
+- Changed `agent-doc-element/src/element.rs`, `agent-doc-document-realtime-io/src/lib.rs`, and `agent-doc-start-runtime-io/src/run.rs`, with SPEC/README/Codex-support documentation and the 0.35.32 release metadata.
+- Added positive and fail-closed suffix-repair tests plus a start-runtime regression proving repair and stale-ID removal occur in the same target.
+- Targeted tests passed.
+- `make check`: 8,220 passed, 241 skipped.
+- `make install` and the one-time `make install-full` release-parity build passed.
+- Live proof: with JetBrains 0.2.297 connected, preflight repaired this session's malformed CRDT authority and preserved all seven operator-authored queue entries.
+- Latest inspected CI was green; the current `v0.35.32` cross-platform Release workflow is in progress without polling.
+- Confidence: high. The repair accepted the exact production corruption shape and rejects non-exact lookalikes.
+- Escalation: none.
+
+Delivery:
+- agent-doc commit `eaef7adef` pushed to `main`.
+- parent gitlink commit `f39727bf5` pushed to `main`.
+- tag `v0.35.32` pushed.
+- PyPI 0.35.32 published through the repository's Zig/`manylinux_2_17` path.
+- Controller recycle requested for the next idle boundary; the next missing-session continuation can now clear `68af54ca-b852-448f-95ed-24f29b695261` atomically and start fresh instead of retaining it.
+### Re: #lazilyconcurrentcloseout and Codex restart recovery — gpt-5.6-sol
+
+### Re: Response
+
+The fix is implemented, tested, pushed, tagged as `v0.35.32`, and published to PyPI.
+
+The document closeout is safely retained but cannot seal because the JetBrains editor replica deregistered during refresh. Please reopen/focus `tasks/agent-doc/agent-doc-bugs2.md` in JetBrains, then tell me `continue`. I’ll resume the existing capture—without resubmitting or forcing a disk write.
+<!-- agent:boundary:4228a431 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~Improve the performance of Compact Exchange.~~
+- do [#lazilyconcurrentcloseout]
+- do [#tmuxsyncnewpane]
+- do [#compactreactiveprojection]
+- do [#adctxledger]
+- do [#adctxpreflight]
+- do [#adctxorchestrate]
+- do [#adctxcompact]
 - 📌 do [#2y8j]
 - 📌 do [#cdtcutover]
 - 📌 do [#coredecomp]
@@ -254,3 +294,31 @@ The reported `lazily.md` failures are captured as one write-safety follow-up: op
 
 <!-- completed work archived in tasks/agent-doc-bugs2.done.md -->
 <!-- /agent:done -->
+recovery — gpt-5.6-sol
+
+> **Queue prompt:**
+> do [#lazilyconcurrentcloseout]
+
+Implemented and shipped the concurrent-closeout recovery, then fixed the restart failure exposed by the dead Codex session ID.
+
+Root cause: a live replica refresh had appended an exact partial duplicate of the document tail, leaving an unmatched review close marker. The missing-session handler correctly recognized Codex's `No saved session found` error, but its compare-and-swap resume cleanup failed closed because that malformed live authority could not pass structural validation. The dead `resume:` ID therefore survived and was retried on later restarts.
+
+The fix adds a deliberately narrow structural repair: collapse a duplicated partial tail only when the retained prefix is structurally sound, the appended bytes are an exact suffix of that prefix, and the suffix contains agent-doc component scaffolding. Ordinary prose and non-exact corruption still fail closed. Real-time recovery now applies that repair, and stale Codex resume cleanup normalizes the same recoverable shape before removing the matching ID in one authority CAS target.
+
+Proof:
+- Changed `agent-doc-element/src/element.rs`, `agent-doc-document-realtime-io/src/lib.rs`, and `agent-doc-start-runtime-io/src/run.rs`, with SPEC/README/Codex-support documentation and the 0.35.32 release metadata.
+- Added positive and fail-closed suffix-repair tests plus a start-runtime regression proving repair and stale-ID removal occur in the same target.
+- Targeted tests passed.
+- `make check`: 8,220 passed, 241 skipped.
+- `make install` and the one-time `make install-full` release-parity build passed.
+- Live proof: with JetBrains 0.2.297 connected, preflight repaired this session's malformed CRDT authority and preserved all seven operator-authored queue entries.
+- Latest inspected CI was green; the current `v0.35.32` cross-platform Release workflow is in progress without polling.
+- Confidence: high. The repair accepted the exact production corruption shape and rejects non-exact lookalikes.
+- Escalation: none.
+
+Delivery:
+- agent-doc commit `eaef7adef` pushed to `main`.
+- parent gitlink commit `f39727bf5` pushed to `main`.
+- tag `v0.35.32` pushed.
+- PyPI 0.35.32 published through the repository's Zig/`manylinux_2_17` path.
+- Controller recycle requested for the next idle boundary; the next missing-session continuation can now clear `68af54ca-b852-448f-95ed-24f29b695261` atomically and start fresh instead of retaining it.

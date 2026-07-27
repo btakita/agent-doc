@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#lzqfports]
+
+
+> **Queue prompt:**
+>
 > do [#lzqfjs]
 
 
@@ -352,7 +357,24 @@ One runtime test exposed and fixed the Topic empty-stream edge case: connect/dis
 Pushed lazily-js commit `186c8c9` (`fix: make queue family reader kinds reactive`). Latest CI was queried exactly once and was `queued` (run `30226088533`). Committed the root submodule pointer as `2105c1842` (`lazily: make JS queue readers reactive`). Pre-existing lazily-js `README.md` and untracked `build/` changes were preserved and not staged.
 
 Confidence: high. No escalation was required.
-<!-- agent:boundary:232d1c89 -->
+
+### Re: Response
+
+Completed `#lzqfports` for the five admitted target bindings. The canonical corpus is 11 fixtures (Queue 5, Topic 4, WorkQueue 2), and each binding now replays every fixture across sync, thread-safe, and async flavors with an enforced 9-pair capability ledger, exact `expected.invalidates` checks, real state/return assertions, concurrency or atomicity probes, and mutation-discriminating validation.
+
+Binding revisions:
+- C++ `be4b5ac8c31ec0c6791cc99154d5b435e91c32f0`; `make check` green; CI `30226730599` queued.
+- Dart `39d6e862728eaa5ced9e791b32ab9f59bc10dedc`; `make check` green; CI `30226694786` queued.
+- Python `b2f5f449bdc793471ebad02e2683311af2ca7a98`; `make check` green (583 tests, coverage 120/124); no named CI workflow was present.
+- Go `4c8f11081b50b1a92f6df8fdd181ddc3b82006c1`; focused race tests and `make check` green; CI `30227440955` queued.
+- Kotlin `86b047d9a0417e23ef3a67b6aee1d4bbbde96c6a`; focused and full `make check` green; CI `30227524633` queued.
+
+The root repository records exactly those five submodule revisions in `363452b0d` (`lazily: port queue family flavors`). All five target worktrees are clean except Python's preserved pre-existing untracked `.claude/worktrees` content.
+
+C# was intentionally not admitted to this peer group. It remains explicitly staged under `#lzcsqueues` until its queue-family implementations and the same admission gates exist; no unsupported C# behavior is presented as conformance.
+
+Confidence: high. The implementations, canonical replay, exact invalidation behavior, concurrency/atomicity probes, mutation checks, repository gates, commits, pushes, and one-time CI queries were all verified. No escalation is required for this item.
+<!-- agent:boundary:aaaf86a6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -363,7 +385,7 @@ Confidence: high. No escalation was required.
 - ~~do [#lazilyconformancecoverag]~~
 - ~~do [#lazilybenchmarkregressio]~~
 - ~~do [#lzqfjs]~~
-- do [#lzqfports]
+- ~~do [#lzqfports]~~
 - do [#lzqfzig]
 - do [#maphandlecleardependents]
 - do [#lazilycellfamily]
@@ -408,7 +430,6 @@ Confidence: high. No escalation was required.
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
-- [ ] [#lzqfports] lazily: Phase 5 — port the queue-family flavors to cpp, dart, py, go, kt (and build cs flavor-complete from the start under #lzcsqueues). One subagent per binding, NEVER two against one repo. Dispatch only after #lzqfspec + #lzqffx + #lzqfrs are committed so each agent has a settled spec, a red per-flavor gate, and a reference diff. cpp additionally needs its Source<uint64_t> version cells migrated if Phase 0 picks memoized-derive. KEPT OPEN 2026-07-26: #lzqfspec and #lzqffx are now committed, but #lzqfrs (the rs reference implementation) is not, so the stated precondition is unmet — dispatching now would be six independent guesses at an unpinned shape. Unblocks the moment #lzqfrs lands — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md

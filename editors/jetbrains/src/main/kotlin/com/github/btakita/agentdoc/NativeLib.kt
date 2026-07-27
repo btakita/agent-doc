@@ -672,6 +672,16 @@ interface AgentDocLib : Library {
     ): Int
 
     /**
+     * Record one ordered editor-op burst as a single bounded state-ledger
+     * transaction. [opsJson] uses the Rust EditorOp JSON shape.
+     */
+    fun agent_doc_record_editor_ops_json(
+        filePath: String,
+        baseHash: String,
+        opsJson: String,
+    ): Int
+
+    /**
      * End the current operator-op epoch before a remote/agent projection changes
      * the editor frontier. This prevents later local edits from being appended
      * to operations captured against the pre-projection merge base.

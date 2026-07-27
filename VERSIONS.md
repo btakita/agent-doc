@@ -6,6 +6,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+_JetBrains plugin 0.2.301; VS Code extension 0.2.57._
+
+- **JetBrains typing bursts now persist editor operations in one bounded SQLite transaction (`#qbasehashmemo`).** The quiet-period worker resolves the merge base once, sends the ordered burst through one native JSON batch, and uses a 250 ms ledger busy timeout so optional op-capture evidence cannot starve controller reads. The safe diff-guess remains the fallback if the ledger is busy. This removes the per-keystroke open/transaction/growing-JSON rewrite amplification observed during live IDEA typing.
+
 ## 0.35.40
 
 _JetBrains plugin 0.2.300; VS Code extension 0.2.57._

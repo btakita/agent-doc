@@ -1590,6 +1590,68 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
     }
 }
 
+/// Record an ordered editor-op burst in one bounded state-ledger transaction.
+///
+/// `ops_json` is a JSON array of [`agent_doc_merge::crdt::EditorOp`] values,
+/// e.g. `[{"kind":"insert","offset":3,"text":"x"}]`. Returns `1` when the
+/// complete batch was durably recorded and `0` on malformed input or I/O
+/// failure. The caller can safely fall back to the diff-guess path on failure.
+///
+/// # Safety
+///
+/// `file_path`, `base_hash`, and `ops_json` must be valid, NUL-terminated UTF-8
+/// strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
+    file_path: *const c_char,
+    base_hash: *const c_char,
+    ops_json: *const c_char,
+) -> i32 {
+    let (Ok(file), Ok(base), Ok(ops_json)) = (
+        unsafe { CStr::from_ptr(file_path) }.to_str(),
+        unsafe { CStr::from_ptr(base_hash) }.to_str(),
+        unsafe { CStr::from_ptr(ops_json) }.to_str(),
+    ) else {
+        eprintln!(
+            "[op-capture] agent_doc_record_editor_ops_json: non-UTF-8 argument; ignoring batch"
+        );
+        return 0;
+    };
+    let Ok(ops) = serde_json::from_str::<Vec<agent_doc_merge::crdt::EditorOp>>(ops_json) else {
+        eprintln!(
+            "[op-capture] agent_doc_record_editor_ops_json: malformed ops JSON; ignoring batch"
+        );
+        return 0;
+    };
+    if ops.is_empty() {
+        return 1;
+    }
+
+    let file_path_buf = std::path::PathBuf::from(file);
+    let op_count = ops.len();
+    match agent_doc_op_capture_io::record_editor_ops(&file_path_buf, base, ops) {
+        Ok(()) => {
+            agent_doc_ops_log_io::log_op(
+                &file_path_buf,
+                &format!(
+                    "editor_ops_recorded count={op_count} base={} transaction=batch #qbasehashmemo",
+                    base.get(..12).unwrap_or(base),
+                ),
+            );
+            1
+        }
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                &file_path_buf,
+                &format!(
+                    "editor_ops_record_failed count={op_count} transaction=batch error={error} #qbasehashmemo"
+                ),
+            );
+            0
+        }
+    }
+}
+
 /// Close the current editor-op epoch before applying a non-operator projection.
 ///
 /// Captured operator operations are meaningful only within one uninterrupted

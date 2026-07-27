@@ -97,6 +97,20 @@ class TypingTrackerEdtBudgetTest {
             "coalescing must not overwrite the previous editor op with only the newest event",
             source.contains("scheduleFullContentReport(lib, filePath, event.document, op)"),
         )
+        val reportBody = source.substringAfter("private fun reportEditorOps")
+        assertTrue(
+            "one quiet typing burst should cross native persistence as one batch",
+            reportBody.contains("agent_doc_record_editor_ops_json(filePath, baseHash, batch.toString())"),
+        )
+        assertEquals(
+            "the batch reporter should resolve the merge base only once per burst",
+            1,
+            reportBody.substringBefore("\n}").split("agent_doc_document_base_hash").size - 1,
+        )
+        assertFalse(
+            "the batch reporter must not reopen SQLite through one native call per editor op",
+            reportBody.contains("agent_doc_record_editor_op("),
+        )
     }
 
     @Test

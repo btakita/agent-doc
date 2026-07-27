@@ -41,6 +41,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+/// Editor op capture is optional evidence for the CRDT merge. It must never
+/// monopolize the authoritative state ledger when a controller owns the write
+/// lock: the merge can safely fall back to its diff path if this bounded write
+/// cannot be recorded.
+const EDITOR_OP_CAPTURE_BUSY_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Per-document memo of the last `current_base_hash` result, keyed by the
 /// durable-baseline content hash that produced it (`#qbasehashmemo`). No
@@ -151,8 +158,24 @@ pub fn has_pending_editor_ops(doc: &Path) -> bool {
 /// otherwise starts a fresh epoch (the prior ops were captured against a base
 /// that no longer applies, so they are discarded).
 pub fn record_editor_op(doc: &Path, base_hash: &str, op: EditorOp) -> Result<()> {
+    record_editor_ops(doc, base_hash, vec![op])
+}
+
+/// Record an ordered editor-op burst in one bounded state-ledger transaction.
+///
+/// A quiet-period editor report can contain hundreds of keystrokes. Persisting
+/// those one at a time repeatedly opened SQLite, deserialized and serialized the
+/// growing JSON vector, and held up controller reads. This batch boundary keeps
+/// the same epoch semantics while doing that work exactly once per drained burst.
+pub fn record_editor_ops(doc: &Path, base_hash: &str, ops: Vec<EditorOp>) -> Result<()> {
+    if ops.is_empty() {
+        return Ok(());
+    }
     let (project_root, document_hash, canonical_path) = state_db_identity(doc)?;
-    let mut conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let mut conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
+        &project_root,
+        EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
+    )?;
     let tx = conn.transaction()?;
     let existing =
         agent_doc_sqlite::state_store::load_editor_op_capture_from_db(&tx, &document_hash)?;
@@ -168,7 +191,7 @@ pub fn record_editor_op(doc: &Path, base_hash: &str, op: EditorOp) -> Result<()>
             updated_ms: 0,
         },
     };
-    state.ops.push(op);
+    state.ops.extend(ops);
     state.updated_ms = now_millis();
     agent_doc_sqlite::state_store::upsert_editor_op_capture_in_db(
         &tx,
@@ -427,6 +450,49 @@ mod tests {
         .unwrap();
         let capture = load_op_capture(&doc).unwrap().unwrap();
         assert_eq!(capture.ops.len(), 2);
+    }
+
+    #[test]
+    fn record_batch_preserves_order_and_appends_in_one_epoch() {
+        let (_dir, doc) = setup_doc();
+        let h = content_hash("base\n");
+        record_editor_op(
+            &doc,
+            &h,
+            EditorOp::Insert {
+                offset: 0,
+                text: "prefix".into(),
+            },
+        )
+        .unwrap();
+        record_editor_ops(
+            &doc,
+            &h,
+            vec![
+                EditorOp::Delete { offset: 2, len: 3 },
+                EditorOp::Insert {
+                    offset: 2,
+                    text: "replacement".into(),
+                },
+            ],
+        )
+        .unwrap();
+
+        let capture = load_op_capture(&doc).unwrap().unwrap();
+        assert_eq!(
+            capture.ops,
+            vec![
+                EditorOp::Insert {
+                    offset: 0,
+                    text: "prefix".into(),
+                },
+                EditorOp::Delete { offset: 2, len: 3 },
+                EditorOp::Insert {
+                    offset: 2,
+                    text: "replacement".into(),
+                },
+            ],
+        );
     }
 
     #[test]

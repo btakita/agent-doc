@@ -1,5 +1,7 @@
 package com.github.btakita.agentdoc
 
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.Document
@@ -393,13 +395,11 @@ object TypingTracker : DocumentListener {
                     forceRefresh = false,
                 )
             }
-            LOG.debug("[native] document_changed content reported: $filePath")
-            if (drainEditorOps) {
-                val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))
-                for (op in opReports) {
-                    reportEditorOp(lib, filePath, op)
-                }
-            }
+        LOG.debug("[native] document_changed content reported: $filePath")
+        if (drainEditorOps) {
+            val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))
+            reportEditorOps(lib, filePath, opReports)
+        }
             true
         } catch (_: UnsatisfiedLinkError) {
             false
@@ -412,34 +412,41 @@ object TypingTracker : DocumentListener {
     }
 
     /**
-     * #qnodemerge4wire Phase 4: report a single editor change as byte-offset
-     * [agent_doc_record_editor_op] op(s). IntelliJ `DocumentEvent` offsets/fragments
-     * are UTF-16; [prepareEditorOpReports] replays the coalesced burst against
-     * each op's pre-edit shadow so the FFI receives UTF-8 byte units.
-     */
-    private fun reportEditorOp(
-        lib: AgentDocLib,
-        filePath: String,
-        op: PreparedEditorOp,
-    ) {
-        // Resolve the base hash captured ops must align to; skip (diff-guess
-        // fallback) when unavailable.
-        val baseHashPtr = lib.agent_doc_document_base_hash(filePath) ?: return
-        val baseHash = try {
-            baseHashPtr.getString(0)
+ * #qnodemerge4wire Phase 4: report a coalesced editor burst as byte-offset
+ * operations in one bounded native transaction. IntelliJ `DocumentEvent`
+ * offsets/fragments are UTF-16; [prepareEditorOpReports] replays the burst
+ * against each op's pre-edit shadow so the FFI receives UTF-8 byte units.
+ */
+private fun reportEditorOps(
+    lib: AgentDocLib,
+    filePath: String,
+    ops: List<PreparedEditorOp>,
+) {
+    if (ops.isEmpty()) return
+    // Resolve the base hash captured ops must align to; skip (diff-guess
+    // fallback) when unavailable. One burst resolves this once, rather than
+    // making a native base-hash call per keystroke.
+    val baseHashPtr = lib.agent_doc_document_base_hash(filePath) ?: return
+    val baseHash = try {
+        baseHashPtr.getString(0)
         } finally {
             lib.agent_doc_free_string(baseHashPtr)
-        }
-        if (baseHash.isNullOrEmpty()) return
-
-        lib.agent_doc_record_editor_op(
-            filePath,
-            baseHash,
-            op.opKind,
-            op.byteOffset,
-            op.insertText,
-            op.deleteBytes,
-        )
     }
+    if (baseHash.isNullOrEmpty()) return
+
+    val batch = JsonArray()
+    for (op in ops) {
+        batch.add(JsonObject().apply {
+            addProperty("kind", op.opKind)
+            addProperty("offset", op.byteOffset)
+            if (op.opKind == "insert") {
+                addProperty("text", op.insertText ?: "")
+            } else {
+                addProperty("len", op.deleteBytes)
+            }
+        })
+    }
+    lib.agent_doc_record_editor_ops_json(filePath, baseHash, batch.toString())
+}
 
 }

@@ -187,14 +187,33 @@ Verification:
 - Root pointers pushed through `de10a72c2`.
 
 Pre-existing C# `AGENTS.md`, `README.md`, and generated `build/` changes were preserved and not committed.
-<!-- agent:boundary:f9e9c55e -->
+
+### Re: #lazilytwoimplementations — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lazilytwoimplementations]
+
+
+Already resolved by the later shared-core work in lazily-js commit `5a5445a`.
+
+The published implementations no longer contain separate `moveTo` clamp logic: sync `ReactiveMap`, `ThreadSafeReactiveMap`, and `AsyncReactiveMap` all delegate to `KeyedOrder.moveTo`, whose documented contract clamps the target to `[0, len)`. That chooses the existing `collections.js` behavior: negative indices move to the front, rather than inheriting `Array.splice`'s count-from-the-end semantics.
+
+The same commit added the missing feature-group regression cases to `collections-family-conformance.test.js`: `moveTo(-1)` and a far-negative index are replayed against all three supported flavors. This matches the operator policy—every peer that supports the move surface participates in one shared test; unsupported peers would remain staged.
+
+Verification:
+
+- Focused collection-family suite: 9/9 passed (canonical ordering on sync/thread-safe/async plus directional and negative-index moves).
+- `make check`: 496/496 passed; interop peer self-check passed; 121/124 canonical fixtures opened with 3 explicitly known-uncovered.
+- No source change or new commit was needed. Pre-existing `README.md` and generated `build/` changes remain uncommitted.
+<!-- agent:boundary:5ac3a972 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lazilyasynccomputedmapde]~~
-- do [#lazilytwoimplementations]
+- ~~do [#lazilytwoimplementations]~~
 - do [#lazilydartcomputedmap]
 - do [#recommendedspecdecision]
 - do [#lazilyasyncmap]
@@ -204,7 +223,6 @@ Pre-existing C# `AGENTS.md`, `README.md`, and generated `build/` changes were pr
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
-- [ ] [#lazilytwoimplementations] lazily-js: two implementations disagree on moveTo with a negative index — reactive-family.js:270 uses Math.min(index, Math.max(len-1,0)) with no lower clamp, collections.js:196 uses Math.max(0, Math.min(index, len-1)). moveTo(key,-1) splices before the last element in one and at 0 in the other. Untested in both; pick one before any unification silently changes a published surface.
 - [ ] [#lazilydartcomputedmap] lazily-dart: ComputedMap entries are Slot, not Computed (collections.dart:430). Post-v2 Slot is the UNGUARDED pass-through while Computed carries the == memo guard — so ComputedMap does not have the guard its name implies, and this leaks publicly through handle(). Decide whether the handle becomes Computed.
 - [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.
 <!-- /agent:backlog -->

@@ -150,6 +150,15 @@ must preserve its records and retry later.
 
 `agent-doc write <FILE> [--baseline-file PATH] [--stream] [--ipc] [--force-disk] [--origin ORIGIN]`
 
+- **Paused editor-op reconciliation is binary-owned.** Before the detached-base
+  shortcut accepts `disk == cycle_base`, `write` replays any exact pending
+  editor operations recorded against that base. The disk bytes remain the
+  atomic-write expectation; the replayed operator cut becomes the semantic
+  current document for response merge, snapshot construction, and queue
+  reconciliation. A successful write consumes those operations. A failed
+  validation or write leaves them durable for a later retry. This preserves
+  operator deletion of struck queue rows across capacity pauses
+  (`#pauseddeletetombstone`).
 - A session-document response requires `finalize` or explicit `write --commit`. Bare/non-committing `write`, including `write --stream`, fails before stdin, response capture, document mutation, queue mutation, or lifecycle advancement; partial response checkpoints may exist only in recovery sidecars.
 - Strict response placement, answered queue-head removal, backlog/review/done mutations, snapshot publication, and commit are one transaction. A failure before terminal proof must not expose a response prefix or mark a queue head consumed. `AlreadyApplied` is valid only when the visible document proves the exact complete expected final response from this transaction.
 - Done-id queue marking is per semantic queue item, not all-or-nothing by raw occurrence count. If the live document contains extra duplicate queue occurrences that are absent from the preflight snapshot, closeout must still mark every independently matched snapshot occurrence and retain the unmatched live occurrences for later reconciliation; a count mismatch is a recovery warning, not permission to skip all snapshot-side progress.

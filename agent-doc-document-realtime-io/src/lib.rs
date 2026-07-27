@@ -3243,6 +3243,78 @@ fn editor_operator_cut_for_agent_rebase(
     operator_cut
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingEditorCutReconciliation {
+    pub content: String,
+    pub replayed_editor_ops: bool,
+}
+
+/// Materialize a durable operator-op epoch when a temporarily detached editor
+/// left disk at the cycle base. The disk bytes remain the caller's CAS
+/// expectation; this returned cut is the semantic current branch used for
+/// response merge and snapshot construction.
+///
+/// `#pauseddeletetombstone`: an editor can report a delete immediately before
+/// its reliable-sync lease disappears (for example while a capacity-paused
+/// agent is resumed). Treating `observed_current == expected_base` as "no
+/// concurrent edits" would bypass the op-aware merge and resurrect the deleted
+/// queue rows from the captured response branch.
+pub fn reconcile_pending_editor_cut(
+    file: &Path,
+    expected_base: &str,
+    observed_current: &str,
+    source: &str,
+) -> Result<PendingEditorCutReconciliation> {
+    if observed_current != expected_base {
+        return Ok(PendingEditorCutReconciliation {
+            content: observed_current.to_string(),
+            replayed_editor_ops: false,
+        });
+    }
+    let Some(ops) = agent_doc_op_capture_io::editor_ops_for_base(file, expected_base)? else {
+        return Ok(PendingEditorCutReconciliation {
+            content: observed_current.to_string(),
+            replayed_editor_ops: false,
+        });
+    };
+    let Some(operator_cut) = agent_doc_merge::crdt::replay_editor_ops(expected_base, &ops) else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_pending_editor_cut_rejected file={} ops={} base_hash={} reason=op_replay_failed",
+                file.display(),
+                ops.len(),
+                agent_doc_hash::content_hash(expected_base),
+            ),
+        );
+        return Ok(PendingEditorCutReconciliation {
+            content: observed_current.to_string(),
+            replayed_editor_ops: false,
+        });
+    };
+    validate_canonical_document_target(file, &operator_cut, source)?;
+    if operator_cut == observed_current {
+        return Ok(PendingEditorCutReconciliation {
+            content: observed_current.to_string(),
+            replayed_editor_ops: false,
+        });
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_pending_editor_cut_replayed file={} ops={} base_hash={} operator_hash={} strategy=durable_editor_ops_before_detached_base_shortcut",
+            file.display(),
+            ops.len(),
+            agent_doc_hash::content_hash(expected_base),
+            agent_doc_hash::content_hash(&operator_cut),
+        ),
+    );
+    Ok(PendingEditorCutReconciliation {
+        content: operator_cut,
+        replayed_editor_ops: true,
+    })
+}
+
 /// Heal a welded boundary marker AND re-establish the single-boundary invariant
 /// (`#boundarysplice`).
 ///
@@ -6852,6 +6924,46 @@ mod tests {
         assert_eq!(
             editor_operator_cut_for_agent_rebase(&file, base, &unclosed_exchange, "test_reconnect"),
             operator_cut
+        );
+    }
+
+    #[test]
+    fn detached_base_replays_pending_operator_queue_deletion() {
+        let base = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#next]\n",
+            "- ~~do [#old-a]~~\n",
+            "- ~~do [#old-b]~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\nDone.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _) = temp_doc(base);
+        let deleted = "- ~~do [#old-a]~~\n- ~~do [#old-b]~~\n";
+        let offset = base.find(deleted).unwrap();
+        agent_doc_op_capture_io::record_editor_op(
+            &file,
+            &agent_doc_hash::content_hash(base),
+            agent_doc_merge::crdt::EditorOp::Delete {
+                offset,
+                len: deleted.len(),
+            },
+        )
+        .unwrap();
+
+        let reconciled =
+            reconcile_pending_editor_cut(&file, base, base, "paused_closeout").unwrap();
+
+        assert!(reconciled.replayed_editor_ops);
+        assert!(reconciled.content.contains("- do [#next]"));
+        assert!(!reconciled.content.contains("#old-a"));
+        assert!(!reconciled.content.contains("#old-b"));
+        assert!(
+            agent_doc_op_capture_io::has_pending_editor_ops(&file),
+            "the op epoch stays durable until the caller completes its write"
         );
     }
 

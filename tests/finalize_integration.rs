@@ -445,6 +445,65 @@ fn finalize_stream_editor_absent_skips_ipc_and_writes_directly() {
 }
 
 #[test]
+fn finalize_editor_absent_replays_operator_deleted_struck_queue_rows() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let base = concat!(
+        "---\n",
+        "agent_doc_session: test-session\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Resume after the capacity pause\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- ~~do [#old-a]~~\n",
+        "- ~~do [#old-b]~~\n",
+        "<!-- /agent:queue -->\n",
+    );
+    fs::write(&doc, base).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), base);
+    let deleted = "- ~~do [#old-a]~~\n- ~~do [#old-b]~~\n";
+    let offset = base.find(deleted).unwrap();
+    agent_doc_op_capture_io::record_editor_op(
+        &doc,
+        &content_hash(base),
+        agent_doc_merge::crdt::EditorOp::Delete {
+            offset,
+            len: deleted.len(),
+        },
+    )
+    .unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--stream"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: capacity pause — gpt-5\n\nResumed safely.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let head = head_blob(tmp.path());
+    for materialized in [&content, &head] {
+        assert!(materialized.contains("Resumed safely."));
+        assert!(!materialized.contains("#old-a"));
+        assert!(!materialized.contains("#old-b"));
+    }
+    assert!(!agent_doc_op_capture_io::has_pending_editor_ops(&doc));
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(ops.contains("run_stream_pending_editor_cut_replayed"));
+    assert!(ops.contains("run_stream_pending_editor_cut_consumed"));
+}
+
+#[test]
 fn finalize_editor_absent_skips_ipc_and_applies_done_directly() {
     let (tmp, doc) = setup_session_stream_doc();
     insert_pending_item(&doc, "- [ ] [#done1] Close the loop\n");

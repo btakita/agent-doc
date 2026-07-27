@@ -7,6 +7,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 ## Unreleased
 
 - **Editor reruns, prompt replacements, and realtime steering now share one plain `agent-doc <file>` dispatch path (`#adreplacementturndispatch`).** Saved document edits remain the sole prompt payload: selection state no longer forks JetBrains into a separate supervisor steering RPC, plain triggers bypass prompt-aware queue synthesis, and actual busy agent turns accept the same bare trigger while protected interactive substates still fail closed.
+- **Capacity-paused closeout preserves operator queue deletions (`#pauseddeletetombstone`).** When the disk document still equals a paused cycle's base, the write runtime now asks document realtime I/O to replay exact durable editor operations before taking the detached-base shortcut. The original disk bytes remain the atomic-write expectation, while the replayed operator cut drives response merge, snapshot construction, and queue reconciliation. Captured operations are consumed only after a successful write. Unit and finalize-integration coverage reproduces the Lazily no-op convergence race and proves deleted struck queue rows are not resurrected.
 
 ## 0.35.31
 

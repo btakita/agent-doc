@@ -69,6 +69,50 @@ fn atomic_write_for_write_mode(
     }
 }
 
+#[derive(Debug)]
+struct RecoveryMergeContent {
+    content: String,
+    replayed_pending_editor_ops: bool,
+}
+
+#[derive(Debug)]
+struct StreamFinalPayload {
+    content: String,
+    crdt_state: Vec<u8>,
+    cleaned_resolved_backlog_prompts: bool,
+    operator_current: String,
+    replayed_pending_editor_ops: bool,
+}
+
+fn clear_replayed_editor_ops_after_write(file: &Path, replayed: bool, source: &str) {
+    if !replayed {
+        return;
+    }
+    match agent_doc_op_capture_io::clear_op_capture(file) {
+        Ok(()) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_pending_editor_cut_consumed file={} outcome=cleared_after_successful_write",
+                file.display(),
+            ),
+        ),
+        Err(err) => {
+            eprintln!(
+                "[write] warning: failed to clear replayed editor-op capture for {} after successful write: {err}",
+                file.display(),
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_pending_editor_cut_clear_failed file={} error={}",
+                    file.display(),
+                    err,
+                ),
+            );
+        }
+    }
+}
+
 fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Result<bool> {
     if let Some(recover) = flags.empty_response_recovery {
         recover(
@@ -1385,13 +1429,28 @@ pub(crate) fn run_stream(
     // for a given on-disk `current`. Factored so the reconcile loop below can
     // re-merge against a fresh disk state when a foreign agent-doc writer
     // appends mid-generation (#ipc-drift-visbuf-reconcile).
-    let recompute_final = |content_current: &str| -> Result<(String, Vec<u8>, bool)> {
+    let recompute_final = |content_current: &str| -> Result<StreamFinalPayload> {
+        let reconciled_current = if force_disk {
+            agent_doc_document_realtime_io::PendingEditorCutReconciliation {
+                content: content_current.to_string(),
+                replayed_editor_ops: false,
+            }
+        } else {
+            agent_doc_document_realtime_io::reconcile_pending_editor_cut(
+                file,
+                base,
+                content_current,
+                "run_stream",
+            )?
+        };
+        let operator_current = reconciled_current.content;
+        let merge_current = operator_current.as_str();
         let (final_content, mut crdt_state, skip_final_normalize) = if let Some(repaired_current) =
             adopt_current_response_without_duplication(
                 file,
                 base,
                 &content_ours,
-                content_current,
+                merge_current,
                 snapshot_doc.as_deref(),
                 &response,
             )? {
@@ -1404,7 +1463,7 @@ pub(crate) fn run_stream(
                 doc.encode_state(),
                 force_disk_editor_attached,
             )
-        } else if content_current == base {
+        } else if merge_current == base {
             // No edits — build CRDT state from result
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours);
             (content_ours.clone(), doc.encode_state(), false)
@@ -1417,21 +1476,21 @@ pub(crate) fn run_stream(
                 &format!(
                     "force_disk_patch_current file={} source=run_stream current_len={} base_len={}",
                     file.display(),
-                    content_current.len(),
+                    merge_current.len(),
                     base.len()
                 ),
             );
             let patched_current = match apply_simple_exchange_patch_to_current(
                 file,
-                content_current,
+                merge_current,
                 &patches,
                 &unmatched,
             ) {
                 Some(result) => result?,
-                None => build_patched_content(content_current, content_current, false, false)?,
+                None => build_patched_content(merge_current, merge_current, false, false)?,
             };
             agent_doc_element_exchange_io::check_exchange_shrink_guard_with_log(
-                content_current,
+                merge_current,
                 &patched_current,
                 file,
                 SHRINK_GUARD_MIN_BYTES,
@@ -1450,12 +1509,12 @@ pub(crate) fn run_stream(
             );
             let rebased = match apply_simple_exchange_patch_to_current(
                 file,
-                content_current,
+                merge_current,
                 &patches,
                 &unmatched,
             ) {
                 Some(result) => result?,
-                None => merge_template_document_model(file, base, &content_ours, content_current)?,
+                None => merge_template_document_model(file, base, &content_ours, merge_current)?,
             };
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&rebased);
             (rebased, doc.encode_state(), false)
@@ -1464,7 +1523,7 @@ pub(crate) fn run_stream(
             file,
             base,
             snapshot: snapshot_doc.as_deref(),
-            before_current: content_current,
+            before_current: merge_current,
             current_at_response_capture: &current_content,
             content: &final_content,
             response: &response,
@@ -1478,11 +1537,13 @@ pub(crate) fn run_stream(
         if final_closeout.cleaned_resolved_backlog_prompts {
             crdt_state = agent_doc_merge::crdt::CrdtDoc::from_text(&final_content).encode_state();
         }
-        Ok((
-            final_content,
+        Ok(StreamFinalPayload {
+            content: final_content,
             crdt_state,
-            final_closeout.cleaned_resolved_backlog_prompts,
-        ))
+            cleaned_resolved_backlog_prompts: final_closeout.cleaned_resolved_backlog_prompts,
+            operator_current,
+            replayed_pending_editor_ops: reconciled_current.replayed_editor_ops,
+        })
     };
 
     let initial_payload = recompute_final(&content_current)?;
@@ -1491,34 +1552,38 @@ pub(crate) fn run_stream(
     // captured response against a foreign disk append landed after the merge
     // was computed instead of failing closed and stranding the response
     // outside HEAD (#ipc-drift-visbuf-reconcile).
-    let (content_current, (final_content, _crdt_state, cleaned_resolved_backlog_prompts_applied)) =
-        if force_disk_editor_attached {
-            (content_current, initial_payload)
-        } else {
-            reconcile_visible_write(
-                file,
-                content_current,
-                initial_payload,
-                VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
-                |f, expected, payload| {
-                    guard_visible_write_reconcile_with_target(
-                        f,
-                        "run_stream",
-                        expected,
-                        Some(&payload.0),
-                    )
-                },
-                recompute_final,
-                |f, current, payload| {
-                    guard_visible_write_expected_current_or_target(
-                        f,
-                        "run_stream",
-                        current,
-                        Some(&payload.0),
-                    )
-                },
-            )?
-        };
+    let (content_current, final_payload) = if force_disk_editor_attached {
+        (content_current, initial_payload)
+    } else {
+        reconcile_visible_write(
+            file,
+            content_current,
+            initial_payload,
+            VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
+            |f, expected, payload| {
+                guard_visible_write_reconcile_with_target(
+                    f,
+                    "run_stream",
+                    expected,
+                    Some(&payload.content),
+                )
+            },
+            recompute_final,
+            |f, current, payload| {
+                guard_visible_write_expected_current_or_target(
+                    f,
+                    "run_stream",
+                    current,
+                    Some(&payload.content),
+                )
+            },
+        )?
+    };
+    let final_content = final_payload.content;
+    let cleaned_resolved_backlog_prompts_applied = final_payload.cleaned_resolved_backlog_prompts;
+    let operator_current = final_payload.operator_current;
+    let replayed_pending_editor_ops = final_payload.replayed_pending_editor_ops;
+    let _crdt_state = final_payload.crdt_state;
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -1530,6 +1595,7 @@ pub(crate) fn run_stream(
             Some(&content_current),
         );
         agent_doc_repair_io::pending::clear_pending(file)?;
+        clear_replayed_editor_ops_after_write(file, replayed_pending_editor_ops, "run_stream");
         let elapsed_total = t_total.elapsed().as_millis();
         if elapsed_total > 0 {
             eprintln!("[perf] run_stream total: {}ms", elapsed_total);
@@ -1543,7 +1609,7 @@ pub(crate) fn run_stream(
         snapshot_persist_mode_with_current(
             baseline,
             base,
-            &content_current,
+            &operator_current,
             &content_ours,
             &final_content,
         )
@@ -1556,7 +1622,7 @@ pub(crate) fn run_stream(
         committed_snapshot_union_excluding_carry_forward(
             base,
             &content_ours,
-            &content_current,
+            &operator_current,
             &final_content,
         )
     } else {
@@ -1591,7 +1657,7 @@ pub(crate) fn run_stream(
         "stream_disk",
         None,
         baseline,
-        &content_current,
+        &operator_current,
         &final_content,
         &patches,
         &unmatched,
@@ -1608,6 +1674,7 @@ pub(crate) fn run_stream(
         force_disk,
         "run_stream",
     )?;
+    clear_replayed_editor_ops_after_write(file, replayed_pending_editor_ops, "run_stream");
     if force_disk && snapshot_content != final_content {
         match
             agent_doc_controller_io::project_controller::record_visible_write_materialized_carry_forward_for_file(
@@ -2009,13 +2076,30 @@ fn merge_recovery_content(
     content_ours: &str,
     content_current: &str,
     source: &str,
-    _force_disk: bool,
-) -> Result<String> {
+    force_disk: bool,
+) -> Result<RecoveryMergeContent> {
+    let reconciled_current = if force_disk {
+        agent_doc_document_realtime_io::PendingEditorCutReconciliation {
+            content: content_current.to_string(),
+            replayed_editor_ops: false,
+        }
+    } else {
+        agent_doc_document_realtime_io::reconcile_pending_editor_cut(
+            file,
+            base,
+            content_current,
+            source,
+        )?
+    };
+    let content_current = reconciled_current.content.as_str();
     if content_current == base {
-        return Ok(content_ours.to_string());
+        return Ok(RecoveryMergeContent {
+            content: content_ours.to_string(),
+            replayed_pending_editor_ops: false,
+        });
     }
 
-    if content_uses_crdt_write(base) {
+    let content = if content_uses_crdt_write(base) {
         eprintln!(
             "[write] Current document changed since response recovery baseline. Document-model merging..."
         );
@@ -2031,7 +2115,11 @@ fn merge_recovery_content(
             .with_context(|| format!("document-model merge failed during {source}"))
     } else {
         agent_doc_merge_io::merge_contents(base, content_ours, content_current)
-    }
+    }?;
+    Ok(RecoveryMergeContent {
+        content,
+        replayed_pending_editor_ops: reconciled_current.replayed_editor_ops,
+    })
 }
 
 fn save_recovery_snapshot(file: &Path, content: &str, _use_crdt: bool) -> Result<()> {
@@ -2174,7 +2262,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     let content_current =
         resolve_current_document_content(file, "apply_append_from_string_current_content")?;
 
-    let final_content = merge_recovery_content(
+    let merged = merge_recovery_content(
         file,
         &content,
         &content_ours,
@@ -2182,6 +2270,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
         "apply_append_from_string",
         false,
     )?;
+    let final_content = merged.content;
 
     guard_visible_write_expected_current_or_target(
         file,
@@ -2197,6 +2286,11 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     )?;
     // Save snapshot as content_ours, not final_content
     save_recovery_snapshot(file, &content_ours, use_crdt)?;
+    clear_replayed_editor_ops_after_write(
+        file,
+        merged.replayed_pending_editor_ops,
+        "apply_append_from_string",
+    );
     eprintln!("[write] Response appended to {}", file.display());
     Ok(())
 }
@@ -2271,27 +2365,29 @@ pub fn apply_template_from_string_with_options(
         "apply_template_from_string_force_disk_current_content",
     )?;
 
-    let final_content = if let Some(repaired_current) = adopt_current_response_without_duplication(
-        file,
-        &content,
-        &content_ours,
-        &content_current,
-        snapshot_doc.as_deref(),
-        &response,
-    )? {
+    let (final_content, replayed_pending_editor_ops) = if let Some(repaired_current) =
+        adopt_current_response_without_duplication(
+            file,
+            &content,
+            &content_ours,
+            &content_current,
+            snapshot_doc.as_deref(),
+            &response,
+        )? {
         eprintln!(
             "[write] response already present in current file; adopting normalized current content"
         );
-        repaired_current
+        (repaired_current, false)
     } else {
-        merge_recovery_content(
+        let merged = merge_recovery_content(
             file,
             &content,
             &content_ours,
             &content_current,
             "apply_template_from_string",
             options.force_disk,
-        )?
+        )?;
+        (merged.content, merged.replayed_pending_editor_ops)
     };
     let final_content = normalize_final_template_content(
         file,
@@ -2336,6 +2432,11 @@ pub fn apply_template_from_string_with_options(
     }
     // Save snapshot as the repaired/merged final content.
     save_recovery_snapshot(file, &final_content, use_crdt)?;
+    clear_replayed_editor_ops_after_write(
+        file,
+        replayed_pending_editor_ops,
+        "apply_template_from_string",
+    );
     eprintln!("[write] Template patches applied to {}", file.display());
     Ok(())
 }
@@ -2561,6 +2662,61 @@ mod tests {
     }
 
     #[test]
+    fn paused_closeout_merges_response_over_durable_operator_queue_deletion() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("lazily.md");
+        let base = concat!(
+            "---\nagent_doc_write: crdt\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nPrior response.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#next]\n",
+            "- ~~do [#old-a]~~\n",
+            "- ~~do [#old-b]~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, base).unwrap();
+        let deleted = "- ~~do [#old-a]~~\n- ~~do [#old-b]~~\n";
+        let offset = base.find(deleted).unwrap();
+        agent_doc_op_capture_io::record_editor_op(
+            &doc,
+            &agent_doc_hash::content_hash(base),
+            agent_doc_merge::crdt::EditorOp::Delete {
+                offset,
+                len: deleted.len(),
+            },
+        )
+        .unwrap();
+        let ours = base.replacen(
+            "<!-- agent:boundary:base -->",
+            "### Re: resumed — gpt-5\n\nCapacity pause recovered.\n<!-- agent:boundary:base -->",
+            1,
+        );
+
+        let merged =
+            merge_recovery_content(&doc, base, &ours, base, "paused_closeout", false).unwrap();
+
+        assert!(merged.replayed_pending_editor_ops);
+        assert!(merged.content.contains("Capacity pause recovered."));
+        assert!(merged.content.contains("- do [#next]"));
+        assert!(!merged.content.contains("#old-a"));
+        assert!(!merged.content.contains("#old-b"));
+        assert!(
+            agent_doc_op_capture_io::has_pending_editor_ops(&doc),
+            "a merge alone must not clear deletion evidence before write success"
+        );
+        clear_replayed_editor_ops_after_write(
+            &doc,
+            merged.replayed_pending_editor_ops,
+            "paused_closeout",
+        );
+        assert!(!agent_doc_op_capture_io::has_pending_editor_ops(&doc));
+    }
+
+    #[test]
     fn apply_template_from_string_compact_exchange_replaces_exchange_body() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2692,11 +2848,12 @@ mod tests {
         )
         .unwrap();
 
-        assert!(merged.contains("### Re: recovery crdt - gpt-5"));
-        assert!(merged.contains("while I was typing"));
+        assert!(merged.content.contains("### Re: recovery crdt - gpt-5"));
+        assert!(merged.content.contains("while I was typing"));
         assert!(
-            !merged.contains("<<<<<<<") && !merged.contains(">>>>>>>"),
-            "document-model recovery merge must not emit diff3 markers:\n{merged}"
+            !merged.content.contains("<<<<<<<") && !merged.content.contains(">>>>>>>"),
+            "document-model recovery merge must not emit diff3 markers:\n{}",
+            merged.content,
         );
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops.contains("recovery_document_model_merge"));

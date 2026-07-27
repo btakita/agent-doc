@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#maphandlecleardependents]
+
+
+> **Queue prompt:**
+>
 > do [#lzqfzig]
 
 
@@ -393,7 +398,38 @@ Verification: `zig build test` and final `make check` passed. Dedicated graph te
 The canonical coverage matrix remains partial for Zig's three synchronous queue-family rows because this item removes the false-reactivity prerequisite only; it does not yet ship the all-flavor 11-fixture runner. Thread-safe and async Zig remain staged for their later flavor item, and C# remains staged under `#lzcsqueues`. The pre-existing uncommitted `AGENTS.md` change in lazily-zig was preserved and excluded from the commit.
 
 Confidence: high. The implementation, graph-edge behavior, independence, atomic changed-kind publication, mutation discrimination, repository gate, commit, push, and one-time CI lookup were verified. No escalation is required.
-<!-- agent:boundary:b4105822 -->
+
+### Re: Response
+
+Completed `#maphandlecleardependents`.
+
+The Rust remainder was stale rather than actionable: `MapHandle`, `ThreadSafeMapHandle`, and `AsyncMapHandle` already define `clear_dependents`; source/computed implementations dispose the appropriate graph node; and every flavor's `remove` invokes the hook after releasing collection state. `cargo test --test collections_family_conformance` passes, so no Rust edit was made.
+
+Python now tears down removed map handles on every supported flavor and entry kind:
+
+- sync/thread-safe source entries call terminal `Cell.dispose()`;
+- sync/thread-safe computed entries call terminal `Slot.dispose(ctx)`;
+- async source entries call terminal `Cell.dispose()`;
+- legacy `AsyncSlot` entries call `hard_clear()`, matching that non-graph handle's supported lifecycle by dropping the resolved cache and invalidating any in-flight revision.
+
+Held-handle tests cover all six flavor/kind combinations. Mutation proof removed the three teardown calls, made all six tests fail, restored the calls, and returned the tests to green.
+
+Verification:
+
+- lazily-rs: `cargo test --test collections_family_conformance` — pass.
+- lazily-py: focused three-family suite — 47 passed.
+- lazily-py: six removal tests after restoration — pass.
+- lazily-py: `make check` — pass.
+- Workspace `make check` reached an unrelated `corky-core` OAuth-loopback test race: four parallel tests failed binding the same fixed port with `AddrInUse`. The isolated group passes with `--test-threads=1`; no Corky files were touched.
+- Python CI query: repository has no workflow named `CI`.
+
+Durable commits:
+
+- lazily-py `2df765f` (`reactive-map: dispose removed entry handles`), pushed to `origin/main`.
+- workspace pointer `c56438eaf` (`lazily-py: dispose removed map handles`).
+
+The pre-existing untracked `.claude/worktrees/agent-af5350b120eaf83f3` was preserved. C# remains staged according to the operator rule; this item does not broaden its peer-suite admission.
+<!-- agent:boundary:6dc715b3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -406,7 +442,7 @@ Confidence: high. The implementation, graph-edge behavior, independence, atomic 
 - ~~do [#lzqfjs]~~
 - ~~do [#lzqfports]~~
 - ~~do [#lzqfzig]~~
-- do [#maphandlecleardependents]
+- ~~do [#maphandlecleardependents]~~
 - do [#lazilycellfamily]
 - do [#lazilyspecdisagrees]
 - do [#lzjsnpmtrustedpub]
@@ -445,7 +481,6 @@ Confidence: high. The implementation, graph-edge behavior, independence, atomic 
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
 - [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-26: 42/124 canonical fixtures opened, 82 known-uncovered (reactive-graph 21, collections 10, statechart 7, materialization 3, familysync 1 are covered). The remaining fixtures are genuinely missing product surfaces, not runner-wiring gaps. Keep open and work it down only by shipping the explicit tasks in tasks/software/lazily-cs-parity-plan.md (#lzcscollections, #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, #lzcstemporal, #lzcscluster, #lzcsplane); admit C# to each capability group only when that production surface and canonical replay ship.
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
-- [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md

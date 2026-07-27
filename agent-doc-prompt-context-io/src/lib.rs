@@ -11,8 +11,6 @@ use agent_doc_workflow::session_cycle::prompt_targets_from_diff;
 
 use std::path::Path;
 
-pub mod dynamic_context;
-
 pub fn build_document_section(
     file: &Path,
     diff_text: &str,
@@ -25,6 +23,7 @@ pub fn build_document_section(
         doc,
         report,
         &remote_host_scope_for_file(file, doc),
+        true,
     )
 }
 
@@ -42,6 +41,26 @@ pub fn build_document_section_with_ssh_context(
         doc,
         report,
         &remote_host_scope_for_file_with_context(file, doc, ssh),
+        true,
+    )
+}
+
+/// Build the ordinary document projection while an orchestration caller owns
+/// delivery of the dynamic-context child manifest.
+pub fn build_document_section_with_ssh_context_without_dynamic_context(
+    file: &Path,
+    diff_text: &str,
+    doc: &str,
+    report: Option<&SessionAccretionReport>,
+    ssh: &ResolvedSshContext,
+) -> String {
+    build_document_section_with_remote_host_scope(
+        file,
+        diff_text,
+        doc,
+        report,
+        &remote_host_scope_for_file_with_context(file, doc, ssh),
+        false,
     )
 }
 
@@ -51,6 +70,7 @@ fn build_document_section_with_remote_host_scope(
     doc: &str,
     report: Option<&SessionAccretionReport>,
     remote_host_scope: &str,
+    include_dynamic_context: bool,
 ) -> String {
     let prompt_targets = prompt_targets_from_diff(diff_text);
     let response_toc = document_section_needs_response_toc(doc, report, &prompt_targets)
@@ -64,8 +84,9 @@ fn build_document_section_with_remote_host_scope(
         response_toc: response_toc.as_deref(),
         remote_host_scope,
     });
-    if let Ok(Some(snapshot)) =
-        dynamic_context::build_dynamic_context_snapshot(file, doc, &prompt_targets)
+    if include_dynamic_context
+        && let Ok(Some(snapshot)) =
+            agent_doc_dynamic_context_io::build_dynamic_context_snapshot(file, doc, &prompt_targets)
         && let Some(dynamic_context) = snapshot.as_prompt_section()
     {
         section.push_str("\n\n");

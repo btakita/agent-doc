@@ -131,6 +131,8 @@ pub(crate) struct OrderedTaskStepOptions<'a> {
     graph_context: Option<&'a str>,
     graph_evidence: Option<&'a crate::tsift_graph::TsiftGraphEvidencePlan>,
     task_label: &'a str,
+    orchestration_context: Option<&'a str>,
+    orchestration_context_owned: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -433,24 +435,76 @@ fn build_agent_prompt(
     diff_text: Option<&str>,
     doc: &str,
     session_accretion: Option<&SessionAccretionReport>,
+    orchestration_context: Option<&str>,
+    orchestration_context_owned: bool,
 ) -> String {
     let diff_text = diff_text.unwrap_or_default();
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let ssh_context = rc.ssh_context();
-    let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
-        file,
-        diff_text,
-        doc,
-        session_accretion,
-        &ssh_context,
-    );
+    let document_section = if orchestration_context_owned {
+        agent_doc_prompt_context_io::build_document_section_with_ssh_context_without_dynamic_context(
+            file,
+            diff_text,
+            doc,
+            session_accretion,
+            &ssh_context,
+        )
+    } else {
+        agent_doc_prompt_context_io::build_document_section_with_ssh_context(
+            file,
+            diff_text,
+            doc,
+            session_accretion,
+            &ssh_context,
+        )
+    };
 
-    agent_doc_prompt_context::render_agent_prompt(AgentPromptContext {
+    let mut prompt = agent_doc_prompt_context::render_agent_prompt(AgentPromptContext {
         template_mode: mode.is_template(),
         diff_text,
         doc,
         document_section: &document_section,
-    })
+    });
+    if let Some(context) = orchestration_context {
+        prompt.push_str("\n\n");
+        prompt.push_str(context);
+    }
+    prompt
+}
+
+fn build_orchestration_dynamic_context(
+    file: &Path,
+    prompt_targets: &[String],
+) -> Option<agent_doc_dynamic_context_io::DynamicContextSnapshot> {
+    let doc = match resolve_orchestrate_current_document(file, "orchestrate_dynamic_context") {
+        Ok(doc) => doc,
+        Err(err) => {
+            eprintln!("[orchestrate] dynamic context document unavailable: {err:#}");
+            return None;
+        }
+    };
+    match agent_doc_dynamic_context_io::build_dynamic_context_snapshot(file, &doc, prompt_targets) {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            eprintln!("[orchestrate] dynamic context unavailable: {err:#}");
+            None
+        }
+    }
+}
+
+fn append_orchestration_child_context(
+    mut prompt: String,
+    snapshot: Option<&agent_doc_dynamic_context_io::DynamicContextSnapshot>,
+    child_index: usize,
+    child_count: usize,
+) -> String {
+    if let Some(context) = snapshot
+        .and_then(|snapshot| snapshot.as_orchestration_child_section(child_index, child_count))
+    {
+        prompt.push_str("\n\n");
+        prompt.push_str(&context);
+    }
+    prompt
 }
 
 fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<ResolvedTaskBatch> {
@@ -2095,6 +2149,8 @@ mod tests {
             Some("diff"),
             doc,
             None,
+            None,
+            false,
         );
         assert!(
             prompt.contains(
@@ -2138,6 +2194,8 @@ mod tests {
             Some(diff),
             doc,
             Some(&report),
+            None,
+            false,
         );
         assert!(prompt.contains("<response_context level=\"warn\">"));
         assert!(!prompt.contains("<document>\n## Exchange"));

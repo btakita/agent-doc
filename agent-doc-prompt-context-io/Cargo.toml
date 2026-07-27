@@ -11,22 +11,10 @@ publish = false
 name = "agent_doc_prompt_context_io"
 
 [dependencies]
-anyhow = "1"
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.40" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.40" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.40" }
+agent-doc-dynamic-context-io = { path = "../agent-doc-dynamic-context-io", version = "0.35.40" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.40" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.40" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.40" }
 agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.35.40" }
 agent-doc-response-toc-io = { path = "../agent-doc-response-toc-io", version = "0.35.40" }
 agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.40" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.40" }
 agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.40" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tempfile = "3"
-wait-timeout = "0.2"
-
-[dev-dependencies]
-tempfile = "3"

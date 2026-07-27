@@ -115,8 +115,7 @@ pub struct TsiftContextPlan {
     pub stale_fallback: String,
     pub loaded_context_ledger: LoadedContextLedger,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dynamic_manifest:
-        Option<agent_doc_prompt_context_io::dynamic_context::DynamicContextSnapshot>,
+    pub dynamic_manifest: Option<agent_doc_dynamic_context_io::DynamicContextSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<String>,
 }
@@ -703,18 +702,17 @@ fn tsift_context_plan(file: &Path, document: &str, prompt_targets: &[String]) ->
         ),
     ]);
     let mut diagnostics = Vec::new();
-    let dynamic_manifest =
-        match agent_doc_prompt_context_io::dynamic_context::build_dynamic_context_snapshot(
-            file,
-            document,
-            prompt_targets,
-        ) {
-            Ok(manifest) => manifest,
-            Err(err) => {
-                diagnostics.push(format!("dynamic context manifest unavailable: {err:#}"));
-                None
-            }
-        };
+    let dynamic_manifest = match agent_doc_dynamic_context_io::build_dynamic_context_snapshot(
+        file,
+        document,
+        prompt_targets,
+    ) {
+        Ok(manifest) => manifest,
+        Err(err) => {
+            diagnostics.push(format!("dynamic context manifest unavailable: {err:#}"));
+            None
+        }
+    };
     if let Some(manifest) = &dynamic_manifest {
         diagnostics.extend(manifest.diagnostics.iter().cloned());
     }

@@ -54,6 +54,8 @@ pub struct DynamicContextChunkManifest {
     pub token_count: usize,
     pub injection_mode: String,
     pub handle_reference: String,
+    #[serde(default)]
+    pub expansion_command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expanded_text: Option<String>,
 }
@@ -95,32 +97,53 @@ impl DynamicContextSnapshot {
     /// Render only first-use payloads. Every repeated or duplicate chunk is a
     /// compact, resolvable handle reference.
     pub fn as_prompt_section(&self) -> Option<String> {
+        self.as_orchestration_child_section(0, 1)
+    }
+
+    /// Render one orchestration child view of this manifest.
+    ///
+    /// Every child receives every durable handle. First-use excerpts are
+    /// deterministically partitioned across children, so a parallel fan-out
+    /// shares context identity without copying the same payload into every
+    /// worktree prompt.
+    pub fn as_orchestration_child_section(
+        &self,
+        child_index: usize,
+        child_count: usize,
+    ) -> Option<String> {
         if self.chunks.is_empty() {
             return None;
         }
+        let child_count = child_count.max(1);
+        let child_index = child_index.min(child_count - 1);
         let mut lines = vec![format!(
-            "<dynamic_context contract=\"{}\" fingerprint=\"{}\" token_count=\"{}\">",
+            "<dynamic_context contract=\"{}\" fingerprint=\"{}\" token_count=\"{}\" child=\"{}/{}\">",
             CONTRACT_VERSION,
             escape_attribute(&self.prompt_fingerprint),
-            self.token_count
+            self.token_count,
+            child_index + 1,
+            child_count
         )];
-        for chunk in &self.chunks {
-            if let Some(text) = &chunk.expanded_text {
+        for (chunk_index, chunk) in self.chunks.iter().enumerate() {
+            let owns_expansion = chunk_index % child_count == child_index;
+            if let Some(text) = chunk.expanded_text.as_ref().filter(|_| owns_expansion) {
                 lines.push(format!(
-                    "<context_chunk handle=\"{}\" hash=\"{}\" source=\"{}\">",
+                    "<context_chunk handle=\"{}\" hash=\"{}\" source=\"{}\" expand=\"{}\">",
                     escape_attribute(&chunk.handle_reference),
                     escape_attribute(&chunk.content_hash),
-                    escape_attribute(&chunk.source_uri)
+                    escape_attribute(&chunk.source_uri),
+                    escape_attribute(&chunk.expansion_command)
                 ));
                 lines.push(text.clone());
                 lines.push("</context_chunk>".to_string());
             } else {
                 lines.push(format!(
-                    "<context_ref handle=\"{}\" hash=\"{}\" source=\"{}\" mode=\"{}\" />",
+                    "<context_ref handle=\"{}\" hash=\"{}\" source=\"{}\" mode=\"{}\" expand=\"{}\" />",
                     escape_attribute(&chunk.handle_reference),
                     escape_attribute(&chunk.content_hash),
                     escape_attribute(&chunk.source_uri),
-                    escape_attribute(&chunk.injection_mode)
+                    escape_attribute(&chunk.injection_mode),
+                    escape_attribute(&chunk.expansion_command)
                 ));
             }
         }
@@ -596,6 +619,7 @@ fn chunk_manifest(
     expanded_text: Option<String>,
 ) -> DynamicContextChunkManifest {
     let handle_reference = format!("tsift://{pack_id}/{chunk_id}");
+    let expansion_command = source_read_command(&source_uri, range_start, range_end);
     DynamicContextChunkManifest {
         pack_id,
         chunk_id,
@@ -606,8 +630,35 @@ fn chunk_manifest(
         token_count,
         injection_mode: injection_mode.to_string(),
         handle_reference,
+        expansion_command,
         expanded_text,
     }
+}
+
+fn source_read_command(
+    source_uri: &str,
+    range_start: Option<usize>,
+    range_end: Option<usize>,
+) -> String {
+    let source = shell_quote(source_uri);
+    match (range_start, range_end) {
+        (Some(start), Some(end)) if end >= start => format!(
+            "tsift --envelope source-read {source} --start {start} --lines {} --budget normal",
+            end.saturating_sub(start).saturating_add(1)
+        ),
+        _ => format!("tsift --envelope source-read {source} --budget normal"),
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b':')
+        })
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn sqlite_mode(mode: InjectionMode) -> ContextInjectionMode {
@@ -800,5 +851,81 @@ mod tests {
                 .iter()
                 .all(|chunk| chunk.expanded_text.is_none())
         );
+    }
+
+    #[test]
+    fn parallel_children_share_handles_without_duplicate_expanded_text() {
+        let snapshot = DynamicContextSnapshot {
+            contract_version: CONTRACT_VERSION.to_string(),
+            status: "recorded".to_string(),
+            document_id: "doc".to_string(),
+            session_id: "session".to_string(),
+            cycle_id: "cycle".to_string(),
+            pack_ids: vec!["pack".to_string()],
+            prompt_fingerprint: "fingerprint".to_string(),
+            token_count: 4,
+            chunks: vec![
+                chunk_manifest(
+                    "pack".to_string(),
+                    "chunk-a".to_string(),
+                    "hash-a".to_string(),
+                    "src/a.rs".to_string(),
+                    Some(10),
+                    Some(12),
+                    2,
+                    "expanded",
+                    Some("unique excerpt a".to_string()),
+                ),
+                chunk_manifest(
+                    "pack".to_string(),
+                    "chunk-b".to_string(),
+                    "hash-b".to_string(),
+                    "src/b.rs".to_string(),
+                    None,
+                    None,
+                    2,
+                    "expanded",
+                    Some("unique excerpt b".to_string()),
+                ),
+            ],
+            diagnostics: Vec::new(),
+        };
+        let first = snapshot.as_orchestration_child_section(0, 2).unwrap();
+        let second = snapshot.as_orchestration_child_section(1, 2).unwrap();
+        for handle in ["tsift://pack/chunk-a", "tsift://pack/chunk-b"] {
+            assert!(first.contains(handle));
+            assert!(second.contains(handle));
+        }
+        let combined = format!("{first}\n{second}");
+        assert_eq!(combined.matches("unique excerpt a").count(), 1);
+        assert_eq!(combined.matches("unique excerpt b").count(), 1);
+        assert!(combined.contains("--start 10 --lines 3"));
+    }
+
+    #[test]
+    fn queue_continuation_child_context_references_prior_cycle_without_reexpansion() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        project_and_record_report(
+            &mut conn,
+            &identity("cycle-1"),
+            components(),
+            &["first queue head".to_string()],
+            &report("shared source"),
+        )
+        .unwrap();
+        let continuation = project_and_record_report(
+            &mut conn,
+            &identity("cycle-2"),
+            components(),
+            &["next queue head".to_string()],
+            &report("shared source"),
+        )
+        .unwrap();
+        let prompt = continuation.as_orchestration_child_section(0, 1).unwrap();
+        assert!(prompt.contains("<context_ref"));
+        assert!(!prompt.contains("\"summary\":\"shared source\""));
+        assert!(prompt.contains("tsift://"));
+        assert!(prompt.contains("expand=\"tsift --envelope source-read"));
     }
 }

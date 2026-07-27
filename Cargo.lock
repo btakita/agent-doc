@@ -46,6 +46,7 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
+ "agent-doc-dynamic-context-io",
  "agent-doc-editor-surface",
  "agent-doc-editor-surface-io",
  "agent-doc-element",
@@ -722,6 +723,25 @@ dependencies = [
  "serde_json",
  "tempfile",
  "uuid",
+]
+
+[[package]]
+name = "agent-doc-dynamic-context-io"
+version = "0.35.40"
+dependencies = [
+ "agent-doc-cycle-state-io",
+ "agent-doc-element",
+ "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-prompt-context",
+ "agent-doc-sqlite",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -1548,22 +1568,13 @@ dependencies = [
 name = "agent-doc-prompt-context-io"
 version = "0.35.40"
 dependencies = [
- "agent-doc-cycle-state-io",
- "agent-doc-element",
+ "agent-doc-dynamic-context-io",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
- "agent-doc-fs",
- "agent-doc-hash",
  "agent-doc-prompt-context",
  "agent-doc-response-toc-io",
  "agent-doc-session-accretion",
- "agent-doc-sqlite",
  "agent-doc-workflow",
- "anyhow",
- "serde",
- "serde_json",
- "tempfile",
- "wait-timeout",
 ]
 
 [[package]]

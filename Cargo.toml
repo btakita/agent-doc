@@ -32,6 +32,7 @@ members = [
     "agent-doc-template-io",
     "agent-doc-diff",
     "agent-doc-diff-io",
+    "agent-doc-dynamic-context-io",
     "agent-doc-editor-surface",
     "agent-doc-editor-surface-io",
     "agent-doc-frontmatter",
@@ -196,6 +197,7 @@ agent-doc-cycle-state-io = { path = "agent-doc-cycle-state-io", version = "0.35.
 agent-doc-debounce = { path = "agent-doc-debounce", version = "0.35.40" }
 agent-doc-diff = { path = "agent-doc-diff", version = "0.35.40" }
 agent-doc-diff-io = { path = "agent-doc-diff-io", version = "0.35.40" }
+agent-doc-dynamic-context-io = { path = "agent-doc-dynamic-context-io", version = "0.35.40" }
 agent-doc-document = { path = "agent-doc-document", version = "0.35.40" }
 agent-doc-document-realtime = { path = "agent-doc-document-realtime", version = "0.35.40" }
 agent-doc-document-realtime-io = { path = "agent-doc-document-realtime-io", version = "0.35.40" }

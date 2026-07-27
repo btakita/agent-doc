@@ -106,15 +106,27 @@ pub(crate) fn run_with_dependencies(
             } else {
                 collect_graph_evidence_for_tasks(file, &batch.tasks, true)?
             };
+            let dynamic_context = if config.dry_run || config.plan {
+                None
+            } else {
+                build_orchestration_dynamic_context(file, &batch.tasks)
+            };
+            let task_count = batch.tasks.len().max(1);
             let parallel_tasks = batch
                 .tasks
                 .into_iter()
-                .map(|task| parallel::ParallelTask {
+                .enumerate()
+                .map(|(index, task)| parallel::ParallelTask {
                     description: task.clone(),
-                    prompt: apply_parallel_graph_context(
-                        &task,
-                        apply_prompt_preset_block(&task, prompt_preset_block.as_deref()),
-                        graph_evidence.as_ref(),
+                    prompt: append_orchestration_child_context(
+                        apply_parallel_graph_context(
+                            &task,
+                            apply_prompt_preset_block(&task, prompt_preset_block.as_deref()),
+                            graph_evidence.as_ref(),
+                        ),
+                        dynamic_context.as_ref(),
+                        index,
+                        task_count,
                     ),
                 })
                 .collect::<Vec<_>>();
@@ -245,6 +257,11 @@ pub(crate) fn run_ordered_tasks_internal(
     agent_runner: &impl FreshAgentRunner,
     graph_evidence: Option<&crate::tsift_graph::TsiftGraphEvidencePlan>,
 ) -> Result<()> {
+    let dynamic_targets = tasks
+        .iter()
+        .map(|task| task.prompt.clone())
+        .collect::<Vec<_>>();
+    let dynamic_context = build_orchestration_dynamic_context(file, &dynamic_targets);
     let mut effective_model: Option<String> = options.model_override.map(String::from);
     let dispatch_ctx = build_dispatch_context(file);
     agent_doc_flow_io::log_flow_event(
@@ -274,6 +291,9 @@ pub(crate) fn run_ordered_tasks_internal(
                 let graph_context = graph_evidence
                     .and_then(|evidence| evidence.prompt_context_for_task(&task.label).transpose())
                     .transpose()?;
+                let orchestration_context = dynamic_context
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.as_orchestration_child_section(idx, tasks.len()));
                 let child_result = match run_ordered_task_step(
                     file,
                     &task.prompt,
@@ -283,6 +303,8 @@ pub(crate) fn run_ordered_tasks_internal(
                         graph_context: graph_context.as_deref(),
                         graph_evidence,
                         task_label: &task.label,
+                        orchestration_context: orchestration_context.as_deref(),
+                        orchestration_context_owned: dynamic_context.is_some(),
                     },
                     global_config,
                     lifecycle,
@@ -475,6 +497,16 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
     lifecycle: &impl LifecycleOps,
     agent_runner: &impl FreshAgentRunner,
 ) -> Result<()> {
+    let dynamic_targets = schedule
+        .nodes
+        .iter()
+        .filter(|node| node.state != AutoDagNodeState::Complete)
+        .filter(|node| classify(&node.label).kind == QueueItemKind::Prompt)
+        .map(|node| node.prompt.clone())
+        .collect::<Vec<_>>();
+    let dynamic_context = build_orchestration_dynamic_context(file, &dynamic_targets);
+    let dynamic_child_count = dynamic_targets.len().max(1);
+    let mut dynamic_child_index = 0;
     let mut effective_model: Option<String> = options.ordered.model_override.map(String::from);
     let dispatch_ctx = build_dispatch_context(file);
     agent_doc_flow_io::log_flow_event(
@@ -524,20 +556,31 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                     }
                     Ok(())
                 }
-                QueueItemKind::Prompt => run_ordered_task_step(
-                    file,
-                    &prompt,
-                    OrderedTaskStepOptions {
-                        agent_override: options.ordered.agent_override,
-                        model_override: effective_model.as_deref(),
-                        graph_context: graph_context.as_deref(),
-                        graph_evidence: options.graph_evidence,
-                        task_label: &node.label,
-                    },
-                    global_config,
-                    lifecycle,
-                    agent_runner,
-                ),
+                QueueItemKind::Prompt => {
+                    let orchestration_context = dynamic_context.as_ref().and_then(|snapshot| {
+                        snapshot.as_orchestration_child_section(
+                            dynamic_child_index,
+                            dynamic_child_count,
+                        )
+                    });
+                    dynamic_child_index += 1;
+                    run_ordered_task_step(
+                        file,
+                        &prompt,
+                        OrderedTaskStepOptions {
+                            agent_override: options.ordered.agent_override,
+                            model_override: effective_model.as_deref(),
+                            graph_context: graph_context.as_deref(),
+                            graph_evidence: options.graph_evidence,
+                            task_label: &node.label,
+                            orchestration_context: orchestration_context.as_deref(),
+                            orchestration_context_owned: dynamic_context.is_some(),
+                        },
+                        global_config,
+                        lifecycle,
+                        agent_runner,
+                    )
+                }
             };
 
             match step_result {

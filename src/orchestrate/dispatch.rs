@@ -128,6 +128,8 @@ pub(crate) fn run_ordered_task_step(
         Some(&injected_diff),
         &doc,
         session_accretion.as_ref(),
+        options.orchestration_context,
+        options.orchestration_context_owned,
     );
     if let Some(image_block) = build_image_description_block(file, &doc, agent_name) {
         prompt.push_str("\n\n");

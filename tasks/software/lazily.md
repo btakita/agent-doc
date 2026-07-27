@@ -126,13 +126,36 @@ Publication was intentionally not triggered: the repository has no `NUGET_API_KE
 The root workspace `make check` was also attempted. It is blocked only by two reproducible, unrelated tests in the already-dirty `src/agent-doc` submodule (`managed_capability_proof_status_tracks_pending_and_failed` and `managed_capability_proof_status_requires_post_restart_proof`); lazily-cs checks and CI are green.
 
 Confidence: high for package construction and release automation. Escalation: an operator must provide the NuGet credential and version authorization for `#lzcsnugetpublish`.
-<!-- agent:boundary:858fdd56 -->
+
+### Re: do [#lzcsnugetpublish] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzcsnugetpublish]
+
+
+Gated `#lzcsnugetpublish` on the missing external publication credential. No public registry mutation was attempted.
+
+Evidence:
+
+- `gh secret list -R lazily-hub/lazily-cs` returned no repository Actions secrets.
+- The configured password-store entry names contain no `nuget`, `lazily`, or `dotnet` credential.
+- The current environment exposes no NuGet credential variable.
+- The NuGet flat-container endpoint for package ID `Lazily` still returns HTTP 404, so the first publication remains outstanding.
+- The package-ready implementation remains pushed at lazily-cs commit `813983e`, with workspace pointer commit `f7431f0a5`; CI run `30305847353` is green.
+
+Changed paths: none in this cycle. The prior package and workflow changes remain the release candidate.
+
+Required external signal to ungate: add repository secret `NUGET_API_KEY` to `lazily-hub/lazily-cs` and authorize the immutable public version (`0.2.0`, currently package-ready and unregistered, or a newer version). Once supplied, rerun this item to dispatch `.github/workflows/release.yml` and verify the NuGet listing.
+
+Confidence: high that credential absence is the only immediate publication blocker. Escalation: repository/NuGet owner action is required because the secret cannot be derived safely from repository state.
+<!-- agent:boundary:5adf08bd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lzcsnugetpublish]
+- ~~do [#lzcsnugetpublish]~~
 - ~~do [#lzcspackage]~~
 - do [#asyncplanenever]
 - do [#lazilyconformancecoverag]
@@ -143,7 +166,6 @@ Confidence: high for package construction and release automation. Escalation: an
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsnugetpublish] lazily-cs: add repository secret NUGET_API_KEY, choose and authorize the NuGet version (0.2.0 is package-ready and currently unregistered, or create a newer tag), run the Release workflow, and verify the first Lazily publication on NuGet.
 - [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell + QueueStorage shipped at 01d2cf3; WorkQueueCell shipped at fafb88f; TopicCell shipped at 17256ce; Relay core and Count BackpressurePolicy shipped at 5ac24cc; SpillStore shipped at 3e79b92; Relay Transport shipped at 0cca2e6; Spill overflow integration shipped at c5d678d with idempotent-or-deduplicated replay guard and lossless cold+hot reconstruction. Keep C# eligible only for exact capabilities. Still add Bytes/Keys/Age meters before admitting C# to the full RelayCell peer group. (stays open: Bytes/Keys/Age metering and normative integration tests remain.)
 - [ ] [#lzcscrdt] lazily-cs: PARTIAL/STAGED — HLC, ICellCrdt/IRegisterCrdt, LWW/MV registers, PnCounter, and the ReplicatedCell reactive bridge shipped at f1f32e2 with algebraic, replay-idempotence, and invalidation-suppression tests. Keep C# eligible only for these exact CRDT register capabilities. Still implement TextCrdt + delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt including dotted-frontier anti-entropy and concurrent-merge convergence, then replay the textcrdt, seqcrdt, crdt-tree, and lossless-tree corpora before full CRDT peer admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: TextCrdt/delta, SeqCrdt, CrdtTree, LosslessTreeCrdt, and their conformance runners remain.)
 - [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
@@ -156,6 +178,7 @@ Confidence: high for package construction and release automation. Escalation: an
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcsnugetpublish] lazily-cs: add repository secret NUGET_API_KEY, choose and authorize the NuGet version (0.2.0 is package-ready and currently unregistered, or create a newer tag), run the Release workflow, and verify the first Lazily publication on NuGet.
 - [/] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. Current state: #lzcsipc is partial (schema-validated wire codec shipped; ShmBlobArena/executable zero-copy backends remain) and #lzcssync is partial (durable outbox shipped; CrdtPlaneRuntime, anti-entropy/resync, IpcSink/IpcSource, full-duplex SyncDriver, and remaining corpora remain). After both prerequisites ship their complete production surfaces, implement the C# interop peer, advertise only the exact features/codecs/channels/variants it supports, and let the capability-driven matrix admit it automatically. (gated: prerequisites #lzcsipc and #lzcssync remain open.)
 - [/] [#lazilyrenameinverted] [operator-decision] Keep lazily-py `Cell`/`CellSlot` as mypyc-native implementation class names with canonical `Source`/`SourceSlot` aliases. NEXT: accept this documented exception, or explicitly authorize a breaking native-class rename with mypyc and identity migration tests.
 - [/] [#lzjsnpmtrustedpub] [operator-action] lazily-js repository workflow/OIDC/provenance is ready, but npm rejects publication until trusted-publisher setup is completed. NEXT: authenticate npm, register `@lazily-hub/lazily-js` for `lazily-hub/lazily-js` workflow `release.yml` with no environment and allowed action `npm publish`, verify with `npm trust list @lazily-hub/lazily-js`, then prove the next version tag.

@@ -183,14 +183,41 @@ Completed the schema-defined IPC wire subphase for lazily-cs.
 - Preserved pre-existing lazily-cs changes to `AGENTS.md`, `README.md`, and untracked `build/`.
 
 Confidence is high for the wire/schema capability; no escalation was required. `#lzcsipc` stays staged because `ShmBlobArena` and executable `BlobBackend` zero-copy resolution are not implemented, so C# must remain outside those peer groups.
-<!-- agent:boundary:0229cf13 -->
+
+### Re: ⏭️ do [#lzcssync] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzcssync]
+
+
+Implemented and shipped the bounded durable-outbox subphase for lazily-cs.
+
+- Added `src/Lazily/DurableOutbox.cs`: `IOutboxStore`, `DurableOutbox<TStore>`, `InMemoryOutboxStore`, and fsync-backed append-only `FileOutboxStore`.
+- Enforced append-before-send recovery, monotonic acknowledgement cursors across stale handles, pruning, ordered replay, retained epochs, and tolerance of an incomplete trailing crash record.
+- Added `DurableOutboxConformanceTests.cs`, replaying all scenarios in `reliable-sync/outbox_store_protocol.json` and `reliable-sync/outbox_replay_after_crash.json`, plus crash-tail and memory-boundary tests.
+- Removed exactly those two now-runtime-opened fixtures from the known-uncovered list. lazily-cs coverage is now 58/124 runtime-opened and 66 known-uncovered.
+- Mutation proof: replacing max-fold cursor recovery with last-record-wins made the stale-handle cursor test fail (`expected 9, actual 3`); restored implementation passes.
+
+Verification:
+
+- lazily-cs `make check`: 123 tests passed; coverage gate passed.
+- lazily-cs `make format-check`: passed.
+- Root `make check`: 8,208/8,208 agent-doc tests passed, TLA models passed, corky passed. An initial unrelated corky fixed-port collision passed in isolation and the full clean rerun passed.
+- lazily-cs CI: completed/success for `b103f80`.
+- Root has no workflow named `CI`.
+- Pushed lazily-cs commit `b103f80`; pushed root pointer commit `631031ffa`.
+
+C# is admitted only to the durable-outbox peer group. Full sync/plane parity remains staged behind `#lzcssync`: CRDT-plane runtime, anti-entropy/resync, IPC transports, full-duplex sync driver, and the remaining reliable-sync/distributed/message-passing corpora are still open.
+
+Pre-existing lazily-cs `AGENTS.md`, `README.md`, and untracked `build/` were preserved. Unrelated root and `src/tmux-router` changes were not staged.
+<!-- agent:boundary:cf088dd7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzcsipc]~~
-- do [#lzcssync]
+- ~~do [#lzcssync]~~
 - do [#lzinteropcs]
 - do [#lzcsplane]
 - do [#lzcstemporal]
@@ -198,7 +225,8 @@ Confidence is high for the wire/schema capability; no escalation was required. `
 - do [#lzcspackage]
 - do [#asyncplanenever]
 - do [#lazilyconformancecoverag]
-- release + publish all lazily packages
+- 
+-d release + publish all lazily packages
 <!-- /agent:queue -->
 
 ## Backlog
@@ -207,7 +235,7 @@ Confidence is high for the wire/schema capability; no escalation was required. `
 - [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell + QueueStorage shipped at 01d2cf3; WorkQueueCell shipped at fafb88f; TopicCell shipped at 17256ce; Relay core and Count BackpressurePolicy shipped at 5ac24cc; SpillStore shipped at 3e79b92; Relay Transport shipped at 0cca2e6; Spill overflow integration shipped at c5d678d with idempotent-or-deduplicated replay guard and lossless cold+hot reconstruction. Keep C# eligible only for exact capabilities. Still add Bytes/Keys/Age meters before admitting C# to the full RelayCell peer group. (stays open: Bytes/Keys/Age metering and normative integration tests remain.)
 - [ ] 🚧 [#lzcscrdt] lazily-cs: PARTIAL/STAGED — HLC, ICellCrdt/IRegisterCrdt, LWW/MV registers, PnCounter, and the ReplicatedCell reactive bridge shipped at f1f32e2 with algebraic, replay-idempotence, and invalidation-suppression tests. Keep C# eligible only for these exact CRDT register capabilities. Still implement TextCrdt + delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt including dotted-frontier anti-entropy and concurrent-merge convergence, then replay the textcrdt, seqcrdt, crdt-tree, and lossless-tree corpora before full CRDT peer admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: TextCrdt/delta, SeqCrdt, CrdtTree, LosslessTreeCrdt, and their conformance runners remain.)
 - [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
-- [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
+- [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
 - [ ] [#lzcsplane] lazily-cs: state projection/mirror, CausalReceipts, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay receipts + signaling + agent-doc corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 33-39)
 - [ ] [#lzcstemporal] lazily-cs: TimerCell/IntervalCell/CronCell/DeadlineCell over a logical clock, debounce/throttle/sample/probabilistic-sample, tumbling/sliding/session windows; replay temporal + rateshape + windowing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 40, 41, 45)

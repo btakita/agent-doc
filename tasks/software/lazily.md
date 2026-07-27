@@ -14,6 +14,8 @@ queue: go
 ## Status
 
 <!-- agent:status patch=replace -->
+
+done
 <!-- /agent:status -->
 
 ## Exchange
@@ -156,14 +158,42 @@ The two non-sync-map defects were already corrected in the current implementatio
 The remaining sync-map defect is fixed in lazily-zig commit `bc3cbc9` (root pointer `466bf3a6a`). `ReactiveMap` now owns real graph nodes for every per-entry value reader plus independent membership and order reader kinds. `handle(key)` returns the actual stable graph identity; `keys`, `len`, `contains`, `position`, and `isEmpty` expose reader handles that register edges through `Compute.get`; writes, add/remove, and reorder invalidate only their exact reader class. Removal and map teardown dispose the owned nodes. A regression test proves dependency registration, exact invalidation, no equal-write wakeup, and handle stability across atomic moves.
 
 Verification passed: lazily-zig `zig build test`, lazily-zig `make check`, root `make check`, and GitHub Actions CI run `30234679063` (`success`). The unrelated dirty `AGENTS.md` edit was preserved and not committed.
-<!-- agent:boundary:19e7a766 -->
+
+### Re: #lazilyasynccomputedmapde — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lazilyasynccomputedmapde]
+
+
+Closed the remaining C# map gap without admitting fake peers into conformance.
+
+The two originally reported `AsyncComputedMap` defects were already fixed on the current branch: `Len(AsyncCompute?)` tracks the membership source, and `Remove` disposes the removed computed node. The remaining live defect was that C# had no real thread-safe or async source-map peers; the materialization suite concealed that absence with a hand-locked sync `SourceMap` and a bare `Dictionary`.
+
+Implemented:
+
+- `ThreadSafeSourceMap<TKey,TValue>` as a lock projection over the real graph-backed `SourceMap`, including entry/value, membership, order, move, insert, and reconcile surfaces.
+- `AsyncSourceMap<TKey,TValue>` with real per-entry `AsyncSource` handles plus independent reactive membership and order signals, stable handles across moves, and disposal on remove.
+- Replaced both runner-local substitutes in `MaterializationConformanceTests` with the real peer types.
+- Added one capability-gated source-flavor test covering the supported thread-safe and async peers. It proves exact value/membership/order invalidation, positive membership invalidation on add/remove, stable handle identity across reorder, and removed-node lifecycle. The test documentation now states the policy explicitly: a peer joins a feature group only after it exposes the real graph behavior; missing features remain staged rather than emulated.
+
+Verification:
+
+- `dotnet format --verify-no-changes` passed.
+- `make check` in `lazily-cs` passed: 78 tests, 42/124 canonical fixtures opened, 82 explicitly known-uncovered.
+- Root `make check` passed, including 8,202 `agent-doc` tests and the model checks.
+- C# implementation commit: `a3f5558` (`feat: add source maps for concurrent contexts`).
+- The required one-shot CI inspection found an older queue-test whitespace failure. Fixed and pushed as `68a6818` (`style: format queue conformance case`); local format verification and the full check passed afterward. Per the one-shot rule, the replacement run was not polled.
+- Root pointers pushed through `de10a72c2`.
+
+Pre-existing C# `AGENTS.md`, `README.md`, and generated `build/` changes were preserved and not committed.
+<!-- agent:boundary:f9e9c55e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#zigdefectsfound]~~
-- do [#lazilyasynccomputedmapde]
+- ~~do [#lazilyasynccomputedmapde]~~
 - do [#lazilytwoimplementations]
 - do [#lazilydartcomputedmap]
 - do [#recommendedspecdecision]
@@ -174,7 +204,6 @@ Verification passed: lazily-zig `zig build test`, lazily-zig `make check`, root 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
-- [ ] [#lazilyasynccomputedmapde] lazily-cs AsyncComputedMap defects: Len() is documented as reading through the membership plane but returns _order.Count, and _membership is written at :117 and never read anywhere (dead code, so Len is non-reactive); Remove (:92-98) never disposes the removed AsyncComputed, unlike both sync clear delegates (ReactiveMap.cs:299,:405), leaving readers on a stale cache. Also: no thread-safe or async SourceMap exists at all — conformance papers over it with a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336).
 - [ ] [#lazilytwoimplementations] lazily-js: two implementations disagree on moveTo with a negative index — reactive-family.js:270 uses Math.min(index, Math.max(len-1,0)) with no lower clamp, collections.js:196 uses Math.max(0, Math.min(index, len-1)). moveTo(key,-1) splices before the last element in one and at 0 in the other. Untested in both; pick one before any unification silently changes a published surface.
 - [ ] [#lazilydartcomputedmap] lazily-dart: ComputedMap entries are Slot, not Computed (collections.dart:430). Post-v2 Slot is the UNGUARDED pass-through while Computed carries the == memo guard — so ComputedMap does not have the guard its name implies, and this leaks publicly through handle(). Decide whether the handle becomes Computed.
 - [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.

@@ -664,14 +664,26 @@ Implemented and pushed the binary-owned fixes for both failure classes.
 - `#closeoutwaitchurn`: `session-check` now subscribes to the exact controller-owned closeout cycle instead of treating a long-lived supervisor PID or its five-minute lease as the request lifetime. Terminal-cycle and request-owner-release facts wake recovery immediately; owner release, controller reconnect, or a bounded 30-second crashed-owner fallback retries the keyed operation. Agent-doc commit `667b05fbe`; parent gitlink `04286481e`.
 
 Verification passed: all focused controller/closeout/repair suites, all 8,204 repository tests, and every formal model. The matching binary and JetBrains package were installed. CI run `30236403252` was in progress at its required one-time inspection.
-<!-- agent:boundary:de0d6315 -->
+
+### Re: session-check turn reactivity — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> do [#sessioncheckturnreactive]
+
+
+Completed `#sessioncheckturnreactive`. Managed orchestration no longer launches a redundant short-lived `agent-doc session-check` process after strict finalize. The connected MCP finalize boundary now returns binary-owned queue-continuation fields directly, while direct-exec Codex/OpenCode paths retain the explicit distrust check. The next admit/preflight still re-evaluates the same document-integrity guards, and a newer turn supersedes the previous turn owner.
+
+Regression coverage now verifies the MCP contract, queue fields, managed orchestration behavior, stale-owner supersession, and preflight closeout guards. `make check` passed all 8,205 tests plus every formal model; `make install` installed the matching binary, shared library, and JetBrains package. The new CI run was in progress at the single required inspection.
+
+Pushed agent-doc commit `168a5464c` (`refactor: make managed closeout turn-reactive`) and parent gitlink commit `0af7e284f` (`chore: advance agent-doc reactive closeout`). Unrelated dirty files were preserved and left unstaged.
+<!-- agent:boundary:5b5e2f48 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#compactcachedeletetombstone]~~
-- do [#sessioncheckturnreactive]
-- ~~do [#closeoutwaitchurn]~~
+- do [#backlogqueuepopulation]
+- ~~do [#sessioncheckturnreactive]~~
 - do [#steergateidle]
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
@@ -708,7 +720,7 @@ Verification passed: all focused controller/closeout/repair suites, all 8,204 re
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#sessioncheckturnreactive] #agent-doc-bug Track the turn reactively and supersede outstanding checks instead of requiring a separate session-check command. session-check exists as a distrust check on the AGENT: per AGENTS.md it is the direct-exec post-write guard that fails closed on an open cycle, a prompt-only exchange tail with no assistant response, or a likely direct assistant patchback that bypassed the binary write path. That is a real invariant, but it is enforced by a command the agent must remember to run — and which takes a closeout lease, can wedge, and whose own refusal text says 'retry only session-check'. Two changes: (1) the invariant is a property of the turn, and the NEXT turn's preflight already resolves the document, so it can evaluate the same guards without a separate agent-invoked step; (2) an outstanding check for turn N is MOOT once turn N+1 opens — supersession must cancel it and release its lease rather than leaving a dead claim to expire on a clock (the 2026-07-26 wedge was exactly a stale claim from a superseded probe). Keep session-check as an explicit command for direct-exec harnesses and debugging; remove it from the hot path. Related #closeoutterminalreactive, #preflightinbinary.
+- [ ] [#backlogqueuepopulation] Make backlog-to-queue population binary-owned: when backlog mutations add or ungate actionable items, reconcile the explicit Queue component in dependency order in the same closeout; do not leave only an answered triage prompt or require a manual repair cycle.
 - [ ] [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 

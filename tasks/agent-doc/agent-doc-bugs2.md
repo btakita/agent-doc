@@ -553,6 +553,11 @@ Changed paths this cycle: none. Verification: inspected the current closeout imp
 
 > **Queue prompt:**
 >
+> do [#adreplacementturndispatch]
+
+
+> **Queue prompt:**
+>
 > do [#replicareloadincremental]
 
 
@@ -567,22 +572,29 @@ Committed and pushed:
 - parent gitlink `08b4c9762` — `chore: update incremental CRDT replica reload`
 
 The single required CI snapshot for this push is in progress (run 30229224450); it was not polled. Unrelated dirty parent/submodule work remains untouched.
-<!-- agent:boundary:336993c2 -->
+
+### Re: Response
+
+Implemented and pushed `#adreplacementturndispatch`.
+
+The invariant is now explicit: fresh editor runs, interrupted-turn replacements, and realtime steering all enter through the same plain `agent-doc <file>` trigger, with the saved document as the only prompt payload. The authoritative actor/route transition owns the policy: ready, busy, and waiting-input actors receive the same direct plain trigger; prompt-aware routes retain queue-or-refuse behavior; protected interactive substates such as Claude's artifact picker still fail closed.
+
+Removed the separate selected-text supervisor steering transport from the Rust route runtime and JetBrains production action. Legacy selected-text RPC fields remain read-compatible but normalize into the ordinary editor route. Plain triggers skip prompt-bearing context synthesis, so an editor diff or delivery-ACK state cannot manufacture a second queue prompt.
+
+Regression coverage pins the actor transition rows, the route-edge submit/queue/refuse classifier, selected-text normalization, and JetBrains save-then-route behavior. Full Rust package suites, the JetBrains suite, and repository `make check` passed. No split steering migration path remains in production.
+
+Commits pushed:
+- `agent-doc` `557ef9366` (`fix: unify editor rerun dispatch`)
+- parent gitlink `e84ea1de1` (`agent-doc: unify editor rerun dispatch`)
+
+The required one-time CI observation found run `30231745449` in progress; it was not polled.
+<!-- agent:boundary:47ef1f6d -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#closeoutnormrefactor]~~
-- ~~do [#promptgrowthprovenance]~~
-- ~~do [#responseordercell]~~
-- ~~do [#haivenresponseorder]~~
-- ~~do [#crdtwaitsubscribe]~~
-- ~~do [#crdtwaitsplit]~~
-- ~~do [#sessioncheckguardsweep]~~
-- ~~do [#crdtdeliverybatch]~~
-- ~~do [#closeoutgitsubmodulescan]~~
-- ~~do [#replicareloadincremental]~~
-- do [#adreplacementturndispatch]
+- do [#pauseddeletetombstone]
+- ~~do [#adreplacementturndispatch]~~
 - do [#preflightreactive]
 - do [#sessioncheckturnreactive]
 - do [#closeoutwaitchurn]
@@ -622,7 +634,7 @@ The single required CI snapshot for this push is in progress (run 30229224450); 
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#adreplacementturndispatch] #agent-doc-bug Operator-reported 2026-07-26: interrupting a running Run Agent Doc turn, editing the prompt, then starting a new Run Agent Doc fails to converge, and realtime steering is rejected in the same window. Two exact errors: (1) 'failed to converge queued dispatch for tasks/professional/job-offers.md through editor IPC/disk: route_dispatch_queue: editor delivery ACK recovery did not settle within 8000ms and the exact canonical target lacks active retained-delivery proof; refusing closeout'; (2) 'Could not steer the active turn: authoritative supervisor rejected selected-text steering: turn steering requires an authoritative actor with an active busy turn'. OPERATOR'S STATED FIX: always send `agent-doc <file>` for BOTH starting a replacement turn in this scenario AND realtime steering (whether by text selection or diff), rather than a distinct dispatch path that can fail to converge. Note (2) is the same shape as #steergateidle, already in backlog: steering gated on an active busy turn and rejecting otherwise, where an idle pane should just dispatch. (1) is separate - a replacement turn after an interrupt has no retained-delivery proof for the edited prompt, so the 8s ACK recovery window expires and the dispatch is refused instead of falling back to the plain trigger.
+- [ ] [#pauseddeletetombstone] #agent-doc-bug Paused-cycle reconciliation must preserve operator deletions of struck agent:queue items. If an agent is paused (for example because the model is at capacity), the operator deletes struck queue items, and the agent later continues, closeout reconciliation must happen entirely inside the agent-doc binary and must not re-add those deleted items from an older cycle snapshot. Add a regression reproducing the lazily.md convergence-race/no-op-closeout sequence and make live operator deletions authoritative.
 - [ ] [#sessioncheckturnreactive] #agent-doc-bug Track the turn reactively and supersede outstanding checks instead of requiring a separate session-check command. session-check exists as a distrust check on the AGENT: per AGENTS.md it is the direct-exec post-write guard that fails closed on an open cycle, a prompt-only exchange tail with no assistant response, or a likely direct assistant patchback that bypassed the binary write path. That is a real invariant, but it is enforced by a command the agent must remember to run — and which takes a closeout lease, can wedge, and whose own refusal text says 'retry only session-check'. Two changes: (1) the invariant is a property of the turn, and the NEXT turn's preflight already resolves the document, so it can evaluate the same guards without a separate agent-invoked step; (2) an outstanding check for turn N is MOOT once turn N+1 opens — supersession must cancel it and release its lease rather than leaving a dead claim to expire on a clock (the 2026-07-26 wedge was exactly a stale claim from a superseded probe). Keep session-check as an explicit command for direct-exec harnesses and debugging; remove it from the hot path. Related #closeoutterminalreactive, #preflightinbinary.
 - [ ] [#preflightreactive] #agent-doc-feature Decompose preflight into derived reads plus signal-gated effects instead of a fixed imperative step sequence. Today 'agent-doc preflight' runs step 0 layout check, step 1 repair, step 2 commit, step 3 claims, step 3c related docs, step 4 diff, then queue convergence and baseline checkpoint, in that order, and the ordering is correct only by convention — a step inserted in the wrong place breaks it silently, which is the same failure class as #preflightsettleparity and #closeoutwaitchurn. The steps split cleanly: (a) DERIVABLE READS — diff vs baseline, queue convergence view, effective/required/suggested tier, agent_model, claims, related docs, session accretion — are pure functions of (document, baseline, config) and belong in the controller's document scope as Computeds, continuously current, with the agent reading a projection; (b) ORDERED EFFECTS — repair, commit-of-the-prior-cycle, baseline checkpoint, cycle-open — stay effects but become gated on derived signals rather than positionally ordered, so ordering is a data dependency instead of a call order. Cycle-open specifically does NOT become a Computed: it is an exactly-once durable transition carrying an identity (cycle-<id>) that the interrupted-cycle guard depends on, so it stays a state-machine transition. Success test: no preflight step can be skipped by a caller that forgot it, and inserting a new step cannot silently break an existing one's ordering. DEFERRED 2026-07-26: selected as the queue head but not worked this cycle - a standing operator goal (agent-doc plugin performance in IntelliJ and tmux) took precedence and consumed the turn. Item is unchanged and still fully actionable; nothing was partially landed against it.
 - [ ] [#closeoutwaitchurn] #agent-doc-bug A held foreground closeout tells the agent a fact, not what to do, so agents invent a poll loop. Observed 2026-07-26 on tasks/software/lazily.md: one write turn spent 8+ background commands on 'wait then read settle output', 're-run session-check after recycle', 'poll settle output again', plus 'admin recycle' and 'admin reload-lib' — all self-invented recovery. ROOT CAUSE (grounded): agent-doc-closeout-runtime-io/src/lib.rs:75 returns CloseoutOwnerClaimOutcome::HeldByOther as the bare string 'foreground closeout owner {id} pid={pid} role={role} remains active until {expires}' with NO next command, unlike every other fail-closed path (cf. agent-doc-turn/src/closeout_recovery.rs:391, which names the exact command). CycleSuperseded is the same shape. And 'agent-doc session-check' has no blocking wait — its only options are --codex-final-gate and --help — so 'wait for the owner' is not expressible and the agent must re-invoke, choosing its own interval. Each re-invocation pays the full ~30-guard sweep (measured 4.1s, inspect_with_warnings 2.8s of it) to answer one question: is the lease still held. FIX: (1) add 'session-check <FILE> --wait[=secs]' that blocks on the closeout-owner lease / terminal cycle phase, defaulting to CLOSEOUT_OWNER_LEASE_SECS, with a cheap owner-lease-only probe that skips the guard sweep while the owner is still held; (2) make HeldByOther and CycleSuperseded emit a directive — the one command to run, the known deadline from owner.expires_secs, and an explicit 'do NOT run admin recycle / admin reload-lib / write --commit: they perturb the capture you are waiting on'; (3) align SKILL.md and runbooks/commit.md so the shipped instruction says 'wait once with --wait' instead of 'retry session-check', which reads as 'poll'. Regression coverage: a held-lease session-check must return the directive text and must NOT be satisfiable by repeated bare invocations in the test harness.

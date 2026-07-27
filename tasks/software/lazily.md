@@ -205,7 +205,15 @@ Fresh verification at lazily-cs `813983e` confirms:
 C# therefore remains eligible only for the exact peer/feature groups whose production surface and canonical replay have shipped. Full peer admission stays blocked by the actionable implementation items `#lzcsqueues`, `#lzcscrdt`, `#lzcsipc`, `#lzcssync`, and `#lzcsplane`; the ledger text now names those dependencies explicitly.
 
 No source paths changed in this cycle. Existing unrelated lazily-cs `AGENTS.md`, `README.md`, and build-tree state were preserved. Confidence is high because the measurement came from the runtime-opened manifest rather than static source references. No escalation is needed.
-<!-- agent:boundary:38bbf6cd -->
+
+### Re: /goal Add missing lazily-cs features — gpt-5
+
+Goal created: **Add missing lazily-cs features**.
+
+The active implementation scope remains the five staged parity items already tracked in this document: queue metering, CRDT families, shared-memory/blob IPC, reliable/distributed sync, and the remaining plane surfaces. C# will enter each peer/feature group only after that production surface and its canonical fixture replay ship.
+
+No repository paths changed for this command. Goal creation was confirmed by the goal controller, confidence is high, and no escalation is needed.
+<!-- agent:boundary:3a714e20 -->
 <!-- /agent:exchange -->
 
 ## Queue

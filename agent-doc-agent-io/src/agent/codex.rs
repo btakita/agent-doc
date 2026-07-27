@@ -73,7 +73,8 @@ use agent_doc_turn_executor::codex_launch::{
     CODEX_CHILD_NETWORK_PROBE_MARKER, CodexNetworkProbeTransport, ManagedCapabilityProofTimings,
     OPENCODE_CHILD_SSH_PROBE_MARKER, add_dirs_from_args, args_contain_add_dir,
     classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
-    classify_child_writable_root_probe_failure, codex_child_network_probe_prompt,
+    classify_child_writable_root_probe_failure,
+    codex_child_network_and_writable_roots_probe_prompt, codex_child_network_probe_prompt,
     codex_child_writable_roots_probe_prompt, codex_exec_args_for_probe,
     codex_network_probe_shell_command, codex_network_probe_transport, codex_resume_restart_args,
     codex_text_file_busy_launch_retry_delay, codex_transport_403_429_diagnostic, default_base_args,
@@ -292,6 +293,47 @@ fn prove_codex_child_network_access(
         &String::from_utf8_lossy(&output.stderr),
         harness,
     )
+}
+
+fn prove_codex_child_network_and_writable_roots(
+    command: &str,
+    launch_args: &[String],
+    env: &std::collections::HashMap<String, String>,
+    roots: &[PathBuf],
+    harness: &str,
+    probe_timeout: Duration,
+) -> Result<()> {
+    let probe_args = codex_exec_args_for_probe(launch_args);
+    let codex =
+        Codex::new(Some(command.to_string()), Some(probe_args)).with_env(env_map_as_overrides(env));
+    let mut cmd = codex.build_command(None, false, None)?;
+    cmd.stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = spawn_agent_command(&mut cmd)
+        .map_err(|e| anyhow::anyhow!("failed to start {harness} combined capability probe: {e}"))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        Codex::write_prompt_to_child(
+            stdin,
+            &codex_child_network_and_writable_roots_probe_prompt(roots),
+        )?;
+    }
+    child.stdin.take();
+
+    let output = wait_with_timeout(child, probe_timeout, "combined capability", harness)?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let classification = classify_child_network_probe_failure(&detail, harness, false);
+        anyhow::bail!(
+            "{classification}: {harness} combined capability probe exited nonzero: {}",
+            detail.trim()
+        );
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    validate_codex_child_network_probe_output(&stdout, &stderr, harness)?;
+    validate_codex_child_writable_root_probe_output(&stdout, &stderr, harness)
 }
 
 fn prove_unrestricted_codex_network_access_with_command(
@@ -646,6 +688,12 @@ pub fn prove_managed_session_capabilities(
     let network_required =
         resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
             == CodexNetworkAccess::Enabled;
+    let writable_roots = if harness == "codex" {
+        add_dirs_from_args(args)
+    } else {
+        Vec::new()
+    };
+    let mut writable_child_proven = false;
     let mut network_probe = "not_required";
     if network_required {
         let phase_start = Instant::now();
@@ -671,6 +719,18 @@ pub fn prove_managed_session_capabilities(
                             harness,
                             probe_timeout,
                         )?;
+                    } else if !writable_roots.is_empty() {
+                        prove_codex_child_network_and_writable_roots(
+                            command,
+                            args,
+                            env,
+                            &writable_roots,
+                            harness,
+                            probe_timeout,
+                        )?;
+                        writable_child_proven = true;
+                        timings.writable_child = Some(phase_start.elapsed());
+                        network_probe = "child_dns_https_combined_writable";
                     } else {
                         prove_codex_child_network_access(
                             command,
@@ -681,7 +741,9 @@ pub fn prove_managed_session_capabilities(
                         )?;
                     }
                     remember_managed_network_child_proof(cache_key);
-                    network_probe = "child_dns_https";
+                    if network_probe == "not_required" {
+                        network_probe = "child_dns_https";
+                    }
                 }
             }
         }
@@ -707,11 +769,6 @@ pub fn prove_managed_session_capabilities(
         timings.ssh = Some(phase_start.elapsed());
     }
 
-    let writable_roots = if harness == "codex" {
-        add_dirs_from_args(args)
-    } else {
-        Vec::new()
-    };
     let writable_root_contract = writable_root_contract_id(&writable_roots);
     let proof_contract =
         managed_capability_proof_contract(command, args, env, fm, global_config, harness);
@@ -722,10 +779,19 @@ pub fn prove_managed_session_capabilities(
     if !writable_roots.is_empty() {
         timings.writable_launcher = Some(phase_start.elapsed());
     }
-    let phase_start = Instant::now();
-    prove_codex_child_writable_roots(command, args, env, &writable_roots, harness, probe_timeout)?;
-    if !writable_roots.is_empty() {
-        timings.writable_child = Some(phase_start.elapsed());
+    if !writable_child_proven {
+        let phase_start = Instant::now();
+        prove_codex_child_writable_roots(
+            command,
+            args,
+            env,
+            &writable_roots,
+            harness,
+            probe_timeout,
+        )?;
+        if !writable_roots.is_empty() {
+            timings.writable_child = Some(phase_start.elapsed());
+        }
     }
     timings.total = total_start.elapsed();
 
@@ -2128,7 +2194,10 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             "--add-dir".to_string(),
             dir.path().to_string_lossy().into_owned(),
         ];
-        let fm = Frontmatter::default();
+        let fm = Frontmatter {
+            managed_proof: Some(true),
+            ..Default::default()
+        };
         let env = std::collections::HashMap::new();
 
         let event = prove_managed_session_capabilities(
@@ -2169,7 +2238,10 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             "--add-dir".to_string(),
             root.to_string_lossy().into_owned(),
         ];
-        let fm = Frontmatter::default();
+        let fm = Frontmatter {
+            managed_proof: Some(true),
+            ..Default::default()
+        };
         let env = std::collections::HashMap::new();
         let expected_contract = writable_root_contract_id(&[root]).unwrap();
         let config = agent_doc_config::Config::default();
@@ -2344,8 +2416,48 @@ printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_messa
                 "danger-full-access",
                 "--add-dir",
                 "/tmp/repo",
+                "--ephemeral",
+                "--ignore-rules",
+                "-c",
+                "model_reasoning_effort=\"low\"",
             ]
         );
+    }
+
+    #[test]
+    fn combined_codex_probe_uses_one_low_latency_child_for_network_and_writes() {
+        let dir = TempDir::new().unwrap();
+        let count_file = dir.path().join("child-count");
+        let (_script_dir, script) = write_fake_codex_script(&format!(
+            r#"#!/bin/sh
+printf x >> '{}'
+cat >/dev/null
+printf '%s\n' '{{"type":"thread.started","thread_id":"probe-thread"}}'
+printf '%s\n' '{{"type":"item.completed","item":{{"type":"command_execution","command":"sh -lc probe","aggregated_output":"{}\n{}\n","exit_code":0}}}}'
+printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
+"#,
+            count_file.to_string_lossy(),
+            CODEX_CHILD_NETWORK_PROBE_MARKER,
+            CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER,
+        ));
+        let args = vec![
+            "--sandbox".to_string(),
+            "workspace-write".to_string(),
+            "--add-dir".to_string(),
+            dir.path().to_string_lossy().into_owned(),
+        ];
+
+        prove_codex_child_network_and_writable_roots(
+            &script,
+            &args,
+            &std::collections::HashMap::new(),
+            &[dir.path().to_path_buf()],
+            "codex",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(count_file).unwrap(), "x");
     }
 
     #[test]

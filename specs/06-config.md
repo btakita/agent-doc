@@ -53,9 +53,20 @@ OpenCode resolution chain: `frontmatter agent_args > frontmatter opencode_args >
 
 Codex network resolution chain: `frontmatter codex_network_access > config codex_network_access > inherit`.
 
+## managed_proof
+
+The managed Codex capability proof is off by default. Set
+`managed_proof: true` in document frontmatter to opt in. Project/global config
+cannot enable it implicitly. Once enabled, network access, required SSH targets,
+or resolved `--add-dir` writable roots select the proof phases; with none of
+those requirements the gate remains `NotRequired`.
+
+OpenCode capability-proof selection is unchanged and does not depend on this
+Codex opt-in.
+
 ## managed_proof_max_attempts / managed_proof_retry_backoff_secs / managed_proof_probe_timeout_secs
 
-Tune the managed-capability proof (network/SSH/writable-root) retry policy so a
+Tune an opted-in managed-capability proof (network/SSH/writable-root) retry policy so a
 transient probe failure (e.g. a brief network blip) self-heals instead of
 permanently disabling dispatch.
 
@@ -70,6 +81,9 @@ Frontmatter and global config share these field names. Managed-proof resolution
 chain (each field independently): `frontmatter > config > built-in default`.
 Between retries the gate stays `Pending` (gated but recoverable); operator
 `session clear` / `session interrupt-clear` / stop remain gate-exempt regardless.
+Codex probe children are ephemeral, skip project rule loading, force low
+reasoning effort, and combine network plus writable-root checks into one child
+when both are required.
 
 `claude_args` and `AGENT_DOC_CLAUDE_ARGS` are ignored when the active harness is not Claude. `codex_args` is ignored when the active harness is not Codex. `opencode_args` is ignored when the active harness is not OpenCode.
 

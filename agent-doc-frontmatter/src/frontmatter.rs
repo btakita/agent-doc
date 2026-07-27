@@ -460,6 +460,11 @@ pub struct Frontmatter {
     /// SSH mappings when the document omits direct `required_ssh_targets`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_ssh_profile: Option<String>,
+    /// Explicit opt-in for the managed Codex capability proof. Omitted or
+    /// false keeps the proof gate off even when the launch has network, SSH,
+    /// or additional writable-root requirements.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_proof: Option<bool>,
     /// Maximum number of managed-capability-proof attempts before the dispatch
     /// gate is set to `Failed`. A transient network blip is retried (with
     /// backoff) up to this many times so it no longer permanently wedges the
@@ -1463,6 +1468,11 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                 }
             }
             "required_ssh_profile" => fm.required_ssh_profile = val_str(),
+            "managed_proof" => {
+                if let Some(enabled) = value.as_bool() {
+                    fm.managed_proof = Some(enabled);
+                }
+            }
             "queue" => {
                 fm.queue = val_str();
                 normalize_queue_control(&mut fm);
@@ -2576,6 +2586,7 @@ mod tests {
             codex_network_access: None,
             required_ssh_targets: Vec::new(),
             required_ssh_profile: None,
+            managed_proof: None,
             managed_proof_max_attempts: None,
             managed_proof_retry_backoff_secs: None,
             managed_proof_probe_timeout_secs: None,
@@ -3260,7 +3271,7 @@ mod tests {
 
     #[test]
     fn parse_agent_args_and_harness_aliases() {
-        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\nopencode_args: \"--dangerously-skip-permissions\"\ncodex_network_access: enabled\nrequired_ssh_targets:\n  - sampleorders-server\n---\nBody\n";
+        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\nopencode_args: \"--dangerously-skip-permissions\"\ncodex_network_access: enabled\nrequired_ssh_targets:\n  - sampleorders-server\nmanaged_proof: true\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("--json"));
         assert_eq!(
@@ -3277,6 +3288,7 @@ mod tests {
             fm.required_ssh_targets,
             vec!["sampleorders-server".to_string()]
         );
+        assert_eq!(fm.managed_proof, Some(true));
     }
 
     #[test]
@@ -3287,6 +3299,7 @@ mod tests {
             opencode_args: Some("--dangerously-skip-permissions".to_string()),
             codex_network_access: Some(CodexNetworkAccess::Enabled),
             required_ssh_targets: vec!["sampleorders-server".to_string()],
+            managed_proof: Some(true),
             ..Default::default()
         };
         let written = write(&fm, "body\n").unwrap();
@@ -3302,6 +3315,7 @@ mod tests {
             fm2.required_ssh_targets,
             vec!["sampleorders-server".to_string()]
         );
+        assert_eq!(fm2.managed_proof, Some(true));
     }
 
     #[test]
@@ -3357,6 +3371,13 @@ mod tests {
                 "root@50.28.2.199".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn merge_fields_managed_proof() {
+        let result = merge_fields("Body\n", "managed_proof: true").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.managed_proof, Some(true));
     }
 
     #[test]

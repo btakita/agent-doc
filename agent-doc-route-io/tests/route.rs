@@ -373,7 +373,7 @@ pub(crate) fn write_codex_proof_status_fixture(
     let doc = dir.join("session.md");
     std::fs::write(
             &doc,
-            "---\nagent_doc_session: route-proof-status\nagent: codex\ncodex_network_access: enabled\n---\n",
+            "---\nagent_doc_session: route-proof-status\nagent: codex\ncodex_network_access: enabled\nmanaged_proof: true\n---\n",
         )
         .unwrap();
     std::fs::write(
@@ -403,7 +403,7 @@ pub(crate) fn write_codex_writable_proof_status_fixture(
     std::fs::write(
             &doc,
             format!(
-                "---\nagent_doc_session: route-proof-status\nagent: codex\ncodex_args: \"--add-dir {}\"\n---\n",
+                "---\nagent_doc_session: route-proof-status\nagent: codex\ncodex_args: \"--add-dir {}\"\nmanaged_proof: true\n---\n",
                 writable.display()
             ),
         )

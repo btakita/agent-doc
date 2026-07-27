@@ -20,6 +20,9 @@ pub fn managed_capability_contract_required(
     if harness != "codex" {
         return false;
     }
+    if fm.managed_proof != Some(true) {
+        return false;
+    }
     resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
         == CodexNetworkAccess::Enabled
         || !fm.required_ssh_targets.is_empty()
@@ -31,7 +34,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn managed_capability_contract_required_requires_network_ssh_or_writable_roots() {
+    fn codex_managed_capability_contract_requires_explicit_frontmatter_opt_in() {
         let config = Config::default();
         let mut fm = Frontmatter::default();
         assert!(!managed_capability_contract_required(
@@ -54,7 +57,7 @@ mod tests {
         ));
 
         fm.codex_network_access = Some(CodexNetworkAccess::Enabled);
-        assert!(managed_capability_contract_required(
+        assert!(!managed_capability_contract_required(
             &[],
             &fm,
             &config,
@@ -72,13 +75,21 @@ mod tests {
             &config,
             "claude"
         ));
+        fm.managed_proof = Some(true);
+        assert!(managed_capability_contract_required(
+            &[],
+            &fm,
+            &config,
+            "codex"
+        ));
 
         fm.codex_network_access = None;
+        fm.managed_proof = None;
         let config = Config {
             codex_network_access: Some(CodexNetworkAccess::Enabled),
             ..Default::default()
         };
-        assert!(managed_capability_contract_required(
+        assert!(!managed_capability_contract_required(
             &[],
             &fm,
             &config,
@@ -95,11 +106,19 @@ mod tests {
             &fm,
             &config,
             "claude"
+        ));
+        fm.managed_proof = Some(true);
+        assert!(managed_capability_contract_required(
+            &[],
+            &fm,
+            &config,
+            "codex"
         ));
 
         let config = Config::default();
+        fm.managed_proof = None;
         fm.required_ssh_targets = vec!["example-host".to_string()];
-        assert!(managed_capability_contract_required(
+        assert!(!managed_capability_contract_required(
             &[],
             &fm,
             &config,
@@ -117,15 +136,23 @@ mod tests {
             &config,
             "claude"
         ));
+        fm.managed_proof = Some(true);
+        assert!(managed_capability_contract_required(
+            &[],
+            &fm,
+            &config,
+            "codex"
+        ));
 
         fm.required_ssh_targets.clear();
+        fm.managed_proof = None;
         let add_dir_args = [
             "exec".to_string(),
             "--json".to_string(),
             "--add-dir".to_string(),
             "/tmp/example".to_string(),
         ];
-        assert!(managed_capability_contract_required(
+        assert!(!managed_capability_contract_required(
             &add_dir_args,
             &fm,
             &config,
@@ -143,9 +170,17 @@ mod tests {
             &config,
             "claude"
         ));
-
-        let equals_add_dir_args = ["exec".to_string(), "--add-dir=/tmp/example".to_string()];
+        fm.managed_proof = Some(true);
         assert!(managed_capability_contract_required(
+            &add_dir_args,
+            &fm,
+            &config,
+            "codex"
+        ));
+
+        fm.managed_proof = None;
+        let equals_add_dir_args = ["exec".to_string(), "--add-dir=/tmp/example".to_string()];
+        assert!(!managed_capability_contract_required(
             &equals_add_dir_args,
             &fm,
             &config,
@@ -156,6 +191,20 @@ mod tests {
             &fm,
             &config,
             "opencode"
+        ));
+        fm.managed_proof = Some(false);
+        assert!(!managed_capability_contract_required(
+            &equals_add_dir_args,
+            &fm,
+            &config,
+            "codex"
+        ));
+        fm.managed_proof = Some(true);
+        assert!(managed_capability_contract_required(
+            &equals_add_dir_args,
+            &fm,
+            &config,
+            "codex"
         ));
     }
 }

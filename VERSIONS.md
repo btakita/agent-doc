@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.40
+
+_JetBrains plugin 0.2.300; VS Code extension 0.2.57._
+
+- **Managed Codex capability proof is now explicit and faster.** The proof gate is off by default and activates only when document frontmatter sets `managed_proof: true`; project/global configuration cannot opt a document in, and managed OpenCode behavior is unchanged. Opted-in Codex probe children now run ephemeral, ignore project rules, force low reasoning effort, and combine simultaneous network and writable-root checks into one child while preserving the existing exact marker contracts. Frontmatter, gate-transition, launch-argument, and single-child regressions cover the policy and latency paths.
+
 ## 0.35.39
 
 _JetBrains plugin 0.2.300; VS Code extension 0.2.57._

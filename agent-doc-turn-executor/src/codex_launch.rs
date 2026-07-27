@@ -390,16 +390,28 @@ pub fn codex_resume_restart_args(
 }
 
 pub fn codex_exec_args_for_probe(launch_args: &[String]) -> Vec<String> {
-    if launch_args.first().is_some_and(|arg| arg == "exec") {
+    let mut args = if launch_args.first().is_some_and(|arg| arg == "exec") {
         let mut args = launch_args.to_vec();
         if !args.iter().any(|arg| arg == "--json") {
             args.insert(1, "--json".to_string());
         }
-        return args;
-    }
+        args
+    } else {
+        let mut args = vec!["exec".to_string(), "--json".to_string()];
+        args.extend(launch_args.iter().cloned());
+        args
+    };
 
-    let mut args = vec!["exec".to_string(), "--json".to_string()];
-    args.extend(launch_args.iter().cloned());
+    if !args.iter().any(|arg| arg == "--ephemeral") {
+        args.push("--ephemeral".to_string());
+    }
+    if !args.iter().any(|arg| arg == "--ignore-rules") {
+        args.push("--ignore-rules".to_string());
+    }
+    // Capability probes only need one exact shell command. Do not inherit a
+    // user's high/xhigh reasoning setting for this latency-sensitive child.
+    args.push("-c".to_string());
+    args.push("model_reasoning_effort=\"low\"".to_string());
     args
 }
 
@@ -463,6 +475,32 @@ pub fn codex_child_network_probe_prompt() -> String {
     format!(
         "Run exactly this command:\n\nsh -lc '{}'",
         codex_network_probe_shell_command()
+    )
+}
+
+pub fn codex_child_network_and_writable_roots_probe_prompt(roots: &[PathBuf]) -> String {
+    let roots = roots
+        .iter()
+        .map(|root| shell_single_quote(&root.to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "Run exactly this command:\n\n\
+         sh -lc '{}; \
+         for dir do \
+         test -d \"$dir\"; \
+         probe=\"$dir/.agent-doc-write-probe-$$\"; \
+         printf \"%s\" agent-doc > \"$probe\"; \
+         rm -f \"$probe\"; \
+         if test -f \"$dir/HEAD\" || test -f \"$dir/commondir\" || test -d \"$dir/objects\"; then \
+         lock=\"$dir/index.lock\"; \
+         set -C; : > \"$lock\"; set +C; \
+         rm -f \"$lock\"; \
+         fi; \
+         done; \
+         printf \"{}\\n\"' sh {roots}",
+        codex_network_probe_shell_command(),
+        CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER,
     )
 }
 

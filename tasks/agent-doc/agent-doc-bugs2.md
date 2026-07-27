@@ -98,7 +98,34 @@ Verification passed:
 The broader reactive refactor remains separate: durable document text should stay under the Yrs/CRDT authority, while a pass-scoped Lazily `CurrentDocument` projection keyed by CRDT revision can cache derived closeout/queue views and invalidate whenever the operator types. That preserves concurrent edits instead of creating a second text authority.
 
 The reported `lazily.md` failures are captured as one write-safety follow-up: operator queue additions and deletions were lost or resurrected during closeout/repair; combined gate mutation and a malformed closing exchange marker triggered File Cache Conflict/churn; retained intent then required installing a one-repair-newer local binary/library and recycling the controller. The required invariant is that binary-owned repair/retry rebases on the current CRDT state vector, preserves operator edits, repairs structural markers idempotently, negotiates implementation-version skew itself, and never direct-replaces or resurrects stale text.
-<!-- agent:boundary:0bba7e41 -->
+
+### Re: Compact Exchange performance — gpt-5
+
+> **Queue prompt:**
+>
+> Improve the performance of Compact Exchange.
+
+Implemented and pushed the Compact Exchange closeout optimization in agent-doc commit `28377eb30` (`perf: reduce compact closeout latency`).
+
+The binary now reuses the current document content already resolved by terminal cycle closeout when clearing pipeline frontmatter, while leaving the convergence port responsible for rebasing concurrent operator edits. Once the primary pipeline transition has made the cycle terminal, post-commit cleanup also folds the redundant capture `WriteApplied` + `Committed` transitions into that terminal cycle instead of repeating command-plane round trips. Recovery retains the old capture transition when the primary terminal transition did not succeed. Per-phase compact, commit, and finalization telemetry was added so later work can target the remaining waits.
+
+Cold forced-disk benchmark on the same isolated document:
+
+- End-to-end Compact Exchange: about 1.05 s before, 844 ms after (about 20% faster).
+- Commit finalization: about 445 ms before, 244 ms after.
+- Redundant capture phase: about 250 ms before, 49 ms after.
+
+Verification passed:
+
+- Targeted cycle-state, git, and commit library tests.
+- Full `make check`: 8,210 tests passed, 241 skipped; formal closeout, tmux-sync, CRDT-lineage, and response-checkpoint models passed.
+- Latest pre-push CI run was green.
+- Pushed `28377eb30` to `origin/main`.
+
+The broader reactive refactor remains separate: durable document text should stay under the Yrs/CRDT authority, while a pass-scoped Lazily `CurrentDocument` projection keyed by CRDT revision can cache derived closeout/queue views and invalidate whenever the operator types. That preserves concurrent edits instead of creating a second text authority.
+
+The reported `lazily.md` failures are captured as one write-safety follow-up: operator queue additions and deletions were lost or resurrected during closeout/repair; combined gate mutation and a malformed closing exchange marker triggered File Cache Conflict/churn; retained intent then required installing a one-repair-newer local binary/library and recycling the controller. The required invariant is that binary-owned repair/retry rebases on the current CRDT state vector, preserves operator edits, repairs structural markers idempotently, negotiates implementation-version skew itself, and never direct-replaces or resurrects stale text.
+<!-- agent:boundary:6db82553 -->
 <!-- /agent:exchange -->
 ## Queue
 

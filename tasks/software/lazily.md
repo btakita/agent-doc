@@ -26,27 +26,35 @@ queue: go
 Compacted content:
 - Archived 31 response topic(s): do [#lazilyupgradeconformance]; do [#lazilyzigconformance]; should the JSON `type` field be an enum?; 28 more
 - Prior summary/context: prior compacted content: Archived 26 response topic(s): the done-archive quote bug is fixed, not worked around; Phase...
-<!-- agent:boundary:33f5da78 -->
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#lazilycppconformance]
+
+
+Completed `#lazilycppconformance`: all nine affected C++ conformance runners now parse and replay the canonical corpus rather than checking a `model` marker and executing an unchecked transcription.
+
+Changed paths: `tests/test_json.hpp` plus the rate-shape, coordination, temporal, windowing, service, resilience, presence, membership, and CRDT-tree runners. The shared test JSON reader now provides typed member/array/string/number/bool/nullable accessors. Fixture config, operations, return values, projections, invalidation expectations, and CRDT-tree scenario algebra now drive the tests directly.
+
+Audit correction: the current corpus is 32 fixtures across nine runners (6 + 5 + 4 + 4 + 4 + 4 + 3 + 1 + 1), not the backlog's stale 33/ten count.
+
+Verification:
+- Each of the nine focused CMake targets built and its focused CTest passed.
+- `make check` passed in lazily-cpp, including conformance coverage.
+- C++ commit `a370fe8` and root pointer commit `dd873d892` were pushed.
+- Latest C++ CI run `30232956446` is in progress; per repository policy it was inspected once and not polled.
+- Root `make check` was attempted but is red only in unrelated concurrent `src/agent-doc` work (`agent-doc-preflight-command-io`: unused imports/variables). `src/agent-doc` was left untouched. The root repository has no workflow named `CI`.
+
+Confidence: high. No capability-staged peer was admitted or changed.
+<!-- agent:boundary:61b8c681 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzjsnpmtrustedpub]~~
-- ~~do [#lzcsqueues]~~
-- ~~do [#lzcscrdt]~~
-- ~~do [#lzcsipc]~~
-- ~~do [#lzcssync]~~
-- ~~do [#lzcstemporal]~~
-- ~~do [#lzcscluster]~~
-- ~~do [#lzcsplane]~~
-- ~~do [#lzcspackage]~~
-- ~~do [#asyncplanenever]~~
-- ~~do [#lazilyrenameinverted]~~
-- ~~do [#readmeexamplesreference]~~
-- ~~do [#signalgetsignallive]~~
-- ~~do [#recommendeddecidewhether]~~
-- do [#lazilycppconformance]
+- ~~do [#lazilycppconformance]~~
 - do [#lazilycppcollections]
 - do [#trackedcopieslazily]
 - do [#firstunificationwire]
@@ -76,7 +84,6 @@ Compacted content:
 - [ ] [#lazilytwoimplementations] lazily-js: two implementations disagree on moveTo with a negative index — reactive-family.js:270 uses Math.min(index, Math.max(len-1,0)) with no lower clamp, collections.js:196 uses Math.max(0, Math.min(index, len-1)). moveTo(key,-1) splices before the last element in one and at 0 in the other. Untested in both; pick one before any unification silently changes a published surface.
 - [ ] [#lazilydartcomputedmap] lazily-dart: ComputedMap entries are Slot, not Computed (collections.dart:430). Post-v2 Slot is the UNGUARDED pass-through while Computed carries the == memo guard — so ComputedMap does not have the guard its name implies, and this leaks publicly through handle(). Decide whether the handle becomes Computed.
 - [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.
-- [ ] [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
 - [ ] [#lazilycppcollections] lazily-cpp: 15 collections fixtures still uncovered — 9 with no coverage at all (cellmap_atomic_move, cellmap_independence, keyed_reconciliation_lis, semtree_incremental, stableid_alignment, textcrdt_convergence, textcrdt_delta_sync, workqueue_competing_delivery, workqueue_lease_deadletter) and 6 hand-transcribed (mergecell_algebra, 5x queuecell_*). Largest single body of remaining conformance work; spans five separate primitives. Tracked in the KNOWN_UNCOVERED ledger.
 - [ ] [#trackedcopieslazily] The tracked copies of lazily-spec conformance fixtures inside lazily-py (tests/conformance), lazily-dart (test/conformance), lazily-rs (tests/conformance) and lazily-go (test/conformance) are kept byte-identical to canonical BY HAND with no sync script or drift check. This cycle had to flip the same fixture in three places. Add a sync/verify script (or make the runners read the sibling checkout) so a canonical edit cannot silently miss a vendored copy.
 <!-- /agent:backlog -->

@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#lzqfzig]
+
+
+> **Queue prompt:**
+>
 > do [#lzqfports]
 
 
@@ -374,7 +379,21 @@ The root repository records exactly those five submodule revisions in `363452b0d
 C# was intentionally not admitted to this peer group. It remains explicitly staged under `#lzcsqueues` until its queue-family implementations and the same admission gates exist; no unsupported C# behavior is presented as conformance.
 
 Confidence: high. The implementations, canonical replay, exact invalidation behavior, concurrency/atomicity probes, mutation checks, repository gates, commits, pushes, and one-time CI queries were all verified. No escalation is required for this item.
-<!-- agent:boundary:aaaf86a6 -->
+
+### Re: Response
+
+Completed `#lzqfzig` as the graph-reactivity prerequisite, without prematurely admitting Zig's thread-safe or async flavors.
+
+Zig revision `90c0241a5cf81aed8029f100de5ddfb8433cb5c7` (`queue: bind sync readers to graph`) is pushed to `origin/main`; the root records it in `806d70eef` (`lazily: graph-back Zig queue readers`). Changed paths are `README.md`, `src/lazily/context.zig`, `src/lazily/cell.zig`, new `src/lazily/reader_kind.zig`, `src/lazily/queue.zig`, and `src/lazily/work_queue.zig`.
+
+The previous plain polling counters are replaced by runtime-minted graph node identities. QueueCell exposes demand-derived `head`/`len`/`is_empty`/`is_full`/`closed` handles; TopicCell gives every subscriber its own graph-backed reader; WorkQueueCell exposes independent pending/empty/in-flight/dead-letter handles. `Compute.get(...)` now registers real dependency edges, while direct handle `.get()` is explicitly untracked. Multi-root changes publish under one graph lock and eager dependents drain only after the complete changed-kind set is visible. Runtime cache keys are monotonic per Context so multiple collection instances cannot alias merely because they share a comptime initializer.
+
+Verification: `zig build test` and final `make check` passed. Dedicated graph tests prove downstream computed nodes rerun for Queue, Topic, and WorkQueue changes and remain warm for independent reader kinds. Mutation checks deliberately removed Queue `len`, Topic publish, and WorkQueue pending invalidation; the respective conformance/graph gates failed, then each mutation was restored and the baseline gate passed. Latest CI was queried once after push and is queued as run `30228405960`.
+
+The canonical coverage matrix remains partial for Zig's three synchronous queue-family rows because this item removes the false-reactivity prerequisite only; it does not yet ship the all-flavor 11-fixture runner. Thread-safe and async Zig remain staged for their later flavor item, and C# remains staged under `#lzcsqueues`. The pre-existing uncommitted `AGENTS.md` change in lazily-zig was preserved and excluded from the commit.
+
+Confidence: high. The implementation, graph-edge behavior, independence, atomic changed-kind publication, mutation discrimination, repository gate, commit, push, and one-time CI lookup were verified. No escalation is required.
+<!-- agent:boundary:b4105822 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -386,7 +405,7 @@ Confidence: high. The implementations, canonical replay, exact invalidation beha
 - ~~do [#lazilybenchmarkregressio]~~
 - ~~do [#lzqfjs]~~
 - ~~do [#lzqfports]~~
-- do [#lzqfzig]
+- ~~do [#lzqfzig]~~
 - do [#maphandlecleardependents]
 - do [#lazilycellfamily]
 - do [#lazilyspecdisagrees]
@@ -429,7 +448,6 @@ Confidence: high. The implementations, canonical replay, exact invalidation beha
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
-- [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md

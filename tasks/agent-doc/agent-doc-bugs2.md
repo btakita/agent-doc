@@ -335,7 +335,31 @@ Commits:
 ### Re: #adctxpreflight
 
 Retained response linkage repaired for the committed Phase 3 closeout.
-<!-- agent:boundary:d7755d58 -->
+
+### Re: #adctxorchestrate
+
+> **Queue prompt:**
+>
+> do [#adctxorchestrate]
+
+
+Implemented and committed Phase 4 dynamic-context orchestration integration.
+
+- Sequential, parallel/worktree, ordered DAG, and resumed scheduled-DAG dispatch now build one parent-cycle context manifest and thread child-specific views through the orchestration boundary.
+- Every child receives the same durable `tsift://` pack handles and bounded expansion commands. First-use excerpts are deterministically partitioned across children, so fan-out does not duplicate chunk payloads or session history.
+- Queue continuations and same-cycle retries reuse the SQLite injection ledger as handle-only references; changed source hashes are the transition that permits re-expansion.
+- Child prompt assembly suppresses its own dynamic-context rebuild when orchestration owns the manifest, avoiding repeated tsift launches and duplicate prompt sections.
+- Stateful tsift/SQLite ownership now lives in the dedicated `agent-doc-dynamic-context-io` adapter crate, preserving the pure prompt-rendering boundary.
+
+Architecture proof:
+
+- Invariant: one parent orchestration cycle owns context projection; children share durable identities, and any expanded chunk text appears in at most one child prompt until its source hash changes.
+- Policy owner: `agent-doc-dynamic-context-io::DynamicContextSnapshot`, with orchestration modules only gathering targets and applying child views.
+- Tested transitions: first-use expansion, parallel handle sharing with nonduplicated excerpts, same-cycle manifest reuse, later queue-cycle reference-only reuse, and changed-hash re-expansion.
+- Edited surfaces: the dynamic-context IO adapter, prompt-context adapter, plan projection, and sequential/parallel/DAG dispatch paths. No migration or operator verification remains.
+
+Verification passed: focused dynamic-context tests, focused orchestration tests, the prompt-context architecture guard, `make check` (8,235 tests plus model checks), and the latest CI run was green. Commits: `4878e65dd` in `src/agent-doc` and parent gitlink commit `157828ce2`.
+<!-- agent:boundary:3c115ee6 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -344,7 +368,7 @@ Retained response linkage repaired for the committed Phase 3 closeout.
 - ~~Please make the Codex managed capacity proof off by default with an opt-in based on the frontmatter. Please also improve the latency of the managed capacity proof.~~
 - ~~do [#adctxledger]~~
 - ~~do [#adctxpreflight]~~
-- do [#adctxorchestrate]
+- ~~do [#adctxorchestrate]~~
 - do [#adctxcompact]
 - 📌 do [#2y8j]
 - 📌 do [#cdtcutover]
@@ -379,7 +403,6 @@ Retained response linkage repaired for the committed Phase 3 closeout.
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
-- [ ] [#adctxorchestrate] [focused-cycle] Dynamic-context injection ledger Phase 4 after #adctxpreflight: integrate child-dispatch and queue-continuation behavior so context projection/ledger decisions remain correct across orchestration boundaries and do not duplicate injected context. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxcompact] [focused-cycle] Dynamic-context injection ledger Phase 5 after #adctxorchestrate: define and implement Compact Exchange/restart semantics for projected context and the durable ledger, preserving explainable expanded/referenced/skipped diagnostics without replay after compact or process restart. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 

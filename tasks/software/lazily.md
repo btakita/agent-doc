@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#lzjsnpmtrustedpub]
+
+
+> **Queue prompt:**
+>
 > do [#lazilyspecdisagrees]
 
 
@@ -487,13 +492,24 @@ This is exactly the staged-capability policy: a shipped, tested implementation j
 ### Re: Response
 
 Continuing. `#lazilyspecdisagrees` is already resolved by the current spec and Dart implementation: the shipped thread-safe flavor remains admitted, and its focused conformance test passed. Advancing to the next queued item.
-<!-- agent:boundary:bf755021 -->
+
+### Re: Response
+
+`#lzjsnpmtrustedpub` is correctly an operator gate, not a repository change.
+
+- Changed paths: none. Existing local `README.md` and `build/` changes were left untouched.
+- Repository proof: `.github/workflows/release.yml` already uses a GitHub-hosted runner, `id-token: write`, Node 24, the public registry, and `npm publish --provenance --access public`. `package.json` identifies `@lazily-hub/lazily-js` and the exact `https://github.com/lazily-hub/lazily-js.git` repository.
+- Runtime proof: `npm view` reports published version/latest `0.29.1`. Release run `30215783298` passed checkout, install, and tests, signed provenance, then npm rejected the PUT with the permission-masked E404. The local npm login is valid (`btakita`), but even `npm trust list` requires one-time browser authentication, so the account change cannot be completed unattended.
+- Exact unblock: authenticate the npm CLI/browser challenge, then create the GitHub Actions trust with organization `lazily-hub`, repository `lazily-js`, workflow filename `release.yml`, no environment, and allowed action `npm publish` (equivalently: `npm trust github @lazily-hub/lazily-js --file release.yml --repo lazily-hub/lazily-js --allow-publish -y`). npm’s official trusted-publisher documentation confirms those fields and that they are case-sensitive.
+- Verification after unblock: `npm trust list @lazily-hub/lazily-js`, then publish the next version tag; do not retry the already manually published `0.29.1` as proof.
+- Confidence: high. Escalation: npm account owner/browser authentication required.
+<!-- agent:boundary:db7d4048 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lzjsnpmtrustedpub]
+- ~~do [#lzjsnpmtrustedpub]~~
 - do [#lzcsqueues]
 - do [#lzcscrdt]
 - do [#lzcsipc]
@@ -547,7 +563,6 @@ Continuing. `#lazilyspecdisagrees` is already resolved by the current spec and D
 - [ ] [#readmeexamplesreference] README examples reference types that no longer exist: lazily-go README:82 `lazily.NewCell` (never defined, example does not compile) and README:209 `*Cell[V]`; lazily-cpp README:54,280,387 + AGENTS.md:43 `CellHandle`/`SlotHandle` (deleted); lazily-dart README:38,329 claims a `Signal` back-compat alias that does not exist; lazily-py README:225 calls `CellSlot` canonical.
 - [ ] [#signalgetsignallive] signal/getSignal still live and UNDEPRECATED on the threadsafe/async planes after the sync plane retired them: lazily-kt ThreadSafeContext.kt:195,247 + AsyncContext.kt:624, lazily-js reactive-async.d.ts:85, lazily-zig root.zig:86,90. Deprecate or migrate to eager Computed.
 - [ ] [#recommendeddecidewhether] [recommended] Decide whether the domain *Cell family (QueueCell / TopicCell / RelayCell / MergeCell / TimerCell / LeaseCell / CircuitBreakerCell / PresenceCell / ...) follows the kernel to *Source, or is deliberately pinned as spec-level naming. Three independent bindings flagged it as the largest remaining Cell-vocabulary surface. It must move in lockstep across all 9 bindings, so it needs a decision before anyone starts. RECOMMENDATION 2026-07-26 (agent): KEEP *Cell. The kernel renamed the two value-node KINDS (Source/Computed) and kept Cell as the concept for a value-bearing reactive node. A QueueCell is not a kind — it composes them (five Source<u64> reader-version cells plus derived readers), so QueueSource would imply "written from outside, folds under a merge policy", which is false for a queue. Same for TimerCell/LeaseCell/CircuitBreakerCell/PresenceCell: each is a composite of a pure core plus projecting cells. KEPT OPEN: naming must converge with the operator before editing (9 bindings in lockstep + deprecation surface on every public type). Unblocks on a yes/no. If YES, scope is: spec cell-model.md first, then 9 bindings in lockstep with deprecated aliases, plus a decision on whether MergeCell collapses entirely (under the kernel it is already Source<T,M> with a non-default policy)
-- [ ] [#lzjsnpmtrustedpub] lazily-js: register @lazily-hub/lazily-js as a trusted publisher on npmjs.com so release.yml can publish unattended. The workflow is correct — its OIDC exchange succeeds and provenance is signed and logged to Sigstore — but the upload is rejected with E404 PUT https://registry.npmjs.org/@lazily-hub%2flazily-js, meaning npm does not associate the package with that publisher (or the token lacks scope permission). This has now E404'd on two consecutive releases and each time required a manual 'npm publish --access public --otp=<code>' from the operator. Fix is npmjs.com-side configuration, not a code change
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)

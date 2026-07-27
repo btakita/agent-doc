@@ -40,7 +40,21 @@ done
 Compacted content:
 - Archived 2 response topic(s): Live Sync Tmux Layout crash verification; Live Sync Tmux Layout crash verification
 - Prior summary/context: prior compacted content: Archived 36 response topic(s): #adbacklogorphanseg; closeout settling latency; closeout sett...
-<!-- agent:boundary:b50ca63f -->
+
+### Re: Live Sync Tmux Layout crash verification — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> 📌 do [#tmuxsynccrashlog]
+
+Verified and closed `#tmuxsynccrashlog`; the repeated live JetBrains runs did not crash or restart tmux.
+
+The agent-doc ops log contains fourteen `sync_tmux_layout` completions, including a tight repeated-run burst from `2026-07-26T05:47:02Z` through `05:48:30Z`. Every command completed with `exit_code=0`. The safe-passive runs either correctly preserved the current layout while an unresolved file remained blocked or later applied the requested layout; their tmux-router phases completed normally.
+
+Tmux PID `6538` started at `2026-07-25T17:39:56Z`, before that burst, and is still the active server for both current sessions and all listed windows. The current IntelliJ `idea.log` extends through this turn and contains no agent-doc/tmux crash, fatal, SIGSEGV, or SIGABRT evidence.
+
+Changed paths: none. Commands/evidence: bounded ops-log digest and burst inspection, current IDE-log scan, process start/uptime, and live tmux session/window inventory. Confidence: high. Escalation: none. Because the server stayed stable and the commands resolved through safe-passive preserve/apply outcomes, no follow-up defect was filed.
+<!-- agent:boundary:555e9e1c -->
 <!-- /agent:exchange -->
 ## Queue
 

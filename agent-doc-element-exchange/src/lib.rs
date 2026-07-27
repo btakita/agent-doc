@@ -460,11 +460,73 @@ fn exchange_response_block_matches_signature(
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PromptGrowthProvenanceInput<'a> {
+    admission_baseline: &'a str,
+    pre_write_authority: &'a str,
+}
+
+impl<'a> PromptGrowthProvenanceInput<'a> {
+    pub fn new(admission_baseline: &'a str, pre_write_authority: &'a str) -> Self {
+        Self {
+            admission_baseline,
+            pre_write_authority,
+        }
+    }
+
+    fn classify(self, prompt_lines: &[String]) -> PromptGrowthProvenance {
+        if prompt_lines.is_empty()
+            || !exchange_contains_normalized_line_sequence(self.pre_write_authority, prompt_lines)
+        {
+            return PromptGrowthProvenance::Unproven;
+        }
+        if exchange_contains_normalized_line_sequence(self.admission_baseline, &prompt_lines[..1]) {
+            PromptGrowthProvenance::AdmissionBaselineGrowth
+        } else {
+            PromptGrowthProvenance::PostPreflightFollowUp
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PromptGrowthProvenance {
+    AdmissionBaselineGrowth,
+    PostPreflightFollowUp,
+    Unproven,
+}
+
+#[derive(Clone, Copy)]
+enum ResponsePromptOrderEvidence<'a> {
+    Boundary {
+        prompt_must_exist_in: Option<&'a str>,
+    },
+    PromptGrowth(PromptGrowthProvenanceInput<'a>),
+}
+
+impl<'a> ResponsePromptOrderEvidence<'a> {
+    fn prompt_must_exist_in(self) -> Option<&'a str> {
+        match self {
+            Self::Boundary {
+                prompt_must_exist_in,
+            } => prompt_must_exist_in,
+            Self::PromptGrowth(input) => Some(input.pre_write_authority),
+        }
+    }
+
+    fn permits_repair(self, prompt_lines: &[String], saw_boundary_after_heading: bool) -> bool {
+        match self {
+            Self::Boundary { .. } => saw_boundary_after_heading,
+            Self::PromptGrowth(input) => {
+                input.classify(prompt_lines) == PromptGrowthProvenance::AdmissionBaselineGrowth
+            }
+        }
+    }
+}
+
 fn find_response_precedes_prompt_candidate(
     exchange_content: &str,
     response: Option<&str>,
-    prompt_must_exist_in: Option<&str>,
-    prompt_must_start_in: Option<&str>,
+    evidence: ResponsePromptOrderEvidence<'_>,
 ) -> Option<(usize, usize, usize)> {
     let segments = split_exchange_line_segments(exchange_content);
     let signature = normalized_response_signature_lines(response);
@@ -506,25 +568,7 @@ fn find_response_precedes_prompt_candidate(
                 }
             }
             let prompt_lines = normalized_non_boundary_exchange_lines(&segments[idx..prompt_end]);
-            let prompt_matches_authority = prompt_must_exist_in.is_some_and(|required_doc| {
-                !prompt_lines.is_empty()
-                    && exchange_contains_normalized_line_sequence(required_doc, &prompt_lines)
-            });
-            let prompt_started_in_partial_baseline =
-                prompt_must_start_in.is_some_and(|partial_baseline| {
-                    prompt_lines.first().is_some_and(|first_line| {
-                        exchange_contains_normalized_line_sequence(
-                            partial_baseline,
-                            std::slice::from_ref(first_line),
-                        )
-                    })
-                });
-            let has_order_repair_evidence = if prompt_must_start_in.is_some() {
-                prompt_matches_authority && prompt_started_in_partial_baseline
-            } else {
-                saw_boundary_after_heading
-            };
-            if has_order_repair_evidence
+            if evidence.permits_repair(&prompt_lines, saw_boundary_after_heading)
                 && line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
                 && exchange_response_block_matches_signature(
                     &segments,
@@ -551,33 +595,42 @@ pub fn response_precedes_prompt_in_exchange(
     response: Option<&str>,
     prompt_must_exist_in: Option<&str>,
 ) -> bool {
-    response_precedes_prompt_in_exchange_with_partial_baseline(
+    response_precedes_prompt_in_exchange_with_evidence(
         doc,
         response,
-        prompt_must_exist_in,
-        None,
+        ResponsePromptOrderEvidence::Boundary {
+            prompt_must_exist_in,
+        },
     )
 }
 
-pub fn response_precedes_prompt_in_exchange_with_partial_baseline(
+pub fn response_precedes_prompt_in_exchange_with_prompt_growth(
     doc: &str,
     response: Option<&str>,
-    prompt_must_exist_in: Option<&str>,
-    prompt_must_start_in: Option<&str>,
+    prompt_growth: PromptGrowthProvenanceInput<'_>,
+) -> bool {
+    response_precedes_prompt_in_exchange_with_evidence(
+        doc,
+        response,
+        ResponsePromptOrderEvidence::PromptGrowth(prompt_growth),
+    )
+}
+
+fn response_precedes_prompt_in_exchange_with_evidence(
+    doc: &str,
+    response: Option<&str>,
+    evidence: ResponsePromptOrderEvidence<'_>,
 ) -> bool {
     let Some(exchange) = exchange_component(doc) else {
         return false;
     };
     let exchange_content = exchange.content(doc);
-    let Some((_, prompt_idx, prompt_end)) = find_response_precedes_prompt_candidate(
-        exchange_content,
-        response,
-        prompt_must_exist_in,
-        prompt_must_start_in,
-    ) else {
+    let Some((_, prompt_idx, prompt_end)) =
+        find_response_precedes_prompt_candidate(exchange_content, response, evidence)
+    else {
         return false;
     };
-    if let Some(required_doc) = prompt_must_exist_in {
+    if let Some(required_doc) = evidence.prompt_must_exist_in() {
         let segments = split_exchange_line_segments(exchange_content);
         let prompt_lines =
             normalized_non_boundary_exchange_lines(&segments[prompt_idx..prompt_end]);
@@ -591,19 +644,31 @@ pub fn repair_response_precedes_prompt_in_exchange(
     response: Option<&str>,
     prompt_must_exist_in: Option<&str>,
 ) -> Result<Option<String>> {
-    repair_response_precedes_prompt_in_exchange_with_partial_baseline(
+    repair_response_precedes_prompt_in_exchange_with_evidence(
         doc,
         response,
-        prompt_must_exist_in,
-        None,
+        ResponsePromptOrderEvidence::Boundary {
+            prompt_must_exist_in,
+        },
     )
 }
 
-pub fn repair_response_precedes_prompt_in_exchange_with_partial_baseline(
+pub fn repair_response_precedes_prompt_in_exchange_with_prompt_growth(
     doc: &str,
     response: Option<&str>,
-    prompt_must_exist_in: Option<&str>,
-    prompt_must_start_in: Option<&str>,
+    prompt_growth: PromptGrowthProvenanceInput<'_>,
+) -> Result<Option<String>> {
+    repair_response_precedes_prompt_in_exchange_with_evidence(
+        doc,
+        response,
+        ResponsePromptOrderEvidence::PromptGrowth(prompt_growth),
+    )
+}
+
+fn repair_response_precedes_prompt_in_exchange_with_evidence(
+    doc: &str,
+    response: Option<&str>,
+    evidence: ResponsePromptOrderEvidence<'_>,
 ) -> Result<Option<String>> {
     let components = agent_doc_element::element::parse(doc)?;
     let Some(exchange) = components
@@ -613,16 +678,13 @@ pub fn repair_response_precedes_prompt_in_exchange_with_partial_baseline(
         return Ok(None);
     };
     let exchange_content = exchange.content(doc);
-    let Some((heading_idx, prompt_idx, prompt_end)) = find_response_precedes_prompt_candidate(
-        exchange_content,
-        response,
-        prompt_must_exist_in,
-        prompt_must_start_in,
-    ) else {
+    let Some((heading_idx, prompt_idx, prompt_end)) =
+        find_response_precedes_prompt_candidate(exchange_content, response, evidence)
+    else {
         return Ok(None);
     };
     let segments = split_exchange_line_segments(exchange_content);
-    if let Some(required_doc) = prompt_must_exist_in {
+    if let Some(required_doc) = evidence.prompt_must_exist_in() {
         let prompt_lines =
             normalized_non_boundary_exchange_lines(&segments[prompt_idx..prompt_end]);
         if !exchange_contains_normalized_line_sequence(required_doc, &prompt_lines) {
@@ -2431,6 +2493,39 @@ ship it
             )
             .unwrap()
             .is_none()
+        );
+    }
+
+    #[test]
+    fn prompt_growth_provenance_distinguishes_continued_prompt_from_new_follow_up() {
+        let admission_baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reference job-offer.md.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let pre_write_authority = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reference job-offer.md.\n",
+            "❯ Please create a proposal.\n",
+            "❯ This is a wholly new follow-up.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let input = PromptGrowthProvenanceInput::new(admission_baseline, pre_write_authority);
+
+        assert_eq!(
+            input.classify(&[
+                "Please reference job-offer.md.".to_string(),
+                "Please create a proposal.".to_string(),
+            ]),
+            PromptGrowthProvenance::AdmissionBaselineGrowth,
+        );
+        assert_eq!(
+            input.classify(&["This is a wholly new follow-up.".to_string()]),
+            PromptGrowthProvenance::PostPreflightFollowUp,
+        );
+        assert_eq!(
+            input.classify(&["Missing from current authority.".to_string()]),
+            PromptGrowthProvenance::Unproven,
         );
     }
 

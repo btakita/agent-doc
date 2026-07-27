@@ -1453,11 +1453,10 @@ Created the proposal and implementation plan.
             "response repair must not duplicate the response:\n{repaired}"
         );
         assert!(!closeout.cleaned_resolved_backlog_prompts);
-        assert!(!response_precedes_prompt_in_exchange_with_partial_baseline(
+        assert!(!response_precedes_prompt_in_exchange_with_prompt_growth(
             &repaired,
             Some(response),
-            Some(before_current),
-            Some(base),
+            PromptGrowthProvenanceInput::new(base, before_current),
         ));
     }
 

@@ -221,8 +221,8 @@ pub(crate) use agent_doc_document_realtime_io::{
 use agent_doc_element::element;
 use agent_doc_element_backlog_io::backlog_cmd;
 use agent_doc_element_exchange::{
-    exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,
-    response_precedes_prompt_in_exchange_with_partial_baseline,
+    PromptGrowthProvenanceInput, exchange_has_live_user_edit, exchange_prompt_prefix_count,
+    exchange_prompt_text_duplicated, response_precedes_prompt_in_exchange_with_prompt_growth,
     strip_prompt_prefix_from_response_body_first_lines,
 };
 use agent_doc_queue::queue_consume::{
@@ -2517,6 +2517,7 @@ fn normalize_final_template_content(
 ) -> Result<String> {
     let mut normalized = content.to_string();
     let prompt_authority = before_current.unwrap_or(base);
+    let prompt_growth = PromptGrowthProvenanceInput::new(base, prompt_authority);
     if let Some(snapshot_doc) = snapshot {
         normalized = normalize_user_prompts_in_exchange_safe(
             &normalized,
@@ -2562,12 +2563,11 @@ fn normalize_final_template_content(
         }
     }
     if let Some(repaired) =
-        agent_doc_template_io::repair_response_prompt_order_for_file_with_partial_baseline(
+        agent_doc_template_io::repair_response_prompt_order_for_file_with_prompt_growth(
             &normalized,
             response,
             file,
-            Some(prompt_authority),
-            Some(base),
+            prompt_growth,
         )?
     {
         normalized = repaired;
@@ -2585,12 +2585,8 @@ fn normalize_final_template_content(
             preserve_current_or_base,
         )?;
     }
-    if response_precedes_prompt_in_exchange_with_partial_baseline(
-        &normalized,
-        response,
-        Some(prompt_authority),
-        Some(base),
-    ) {
+    if response_precedes_prompt_in_exchange_with_prompt_growth(&normalized, response, prompt_growth)
+    {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

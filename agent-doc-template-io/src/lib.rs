@@ -161,35 +161,44 @@ pub fn repair_response_prompt_order_for_file(
     file: &Path,
     prompt_must_exist_in: Option<&str>,
 ) -> Result<Option<String>> {
-    repair_response_prompt_order_for_file_with_partial_baseline(
+    let repaired = agent_doc_element_exchange::repair_response_precedes_prompt_in_exchange(
         doc,
         response,
-        file,
         prompt_must_exist_in,
-        None,
     )
-}
-
-pub fn repair_response_prompt_order_for_file_with_partial_baseline(
-    doc: &str,
-    response: Option<&str>,
-    file: &Path,
-    prompt_must_exist_in: Option<&str>,
-    prompt_must_start_in: Option<&str>,
-) -> Result<Option<String>> {
-    let repaired =
-        agent_doc_element_exchange::repair_response_precedes_prompt_in_exchange_with_partial_baseline(
-            doc,
-            response,
-            prompt_must_exist_in,
-            prompt_must_start_in,
-        )
     .with_context(|| {
         format!(
             "failed to parse {} for response/prompt order repair",
             file.display()
         )
     })?;
+    log_response_prompt_order_repair(file, &repaired);
+    Ok(repaired)
+}
+
+pub fn repair_response_prompt_order_for_file_with_prompt_growth(
+    doc: &str,
+    response: Option<&str>,
+    file: &Path,
+    prompt_growth: agent_doc_element_exchange::PromptGrowthProvenanceInput<'_>,
+) -> Result<Option<String>> {
+    let repaired =
+        agent_doc_element_exchange::repair_response_precedes_prompt_in_exchange_with_prompt_growth(
+            doc,
+            response,
+            prompt_growth,
+        )
+        .with_context(|| {
+            format!(
+                "failed to parse {} for response/prompt order repair",
+                file.display()
+            )
+        })?;
+    log_response_prompt_order_repair(file, &repaired);
+    Ok(repaired)
+}
+
+fn log_response_prompt_order_repair(file: &Path, repaired: &Option<String>) {
     if repaired.is_some() {
         agent_doc_ops_log_io::log_op(
             file,
@@ -199,7 +208,6 @@ pub fn repair_response_prompt_order_for_file_with_partial_baseline(
             ),
         );
     }
-    Ok(repaired)
 }
 
 pub fn log_duplicate_prompt_residue_guard(file: &Path) {

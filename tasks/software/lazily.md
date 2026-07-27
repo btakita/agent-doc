@@ -89,7 +89,19 @@ The workspace-wide `make check` is not green because three pre-existing dirty `s
 Confidence is high for the TopicCell capability because its full canonical corpus, invalidation matrix, state snapshots, positive floors, mutation check, full binding suite, formatting gate, and CI are green. No operator escalation is needed.
 
 The backlog was also corrected to recognize that QueueStorage shipped with QueueCell. `#lzcsqueues` stays open only for RelayCell, BackpressurePolicy, SpillStore, Transport, and their canonical replays; C# remains staged out of that unsupported capability group.
-<!-- agent:boundary:fab8d1e8 -->
+
+### Re: RelayCell core subphase — gpt-5
+
+Implemented and shipped the in-process RelayCell core and reactive count-metered `BackpressurePolicy`. The new production surface provides algebra-typed hot-window merging, reactive depth/full/empty/reconfiguration readers, live high/low-water and overflow sources, exact Block/DropNewest/DropOldest/Conflate outcomes, dropped/conflated counters, fail-closed policy validation, drain/peek, and merge swaps only at empty boundaries.
+
+Changed paths: `src/Lazily/RelayCell.cs` and `tests/Lazily.Tests/RelayCellTests.cs`. Lazily-spec currently has no RelayCell JSON fixtures, so this layer is verified against the normative `docs/relaycell.md` contract with the same cross-binding invariants: drain-schedule convergence, reactive policy retuning, overflow behavior, algebra legality, and safe reconfiguration.
+
+Commands and verification: the targeted six-test relay suite passed; changing the ingress gate from `depth >= high_water` to `depth > high_water` made it fail, and the restored baseline passed; `make check` passed with 86 tests and 48/124 runtime-opened canonical fixtures; `make format-check` passed; lazily-cs CI completed successfully. The implementation is pushed as lazily-cs `5ac24cc`, and the workspace submodule advance is pushed as `9022b5acc`.
+
+The workspace-wide `make check` reproduced only the same unrelated dirty `src/agent-doc` wording mismatch: three tests expect `same-cycle pending-add` while the implementation emits `same-cycle actionable backlog`; 181 tests passed before fail-fast. I left that separate work untouched. The workspace has no workflow named `CI`.
+
+Confidence is high for the RelayCell core. No operator escalation is needed. `#lzcsqueues` stays open for SpillStore, Transport, Spill overflow integration, Bytes/Keys/Age metering, and their normative integration tests; C# remains staged out of the full RelayCell capability group.
+<!-- agent:boundary:76c5de82 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -111,7 +123,7 @@ The backlog was also corrected to recognize that QueueStorage shipped with Queue
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell + QueueStorage shipped at 01d2cf3 and replay all five canonical queuecell fixtures; WorkQueueCell shipped at fafb88f and replays both canonical workqueue fixtures; TopicCell shipped at 17256ce and replays all four canonical topiccell fixtures. Keep C# eligible only for the exact queue capabilities it implements. Still implement RelayCell with BackpressurePolicy, SpillStore, and Transport, then replay its canonical corpora before admitting C# to that peer/feature group — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16). (stays open: RelayCell, BackpressurePolicy, SpillStore, Transport, and their canonical replays remain.)
+- [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell + QueueStorage shipped at 01d2cf3 and replay all five canonical queuecell fixtures; WorkQueueCell shipped at fafb88f and replays both canonical workqueue fixtures; TopicCell shipped at 17256ce and replays all four canonical topiccell fixtures; RelayCell's in-process algebraic core plus reactive count-metered BackpressurePolicy shipped at 5ac24cc with normative relay convergence/overflow tests. Keep C# eligible only for the exact queue capabilities it implements. Still implement SpillStore, Transport, Spill overflow integration, and Bytes/Keys/Age meters before admitting C# to the full RelayCell peer/feature group — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16). (stays open: SpillStore, Transport, Spill overflow integration, Bytes/Keys/Age metering, and their normative replay/integration tests remain.)
 - [ ] 🚧 [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: resume after the operator-requested agent-doc controller recycle completes.)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)

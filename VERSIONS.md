@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.34
+
+_JetBrains plugin 0.2.298; VS Code extension 0.2.57._
+
+- **Replica-refresh suffix recovery now recognizes exact replay cuts at every UTF-8 character boundary.** A complete document that ends without a newline can be followed by an exact retained suffix beginning mid-line or mid-token; recovery now collapses that proof-bearing shape while retaining the existing structural-validity, component-scaffolding, and exact-suffix gates. This closes the remaining production variant that could leave an unmatched component close and prevent retained closeout replay.
+
 ## 0.35.33
 
 _JetBrains plugin 0.2.298; VS Code extension 0.2.57._

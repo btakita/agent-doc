@@ -1529,14 +1529,7 @@ pub fn repair_single_unmatched_duplicate_component_close(doc: &str) -> Option<St
 pub fn repair_duplicated_document_suffix(doc: &str) -> Option<String> {
     structural_corruption_reason(doc)?;
 
-    let line_starts = std::iter::once(0)
-        .chain(
-            doc.match_indices('\n')
-                .map(|(index, _)| index + 1)
-                .filter(|&index| index < doc.len()),
-        )
-        .collect::<Vec<_>>();
-    for split in line_starts.into_iter().rev() {
+    for (split, _) in doc.char_indices().rev() {
         let prefix = &doc[..split];
         let suffix = &doc[split..];
         if prefix.len() < suffix.len()
@@ -3424,7 +3417,7 @@ Fix applied to skip non-agent <!-- sequences.
         let sound = concat!(
             "---\nagent_doc_session: suffix-repair\n---\n\n",
             "<!-- agent:review -->\n",
-            "- [/] Long diagnosis, even though the live editor owns the cut.\n",
+            "- [/] Long #agent-doc-feature diagnosis, even though the live editor owns the cut.\n",
             "- [/] Keep this operator-authored row.\n",
             "<!-- /agent:review -->\n\n",
             "<!-- agent:icebox -->\n",
@@ -3432,12 +3425,14 @@ Fix applied to skip non-agent <!-- sequences.
             "<!-- /agent:icebox -->\n\n",
             "<!-- agent:done -->\n",
             "<!-- completed work archived -->\n",
-            "<!-- /agent:done -->\n",
+            "<!-- /agent:done -->",
         );
         let duplicated_tail = sound
-            .find(", even though")
+            .find("oc-feature")
             .map(|start| &sound[start..])
-            .expect("fixture contains the mid-row suffix");
+            .expect("fixture contains the mid-token suffix");
+        assert!(!sound.ends_with('\n'));
+        assert!(duplicated_tail.starts_with("oc-feature"));
         let corrupted = format!("{sound}{duplicated_tail}");
 
         assert!(structural_corruption_reason(&corrupted).is_some());
@@ -3465,6 +3460,13 @@ Fix applied to skip non-agent <!-- sequences.
             )),
             None,
             "a non-exact structural tail must fail closed"
+        );
+        assert_eq!(
+            repair_duplicated_document_suffix(&format!(
+                "{sound}peated changed operator prose.\n<!-- /agent:review -->\n"
+            )),
+            None,
+            "a non-exact mid-token structural tail must fail closed"
         );
     }
 

@@ -284,7 +284,27 @@ Validation is green: focused CRDT tests 6/6; lazily-cs `make check` 160/160 with
 Shipped commits are lazily-cs `f25c632`, lazily-spec `c24151e`, generated sibling coverage commits `9f3026f`, `2df2a19`, `c0e50b6`, `bc10922`, `85e0b9a`, `ed99582`, `d3acd6b`, `cc9db9e`, and `a344ddc`, with root pointer commit `b66c1bff2`; all were pushed. The required one-shot CI inspection found the spec and JavaScript runs successful, C#/Rust/Kotlin/Dart/Go/C++ in progress, Zig queued, and no CI workflow in Python/formal. It was not polled further.
 
 Pre-existing worktree changes, including the staged queue-family README work and build directories, were preserved and excluded from these commits. C# may now join all eight exact CRDT feature groups; incomplete IPC, sync, and plane features remain staged.
-<!-- agent:boundary:69ac7bfa -->
+
+### Re: complete [#lzcsipc] — gpt-5
+
+Completed and shipped the full lazily-cs IPC parity phase (rows 25–27).
+
+Production support now includes:
+
+- Canonical fixed-capacity `ShmBlobArena` storage with exact 40-byte `LZSH` headers, FNV-1a-64 checksums, wraparound generations, epoch invalidation, bounds/header/checksum validation, defensive reads, and zero-copy arena views.
+- Idiomatic `IBlobBackend` adapters for in-process and Apache Arrow IPC buffers, with immutable backend-owned views and explicit backend discriminators.
+- A real same-host `ShmBackend`: named file-backed memory mappings under `/dev/shm` on Linux (temporary mapped files elsewhere), atomic shared bump/generation/epoch counters, independent open/create mappings, cross-mapping multi-writer resolution, lifecycle flush/dispose/unlink, and default/omitted `shm` wire routing.
+- `BlobTransport` threshold policy across Snapshot node states, Delta CellSet/SlotValue/NodeAdd/QueuePush payloads, and CrdtSync states, plus `BlobRouter` receiver-side multi-backend isolation and resolution.
+- Wire normalization now omits an explicit default `shm` discriminator while preserving Arrow and in-process discriminators.
+
+The strict runner opens `arena_blob.json` and pins its descriptor, checksum, exact header bytes, payload region, and round trip. Behavioral tests cover oversize, wrap/ABA staleness, torn payloads, epoch invalidation, backend isolation, zero-copy aliasing, Arrow streams, every spill site, router resolution, two independent shared mappings, and concurrent writes through both mappings. Focused IPC tests pass 5/5; the full lazily-cs gate passes 165/165 with zero skips across netstandard2.1, net8, and net10 plus package checks. Runtime coverage advances to 106/124 canonical fixtures opened with 18 known-uncovered.
+
+Mutation proof changed the production FNV prime: canonical `arena_blob.json` failed with expected checksum `13098019626228322701` versus mutated `13459411970303564233`; restoring the algorithm returned the replay to green. Formatting, lazily-spec, every regenerated sibling table, and root workspace `make check` are green.
+
+Shipped commits are lazily-cs `935996d`, lazily-spec `ba62af1`, sibling coverage commits `1eb95c2`, `6814627`, `1e97133`, `254604d`, `b42de92`, `2035d1d`, `22c66ce`, `6ee3e9d`, and `d6f4a1e`, with root pointer commit `883aaa5a1`; all were pushed. The one-shot CI inspection found C#, spec, Kotlin, JavaScript, Dart, Zig, Go, and C++ successful; Rust in progress; and no CI workflow in Python, formal, or the root. It was not polled further.
+
+Pre-existing C#/JS/Zig/Python and root worktree changes were preserved and excluded. C# may now join all three exact IPC feature groups; only sync and plane remain staged.
+<!-- agent:boundary:835fc041 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -295,10 +315,9 @@ Pre-existing worktree changes, including the staged queue-family README work and
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
 - [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
 - [ ] [#lzcsplane] lazily-cs: PARTIAL/STAGED — CausalReceipt/CausalReceipts schema/projection shipped at 967c44e; all 17 typed signaling frames, strict exact codec, authoritative SignalingRoom, anti-spoof server-stamped sender, sorted self-excluding rosters, unknown-target handling, and leave semantics shipped at d663074 with canonical signaling client/server fixture replay. Runtime coverage is now 61/124 with 63 known-uncovered. Admit C# only to the exact causal-receipts and signaling-wire/open-room peer groups. Still implement general state projection/mirror, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay service, agent-doc, and remaining message-passing corpora. Plan rows 33-39. (stays open: state mirror, command plane, FFI, permissions, handshake, instrumentation/benchmarks, and remaining corpora.)
-- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Reverified 2026-07-27 at lazily-cs f25c632: 105/124 canonical fixtures are runtime-opened and 19 are explicitly known-uncovered; 160/160 tests, all three target frameworks, package checks, and the conformance guard pass. All eight CRDT rows are now admitted (registers, TextCrdt + delta, CrdtTree, SeqCrdt, LosslessTreeCrdt core, dotted-frontier anti-entropy, and concurrent convergence), alongside the previously shipped exact slices. (stays open: close only after #lzcsipc, #lzcssync, and #lzcsplane ship their remaining production surfaces and canonical replays; until then admit C# only to exact feature groups whose implementation and fixture replay are present.)
+- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Reverified 2026-07-27 at lazily-cs 935996d: 106/124 canonical fixtures are runtime-opened and 18 are explicitly known-uncovered; 165/165 tests, all three target frameworks, package checks, and the conformance guard pass. All three IPC rows are now admitted (Snapshot/Delta/CrdtSync wire, exact ShmBlobArena, and executable BlobBackend transport for shm, Arrow, and in-process backends), alongside the previously shipped exact slices. (stays open: close only after #lzcssync and #lzcsplane ship their remaining production surfaces and canonical replays; until then admit C# only to exact feature groups whose implementation and fixture replay are present.)
 <!-- /agent:backlog -->
 
 ## Review

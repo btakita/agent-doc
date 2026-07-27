@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#signalgetsignallive]
+
+
+> **Queue prompt:**
+>
 > do [#readmeexamplesreference]
 
 
@@ -596,7 +601,18 @@ Completed `#readmeexamplesreference` across the four affected bindings.
 - Root submodule pointers committed and pushed as `2673e9792`.
 
 Verification: `git diff --check` and `make check` passed in all four bindings. One-shot CI checks: Go, C++, and Dart runs were in progress; lazily-py and the root have no workflow named `CI`. Confidence: high. Escalation: none.
-<!-- agent:boundary:bdb3543d -->
+
+### Re: Response
+
+Completed `#signalgetsignallive` without promoting any staged peer capability.
+
+- Kotlin: deprecated `ThreadSafeSignalHandle`, `ThreadSafeContext.signal/getSignal`, `AsyncSignalHandle`, `AsyncContext.signalAsync`, and the async compute-context signal read. The warnings explicitly say these remain compatibility-only until the thread-safe/async planes expose eager `Computed` forms. Commit `008f430`.
+- JavaScript: added `@deprecated` metadata to sync, thread-safe, and async signal handles/constructors/reads (including async scope and lifecycle methods), while retaining behavior for compatibility. Commit `cba564f`.
+- Zig: converted the root re-exports and constructors to explicit `Deprecated:` documentation; both already return eager `*Computed(T)` and direct users to `computed(...).eager()` / `computedKeyed(...).eager()`. Commit `806f7a7`.
+- Root submodule-pointer commit: `4a0a05086`.
+
+Verification: `make check` passed in lazily-kt, lazily-js, lazily-zig, and the root workspace. Latest CI runs succeeded for Kotlin (`30232103292`), JavaScript (`30232111352`), and Zig (`30232122167`); the root repository has no workflow named `CI`. All commits were pushed. Pre-existing unrelated JavaScript README/build and Zig AGENTS changes were left untouched.
+<!-- agent:boundary:8e580ce0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -614,7 +630,7 @@ Verification: `git diff --check` and `make check` passed in all four bindings. O
 - ~~do [#asyncplanenever]~~
 - ~~do [#lazilyrenameinverted]~~
 - ~~do [#readmeexamplesreference]~~
-- do [#signalgetsignallive]
+- ~~do [#signalgetsignallive]~~
 - do [#recommendeddecidewhether]
 - do [#lazilycppconformance]
 - do [#lazilycppcollections]
@@ -649,7 +665,6 @@ Verification: `git diff --check` and `make check` passed in all four bindings. O
 - [ ] [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
 - [ ] [#lazilycppcollections] lazily-cpp: 15 collections fixtures still uncovered — 9 with no coverage at all (cellmap_atomic_move, cellmap_independence, keyed_reconciliation_lis, semtree_incremental, stableid_alignment, textcrdt_convergence, textcrdt_delta_sync, workqueue_competing_delivery, workqueue_lease_deadletter) and 6 hand-transcribed (mergecell_algebra, 5x queuecell_*). Largest single body of remaining conformance work; spans five separate primitives. Tracked in the KNOWN_UNCOVERED ledger.
 - [ ] [#trackedcopieslazily] The tracked copies of lazily-spec conformance fixtures inside lazily-py (tests/conformance), lazily-dart (test/conformance), lazily-rs (tests/conformance) and lazily-go (test/conformance) are kept byte-identical to canonical BY HAND with no sync script or drift check. This cycle had to flip the same fixture in three places. Add a sync/verify script (or make the runners read the sibling checkout) so a canonical edit cannot silently miss a vendored copy.
-- [ ] [#signalgetsignallive] signal/getSignal still live and UNDEPRECATED on the threadsafe/async planes after the sync plane retired them: lazily-kt ThreadSafeContext.kt:195,247 + AsyncContext.kt:624, lazily-js reactive-async.d.ts:85, lazily-zig root.zig:86,90. Deprecate or migrate to eager Computed.
 - [ ] [#recommendeddecidewhether] [recommended] Decide whether the domain *Cell family (QueueCell / TopicCell / RelayCell / MergeCell / TimerCell / LeaseCell / CircuitBreakerCell / PresenceCell / ...) follows the kernel to *Source, or is deliberately pinned as spec-level naming. Three independent bindings flagged it as the largest remaining Cell-vocabulary surface. It must move in lockstep across all 9 bindings, so it needs a decision before anyone starts. RECOMMENDATION 2026-07-26 (agent): KEEP *Cell. The kernel renamed the two value-node KINDS (Source/Computed) and kept Cell as the concept for a value-bearing reactive node. A QueueCell is not a kind — it composes them (five Source<u64> reader-version cells plus derived readers), so QueueSource would imply "written from outside, folds under a merge policy", which is false for a queue. Same for TimerCell/LeaseCell/CircuitBreakerCell/PresenceCell: each is a composite of a pure core plus projecting cells. KEPT OPEN: naming must converge with the operator before editing (9 bindings in lockstep + deprecation surface on every public type). Unblocks on a yes/no. If YES, scope is: spec cell-model.md first, then 9 bindings in lockstep with deprecated aliases, plus a decision on whether MergeCell collapses entirely (under the kernel it is already Source<T,M> with a non-default policy)
 <!-- /agent:backlog -->
 

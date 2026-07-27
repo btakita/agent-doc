@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -207,12 +207,13 @@ The roadmap now specifies:
 ### Re: RPG Maker, Ren'Py, and long-tail framing — gpt-5
 
 Added RPG Maker and Ren'Py across the SDK proposal, implementation roadmap, and superrepo design, and corrected Wave C so none of its adapters is presented as a market-balancing anchor.
-<!-- agent:boundary:4b0f69c1 -->
+<!-- agent:boundary:7083b799 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority -->
+- 🚧 do [#authenticationhandledsdk]
 <!-- /agent:queue -->
 
 ## Backlog

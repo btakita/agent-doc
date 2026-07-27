@@ -157,7 +157,23 @@ Updated the site-wide public utility bar from `Mon-Fri 8AM-6PM PST` to `Mon-Fri 
 - Confidence: high. The only deploy warning is the already-tracked `#efs-prod-route-token` route-sync permission error, which occurs after version activation; the existing production route is serving the corrected content.
 
 Unrelated TMO worktree changes were preserved and excluded from the clean production bundle.
-<!-- agent:boundary:e4ec9eda -->
+
+### Re: Contact office hours — gpt-5
+
+> **Queue prompt:** In https://www.equityfundingsource.com/contact > Call the office: list the office hours as being 9AM-5PM PT.
+
+Updated the Contact page’s **Call the office** card to explicitly state: `Office hours are 9AM-5PM PT.`
+
+- Changed `lib/ui--server--efs/contact/index.ts` and added renderer coverage in `tests/public-content.test.ts`.
+- Added the requirement to `prds/equity-funding-source-lending-portal-prd.md` and its contract assertion to `tests/prd.test.ts`.
+- Verification passed: `bun test tests/public-content.test.ts tests/prd.test.ts`, full `make check` (exit 0), and `git diff --check`.
+- The required remote lookup `gh run list --workflow CI --limit 1` found no workflow named `CI`, so there was no matching run to inspect.
+- Committed and pushed `c3e899ff` (`fix(contact): show office hours`) to `origin/main`.
+- Production deployment was not run because this cycle’s `#spec-test-commit-push` preset ends at push.
+- Existing unrelated TMO changes and untracked local configuration files were preserved and left out of the commit.
+
+Confidence: high.
+<!-- agent:boundary:59ade1c6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

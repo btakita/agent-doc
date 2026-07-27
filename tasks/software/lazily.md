@@ -67,7 +67,34 @@ Verification and publication:
 Confidence is high: the complete canonical corpora, true reactive invalidation probes, merge-policy-path counter, large logical-clock jump, mutation check, full binding gate, workspace gate, and CI are green. No escalation was required.
 
 C# may now join the exact temporal, rate-shaping, and windowing peer groups in the single feature suite. Unsupported capabilities remain staged and skipped rather than advertised.
-<!-- agent:boundary:d6f07570 -->
+
+### Re: do [#lzcscluster] — gpt-5
+
+Completed `#lzcscluster` and preserved capability-staged peer admission.
+
+Implemented production C# surfaces for:
+
+- SWIM membership with Phi-accrual failure detection and structurally compared reactive peer sets.
+- Lease, leader, fenced lock, semaphore, barrier/quorum coordination.
+- Typed ephemeral, presence, and awareness cells with TTL and membership eviction.
+- Circuit breaker, retry backoff, bulkhead, and timeout resilience.
+- Health, readiness, discovery, and durable service-registry projection/replay.
+
+Canonical proof:
+
+- Added `tests/Lazily.Tests/ClusterConformanceTests.cs`, which opens and replays all 17 membership/coordination/presence/resilience/service fixtures and checks every operation, return, projection, and invalidation edge (95 fixture steps across 5 tests).
+- Deliberately mutated lease expiry from `<` to `<=`; `coordination/lease.json` failed at the exact `now == expiry` edge (`Expected: True`, `Actual: False`). Restored the correct boundary and reran green.
+- `make check` in lazily-cs: 141/141 tests passed; runtime coverage is 92/124, with known-uncovered reduced from 49 to 32.
+- `make format-check`: passed.
+- Root `make check`: all 8,228 agent-doc tests passed; an unrelated dirty Corky submodule failed once in `corky-core --lib`, and the exact `cargo test -p corky-core --lib` reproduction passed immediately without changes.
+- Lazily C# CI run 30304369632: completed successfully. The root repository has no workflow named `CI`.
+
+Changed paths: `src/Lazily/{ClusterCollections,Membership,Coordination,Presence,Resilience,Service}.cs`, `tests/Lazily.Tests/ClusterConformanceTests.cs`, and `scripts/check-conformance-coverage.sh`. Pre-existing `AGENTS.md`, `README.md`, and `build/` changes were left untouched.
+
+Committed and pushed lazily-cs `6afe762` (`feat: add cluster coordination primitives`) and root pointer `b5a7dc9c8` (`chore: advance lazily-cs cluster features`).
+
+Confidence: high. Escalation: none. C# remains excluded from unsupported peer groups; only these now-proven cluster capabilities are eligible.
+<!-- agent:boundary:d8cee586 -->
 <!-- /agent:exchange -->
 
 ## Queue

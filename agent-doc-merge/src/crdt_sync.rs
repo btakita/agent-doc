@@ -364,6 +364,21 @@ impl ReplicaState {
         serde_json::to_vec(&self.text.borrow().version_vector()).unwrap_or_default()
     }
 
+    /// Whether this replica already contains every operation named by `state_vector`.
+    ///
+    /// A decodable vector is not necessarily an ancestor of this replica: a peer
+    /// can retain operations from an obsolete branch after the canonical replica
+    /// was rebuilt from a text projection. Incremental bootstrap is safe only when
+    /// every retained counter is at or behind this replica's counter.
+    pub fn covers_state_vector(&self, state_vector: &[u8]) -> Result<bool> {
+        let retained: TextVersionVector =
+            serde_json::from_slice(state_vector).context("decode version vector")?;
+        let current = self.text.borrow().version_vector();
+        Ok(retained.iter().all(|(peer, retained_counter)| {
+            current.get(peer).copied().unwrap_or_default() >= *retained_counter
+        }))
+    }
+
     /// The incremental update carrying exactly the ops `their_sv` is missing
     /// (`delta_since(their_vv)`) — a delta, never a whole-document snapshot. This is
     /// the sync reply a replica sends a peer that announced `their_sv`.

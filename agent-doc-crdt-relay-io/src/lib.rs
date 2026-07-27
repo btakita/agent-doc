@@ -1575,8 +1575,32 @@ fn register_replica_for_file_incremental_with_liveness(
             }
             let canonical_state_vector = hub.canonical_state_vector();
             let (bootstrap, incremental) = match retained_state_vector {
-                Some(state_vector) => match hub.canonical_diff(state_vector) {
-                    Ok(delta) => (delta, true),
+                Some(state_vector) => match hub.canonical_covers_state_vector(state_vector) {
+                    Ok(true) => match hub.canonical_diff(state_vector) {
+                        Ok(delta) => (delta, true),
+                        Err(error) => {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "crdt_replica_register_incremental_fallback file={} client_id={} reason=invalid_state_vector error={error}",
+                                    file.display(),
+                                    client_id,
+                                ),
+                            );
+                            (hub.canonical_encoded_state(), false)
+                        }
+                    },
+                    Ok(false) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "crdt_replica_register_incremental_fallback file={} client_id={} reason=retained_frontier_ahead_of_canonical",
+                                file.display(),
+                                client_id,
+                            ),
+                        );
+                        (hub.canonical_encoded_state(), false)
+                    }
                     Err(error) => {
                         agent_doc_ops_log_io::log_op(
                             file,
@@ -3966,6 +3990,57 @@ mod tests {
             resumed.state_vector(),
             registration.canonical_state_vector,
             "the returned delta and frontier must describe the same canonical cut"
+        );
+    }
+
+    #[test]
+    fn replacement_registration_rejects_a_retained_frontier_ahead_of_canonical() {
+        let (_dir, doc) = temp_doc("ahead-register.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let canonical = std::fs::read_to_string(&doc).unwrap();
+
+        let (old_client_id, original_bootstrap) =
+            register_replica_for_file(&doc, "intellij:ahead-old")
+                .unwrap()
+                .expect("initial editor should receive the full bootstrap");
+        let retained = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            old_client_id,
+            &original_bootstrap,
+        )
+        .unwrap();
+        retained.apply_local_edit(
+            canonical.chars().count() as u32,
+            0,
+            "\nstale retained suffix\n",
+        );
+
+        let registration = register_replica_for_file_incremental(
+            &doc,
+            "intellij:ahead-new",
+            Some(&retained.state_vector()),
+        )
+        .unwrap()
+        .expect("replacement editor should receive a safe bootstrap");
+
+        assert!(
+            !registration.incremental,
+            "a retained frontier ahead of canonical must receive a full bootstrap"
+        );
+        let replacement = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            registration.client_id,
+            &registration.bootstrap,
+        )
+        .unwrap();
+        assert_eq!(
+            replacement.text(),
+            canonical,
+            "the replacement must not union-replay stale retained operations"
+        );
+        assert_eq!(
+            replacement.state_vector(),
+            registration.canonical_state_vector,
+            "the full bootstrap and advertised canonical frontier must match"
         );
     }
 

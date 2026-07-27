@@ -564,6 +564,18 @@ impl RelayHub {
         self.canonical.state_vector()
     }
 
+    /// Whether the canonical replica already contains every operation named by a
+    /// retained editor frontier.
+    ///
+    /// A version vector can be decoded successfully while still being *ahead of*
+    /// the canonical replica (for example after the controller rebuilt its CRDT
+    /// history from a committed text projection). Treating that frontier as an
+    /// incremental-bootstrap base would let the replacement editor relabel and
+    /// replay the obsolete op history into the new lineage.
+    pub fn canonical_covers_state_vector(&self, state_vector: &[u8]) -> Result<bool> {
+        self.canonical.covers_state_vector(state_vector)
+    }
+
     /// Encode only the canonical operations missing from `state_vector`.
     ///
     /// Registration normally needs a whole canonical bootstrap because a fresh
@@ -1645,6 +1657,24 @@ mod tests {
         let after = hub.canonical_state_vector();
         assert_ne!(before, after);
         assert_eq!(after, hub.canonical_state_vector());
+    }
+
+    #[test]
+    fn canonical_frontier_rejects_a_retained_replica_that_is_ahead() {
+        let hub = RelayHub::from_text(1, "canonical");
+        let retained = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        assert!(
+            hub.canonical_covers_state_vector(&retained.state_vector())
+                .unwrap()
+        );
+
+        retained.apply_local_edit("canonical".len() as u32, 0, " stale suffix");
+
+        assert!(
+            !hub.canonical_covers_state_vector(&retained.state_vector())
+                .unwrap(),
+            "a decodable but ahead retained frontier must not be used as an incremental base"
+        );
     }
 
     #[test]

@@ -500,7 +500,24 @@ Changed paths:
 Regression coverage proves the pure path gate, a dated git-history probe for document-only versus source-bearing cycles, and the existing dirty source/test companion warning. The full repository gate passed 8,188 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA.
 
 Commits `b140068d4` (agent-doc) and `11e02c0df` (parent gitlink) are pushed to `main`. CI run `30228119944` was in progress at the single required inspection, with no completed failure. Confidence is high for the measured 817ms target: the expensive scan is unreachable on the common document-only closeout, while source-bearing cycles retain the warning. No escalation was needed, and unrelated tmux-router staging remained untouched.
-<!-- agent:boundary:ecbf0425 -->
+
+### Re: Evaluate opportunistic CRDT delivery batching — gpt-5
+
+> **Queue prompt:**
+>
+> do [#crdtdeliverybatch]
+
+Closed `#crdtdeliverybatch` without an implementation because its explicit `#ackeditorstamps` gate disproves the proposed optimization.
+
+The live editor-side profiles were:
+
+- `received_to_observed=348ms` (`received_to_applied=299ms`, `applied_to_receipt=1ms`, `receipt_to_observed=48ms`)
+- `received_to_observed=198ms` (`received_to_applied=166ms`, `applied_to_receipt=1ms`, `receipt_to_observed=31ms`)
+
+That is one sub-half-second editor delivery/ACK cycle, not many short delivery cycles accumulating into the multi-second `delivery_ack_pending` interval. Client-side batching improves throughput across multiple writes; it cannot shorten time that the delivery is not spending in the editor. The subsequently shipped `#crdtwaitsubscribe` and `#crdtwaitsplit` changes target the measured wait correctly: subscribe to the retained monotonic ACK revision, keep delivery time on its own deadline, and keep controller/CAS backpressure independent.
+
+Changed paths: none. Verification: inspected the completed `#ackeditorstamps` live profiles and the current backlog precondition; the latest full repository gate already passed 8,188 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA, and no implementation changed afterward. Confidence: high. Escalation: none. No actionable follow-up remains for batching unless future profiles show multiple queued deliveries per write rather than the observed single ACK stretch.
+<!-- agent:boundary:07f0cde3 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -512,7 +529,7 @@ Commits `b140068d4` (agent-doc) and `11e02c0df` (parent gitlink) are pushed to `
 - ~~do [#crdtwaitsubscribe]~~
 - ~~do [#crdtwaitsplit]~~
 - ~~do [#sessioncheckguardsweep]~~
-- do [#crdtdeliverybatch]
+- ~~do [#crdtdeliverybatch]~~
 - do [#closeoutgitsubmodulescan]
 - do [#replicareloadincremental]
 - do [#adreplacementturndispatch]
@@ -555,7 +572,6 @@ Commits `b140068d4` (agent-doc) and `11e02c0df` (parent gitlink) are pushed to `
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#crdtdeliverybatch] #agent-doc-feature [recommended] Opportunistic client-side batching of CRDT deliveries. GATED ON #ackeditorstamps - do not start this until the profile says it applies. Current evidence points the other way: the measured shape is ONE delivery waiting a long time for a single ACK (delivery_ack_pending is 457 of 522 waits), and batching improves throughput across many writes rather than the latency of one, so it would not shorten the wait we actually have. It becomes the right lever only if the per-state profile shows delivery_ack_pending accumulating as many short delivery cycles instead of one long stretch. Filed to keep the option recorded with its precondition, not as agreed work.
 - [ ] [#replicareloadincremental] #agent-doc-bug CORRECTED 2026-07-26 - originally filed as THE cause of commit_authority latency; the data does not support that. Measured across 522 convergence waits: delivery_ack_pending 457 (88%), controller_model_backpressure 53 (10%), compare_and_swap_raced 12 (2%). commit_authority is 11-15s of a 15-17s closeout and it is the EDITOR confirming delivery. Correlation test: only 64/210 waits had a crdt_replica_register within 8s, so full-bootstrap-on-reload explains about 30% - real and worth fixing, but a MINORITY factor, not the cause. Ruled out by measurement: git (commit-io internal timer 9-19ms, plumbing 1-4ms each), the controller baseline round trip (record_committed_baseline 72-88ms), and poll oversleep (CRDT_WRITE_BACKOFF_POLICY is 25ms initial / 250ms max). REMAINING ~70% UNEXPLAINED. NEXT STEP IS INSTRUMENTATION, NOT A FOURTH HYPOTHESIS: decompose the ACK round trip with editor-side timestamps - plugin receives intent, applies to buffer, emits visible receipt, binary observes it. Two wrong guesses on this class today (supervisor status snapshot, controller watchdog tick) each cost a build+install+recycle and both collapsed immediately once a log line carried an attribution field. DO NOT background commit_authority to hide this: it is already the slow-path fallback, and making it the default turns 'captured but not committed' into the normal state - the gap every wedge repaired today lived in - and lets queue item N+1 start while N commits, which is the concurrent-cycle splice generator.
 - [ ] [#adreplacementturndispatch] #agent-doc-bug Operator-reported 2026-07-26: interrupting a running Run Agent Doc turn, editing the prompt, then starting a new Run Agent Doc fails to converge, and realtime steering is rejected in the same window. Two exact errors: (1) 'failed to converge queued dispatch for tasks/professional/job-offers.md through editor IPC/disk: route_dispatch_queue: editor delivery ACK recovery did not settle within 8000ms and the exact canonical target lacks active retained-delivery proof; refusing closeout'; (2) 'Could not steer the active turn: authoritative supervisor rejected selected-text steering: turn steering requires an authoritative actor with an active busy turn'. OPERATOR'S STATED FIX: always send `agent-doc <file>` for BOTH starting a replacement turn in this scenario AND realtime steering (whether by text selection or diff), rather than a distinct dispatch path that can fail to converge. Note (2) is the same shape as #steergateidle, already in backlog: steering gated on an active busy turn and rejecting otherwise, where an idle pane should just dispatch. (1) is separate - a replacement turn after an interrupt has no retained-delivery proof for the edited prompt, so the 8s ACK recovery window expires and the dispatch is refused instead of falling back to the plain trigger.
 - [ ] [#closeoutgitsubmodulescan] #agent-doc-bug PARTIAL 9e7ce2f79 - closeout latency is dominated by git_commit (4.6-22.5s across eight measured cycles; everything except it and session-check is ~50ms). Fixed two whole-tree submodule scans in tracked_modified_paths: git status now passes --ignore-submodules=all (284ms -> 6ms on 69 submodules, and the outputs differ by exactly the gitlink lines #side-effect-exclude-submodules already discards), and submodule_paths reads .gitmodules via git config --get-regexp instead of running git submodule status (154ms -> ~0ms). REMAINING AND UNATTRIBUTED: those two save ~432ms per call and tracked_modified_paths has few callers, so they are NOT the bulk of a 5-22s git_commit. Next step is per-subprocess instrumentation inside the commit path (candidate: candidate_repos in partial_staging.rs, which legitimately passes --ignore-submodules=none and costs 341ms, and whether that guard needs to run on every closeout at all). Also unaddressed: session_check is a flat 2.9-4.2s, with inspect_with_warnings measured at 2665ms of it - a ~30-guard sweep run per invocation.

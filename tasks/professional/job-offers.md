@@ -765,6 +765,7 @@ For the 30 minutes, let them summarize the FTE framework for roughly five minute
 
 **Changed paths:** none outside this session response. **Verification:** reconciled this clarification with the prepared Haiven SDK proposal and the revised call objective. **Confidence:** high. **Escalation:** send the heads-up before the call if time permits; obtain Acadian conflict/moonlighting/IP clearance before promising Haiven hours or a start date.
 <!-- agent:boundary:c85c8685 -->
+What company/industry is more of a risk? Acadian is contingent on the stock market. Haiven is contigent on the launch + market success.
 <!-- /agent:exchange -->
 
 ## Queue

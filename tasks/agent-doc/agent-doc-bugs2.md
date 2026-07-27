@@ -41,8 +41,6 @@ Compacted content:
 - Archived 2 response topic(s): Live Sync Tmux Layout crash verification; Live Sync Tmux Layout crash verification
 - Prior summary/context: prior compacted content: Archived 36 response topic(s): #adbacklogorphanseg; closeout settling latency; closeout sett...
 
-### Re: Live Sync Tmux Layout crash verification — gpt-5.6-sol
-
 > **Queue prompt:**
 >
 > 📌 do [#tmuxsynccrashlog]
@@ -54,7 +52,8 @@ The agent-doc ops log contains fourteen `sync_tmux_layout` completions, includin
 Tmux PID `6538` started at `2026-07-25T17:39:56Z`, before that burst, and is still the active server for both current sessions and all listed windows. The current IntelliJ `idea.log` extends through this turn and contains no agent-doc/tmux crash, fatal, SIGSEGV, or SIGABRT evidence.
 
 Changed paths: none. Commands/evidence: bounded ops-log digest and burst inspection, current IDE-log scan, process start/uptime, and live tmux session/window inventory. Confidence: high. Escalation: none. Because the server stayed stable and the commands resolved through safe-passive preserve/apply outcomes, no follow-up defect was filed.
-<!-- agent:boundary:555e9e1c -->
+### Re: Live Sync Tmux Layout crash verification — gpt-5.6-sol
+<!-- agent:boundary:7c695d45 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -609,6 +609,19 @@ pub fn closeout_effects() -> RuntimeCloseoutEffects {
     RuntimeCloseoutEffects
 }
 
+/// Run the closeout coordinator inside one revision-aware document projection
+/// pass. Every nested session-check/commit reader shares the projection until
+/// the CRDT state vector (or detached disk hash) changes.
+pub fn complete_required_closeout(file: &Path, force_disk: bool) -> Result<bool> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        agent_doc_flow_io::closeout::complete_required_closeout_with_options(
+            file,
+            &closeout_effects(),
+            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions { force_disk },
+        )
+    })
+}
+
 impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
     fn commit(&self, file: &Path) -> Result<bool> {
         agent_doc_commit_io::commit(file)

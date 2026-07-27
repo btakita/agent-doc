@@ -5,12 +5,14 @@ use std::path::Path;
 pub mod backlog_guards;
 pub mod closeout_guards;
 pub mod command;
-pub mod current_document;
 pub mod detect;
 pub mod guard_modes;
 pub mod partial_staging;
 pub mod profile;
-pub(crate) use current_document::{invalidate_current_document_pass, with_current_document_pass};
+pub(crate) use agent_doc_document_realtime_io::{
+    invalidate_current_document_projection as invalidate_current_document_pass,
+    with_current_document_projection_pass as with_current_document_pass,
+};
 pub mod pending_capture;
 pub mod pending_guards;
 pub mod prompt_bearing;
@@ -66,21 +68,9 @@ pub(crate) fn resolve_current_document(
             &format!("session-check {source}"),
         );
     }
-    // `#sccurrentpass`: one derived resolution per sweep, re-taken only when a
-    // step actually rewrote the document. See `current_document`.
-    let owned_file = file.to_path_buf();
-    let label = format!("session-check {source}");
-    if let Some(hit) = crate::current_document::pass_resolved(file, move || {
-        agent_doc_document_realtime_io::try_resolve_current_document_with_source(
-            &owned_file,
-            &label,
-        )
-        .ok()
-    }) {
-        return Ok(hit);
-    }
-    // No pass open, or the memoized resolve failed. Re-run uncached so the real
-    // error surfaces instead of a cached absence.
+    // The shared pass projection is revision-aware: repeated guards reuse one
+    // authority result, while a concurrent operator edit advances the Yrs
+    // state vector (or detached disk hash) and invalidates before this read.
     agent_doc_document_realtime_io::try_resolve_current_document_with_source(
         file,
         &format!("session-check {source}"),
@@ -190,13 +180,9 @@ pub(crate) fn operator_live_buffer_contains_heading(file: &Path, heading: &str) 
 mod current_document_pass_tests {
     use super::*;
 
-    /// A session-check sweep must evaluate ONE document version
-    /// (`#sccurrentpass`). Before the pass memo, each guard independently
-    /// resolved the current document, so an operator typing mid-sweep made two
-    /// guards disagree about the same document — and each resolve cost a full
-    /// controller round trip.
+    /// The pass shares unchanged reads but must not hide an operator edit.
     #[test]
-    fn pass_serves_one_document_version_to_every_guard() {
+    fn pass_reacts_to_an_operator_edit_between_guards() {
         let tmp = tempfile::tempdir().unwrap();
         let doc = tmp.path().join("task.md");
         std::fs::write(&doc, "first\n").unwrap();
@@ -209,10 +195,11 @@ mod current_document_pass_tests {
             (first, second)
         });
 
-        assert_eq!(
+        assert_ne!(
             first, second,
-            "guards inside one pass must observe the same document version"
+            "a new disk revision must invalidate the pass"
         );
+        assert_eq!(second, "second\n");
     }
 
     /// The memo is scoped, never ambient: outside a pass every resolve reads
@@ -245,10 +232,10 @@ mod current_document_pass_tests {
         );
     }
 
-    /// A nested entry point reuses the outer pass instead of installing a
-    /// second memo that could observe a different version.
+    /// A nested entry point reuses the outer graph, including its revision
+    /// invalidation; nesting must not freeze the first document version.
     #[test]
-    fn nested_pass_reuses_the_outer_document_version() {
+    fn nested_pass_reuses_the_outer_reactive_graph() {
         let tmp = tempfile::tempdir().unwrap();
         let doc = tmp.path().join("task.md");
         std::fs::write(&doc, "first\n").unwrap();
@@ -262,9 +249,10 @@ mod current_document_pass_tests {
             (outer, inner)
         });
 
-        assert_eq!(
+        assert_ne!(
             outer, inner,
-            "a nested pass must not resolve a second document version"
+            "the shared graph must observe the new revision"
         );
+        assert_eq!(inner, "second\n");
     }
 }

@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -822,9 +823,25 @@ interface AgentDocLib : Library {
                 if (Thread.currentThread() === workerThread.get()) return call()
                 val future = executor.submit<T> { call() }
                 return try {
-                    future.get()
+                    future.get(NATIVE_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 } catch (error: ExecutionException) {
                     throw error.cause ?: error
+                } catch (_: TimeoutException) {
+                    future.cancel(true)
+                    synchronized(callMonitor) {
+                        acceptingCalls = false
+                        callMonitor.notifyAll()
+                    }
+                    executor.shutdownNow()
+                    val reason =
+                        "native call exceeded ${NATIVE_CALL_TIMEOUT_MS}ms; " +
+                            "disabled the wedged generation to keep the IDE responsive"
+                    poisonGeneration(this, reason)
+                    throw IllegalStateException(reason)
+                } catch (error: InterruptedException) {
+                    future.cancel(true)
+                    Thread.currentThread().interrupt()
+                    throw IllegalStateException("interrupted while waiting for the native generation", error)
                 }
             }
 
@@ -894,6 +911,7 @@ interface AgentDocLib : Library {
         @Volatile private var currentLockFile: File? = null
         private var shutdownHookRegistered = false
         private const val NATIVE_QUIESCE_TIMEOUT_MS = 7_000L
+        private const val NATIVE_CALL_TIMEOUT_MS = 10_000L
 
         @Synchronized
         fun get(): AgentDocLib? {
@@ -1095,6 +1113,16 @@ interface AgentDocLib : Library {
             removePidLock()
             LOG.warn("[native] $loadError")
             return NativeReloadOutcome.RestartRequired(reason)
+        }
+
+        @Synchronized
+        private fun poisonGeneration(generation: LoadedGeneration, reason: String) {
+            if (loadedGeneration !== generation) return
+            loadedGeneration = null
+            instance = null
+            loadError = "IDE restart required: $reason"
+            removePidLock()
+            LOG.warn("[native] $loadError")
         }
 
         private fun nativeGenerationIsUnmapped(path: String): Boolean {

@@ -2267,11 +2267,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
 }
 
 fn complete_required_closeout(file: &Path, force_disk: bool) -> Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout_with_options(
-        file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
-        agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions { force_disk },
-    )
+    agent_doc_closeout_runtime_io::complete_required_closeout(file, force_disk)
 }
 
 fn log_closeout_guard(

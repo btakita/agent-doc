@@ -197,6 +197,13 @@ class TypingTrackerEdtBudgetTest {
                 native.contains("handler.nativeLibrary.close()") &&
                 native.contains("nativeGenerationIsUnmapped"),
         )
+        assertTrue(
+            "a wedged native call must time out and poison its generation instead of blocking callers forever",
+            native.contains("future.get(NATIVE_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
+                native.contains("catch (_: TimeoutException)") &&
+                native.contains("poisonGeneration(this, reason)") &&
+                native.contains("disabled the wedged generation to keep the IDE responsive"),
+        )
         assertFalse("JNA's path-cached Native.load shortcut must not own generations", native.contains("Native.load("))
         assertTrue("mtime changes must schedule the same generation handoff", native.contains("requestReload(\"mtime\")"))
         assertTrue("reload must have no filesystem watcher", !watcher.contains("newWatchService()"))
@@ -224,6 +231,34 @@ class TypingTrackerEdtBudgetTest {
                 reporterBody.contains("forceRefresh = true") &&
                 reporterBody.contains("if (!replicaRefreshAccepted) return false") &&
                 reporterBody.contains("if (drainEditorOps)"),
+        )
+    }
+
+    @Test
+    fun `stale local baseline recovery is coalesced across a typing burst`() {
+        val replicaPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val replica = Files.readString(replicaPath)
+        val forwardBody = replica
+            .substringAfter("private fun forwardLocalDeltaFromShadow")
+            .substringBefore("fun requestRemoteDrain")
+        val recoveryBody = replica
+            .substringAfter("private fun scheduleStaleBaselineRecovery")
+            .substringBefore("fun requestRemoteDrain")
+
+        assertTrue(
+            "typing while recovery is pending must replace the quiet-period task without another native baseline read",
+            forwardBody.contains("staleBaselineRecoveryTasks.containsKey(filePath)") &&
+                forwardBody.contains("scheduleStaleBaselineRecovery(filePath, document)") &&
+                forwardBody.contains("recovery=coalesced_exact_editor_adopt_after_quiet"),
+        )
+        assertTrue(
+            "the coalesced recovery must adopt one exact live editor cut and cancel its predecessor",
+            recoveryBody.contains("runReadAction<String> { document.text }") &&
+                recoveryBody.contains("reason = \"coalesced-local-delta-baseline-diverged\"") &&
+                recoveryBody.contains("staleBaselineRecoveryTasks.put(filePath, scheduled)?.cancel(false)"),
         )
     }
 
@@ -362,11 +397,11 @@ class TypingTrackerEdtBudgetTest {
         val localDeltaBody = source.substringAfter("private fun forwardLocalDeltaFromShadow(")
             .substringBefore("private fun requestRemoteDrain(")
         assertTrue(
-            "a local editor delta must verify the native shadow frontier or adopt the exact editor once",
+            "a local editor delta must verify the native shadow frontier or coalesce exact-editor adoption",
             localDeltaBody.contains("shouldForwardLocalDeltaUtil(replicaText, beforeText)") &&
-                localDeltaBody.contains("adoptExactEditorBaseline(") &&
-                localDeltaBody.contains("editorText = nextText") &&
-                localDeltaBody.contains("reason = \"local-delta-baseline-diverged\""),
+                localDeltaBody.contains("staleBaselineRecoveryTasks.containsKey(filePath)") &&
+                localDeltaBody.contains("scheduleStaleBaselineRecovery(filePath, document)") &&
+                source.contains("reason = \"coalesced-local-delta-baseline-diverged\""),
         )
         assertTrue(
             "forced refresh must register and atomically swap before retiring the cached client",

@@ -479,6 +479,20 @@ pub fn run_in_controller(
     commit: bool,
     force_disk: bool,
 ) -> Result<()> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        run_in_controller_scoped(file, keep, component_name, message, tag, commit, force_disk)
+    })
+}
+
+fn run_in_controller_scoped(
+    file: &Path,
+    keep: Option<usize>,
+    component_name: Option<&str>,
+    message: Option<&str>,
+    tag: Option<&str>,
+    commit: bool,
+    force_disk: bool,
+) -> Result<()> {
     let compact_started = std::time::Instant::now();
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());

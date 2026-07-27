@@ -597,6 +597,12 @@ pub fn commit_for_authority(file: &Path, force_disk: bool) -> Result<bool> {
 }
 
 pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        commit_with_outcome_scoped(file)
+    })
+}
+
+fn commit_with_outcome_scoped(file: &Path) -> Result<CommitOutcome> {
     if !controller_commit_in_progress() {
         let _ =
             agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(

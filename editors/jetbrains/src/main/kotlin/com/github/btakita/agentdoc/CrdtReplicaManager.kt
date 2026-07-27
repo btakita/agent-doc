@@ -33,6 +33,7 @@ private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
 private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
+private const val STALE_BASELINE_RECOVERY_QUIET_MS = 150L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
 private const val ACK_RECOVERY_REREGISTER_MIN_INTERVAL_MS = 5_000L
 
@@ -309,6 +310,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     // permanently orphaned delivery frontier.
     private val pendingRemoteAckReplays =
         ConcurrentHashMap<String, ConcurrentHashMap<String, PendingRemoteAck>>()
+    private val staleBaselineRecoveryTasks =
+        ConcurrentHashMap<String, java.util.concurrent.ScheduledFuture<*>>()
     private val templateGuardRecoveryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryRetryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryFailureCounts = ConcurrentHashMap<String, Int>()
@@ -329,6 +332,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
         pendingRemoteAckReplays.clear()
+        staleBaselineRecoveryTasks.clear()
         templateGuardRecoveryPaths.clear()
         templateGuardRecoveryRetryPaths.clear()
         templateGuardRecoveryFailureCounts.clear()
@@ -700,23 +704,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val deleteLen = oldFragment.codePointCount(0, oldFragment.length)
         val forwarder = forwarderFor(filePath, beforeText)
         if (forwarder != null) {
-            val replicaText = forwarder.replicaText()
-            if (shouldForwardLocalDeltaUtil(replicaText, beforeText)) {
-                forwarder.forwardLocalDelta(offset, deleteLen, newFragment)
+            if (staleBaselineRecoveryTasks.containsKey(filePath)) {
+                scheduleStaleBaselineRecovery(filePath, document)
             } else {
-                log.warn(
-                    "[crdt-replica] local delta found a stale native baseline for ${File(filePath).name}; " +
-                        "shadow_hash=${contentHash(beforeText)} " +
-                        "replica_hash=${replicaText?.let(::contentHash) ?: "missing"} " +
-                        "recovery=exact_editor_adopt_then_atomic_reregister",
-                )
-                adoptExactEditorBaseline(
-                    filePath = filePath,
-                    editorText = nextText,
-                    staleForwarder = forwarder,
-                    allowPendingLocal = true,
-                    reason = "local-delta-baseline-diverged",
-                )
+                val replicaText = forwarder.replicaText()
+                if (shouldForwardLocalDeltaUtil(replicaText, beforeText)) {
+                    forwarder.forwardLocalDelta(offset, deleteLen, newFragment)
+                } else {
+                    log.warn(
+                        "[crdt-replica] local delta found a stale native baseline for ${File(filePath).name}; " +
+                            "shadow_hash=${contentHash(beforeText)} " +
+                            "replica_hash=${replicaText?.let(::contentHash) ?: "missing"} " +
+                            "recovery=coalesced_exact_editor_adopt_after_quiet",
+                    )
+                    scheduleStaleBaselineRecovery(filePath, document)
+                }
             }
         }
         logSlow(
@@ -725,6 +727,42 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             started,
             details = "offset_utf16=$eventOffset offset_cp=$offset delete_cp=$deleteLen insert_chars=${newFragment.length}",
         )
+    }
+
+    /**
+     * A stale baseline can cover an entire typing burst. Re-registering the
+     * multi-megabyte native state for every queued DocumentEvent both targets
+     * intermediate editor cuts and monopolizes the serialized FFI lane.
+     * Replace the pending task so one exact current editor cut is adopted after
+     * the burst goes quiet.
+     */
+    private fun scheduleStaleBaselineRecovery(filePath: String, document: Document) {
+        lateinit var scheduled: java.util.concurrent.ScheduledFuture<*>
+        scheduled = executor.schedule(
+            Runnable {
+                try {
+                    if (disposed.get() || staleBaselineRecoveryTasks[filePath] !== scheduled) {
+                        return@Runnable
+                    }
+                    val editorText =
+                        ApplicationManager.getApplication().runReadAction<String> { document.text }
+                    val staleForwarder = forwarders[filePath] ?: return@Runnable
+                    shadows[filePath] = editorText
+                    adoptExactEditorBaseline(
+                        filePath = filePath,
+                        editorText = editorText,
+                        staleForwarder = staleForwarder,
+                        allowPendingLocal = true,
+                        reason = "coalesced-local-delta-baseline-diverged",
+                    )
+                } finally {
+                    staleBaselineRecoveryTasks.remove(filePath, scheduled)
+                }
+            },
+            STALE_BASELINE_RECOVERY_QUIET_MS,
+            TimeUnit.MILLISECONDS,
+        )
+        staleBaselineRecoveryTasks.put(filePath, scheduled)?.cancel(false)
     }
 
     fun requestRemoteDrain(filePath: String? = null, reason: String = "event") {

@@ -39,6 +39,12 @@ pub use agent_doc_document_realtime::{CurrentDocument, DocumentKey};
 pub use agent_doc_state_backbone::DocumentWriteDeferredReason;
 use agent_doc_turn::op_log::OpsLogEvent;
 
+mod current_document_projection;
+pub use current_document_projection::{
+    CurrentDocumentProjection, QueueDocumentProjection, invalidate_current_document_projection,
+    with_current_document_projection_pass,
+};
+
 /// Wall-clock seconds (since UNIX epoch) of the last controller RPC failure
 /// observed by [`observe_live_editor_authority`] (the controller-timeout path).
 /// Hot polling paths — notably the supervisor idle-queue watch — read this via
@@ -5271,6 +5277,14 @@ pub fn try_resolve_current_document(file: &std::path::Path) -> Result<CurrentDoc
 }
 
 pub fn try_resolve_current_document_with_source(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<CurrentDocument> {
+    current_document_projection::resolve_projection(file, source)
+        .map(|projection| projection.document().clone())
+}
+
+fn try_resolve_current_document_uncached_with_source(
     file: &std::path::Path,
     source: &str,
 ) -> Result<CurrentDocument> {

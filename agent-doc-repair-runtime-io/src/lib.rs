@@ -27,10 +27,7 @@ where
 }
 
 fn repair_complete_required_closeout(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout(
-        file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
-    )
+    agent_doc_closeout_runtime_io::complete_required_closeout(file, false)
 }
 
 fn repair_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {

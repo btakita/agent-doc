@@ -607,10 +607,7 @@ fn try_recover_repeated_queue_head_response(
         });
     }
 
-    match agent_doc_flow_io::closeout::complete_required_closeout(
-        file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
-    ) {
+    match agent_doc_closeout_runtime_io::complete_required_closeout(file, false) {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
         }
@@ -1134,10 +1131,7 @@ fn attempt_stop_closeout(
         return Ok(StopCloseAttempt::StillOpen { note });
     }
 
-    match agent_doc_flow_io::closeout::complete_required_closeout(
-        file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
-    ) {
+    match agent_doc_closeout_runtime_io::complete_required_closeout(file, false) {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
         }

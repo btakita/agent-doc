@@ -10523,7 +10523,7 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         run_runtime.contains("pub struct RuntimeDirectRunEffects")
             && run_runtime.contains("pub static DIRECT_RUN_EFFECTS")
             && run_runtime.contains("impl agent_doc_run_io::DirectRunEffects")
-            && run_runtime.contains("agent_doc_closeout_runtime_io::closeout_effects()"),
+            && run_runtime.contains("agent_doc_closeout_runtime_io::complete_required_closeout("),
         "agent-doc-run-runtime-io should own the direct-run runtime effects adapter"
     );
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();

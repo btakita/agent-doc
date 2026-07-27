@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.38
+
+_JetBrains plugin 0.2.300; VS Code extension 0.2.57._
+
+- **Compact, commit, closeout, and session-check now share a CRDT-revision-scoped current-document projection (`#compactreactiveprojection`).** The pass cache derives the authoritative document, pipeline frontmatter, and queue components once per Yrs state vector (or detached disk hash), while operator additions and deletions invalidate the graph before the next reader. This removes repeated controller authority resolution without making a cached markdown copy durable; focused latency and concurrent-edit tests prove unchanged readers reuse the projection and changed revisions never hide edits.
+- **JetBrains native calls now fail closed after a bounded wait, and stale typing recovery is coalesced.** A live IDEA thread dump showed the serialized `agent-doc-native-generation` lane wedged inside reliable-sync push for more than 27 minutes while current-document and CRDT delivery workers waited behind it. Calls now time out after ten seconds, poison the stuck generation without unsafe `dlclose`, and make later work fail fast until restart. When a local shadow discovers a stale native baseline, an entire typing burst now replaces one quiet-period recovery task and adopts the latest exact editor cut once, instead of re-registering a 10MB retained state for every intermediate keystroke.
+
 ## 0.35.37
 
 _JetBrains plugin 0.2.299; VS Code extension 0.2.57._

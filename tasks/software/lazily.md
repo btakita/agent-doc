@@ -75,7 +75,21 @@ The C# runner now replays the real `workqueue_competing_delivery` and `workqueue
 Verification is green: the targeted WorkQueue tests, `make check` (79 tests; runtime conformance 44/124, 80 known-uncovered), `make format-check`, and the workspace-wide `make check` all passed. The implementation is pushed as lazily-cs `fafb88f`; the workspace submodule advance is pushed as `2915aec20`; the one-shot lazily-cs CI check completed successfully. The workspace has no workflow named `CI`.
 
 `#lzcsqueues` stays open for QueueStorage, TopicCell, RelayCell, BackpressurePolicy, SpillStore, Transport, and their canonical replays; C# remains staged out of those unsupported capability groups.
-<!-- agent:boundary:f9b3fe34 -->
+
+### Re: TopicCell subphase — gpt-5
+
+Implemented and shipped the next bounded `#lzcsqueues` capability: `TopicCell<T>` now provides independent non-destructive subscriber cursors, durable/offline replay, ephemeral lifecycle removal, restartable defensive snapshots, tail-aware publish/advance semantics, slowest-durable-cursor garbage collection, and per-subscriber reactive invalidation.
+
+Changed paths: `src/Lazily/TopicCell.cs`, `tests/Lazily.Tests/TopicCellConformanceTests.cs`, and `scripts/check-conformance-coverage.sh`. The runner opens and replays all four real canonical TopicCell fixtures rather than mirroring them inline.
+
+Commands and verification: the targeted TopicCell corpus passed; a mutation that prevented no-durable GC from advancing to the tail made the corpus fail, and the restored baseline passed; `make check` passed with 80 tests and 48/124 runtime-opened fixtures (76 known-uncovered); `make format-check` passed; lazily-cs CI completed successfully. The implementation is pushed as lazily-cs `17256ce`, and the workspace submodule advance is pushed as `80fefd6c4`.
+
+The workspace-wide `make check` is not green because three pre-existing dirty `src/agent-doc` tests expect the phrase `same-cycle pending-add`, while that unrelated implementation now emits `same-cycle actionable backlog`; 181 tests passed before fail-fast cancelled the remainder. I did not modify or stage that separate work. The workspace has no workflow named `CI`.
+
+Confidence is high for the TopicCell capability because its full canonical corpus, invalidation matrix, state snapshots, positive floors, mutation check, full binding suite, formatting gate, and CI are green. No operator escalation is needed.
+
+The backlog was also corrected to recognize that QueueStorage shipped with QueueCell. `#lzcsqueues` stays open only for RelayCell, BackpressurePolicy, SpillStore, Transport, and their canonical replays; C# remains staged out of that unsupported capability group.
+<!-- agent:boundary:fab8d1e8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -97,7 +111,7 @@ Verification is green: the targeted WorkQueue tests, `make check` (79 tests; run
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell shipped at 01d2cf3 and replays all five canonical queuecell fixtures; WorkQueueCell shipped at fafb88f and replays collections/workqueue_competing_delivery.json plus collections/workqueue_lease_deadletter.json. Keep C# eligible only for the exact queue capabilities it implements. Still implement QueueStorage, TopicCell, RelayCell, BackpressurePolicy, SpillStore, and Transport, then replay their canonical corpora before admitting C# to those peer/feature groups — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16). (stays open: QueueStorage, TopicCell, RelayCell, BackpressurePolicy, SpillStore, Transport, and their canonical replays remain.)
+- [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell + QueueStorage shipped at 01d2cf3 and replay all five canonical queuecell fixtures; WorkQueueCell shipped at fafb88f and replays both canonical workqueue fixtures; TopicCell shipped at 17256ce and replays all four canonical topiccell fixtures. Keep C# eligible only for the exact queue capabilities it implements. Still implement RelayCell with BackpressurePolicy, SpillStore, and Transport, then replay its canonical corpora before admitting C# to that peer/feature group — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16). (stays open: RelayCell, BackpressurePolicy, SpillStore, Transport, and their canonical replays remain.)
 - [ ] 🚧 [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: resume after the operator-requested agent-doc controller recycle completes.)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
@@ -107,7 +121,7 @@ Verification is green: the targeted WorkQueue tests, `make check` (79 tests; run
 - [ ] [#lzcscluster] lazily-cs: MembershipCell (SWIM + Phi-accrual), LeaseCell/LeaderCell/LockCell/SemaphoreCell/BarrierCell, presence/awareness/ephemeral, circuit breaker/retry/bulkhead/timeout, health/readiness/discovery/registry; replay membership + coordination + presence + resilience + service corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 42-44, 46-47)
 - [ ] [#lzcspackage] lazily-cs: multi-target netstandard2.1 / net8.0 alongside net10.0 (INumber<T> in the merge algebra needs a shim or policy split), add a release workflow, publish Lazily to NuGet — needs a NuGet API key from the operator
 - [ ] [#asyncplanenever] STAGED implementation — finish the async v2 kernel naming migration in C++, Go, Python, and Zig per tasks/plan-lazily-async-v2-migration.md. Rust, JavaScript, Kotlin, and C# already expose AsyncSource/AsyncComputed. Preserve deprecated aliases in published bindings, collapse live memo constructors into guarded computed, and settle the public AsyncComputedState vs formal AsyncSlotState distinction without renaming the formal model mechanically.
-- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-27: 44/124 canonical fixtures opened, 80 known-uncovered (reactive-graph 21, collections 10, statechart 7, materialization 3, familysync 1, and WorkQueue 2 are covered). The remaining fixtures are genuinely missing product surfaces, not runner-wiring gaps. Keep open and work it down only by shipping the explicit tasks in tasks/software/lazily-cs-parity-plan.md (#lzcscollections, #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, #lzcstemporal, #lzcscluster, #lzcsplane); admit C# to each capability group only when that production surface and canonical replay ship.
+- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-27: 48/124 canonical fixtures opened, 76 known-uncovered (reactive-graph 21, collections 10, statechart 7, materialization 3, familysync 1, QueueCell 5, WorkQueueCell 2, and TopicCell 4 are covered). The remaining fixtures are genuinely missing product surfaces, not runner-wiring gaps. Keep open and work it down only by shipping the explicit tasks in tasks/software/lazily-cs-parity-plan.md (#lzcscollections, #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, #lzcstemporal, #lzcscluster, #lzcsplane); admit C# to each capability group only when that production surface and canonical replay ship.
 <!-- /agent:backlog -->
 
 ## Review

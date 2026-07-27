@@ -1,7 +1,7 @@
 ---
 agent_doc_session: a7cd84b1-f38d-4554-92b9-1fbe207b6f9e
 resume: c00f9a95-29de-4ded-8b3c-3df9edebe6f3
-agent: claude
+agent: codex
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
@@ -644,7 +644,7 @@ Three things in this cycle: what to do about the stalled thread, whether a text 
 **3. Gravity Jack backing: a real update, and it moves the left tail, not the right one.** You're right to correct the model, in both directions. PresenceAI followed the normal startup script... unprofitable, shut down... and a profitable backer genuinely breaks that script: Gravity Jack's agency + patent-licensing revenue means Haiven likely doesn't die abruptly when the seed cash runs low. The Richeys can slow-burn it. Concretely that raises: the odds Haiven *exists* in 3-5 years, the odds your prototype fee gets paid, the odds a revenue-share-if-private ever has a company attached to it, and the durability of the ally relationship you're investing in. What it does **not** move: the $10M/$100M odds. A $1-3M/yr-scale agency can subsidize a small team's payroll; it cannot fund a growth run... that still requires the seed completing and the milestones landing. And there's a subtle downside scenario worth naming: backer-subsidized survival is also how companies persist for years in low-cash grind mode *without* the traction that makes equity or revenue-share worth anything... which is precisely the "long haul I don't have the stomach for" future you declined. So the update is net-positive *for the path you chose*... bounded prototype, ally relationship, door open... and neutral-to-negative for the path you didn't. It confirms rather than reopens the decision.
 
 Sequence for today: Acadian acceptance + questions (if outstanding), Haiven v3 letter, then the text. All three artifacts are committed and ready; the only remaining ingredient is send.
-❯ 🚧 Here is Craig's response. I confirmed that the time is good. I don't think they can match my initial offer. They may be close however. My concern now is I don't want to be the only person getting full salary while everyone else is getting a discount. That is not fair for the team. So I would have to give something up, most likely equity. I was thinking of floating the option of me taking Acadian for financial stability with my family (both Luke + Craig are better off than me financially)...and doing the prototype while with Acadian. I believe they would be receptive to that.
+❯ Here is Craig's response. I confirmed that the time is good. I don't think they can match my initial offer. They may be close however. My concern now is I don't want to be the only person getting full salary while everyone else is getting a discount. That is not fair for the team. So I would have to give something up, most likely equity. I was thinking of floating the option of me taking Acadian for financial stability with my family (both Luke + Craig are better off than me financially)...and doing the prototype while with Acadian. I believe they would be receptive to that.
 
 ```
 You're very welcome, BrIan.
@@ -705,7 +705,40 @@ Your floor feels tricky because you're trying to collapse three different number
 **How this reshapes the call, in one line:** your story tonight is coherent and sympathetic without a single number shared... "I carry debt and I'm building toward a first home, so near-term cash has a real floor for me; above it, pay me in the same upside you're all betting on, and let's write down when salaries normalize." That's not a demand... it's the same candor Craig showed you about the 50%, pointed the other direction. It also quietly explains why the Acadian bridge exists if the blend falls short: a man servicing debt without a house is the one person in the room who genuinely cannot run on mission alone... and nobody on that call, least of all Luke and Craig, can argue otherwise.
 
 Run the worksheet, write $F on a sticky note, and don't let tonight's warmth negotiate below it. Everything else in the playbook stands.
-<!-- agent:boundary:774b399c -->
+
+### Re: 30-minute call and the contracting path — gpt-5
+
+**Yes—bring up contracting early, ideally by minute 5.** The earlier advice to hold it until the end assumed Haiven was still your preferred full-time outcome if the compensation cleared your floor. Your preference has changed: Acadian now appears to be the primary-engagement choice, while Haiven is the work you want to preserve. Letting Luke and Craig spend most of a 30-minute call negotiating an FTE package you probably will not accept would waste the scarce time and feel less candid.
+
+Do not lead with it as the first sentence, and do not call it a “side project.” After a warm opening, frame it as the structure you believe is the best fit:
+
+> “I want to be transparent before we spend the call negotiating the wrong structure. I’m leaning strongly toward taking Acadian as my primary engagement because it gives my family the financial stability I need. That doesn’t reduce my conviction about Haiven or my desire to work with you. I think the strongest fit may be for me to lead a bounded SDK prototype and implementation as a contractor, starting with a tightly scoped milestone. I’d like to use this call to see whether that path works for you.”
+
+Because you said “I think” rather than “I have decided,” keep the wording at **leaning strongly** unless you settle it before the call. If there is still a Haiven FTE package that could genuinely reverse you, say so plainly. If there is not, do not invite another compensation pitch out of politeness.
+
+A useful 30-minute shape:
+
+1. **0–3 minutes:** thank them, acknowledge their effort and the mission.
+2. **3–6 minutes:** give the Acadian-primary / Haiven-contract framing above.
+3. **6–12 minutes:** let Luke and Craig react. Learn whether they actually want a fractional SDK lead or only a full-time founder engineer.
+4. **12–22 minutes:** pitch only the first decision, not the entire platform roadmap: a paid Milestone 0 that defines the protocol, conformance model, Unity-first pilot, architecture, acceptance criteria, schedule, and price. Mention the 10–15 hour/week operating band, weekly demo, Haiven-owned repositories, and milestone-by-milestone authorization.
+5. **22–27 minutes:** ask who owns the decision, what budget exists, what result would justify the next milestone, and whether the schedule is compatible with their near-term customer pipeline.
+6. **27–30 minutes:** agree on one next step—usually sending the prepared proposal and scheduling a scope review. Do not negotiate every engine, superrepo detail, MCP feature, or final price on this call.
+
+The existing proposal is well suited to this conversation, but it is too large to walk through live. Lead with the **bounded Unity-first pilot** and use the wider engine, mobile, superrepo, and agent-harness roadmap only as evidence that the first milestone has a credible expansion path.
+
+Two positioning cautions:
+
+- Do not explain the choice as “Luke and Craig are better off than me” or “Haiven cannot afford me.” Say the primary-role decision is about family stability, debt, home ownership, and preserving enough capacity to do excellent work for both engagements.
+- A consulting rate is not unfair to Haiven’s discounted salaried team. Haiven would be buying a bounded deliverable and specialized leadership without a full-time salary, benefits, or an open-ended founder commitment. Price the milestone honestly; do not donate both cash and equity because you feel guilty.
+
+The hard prerequisite is **Acadian clearance**. Do not promise Haiven a start date or 10–15 hours/week until you have reviewed Acadian’s conflict-of-interest, moonlighting, confidentiality, and invention-assignment terms and obtained written clearance where needed. Keep Haiven work on separate time, equipment, accounts, and repositories. The proposal already makes availability subject to that clearance, which is exactly right.
+
+**My recommendation:** choose Acadian as the primary engagement if that is the decision you can hold, and use this call to test whether Haiven values you enough to create a serious, bounded consulting relationship. That is not a consolation prize. It may be the better arrangement: financial stability for your family, preserved ownership of your distributed-systems work, and a concrete way to build the Haiven relationship through shipped evidence.
+
+**Changed paths:** none outside this session response. **Commands/evidence:** reviewed the current job-offer session, the Haiven SDK session, and the proposal’s commercial model. **Verification:** the prepared proposal already specifies a 10–15 hour/week band, weekly demos, milestone authorization, Haiven-owned repositories, 50/50 milestone payments, background-IP protection, and Acadian clearance as a prerequisite. **Confidence:** high on the call sequencing and positioning; medium on feasibility until Acadian’s agreement and Haiven’s budget are known. **Escalation:** written Acadian conflict/moonlighting/IP clearance before any Haiven commitment.
+The call will be 30 minutes. Should I bring up the contracting early? I think I want to go with Acadian for my full time role. But this would be a great side project. See haiven-sdk.md
+<!-- agent:boundary:a0c3343a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -716,9 +749,9 @@ Run the worksheet, write $F on a sticky note, and don't let tonight's warmth neg
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#haivencall] Tonight 8pm ET: 3-way comp call with Luke + Craig; playbook at tasks/recruit/haiven/call-prep-2026-07-26.md; compute family cashflow floor $F BEFORE the call; do not accept a number live
-- [ ] [#sdkcontract] #sdkcontract [on-hold] Prototype/contract path superseded by the decision to pursue the Haiven role; revive only if the package negotiation falls through (structure preserved in tasks/recruit/haiven/sdk-contract-structure.md)
-- [ ] [#acadiansend] #acadiansend [operator-verify] HOLD Acadian (neither accept nor decline) until the Haiven package is agreed + signed; if the recruiter pings: 'finalizing another conversation, need a few days'; decline graciously only after Haiven signs
+- [ ] [#haivencall] Tonight 8pm ET: 30-minute call with Luke + Craig; by minute 5 state strong preference for Acadian as the primary engagement and propose a bounded Haiven SDK consulting path; test fit for Milestone 0; do not accept or promise hours/start live
+- [ ] [#sdkcontract] Active path: if Luke + Craig are receptive, send/refine tasks/recruit/haiven/sdk-proposal-2026-07-26.md and scope only Milestone 0; 10–15 hours/week and any start date remain subject to Acadian conflict-of-interest, moonlighting, confidentiality, and IP clearance
+- [ ] [#acadiansend] Acadian is now the preferred primary engagement: resolve #acadianterms, confirm the acceptance deadline, and obtain written moonlighting/conflict/invention-assignment clearance before promising Haiven SDK hours
 <!-- /agent:backlog -->
 
 ## Review

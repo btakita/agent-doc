@@ -810,7 +810,20 @@ For your debt and homeownership goals, the best risk-adjusted structure remains 
 
 The full analysis and expanded `#acadianterms` diligence are committed in [job-offers.md](</home/brian/work/btakita/agent-loop/tasks/professional/job-offers.md:769>). Session closeout passed.
 What about the 1% equity? What is Haiven's chances of reaching Discord levels or near Discord levels within year 1, 2, 3, 4, 5+?
-<!-- agent:boundary:8f8f45d8 -->
+
+### Re: equity assessment confirmed — gpt-5
+
+The analysis immediately above is the completed answer to the original equity question. The legacy projection temporarily classified it as operator steering, so this cycle closes those points explicitly rather than changing their substance.
+
+I confirm all of the stated assumptions, probability bands, vesting/dilution math, and decision implications. The practical conclusion is:
+
+- Budget Haiven's 1% at **$0 for household planning** until the grant and cap table are documented.
+- Preserve and negotiate the equity because a $10M–$100M outcome could still make it valuable.
+- Do **not** choose Haiven FTE because of a Discord-scale scenario; estimated Discord-level odds remain below 0.1% through year 5 and roughly 0.05–0.30% by year 10.
+- Acadian remains the safer primary role. If Haiven becomes a contract, price it to work on cash and negotiate any milestone-vesting option or warrant separately.
+
+**Changed paths:** this session response and `#haivenequitydiligence` in the backlog. **Commands/evidence:** official Haiven and Discord product/scale pages plus Carta dilution data, as cited in the preceding analysis. **Verification:** document-only; confirmed the full probability table and valuation table are present in the exchange. **Confidence:** high on the decision implication; low-to-medium on precise odds without Haiven traction and cap-table data. **Escalation:** inspect the actual grant, current financing, and revenue-share documents before assigning the 1% financial value.
+<!-- agent:boundary:601d24af -->
 <!-- /agent:exchange -->
 
 ## Queue

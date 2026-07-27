@@ -359,7 +359,43 @@ Architecture proof:
 - Edited surfaces: the dynamic-context IO adapter, prompt-context adapter, plan projection, and sequential/parallel/DAG dispatch paths. No migration or operator verification remains.
 
 Verification passed: focused dynamic-context tests, focused orchestration tests, the prompt-context architecture guard, `make check` (8,235 tests plus model checks), and the latest CI run was green. Commits: `4878e65dd` in `src/agent-doc` and parent gitlink commit `157828ce2`.
-<!-- agent:boundary:3c115ee6 -->
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#adctxcompact]
+
+
+Implemented `#adctxcompact`.
+
+Invariant and owner:
+- `agent-doc-dynamic-context-io` now owns durable session continuity projection, backed by the SQLite context-injection ledger. Compaction and ordinary process restart preserve handle-only context metadata; transfer/extract carries those handles without expanded bodies; only an explicit successful session clear resets the session injection scope.
+- The turn lifecycle remains the owner of `document_cycles`; clearing dynamic context deletes only context manifests/injections.
+
+Transition coverage:
+- First use records expanded chunks; the next cycle in the same session references the durable handles.
+- Reopening the SQLite state (process/supervisor restart analogue) still renders `<dynamic_context_ref>` / `<context_ref>` metadata and never replays the expanded payload.
+- Full exchange compaction preserves the latest session fingerprint, modes, resolvable `tsift://` handles, and bounded expansion commands while excluding archived response bodies.
+- Transfer/extract annotations and referrals carry the same handle-only reference projection.
+- An explicit successful clear removes the session ledger rows, after which the same source expands again as a fresh scope. Deferred or failed clear paths return before the reset call, so they preserve the scope.
+
+Edited surfaces and why they are sufficient:
+- `agent-doc-sqlite`: added deterministic latest-manifest lookup per document session while retaining the existing explicit scope-clear authority.
+- `agent-doc-dynamic-context-io`: added handle-only rendering, durable latest-session lookup, and explicit session reset APIs.
+- `agent-doc-compact-io`: threads the durable reference into full and partial exchange compact projections, including committed snapshots.
+- `src/extract.rs`: carries durable handles through extract, transfer, and referral boundaries before source mutation.
+- `src/session_actor_cmd.rs`: resets durable context only after normal clear delivery/already-cleared success, and after explicit forced clear cleanup; the auto-queue defer branch does not reset it.
+
+Verification:
+- Focused SQLite, reopen, clear, compact, and transfer tests passed.
+- Full `make check` passed.
+- Latest CI inspection: green (`perf: make Codex managed proof opt-in`, run `30306886226`).
+- Subrepo commit: `888037e9b` (`feat: preserve dynamic context across compaction`).
+- Superproject pointer commit: `b27ef6521` (`agent-doc: preserve context across compaction`).
+
+No migration or operator action is required; existing SQLite schema and session frontmatter are reused.
+<!-- agent:boundary:5785e992 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -369,7 +405,7 @@ Verification passed: focused dynamic-context tests, focused orchestration tests,
 - ~~do [#adctxledger]~~
 - ~~do [#adctxpreflight]~~
 - ~~do [#adctxorchestrate]~~
-- do [#adctxcompact]
+- ~~do [#adctxcompact]~~
 - 📌 do [#2y8j]
 - 📌 do [#cdtcutover]
 - 📌 do [#coredecomp]
@@ -403,7 +439,6 @@ Verification passed: focused dynamic-context tests, focused orchestration tests,
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
-- [ ] [#adctxcompact] [focused-cycle] Dynamic-context injection ledger Phase 5 after #adctxorchestrate: define and implement Compact Exchange/restart semantics for projected context and the durable ledger, preserving explainable expanded/referenced/skipped diagnostics without replay after compact or process restart. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 
 - [ ] [#0dsr] [focused-cycle] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Tagged [focused-cycle] 2026-07-19 — this is WRITE-PATH work whose failure modes are destructive (replaying a stale intent clobbers operator text; broken idempotency double-archives a compact), so it needs fresh context, not a mid-drain slot. MAP (the expensive part, traced 2026-07-19): (1) durable journal = pending_write_journal, agent-doc-state-backbone/src/lib.rs:1433 — deduped by intent_id, entries cleared on DocumentWriteConverged; (2) accessor = pending_document_write_journal, agent-doc-document-realtime-io/src/lib.rs:2824; (3) EXISTING replay = deferred_document_write_reconnect_content, same file :3115 — but triggered only by editor RECONNECT (:1214) and closing cut (:3571), which is the actual gap: a retained intent waits for a reconnect that may never come; (4) settle entry points already exposed to preflight via its effects = settle_retained_committed_projection / settle_retained_captured_projection, agent-doc-closeout-runtime-io/src/lib.rs:170/226/289; (5) the repair step to hook = agent-doc-preflight-command-io/src/run.rs:296, which runs on every Run Agent Doc. IDEMPOTENCY NOTE: intent_id dedup gives you 'do not replay the SAME intent twice' for free, but it does NOT prove replaying a STALE intent over newer content is safe — that guard still has to be designed and is the real risk. Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms' and left work retained with no operator surface to resume it.

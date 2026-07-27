@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -173,7 +173,7 @@ Updated the Contact page’s **Call the office** card to explicitly state: `Offi
 - Existing unrelated TMO changes and untracked local configuration files were preserved and left out of the commit.
 
 Confidence: high.
-<!-- agent:boundary:8b5c6afb -->
+<!-- agent:boundary:57f4de96 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

@@ -208,12 +208,34 @@ No source paths changed in this cycle. Existing unrelated lazily-cs `AGENTS.md`,
 
 ### Re: /goal Add missing lazily-cs features — gpt-5
 
+> **Queue prompt:**
+>
+> /goal Add missing lazily-cs features
+
+
 Goal created: **Add missing lazily-cs features**.
 
 The active implementation scope remains the five staged parity items already tracked in this document: queue metering, CRDT families, shared-memory/blob IPC, reliable/distributed sync, and the remaining plane surfaces. C# will enter each peer/feature group only after that production surface and its canonical fixture replay ship.
 
 No repository paths changed for this command. Goal creation was confirmed by the goal controller, confidence is high, and no escalation is needed.
-<!-- agent:boundary:3a714e20 -->
+
+### Re: release + publish all lazily packages — gpt-5
+
+Released the eligible lazily suite from the capability-gated conformance baseline:
+
+- `lazily-spec` **v0.37.0** and `lazily-formal` **v0.37.0**: tags and GitHub releases are live.
+- `lazily-rs` **0.52.0**: full all-features/formal/benchmark gate passed; the versioned benchmark report was regenerated; `cargo publish --dry-run --locked` passed; **0.52.0 is live on crates.io**; tag and GitHub release are live (`89db3a0`).
+- `lazily-cpp` **v0.26.0**, `lazily-go` **v0.24.0**, and `lazily-zig` **v0.32.0**: release commits, tags, and GitHub releases are live (`e13334b`, `367b7e0`, `84af776`).
+- `lazily-py` **0.38.0**: package build and full gate passed; tagged wheel workflow completed successfully; **0.38.0 is live on PyPI** (`7266c55`).
+- `lazily-kt` **0.39.0**: full gate and Maven-local publication passed; tagged release workflow completed successfully and published the package (`37f89e5`).
+- `lazily-dart` **0.28.0**: full gate and zero-warning publish dry-run passed; **0.28.0 is live on pub.dev**; tag and GitHub release are live (`1fdc9da`).
+- `lazily-js`: v0.30.0 exposed an npm 12 packaging defect before registry publication. The interop peer executable mode and normalized package metadata were fixed in **v0.30.1**; the full gate and clean npm publish dry-run now pass with `bin/interop-peer.mjs` retained as executable; v0.30.1 is tagged and released on GitHub (`50c8914`). npm itself remains at 0.29.1 because CI's OIDC publish still gets the known E404 and local npm auth is expired. Existing operator action `#lzjsnpmtrustedpub` remains exact: configure `@lazily-hub/lazily-js` Trusted Publisher for repository `lazily-hub/lazily-js`, workflow `release.yml`, no environment, allowed action `npm publish`, then rerun the v0.30.1 workflow; alternatively reauthenticate as the package owner and publish v0.30.1 with the required OTP.
+- `lazily-cs` was deliberately **not** tagged or published. It remains feature-staged at 141/141 passing tests and 92/124 runtime-opened canonical fixtures, with incomplete surfaces tracked by `#lzcsqueues`, `#lzcscrdt`, `#lzcsipc`, `#lzcssync`, and `#lzcsplane`; NuGet publication also lacks the repository credential. C# stays out of any peer group unless that exact production capability and canonical replay are present.
+
+Every eligible language candidate passed its repository `make check` plus its applicable package dry-run. The superproject aggregate check encountered five agent-doc controller-socket timeouts under the 8,240-test parallel load; the representative controller test and the complete related preflight group both passed serially, isolating this as live-controller load contention rather than a lazily regression. The nine released submodule pointers were committed and pushed in root commit `9d6ee7946`; unrelated JavaScript README/build output, Zig AGENTS changes, Python worktree state, and session-document edits were excluded from that pointer commit.
+
+The release policy now matches the requested network-suite model: peers join tests per exact supported capability, and incomplete bindings—especially C#—remain staged/skipped instead of being treated as suite-wide implementations.
+<!-- agent:boundary:8ae1b298 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -223,7 +245,7 @@ No repository paths changed for this command. Goal creation was confirmed by the
 - ~~do [#lzcspackage]~~
 - ~~do [#asyncplanenever]~~
 - ~~do [#lazilyconformancecoverag]~~
-- /goal Add missing lazily-cs features
+- ~~/goal Add missing lazily-cs features~~
 - release + publish all lazily packages
 <!-- /agent:queue -->
 

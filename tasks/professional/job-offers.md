@@ -764,8 +764,39 @@ The key distinction is that your circumstances are **the reason for choosing a s
 For the 30 minutes, let them summarize the FTE framework for roughly five minutes if they still want to; receive it respectfully, do not negotiate it reflexively, and then spend the majority of the call testing the contracting path. That honors the work they prepared without allowing the meeting to remain organized around a role you probably will not take.
 
 **Changed paths:** none outside this session response. **Verification:** reconciled this clarification with the prepared Haiven SDK proposal and the revised call objective. **Confidence:** high. **Escalation:** send the heads-up before the call if time permits; obtain Acadian conflict/moonlighting/IP clearance before promising Haiven hours or a start date.
-<!-- agent:boundary:c85c8685 -->
 What company/industry is more of a risk? Acadian is contingent on the stock market. Haiven is contigent on the launch + market success.
+
+### Re: Acadian versus Haiven downside risk — gpt-5
+
+**Haiven is materially riskier as a company and as a full-time employer. Acadian is materially safer as a company, but your particular 12-month contractor seat still has meaningful termination/non-renewal risk.** Those are different layers, and separating them resolves the apparent contradiction.
+
+“Acadian is contingent on the stock market” is directionally true but too binary. Acadian earns management fees on assets under management, so falling markets, client outflows, weak relative performance, and fee compression hurt revenue. Its own March 2026 filing estimates that a uniform 10% change in AUM would change annualized gross management-fee revenue by about $67 million and post-tax economic net income by about $26 million. But Acadian does not need the market to rise continuously in order to exist: it still earns fees on the remaining assets, has long-lived institutional mandates, can gain net inflows during weak markets, and has variable compensation that absorbs part of a downturn. In Q1 2026, $3.2 billion of market depreciation was more than offset by $21.4 billion of net inflows, leaving $195.7 billion of AUM; the company reported $167 million of quarterly revenue and $129 million in cash. Its preliminary April AUM then reached about $219 billion. ([SEC Q1 2026 filing](https://www.sec.gov/Archives/edgar/data/1748824/000162828026031710/aami-20260331.htm), [May 2026 investor update](https://ir.acadian-inc.com/investor-relations/press-releases/press-release-details/2026/Acadian-Asset-Management-Inc--to-Present-Next-Phase-of-Growth-at-Investor-Forum/default.aspx))
+
+Haiven’s risk is more path-dependent and closer to binary. Its public plan still targets an October 2026 launch, gives the SDK and listing to developers at zero cost, and expects player subscriptions to fund the developer pool and Haiven’s share. That requires several things to work together: studios join, SDK integrations ship, players arrive, the subscription proposition converts, cross-game benefits retain them, and the economics leave enough cash for Haiven after developer/reward distributions. The public “200M+ pre-launch reach” is a marketing reach claim, not evidence of paying subscribers or recurring revenue. ([Haiven developer model and launch target](https://haiven.gg/developers))
+
+| Risk layer | Acadian | Haiven |
+|---|---|---|
+| **Company survival** | Low-to-moderate. A 40-year institutional manager with roughly $196–219B recent AUM and current positive cash generation. | High. Pre-launch product, unproven subscription conversion, no public audited operating history. |
+| **Revenue volatility** | Moderate and cyclical: markets, flows, performance, fee mix. Revenue contracts rather than instantly disappearing. | High and structural: failure to achieve product-market fit can prevent the revenue engine from forming. |
+| **Your role/income** | Moderate. Contractors are easier to cut than employees, and the unknown termination-for-convenience clause matters more than company solvency. | High for FTE. You would accept discounted cash while salary normalization depends on funding/revenue; survival at low burn does not make your compensation safe. |
+| **Upside** | Limited but cash is immediate and measurable. | Very high variance; equity/revenue share could matter, but only after traction and enforceable written terms. |
+
+Gravity Jack’s backing lowers Haiven’s **sudden-death risk**, but not its **career or household-finance risk**. It may let Haiven survive for years at a small burn rate. That can actually produce the awkward middle outcome: the company remains alive, but salaries stay discounted, equity remains illiquid, priorities keep shifting, and the launch never generates enough traction to normalize compensation. “The business survives” and “your role pays reliably enough for debt reduction and home ownership” are not the same proposition.
+
+For you, I would rank the risks this way:
+
+1. **Highest risk:** Haiven full-time at discounted cash with normalization tied to future revenue/funding.
+2. **Middle risk:** Acadian’s 12-month contract, because early termination or non-renewal is possible even while Acadian remains healthy.
+3. **Best risk-adjusted structure:** Acadian as the primary cash-flow engine plus Haiven as a prepaid, milestone-bounded contract—provided Acadian permits it and the combined workload is sustainable.
+
+That third structure is not merely a compromise; it matches each opportunity to the kind of risk it handles best. Acadian finances the household with current cash. Haiven becomes a controlled upside bet in which you can learn the team and market through shipped milestones without financing the startup with your base salary.
+
+Before treating Acadian as “safe,” close the remaining diligence gap: obtain the termination/notice clause, confirm whether the 12-month SOW is fully funded and approved, ask whether termination for convenience is allowed, and confirm who bears the payment obligation if the client ends the assignment early. A two-to-four-week notice/payment protection would materially improve the risk profile. For Haiven contracting, retain 50% payment at milestone start, tight acceptance windows, explicit change control, and no promise of continuing capacity beyond each authorized milestone.
+
+**Bottom line:** Acadian is exposed to the market, but Haiven is exposed to whether a new market mechanism forms at all. Acadian’s downside is primarily cyclical and your contract-specific; Haiven’s is existential, compensation-linked, and product-market-fit dependent. Given your debt and home goal, Acadian is the safer primary engagement by a wide margin.
+
+**Changed paths:** none outside this session response. **Commands/evidence:** reviewed the current Acadian term questions, Haiven launch model, and current official Acadian disclosures. **Verification:** checked Acadian’s March/April 2026 AUM, Q1 revenue/cash, stated market sensitivity, and Haiven’s current October 2026 launch/subscription model. **Confidence:** high on the relative ranking; medium on your exact Acadian contract risk until the PGC/SOW termination terms are produced. **Escalation:** resolve `#acadianterms` and written moonlighting/IP clearance before committing to the combined structure.
+<!-- agent:boundary:5aaa552d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -784,7 +815,7 @@ What company/industry is more of a risk? Acadian is contingent on the stock mark
 ## Review
 
 <!-- agent:review -->
-- [/] [#acadianterms] [recommended] Before accepting Acadian: get the termination/notice clause from the PGC agreement and written confirmation of >40hr billing + renewal-renegotiation terms from the recruiter
+- [/] [#acadianterms] [recommended] Before accepting Acadian: confirm the 12-month SOW is fully funded/approved; obtain the PGC termination-for-convenience and notice/payment clause; confirm who pays if Acadian ends the assignment early; and get written confirmation of >40-hour billing, renewal/rate-renegotiation expectations, and moonlighting/conflict/IP clearance for bounded Haiven SDK work
 <!-- /agent:review -->
 
 ## Icebox

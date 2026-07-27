@@ -159,7 +159,7 @@ Delivery:
 The fix is implemented, tested, pushed, tagged as `v0.35.32`, and published to PyPI.
 
 The document closeout is safely retained but cannot seal because the JetBrains editor replica deregistered during refresh. Please reopen/focus `tasks/agent-doc/agent-doc-bugs2.md` in JetBrains, then tell me `continue`. I’ll resume the existing capture—without resubmitting or forcing a disk write.
-<!-- agent:boundary:4228a431 -->
+<!-- agent:boundary:f6e2f822 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -203,7 +203,6 @@ The document closeout is safely retained but cannot seal because the JetBrains e
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#lazilyconcurrentcloseout] [focused-cycle] Fix binary-owned closeout/repair under concurrent lazily.md editor mutation. Reproduce operator queue additions and deletions during a running turn, combined gate mutation, Compact Exchange, File Cache Conflict, and a malformed closing exchange marker. Closeout and repair must CAS/rebase from the current Yrs/CRDT state vector, preserve additions and honor deletions, never resurrect or direct-replace stale text, restore structural markers from retained intent/current authority idempotently, and retry without a second direct document mutation. Negotiate live controller/library build or protocol skew inside agent-doc and refresh/recycle automatically when safe rather than requiring agent-narrated install/replay. Add binary, controller/plugin, malformed-marker, version-skew, and concurrent-edit regression tests.
 - [ ] [#tmuxsyncnewpane] [focused-cycle] Reproduce opening tasks/monsterrodholders.md and invoking Sync Tmux Pane when no pane exists. Trace document actor/route ownership and the tmux pane registry; make Sync Tmux Pane create and associate a new pane in the intended tmux session, submit the document route, and fail visibly if creation cannot complete. Add controller/plugin regression coverage and a live pane proof.
 - [ ] [#compactreactiveprojection] [focused-cycle] Generalize the pass-scoped Lazily CurrentDocument projection already used by session-check into shared compact/commit/closeout infrastructure. Cache derived document, pipeline, and queue projections per CRDT revision/state vector; invalidate on every operator edit; keep Yrs/CRDT as the sole durable text authority. Reuse the recent ThreadSafeQueue and ThreadSafeSourceMap/ThreadSafeComputedMap support, remove remaining duplicate authority resolutions, and add latency plus concurrent-typing tests proving cached projections never hide operator additions or deletions.
 - [ ] [#adctxledger] [focused-cycle] Dynamic-context injection ledger Phase 2: implement the durable SQLite schema and helpers for context_injections, atomic per-turn insertion with cycle state, and indexed duplicate/diagnostic queries. Preserve lazily as live in-process state and SQLite as durable replay memory. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md

@@ -188,7 +188,23 @@ fn resume_captured_finalize_intent(
             agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
                 file, plan,
             );
-        let response = capture.intent_body.unwrap_or(capture.response_body);
+        let mut response = capture.intent_body.unwrap_or(capture.response_body);
+        if let Some(normalized) =
+            agent_doc_template::response_materialization::normalize_retained_legacy_patch_markers(
+                &response,
+            )
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "captured_finalize_legacy_patch_markers_normalized file={} cycle_id={} capture_id={} strategy=transient_replay_only",
+                    file.display(),
+                    expected.cycle_id,
+                    expected.capture_id,
+                ),
+            );
+            response = normalized;
+        }
         agent_doc_write_runtime_io::run_command_with_response(
             options,
             agent_doc_write_command_io::CommitMode::Required,

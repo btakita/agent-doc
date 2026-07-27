@@ -79,6 +79,75 @@ pub fn ensure_strict_template_patch_markers(
     );
 }
 
+/// Normalize the retired `agent:patch:*` wrapper only while replaying an
+/// already-durable closeout capture.
+///
+/// New closeouts must still use the strict `patch:*` protocol and fail before
+/// capture when they do not. This narrow compatibility step prevents an older
+/// malformed capture from becoming an unrecoverable retry loop: it accepts only
+/// complete marker-only payloads with a real exchange response and never
+/// rewrites prose or partial markers.
+pub fn normalize_retained_legacy_patch_markers(response: &str) -> Option<String> {
+    if response.contains("<!-- patch:") || !response.contains("<!-- agent:patch:") {
+        return None;
+    }
+
+    fn normalize_marker_line(line: &str) -> Option<String> {
+        let (closing, rest) = line
+            .strip_prefix("<!-- /agent:patch:")
+            .map(|rest| (true, rest))
+            .or_else(|| {
+                line.strip_prefix("<!-- agent:patch:")
+                    .map(|rest| (false, rest))
+            })?;
+        let name = rest.strip_suffix(" -->")?;
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return None;
+        }
+        Some(if closing {
+            format!("<!-- /patch:{name} -->")
+        } else {
+            format!("<!-- patch:{name} -->")
+        })
+    }
+
+    let mut normalized = String::with_capacity(response.len());
+    let mut changed = false;
+    for segment in response.split_inclusive('\n') {
+        let (line, newline) = if let Some(line) = segment.strip_suffix("\r\n") {
+            (line, "\r\n")
+        } else if let Some(line) = segment.strip_suffix('\n') {
+            (line, "\n")
+        } else {
+            (segment, "")
+        };
+        if let Some(marker) = normalize_marker_line(line) {
+            normalized.push_str(&marker);
+            normalized.push_str(newline);
+            changed = true;
+        } else {
+            normalized.push_str(segment);
+        }
+    }
+    if !changed {
+        return None;
+    }
+
+    let (patches, unmatched) = crate::parse_patches(&normalized).ok()?;
+    if !unmatched.trim().is_empty()
+        || !patches.iter().any(|patch| {
+            patch.name == "exchange" && response_text_has_heading(patch.content.as_str())
+        })
+    {
+        return None;
+    }
+    Some(normalized)
+}
+
 pub fn ensure_strict_template_response_heading_for_current_doc(
     current_content: &str,
     patches: &[PatchBlock],
@@ -789,6 +858,38 @@ mod tests {
         assert!(response.starts_with("<!-- patch:exchange -->"));
         assert!(!response.contains("Implemented the requested change"));
         assert!(response.contains("### Re: topic - gpt-5"));
+    }
+
+    #[test]
+    fn retained_legacy_patch_markers_normalize_only_a_complete_response_payload() {
+        let legacy = concat!(
+            "<!-- agent:patch:exchange -->\n",
+            "### Re: retained — gpt-5\n\nRecovered.\n",
+            "<!-- /agent:patch:exchange -->\n",
+        );
+        let normalized = normalize_retained_legacy_patch_markers(legacy).unwrap();
+        assert_eq!(
+            normalized,
+            concat!(
+                "<!-- patch:exchange -->\n",
+                "### Re: retained — gpt-5\n\nRecovered.\n",
+                "<!-- /patch:exchange -->\n",
+            )
+        );
+        assert!(
+            normalize_retained_legacy_patch_markers(
+                "prefix\n<!-- agent:patch:exchange -->\n### Re: x — gpt-5\n\nx\n<!-- /agent:patch:exchange -->\n"
+            )
+            .is_none(),
+            "unmatched transcript text must not be normalized into a replayable capture"
+        );
+        assert!(
+            normalize_retained_legacy_patch_markers(
+                "<!-- agent:patch:exchange append -->\n### Re: x — gpt-5\n\nx\n<!-- /agent:patch:exchange -->\n"
+            )
+            .is_none(),
+            "legacy markers with attributes remain malformed"
+        );
     }
 
     #[test]

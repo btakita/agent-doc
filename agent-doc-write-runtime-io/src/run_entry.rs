@@ -163,6 +163,32 @@ fn response_cell_from_patchback(
     .then(|| response.to_string())
 }
 
+fn enforce_strict_template_closeout_contract(
+    current_content: &str,
+    parsed_marker_count: usize,
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+    strict_closeout: bool,
+) -> Result<()> {
+    if !strict_closeout {
+        return Ok(());
+    }
+    let template_mode = frontmatter::parse(current_content)
+        .map(|(fm, _)| fm.resolve_mode().is_template())
+        .unwrap_or(false);
+    agent_doc_template::response_materialization::ensure_strict_template_patch_markers(
+        template_mode,
+        parsed_marker_count,
+        patches,
+        unmatched,
+    )?;
+    agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
+        current_content,
+        patches,
+        unmatched,
+    )
+}
+
 /// Apply the response-only part of finalize as one idempotent semantic CRDT op.
 ///
 /// The operation carries no caller baseline or whole-document candidate.  The
@@ -632,22 +658,13 @@ pub(crate) fn run_template(
             &patches, &unmatched,
         )?;
     }
-    if flags.strict_closeout {
-        let template_mode = frontmatter::parse(&current_content)
-            .map(|(fm, _)| fm.resolve_mode().is_template())
-            .unwrap_or(false);
-        agent_doc_template::response_materialization::ensure_strict_template_patch_markers(
-            template_mode,
-            parsed_marker_count,
-            &patches,
-            &unmatched,
-        )?;
-        agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
-            &current_content,
-            &patches,
-            &unmatched,
-        )?;
-    }
+    enforce_strict_template_closeout_contract(
+        &current_content,
+        parsed_marker_count,
+        &patches,
+        &unmatched,
+        flags.strict_closeout,
+    )?;
     let pending_flags = super::pending_write_flags(&flags);
     agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
@@ -1028,13 +1045,13 @@ pub(crate) fn run_stream(
             &patches, &unmatched,
         )?;
     }
-    if flags.strict_closeout {
-        agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
-            &current_content,
-            &patches,
-            &unmatched,
-        )?;
-    }
+    enforce_strict_template_closeout_contract(
+        &current_content,
+        parsed_marker_count,
+        &patches,
+        &unmatched,
+        flags.strict_closeout,
+    )?;
     let pending_flags = super::pending_write_flags(&flags);
     if let Err(err) =
         agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)
@@ -1834,6 +1851,7 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         "run_ipc",
         agent_doc_ops_log_io::log_op,
     )?;
+    let parsed_marker_count = parsed.marker_count;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
 
@@ -1856,14 +1874,6 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
 
-    // Save response to pending store (survives context compaction)
-    agent_doc_repair_io::pending::save_pending_with_current_content_and_plan(
-        file,
-        &response,
-        &current_content,
-        flags.mutation_plan_json.as_deref(),
-    )?;
-
     // Enforcement: reject tracked-work full-replacement blocks unless allowed.
     template_io::enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_no_destructive_todo_patch(&current_content, &patches)?;
@@ -1876,13 +1886,13 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
             &patches, &unmatched,
         )?;
     }
-    if flags.strict_closeout {
-        agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
-            &current_content,
-            &patches,
-            &unmatched,
-        )?;
-    }
+    enforce_strict_template_closeout_contract(
+        &current_content,
+        parsed_marker_count,
+        &patches,
+        &unmatched,
+        flags.strict_closeout,
+    )?;
     let pending_flags = super::pending_write_flags(&flags);
     if let Err(err) =
         agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)
@@ -1896,6 +1906,15 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         retain_ipc_patch_for_retry_error(file, baseline, &response, &err, "pending_done")?;
         return Err(err);
     }
+
+    // Capture only after all response-shape and pending-work guards pass. A
+    // malformed IPC closeout must not become a durable retry loop.
+    agent_doc_repair_io::pending::save_pending_with_current_content_and_plan(
+        file,
+        &response,
+        &current_content,
+        flags.mutation_plan_json.as_deref(),
+    )?;
 
     if try_add_response_cell_via_realtime_backbone(file, &patches, &unmatched, false, "run_ipc")? {
         return Ok(());
@@ -2481,6 +2500,26 @@ mod tests {
         // or a real error would silently apply mutations it never earned.
         let hard = anyhow::anyhow!("finalize: refusing to mutate a non-git document");
         assert!(!error_requests_retry_without_disk(&hard));
+    }
+
+    #[test]
+    fn strict_stream_and_ipc_closeout_reject_legacy_markers_before_capture() {
+        let current = "---\nagent_doc_mode: template\n---\n";
+        let legacy = concat!(
+            "<!-- agent:patch:exchange -->\n",
+            "### Re: retained — gpt-5\n\nRecovered.\n",
+            "<!-- /agent:patch:exchange -->\n",
+        );
+        let err =
+            enforce_strict_template_closeout_contract(current, 0, &[], legacy, true).unwrap_err();
+        assert!(
+            err.to_string().contains("<!-- patch:exchange -->"),
+            "legacy/unmarked payload must fail the common strict contract: {err:#}"
+        );
+
+        let canonical =
+            template::PatchBlock::new("exchange", "\n### Re: retained — gpt-5\n\nRecovered.\n");
+        enforce_strict_template_closeout_contract(current, 2, &[canonical], "", true).unwrap();
     }
 
     #[test]

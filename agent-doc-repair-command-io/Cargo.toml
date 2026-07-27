@@ -13,9 +13,11 @@ name = "agent_doc_repair_command_io"
 [dependencies]
 agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.31" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.31" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.31" }
 agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.31" }
 agent-doc-repair-runtime-io = { path = "../agent-doc-repair-runtime-io", version = "0.35.31" }
 agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.31" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.31" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.31" }
 agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version = "0.35.31" }
 agent-doc-write-runtime-io = { path = "../agent-doc-write-runtime-io", version = "0.35.31" }

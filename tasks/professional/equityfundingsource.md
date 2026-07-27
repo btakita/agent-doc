@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -173,7 +173,22 @@ Updated the Contact page’s **Call the office** card to explicitly state: `Offi
 - Existing unrelated TMO changes and untracked local configuration files were preserved and left out of the commit.
 
 Confidence: high.
-<!-- agent:boundary:57f4de96 -->
+### Re: Staging and production deployment — gpt-5
+
+> **Queue prompt:** deploy to staging + production
+
+Deployed the already-pushed EFS commit `c3e899ff` from an isolated clean worktree, keeping all unrelated TMO worktree changes out of both bundles.
+
+- Changed paths: none in this cycle; deployment used exact commit `c3e899ff` (`fix(contact): show office hours`).
+- Exact-commit verification: `bun install --frozen-lockfile` succeeded and `make check` exited 0. The test digest’s single `error: d1 down` match is an intentional simulated-error assertion, not a failing test.
+- CI lookup: `gh run list --workflow CI --limit 1` found no workflow named `CI`, so there was no remote run to inspect.
+- Staging: remote D1 had no pending migrations; Worker version `b0fa4388-c8eb-4183-91c3-e6d69584e51f` deployed. The staging `/contact` page returns HTTP 200 and includes `Office hours are 9AM-5PM PT.`
+- Production: remote D1 had no pending migrations; deployment status reports version `a4f64136-4e63-4bc3-b5ca-d066323c728c` at 100%. Cache-busted probes of both `https://equityfundingsource.com/contact` and `https://www.equityfundingsource.com/contact` return HTTP 200 and include the new office-hours text.
+- Escalation/status: Wrangler exited 1 only after production upload and activation, when the production token again failed custom-domain route resynchronization with Cloudflare code 10000. The existing routes remained active and both live hostnames serve the new version, so no rollback was needed; the existing route-token permission follow-up remains the correct remediation.
+- The temporary deployment worktree was removed after verification. Existing unrelated TMO changes remain untouched.
+
+Confidence: high.
+<!-- agent:boundary:e67ba9e9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

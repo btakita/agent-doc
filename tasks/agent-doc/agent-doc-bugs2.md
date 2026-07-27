@@ -26,7 +26,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-done
+completed
 <!-- /agent:status -->
 
 ## Exchange
@@ -395,18 +395,57 @@ Verification:
 - Superproject pointer commit: `b27ef6521` (`agent-doc: preserve context across compaction`).
 
 No migration or operator action is required; existing SQLite schema and session frontmatter are reused.
-<!-- agent:boundary:5785e992 -->
+
+### Re: `#2y8j` — live IDEA typing proof and residual SQLite-thrash fix
+
+> **Queue prompt:**
+>
+> 📌 do [#2y8j]
+
+
+Completed the operator verification and fixed the residual hang path it exposed.
+
+Live diagnosis on plugin 0.2.300 first confirmed the narrow `#qbasehashmemo` invariant (727 editor operations, zero `crdt_merge_base`) but not the broader responsiveness claim: the burst produced 13+ `editor_op_record_failed: database is locked` events and a 5 s controller read timeout. The cause was write amplification after the quiet-period drain: every character independently reopened `state.db`, began a transaction, deserialized the growing op vector, appended one op, serialized the entire vector, and committed.
+
+Implemented the architectural boundary as one ordered typing burst → one bounded native persistence transaction:
+
+- Added `record_editor_ops` in `agent-doc-op-capture-io`; it opens the authoritative ledger with a 250 ms busy timeout, loads the epoch once, appends the ordered batch once, serializes once, and commits once. The single-op API remains as a compatibility wrapper.
+- Added `agent_doc_record_editor_ops_json` to the Rust FFI and the JetBrains JNA interface.
+- Changed `TypingTracker` to resolve the base hash once per drained burst, encode the Rust `EditorOp` JSON shape, and cross JNA once instead of looping per op.
+- Kept the safe diff-guess fallback when optional op capture cannot acquire the ledger quickly.
+- Added Rust batch-order/epoch coverage and JetBrains structural regression checks that pin one base-hash lookup and one native batch call per quiet burst.
+- Bumped and installed JetBrains plugin 0.2.301 with the matching 0.35.40 binary/native library, then restarted IDEA. IDEA's startup log confirms `Agent Doc (0.2.301)` loaded.
+
+Live post-fix proof on `agent-doc-bugs2.md`:
+
+- Sustained 784-character per-key burst with a deliberate 2 ms injector delay: 1.819 s wall time; IDEA stayed responsive.
+- Native telemetry: one `editor_ops_recorded count=784 ... transaction=batch #qbasehashmemo` event for the entire burst.
+- Zero `editor_ops_record_failed` / legacy `editor_op_record_failed` events.
+- Zero `crdt_merge_base` events.
+- Zero controller timeouts or `controller_crdt_current_text_read_unavailable` events.
+- One undo emitted the exact inverse `count=785` batch (the 784 burst events plus one adjacent captured editor event). The probe was never saved; the session document's disk hash remained unchanged during the successful proof.
+
+Verification:
+
+- `cargo test -p agent-doc-op-capture-io`: 13 passed.
+- JetBrains `TypingTrackerEdtBudgetTest`: passed.
+- `cargo check --lib`: passed.
+- Full `make check`: passed.
+- Latest CI inspection: green (`perf: make Codex managed proof opt-in`, run `30306886226`).
+- Signed plugin artifacts built: `agent-doc-jetbrains-0.2.301.zip` and `agent-doc-jetbrains-0.2.301-signed.zip`.
+
+Commits:
+
+- agent-doc subrepo: `498796345` (`perf: batch editor op capture`)
+- root pointer: `71a4c63ee` (`agent-doc: batch editor op capture`)
+
+The commits remain local because the root branch also contains concurrent unrelated commits; I did not push those other owners' work implicitly.
+<!-- agent:boundary:ead3685c -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#compactreactiveprojection]~~
-- ~~Please make the Codex managed capacity proof off by default with an opt-in based on the frontmatter. Please also improve the latency of the managed capacity proof.~~
-- ~~do [#adctxledger]~~
-- ~~do [#adctxpreflight]~~
-- ~~do [#adctxorchestrate]~~
-- ~~do [#adctxcompact]~~
-- 📌 do [#2y8j]
+- ~~📌 do [#2y8j]~~
 - 📌 do [#cdtcutover]
 - 📌 do [#coredecomp]
 - 📌 do [#orchdecomp]
@@ -454,7 +493,6 @@ No migration or operator action is required; existing SQLite schema and session 
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
-- [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#coredecomp] [focused-cycle] Keep the former `agent-doc-core` God-crate surface decomposed into owned pure crates. Audit `pending.rs`, `queue_item_lifecycle.rs`, `template.rs`, `crdt_sync.rs`, `component.rs`, and related modules; move element-local semantics into `agent-doc-element-*`, document composition into `agent-doc-document`, merge/CRDT merge policy into `agent-doc-merge`, and FFI ABI into `agent-doc-ffi`. Do not recreate `agent-doc-core` as a compatibility facade or migration alias, and do not move runtime IO, snapshots, commits, IPC, tmux, or controller effects into pure crates.
 - [ ] [#orchdecomp] [focused-cycle] Decompose the `agent-doc-orchestration` God crate along effect boundaries. Audit turn lifecycle, document realtime scheduling, queue/exchange lifecycle, closeout/commit, editor IPC, supervisor/controller state, tmux integration, recovery/repair, and session routing; move stable responsibilities into `agent-doc-turn`, `agent-doc-document`/document-realtime, `agent-doc-supervisor`/controller-state crates, `agent-doc-editor`, `agent-doc-tmux`, and narrow closeout/recovery crates as appropriate. Leave `agent-doc-orchestration` as a shrinking effect adapter only, not a deprecated compatibility facade; callers should move directly to the owning focused crate and pure merge/document code should stay out of orchestration.

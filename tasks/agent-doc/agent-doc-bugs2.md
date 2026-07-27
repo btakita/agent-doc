@@ -375,12 +375,35 @@ The Haiven-shaped regression proves the complete multiline prompt precedes the r
 Verification: full `make check` passed 8,182 tests across 161 binaries (241 skipped), plus clippy, simulations, Lean, and TLA. Installed agent-doc 0.35.31 and the matching Codex skill; JetBrains plugin 0.2.297 was installed to four IDEs. Commits `0b5c4dcd6` (agent-doc) and `5be65085c` (parent gitlink) are pushed; tag `v0.35.31` is pushed. The multi-platform Release workflow is still in progress and owns GitHub Release/PyPI publication.
 
 This follows the 0.35.30 Lazily `ThreadSafeQueueCell` subscription release: delivery convergence now waits on a retained monotonic queue notification instead of controller polling. The remaining refactor opportunities are captured below: consolidate the duplicated final-normalization pipelines, represent prompt-growth provenance as a typed closeout input, and centralize response identity/order binding across closeout paths.
-<!-- agent:boundary:2ffea71b -->
+
+### Re: Shared final closeout normalization — gpt-5
+
+> **Queue prompt:**
+>
+> do [#closeoutnormrefactor]
+
+
+Completed `#closeoutnormrefactor`.
+
+Both `run_template` and the stream disk fallback now call one typed `finalize_template_closeout_content` pipeline. That shared pipeline owns response/prompt reorder repair, prompt-prefix normalization, the fail-closed order guard, resolved-backlog prompt cleanup, and the structural re-normalization required after cleanup. The stream path's deliberate bypass for already-normalized adopted editor authority is represented explicitly as `FinalTemplateNormalizationMode::PreserveAdoptedAuthority` instead of being an independent normalization branch.
+
+Changed paths:
+
+- `agent-doc-write-runtime-io/src/lib.rs`
+- `agent-doc-write-runtime-io/src/run_entry.rs`
+- `agent-doc-write-runtime-io/src/ipc/transport.rs`
+
+The production Haiven-shaped test now enters through the shared closeout helper and still proves full prompt-before-response order, every `❯ ` prefix, and exactly one response. The entire write-runtime package passed 159 tests. The full repository gate passed 8,182 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA.
+
+Commits `fe5519477` (agent-doc) and `147820405` (parent gitlink) are pushed to `main`. The newly triggered agent-doc CI run `30226520087` was in progress at the single required inspection, with no completed failure. Confidence is high: this is a semantics-preserving extraction pinned by the original production regression and the full gate. No escalation was needed, and unrelated partial staging in `src/tmux-router` was preserved untouched.
+
+The remaining requested refactor opportunities stay tracked as `#promptgrowthprovenance` and `#responseordercell`.
+<!-- agent:boundary:e0f7e001 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#closeoutnormrefactor]
+- ~~do [#closeoutnormrefactor]~~
 - do [#promptgrowthprovenance]
 - do [#responseordercell]
 - ~~do [#haivenresponseorder]~~
@@ -430,7 +453,6 @@ This follows the 0.35.30 Lazily `ThreadSafeQueueCell` subscription release: deli
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#closeoutnormrefactor] [recommended] Consolidate the duplicated stream/template final-normalization pipelines into one shared closeout pipeline, including reorder, prompt-prefix normalization, and fail-closed authority checks, so disk and IPC cannot drift semantically.
 - [ ] [#promptgrowthprovenance] [recommended] Replace paired string snapshots used to infer continued prompt typing with a typed prompt-growth provenance input that distinguishes admission-baseline growth from a wholly new post-preflight follow-up.
 - [ ] [#responseordercell] [recommended] Move response identity and prompt-order binding into one shared turn-cell policy consumed by disk write, IPC write, and post-commit repair paths; preserve newest-response selection and transient `(HEAD)` insensitivity.
 - [ ] [#crdtwaitsplit] #agent-doc-feature Separate controller backpressure from CRDT delivery convergence in the write wait. ControllerModelBackpressure and DeliveryAckPending are different conditions with different remedies (back off the controller vs wait on the editor) but currently share one loop, one backoff schedule and one 60s budget, so the wrong remedy is applied to whichever one is actually blocking. Partial coalescing already exists and must be preserved: #crdtcasraced added the `advanced` flag so a non-advancing apply does not reset the backoff floor - without it a contended write pinned at 25ms for the whole 60s budget (~2400 merge+CAS attempts, each worsening the contention it retried). Land after #crdtwaitsubscribe, whose per-condition subscription makes the split natural rather than two parallel poll loops.

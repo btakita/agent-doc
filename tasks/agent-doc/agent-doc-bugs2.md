@@ -398,13 +398,43 @@ The production Haiven-shaped test now enters through the shared closeout helper 
 Commits `fe5519477` (agent-doc) and `147820405` (parent gitlink) are pushed to `main`. The newly triggered agent-doc CI run `30226520087` was in progress at the single required inspection, with no completed failure. Confidence is high: this is a semantics-preserving extraction pinned by the original production regression and the full gate. No escalation was needed, and unrelated partial staging in `src/tmux-router` was preserved untouched.
 
 The remaining requested refactor opportunities stay tracked as `#promptgrowthprovenance` and `#responseordercell`.
-<!-- agent:boundary:e0f7e001 -->
+
+### Re: Typed prompt-growth provenance — gpt-5
+
+> **Queue prompt:**
+>
+> do [#promptgrowthprovenance]
+
+
+Completed `#promptgrowthprovenance`.
+
+The response-order API no longer accepts two anonymous optional document strings and infers their relationship at the call site. It now accepts `PromptGrowthProvenanceInput`, which names the admission baseline and pre-write authority and classifies each candidate as:
+
+- `AdmissionBaselineGrowth` — the full prompt exists in current authority and its first line was already admitted;
+- `PostPreflightFollowUp` — the full prompt exists in current authority but began after admission;
+- `Unproven` — the candidate is not fully present in current authority.
+
+Only admission-baseline growth permits the no-boundary response-order repair. New follow-ups and unproven candidates remain fail-closed. The typed value flows through the pure exchange crate, the template I/O wrapper, and both final reorder/guard calls in write-runtime.
+
+Changed paths:
+
+- `agent-doc-element-exchange/src/lib.rs`
+- `agent-doc-template-io/src/lib.rs`
+- `agent-doc-write-runtime-io/src/lib.rs`
+- `agent-doc-write-runtime-io/src/ipc/transport.rs`
+
+Verification included the new three-way pure classification test, the Haiven-shaped repair regression, and `finalize_fails_closed_on_concurrent_prompt_added_after_baseline`. The full repository gate passed 8,183 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA.
+
+Commits `2a83942af` (agent-doc) and `ea1326859` (parent gitlink) are pushed to `main`. The newly triggered CI run `30226893341` was in progress at the single required inspection, with no completed failure. Confidence is high; the behavioral distinction is now explicit and both sides of it are pinned. No escalation was needed, and unrelated `src/tmux-router` staging remained untouched.
+
+The final requested refactor opportunity remains tracked as `#responseordercell`.
+<!-- agent:boundary:f98cbc56 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#closeoutnormrefactor]~~
-- do [#promptgrowthprovenance]
+- ~~do [#promptgrowthprovenance]~~
 - do [#responseordercell]
 - ~~do [#haivenresponseorder]~~
 - ~~do [#crdtwaitsubscribe]~~
@@ -453,7 +483,6 @@ The remaining requested refactor opportunities stay tracked as `#promptgrowthpro
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#promptgrowthprovenance] [recommended] Replace paired string snapshots used to infer continued prompt typing with a typed prompt-growth provenance input that distinguishes admission-baseline growth from a wholly new post-preflight follow-up.
 - [ ] [#responseordercell] [recommended] Move response identity and prompt-order binding into one shared turn-cell policy consumed by disk write, IPC write, and post-commit repair paths; preserve newest-response selection and transient `(HEAD)` insensitivity.
 - [ ] [#crdtwaitsplit] #agent-doc-feature Separate controller backpressure from CRDT delivery convergence in the write wait. ControllerModelBackpressure and DeliveryAckPending are different conditions with different remedies (back off the controller vs wait on the editor) but currently share one loop, one backoff schedule and one 60s budget, so the wrong remedy is applied to whichever one is actually blocking. Partial coalescing already exists and must be preserved: #crdtcasraced added the `advanced` flag so a non-advancing apply does not reset the backoff floor - without it a contended write pinned at 25ms for the whole 60s budget (~2400 merge+CAS attempts, each worsening the contention it retried). Land after #crdtwaitsubscribe, whose per-condition subscription makes the split natural rather than two parallel poll loops.
 - [ ] [#sessioncheckguardsweep] #agent-doc-bug session_check is the second-largest closeout phase - a flat 2.9-4.2s, observed once at 11,271ms - and it is a per-invocation ~30-guard sweep. Measured attribution from one run: inspect_with_warnings 2665ms (the nesting parent), guard_partial_staging_closeout 817ms, inspect_core 607ms, self_heal_response_replay_duplication 385ms, resolve_current_document_content 350ms/13x. The partial-staging guard is the concrete target: companion_findings iterates candidate_repos, which on this superproject enumerates every dirty submodule and then runs several git diffs per repo. candidate_repos legitimately needs --ignore-submodules=none (it is hunting dirty submodule repos, 341ms) and narrowing it with --untracked-files=no was measured at only 13ms and discarded, so the real question is a SEMANTICS decision: must a WARN-only narrow guard run on every closeout, or only when the cycle actually staged something beyond the session document? Related: #closeoutgitsubmodulescan (9e7ce2f79 fixed two 47x submodule scans in tracked_modified_paths that were NOT the dominant cost).

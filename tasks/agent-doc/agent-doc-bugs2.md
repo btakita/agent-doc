@@ -331,7 +331,11 @@ Verification:
 Commits:
 - agent-doc subrepo: `cf8376921 feat: project dynamic context manifests`
 - parent gitlink: `c9ab8a9d0 agent-doc: project dynamic context manifests`
-<!-- agent:boundary:e8f09c24 -->
+
+### Re: #adctxpreflight
+
+Retained response linkage repaired for the committed Phase 3 closeout.
+<!-- agent:boundary:d7755d58 -->
 <!-- /agent:exchange -->
 ## Queue
 

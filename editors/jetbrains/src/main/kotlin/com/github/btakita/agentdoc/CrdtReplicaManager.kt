@@ -503,10 +503,19 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 (forwarder != null).also { attached ->
                     if (attached) {
                         shadows[filePath] = registrationText
-                        // Registration published this exact visible editor cut.
-                        // Let the binary settle a matching reconnect decision,
-                        // but never fetch or install a whole-document target here.
-                        NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
+                        if (forceRefresh) {
+                            // The exact visible cut is registered and fenced.
+                            // A retained response can now be semantically replayed
+                            // over that baseline without reviving deleted operator text.
+                            replayDeferredWriteAfterRegistration(
+                                filePath,
+                                document,
+                                registrationText,
+                                forwarder!!,
+                            )
+                        } else {
+                            NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
+                        }
                         requestRemoteDrain(filePath, "open-document")
                     }
                 }
@@ -562,6 +571,103 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             log.warn("[crdt-replica] closing editor cut publish failed for $filePath: ${e.message}")
             false
         }
+    }
+
+    /**
+     * Complete the second half of an editor-first forced reconnect.
+     *
+     * The replacement replica already owns [registrationText], so the native
+     * binary may return a validated semantic replay over that exact cut. Fence
+     * the editor, replica, pending-local state, and disk before applying. This
+     * keeps operator deletions authoritative while allowing a retained closeout
+     * response to become visible and durable after registration.
+     */
+    private fun replayDeferredWriteAfterRegistration(
+        filePath: String,
+        document: Document,
+        registrationText: String,
+        forwarder: CrdtReplicaForwarder,
+    ): Boolean {
+        val recovered =
+            NativePatching.deferredWritePostRegisterContent(filePath, registrationText)
+                ?: run {
+                    NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
+                    return true
+                }
+        if (recovered == registrationText) {
+            NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
+            return true
+        }
+        if (
+            templateStructureState(filePath, recovered, "post-register-replay") !=
+            TemplateStructureProjectionState.Exact
+        ) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-structure")
+            return false
+        }
+        if (forwarders[filePath] !== forwarder || hasPendingLocal(filePath)) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-replica-raced")
+            return false
+        }
+
+        var applied = false
+        var persisted = false
+        ApplicationManager.getApplication().invokeAndWait {
+            if (
+                forwarders[filePath] !== forwarder ||
+                hasPendingLocal(filePath) ||
+                document.text != registrationText
+            ) {
+                return@invokeAndWait
+            }
+            if (
+                !remoteCrdtDiskCanPersistUtil(
+                    registrationText,
+                    recovered,
+                    readRawDiskText(filePath),
+                )
+            ) {
+                log.warn(
+                    "[crdt-replica] post-register replay retained because disk contains novel external text for $filePath; " +
+                    "editor_hash=${contentHash(registrationText)} recovered_hash=${contentHash(recovered)}",
+                )
+                return@invokeAndWait
+            }
+            advanceNonOperatorMutationEpoch(filePath)
+            applyingRemote.add(filePath)
+            try {
+                runUndoableRemoteUpdateCommand(document) {
+                    applyMinimalDocumentEditUtil(document, registrationText, recovered)
+                }
+                shadows[filePath] = recovered
+                applied = true
+                persisted =
+                    persistRemoteCrdtTextIfSafe(
+                        filePath,
+                        document,
+                        registrationText,
+                        recovered,
+                    )
+            } finally {
+                applyingRemote.remove(filePath)
+            }
+        }
+        if (!applied) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-editor-raced")
+            return false
+        }
+
+        // The editor mutation was suppressed from the ordinary document
+        // listener above, so publish this validated semantic replay explicitly.
+        forwarder.ensureEditorText(recovered)
+        if (persisted) {
+            NativePatching.deferredWriteReconnectPropagated(filePath, recovered)
+        }
+        log.info(
+            "[crdt-replica] replayed deferred write after exact editor registration for $filePath; " +
+            "before_hash=${contentHash(registrationText)} recovered_hash=${contentHash(recovered)} persisted=$persisted",
+        )
+        return true
     }
 
     private fun forwardLocalDeltaFromShadow(

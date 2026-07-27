@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.33
+
+_JetBrains plugin 0.2.298; VS Code extension 0.2.57._
+
+- **Forced JetBrains reconnects now finish retained closeouts after registering the exact live editor cut (`#lazilyconcurrentcloseout`).** The plugin keeps editor-first registration, then requests a validated semantic replay from a new post-registration ABI, fences the editor/replica/pending-local/disk state, applies the minimal editor mutation, saves it, and explicitly publishes the resulting CRDT delta. This prevents the former re-register loop where controller authority held the completed response while IntelliJ repeatedly restored and saved its shorter pre-closeout buffer. The legacy reconnect ABI remains fail-closed for rolling upgrades, and regression coverage proves the replay preserves an unsaved queue deletion while materializing the retained response.
+
 ## 0.35.32
 
 _JetBrains plugin 0.2.297; VS Code extension 0.2.57._

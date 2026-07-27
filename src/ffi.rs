@@ -1929,20 +1929,65 @@ pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_content(
         eprintln!("[deferred-write] reconnect: non-UTF-8 editor content; returning null");
         return std::ptr::null_mut();
     };
-    let recovered = match agent_doc_document_realtime_io::deferred_document_write_reconnect_content(
-        std::path::Path::new(path),
+    let file = std::path::Path::new(path);
+    let recovered = deferred_write_reconnect_candidate(file, editor_content);
+    let recovered = exact_editor_reregister_candidate(file, editor_content, recovered);
+    recovered
+        .and_then(|content| CString::new(content).ok())
+        .map(CString::into_raw)
+        .unwrap_or(std::ptr::null_mut())
+}
+
+/// Recover a deferred write after a replacement replica has registered the
+/// exact visible editor baseline.
+///
+/// Unlike [`agent_doc_deferred_write_reconnect_content`], this entrypoint may
+/// return a different document. The returned content is a validated semantic
+/// replay over `editor_content`; callers must fence the still-visible editor
+/// bytes, install through the editor API, persist safely, and publish the
+/// resulting local CRDT delta.
+///
+/// Caller must free a non-null result with [`agent_doc_free_string`].
+///
+/// # Safety
+///
+/// Both arguments must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_deferred_write_post_register_content(
+    file_path: *const c_char,
+    editor_content: *const c_char,
+) -> *mut c_char {
+    let Ok(path) = (unsafe { CStr::from_ptr(file_path) }).to_str() else {
+        eprintln!("[deferred-write] post-register reconnect: non-UTF-8 file path; returning null");
+        return std::ptr::null_mut();
+    };
+    let Ok(editor_content) = (unsafe { CStr::from_ptr(editor_content) }).to_str() else {
+        eprintln!(
+            "[deferred-write] post-register reconnect: non-UTF-8 editor content; returning null"
+        );
+        return std::ptr::null_mut();
+    };
+    deferred_write_reconnect_candidate(std::path::Path::new(path), editor_content)
+        .and_then(|content| CString::new(content).ok())
+        .map(CString::into_raw)
+        .unwrap_or(std::ptr::null_mut())
+}
+
+fn deferred_write_reconnect_candidate(
+    file: &std::path::Path,
+    editor_content: &str,
+) -> Option<String> {
+    match agent_doc_document_realtime_io::deferred_document_write_reconnect_content(
+        file,
         editor_content,
     ) {
         Ok(Some(content)) => Some(content),
         Ok(None)
-            if agent_doc_document_realtime_io::pending_external_disk_candidate(
-                std::path::Path::new(path),
-            )
-            .is_some() =>
+            if agent_doc_document_realtime_io::pending_external_disk_candidate(file).is_some() =>
         {
             None
         }
-        Ok(None) => match agent_doc_capture_io::load_active(std::path::Path::new(path)) {
+        Ok(None) => match agent_doc_capture_io::load_active(file) {
             Ok(Some(capture))
                 if capture.committed_at.is_none()
                     && capture.discarded_at.is_none()
@@ -1953,7 +1998,7 @@ pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_content(
                     ) =>
             {
                 match agent_doc_template_io::parse_template_patchback(
-                    std::path::Path::new(path),
+                    file,
                     &capture.response_body,
                     "editor_reconnect_capture_fallback",
                     agent_doc_ops_log_io::log_op,
@@ -1963,7 +2008,7 @@ pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_content(
                         editor_content,
                         &plan.patches,
                         &plan.unmatched,
-                        std::path::Path::new(path),
+                        file,
                     )
                 }) {
                     Ok(content)
@@ -1976,28 +2021,31 @@ pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_content(
                     }
                     Ok(_) => None,
                     Err(err) => {
-                        eprintln!("[deferred-write] capture fallback failed for {path}: {err}");
+                        eprintln!(
+                            "[deferred-write] capture fallback failed for {}: {err}",
+                            file.display()
+                        );
                         None
                     }
                 }
             }
             Ok(_) => None,
             Err(err) => {
-                eprintln!("[deferred-write] capture lookup failed for {path}: {err}");
+                eprintln!(
+                    "[deferred-write] capture lookup failed for {}: {err}",
+                    file.display()
+                );
                 None
             }
         },
         Err(err) => {
-            eprintln!("[deferred-write] reconnect failed for {path}: {err}");
+            eprintln!(
+                "[deferred-write] reconnect failed for {}: {err}",
+                file.display()
+            );
             None
         }
-    };
-    let recovered =
-        exact_editor_reregister_candidate(std::path::Path::new(path), editor_content, recovered);
-    recovered
-        .and_then(|content| CString::new(content).ok())
-        .map(CString::into_raw)
-        .unwrap_or(std::ptr::null_mut())
+    }
 }
 
 fn exact_editor_reregister_candidate(
@@ -3135,6 +3183,56 @@ mod tests {
         assert_eq!(
             exact_editor_reregister_candidate(file, live, Some(stale.to_string())),
             None,
+        );
+    }
+
+    #[test]
+    fn post_register_reconnect_returns_semantic_replay_over_exact_editor_cut() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: base — gpt-5\n\nBase response.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#deleted-unsaved]\n",
+            "- do [#kept]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let editor_cut = baseline.replace("- do [#deleted-unsaved]\n", "");
+        let target = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: retained — gpt-5\n\nRetained response.\n<!-- /agent:exchange -->",
+        );
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &file,
+            baseline,
+            &target,
+            "ffi_post_register_test",
+            agent_doc_state_backbone::DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+        )
+        .unwrap();
+
+        let path = CString::new(file.to_string_lossy().as_bytes()).unwrap();
+        let editor = CString::new(editor_cut.as_bytes()).unwrap();
+        let ptr = unsafe {
+            agent_doc_deferred_write_post_register_content(path.as_ptr(), editor.as_ptr())
+        };
+        assert!(!ptr.is_null());
+        let recovered = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
+        unsafe { agent_doc_free_string(ptr) };
+
+        assert!(recovered.contains("Retained response."));
+        assert!(recovered.contains("- do [#kept]"));
+        assert!(!recovered.contains("- do [#deleted-unsaved]"));
+        assert_ne!(recovered, editor_cut);
+        assert_eq!(
+            exact_editor_reregister_candidate(&file, &editor_cut, Some(recovered)),
+            None,
+            "the legacy reconnect entrypoint must remain fail-closed",
         );
     }
 

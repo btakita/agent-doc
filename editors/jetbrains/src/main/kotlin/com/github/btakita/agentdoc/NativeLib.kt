@@ -483,6 +483,7 @@ interface AgentDocLib : Library {
      * Caller must free a non-null result with [agent_doc_free_string].
      */
     fun agent_doc_deferred_write_reconnect_content(filePath: String, editorContent: String): Pointer?
+    fun agent_doc_deferred_write_post_register_content(filePath: String, editorContent: String): Pointer?
     fun agent_doc_deferred_write_reconnect_propagated(filePath: String, editorContent: String): Int
 
     /**
@@ -1694,6 +1695,26 @@ object NativePatching {
     fun deferredWriteReconnectContent(filePath: String, editorContent: String): String? {
         val lib = AgentDocLib.get() ?: return null
         val ptr = lib.agent_doc_deferred_write_reconnect_content(filePath, editorContent)
+        try {
+            return ptr?.getString(0)
+        } finally {
+            lib.agent_doc_free_string(ptr)
+        }
+    }
+
+    /**
+     * Replay a deferred semantic write only after the exact editor cut has
+     * become the registered CRDT baseline.
+     */
+    fun deferredWritePostRegisterContent(filePath: String, editorContent: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val ptr =
+            try {
+                lib.agent_doc_deferred_write_post_register_content(filePath, editorContent)
+            } catch (e: UnsatisfiedLinkError) {
+                LOG.debug("[native] deferred-write post-register replay unavailable: ${e.message}")
+                return null
+            }
         try {
             return ptr?.getString(0)
         } finally {

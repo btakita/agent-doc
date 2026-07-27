@@ -109,8 +109,47 @@ class RefreshBeforeApplyConflictTest {
         assertFalse(ensureOpenReplica.contains("persistRemoteCrdtTextIfSafe("))
         assertTrue(ensureOpenReplica.contains("registrationText = text"))
         assertTrue(ensureOpenReplica.contains("deferredWriteReconnectPropagated(filePath, registrationText)"))
+        assertTrue(ensureOpenReplica.contains("replayDeferredWriteAfterRegistration("))
         assertTrue(ensureOpenReplica.contains("replaceCached = forceRefresh"))
         assertTrue(ensureOpenReplica.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null"))
+        assertTrue(
+            "semantic replay must begin only after exact editor registration succeeds",
+            ensureOpenReplica.indexOf("val forwarder = forwarderFor(") <
+                ensureOpenReplica.indexOf("replayDeferredWriteAfterRegistration("),
+        )
+    }
+
+    @Test
+    fun `forced reconnect replays retained intent only through fenced post-registration apply`() {
+        val crdtReplicaPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val crdtReplica = Files.readString(crdtReplicaPath)
+        val replay = functionBody(
+            crdtReplica,
+            "private fun replayDeferredWriteAfterRegistration(",
+        )
+
+        assertTrue(replay.contains("deferredWritePostRegisterContent(filePath, registrationText)"))
+        assertTrue(replay.contains("forwarders[filePath] !== forwarder"))
+        assertTrue(replay.contains("hasPendingLocal(filePath)"))
+        assertTrue(replay.contains("document.text != registrationText"))
+        assertTrue(replay.contains("remoteCrdtDiskCanPersistUtil("))
+        assertTrue(replay.contains("applyMinimalDocumentEditUtil(document, registrationText, recovered)"))
+        assertTrue(replay.contains("persistRemoteCrdtTextIfSafe("))
+        assertTrue(replay.contains("forwarder.ensureEditorText(recovered)"))
+        assertTrue(replay.contains("deferredWriteReconnectPropagated(filePath, recovered)"))
+        assertTrue(
+            "deferred content must be resolved before any editor mutation",
+            replay.indexOf("deferredWritePostRegisterContent(") <
+                replay.indexOf("applyMinimalDocumentEditUtil("),
+        )
+        assertTrue(
+            "the recovered editor cut must be persisted before CRDT publication",
+            replay.indexOf("persistRemoteCrdtTextIfSafe(") <
+                replay.indexOf("forwarder.ensureEditorText(recovered)"),
+        )
     }
 
     @Test

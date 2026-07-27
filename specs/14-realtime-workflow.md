@@ -456,8 +456,15 @@ The binary wakes this replay while convergence is pending and, after a bounded
 grace period, sends a targeted force-refresh event that re-registers the document
 replica from the exact editor buffer. The deferred candidate remains retained
 as an ordered semantic intent and replays only after that editor baseline is
-published, so process exit, controller recycle, or a same-target finalize retry
-cannot lose or duplicate the response. Recovery is
+published. The JetBrains client then resolves that replay through a distinct
+post-registration ABI, requires the editor and replacement replica to still
+match the registered baseline with no pending local delta, verifies that disk
+contains no novel external text, installs and saves the minimal editor mutation,
+and explicitly publishes the resulting CRDT delta. The older reconnect ABI
+continues to return only the exact editor bytes so a rolling upgrade cannot let
+an older client preinstall a retained whole-document target. Thus process exit,
+controller recycle, or a same-target finalize retry cannot lose or duplicate
+the response. Recovery is
 bounded and automatic; it must not require closing the editor tab, recycling the
 controller, or choosing between force-disk and an uncommitted response.
 
@@ -727,9 +734,14 @@ Additional convergence invariants:
   before becoming an editor projection. This includes singleton components,
   balanced component markers, and at most one live exchange boundary marker.
 - A whole-document editor REPLACE delivery uses the same structural guard as an
-  incremental delivery. If the remote CRDT result is invalid, the plugin does
-  not install or ACK it; it re-adopts the exact coherent editor baseline,
-  atomically re-registers the replica, and retries the retained intent.
+incremental delivery. If the remote CRDT result is invalid, the plugin does
+not install or ACK it; it re-adopts the exact coherent editor baseline,
+atomically re-registers the replica, and retries the retained intent.
+- Forced reconnect is two-phase. Registration must publish the exact live editor
+cut before the binary may return a divergent semantic replay. That replay may be
+installed only while the editor, replacement replica, pending-local counter, and
+disk still satisfy their registration fences; the client then saves through the
+editor API and publishes the recovered cut through the registered replica.
 - A retained captured response whose editor authority has advanced is replayed
 over that authority whether the operator cut is still unsaved or has already
 reached disk. The binary then requests native editor save itself. Operator

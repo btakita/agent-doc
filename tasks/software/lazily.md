@@ -206,7 +206,28 @@ Verification:
 - Focused collection-family suite: 9/9 passed (canonical ordering on sync/thread-safe/async plus directional and negative-index moves).
 - `make check`: 496/496 passed; interop peer self-check passed; 121/124 canonical fixtures opened with 3 explicitly known-uncovered.
 - No source change or new commit was needed. Pre-existing `README.md` and generated `build/` changes remain uncommitted.
-<!-- agent:boundary:5ac3a972 -->
+
+### Re: #lazilydartcomputedmap — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lazilydartcomputedmap]
+
+
+Fixed the live Dart type/semantics mismatch.
+
+`ComputedMap<K,V>` now specializes `ReactiveMap<K,V,Computed<V>>`, mints guarded `Computed` handles, reads through those handles, and disposes them through `Context.disposeNode` on removal. Its public `handle()` therefore exposes the guarded v2 kind its name and `EntryKind.computed` already promised, rather than an unguarded `Slot`.
+
+Added a regression that observes a `ComputedMap` entry from a downstream slot, changes its upstream source while preserving the computed parity, and proves the equality guard suppresses the downstream recomputation. It also asserts the public handle is `Computed<int>`. Updated the collection documentation accordingly.
+
+Verification:
+
+- Focused `reactive_family_test.dart`: 10/10 passed.
+- `make check`: analysis clean; 551/551 tests passed; interop peer self-check passed; 118/124 canonical fixtures opened with 13 explicitly known-uncovered; Lean formal checks passed.
+- Dart commit/push: `1d92bd9` (`fix: guard ComputedMap entries`).
+- Root pointer commit/push: `784b2621d`.
+- Required one-shot CI inspection: run `30235586745` was in progress; not polled.
+<!-- agent:boundary:70cd169b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -214,7 +235,7 @@ Verification:
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lazilyasynccomputedmapde]~~
 - ~~do [#lazilytwoimplementations]~~
-- do [#lazilydartcomputedmap]
+- ~~do [#lazilydartcomputedmap]~~
 - do [#recommendedspecdecision]
 - do [#lazilyasyncmap]
 <!-- /agent:queue -->
@@ -223,7 +244,6 @@ Verification:
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
-- [ ] [#lazilydartcomputedmap] lazily-dart: ComputedMap entries are Slot, not Computed (collections.dart:430). Post-v2 Slot is the UNGUARDED pass-through while Computed carries the == memo guard — so ComputedMap does not have the guard its name implies, and this leaks publicly through handle(). Decide whether the handle becomes Computed.
 - [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.
 <!-- /agent:backlog -->
 

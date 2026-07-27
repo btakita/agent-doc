@@ -480,7 +480,27 @@ Changed path: `agent-doc-document-realtime-io/src/lib.rs`.
 Verification included two new budget/backoff-independence tests, all 95 realtime-I/O tests, the delayed-ACK subscription convergence test, and the retained-success-at-ACK-deadline test. The full repository gate passed 8,186 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA.
 
 Commits `5b204ed04` (agent-doc) and `1cb2a3658` (parent gitlink) are pushed to `main`. CI run `30227784741` was in progress at the single required inspection, with no completed failure. Confidence is high: normal delivery remains subscription-driven, fallback state is independent, and the existing anti-hot-loop `advanced` behavior is unchanged. No escalation was needed; unrelated Lazily Kotlin and tmux-router partial staging remained untouched.
-<!-- agent:boundary:7dfbff79 -->
+
+### Re: Gate the partial-staging guard by cycle scope — gpt-5
+
+> **Queue prompt:**
+>
+> do [#sessioncheckguardsweep]
+
+
+Completed `#sessioncheckguardsweep`'s concrete target.
+
+The WARN-only partial-staging companion scan now runs only when git history since the admitted cycle contains a committed path beyond the session document. A document-only closeout returns before `candidate_repos`, so it does not enumerate every dirty submodule or run companion diffs. A cycle that committed source, test, or a submodule pointer still runs the existing narrow warning guard unchanged.
+
+Changed paths:
+
+- `agent-doc-git-io/src/partial_staging.rs`
+- `agent-doc-session-check-io/src/partial_staging.rs`
+
+Regression coverage proves the pure path gate, a dated git-history probe for document-only versus source-bearing cycles, and the existing dirty source/test companion warning. The full repository gate passed 8,188 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA.
+
+Commits `b140068d4` (agent-doc) and `11e02c0df` (parent gitlink) are pushed to `main`. CI run `30228119944` was in progress at the single required inspection, with no completed failure. Confidence is high for the measured 817ms target: the expensive scan is unreachable on the common document-only closeout, while source-bearing cycles retain the warning. No escalation was needed, and unrelated tmux-router staging remained untouched.
+<!-- agent:boundary:ecbf0425 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -491,7 +511,7 @@ Commits `5b204ed04` (agent-doc) and `1cb2a3658` (parent gitlink) are pushed to `
 - ~~do [#haivenresponseorder]~~
 - ~~do [#crdtwaitsubscribe]~~
 - ~~do [#crdtwaitsplit]~~
-- do [#sessioncheckguardsweep]
+- ~~do [#sessioncheckguardsweep]~~
 - do [#crdtdeliverybatch]
 - do [#closeoutgitsubmodulescan]
 - do [#replicareloadincremental]
@@ -535,7 +555,6 @@ Commits `5b204ed04` (agent-doc) and `1cb2a3658` (parent gitlink) are pushed to `
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#sessioncheckguardsweep] #agent-doc-bug session_check is the second-largest closeout phase - a flat 2.9-4.2s, observed once at 11,271ms - and it is a per-invocation ~30-guard sweep. Measured attribution from one run: inspect_with_warnings 2665ms (the nesting parent), guard_partial_staging_closeout 817ms, inspect_core 607ms, self_heal_response_replay_duplication 385ms, resolve_current_document_content 350ms/13x. The partial-staging guard is the concrete target: companion_findings iterates candidate_repos, which on this superproject enumerates every dirty submodule and then runs several git diffs per repo. candidate_repos legitimately needs --ignore-submodules=none (it is hunting dirty submodule repos, 341ms) and narrowing it with --untracked-files=no was measured at only 13ms and discarded, so the real question is a SEMANTICS decision: must a WARN-only narrow guard run on every closeout, or only when the cycle actually staged something beyond the session document? Related: #closeoutgitsubmodulescan (9e7ce2f79 fixed two 47x submodule scans in tracked_modified_paths that were NOT the dominant cost).
 - [ ] [#crdtdeliverybatch] #agent-doc-feature [recommended] Opportunistic client-side batching of CRDT deliveries. GATED ON #ackeditorstamps - do not start this until the profile says it applies. Current evidence points the other way: the measured shape is ONE delivery waiting a long time for a single ACK (delivery_ack_pending is 457 of 522 waits), and batching improves throughput across many writes rather than the latency of one, so it would not shorten the wait we actually have. It becomes the right lever only if the per-state profile shows delivery_ack_pending accumulating as many short delivery cycles instead of one long stretch. Filed to keep the option recorded with its precondition, not as agreed work.
 - [ ] [#replicareloadincremental] #agent-doc-bug CORRECTED 2026-07-26 - originally filed as THE cause of commit_authority latency; the data does not support that. Measured across 522 convergence waits: delivery_ack_pending 457 (88%), controller_model_backpressure 53 (10%), compare_and_swap_raced 12 (2%). commit_authority is 11-15s of a 15-17s closeout and it is the EDITOR confirming delivery. Correlation test: only 64/210 waits had a crdt_replica_register within 8s, so full-bootstrap-on-reload explains about 30% - real and worth fixing, but a MINORITY factor, not the cause. Ruled out by measurement: git (commit-io internal timer 9-19ms, plumbing 1-4ms each), the controller baseline round trip (record_committed_baseline 72-88ms), and poll oversleep (CRDT_WRITE_BACKOFF_POLICY is 25ms initial / 250ms max). REMAINING ~70% UNEXPLAINED. NEXT STEP IS INSTRUMENTATION, NOT A FOURTH HYPOTHESIS: decompose the ACK round trip with editor-side timestamps - plugin receives intent, applies to buffer, emits visible receipt, binary observes it. Two wrong guesses on this class today (supervisor status snapshot, controller watchdog tick) each cost a build+install+recycle and both collapsed immediately once a log line carried an attribution field. DO NOT background commit_authority to hide this: it is already the slow-path fallback, and making it the default turns 'captured but not committed' into the normal state - the gap every wedge repaired today lived in - and lets queue item N+1 start while N commits, which is the concurrent-cycle splice generator.
 - [ ] [#adreplacementturndispatch] #agent-doc-bug Operator-reported 2026-07-26: interrupting a running Run Agent Doc turn, editing the prompt, then starting a new Run Agent Doc fails to converge, and realtime steering is rejected in the same window. Two exact errors: (1) 'failed to converge queued dispatch for tasks/professional/job-offers.md through editor IPC/disk: route_dispatch_queue: editor delivery ACK recovery did not settle within 8000ms and the exact canonical target lacks active retained-delivery proof; refusing closeout'; (2) 'Could not steer the active turn: authoritative supervisor rejected selected-text steering: turn steering requires an authoritative actor with an active busy turn'. OPERATOR'S STATED FIX: always send `agent-doc <file>` for BOTH starting a replacement turn in this scenario AND realtime steering (whether by text selection or diff), rather than a distinct dispatch path that can fail to converge. Note (2) is the same shape as #steergateidle, already in backlog: steering gated on an active busy turn and rejecting otherwise, where an idle pane should just dispatch. (1) is separate - a replacement turn after an interrupt has no retained-delivery proof for the edited prompt, so the 8s ACK recovery window expires and the dispatch is refused instead of falling back to the plain trigger.

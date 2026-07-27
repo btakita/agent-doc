@@ -5639,11 +5639,19 @@ fn controller_current_text_from_data(
                 .get("delivery_version")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
+            let semantics = data
+                .get("semantics")
+                .filter(|value| !value.is_null())
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .context("failed to parse controller current text semantics")?;
             Ok(agent_doc_crdt_relay_io::CurrentText::Current {
                 text,
                 live_editors,
                 delivery_converged,
                 delivery_version,
+                semantics,
             })
         }
         Some(status) => anyhow::bail!("unknown controller current text status `{status}`"),
@@ -5669,6 +5677,7 @@ fn controller_current_text_response(
             live_editors,
             delivery_converged,
             delivery_version,
+            semantics,
         } => serde_json::json!({
             "status": "current",
             "text_len": text.len(),
@@ -5677,6 +5686,7 @@ fn controller_current_text_response(
             "live_editors": live_editors,
             "delivery_converged": delivery_converged,
             "delivery_version": delivery_version,
+            "semantics": semantics,
         }),
     }
 }
@@ -5718,6 +5728,7 @@ fn log_controller_current_text_result(
             live_editors,
             delivery_converged,
             delivery_version,
+            ..
         } => agent_doc_ops_log_io::log_op(
             canonical,
             &format!(
@@ -8552,17 +8563,22 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         // Operator-visible live text is authoritative. Disk is consulted only
         // when no editor owns the document; an attached-but-pending replica
         // fails closed until the relay can supply a consistent cut.
-        let content = match &memoized_head {
+        let (content, queue_unresolved_prompts) = match &memoized_head {
             // Unchanged revision: the head cannot have moved, so skip the
             // materialize + SHA + log entirely and reuse the parsed answer.
-            Some(_) => String::new(),
+            Some(_) => (String::new(), None),
             None => match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file) {
-                Ok(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                    text, semantics, ..
+                }) => (
+                    text,
+                    semantics.map(|semantics| semantics.queue_unresolved_prompts),
+                ),
                 Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {
                     let Ok(content) = std::fs::read_to_string(&file) else {
                         continue;
                     };
-                    content
+                    (content, None)
                 }
                 Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
                 | Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => continue,
@@ -8578,10 +8594,14 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         let drainable = match memoized_head {
             Some(head) => head.into_head(),
             None => {
-                let head = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-                    &content,
-                    agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-                );
+                let head = if queue_unresolved_prompts == Some(0) {
+                    None
+                } else {
+                    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+                        &content,
+                        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+                    )
+                };
                 if let Some(revision) = gate_revision {
                     orphan_drain_memoize_head(&file, revision, head.clone());
                 }
@@ -15998,6 +16018,25 @@ mod tests {
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
     use lazily::DurableOutbox;
+
+    #[test]
+    fn current_text_controller_round_trip_preserves_live_semantics() {
+        let current = agent_doc_crdt_relay_io::CurrentText::Current {
+            text: "document".to_string(),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 7,
+            semantics: Some(agent_doc_crdt_relay_io::CurrentDocumentSemantics {
+                unresolved_prompts: 3,
+                queue_unresolved_prompts: 2,
+            }),
+        };
+        let encoded = controller_current_text_response(current.clone());
+        assert_eq!(
+            controller_current_text_from_data(&encoded).unwrap(),
+            current
+        );
+    }
 
     #[test]
     fn the_editor_ack_profile_reports_legs_it_can_derive_and_omits_the_rest() {

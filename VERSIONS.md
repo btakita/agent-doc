@@ -8,6 +8,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 _JetBrains plugin 0.2.301; VS Code extension 0.2.57._
 
+- **Live document semantics now have a default-off incremental CellDocTree cutover (`#cdtcutover`).** Opted-in relay hubs share one thread-safe Lazily graph for canonical text, per-node document cells, and memoized unresolved-prompt queries. Every canonical delta—including editor relay, commit barrier, controller replace, recovery, and authoritative compaction—updates the existing nodes in place; finalize no longer constructs and discards a whole tree. Controller current-text responses expose the optional semantic projection, and idle-watch, orphan-drain, and unchanged preflight queue paths use a zero-work proof before falling back to the exact queue parser. The generic thread-safe tree, reconciliation, and semantic primitives ship in Lazily 0.53.0.
 - **JetBrains typing bursts now persist editor operations in one bounded SQLite transaction (`#qbasehashmemo`).** The quiet-period worker resolves the merge base once, sends the ordered burst through one native JSON batch, and uses a 250 ms ledger busy timeout so optional op-capture evidence cannot starve controller reads. The safe diff-guess remains the fallback if the ledger is busy. This removes the per-keystroke open/transaction/growing-JSON rewrite amplification observed during live IDEA typing.
 
 ## 0.35.40

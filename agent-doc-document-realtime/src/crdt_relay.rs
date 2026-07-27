@@ -43,13 +43,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use lazily::{
-    Computed, EphemeralMapCore, Source, ThreadSafeContext, ThreadSafeQueueCell, ThreadSafeSourceMap,
+    Computed, EphemeralMapCore, Source, ThreadSafeContext, ThreadSafeQueueCell, ThreadSafeSemTree,
+    ThreadSafeSourceMap,
 };
 use parking_lot::{Condvar, Mutex};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
+use agent_doc_merge::document_cell::ThreadSafeDocumentCellTree;
 
 use crate::crdt_authority::CrdtAuthority;
 
@@ -61,6 +63,50 @@ use crate::crdt_authority::CrdtAuthority;
 /// single in-code statement of that contract, asserted by tests and consulted by
 /// callers that must not treat a persisted projection as authority.
 pub const DISK_IS_RECOVERY_PROJECTION_ONLY: bool = true;
+
+/// Explicit opt-in for the live, per-node document projection (`#cdtcutover`).
+///
+/// The projection is default-off while it gathers live-session evidence. An
+/// explicit truthy value (`1`, `true`, `on`, or `yes`) enables it for newly
+/// constructed relay hubs.
+pub const CELL_DOC_TREE_CUTOVER_ENV: &str = "AGENT_DOC_CELL_DOC_TREE_CUTOVER";
+
+fn cell_doc_tree_cutover_enabled() -> bool {
+    std::env::var(CELL_DOC_TREE_CUTOVER_ENV)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on" | "yes"
+            )
+        })
+        .unwrap_or(false)
+}
+
+struct LiveDocumentProjection {
+    tree: ThreadSafeDocumentCellTree,
+    unresolved_prompts: ThreadSafeSemTree<String, usize>,
+}
+
+impl LiveDocumentProjection {
+    fn new(ctx: &ThreadSafeContext, document: &str) -> Self {
+        let tree = ThreadSafeDocumentCellTree::from_document(ctx, document);
+        let unresolved_prompts = tree.unresolved_prompt_counts(ctx);
+        Self {
+            tree,
+            unresolved_prompts,
+        }
+    }
+
+    fn update_to(&mut self, ctx: &ThreadSafeContext, old_document: &str, new_document: &str) {
+        if old_document == new_document {
+            return;
+        }
+        if self.tree.update_to(ctx, old_document, new_document) {
+            self.unresolved_prompts = self.tree.unresolved_prompt_counts(ctx);
+        }
+    }
+}
 
 /// One registered editor replica's hub-side mirror.
 struct Member {
@@ -230,6 +276,10 @@ pub struct RelayHub {
     /// `RebuiltFromDisk`; drained by the caller which delivers the replace and
     /// calls [`Self::clear_rebootstrap`].
     pending_rebootstrap: HashSet<u64>,
+    /// Optional live per-node document projection. It shares this hub's
+    /// [`ThreadSafeContext`] and is updated at every canonical mutation boundary.
+    /// Default-off; see [`CELL_DOC_TREE_CUTOVER_ENV`].
+    live_document_projection: Option<Mutex<LiveDocumentProjection>>,
     /// The thread-safe reactive graph that owns member liveness (#live-editor-reactive).
     /// `RelayHub` lives in a `static Mutex<HashMap<String, RelayHub>>`, so every
     /// reactive handle stored here must be `Send`; [`ThreadSafeContext`] and the
@@ -476,6 +526,64 @@ impl RelayHub {
             .observe(&self.ctx, &client_id)
             .unwrap_or(false)
     }
+
+    fn sync_live_document_projection(&self, old_document: &str, new_document: &str) {
+        if let Some(projection) = &self.live_document_projection {
+            projection
+                .lock()
+                .update_to(&self.ctx, old_document, new_document);
+        }
+    }
+
+    fn reset_live_document_projection(&mut self, document: &str) {
+        if let Some(projection) = &self.live_document_projection {
+            *projection.lock() = LiveDocumentProjection::new(&self.ctx, document);
+        }
+    }
+
+    /// Whether this hub owns the opt-in live per-node projection.
+    pub fn live_document_projection_enabled(&self) -> bool {
+        self.live_document_projection.is_some()
+    }
+
+    /// Memoized unresolved-prompt count for the whole live canonical document.
+    ///
+    /// `None` means the default-off cutover gate was not enabled for this hub.
+    pub fn unresolved_prompt_count(&self) -> Option<usize> {
+        self.unresolved_prompt_counts().map(|(total, _)| total)
+    }
+
+    /// Memoized unresolved-prompt count for one component occurrence.
+    pub fn unresolved_prompt_count_for_component(
+        &self,
+        component: &str,
+        occurrence: usize,
+    ) -> Option<usize> {
+        let node_id = format!("{component}:{occurrence}");
+        self.live_document_projection
+            .as_ref()
+            .and_then(|projection| {
+                projection
+                    .lock()
+                    .unresolved_prompts
+                    .node_value(&self.ctx, &node_id)
+            })
+    }
+
+    /// Read the whole-document and first queue-occurrence counts under one
+    /// projection lock. A missing queue occurrence contributes zero.
+    pub fn unresolved_prompt_counts(&self) -> Option<(usize, usize)> {
+        self.live_document_projection.as_ref().map(|projection| {
+            let projection = projection.lock();
+            let total = projection.unresolved_prompts.value(&self.ctx);
+            let queue = projection
+                .unresolved_prompts
+                .node_value(&self.ctx, &"queue:0".to_string())
+                .unwrap_or(0);
+            (total, queue)
+        })
+    }
+
     /// Create a hub whose canonical replica uses `canonical_id` as its CRDT peer
     /// peer id. `canonical_id` is reserved — no member may register with it.
     pub fn new(canonical_id: u64) -> Self {
@@ -487,6 +595,8 @@ impl RelayHub {
             delivery_epoch,
             delivery_subscription,
         } = Self::build_liveness_core();
+        let live_document_projection = cell_doc_tree_cutover_enabled()
+            .then(|| Mutex::new(LiveDocumentProjection::new(&ctx, "")));
         Self {
             canonical: ReplicaState::new(canonical_id),
             canonical_id,
@@ -496,6 +606,7 @@ impl RelayHub {
             awareness: AwarenessChannel::new(),
             last_committed_text: None,
             pending_rebootstrap: HashSet::new(),
+            live_document_projection,
             ctx,
             liveness,
             membership_epoch,
@@ -511,6 +622,7 @@ impl RelayHub {
     pub fn from_text(canonical_id: u64, text: &str) -> Self {
         let mut hub = Self::new(canonical_id);
         hub.canonical = ReplicaState::from_text(canonical_id, text);
+        hub.reset_live_document_projection(text);
         hub.last_committed_text = Some(text.to_string());
         hub
     }
@@ -539,6 +651,8 @@ impl RelayHub {
         let last_committed_text = Some(canonical.text());
         let mut hub = Self::new(canonical_id);
         hub.canonical = canonical;
+        let recovered_text = hub.canonical.text();
+        hub.reset_live_document_projection(&recovered_text);
         if let Some(lineage) = lineage.filter(|value| !value.is_empty()) {
             hub.lineage = lineage.to_string();
         }
@@ -699,6 +813,7 @@ impl RelayHub {
     /// and the updates it missed while offline flow back into it. After this the
     /// member and canonical have converged.
     pub fn reconnect(&mut self, client_id: u64) -> Result<()> {
+        let before_text = self.canonical.text();
         let member = self
             .members
             .get_mut(&client_id)
@@ -710,6 +825,8 @@ impl RelayHub {
         let to_member = self.canonical.diff(&member.replica.state_vector())?;
         self.canonical.apply_update(&to_canonical)?;
         member.replica.apply_update(&to_member)?;
+        let after_text = self.canonical.text();
+        self.sync_live_document_projection(&before_text, &after_text);
         // Mark live only after a successful bidirectional catch-up (the `member`
         // borrow above must end before touching the reactive `ctx`).
         self.set_live(client_id, true);
@@ -744,6 +861,7 @@ impl RelayHub {
     /// used to model fan-out lag and out-of-order delivery). Use [`Self::relay`]
     /// for the immediate-delivery live path.
     pub fn relay_capture(&mut self, client_id: u64) -> Result<BroadcastPacket> {
+        let before_text = self.canonical.text();
         let member = self
             .members
             .get(&client_id)
@@ -752,6 +870,8 @@ impl RelayHub {
         let before = self.canonical.state_vector();
         let into_canonical = member.replica.diff(&self.canonical.state_vector())?;
         self.canonical.apply_update(&into_canonical)?;
+        let after_text = self.canonical.text();
+        self.sync_live_document_projection(&before_text, &after_text);
         let update = self.canonical.diff(&before)?;
         let targets: Vec<u64> = self
             .members
@@ -787,6 +907,7 @@ impl RelayHub {
         client_id: u64,
         update: &[u8],
     ) -> Result<BroadcastPacket> {
+        let before_text = self.canonical.text();
         let member = self
             .members
             .get(&client_id)
@@ -797,6 +918,8 @@ impl RelayHub {
         let before = self.canonical.state_vector();
         let into_canonical = member.replica.diff(&self.canonical.state_vector())?;
         self.canonical.apply_update(&into_canonical)?;
+        let after_text = self.canonical.text();
+        self.sync_live_document_projection(&before_text, &after_text);
         let delta = self.canonical.diff(&before)?;
         let targets: Vec<u64> = self
             .members
@@ -848,7 +971,8 @@ impl RelayHub {
     /// lineage. Self-echo guarded: a no-op when the canonical already shows this text (so a
     /// repeated push can't pump a feedback loop). Any other live members rebootstrap.
     pub fn adopt_editor_text(&mut self, text: &str) -> Result<BroadcastPacket> {
-        if self.canonical.text() == text {
+        let before_text = self.canonical.text();
+        if before_text == text {
             return Ok(BroadcastPacket {
                 origin: self.canonical_id,
                 update: Vec::new(),
@@ -857,6 +981,7 @@ impl RelayHub {
         }
         let before = self.canonical.state_vector();
         self.canonical = ReplicaState::from_text(self.canonical_id, text);
+        self.sync_live_document_projection(&before_text, text);
         self.rotate_lineage();
         self.last_committed_text = None;
         let out = self.canonical.diff(&before)?;
@@ -885,7 +1010,8 @@ impl RelayHub {
         // re-pushed a growing op-log (77MB→167MB feedback loop). Skip entirely: no replace
         // (so the canonical never accretes the editor's tombstone bloat), no broadcast, no
         // rebootstrap. Only a genuine text divergence (real drift to correct) proceeds.
-        if adopted.text() == self.canonical.text() {
+        let before_text = self.canonical.text();
+        if adopted.text() == before_text {
             return Ok(BroadcastPacket {
                 origin: self.canonical_id,
                 update: Vec::new(),
@@ -894,6 +1020,8 @@ impl RelayHub {
         }
         let before = self.canonical.state_vector();
         self.canonical = adopted;
+        let after_text = self.canonical.text();
+        self.sync_live_document_projection(&before_text, &after_text);
         self.rotate_lineage();
         // The adopted state is not a committed-to-disk baseline; clear the marker so
         // `#staleinmem` re-detects on the next commit rather than trusting stale text.
@@ -934,8 +1062,11 @@ impl RelayHub {
     /// member so connected editors also converge. Returns the broadcast packet;
     /// `packet.update` is the empty-delta encoding when the frame added nothing new.
     pub fn apply_document_op_delta(&mut self, delta: &[u8]) -> Result<BroadcastPacket> {
+        let before_text = self.canonical.text();
         let before = self.canonical.state_vector();
         self.canonical.apply_update(delta)?;
+        let after_text = self.canonical.text();
+        self.sync_live_document_projection(&before_text, &after_text);
         let out = self.canonical.diff(&before)?;
         let targets: Vec<u64> = self
             .members
@@ -1038,11 +1169,11 @@ impl RelayHub {
                 current.len()
             ));
         }
-        apply_canonical_document_tree_replace(&current, content)?;
         let before = self.canonical.state_vector();
         if let Some((offset, delete_len, insert)) = minimal_char_span_edit(&current, content)? {
             self.canonical.apply_local_edit(offset, delete_len, &insert);
         }
+        self.sync_live_document_projection(&current, content);
         let update = self.canonical.diff(&before)?;
         let mut targets: Vec<u64> = self
             .members
@@ -1227,7 +1358,11 @@ impl RelayHub {
     /// snapshot of the canonical replica ([`Self::projection_bytes`]) is safe to
     /// write to git.
     pub fn commit_barrier(&self) -> Result<bool> {
-        flush_to_commit_barrier(&self.canonical, &self.live_editors())
+        let before_text = self.canonical.text();
+        let settled = flush_to_commit_barrier(&self.canonical, &self.live_editors())?;
+        let after_text = self.canonical.text();
+        self.sync_live_document_projection(&before_text, &after_text);
+        Ok(settled)
     }
 
     /// Whether the canonical replica is already a consistent cut of the live
@@ -1286,7 +1421,9 @@ impl RelayHub {
     pub fn reconcile_disk_projection(&self, projection: &[u8]) -> Result<bool> {
         let before = self.canonical.text();
         self.canonical.apply_update(projection)?;
-        Ok(self.canonical.text() != before)
+        let after = self.canonical.text();
+        self.sync_live_document_projection(&before, &after);
+        Ok(after != before)
     }
 
     // --- Out-of-band baseline reconcile (`#staleinmem`) -----------------------
@@ -1349,12 +1486,14 @@ impl RelayHub {
             return Ok(false);
         }
         // Out-of-band correction: rebuild the canonical from the corrected baseline.
+        let before_text = self.canonical.text();
         let fresh = ReplicaState::new(self.canonical_id);
         if !on_disk.is_empty() {
             fresh.apply_local_edit(0, 0, on_disk);
         }
         let bootstrap = fresh.encode_state();
         self.canonical = fresh;
+        self.sync_live_document_projection(&before_text, on_disk);
         self.rotate_lineage();
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
@@ -1385,7 +1524,8 @@ impl RelayHub {
     /// replace-capable re-bootstrap because a compaction deletion cannot be
     /// expressed as an additive delta.
     pub fn adopt_authoritative_text(&mut self, text: &str) -> Result<bool> {
-        if self.canonical.text() == text {
+        let before_text = self.canonical.text();
+        if before_text == text {
             self.last_committed_text = Some(text.to_string());
             return Ok(false);
         }
@@ -1395,6 +1535,7 @@ impl RelayHub {
         }
         let bootstrap = fresh.encode_state();
         self.canonical = fresh;
+        self.sync_live_document_projection(&before_text, text);
         self.rotate_lineage();
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
@@ -1482,61 +1623,6 @@ impl RelayHub {
     pub fn last_committed_text_for_test(&self) -> Option<&str> {
         self.last_committed_text.as_deref()
     }
-}
-
-fn apply_canonical_document_tree_replace(current: &str, content: &str) -> Result<()> {
-    let diffs = agent_doc_merge::document_cell::diff_document(current, content);
-    if diffs.is_empty() {
-        return Ok(());
-    }
-    // #stategraphjoin-allow: bounded per-call pure transform. The context is built,
-    // used to fold a fixed diff list into a tree, and dropped before returning; no
-    // owner retains it and nothing derives from it across calls.
-    let ctx = lazily::Context::new();
-    let mut tree = agent_doc_merge::document_cell::DocumentCellTree::from_document(&ctx, current);
-    for diff in &diffs {
-        tree.apply(&ctx, diff);
-    }
-
-    #[cfg(debug_assertions)]
-    {
-        let rebuilt =
-            agent_doc_merge::document_cell::DocumentCellTree::from_document(&ctx, content);
-        let new_projection = agent_doc_merge::document_cell::project_document(content);
-        for occ in &new_projection {
-            assert_eq!(
-                tree.item_ids(&ctx, &occ.component, occ.occurrence),
-                rebuilt.item_ids(&ctx, &occ.component, occ.occurrence),
-                "canonical document tree update diverged from rebuilt {}:{}",
-                occ.component,
-                occ.occurrence
-            );
-            for (key, expected_value) in &occ.items {
-                let identity = agent_doc_merge::document_cell::node_key_identity(key);
-                assert_eq!(
-                    tree.item_value(&ctx, &occ.component, occ.occurrence, identity),
-                    Some(expected_value.clone()),
-                    "canonical document tree value diverged from compacted projection for {identity}"
-                );
-            }
-        }
-        for occ in agent_doc_merge::document_cell::project_document(current) {
-            let new_occurrence_exists = new_projection.iter().any(|new_occ| {
-                new_occ.component == occ.component && new_occ.occurrence == occ.occurrence
-            });
-            if !new_occurrence_exists {
-                assert!(
-                    tree.item_ids(&ctx, &occ.component, occ.occurrence)
-                        .is_empty(),
-                    "canonical document tree retained removed {}:{}",
-                    occ.component,
-                    occ.occurrence
-                );
-            }
-        }
-    }
-
-    Ok(())
 }
 
 /// One replica's ephemeral presence: cursor / selection / a display name. NONE of
@@ -1630,6 +1716,70 @@ pub fn mint_client_id(identity: &str) -> u64 {
 mod tests {
     use super::*;
     use agent_doc_merge::crdt_sync::ReplicaState;
+
+    static CELL_DOC_TREE_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn live_document_projection_is_default_off_and_tracks_opt_in_canonical_deltas() {
+        let _guard = CELL_DOC_TREE_ENV_LOCK.lock();
+        let previous = std::env::var_os(CELL_DOC_TREE_CUTOVER_ENV);
+        // SAFETY: the process-global mutation is serialized by
+        // `CELL_DOC_TREE_ENV_LOCK` and restored before the test returns.
+        unsafe { std::env::remove_var(CELL_DOC_TREE_CUTOVER_ENV) };
+
+        let document = "\
+<!-- agent:queue -->
+- do [#alpha] first
+- do [#beta] second
+<!-- /agent:queue -->
+<!-- agent:backlog -->
+- [#later] later
+<!-- /agent:backlog -->
+";
+        let off = RelayHub::from_text(1, document);
+        assert!(!off.live_document_projection_enabled());
+        assert_eq!(off.unresolved_prompt_count(), None);
+
+        // SAFETY: serialized and restored as above.
+        unsafe { std::env::set_var(CELL_DOC_TREE_CUTOVER_ENV, "true") };
+        let mut hub = RelayHub::from_text(2, document);
+        assert!(hub.live_document_projection_enabled());
+        assert_eq!(hub.unresolved_prompt_count(), Some(3));
+        assert_eq!(
+            hub.unresolved_prompt_count_for_component("queue", 0),
+            Some(2)
+        );
+
+        let resolved = document.replace("- do [#alpha] first\n", "- ~~do [#alpha] first~~\n");
+        hub.apply_canonical_replace(document, &resolved).unwrap();
+        assert_eq!(hub.unresolved_prompt_count(), Some(2));
+        assert_eq!(
+            hub.unresolved_prompt_count_for_component("backlog", 0),
+            Some(1)
+        );
+
+        let grown = resolved.replace(
+            "- do [#beta] second\n",
+            "- do [#beta] second\n- do [#gamma] third\n",
+        );
+        hub.apply_canonical_replace(&resolved, &grown).unwrap();
+        assert_eq!(hub.unresolved_prompt_count(), Some(3));
+        assert_eq!(
+            hub.unresolved_prompt_count_for_component("queue", 0),
+            Some(2)
+        );
+
+        match previous {
+            Some(value) => {
+                // SAFETY: serialized and restored as above.
+                unsafe { std::env::set_var(CELL_DOC_TREE_CUTOVER_ENV, value) };
+            }
+            None => {
+                // SAFETY: serialized and restored as above.
+                unsafe { std::env::remove_var(CELL_DOC_TREE_CUTOVER_ENV) };
+            }
+        }
+    }
 
     #[test]
     fn fan_out_reaches_every_other_live_replica() {

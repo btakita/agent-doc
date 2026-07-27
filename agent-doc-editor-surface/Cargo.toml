@@ -12,5 +12,5 @@ name = "agent_doc_editor_surface"
 
 [dependencies]
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.40" }
-lazily = { version = "0.51.1", features = ["thread-safe"] }
+lazily = { version = "0.53.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

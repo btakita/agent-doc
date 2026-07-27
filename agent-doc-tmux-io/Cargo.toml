@@ -17,5 +17,5 @@ agent-doc-process-owner-io = { path = "../agent-doc-process-owner-io", version =
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.40" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.40" }
 anyhow = "1"
-lazily = "0.51.0"
+lazily = "0.53.0"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }

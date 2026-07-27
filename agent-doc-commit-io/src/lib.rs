@@ -1941,6 +1941,7 @@ mod controller_commit_scope_tests {
             live_editors: 1,
             delivery_converged: true,
             delivery_version: 1,
+            semantics: None,
         };
         let content = controller_local_relay_text(current);
 

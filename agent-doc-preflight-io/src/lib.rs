@@ -2563,42 +2563,45 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         );
         return Ok(QueueState::default());
     }
-    let mut content = match current_text_via_preflight_authority_retrying(
-        file,
-        "preflight_queue_maintenance",
-    ) {
-        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => text,
-        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) | Ok(None) => {
-            match std::fs::read_to_string(file) {
-                Ok(c) => c,
-                Err(_) => return Ok(QueueState::default()),
+    let (mut content, authority_queue_unresolved_prompts) =
+        match current_text_via_preflight_authority_retrying(file, "preflight_queue_maintenance") {
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+                text, semantics, ..
+            })) => (
+                text,
+                semantics.map(|semantics| semantics.queue_unresolved_prompts),
+            ),
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) | Ok(None) => {
+                match std::fs::read_to_string(file) {
+                    Ok(content) => (content, None),
+                    Err(_) => return Ok(QueueState::default()),
+                }
             }
-        }
-        Ok(Some(
-            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
-            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
-        )) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_maintenance_deferred file={} reason=editor_authority_not_current",
-                    file.display()
-                ),
-            );
-            return Ok(QueueState::default());
-        }
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_maintenance_deferred file={} reason=current_text_unavailable error={}",
-                    file.display(),
-                    err
-                ),
-            );
-            return Ok(QueueState::default());
-        }
-    };
+            Ok(Some(
+                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+                | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+            )) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_deferred file={} reason=editor_authority_not_current",
+                        file.display()
+                    ),
+                );
+                return Ok(QueueState::default());
+            }
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_deferred file={} reason=current_text_unavailable error={}",
+                        file.display(),
+                        err
+                    ),
+                );
+                return Ok(QueueState::default());
+            }
+        };
     // `content` already came from the CP/editor authority above. Do not reread
     // disk or run a second queue-only merge here: that used to compare the live
     // frontier with itself, making the supposed deletion-adoption branch dead
@@ -4322,7 +4325,12 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     let queue_pause_reason =
         agent_doc_queue_io::controller_pause::document_queue_controller_pause_reason(file);
     let queue_paused = queue_pause_reason.is_some();
-    let queue_drainable_head_count = if activation.active {
+    let queue_drainable_head_count = if activation.active
+        && authority_queue_unresolved_prompts == Some(0)
+        && current_content == authority_baseline
+    {
+        0
+    } else if activation.active {
         agent_doc_queue::queue_continuation::drainable_head_count(&current_content)
     } else {
         0
@@ -5054,6 +5062,7 @@ mod tests {
                         live_editors: 1,
                         delivery_converged: true,
                         delivery_version: 1,
+                        semantics: None,
                     },
                     already_ensured,
                 ),
@@ -5357,6 +5366,7 @@ mod tests {
                     live_editors: 1,
                     delivery_converged: true,
                     delivery_version: 1,
+                    semantics: None,
                 }))
             }
         });

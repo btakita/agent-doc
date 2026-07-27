@@ -688,6 +688,15 @@ pub fn hub_is_allocated_for_test(doc_hash: &str) -> bool {
     hub_is_allocated(doc_hash)
 }
 
+/// Optional semantic facts derived from the live per-node projection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CurrentDocumentSemantics {
+    /// Unresolved prompt lines across the whole live document.
+    pub unresolved_prompts: usize,
+    /// Unresolved prompt lines in the first queue occurrence.
+    pub queue_unresolved_prompts: usize,
+}
+
 /// Live document text resolved from the CRDT relay authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CurrentText {
@@ -706,6 +715,9 @@ pub enum CurrentText {
         /// Monotonic cursor for the member/liveness/pending-delivery inputs
         /// represented by `delivery_converged`.
         delivery_version: u64,
+        /// Opt-in memoized semantics from the live per-node projection. `None`
+        /// preserves the default-off/fallback behavior.
+        semantics: Option<CurrentDocumentSemantics>,
     },
 }
 
@@ -886,6 +898,14 @@ fn current_text_for_file_with_authority_inner(
 
     let text = hub.canonical_text();
     let live_editors = hub.live_count();
+    let semantics =
+        hub.unresolved_prompt_counts()
+            .map(
+                |(unresolved_prompts, queue_unresolved_prompts)| CurrentDocumentSemantics {
+                    unresolved_prompts,
+                    queue_unresolved_prompts,
+                },
+            );
     // `process_pid` mirrors the `crdt_current_text_unavailable` sibling above.
     // Without it this line says a full-document read happened but not *who*
     // asked: the relay-side log carries no `source=` (only the controller RPC
@@ -911,6 +931,7 @@ fn current_text_for_file_with_authority_inner(
         live_editors,
         delivery_converged,
         delivery_version: delivery.version,
+        semantics,
     })
 }
 
@@ -4883,6 +4904,7 @@ mod tests {
                     live_editors: 1,
                     delivery_converged: true,
                     delivery_version: 1,
+                    semantics: None,
                 })
             },
         )

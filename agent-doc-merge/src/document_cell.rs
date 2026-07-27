@@ -39,8 +39,9 @@
 //! `item-id` is the durable child key.
 
 use lazily::{
-    Context, DiffOp, SemTree, SourceMap, SourceTree, TextCrdt, apply_to_map, apply_to_tree,
-    reconcile,
+    Context, DiffOp, SemTree, SourceMap, SourceTree, TextCrdt, ThreadSafeContext,
+    ThreadSafeSemTree, ThreadSafeSourceMap, ThreadSafeSourceTree, apply_to_map,
+    apply_to_thread_safe_tree, apply_to_tree, reconcile,
 };
 use std::fmt;
 
@@ -2040,6 +2041,138 @@ impl DocumentCellTree {
     }
 }
 
+/// `Send + Sync` live-session companion to [`DocumentCellTree`].
+///
+/// The projection is designed to live inside a relay hub and share that hub's
+/// [`ThreadSafeContext`]. [`Self::update_to`] applies per-node deltas and reports
+/// whether semantic slots must be rebuilt because the document gained a node.
+pub struct ThreadSafeDocumentCellTree {
+    root: ThreadSafeSourceTree<String, String>,
+    occurrences: std::collections::HashMap<(String, usize), ThreadSafeSourceMap<String, String>>,
+}
+
+impl ThreadSafeDocumentCellTree {
+    /// Build a thread-safe reactive projection from one document revision.
+    pub fn from_document(ctx: &ThreadSafeContext, doc: &str) -> Self {
+        let root = ThreadSafeSourceTree::leaf(ctx, String::new(), String::new());
+        let mut occurrences = std::collections::HashMap::new();
+        for occurrence in project_document(doc) {
+            let occurrence_id = format!("{}:{}", occurrence.component, occurrence.occurrence);
+            let occurrence_node = root.insert_child(ctx, occurrence_id.clone(), String::new());
+            let map = ThreadSafeSourceMap::new(ctx);
+            for (key, value) in &occurrence.items {
+                let identity = node_key_identity(key).to_string();
+                occurrence_node.insert_child(ctx, identity.clone(), value.clone());
+                map.set(ctx, identity, value.clone());
+            }
+            occurrences.insert((occurrence.component.clone(), occurrence.occurrence), map);
+        }
+        Self { root, occurrences }
+    }
+
+    /// Root handle for semantic derivations.
+    pub fn root(&self) -> &ThreadSafeSourceTree<String, String> {
+        &self.root
+    }
+
+    /// Reactively read a projected item value.
+    pub fn item_value(
+        &self,
+        ctx: &ThreadSafeContext,
+        component: &str,
+        occurrence: usize,
+        identity: &str,
+    ) -> Option<String> {
+        self.occurrences
+            .get(&(component.to_string(), occurrence))
+            .and_then(|map| map.observe(ctx, &identity.to_string()))
+    }
+
+    /// Reactively read ordered item identities for a component occurrence.
+    pub fn item_ids(
+        &self,
+        ctx: &ThreadSafeContext,
+        component: &str,
+        occurrence: usize,
+    ) -> Vec<String> {
+        self.occurrences
+            .get(&(component.to_string(), occurrence))
+            .map(|map| map.keys(ctx))
+            .unwrap_or_default()
+    }
+
+    /// Incrementally update the live tree. Returns `true` when a node was added
+    /// and a semantic-tree rebuild is required to allocate its computed slot.
+    pub fn update_to(&mut self, ctx: &ThreadSafeContext, old_doc: &str, new_doc: &str) -> bool {
+        let mut semantic_rebuild_required = false;
+        for diff in diff_document(old_doc, new_doc) {
+            semantic_rebuild_required |= self.apply(ctx, &diff);
+        }
+
+        let new_occurrences: std::collections::HashSet<(String, usize)> = project_document(new_doc)
+            .into_iter()
+            .map(|occurrence| (occurrence.component, occurrence.occurrence))
+            .collect();
+        let existing: Vec<(String, usize)> = self.occurrences.keys().cloned().collect();
+        for (component, occurrence) in existing {
+            if !new_occurrences.contains(&(component.clone(), occurrence)) {
+                self.occurrences.remove(&(component.clone(), occurrence));
+                self.root
+                    .remove_child(ctx, &format!("{component}:{occurrence}"));
+            }
+        }
+        semantic_rebuild_required
+    }
+
+    /// Build the memoized unresolved-prompt count query.
+    pub fn unresolved_prompt_counts(
+        &self,
+        ctx: &ThreadSafeContext,
+    ) -> ThreadSafeSemTree<String, usize> {
+        ThreadSafeSemTree::build(ctx, &self.root, |value: &String, children: &[usize]| {
+            unresolved_prompt_count(value) + children.iter().sum::<usize>()
+        })
+    }
+
+    /// Apply one component diff. The return value reports structural growth.
+    pub fn apply(&mut self, ctx: &ThreadSafeContext, diff: &ComponentDiff) -> bool {
+        let occurrence_key = (diff.component.clone(), diff.occurrence);
+        let occurrence_id = format!("{}:{}", diff.component, diff.occurrence);
+        let occurrence_existed = self.root.child(&occurrence_id).is_some();
+        let occurrence_node = self.root.child(&occurrence_id).unwrap_or_else(|| {
+            self.root
+                .insert_child(ctx, occurrence_id.clone(), String::new())
+        });
+        let map = self
+            .occurrences
+            .entry(occurrence_key)
+            .or_insert_with(|| ThreadSafeSourceMap::new(ctx));
+        for operation in &diff.ops {
+            match operation {
+                DiffOp::Remove { key } => {
+                    map.remove(ctx, key);
+                }
+                DiffOp::Insert { key, value, index } => {
+                    map.set(ctx, key.clone(), value.clone());
+                    map.move_to(ctx, key, *index);
+                }
+                DiffOp::Move { key, to } => {
+                    map.move_to(ctx, key, *to);
+                }
+                DiffOp::Update { key, value } => {
+                    map.set(ctx, key.clone(), value.clone());
+                }
+            }
+        }
+        apply_to_thread_safe_tree(ctx, &occurrence_node, &diff.ops);
+        !occurrence_existed
+            || diff
+                .ops
+                .iter()
+                .any(|operation| matches!(operation, DiffOp::Insert { .. }))
+    }
+}
+
 fn unresolved_prompt_count(value: &str) -> usize {
     value
         .lines()
@@ -2549,6 +2682,51 @@ agent_doc_format: template
         assert_eq!(
             updated_counts.value(&ctx),
             eager_unresolved_prompt_count(&edited)
+        );
+    }
+
+    #[test]
+    fn thread_safe_tree_updates_live_semantics_and_reports_structural_growth() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ThreadSafeDocumentCellTree>();
+
+        let ctx = ThreadSafeContext::new();
+        let mut tree = ThreadSafeDocumentCellTree::from_document(&ctx, DOC);
+        let counts = tree.unresolved_prompt_counts(&ctx);
+        assert_eq!(counts.value(&ctx), eager_unresolved_prompt_count(DOC));
+        assert_eq!(counts.node_value(&ctx, &"queue:0".to_string()), Some(3));
+        assert_eq!(counts.node_value(&ctx, &"backlog:0".to_string()), Some(2));
+
+        let backlog_slot = counts.node(&"backlog:0".to_string()).unwrap();
+        let edited = DOC.replace(
+            "- do [#alpha] first task\n",
+            "- ~~do [#alpha] first task~~\n",
+        );
+        assert!(
+            !tree.update_to(&ctx, DOC, &edited),
+            "a value-only edit must preserve the semantic slot topology"
+        );
+        assert_eq!(counts.node_value(&ctx, &"queue:0".to_string()), Some(2));
+        assert!(
+            ctx.is_set(&backlog_slot),
+            "queue editing must leave the backlog semantic subtree cached"
+        );
+
+        let grown = format!(
+            "{edited}<!-- agent:review -->\n- do [#review] inspect\n<!-- /agent:review -->\n"
+        );
+        assert!(
+            tree.update_to(&ctx, &edited, &grown),
+            "a new occurrence must request semantic slot rebuilding"
+        );
+        let rebuilt_counts = tree.unresolved_prompt_counts(&ctx);
+        assert_eq!(
+            rebuilt_counts.value(&ctx),
+            eager_unresolved_prompt_count(&grown)
+        );
+        assert_eq!(
+            rebuilt_counts.node_value(&ctx, &"review:0".to_string()),
+            Some(1)
         );
     }
 

@@ -468,7 +468,7 @@ mod tests {
 
         // `Effect` is a `Copy` handle into the scope's graph, not an RAII guard:
         // dropping it leaves the subscription live. Unsubscribing is explicit.
-        drop(effect);
+        let _ = effect;
         state.observe(surface("/b.md", &[&["/a.md"], &["/b.md"]]));
         assert_eq!(
             seen.lock().unwrap().len(),

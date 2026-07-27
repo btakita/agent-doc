@@ -2310,6 +2310,7 @@ pub fn apply_canonical_replace_if_attached(
                     live_editors,
                     delivery_converged,
                     delivery_version,
+                    ..
                 } => {
                     delivery_wait_cursor = Some((delivery_version, live_editors));
                     if let Some(applied_target) = pending_target.as_ref() {

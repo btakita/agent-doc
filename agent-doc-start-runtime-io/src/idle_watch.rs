@@ -613,22 +613,25 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
             file,
             "idle_watch_active_queue_head",
         );
-    let (content, transition) = match current {
+    let (content, transition, queue_unresolved_prompts) = match current {
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
             text,
             live_editors,
             delivery_converged,
+            semantics,
             ..
         })) if live_editors > 0 => {
             ZERO_REPLICA_IDLE_WATCH_LAST_PROBE.lock().remove(&canonical);
             (
                 text,
                 IdleQueueTransition::from_converged(delivery_converged),
+                semantics.map(|semantics| semantics.queue_unresolved_prompts),
             )
         }
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
             text,
             delivery_converged,
+            semantics,
             ..
         })) => {
             ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
@@ -637,6 +640,7 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
             (
                 text,
                 IdleQueueTransition::from_converged(delivery_converged),
+                semantics.map(|semantics| semantics.queue_unresolved_prompts),
             )
         }
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
@@ -655,10 +659,14 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
         }
     };
     let observation = QueueHeadObservation::Observed {
-        head: agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-            &content,
-            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-        ),
+        head: if queue_unresolved_prompts == Some(0) {
+            None
+        } else {
+            agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+                &content,
+                agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            )
+        },
         transition,
     };
     memoize_queue_head(&canonical, revision, &observation);

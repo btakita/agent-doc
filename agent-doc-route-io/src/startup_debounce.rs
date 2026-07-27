@@ -195,6 +195,7 @@ mod tests {
                         live_editors: 1,
                         delivery_converged: false,
                         delivery_version: 1,
+                        semantics: None,
                     }))
                 } else {
                     Ok(Some(CurrentText::Current {
@@ -202,6 +203,7 @@ mod tests {
                         live_editors: 1,
                         delivery_converged: true,
                         delivery_version: 2,
+                        semantics: None,
                     }))
                 }
             },
@@ -249,6 +251,7 @@ mod tests {
                         live_editors: 1,
                         delivery_converged: false,
                         delivery_version: n as u64,
+                        semantics: None,
                     }))
                 } else {
                     Ok(Some(CurrentText::Current {
@@ -256,6 +259,7 @@ mod tests {
                         live_editors: 1,
                         delivery_converged: true,
                         delivery_version: n as u64,
+                        semantics: None,
                     }))
                 }
             },
@@ -289,6 +293,7 @@ mod tests {
                     live_editors: 1,
                     delivery_converged: false,
                     delivery_version: 1,
+                    semantics: None,
                 }))
             },
             |_file, _reason, _targets| Ok(()),
@@ -327,6 +332,7 @@ mod tests {
                     live_editors: 2,
                     delivery_converged: false,
                     delivery_version: 1,
+                    semantics: None,
                 }))
             },
             |_file, reason, targets| {

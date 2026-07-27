@@ -22,7 +22,7 @@ agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.4
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.40" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.40" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.35.40" }
-lazily = { version = "0.51.1", features = ["thread-safe"] }
+lazily = { version = "0.53.0", features = ["thread-safe"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 similar = "3"

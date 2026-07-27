@@ -194,7 +194,7 @@ Confidence is high for the wire/schema capability; no escalation was required. `
 Implemented and shipped the bounded durable-outbox subphase for lazily-cs.
 
 - Added `src/Lazily/DurableOutbox.cs`: `IOutboxStore`, `DurableOutbox<TStore>`, `InMemoryOutboxStore`, and fsync-backed append-only `FileOutboxStore`.
-- Enforced append-before-send recovery, monotonic acknowledgement cursors across stale handles, pruning, ordered replay, retained epochs, and tolerance of an incomplete trailing crash record.
+- Enforced append-beforecs feateresnd recovery, monotonic acknowledgement cursors across stale handles, pruning, ordered replay, retained epochs, and tolerance of an incomplete trailing crash record.
 - Added `DurableOutboxConformanceTests.cs`, replaying all scenarios in `reliable-sync/outbox_store_protocol.json` and `reliable-sync/outbox_replay_after_crash.json`, plus crash-tail and memory-boundary tests.
 - Removed exactly those two now-runtime-opened fixtures from the known-uncovered list. lazily-cs coverage is now 58/124 runtime-opened and 66 known-uncovered.
 - Mutation proof: replacing max-fold cursor recovery with last-record-wins made the stale-handle cursor test fail (`expected 9, actual 3`); restored implementation passes.
@@ -211,7 +211,28 @@ Verification:
 C# is admitted only to the durable-outbox peer group. Full sync/plane parity remains staged behind `#lzcssync`: CRDT-plane runtime, anti-entropy/resync, IPC transports, full-duplex sync driver, and the remaining reliable-sync/distributed/message-passing corpora are still open.
 
 Pre-existing lazily-cs `AGENTS.md`, `README.md`, and untracked `build/` were preserved. Unrelated root and `src/tmux-router` changes were not staged.
-<!-- agent:boundary:cf088dd7 -->
+
+### Re: do [#lzinteropcs] — gpt-5
+
+Gated `#lzinteropcs` on its declared prerequisites; no production peer was fabricated.
+
+The acceptance rule requires complete real C# IPC/CRDT and full-duplex sync surfaces. Current evidence shows:
+
+- `#lzcsipc` is partial: the schema-validated typed wire codec is shipped, but `ShmBlobArena` and executable zero-copy backends remain open.
+- `#lzcssync` is partial: the durable outbox is shipped, but `CrdtPlaneRuntime`, anti-entropy/resync, `IpcSink`/`IpcSource`, the full-duplex `SyncDriver`, and remaining shared corpora remain open.
+
+Therefore lazily-cs stays visible but registry-staged in the single network suite. It must not advertise peer capabilities or enter channel/codec/variant groups until those surfaces exist and their fixtures prove them.
+
+Proof:
+
+- Changed paths: session tracking only; no source implementation was authorized by the unmet prerequisites.
+- Commands/evidence: agent-doc admit/plan and the committed `#lzcsipc`/`#lzcssync` closeouts from this queue.
+- Verification: both prerequisite items explicitly remain open with concrete missing production surfaces.
+- Confidence: high—the gate follows the item's own completion criteria and the operator's staged-peer policy.
+- Escalation: none.
+
+`#lzinteropcs` is now a typed prerequisite gate and will be revisited after `#lzcsipc` and `#lzcssync` complete.
+<!-- agent:boundary:9b1bd118 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -236,7 +257,6 @@ Pre-existing lazily-cs `AGENTS.md`, `README.md`, and untracked `build/` were pre
 - [ ] 🚧 [#lzcscrdt] lazily-cs: PARTIAL/STAGED — HLC, ICellCrdt/IRegisterCrdt, LWW/MV registers, PnCounter, and the ReplicatedCell reactive bridge shipped at f1f32e2 with algebraic, replay-idempotence, and invalidation-suppression tests. Keep C# eligible only for these exact CRDT register capabilities. Still implement TextCrdt + delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt including dotted-frontier anti-entropy and concurrent-merge convergence, then replay the textcrdt, seqcrdt, crdt-tree, and lossless-tree corpora before full CRDT peer admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: TextCrdt/delta, SeqCrdt, CrdtTree, LosslessTreeCrdt, and their conformance runners remain.)
 - [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
 - [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
-- [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
 - [ ] [#lzcsplane] lazily-cs: state projection/mirror, CausalReceipts, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay receipts + signaling + agent-doc corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 33-39)
 - [ ] [#lzcstemporal] lazily-cs: TimerCell/IntervalCell/CronCell/DeadlineCell over a logical clock, debounce/throttle/sample/probabilistic-sample, tumbling/sliding/session windows; replay temporal + rateshape + windowing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 40, 41, 45)
 - [ ] [#lzcscluster] lazily-cs: MembershipCell (SWIM + Phi-accrual), LeaseCell/LeaderCell/LockCell/SemaphoreCell/BarrierCell, presence/awareness/ephemeral, circuit breaker/retry/bulkhead/timeout, health/readiness/discovery/registry; replay membership + coordination + presence + resilience + service corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 42-44, 46-47)
@@ -248,6 +268,7 @@ Pre-existing lazily-cs `AGENTS.md`, `README.md`, and untracked `build/` were pre
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. Current state: #lzcsipc is partial (schema-validated wire codec shipped; ShmBlobArena/executable zero-copy backends remain) and #lzcssync is partial (durable outbox shipped; CrdtPlaneRuntime, anti-entropy/resync, IpcSink/IpcSource, full-duplex SyncDriver, and remaining corpora remain). After both prerequisites ship their complete production surfaces, implement the C# interop peer, advertise only the exact features/codecs/channels/variants it supports, and let the capability-driven matrix admit it automatically. (gated: prerequisites #lzcsipc and #lzcssync remain open.)
 - [/] [#lazilyrenameinverted] [operator-decision] Keep lazily-py `Cell`/`CellSlot` as mypyc-native implementation class names with canonical `Source`/`SourceSlot` aliases. NEXT: accept this documented exception, or explicitly authorize a breaking native-class rename with mypyc and identity migration tests.
 - [/] [#lzjsnpmtrustedpub] [operator-action] lazily-js repository workflow/OIDC/provenance is ready, but npm rejects publication until trusted-publisher setup is completed. NEXT: authenticate npm, register `@lazily-hub/lazily-js` for `lazily-hub/lazily-js` workflow `release.yml` with no environment and allowed action `npm publish`, verify with `npm trust list @lazily-hub/lazily-js`, then prove the next version tag.
 <!-- /agent:review -->

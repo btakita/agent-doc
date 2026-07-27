@@ -25,13 +25,6 @@ class SubmitAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
-        // Capture synchronously: the editor selection may change before the
-        // invokeLater save/dispatch callback runs. Preserve whitespace and
-        // multiline content verbatim; only an actually empty selection is absent.
-        val selectedText = e.getData(CommonDataKeys.EDITOR)
-            ?.selectionModel
-            ?.selectedText
-            ?.takeIf { it.isNotEmpty() }
 
         val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
         LOG.warn("[run] actionPerformed: ${file.name}")
@@ -80,7 +73,6 @@ class SubmitAction : AnAction() {
                 file,
                 attempt = attempt,
                 resolved = cwd to relativePath,
-                selectedText = selectedText,
             )
         TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "run-agent-doc")
     }

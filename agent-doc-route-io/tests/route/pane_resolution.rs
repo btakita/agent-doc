@@ -27,6 +27,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
         file_path,
         target_session,
         harness,
+        false,
         created_panes,
         route_authoritative_actor_effects(super::route_repair_closeout),
         route_dispatch_only_effects(),

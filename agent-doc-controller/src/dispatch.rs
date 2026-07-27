@@ -715,16 +715,32 @@ pub enum AuthoritativeActorDispatchAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoritativeActorDispatchIntent {
+    PromptAware,
+    PlainTrigger,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthoritativeActorDispatchActionFacts {
     pub mode: ReopenMode,
     pub actor_state: ActorDispatchState,
     pub has_prompt_bearing_work: bool,
     pub reopen_decision: RouteDecision,
+    pub intent: AuthoritativeActorDispatchIntent,
 }
 
 pub fn classify_authoritative_actor_dispatch_action(
     facts: AuthoritativeActorDispatchActionFacts,
 ) -> AuthoritativeActorDispatchAction {
+    if facts.mode == ReopenMode::DispatchOnly
+        && facts.intent == AuthoritativeActorDispatchIntent::PlainTrigger
+        && matches!(
+            facts.actor_state,
+            ActorDispatchState::Ready | ActorDispatchState::Busy | ActorDispatchState::WaitingInput
+        )
+    {
+        return AuthoritativeActorDispatchAction::DispatchOnlyDirectPane;
+    }
     if actor_dispatch_blocker_reason(facts.actor_state).is_some() {
         if !facts.has_prompt_bearing_work {
             return AuthoritativeActorDispatchAction::FocusOnly;
@@ -4811,6 +4827,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 actor_state: ActorDispatchState::Ready,
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::ReuseReady,
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
             }),
             AuthoritativeActorDispatchAction::DispatchOnlyDirectPane
         );
@@ -4820,6 +4837,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 actor_state: ActorDispatchState::Ready,
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::ReuseReady,
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
             }),
             AuthoritativeActorDispatchAction::ManagedSupervisorIpc
         );
@@ -4829,6 +4847,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 actor_state: ActorDispatchState::Busy,
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::ReuseReady,
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
             }),
             AuthoritativeActorDispatchAction::ManagedSupervisorQueue
         );
@@ -4838,6 +4857,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 actor_state: ActorDispatchState::Busy,
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::FailClosed,
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
             }),
             AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue
         );
@@ -4847,6 +4867,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 actor_state: ActorDispatchState::WaitingInput,
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::FailClosed,
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
             }),
             AuthoritativeActorDispatchAction::RecoverDispatchOnlyWaitingInput
         );
@@ -4856,9 +4877,28 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 actor_state: ActorDispatchState::Blocked,
                 has_prompt_bearing_work: false,
                 reopen_decision: RouteDecision::FailClosed,
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
             }),
             AuthoritativeActorDispatchAction::FocusOnly
         );
+        for actor_state in [
+            ActorDispatchState::Ready,
+            ActorDispatchState::Busy,
+            ActorDispatchState::WaitingInput,
+        ] {
+            assert_eq!(
+                classify_authoritative_actor_dispatch_action(
+                    AuthoritativeActorDispatchActionFacts {
+                        mode: ReopenMode::DispatchOnly,
+                        actor_state,
+                        has_prompt_bearing_work: false,
+                        reopen_decision: RouteDecision::FailClosed,
+                        intent: AuthoritativeActorDispatchIntent::PlainTrigger,
+                    }
+                ),
+                AuthoritativeActorDispatchAction::DispatchOnlyDirectPane
+            );
+        }
     }
 
     #[test]

@@ -359,7 +359,6 @@ object TerminalUtil {
         attempt: RunAgentDocAttemptLedger.Attempt? = null,
         commandPreAcquired: Boolean = false,
         resolved: Pair<String, String>? = null,
-        selectedText: String? = null,
     ) {
         // `#jbedtledger`: `resolveProject` crosses the FFI boundary. Callers that
         // already resolved this exact file (SubmitAction, to open the attempt
@@ -372,20 +371,6 @@ object TerminalUtil {
 
         LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath transport=cp")
         attempt?.recordIfCurrent("route_prepare")
-
-        if (selectedText != null) {
-            sendSelectedTextSteering(
-                project = project,
-                cwd = cwd,
-                relativePath = relativePath,
-                documentPath = documentPath,
-                routeKey = routeKey,
-                selectedText = selectedText,
-                attempt = attempt,
-                onComplete = onComplete,
-            )
-            return
-        }
 
         if (!commandPreAcquired) {
             when (editorCommandRegistry.request(routeKey, EditorCommandKind.RUN_AGENT_DOC)) {
@@ -640,72 +625,6 @@ object TerminalUtil {
             onComplete?.invoke()
             notifyError(project, "Failed to send Run Agent Doc through CP: ${e.message}")
         }
-    }
-
-    private fun sendSelectedTextSteering(
-        project: Project,
-        cwd: String,
-        relativePath: String,
-        documentPath: String,
-        routeKey: String,
-        selectedText: String,
-        attempt: RunAgentDocAttemptLedger.Attempt?,
-        onComplete: (() -> Unit)?,
-    ) {
-        val steeringId = attempt?.id ?: "steer-" + java.util.UUID.randomUUID().toString()
-        attempt?.recordIfCurrent("turn_steering_start")
-        LOG.warn(
-            "[route] sending selected-text turn steering: rel=$relativePath bytes=${selectedText.toByteArray().size}",
-        )
-        Thread {
-            try {
-                val result = CpRouteClient.runEditorRoute(
-                    projectRoot = cwd,
-                    filePath = documentPath,
-                    relativePath = relativePath,
-                    layoutArgs = emptyList(),
-                    waitForReadySeconds = RUN_ROUTE_WAIT_FOR_READY_SECONDS,
-                    attemptId = attempt?.id,
-                    routeKey = routeKey,
-                    selectedText = selectedText,
-                    steeringId = steeringId,
-                )
-                val expectedBytes = selectedText.toByteArray().size
-                val acknowledgementError = when {
-                    result.exitCode != 0 -> result.output
-                    result.steering == null -> "controller omitted the typed turn-steering acknowledgement"
-                    result.steering.kind != "turn_steering_ack" ->
-                        "controller returned unexpected turn-steering acknowledgement kind: ${result.steering.kind}"
-                    result.steering.steeringId != steeringId ->
-                        "controller acknowledged steering id ${result.steering.steeringId} instead of $steeringId"
-                    result.steering.outcome !in setOf("delivered", "duplicate") ->
-                        "controller returned unexpected turn-steering outcome: ${result.steering.outcome}"
-                    result.steering.outcome == "delivered" && result.steering.acceptedBytes != expectedBytes ->
-                        "controller acknowledged ${result.steering.acceptedBytes} bytes instead of $expectedBytes"
-                    result.steering.outcome == "duplicate" && result.steering.acceptedBytes != 0 ->
-                        "controller duplicate acknowledgement reported ${result.steering.acceptedBytes} newly accepted bytes"
-                    else -> null
-                }
-                if (acknowledgementError == null) {
-                    LOG.warn("[route] selected-text turn steering acknowledged: ${result.output}")
-                    attempt?.finishIfCurrent("turn_steering_ack")
-                    showHint(project, "Selected text delivered to the active turn")
-                } else {
-                    LOG.warn("[route] selected-text turn steering rejected: $acknowledgementError")
-                    attempt?.finishIfCurrent("turn_steering_rejected", error = acknowledgementError)
-                    notifyError(project, "Could not steer the active turn: $acknowledgementError")
-                }
-            } catch (e: Exception) {
-                LOG.warn("[route] selected-text turn steering failed: ${e.message}", e)
-                attempt?.finishIfCurrent(
-                    "turn_steering_exception",
-                    error = e.message ?: e.javaClass.simpleName,
-                )
-                notifyError(project, "Could not steer the active turn: ${e.message}")
-            } finally {
-                onComplete?.invoke()
-            }
-        }.start()
     }
 
     private fun routeAttemptError(

@@ -19,8 +19,6 @@ class SubmitActionTest {
         // breaks whenever a parameter is added (it did, for `resolved =`), which
         // tests ordering by accident rather than on purpose.
         val routeIdx = source.indexOf("TerminalUtil.sendToTerminal(")
-        val selectionCaptureIdx = source.indexOf("selectionModel")
-        val selectionArgumentIdx = source.indexOf("selectedText = selectedText")
 
         assertTrue("SubmitAction should begin a durable Run Agent Doc attempt", ledgerIdx >= 0)
         assertTrue("SubmitAction should drop stale queued callbacks before saving", currentCheckIdx > ledgerIdx)
@@ -29,12 +27,8 @@ class SubmitActionTest {
         assertTrue("SubmitAction should record document save before routing", saveRecordIdx > saveIdx)
         assertTrue("SubmitAction should route after saving", routeIdx > saveIdx)
         assertTrue(
-            "SubmitAction should capture the exact selection before invokeLater",
-            selectionCaptureIdx in 0 until currentCheckIdx,
-        )
-        assertTrue(
-            "SubmitAction should pass the captured selection to the controller route",
-            selectionArgumentIdx > routeIdx,
+            "text selection must not fork Run Agent Doc onto a distinct steering path",
+            !source.contains("selectionModel") && !source.contains("selectedText"),
         )
         assertTrue("SubmitAction should not block on the typing debounce", !source.contains("TypingTracker.awaitIdle(file.path)"))
         assertTrue("SubmitAction should not save unrelated open documents", !source.contains("saveAllDocuments()"))

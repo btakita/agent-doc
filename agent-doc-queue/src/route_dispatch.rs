@@ -121,6 +121,20 @@ pub fn dispatch_active_turn_queue_source(
     }
 }
 
+pub fn dispatch_active_turn_accepts_plain_trigger(
+    harness_binary: &str,
+    blocker_reason: &str,
+) -> bool {
+    matches!(
+        dispatch_active_turn_queue_source(harness_binary, blocker_reason),
+        Some(
+            "dispatch_only_codex_active_turn"
+                | "dispatch_only_opencode_active_turn"
+                | "dispatch_only_claude_active_turn"
+        )
+    )
+}
+
 pub fn prepare_route_dispatch_queue_update(
     original: &str,
     change_text: &str,
@@ -504,6 +518,25 @@ mod tests {
             None,
             "drafted prompt input must not be overwritten by route queueing"
         );
+    }
+
+    #[test]
+    fn plain_triggers_can_submit_only_to_actual_active_turns() {
+        for (harness, blocker) in [
+            ("codex", "active codex turn"),
+            ("opencode", "opencode active turn"),
+            ("claude", "active claude turn"),
+        ] {
+            assert!(dispatch_active_turn_accepts_plain_trigger(harness, blocker));
+        }
+        assert!(!dispatch_active_turn_accepts_plain_trigger(
+            "claude",
+            "claude artifact picker open"
+        ));
+        assert!(!dispatch_active_turn_accepts_plain_trigger(
+            "codex",
+            "queued draft in composer"
+        ));
     }
 
     #[test]

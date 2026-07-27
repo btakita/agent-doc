@@ -6,11 +6,11 @@ use std::time::Duration;
 
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
-    CloseoutBlockDispatchDecision, DispatchOnlyBusyRefusalFacts, DispatchOnlyReopenDelivery,
-    ReopenMode, RouteCloseoutDrainOutcome, RoutedReopenFacts, RoutedReopenGuardReason,
-    StartingTimeoutActorFacts, actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
-    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
-    decide_authoritative_reopen,
+    AuthoritativeActorDispatchIntent, CloseoutBlockDispatchDecision, DispatchOnlyBusyRefusalFacts,
+    DispatchOnlyReopenDelivery, ReopenMode, RouteCloseoutDrainOutcome, RoutedReopenFacts,
+    RoutedReopenGuardReason, StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
+    actor_dispatch_blocker_reason, busy_projection_repaired_by_ready_prompt,
+    classify_authoritative_actor_dispatch_action, decide_authoritative_reopen,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_probe_active_turn_cue,
@@ -39,7 +39,8 @@ use crate::closeout_drain::{
 use crate::cycle_ack::{RouteCycleAckEffects, require_routed_cycle_ack};
 use crate::dispatch::{RouteDispatchEffects, dispatch_via_supervisor_ipc};
 use crate::dispatch_only::{
-    DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions, dispatch_only_send_reopen,
+    DispatchOnlyActiveTurnPolicy, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
+    dispatch_only_send_reopen,
 };
 use crate::dispatch_target::register_dispatch_target;
 use crate::pane_resolution::{
@@ -160,6 +161,7 @@ pub fn route_via_authoritative_actor(
     baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     prompt_context: Option<&PromptBearingRouteContext>,
     dispatch_only: bool,
+    plain_trigger: bool,
     actor: AuthoritativeActorDispatchTarget,
     effects: RouteAuthoritativeActorEffects,
 ) -> Result<String> {
@@ -729,6 +731,11 @@ pub fn route_via_authoritative_actor(
             actor_state: actor_dispatch_state,
             has_prompt_bearing_work: prompt_bearing_marker.is_some(),
             reopen_decision: reopen_outcome.decision,
+            intent: if plain_trigger {
+                AuthoritativeActorDispatchIntent::PlainTrigger
+            } else {
+                AuthoritativeActorDispatchIntent::PromptAware
+            },
         });
 
     if actor_dispatch_blocker_reason(actor_dispatch_state).is_some()
@@ -1173,6 +1180,11 @@ pub fn route_via_authoritative_actor(
                 DispatchOnlySendReopenOptions {
                     delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
                     queue_prompt_text: queue_prompt.as_deref(),
+                    active_turn_policy: if plain_trigger {
+                        DispatchOnlyActiveTurnPolicy::SubmitPlainTrigger
+                    } else {
+                        DispatchOnlyActiveTurnPolicy::QueueOrRefuse
+                    },
                     effects: effects.dispatch_only_route_effects,
                 },
             )?;

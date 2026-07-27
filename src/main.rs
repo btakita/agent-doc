@@ -46,7 +46,6 @@ mod auto_dag;
 mod autoclaim;
 mod clean;
 mod cleanup_cmd;
-mod preflight_hook;
 mod commands;
 mod convert;
 mod crash_resilience;
@@ -76,6 +75,7 @@ mod parallel;
 mod patch;
 mod plan;
 mod plugin;
+mod preflight_hook;
 mod queue_dispatch;
 mod queue_recovery;
 mod read;
@@ -238,18 +238,6 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                 },
             ),
         }
-    }
-
-    fn steer_active_turn(
-        &self,
-        invocation: agent_doc_controller_io::project_controller::ControllerTurnSteeringInvocation,
-    ) -> anyhow::Result<agent_doc_controller_io::project_controller::ControllerTurnSteeringReceipt>
-    {
-        agent_doc_route_io::turn_steering::deliver_active_turn_steering(
-            &invocation.file,
-            &invocation.steering_id,
-            &invocation.text,
-        )
     }
 
     fn sync_tmux_layout(
@@ -5433,9 +5421,7 @@ fn try_main() -> anyhow::Result<()> {
             HookAction::CoinedIdPreToolUse => {
                 agent_doc_hooks_io::coined_id_pretooluse::handle_pretooluse()
             }
-            HookAction::PreflightUserPromptSubmit => {
-                preflight_hook::handle_user_prompt_submit()
-            }
+            HookAction::PreflightUserPromptSubmit => preflight_hook::handle_user_prompt_submit(),
         },
         Commands::Cleanup {
             file,

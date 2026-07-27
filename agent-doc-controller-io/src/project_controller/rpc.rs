@@ -6063,51 +6063,17 @@ fn handle_editor_route_rpc(
         .filter(|value| !value.is_empty())
         .unwrap_or("jetbrains_plugin");
 
-    if let Some(selected_text) = payload.selected_text {
-        let steering_id = payload
-            .steering_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .context("selected-text editor route requires steering_id")?
-            .to_string();
+    if payload.selected_text.is_some() || payload.steering_id.is_some() {
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "controller_turn_steering_started file={} source={} steering_id={} selected_bytes={}",
+                "controller_editor_route_legacy_steering_normalized file={} source={} steering_id={} selected_bytes={} outcome=plain_trigger",
                 canonical.display(),
                 source,
-                steering_id,
-                selected_text.len(),
+                payload.steering_id.as_deref().unwrap_or("none"),
+                payload.selected_text.as_deref().map(str::len).unwrap_or(0),
             ),
         );
-        let receipt = runtime_effects()?.steer_active_turn(ControllerTurnSteeringInvocation {
-            file: canonical.clone(),
-            steering_id: steering_id.clone(),
-            text: selected_text,
-        })?;
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "controller_turn_steering_ack file={} source={} steering_id={} outcome={:?} accepted_bytes={} actor_session={} actor_pane={} actor_generation={}",
-                canonical.display(),
-                source,
-                receipt.steering_id,
-                receipt.outcome,
-                receipt.accepted_bytes,
-                receipt.actor_session_id,
-                receipt.actor_pane_id,
-                receipt.actor_generation,
-            ),
-        );
-        return Ok(ControllerEditorRouteResult {
-            exit_code: 0,
-            output: format!(
-                "[route] realtime turn steering {:?} for {}",
-                receipt.outcome, relative_path
-            ),
-            steering: Some(receipt),
-        });
     }
 
     agent_doc_ops_log_io::log_op(
@@ -16204,7 +16170,7 @@ mod tests {
     }
 
     #[test]
-    fn command_submit_selected_text_returns_typed_turn_steering_ack() {
+    fn command_submit_selected_text_uses_the_plain_editor_route() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
@@ -16228,16 +16194,13 @@ mod tests {
 
         let response = handle_editor_command_submit_rpc(&bootstrap, request).unwrap();
         assert_eq!(response["exit_code"], 0);
-        assert_eq!(response["payload"]["steering"]["kind"], "turn_steering_ack");
-        assert_eq!(
-            response["payload"]["steering"]["steering_id"],
-            "steer-exact-1"
+        assert!(
+            response["payload"]["output"]
+                .as_str()
+                .unwrap()
+                .contains("test editor route accepted")
         );
-        assert_eq!(response["payload"]["steering"]["outcome"], "delivered");
-        assert_eq!(
-            response["payload"]["steering"]["accepted_bytes"],
-            selected.len()
-        );
+        assert!(response["payload"]["steering"].is_null());
         assert_eq!(response["projection"]["commands"][0]["status"], "applied");
     }
 

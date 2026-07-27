@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Editor reruns, prompt replacements, and realtime steering now share one plain `agent-doc <file>` dispatch path (`#adreplacementturndispatch`).** Saved document edits remain the sole prompt payload: selection state no longer forks JetBrains into a separate supervisor steering RPC, plain triggers bypass prompt-aware queue synthesis, and actual busy agent turns accept the same bare trigger while protected interactive substates still fail closed.
+
 ## 0.35.31
 
 _JetBrains plugin 0.2.297; VS Code extension 0.2.57._

@@ -22,8 +22,8 @@ use crate::cycle_ack::{
 };
 use crate::dispatch::{RouteDispatchEffects, dispatch_existing_managed_reopen};
 use crate::dispatch_only::{
-    DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions, dispatch_only_reopen_existing_pane,
-    dispatch_only_send_reopen,
+    DispatchOnlyActiveTurnPolicy, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
+    dispatch_only_reopen_existing_pane, dispatch_only_send_reopen,
 };
 use crate::dispatch_recovery::{
     StartingPaneRecoveryWaitOptions, resolve_fresh_dispatch_target_after_ready_wait,
@@ -250,6 +250,7 @@ pub fn resolve_or_create_pane_dispatch_only(
     file_path: &str,
     target_session: &str,
     harness: &HarnessConfig,
+    plain_trigger: bool,
     created_panes: &mut Vec<String>,
     authoritative_effects: RouteAuthoritativeActorEffects,
     dispatch_only_effects: DispatchOnlyRouteEffects,
@@ -257,8 +258,11 @@ pub fn resolve_or_create_pane_dispatch_only(
 ) -> Result<String> {
     let registered = lookup_dispatch_registration(file_path, session_id)?;
     let cycle_baseline = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
-    let pending_prompt_context =
-        pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
+    let pending_prompt_context = if plain_trigger {
+        None
+    } else {
+        pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?
+    };
     let authoritative_actor =
         load_authoritative_actor_binding(tmux, file, session_id, file_path, harness, false, false)?;
     let registered_actor = if authoritative_actor.is_none() {
@@ -283,6 +287,7 @@ pub fn resolve_or_create_pane_dispatch_only(
             cycle_baseline.as_ref(),
             pending_prompt_context.as_ref(),
             true,
+            plain_trigger,
             actor.clone(),
             authoritative_effects,
         );
@@ -670,6 +675,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
             harness,
             cycle_baseline.as_ref(),
             pending_prompt_context.as_ref(),
+            false,
             false,
             actor,
             effects.route_authoritative_actor_effects,
@@ -1395,6 +1401,7 @@ pub fn recover_dispatch_only_authoritative_waiting_input(
         DispatchOnlySendReopenOptions {
             delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
             queue_prompt_text: None,
+            active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
             effects,
         },
     )

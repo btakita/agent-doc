@@ -179,6 +179,7 @@ pub fn run_with_tmux_with_options(
             &file_path,
             &target_session,
             &harness,
+            plain_trigger,
             &mut created_panes,
             effects.authoritative_actor_effects,
             effects.dispatch_only_effects,

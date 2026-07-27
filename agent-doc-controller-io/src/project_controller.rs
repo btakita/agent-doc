@@ -261,11 +261,6 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         invocation: ControllerEditorRouteInvocation,
     ) -> Result<ControllerEditorRouteRuntimeResult>;
 
-    fn steer_active_turn(
-        &self,
-        invocation: ControllerTurnSteeringInvocation,
-    ) -> Result<ControllerTurnSteeringReceipt>;
-
     fn sync_tmux_layout(
         &self,
         project_root: &Path,
@@ -375,21 +370,6 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
                 "test editor route accepted for {}",
                 invocation.relative_path
             ),
-        })
-    }
-
-    fn steer_active_turn(
-        &self,
-        invocation: ControllerTurnSteeringInvocation,
-    ) -> Result<ControllerTurnSteeringReceipt> {
-        Ok(ControllerTurnSteeringReceipt {
-            kind: "turn_steering_ack".to_string(),
-            steering_id: invocation.steering_id,
-            outcome: ControllerTurnSteeringOutcome::Delivered,
-            accepted_bytes: invocation.text.len(),
-            actor_session_id: "test-session".to_string(),
-            actor_pane_id: "%test".to_string(),
-            actor_generation: 1,
         })
     }
 
@@ -566,8 +546,10 @@ struct ControllerDocumentGraphs {
     ctx: ThreadSafeContext,
     /// The fact seam: the document's state projection, set once per applied
     /// state event. Everything retained-write-shaped is *derived* from this.
-    projection:
-        lazily::ThreadSafeSourceMap<String, Option<agent_doc_state_backbone::DocumentStateProjection>>,
+    projection: lazily::ThreadSafeSourceMap<
+        String,
+        Option<agent_doc_state_backbone::DocumentStateProjection>,
+    >,
     /// Derived from [`Self::projection`] — **not** pushed.
     ///
     /// This was a cell map that `apply_state_event` computed and wrote into. A
@@ -650,9 +632,7 @@ impl RetainedWriteSettleSink {
             },
         );
         if let Err(e) = append_state_event(&self.project_root, &event) {
-            eprintln!(
-                "[controller] retained-write settle append failed for {document_hash}: {e}"
-            );
+            eprintln!("[controller] retained-write settle append failed for {document_hash}: {e}");
             return;
         }
         if let Err(e) = runtime.apply_state_event(&event) {
@@ -740,7 +720,8 @@ impl ControllerDocumentGraphs {
         // One batch: the two planes are one observation, and a settle effect that
         // ran between them would be judging a fresh authority against a stale disk.
         self.ctx.batch(|ctx| {
-            self.authority.set(ctx, document_hash.to_string(), authority);
+            self.authority
+                .set(ctx, document_hash.to_string(), authority);
             self.disk.set(ctx, document_hash.to_string(), disk);
         });
 
@@ -763,15 +744,17 @@ impl ControllerDocumentGraphs {
         let pending = self.pending.clone();
         let authority_map = self.authority.clone();
         let disk_map = self.disk.clone();
-        let verdict = self
-            .verdict
-            .get_or_insert_with(&self.ctx, document_hash.to_string(), move |ctx, key| {
+        let verdict = self.verdict.get_or_insert_with(
+            &self.ctx,
+            document_hash.to_string(),
+            move |ctx, key| {
                 agent_doc_state_backbone::retained_write::settlement_verdict(
                     pending.observe(ctx, key).flatten().as_ref(),
                     authority_map.observe(ctx, key).flatten().as_ref(),
                     disk_map.observe(ctx, key).flatten().as_ref(),
                 )
-            });
+            },
+        );
         // Minted after the slot it subscribes to, and only ever once per
         // document. On the first query it fires here; afterwards it has already
         // fired from the `set` above. Either way no caller decides to settle.
@@ -976,12 +959,7 @@ impl ControllerRuntime {
         self.memory.lock().actor_store.clone()
     }
 
-    fn try_claim_coordination(
-        &self,
-        scopes: &[String],
-        owner_token: &str,
-        owner_pid: u32,
-    ) -> bool {
+    fn try_claim_coordination(&self, scopes: &[String], owner_token: &str, owner_pid: u32) -> bool {
         self.coordination_graph
             .try_claim(scopes, owner_token, owner_pid)
     }
@@ -7721,7 +7699,8 @@ agent:queue\n\
                 target_hash: target_hash.to_string(),
                 target_content: format!("content-for-{target_hash}"),
                 source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
-                reason: agent_doc_state_backbone::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                reason:
+                    agent_doc_state_backbone::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
             },
         );
         append_state_event(project_root, &event).unwrap();

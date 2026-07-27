@@ -144,10 +144,49 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
 /// project supervisor is mid-`execve` hot-reload, so a trigger typed now would
 /// be dropped before submit. Fail closed (don't type) and let the caller retry
 /// once the recycle settles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchOnlyActiveTurnPolicy {
+    QueueOrRefuse,
+    SubmitPlainTrigger,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DispatchOnlyBlockerAction {
+    SubmitPlainTrigger,
+    QueuePrompt(&'static str),
+    Refuse,
+}
+
+fn classify_dispatch_only_blocker(
+    policy: DispatchOnlyActiveTurnPolicy,
+    harness_binary: &str,
+    blocker_reason: &str,
+    has_queue_prompt: bool,
+) -> DispatchOnlyBlockerAction {
+    if policy == DispatchOnlyActiveTurnPolicy::SubmitPlainTrigger
+        && agent_doc_queue::route_dispatch::dispatch_active_turn_accepts_plain_trigger(
+            harness_binary,
+            blocker_reason,
+        )
+    {
+        return DispatchOnlyBlockerAction::SubmitPlainTrigger;
+    }
+    if has_queue_prompt
+        && let Some(source) = agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source(
+            harness_binary,
+            blocker_reason,
+        )
+    {
+        return DispatchOnlyBlockerAction::QueuePrompt(source);
+    }
+    DispatchOnlyBlockerAction::Refuse
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct DispatchOnlySendReopenOptions<'a> {
     pub delivery: DispatchOnlyReopenDelivery,
     pub queue_prompt_text: Option<&'a str>,
+    pub active_turn_policy: DispatchOnlyActiveTurnPolicy,
     pub effects: DispatchOnlyRouteEffects,
 }
 
@@ -396,74 +435,99 @@ pub fn dispatch_only_send_reopen(
                 reason
             ),
         );
-        if let Some(source) = agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source(
+        match classify_dispatch_only_blocker(
+            options.active_turn_policy,
             &harness.binary,
             &reason,
-        ) && let Some(prompt_text) = options.queue_prompt_text
-        {
-            // #jb-run-preempt-autoloop-priority: manual Run Agent Doc into a busy
-            // active turn preempts pending auto items (head-insert).
-            let queued =
-                (options.effects.enqueue_route_dispatch_prompt)(file, prompt_text, source, true)?;
-            eprintln!(
-                "[route] dispatch-only {} reopen for {} found {} on pane {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger {}",
-                harness.binary,
-                file.display(),
-                reason,
-                dispatch_pane,
-                queued.prompt_text,
-                queued.appended,
-                queued.already_present,
-                queued.superseded,
-                agent_doc_flow::outcome::user_outcome_fields(
-                    agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
-                )
-            );
-            // #claude-busy-status-during-active-turn: this queued path previously
-            // returned Ok silently, so the operator saw nothing and the session
-            // looked idle while a turn was in flight. Surface the turn-in-progress
-            // + queued status on the pane (status-only; no hard block — the prompt
-            // already auto-queued above and runs when the current turn finishes).
-            (options.effects.emit_busy_route_queued_diagnostic)(
-                tmux,
-                &dispatch_pane,
-                file,
-                harness,
-            );
-            return Ok(dispatch_pane);
+            options.queue_prompt_text.is_some(),
+        ) {
+            DispatchOnlyBlockerAction::SubmitPlainTrigger => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_plain_trigger_active_turn file={} pane={} harness={} blocker={} outcome=submit_bare_trigger",
+                        file.display(),
+                        dispatch_pane,
+                        harness.binary,
+                        reason,
+                    ),
+                );
+            }
+            DispatchOnlyBlockerAction::QueuePrompt(source) => {
+                let prompt_text = options
+                    .queue_prompt_text
+                    .expect("classified queue action requires prompt text");
+                // #jb-run-preempt-autoloop-priority: manual Run Agent Doc into a busy
+                // active turn preempts pending auto items (head-insert).
+                let queued = (options.effects.enqueue_route_dispatch_prompt)(
+                    file,
+                    prompt_text,
+                    source,
+                    true,
+                )?;
+                eprintln!(
+                    "[route] dispatch-only {} reopen for {} found {} on pane {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger {}",
+                    harness.binary,
+                    file.display(),
+                    reason,
+                    dispatch_pane,
+                    queued.prompt_text,
+                    queued.appended,
+                    queued.already_present,
+                    queued.superseded,
+                    agent_doc_flow::outcome::user_outcome_fields(
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                    )
+                );
+                // #claude-busy-status-during-active-turn: this queued path previously
+                // returned Ok silently, so the operator saw nothing and the session
+                // looked idle while a turn was in flight. Surface the turn-in-progress
+                // + queued status on the pane (status-only; no hard block — the prompt
+                // already auto-queued above and runs when the current turn finishes).
+                (options.effects.emit_busy_route_queued_diagnostic)(
+                    tmux,
+                    &dispatch_pane,
+                    file,
+                    harness,
+                );
+                return Ok(dispatch_pane);
+            }
+            DispatchOnlyBlockerAction::Refuse => {
+                let file_display = file.display().to_string();
+                let recovery =
+                    dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
+                        harness_binary: &harness.binary,
+                        reason: &reason,
+                        file_display: &file_display,
+                    });
+                // #snrun: name the interactive shell substate distinctly from a generic
+                // busy actor so the failure says which terminal state blocked dispatch.
+                let guard_reason = dispatch_only_blocked_guard_reason(&reason);
+                agent_doc_flow_io::log_flow_event(
+                    file,
+                    prompt_ready_barrier_failed_event(guard_reason),
+                    agent_doc_ops_log_io::log_op,
+                );
+                if guard_reason == RoutedReopenGuardReason::BlockedInInteractiveSubstate {
+                    anyhow::bail!(
+                        "dispatch-only {} reopen refused to inject into pane {} for {} because the pane is blocked in an interactive terminal substate ({}), not a dispatch-ready composer; {}",
+                        harness.binary,
+                        dispatch_pane,
+                        file.display(),
+                        reason,
+                        recovery
+                    );
+                }
+                anyhow::bail!(
+                    "dispatch-only {} reopen refused to inject into pane {} for {} because the pane still shows {}; {}",
+                    harness.binary,
+                    dispatch_pane,
+                    file.display(),
+                    reason,
+                    recovery
+                );
+            }
         }
-        let file_display = file.display().to_string();
-        let recovery = dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
-            harness_binary: &harness.binary,
-            reason: &reason,
-            file_display: &file_display,
-        });
-        // #snrun: name the interactive shell substate distinctly from a generic
-        // busy actor so the failure says which terminal state blocked dispatch.
-        let guard_reason = dispatch_only_blocked_guard_reason(&reason);
-        agent_doc_flow_io::log_flow_event(
-            file,
-            prompt_ready_barrier_failed_event(guard_reason),
-            agent_doc_ops_log_io::log_op,
-        );
-        if guard_reason == RoutedReopenGuardReason::BlockedInInteractiveSubstate {
-            anyhow::bail!(
-                "dispatch-only {} reopen refused to inject into pane {} for {} because the pane is blocked in an interactive terminal substate ({}), not a dispatch-ready composer; {}",
-                harness.binary,
-                dispatch_pane,
-                file.display(),
-                reason,
-                recovery
-            );
-        }
-        anyhow::bail!(
-            "dispatch-only {} reopen refused to inject into pane {} for {} because the pane still shows {}; {}",
-            harness.binary,
-            dispatch_pane,
-            file.display(),
-            reason,
-            recovery
-        );
     }
 
     drop(pre_dispatch_route_guard.take());
@@ -614,6 +678,7 @@ pub fn dispatch_only_reopen_existing_pane(
             DispatchOnlySendReopenOptions {
                 delivery,
                 queue_prompt_text,
+                active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
                 effects,
             },
         );
@@ -643,6 +708,7 @@ pub fn dispatch_only_reopen_existing_pane(
             DispatchOnlySendReopenOptions {
                 delivery,
                 queue_prompt_text,
+                active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
                 effects,
             },
         );
@@ -665,6 +731,7 @@ pub fn dispatch_only_reopen_existing_pane(
             DispatchOnlySendReopenOptions {
                 delivery,
                 queue_prompt_text,
+                active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
                 effects,
             },
         ),
@@ -985,6 +1052,50 @@ mod tests {
         assert_eq!(
             remaining_ready_wait(deadline, start + Duration::from_secs(20)),
             Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn blocker_policy_submits_only_plain_triggers_to_actual_active_turns() {
+        assert_eq!(
+            classify_dispatch_only_blocker(
+                DispatchOnlyActiveTurnPolicy::SubmitPlainTrigger,
+                "codex",
+                "active codex turn",
+                false,
+            ),
+            DispatchOnlyBlockerAction::SubmitPlainTrigger,
+        );
+        assert_eq!(
+            classify_dispatch_only_blocker(
+                DispatchOnlyActiveTurnPolicy::SubmitPlainTrigger,
+                "claude",
+                "claude artifact picker open",
+                false,
+            ),
+            DispatchOnlyBlockerAction::Refuse,
+        );
+    }
+
+    #[test]
+    fn blocker_policy_preserves_prompt_aware_queue_or_refuse_behavior() {
+        assert_eq!(
+            classify_dispatch_only_blocker(
+                DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+                "codex",
+                "active codex turn",
+                true,
+            ),
+            DispatchOnlyBlockerAction::QueuePrompt("dispatch_only_codex_active_turn"),
+        );
+        assert_eq!(
+            classify_dispatch_only_blocker(
+                DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+                "codex",
+                "active codex turn",
+                false,
+            ),
+            DispatchOnlyBlockerAction::Refuse,
         );
     }
 

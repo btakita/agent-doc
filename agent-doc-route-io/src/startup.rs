@@ -12,7 +12,8 @@ use std::time::Duration;
 use crate::cycle_ack::{RouteCycleAckEffects, wait_for_start_ack};
 use crate::dispatch::{RouteDispatchEffects, dispatch_routed_reopen};
 use crate::dispatch_only::{
-    DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions, dispatch_only_send_reopen,
+    DispatchOnlyActiveTurnPolicy, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
+    dispatch_only_send_reopen,
 };
 use crate::dispatch_recovery::resolve_fresh_dispatch_target_after_ready_wait;
 use crate::dispatch_target::register_dispatch_target;
@@ -782,6 +783,7 @@ pub fn auto_start_in_session_with_lock_mode(
                     DispatchOnlySendReopenOptions {
                         delivery: DispatchOnlyReopenDelivery::SupervisorIpcOnce,
                         queue_prompt_text: None,
+                        active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
                         effects: effects.dispatch_only_route_effects,
                     },
                 )?;
@@ -826,6 +828,7 @@ pub fn auto_start_in_session_with_lock_mode(
                     DispatchOnlySendReopenOptions {
                         delivery: DispatchOnlyReopenDelivery::SupervisorIpcOnce,
                         queue_prompt_text: None,
+                        active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
                         effects: effects.dispatch_only_route_effects,
                     },
                 )

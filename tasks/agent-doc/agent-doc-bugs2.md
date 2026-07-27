@@ -517,7 +517,23 @@ The live editor-side profiles were:
 That is one sub-half-second editor delivery/ACK cycle, not many short delivery cycles accumulating into the multi-second `delivery_ack_pending` interval. Client-side batching improves throughput across multiple writes; it cannot shorten time that the delivery is not spending in the editor. The subsequently shipped `#crdtwaitsubscribe` and `#crdtwaitsplit` changes target the measured wait correctly: subscribe to the retained monotonic ACK revision, keep delivery time on its own deadline, and keep controller/CAS backpressure independent.
 
 Changed paths: none. Verification: inspected the completed `#ackeditorstamps` live profiles and the current backlog precondition; the latest full repository gate already passed 8,188 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA, and no implementation changed afterward. Confidence: high. Escalation: none. No actionable follow-up remains for batching unless future profiles show multiple queued deliveries per write rather than the observed single ACK stretch.
-<!-- agent:boundary:07f0cde3 -->
+
+> **Queue prompt:**
+>
+> do [#crdtdeliverybatch]
+
+Closed `#crdtdeliverybatch` without an implementation because its explicit `#ackeditorstamps` gate disproves the proposed optimization.
+
+The live editor-side profiles were:
+
+- `received_to_observed=348ms` (`received_to_applied=299ms`, `applied_to_receipt=1ms`, `receipt_to_observed=48ms`)
+- `received_to_observed=198ms` (`received_to_applied=166ms`, `applied_to_receipt=1ms`, `receipt_to_observed=31ms`)
+
+That is one sub-half-second editor delivery/ACK cycle, not many short delivery cycles accumulating into the multi-second `delivery_ack_pending` interval. Client-side batching improves throughput across multiple writes; it cannot shorten time that the delivery is not spending in the editor. The subsequently shipped `#crdtwaitsubscribe` and `#crdtwaitsplit` changes target the measured wait correctly: subscribe to the retained monotonic ACK revision, keep delivery time on its own deadline, and keep controller/CAS backpressure independent.
+
+Changed paths: none. Verification: inspected the completed `#ackeditorstamps` live profiles and the current backlog precondition; the latest full repository gate already passed 8,188 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA, and no implementation changed afterward. Confidence: high. Escalation: none. No actionable follow-up remains for batching unless future profiles show multiple queued deliveries per write rather than the observed single ACK stretch.
+### Re: Evaluate opportunistic CRDT delivery batching — gpt-5
+<!-- agent:boundary:55292532 -->
 <!-- /agent:exchange -->
 ## Queue
 

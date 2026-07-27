@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.35
+
+_JetBrains plugin 0.2.298; VS Code extension 0.2.57._
+
+- **Session-check now publishes proof-bearing replay repairs through an exact-current authority CAS.** The duplicated-suffix normalizer already proves both the observed invalid generation and its structurally valid retained prefix; its self-heal no longer sends that prefix through the ordinary component merge against the invalid editor generation, which could recreate the unmatched component close and retain the cycle indefinitely.
+
 ## 0.35.34
 
 _JetBrains plugin 0.2.298; VS Code extension 0.2.57._

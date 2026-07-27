@@ -104,6 +104,13 @@ pub enum CapturedFinalizeResumeOutcome {
 pub trait SessionCheckEffects {
     fn closeout_recovery_hint(&self, file: &Path) -> String;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+    fn atomic_repair_write_if_current(
+        &self,
+        file: &Path,
+        content: &str,
+        expected_current: &str,
+        source: &str,
+    ) -> Result<String>;
     fn settle_committed_projection(
         &self,
         file: &Path,
@@ -1135,7 +1142,17 @@ fn self_heal_response_replay_duplication(
         &normalized,
         "session_check_response_replay_dedup",
     )?;
-    effects.atomic_write(file, &normalized)?;
+    let repaired = effects.atomic_repair_write_if_current(
+        file,
+        &normalized,
+        &current,
+        "session_check_response_replay_dedup",
+    )?;
+    anyhow::ensure!(
+        repaired == normalized,
+        "[session-check] response replay deduplication for {} returned a non-exact repair projection",
+        file.display(),
+    );
     let settled = crate::resolve_current_document_content(
         file,
         "session_check_response_replay_dedup_settled",
@@ -2029,6 +2046,21 @@ mod terminal_convergence_tests {
             agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
         }
 
+        fn atomic_repair_write_if_current(
+            &self,
+            file: &Path,
+            content: &str,
+            expected_current: &str,
+            source: &str,
+        ) -> Result<String> {
+            agent_doc_document_realtime_io::atomic_repair_write_if_current_through_authority(
+                file,
+                content,
+                expected_current,
+                source,
+            )
+        }
+
         fn settle_committed_projection(
             &self,
             file: &Path,
@@ -2077,6 +2109,74 @@ mod terminal_convergence_tests {
         }
     }
 
+    struct RepairOnlyEffects;
+
+    impl SessionCheckEffects for RepairOnlyEffects {
+        fn closeout_recovery_hint(&self, file: &Path) -> String {
+            TestEffects.closeout_recovery_hint(file)
+        }
+
+        fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+            anyhow::bail!("proof-bearing replay repair used generic semantic write")
+        }
+
+        fn atomic_repair_write_if_current(
+            &self,
+            file: &Path,
+            content: &str,
+            expected_current: &str,
+            source: &str,
+        ) -> Result<String> {
+            TestEffects.atomic_repair_write_if_current(
+                file,
+                content,
+                expected_current,
+                source,
+            )
+        }
+
+        fn settle_committed_projection(
+            &self,
+            file: &Path,
+            committed_content: &str,
+            expected_current: &str,
+        ) -> Result<()> {
+            TestEffects.settle_committed_projection(file, committed_content, expected_current)
+        }
+
+        fn settle_retained_committed_projection(
+            &self,
+            file: &Path,
+            committed_content: &str,
+            expected_disk: &str,
+        ) -> Result<bool> {
+            TestEffects.settle_retained_committed_projection(
+                file,
+                committed_content,
+                expected_disk,
+            )
+        }
+
+        fn repair_committed_historical_snapshot_drift(
+            &self,
+            file: &Path,
+        ) -> Result<Option<&'static str>> {
+            TestEffects.repair_committed_historical_snapshot_drift(file)
+        }
+
+        fn recover_missing_commit_boundary(
+            &self,
+            file: &Path,
+            event: &str,
+        ) -> Result<Option<&'static str>> {
+            TestEffects.recover_missing_commit_boundary(file, event)
+        }
+
+        fn resume_captured_finalize(&self, file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
+            TestEffects.resume_captured_finalize(file)
+        }
+    }
+
     struct ResumeEffects;
 
     impl SessionCheckEffects for ResumeEffects {
@@ -2086,6 +2186,21 @@ mod terminal_convergence_tests {
 
         fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
             TestEffects.atomic_write(file, content)
+        }
+
+        fn atomic_repair_write_if_current(
+            &self,
+            file: &Path,
+            content: &str,
+            expected_current: &str,
+            source: &str,
+        ) -> Result<String> {
+            TestEffects.atomic_repair_write_if_current(
+                file,
+                content,
+                expected_current,
+                source,
+            )
         }
 
         fn settle_committed_projection(
@@ -2351,7 +2466,7 @@ mod terminal_convergence_tests {
         );
         std::fs::write(&file, duplicated).unwrap();
 
-        assert!(self_heal_response_replay_duplication(&file, &TestEffects).unwrap());
+        assert!(self_heal_response_replay_duplication(&file, &RepairOnlyEffects).unwrap());
 
         let healed = std::fs::read_to_string(&file).unwrap();
         assert_eq!(healed.matches("agent:boundary:").count(), 1);

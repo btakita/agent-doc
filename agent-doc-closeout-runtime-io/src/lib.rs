@@ -245,6 +245,16 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
+    fn atomic_repair_write_if_current(
+        &self,
+        file: &Path,
+        content: &str,
+        expected_current: &str,
+        source: &str,
+    ) -> Result<String> {
+        repair_atomic_write_if_current(file, content, expected_current, source)
+    }
+
     fn settle_committed_projection(
         &self,
         file: &Path,

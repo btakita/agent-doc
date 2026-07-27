@@ -428,14 +428,44 @@ Verification included the new three-way pure classification test, the Haiven-sha
 Commits `2a83942af` (agent-doc) and `ea1326859` (parent gitlink) are pushed to `main`. The newly triggered CI run `30226893341` was in progress at the single required inspection, with no completed failure. Confidence is high; the behavioral distinction is now explicit and both sides of it are pinned. No escalation was needed, and unrelated `src/tmux-router` staging remained untouched.
 
 The final requested refactor opportunity remains tracked as `#responseordercell`.
-<!-- agent:boundary:f98cbc56 -->
+
+### Re: Shared response-turn cell policy — gpt-5
+
+> **Queue prompt:**
+>
+> do [#responseordercell]
+
+
+Completed `#responseordercell`.
+
+`ResponseTurnCellPolicy` now lives beside the exchange-tree response identity in `agent-doc-markdown-ast`. It is the single owner of:
+
+- body-aware response node and cell IDs;
+- transient ` (HEAD)`- and leaked prompt-marker-insensitive order matching;
+- response-block signature matching;
+- newest matching response selection when generic headings repeat.
+
+Realtime/IPC response insertion now obtains its cell ID and node IDs from that policy. Disk closeout and post-commit repair consume the same policy through `agent-doc-element-exchange`, replacing their separate line-signature and newest-heading implementation. This keeps all three paths bound to the same response turn while retaining their existing write/recovery mechanisms.
+
+Changed paths:
+
+- `Cargo.lock`
+- `agent-doc-element-exchange/Cargo.toml`
+- `agent-doc-element-exchange/src/lib.rs`
+- `agent-doc-markdown-ast/src/exchange_tree.rs`
+- `agent-doc-merge/src/response_cell.rs`
+
+Verification covered the new shared-policy identity/newest-binding test, all 47 exchange tests, response-cell tests, the Haiven prompt-order regression, and the repeated-heading DAG orchestration regression. The full repository gate passed 8,184 tests across 161 binaries with 241 skipped, plus clippy, simulations, Lean, and TLA.
+
+Commits `c4f4ae9c7` (agent-doc) and `c34e8e4df` (parent gitlink) are pushed to `main`. CI run `30227334860` was in progress at the single required inspection, with no completed failure. Confidence is high: identity and order binding now share one pure policy and all affected path-specific regressions remain green. No escalation was needed, and unrelated `src/tmux-router` staging was preserved untouched.
+<!-- agent:boundary:45fb0935 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#closeoutnormrefactor]~~
 - ~~do [#promptgrowthprovenance]~~
-- do [#responseordercell]
+- ~~do [#responseordercell]~~
 - ~~do [#haivenresponseorder]~~
 - ~~do [#crdtwaitsubscribe]~~
 - do [#crdtwaitsplit]
@@ -483,7 +513,6 @@ The final requested refactor opportunity remains tracked as `#responseordercell`
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#responseordercell] [recommended] Move response identity and prompt-order binding into one shared turn-cell policy consumed by disk write, IPC write, and post-commit repair paths; preserve newest-response selection and transient `(HEAD)` insensitivity.
 - [ ] [#crdtwaitsplit] #agent-doc-feature Separate controller backpressure from CRDT delivery convergence in the write wait. ControllerModelBackpressure and DeliveryAckPending are different conditions with different remedies (back off the controller vs wait on the editor) but currently share one loop, one backoff schedule and one 60s budget, so the wrong remedy is applied to whichever one is actually blocking. Partial coalescing already exists and must be preserved: #crdtcasraced added the `advanced` flag so a non-advancing apply does not reset the backoff floor - without it a contended write pinned at 25ms for the whole 60s budget (~2400 merge+CAS attempts, each worsening the contention it retried). Land after #crdtwaitsubscribe, whose per-condition subscription makes the split natural rather than two parallel poll loops.
 - [ ] [#sessioncheckguardsweep] #agent-doc-bug session_check is the second-largest closeout phase - a flat 2.9-4.2s, observed once at 11,271ms - and it is a per-invocation ~30-guard sweep. Measured attribution from one run: inspect_with_warnings 2665ms (the nesting parent), guard_partial_staging_closeout 817ms, inspect_core 607ms, self_heal_response_replay_duplication 385ms, resolve_current_document_content 350ms/13x. The partial-staging guard is the concrete target: companion_findings iterates candidate_repos, which on this superproject enumerates every dirty submodule and then runs several git diffs per repo. candidate_repos legitimately needs --ignore-submodules=none (it is hunting dirty submodule repos, 341ms) and narrowing it with --untracked-files=no was measured at only 13ms and discarded, so the real question is a SEMANTICS decision: must a WARN-only narrow guard run on every closeout, or only when the cycle actually staged something beyond the session document? Related: #closeoutgitsubmodulescan (9e7ce2f79 fixed two 47x submodule scans in tracked_modified_paths that were NOT the dominant cost).
 - [ ] [#crdtdeliverybatch] #agent-doc-feature [recommended] Opportunistic client-side batching of CRDT deliveries. GATED ON #ackeditorstamps - do not start this until the profile says it applies. Current evidence points the other way: the measured shape is ONE delivery waiting a long time for a single ACK (delivery_ack_pending is 457 of 522 waits), and batching improves throughput across many writes rather than the latency of one, so it would not shorten the wait we actually have. It becomes the right lever only if the per-state profile shows delivery_ack_pending accumulating as many short delivery cycles instead of one long stretch. Filed to keep the option recorded with its precondition, not as agreed work.

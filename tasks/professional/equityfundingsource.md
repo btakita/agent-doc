@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -127,14 +127,24 @@ asset contract, and test every required production image.
 > **Queue prompt:** Please add a Home link in the main navigation.
 
 The Home link was completed and deployed in the prior response. This entry only repairs its stale queue bookkeeping; no implementation changed.
-<!-- agent:boundary:6488dd94 -->
+
+### Re: Broken production photos and Home navigation — gpt-5
+
+> **Queue prompt:** do [#fixbrokenphotos]
+>
+> **Queue prompt:** do [#homelinkmain]
+
+Completed and deployed both requested changes. Production now serves all 35 required site image assets with HTTP 200, non-empty `image/*` responses, including the contact/about banners, team portraits, funded-deal photos, logo fallbacks, and hero fallback. The main navigation now starts with an active Home link.
+
+The EFS change is committed and pushed as `77a8b324` (`fix(public): ship site photos and Home nav (#fixbrokenphotos)`). The production Worker is running version `02ede09a-79d8-4c53-8832-bd8cb77ff1f0`. The only remaining deployment-operations issue is already tracked as `#efs-prod-route-token`: the current Cloudflare token activates the Worker version but lacks Workers Routes Edit, so Wrangler route synchronization exits with Cloudflare code 10000 while the existing production route remains live.
+<!-- agent:boundary:53715774 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
-- Please fix all broken photos on https://www.equityfundingsource.com/contact and on the rest of the site. You can copy the photos from staging to production.
+- ~~do [#fixbrokenphotos]~~
+- ~~do [#homelinkmain]~~
 - The about page is missing photos as well.
 - The office hours are 9am-5pm PST.
-- Please add a Home link in the main navigation.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.36
+
+_JetBrains plugin 0.2.298; VS Code extension 0.2.57._
+
+- **A terminally committed response can no longer retain stale write ownership and block the next queue cycle.** Retained-effect arbitration now treats an exact terminal closeout proof—matching cycle, capture, response hash, and file/snapshot/HEAD agreement—as stronger than a superseded byte target. Ordinary authority drift and mismatched proofs remain fail-closed, while a proven committed capture releases the old effect even after queue maintenance or editor reconciliation advances the live document.
+
 ## 0.35.35
 
 _JetBrains plugin 0.2.298; VS Code extension 0.2.57._

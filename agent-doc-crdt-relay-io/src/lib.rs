@@ -2358,7 +2358,7 @@ fn checkpoint_durable_projection_for_file_with_mode(
     // the controller, so a supervisor or CLI process running this path reads an
     // empty registry, and — because durable liveness says the editor is
     // attached — that miss surfaces as `editor_attached_model_missing` on every
-    // attempt. Observed on equityfundingsource.md as repeating
+    // attempt. Observed on sampleorders.md as repeating
     // `document_model_ensure_failed ... source=controller_recycle_request:background`
     // from pids that were not the controller: work that could never succeed,
     // logged as an editor fault. Defer instead; the hub owner checkpoints at its
@@ -5190,7 +5190,7 @@ mod tests {
     /// a supervisor or short-lived CLI running that path reads an empty registry
     /// and — because durable liveness reports the editor attached — reports
     /// `editor_attached_model_missing` on every attempt. Observed live on
-    /// equityfundingsource.md as repeating `document_model_ensure_failed ...
+    /// sampleorders.md as repeating `document_model_ensure_failed ...
     /// source=controller_recycle_request:background` from non-controller pids.
     ///
     /// Tested through the pure decision rather than by toggling the

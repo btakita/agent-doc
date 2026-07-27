@@ -349,7 +349,7 @@ pub fn normalize_imperative_candidate(line: &str) -> Option<String> {
 /// not — the operator's politeness silently demoted their own instruction. In a
 /// queue that meant a free-text head was never admitted as tracked backlog work,
 /// and an agent had to hand-rewrite the line to `do [#id]` (observed live
-/// 2026-07-18 on `equityfundingsource.md`). Politeness is not a mood change;
+/// 2026-07-18 on `sampleorders.md`). Politeness is not a mood change;
 /// "Please do X" is exactly as imperative as "Do X".
 ///
 /// Only leading markers are stripped, so a mid-sentence "please" is untouched.

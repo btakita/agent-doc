@@ -25611,7 +25611,9 @@ fn test_agent_doc_commit_io_marks_capture_committed_from_resolved_current_conten
         .find("commit_current_document_content(file, \"commit_initial_current\")")
         .expect("commit should resolve initial current document content");
     let stage_commit_idx = commit_source
-        .find("match stage_and_commit_once(&git_root, &resolved, snapshot_content.as_deref(), &msg)")
+        .find(
+            "match stage_and_commit_once(&git_root, &resolved, snapshot_content.as_deref(), &msg)",
+        )
         .expect("commit should run a git stage/commit transaction");
     assert!(
         initial_current_idx < stage_commit_idx,

@@ -2127,12 +2127,7 @@ mod terminal_convergence_tests {
             expected_current: &str,
             source: &str,
         ) -> Result<String> {
-            TestEffects.atomic_repair_write_if_current(
-                file,
-                content,
-                expected_current,
-                source,
-            )
+            TestEffects.atomic_repair_write_if_current(file, content, expected_current, source)
         }
 
         fn settle_committed_projection(
@@ -2150,11 +2145,7 @@ mod terminal_convergence_tests {
             committed_content: &str,
             expected_disk: &str,
         ) -> Result<bool> {
-            TestEffects.settle_retained_committed_projection(
-                file,
-                committed_content,
-                expected_disk,
-            )
+            TestEffects.settle_retained_committed_projection(file, committed_content, expected_disk)
         }
 
         fn repair_committed_historical_snapshot_drift(
@@ -2195,12 +2186,7 @@ mod terminal_convergence_tests {
             expected_current: &str,
             source: &str,
         ) -> Result<String> {
-            TestEffects.atomic_repair_write_if_current(
-                file,
-                content,
-                expected_current,
-                source,
-            )
+            TestEffects.atomic_repair_write_if_current(file, content, expected_current, source)
         }
 
         fn settle_committed_projection(

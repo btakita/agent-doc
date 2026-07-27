@@ -1270,8 +1270,34 @@ impl DocumentStateProjection {
             .is_some_and(|observed| observed == intent.target_hash)
     }
 
+    /// Whether the terminal closeout proof settles the current captured response.
+    ///
+    /// A successful closeout can be followed immediately by queue maintenance or
+    /// editor reconciliation, so the live authority hash may legitimately advance
+    /// beyond an older retained write target before its convergence event prunes
+    /// the journal. The terminal proof is stronger evidence for response ownership:
+    /// it identifies this exact capture and response, and proves file/snapshot/HEAD
+    /// agreement. Once that proof exists, no older document-write effect can still
+    /// own the captured response.
+    fn captured_response_terminally_proven(&self, capture: &CapturedResponseProjection) -> bool {
+        self.proof
+            .terminal_closeouts
+            .get(&capture.cycle_id)
+            .is_some_and(|proof| {
+                proof.capture_id.as_deref() == Some(capture.capture_id.as_str())
+                    && proof.response_sha256.as_deref() == Some(capture.response_sha256.as_str())
+                    && proof.state_file_hash_matches
+                    && proof.state_snapshot_hash_matches
+                    && proof.file_hash == proof.snapshot_hash
+                    && proof.snapshot_hash == proof.head_hash
+            })
+    }
+
     pub fn retained_captured_response_write(&self) -> Option<&DocumentWriteIntentProjection> {
         let capture = self.closeout.captured_response.as_ref()?;
+        if self.captured_response_terminally_proven(capture) {
+            return None;
+        }
         let retains_capture = |pending: &&DocumentWriteIntentProjection| {
             agent_doc_turn::response_replay::response_materialized_in_content(
                 &capture.response_body,
@@ -7664,6 +7690,168 @@ mod tests {
                 .as_ref()
                 .map(|checkpoint| checkpoint.checkpoint_sequence),
             Some(3),
+        );
+    }
+
+    #[test]
+    fn matching_terminal_proof_releases_retained_capture_after_authority_advances() {
+        let document_hash = "doc-terminal-retained";
+        let cycle_1 = "cycle-terminal-retained";
+        let cycle_2 = "cycle-after-terminal";
+        let capture_id = "capture-terminal-retained";
+        let response_sha256 = "response-terminal-retained-sha";
+        let committed_hash = "committed-terminal-hash";
+        let response = "### Re: completed work — gpt-5\n\nThe durable response.\n";
+        let target = format!(
+            "# Session\n\n<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            response.trim_end()
+        );
+        let mut ledger = EventLedger::new();
+
+        ledger.append(state_event(
+            "checkpoint-terminal-retained",
+            StateFact::TurnIntentCheckpointed {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                checkpoint_sequence: 1,
+                state_sha256: "checkpoint-terminal-retained-sha".into(),
+                state_json: r#"{"cycle_id":"cycle-terminal-retained"}"#.into(),
+            },
+        ));
+        ledger.append(state_event(
+            "preflight-terminal-retained",
+            StateFact::PreflightStarted {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                session_id: Some("session-terminal-retained".into()),
+                tracked_work_maintenance_required: Some(false),
+            },
+        ));
+        ledger.append(state_event(
+            "capture-terminal-retained",
+            StateFact::ResponseCaptured {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                capture_id: capture_id.into(),
+                response_sha256: response_sha256.into(),
+                response_body: Some(response.into()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        ));
+        ledger.append(state_event(
+            "write-terminal-retained",
+            StateFact::DocumentWriteDeferred {
+                document_hash: document_hash.into(),
+                intent_id: "intent-terminal-retained".into(),
+                expected_hash: "base".into(),
+                expected_content: Some("# Session\n".into()),
+                target_hash: "target-terminal-retained".into(),
+                target_content: target,
+                source: "finalize".into(),
+                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            },
+        ));
+        ledger.append(state_event(
+            "authority-after-terminal-target",
+            StateFact::DocumentAuthorityObserved {
+                document_hash: document_hash.into(),
+                authority: DocumentAuthority::EditorRelay,
+                authority_epoch: 1,
+                source: "test".into(),
+                reason: "queue-maintenance-advanced-authority".into(),
+                content_hash: Some("newer-authority-content".into()),
+                editor_id: None,
+            },
+        ));
+
+        let retained = ledger.project_document(document_hash).unwrap();
+        assert!(
+            retained.retained_captured_response_write().is_some(),
+            "authority drift alone must not release an unproven captured response"
+        );
+
+        ledger.append(state_event(
+            "mismatched-terminal-proof-retained",
+            StateFact::TerminalCloseoutProofRecorded {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                last_event: "commit_success".into(),
+                did_commit: true,
+                file_hash: committed_hash.into(),
+                snapshot_hash: committed_hash.into(),
+                head_hash: committed_hash.into(),
+                state_file_hash_matches: true,
+                state_snapshot_hash_matches: true,
+                agreement: "file_snapshot_head".into(),
+                capture_id: Some(capture_id.into()),
+                response_sha256: Some("different-response-sha".into()),
+                recorded_at_ms: 1,
+            },
+        ));
+        let mismatched = ledger.project_document(document_hash).unwrap();
+        assert!(
+            mismatched.retained_captured_response_write().is_some(),
+            "a terminal proof for a different response must not release ownership"
+        );
+
+        ledger.append(state_event(
+            "terminal-proof-retained",
+            StateFact::TerminalCloseoutProofRecorded {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                last_event: "commit_success".into(),
+                did_commit: true,
+                file_hash: committed_hash.into(),
+                snapshot_hash: committed_hash.into(),
+                head_hash: committed_hash.into(),
+                state_file_hash_matches: true,
+                state_snapshot_hash_matches: true,
+                agreement: "file_snapshot_head".into(),
+                capture_id: Some(capture_id.into()),
+                response_sha256: Some(response_sha256.into()),
+                recorded_at_ms: 2,
+            },
+        ));
+
+        let terminal = ledger.project_document(document_hash).unwrap();
+        assert!(
+            terminal.retained_captured_response_write().is_none(),
+            "a matching terminal proof must release retained ownership even after authority advances"
+        );
+
+        ledger.append(state_event(
+            "checkpoint-after-terminal",
+            StateFact::TurnIntentCheckpointed {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_2.into(),
+                checkpoint_sequence: 2,
+                state_sha256: "checkpoint-after-terminal-sha".into(),
+                state_json: r#"{"cycle_id":"cycle-after-terminal"}"#.into(),
+            },
+        ));
+        ledger.append(state_event(
+            "preflight-after-terminal",
+            StateFact::PreflightStarted {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_2.into(),
+                session_id: Some("session-after-terminal".into()),
+                tracked_work_maintenance_required: Some(false),
+            },
+        ));
+
+        let advanced = ledger.project_document(document_hash).unwrap();
+        assert_eq!(advanced.closeout.cycle_id.as_deref(), Some(cycle_2));
+        assert_eq!(
+            advanced
+                .closeout
+                .turn_intent_checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.checkpoint_sequence),
+            Some(2),
         );
     }
 

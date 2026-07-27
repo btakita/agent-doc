@@ -796,7 +796,20 @@ Before treating Acadian as “safe,” close the remaining diligence gap: obtain
 **Bottom line:** Acadian is exposed to the market, but Haiven is exposed to whether a new market mechanism forms at all. Acadian’s downside is primarily cyclical and your contract-specific; Haiven’s is existential, compensation-linked, and product-market-fit dependent. Given your debt and home goal, Acadian is the safer primary engagement by a wide margin.
 
 **Changed paths:** none outside this session response. **Commands/evidence:** reviewed the current Acadian term questions, Haiven launch model, and current official Acadian disclosures. **Verification:** checked Acadian’s March/April 2026 AUM, Q1 revenue/cash, stated market sensitivity, and Haiven’s current October 2026 launch/subscription model. **Confidence:** high on the relative ranking; medium on your exact Acadian contract risk until the PGC/SOW termination terms are produced. **Escalation:** resolve `#acadianterms` and written moonlighting/IP clearance before committing to the combined structure.
-<!-- agent:boundary:5aaa552d -->
+
+### Re: Response
+
+Haiven is materially riskier.
+
+- **Acadian company risk:** low-to-moderate. Market declines reduce AUM and fees, but the business remains diversified and cash-generative. It reported $195.7B AUM in March 2026; $21.4B of net inflows outweighed $3.2B of market depreciation. A 10% AUM change would affect annualized fees by about $67M—not eliminate the business. [SEC filing](https://www.sec.gov/Archives/edgar/data/1748824/000162828026031710/aami-20260331.htm)
+- **Your Acadian contract risk:** moderate. Contractors can be terminated even when the company is healthy, so the notice, funding, and termination-for-convenience terms matter.
+- **Haiven risk:** high. Its October 2026 launch and subscription-funded ecosystem require simultaneous developer adoption, player acquisition, conversion, and retention. [Haiven developer model](https://haiven.gg/developers)
+- **Gravity Jack backing:** reduces sudden-death risk, but Haiven could survive for years without achieving the revenue needed to normalize salaries.
+
+For your debt and homeownership goals, the best risk-adjusted structure remains **Acadian as the primary income source plus Haiven as a prepaid, milestone-bounded contract**, subject to Acadian’s written approval.
+
+The full analysis and expanded `#acadianterms` diligence are committed in [job-offers.md](</home/brian/work/btakita/agent-loop/tasks/professional/job-offers.md:769>). Session closeout passed.
+<!-- agent:boundary:6ae03a53 -->
 <!-- /agent:exchange -->
 
 ## Queue

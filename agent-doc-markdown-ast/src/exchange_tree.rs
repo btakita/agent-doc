@@ -20,6 +20,7 @@
 //! `normalize_heading_key`) and should be unified into this module in Phase 3.
 
 use agent_doc_hash::short_content_hash;
+use std::collections::HashSet;
 
 /// What a single exchange node represents.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +145,105 @@ pub fn response_identity_digest(lines: &[String]) -> String {
         norm.pop();
     }
     norm.join("\n")
+}
+
+/// Shared identity and order-binding policy for one captured assistant response
+/// cell. Disk closeout, realtime/IPC insertion, and repair all use this policy so
+/// transient framing and repeated response headings cannot be interpreted
+/// differently by each path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponseTurnCellPolicy {
+    cell_id: String,
+    node_ids: Vec<String>,
+    order_signature_lines: HashSet<String>,
+}
+
+impl ResponseTurnCellPolicy {
+    pub fn from_response(response: Option<&str>) -> Self {
+        let response = response.unwrap_or("").trim_matches(['\n', '\r']);
+        let nodes = if response.is_empty() {
+            Vec::new()
+        } else {
+            parse_exchange_nodes(&format!("{}\n", response.trim_end()))
+                .into_iter()
+                .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+                .collect::<Vec<_>>()
+        };
+        Self::from_response_nodes(&nodes)
+    }
+
+    pub fn from_response_nodes(nodes: &[ExchangeNode]) -> Self {
+        let response_nodes = nodes
+            .iter()
+            .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+            .collect::<Vec<_>>();
+        let node_ids = response_nodes
+            .iter()
+            .map(|node| node.node_id())
+            .collect::<Vec<_>>();
+        let cell_id = match node_ids.as_slice() {
+            [] => String::new(),
+            [node_id] => node_id.clone(),
+            node_ids => format!("response-cell:{}", node_ids.join("+")),
+        };
+        let order_signature_lines = response_nodes
+            .iter()
+            .flat_map(|node| node.lines.iter())
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .filter(|line| !line.starts_with("<!--"))
+            .filter(|line| *line != "Done.")
+            .map(normalize_response_order_line)
+            .collect();
+        Self {
+            cell_id,
+            node_ids,
+            order_signature_lines,
+        }
+    }
+
+    pub fn cell_id(&self) -> &str {
+        &self.cell_id
+    }
+
+    pub fn node_ids(&self) -> &[String] {
+        &self.node_ids
+    }
+
+    pub fn matches_order_line(&self, line: &str) -> bool {
+        !self.node_ids.is_empty()
+            && self
+                .order_signature_lines
+                .contains(&normalize_response_order_line(line))
+    }
+
+    pub fn matches_order_block<'a>(&self, lines: impl IntoIterator<Item = &'a str>) -> bool {
+        !self.node_ids.is_empty() && lines.into_iter().any(|line| self.matches_order_line(line))
+    }
+
+    /// Bind to the newest response heading matching this captured cell. A prior
+    /// response with the same generic heading must never claim a later prompt.
+    pub fn newest_matching_index<'a>(
+        &self,
+        candidates: impl IntoIterator<Item = (usize, &'a str)>,
+    ) -> Option<usize> {
+        candidates
+            .into_iter()
+            .filter(|(_, line)| self.matches_order_line(line))
+            .map(|(index, _)| index)
+            .last()
+    }
+}
+
+/// Normalize transient response-turn framing for order matching. ` (HEAD)` is a
+/// working-tree annotation and a leaked prompt marker is transport syntax; neither
+/// changes the response cell's identity.
+pub fn normalize_response_order_line(line: &str) -> String {
+    let normalized = line.trim().trim_start_matches('❯').trim();
+    normalized
+        .strip_suffix(" (HEAD)")
+        .unwrap_or(normalized)
+        .to_string()
 }
 
 /// Split a string into lines that each retain their trailing `\n` (unlike
@@ -419,6 +519,26 @@ mod tests {
         let plain = parse_exchange_nodes("### Re: Topic — opus-4-8\n\nBody.\n");
         let head = parse_exchange_nodes("### Re: Topic — opus-4-8 (HEAD)\n\nBody.\n");
         assert_eq!(plain[0].node_id(), head[0].node_id());
+    }
+
+    #[test]
+    fn response_turn_cell_policy_binds_identity_and_newest_matching_heading() {
+        let plain =
+            ResponseTurnCellPolicy::from_response(Some("### Re: Topic — opus-4-8\n\nBody.\n"));
+        let head = ResponseTurnCellPolicy::from_response(Some(
+            "### Re: Topic — opus-4-8 (HEAD)\n\nBody.\n",
+        ));
+
+        assert_eq!(plain.cell_id(), head.cell_id());
+        assert_eq!(
+            plain.newest_matching_index([
+                (1, "### Re: Topic — opus-4-8"),
+                (4, "### Re: Other — opus-4-8"),
+                (7, "### Re: Topic — opus-4-8 (HEAD)"),
+            ]),
+            Some(7),
+        );
+        assert!(plain.matches_order_block(["unrelated", "Body."]));
     }
 
     #[test]

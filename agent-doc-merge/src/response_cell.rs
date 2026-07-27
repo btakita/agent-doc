@@ -7,7 +7,8 @@
 
 use agent_doc_element::element;
 use agent_doc_markdown_ast::exchange_tree::{
-    ExchangeNode, ExchangeNodeKind, parse_exchange_nodes, render_exchange_nodes,
+    ExchangeNode, ExchangeNodeKind, ResponseTurnCellPolicy, parse_exchange_nodes,
+    render_exchange_nodes,
 };
 use std::collections::HashSet;
 
@@ -61,20 +62,6 @@ fn render_response_nodes(nodes: &[ExchangeNode]) -> String {
     format!("{}\n", joined.trim_end())
 }
 
-fn response_cell_id(nodes: &[ExchangeNode]) -> String {
-    if nodes.len() == 1 {
-        return nodes[0].node_id();
-    }
-    format!(
-        "response-cell:{}",
-        nodes
-            .iter()
-            .map(ExchangeNode::node_id)
-            .collect::<Vec<_>>()
-            .join("+")
-    )
-}
-
 /// Add one assistant response cell to the first `agent:exchange` component.
 ///
 /// A cell may contain multiple response headings (for example, one closeout
@@ -85,8 +72,9 @@ fn response_cell_id(nodes: &[ExchangeNode]) -> String {
 /// stale whole-document candidate.
 pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCellAddOutcome> {
     let (nodes, rendered) = parse_response_cell(response)?;
-    let cell_id = response_cell_id(&nodes);
-    let node_ids = nodes.iter().map(ExchangeNode::node_id).collect::<Vec<_>>();
+    let response_policy = ResponseTurnCellPolicy::from_response_nodes(&nodes);
+    let cell_id = response_policy.cell_id().to_string();
+    let node_ids = response_policy.node_ids();
     let components = element::parse(doc)?;
     let exchange = components
         .iter()
@@ -124,7 +112,7 @@ pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCe
     // is a genuinely distinct node (different node id), so an unanchored search
     // could treat an older, unrelated turn as this response's prefix and silently
     // drop sections.
-    let already = trailing_prefix_len(&current_node_ids, &node_ids);
+    let already = trailing_prefix_len(&current_node_ids, node_ids);
     let pending = &nodes[already..];
     if pending.is_empty() {
         return Ok(ResponseCellAddOutcome {

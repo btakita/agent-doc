@@ -817,6 +817,7 @@ dependencies = [
  "agent-doc-diff",
  "agent-doc-element",
  "agent-doc-element-boundary",
+ "agent-doc-markdown-ast",
  "agent-doc-prompt-lines",
  "agent-doc-turn",
  "anyhow",

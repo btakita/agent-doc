@@ -15,6 +15,7 @@ agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version =
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.31" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.31" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.31" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.31" }
 anyhow = "1"
 similar = "3"
 

@@ -11,6 +11,7 @@ use agent_doc_element::{
     Component, ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
     ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy, element,
 };
+use agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy;
 use agent_doc_prompt_lines::{
     line_looks_like_markdown_list_item, line_looks_like_plain_response_after_prompt,
     line_looks_like_prompt_prefix_repair_start,
@@ -409,57 +410,6 @@ fn line_is_exchange_boundary(trimmed: &str) -> bool {
     trimmed.starts_with("<!-- agent:boundary:")
 }
 
-fn normalized_response_order_line(line: &str) -> String {
-    let normalized = line.trim().trim_start_matches('❯').trim();
-    normalized
-        .strip_suffix(" (HEAD)")
-        .unwrap_or(normalized)
-        .to_string()
-}
-
-fn normalized_response_signature_lines(response: Option<&str>) -> HashSet<String> {
-    response
-        .unwrap_or("")
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| !line.starts_with("<!--"))
-        .filter(|line| *line != "Done.")
-        .map(normalized_response_order_line)
-        .collect()
-}
-
-fn exchange_response_block_matches_signature(
-    segments: &[ExchangeLineSegment],
-    heading_idx: usize,
-    prompt_idx: usize,
-    signature: &HashSet<String>,
-    response: Option<&str>,
-) -> bool {
-    let Some(response) = response else {
-        return false;
-    };
-    if response.trim().is_empty() {
-        return false;
-    }
-    let heading = segments[heading_idx].line.trim();
-    if signature.contains(&normalized_response_order_line(heading)) {
-        return true;
-    }
-    if signature.is_empty() {
-        return false;
-    }
-    segments[heading_idx..prompt_idx].iter().any(|segment| {
-        let normalized = segment
-            .line
-            .trim()
-            .trim_start_matches('❯')
-            .trim()
-            .to_string();
-        !normalized.is_empty() && signature.contains(&normalized)
-    })
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PromptGrowthProvenanceInput<'a> {
     admission_baseline: &'a str,
@@ -529,64 +479,61 @@ fn find_response_precedes_prompt_candidate(
     evidence: ResponsePromptOrderEvidence<'_>,
 ) -> Option<(usize, usize, usize)> {
     let segments = split_exchange_line_segments(exchange_content);
-    let signature = normalized_response_signature_lines(response);
+    let response_policy = ResponseTurnCellPolicy::from_response(response);
 
-    // Closeout repairs the response being committed now. Walk newest-first so
+    // Closeout repairs the response being committed now. The shared response-cell
+    // policy binds newest-first so
     // an older response with the same generic heading/signature cannot claim a
     // later, correctly ordered prompt from a subsequent orchestration step.
-    for heading_idx in (0..segments.len()).rev() {
-        let heading = segments[heading_idx].line.trim();
-        if !is_exchange_response_heading_for_prefix_repair(heading) {
+    let heading_idx = response_policy.newest_matching_index(
+        segments
+            .iter()
+            .enumerate()
+            .filter(|(_, segment)| {
+                is_exchange_response_heading_for_prefix_repair(segment.line.trim())
+            })
+            .map(|(index, segment)| (index, segment.line.as_str())),
+    )?;
+    let mut saw_boundary_after_heading = false;
+    for idx in (heading_idx + 1)..segments.len() {
+        let trimmed = segments[idx].line.trim();
+        if trimmed.is_empty() {
             continue;
         }
-        if !signature.contains(&normalized_response_order_line(heading)) {
+        if line_is_exchange_boundary(trimmed) {
+            saw_boundary_after_heading = true;
             continue;
         }
-        let mut saw_boundary_after_heading = false;
-        for idx in (heading_idx + 1)..segments.len() {
-            let trimmed = segments[idx].line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            if line_is_exchange_boundary(trimmed) {
-                saw_boundary_after_heading = true;
-                continue;
-            }
-            if trimmed.starts_with("<!--") {
-                continue;
-            }
-            if is_exchange_response_heading_for_prefix_repair(trimmed) {
+        if trimmed.starts_with("<!--") {
+            continue;
+        }
+        if is_exchange_response_heading_for_prefix_repair(trimmed) {
+            break;
+        }
+        let normalized = trimmed.trim_start_matches('❯').trim();
+        let is_target = response_policy.matches_order_line(normalized);
+        let mut prompt_end = segments.len();
+        for (next_idx, next) in segments.iter().enumerate().skip(idx + 1) {
+            if is_exchange_response_heading_for_prefix_repair(next.line.trim()) {
+                prompt_end = next_idx;
                 break;
             }
-            let normalized = trimmed.trim_start_matches('❯').trim();
-            let is_target = signature.contains(normalized);
-            let mut prompt_end = segments.len();
-            for (next_idx, next) in segments.iter().enumerate().skip(idx + 1) {
-                if is_exchange_response_heading_for_prefix_repair(next.line.trim()) {
-                    prompt_end = next_idx;
-                    break;
-                }
-            }
-            let prompt_lines = normalized_non_boundary_exchange_lines(&segments[idx..prompt_end]);
-            if evidence.permits_repair(&prompt_lines, saw_boundary_after_heading)
-                && line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
-                && exchange_response_block_matches_signature(
-                    &segments,
-                    heading_idx,
-                    idx,
-                    &signature,
-                    response,
-                )
-            {
-                return Some((heading_idx, idx, prompt_end));
-            }
         }
-        // The newest heading matching the captured response owns this
-        // closeout. If it is already after every authoritative prompt, an
-        // older response with the same generic heading must not claim a later
-        // turn's prompt.
-        return None;
+        let prompt_lines = normalized_non_boundary_exchange_lines(&segments[idx..prompt_end]);
+        if evidence.permits_repair(&prompt_lines, saw_boundary_after_heading)
+            && line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
+            && response_policy.matches_order_block(
+                segments[heading_idx..idx]
+                    .iter()
+                    .map(|segment| segment.line.as_str()),
+            )
+        {
+            return Some((heading_idx, idx, prompt_end));
+        }
     }
+    // The newest heading matching the captured response owns this closeout. If
+    // it is already after every authoritative prompt, an older response with the
+    // same generic heading must not claim a later turn's prompt.
     None
 }
 

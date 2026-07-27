@@ -588,12 +588,49 @@ Commits pushed:
 - parent gitlink `e84ea1de1` (`agent-doc: unify editor rerun dispatch`)
 
 The required one-time CI observation found run `30231745449` in progress; it was not polled.
-<!-- agent:boundary:47ef1f6d -->
+
+### Re: do [#pauseddeletetombstone]
+
+> **Queue prompt:**
+>
+> do [#pauseddeletetombstone]
+
+
+Fixed and pushed the paused-session queue-deletion resurrection bug.
+
+The Lazily trace showed the exact race: while the capacity-paused cycle was detached, the editor durably recorded deletion of struck queue rows against the cycle base, but disk still equaled that base. `run_stream` treated `content_current == base` as proof of no concurrent edit before consulting the durable editor-op epoch, so it merged the captured response over stale disk and resurrected the deleted rows.
+
+The invariant now lives in document realtime I/O: when observed disk exactly equals the expected cycle base, it may materialize a semantic operator cut by replaying exact, base-hash-guarded durable editor operations. The original disk bytes remain the compare-and-swap write expectation. The replayed cut is used for response merge, snapshot construction, queue reconciliation, and closeout diagnostics. Captured operations stay durable through validation or write failure and are cleared only after a successful reconciled write.
+
+Policy ownership and transitions are covered at each surface:
+
+- `agent-doc-document-realtime-io` owns typed pending-cut reconciliation, structural validation, and the retry-safe operation lifetime.
+- `agent-doc-write-runtime-io` uses the semantic operator cut across streaming and recovery merges while retaining the observed disk baseline for atomic writes.
+- The unit regression deletes struck rows from a durable op capture, proves the cut omits them, and proves the capture remains pending before write success.
+- The runtime regression merges an assistant response over that cut, preserves the next queue item, and consumes the capture only after the success boundary.
+- The finalize integration regression reproduces the editor-absent Lazily shape end to end and proves both the working document and committed `HEAD` retain the response without resurrecting the deleted rows.
+
+This is an internal state-transition correction with no data migration or compatibility fallback. The invariant is documented in `SPEC.md`, `specs/07-closeout-commands.md`, and `VERSIONS.md`.
+
+Verification passed:
+
+- `cargo test -p agent-doc-document-realtime-io`
+- `cargo test -p agent-doc-write-runtime-io`
+- `cargo test --test finalize_integration`
+- full `make check` (`tart-f01090545f`)
+
+Pushed commits:
+
+- `agent-doc`: `242f73283` (`fix: preserve paused queue deletions`)
+- parent gitlink: `e67e76ea8` (`agent-doc: preserve paused queue deletions`)
+
+The single required CI inspection found run `30232512762` in progress; it was not polled.
+<!-- agent:boundary:850db5be -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#pauseddeletetombstone]
+- ~~do [#pauseddeletetombstone]~~
 - ~~do [#adreplacementturndispatch]~~
 - do [#preflightreactive]
 - do [#sessioncheckturnreactive]
@@ -634,7 +671,6 @@ The required one-time CI observation found run `30231745449` in progress; it was
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#pauseddeletetombstone] #agent-doc-bug Paused-cycle reconciliation must preserve operator deletions of struck agent:queue items. If an agent is paused (for example because the model is at capacity), the operator deletes struck queue items, and the agent later continues, closeout reconciliation must happen entirely inside the agent-doc binary and must not re-add those deleted items from an older cycle snapshot. Add a regression reproducing the lazily.md convergence-race/no-op-closeout sequence and make live operator deletions authoritative.
 - [ ] [#sessioncheckturnreactive] #agent-doc-bug Track the turn reactively and supersede outstanding checks instead of requiring a separate session-check command. session-check exists as a distrust check on the AGENT: per AGENTS.md it is the direct-exec post-write guard that fails closed on an open cycle, a prompt-only exchange tail with no assistant response, or a likely direct assistant patchback that bypassed the binary write path. That is a real invariant, but it is enforced by a command the agent must remember to run — and which takes a closeout lease, can wedge, and whose own refusal text says 'retry only session-check'. Two changes: (1) the invariant is a property of the turn, and the NEXT turn's preflight already resolves the document, so it can evaluate the same guards without a separate agent-invoked step; (2) an outstanding check for turn N is MOOT once turn N+1 opens — supersession must cancel it and release its lease rather than leaving a dead claim to expire on a clock (the 2026-07-26 wedge was exactly a stale claim from a superseded probe). Keep session-check as an explicit command for direct-exec harnesses and debugging; remove it from the hot path. Related #closeoutterminalreactive, #preflightinbinary.
 - [ ] [#preflightreactive] #agent-doc-feature Decompose preflight into derived reads plus signal-gated effects instead of a fixed imperative step sequence. Today 'agent-doc preflight' runs step 0 layout check, step 1 repair, step 2 commit, step 3 claims, step 3c related docs, step 4 diff, then queue convergence and baseline checkpoint, in that order, and the ordering is correct only by convention — a step inserted in the wrong place breaks it silently, which is the same failure class as #preflightsettleparity and #closeoutwaitchurn. The steps split cleanly: (a) DERIVABLE READS — diff vs baseline, queue convergence view, effective/required/suggested tier, agent_model, claims, related docs, session accretion — are pure functions of (document, baseline, config) and belong in the controller's document scope as Computeds, continuously current, with the agent reading a projection; (b) ORDERED EFFECTS — repair, commit-of-the-prior-cycle, baseline checkpoint, cycle-open — stay effects but become gated on derived signals rather than positionally ordered, so ordering is a data dependency instead of a call order. Cycle-open specifically does NOT become a Computed: it is an exactly-once durable transition carrying an identity (cycle-<id>) that the interrupted-cycle guard depends on, so it stays a state-machine transition. Success test: no preflight step can be skipped by a caller that forgot it, and inserting a new step cannot silently break an existing one's ordering. DEFERRED 2026-07-26: selected as the queue head but not worked this cycle - a standing operator goal (agent-doc plugin performance in IntelliJ and tmux) took precedence and consumed the turn. Item is unchanged and still fully actionable; nothing was partially landed against it.
 - [ ] [#closeoutwaitchurn] #agent-doc-bug A held foreground closeout tells the agent a fact, not what to do, so agents invent a poll loop. Observed 2026-07-26 on tasks/software/lazily.md: one write turn spent 8+ background commands on 'wait then read settle output', 're-run session-check after recycle', 'poll settle output again', plus 'admin recycle' and 'admin reload-lib' — all self-invented recovery. ROOT CAUSE (grounded): agent-doc-closeout-runtime-io/src/lib.rs:75 returns CloseoutOwnerClaimOutcome::HeldByOther as the bare string 'foreground closeout owner {id} pid={pid} role={role} remains active until {expires}' with NO next command, unlike every other fail-closed path (cf. agent-doc-turn/src/closeout_recovery.rs:391, which names the exact command). CycleSuperseded is the same shape. And 'agent-doc session-check' has no blocking wait — its only options are --codex-final-gate and --help — so 'wait for the owner' is not expressible and the agent must re-invoke, choosing its own interval. Each re-invocation pays the full ~30-guard sweep (measured 4.1s, inspect_with_warnings 2.8s of it) to answer one question: is the lease still held. FIX: (1) add 'session-check <FILE> --wait[=secs]' that blocks on the closeout-owner lease / terminal cycle phase, defaulting to CLOSEOUT_OWNER_LEASE_SECS, with a cheap owner-lease-only probe that skips the guard sweep while the owner is still held; (2) make HeldByOther and CycleSuperseded emit a directive — the one command to run, the known deadline from owner.expires_secs, and an explicit 'do NOT run admin recycle / admin reload-lib / write --commit: they perturb the capture you are waiting on'; (3) align SKILL.md and runbooks/commit.md so the shipped instruction says 'wait once with --wait' instead of 'retry session-check', which reads as 'poll'. Regression coverage: a held-lease session-check must return the directive text and must NOT be satisfiable by repeated bare invocations in the test harness.

@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#recommendeddecidewhether]
+
+
+> **Queue prompt:**
+>
 > do [#signalgetsignallive]
 
 
@@ -612,7 +617,17 @@ Completed `#signalgetsignallive` without promoting any staged peer capability.
 - Root submodule-pointer commit: `4a0a05086`.
 
 Verification: `make check` passed in lazily-kt, lazily-js, lazily-zig, and the root workspace. Latest CI runs succeeded for Kotlin (`30232103292`), JavaScript (`30232111352`), and Zig (`30232122167`); the root repository has no workflow named `CI`. All commits were pushed. Pre-existing unrelated JavaScript README/build and Zig AGENTS changes were left untouched.
-<!-- agent:boundary:8e580ce0 -->
+
+### Re: Response
+
+Decision for `#recommendeddecidewhether`: **KEEP the domain `*Cell` names** across the specification and bindings.
+
+Rationale: the Cell kernel makes `Cell` the value-bearing reactive-node concept and `Source` / `Computed` the two node kinds. Domain types such as `QueueCell`, `TopicCell`, `RelayCell`, `TimerCell`, `LeaseCell`, `CircuitBreakerCell`, and `PresenceCell` are composites over several source/computed nodes; renaming them to `*Source` would incorrectly imply that the composite is itself the externally-written source kind. The spec already says this directly for `RelayCell` (“composite, not a new node”) and describes `ReactiveMap` as a keyed cell collection specialized into `SourceMap` / `ComputedMap`.
+
+`MergeCell` is not renamed in lockstep either. Its potential collapse into policy-aware `Source<T,M>` is a separate compatibility/API-simplification decision that should happen only after every admitted binding has equivalent policy-aware Source support; it is not evidence for renaming unrelated composite domain types.
+
+No implementation or specification paths changed. Evidence was reviewed with bounded tsift searches over `src/lazily-spec/docs/reactive-graph.md`, `cell-model.md`, `docs/relaycell.md`, and `docs/relaycell-backpressure-analysis.md`. Confidence: high.
+<!-- agent:boundary:ed9af820 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -631,7 +646,7 @@ Verification: `make check` passed in lazily-kt, lazily-js, lazily-zig, and the r
 - ~~do [#lazilyrenameinverted]~~
 - ~~do [#readmeexamplesreference]~~
 - ~~do [#signalgetsignallive]~~
-- do [#recommendeddecidewhether]
+- ~~do [#recommendeddecidewhether]~~
 - do [#lazilycppconformance]
 - do [#lazilycppcollections]
 - do [#trackedcopieslazily]
@@ -665,7 +680,6 @@ Verification: `make check` passed in lazily-kt, lazily-js, lazily-zig, and the r
 - [ ] [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
 - [ ] [#lazilycppcollections] lazily-cpp: 15 collections fixtures still uncovered — 9 with no coverage at all (cellmap_atomic_move, cellmap_independence, keyed_reconciliation_lis, semtree_incremental, stableid_alignment, textcrdt_convergence, textcrdt_delta_sync, workqueue_competing_delivery, workqueue_lease_deadletter) and 6 hand-transcribed (mergecell_algebra, 5x queuecell_*). Largest single body of remaining conformance work; spans five separate primitives. Tracked in the KNOWN_UNCOVERED ledger.
 - [ ] [#trackedcopieslazily] The tracked copies of lazily-spec conformance fixtures inside lazily-py (tests/conformance), lazily-dart (test/conformance), lazily-rs (tests/conformance) and lazily-go (test/conformance) are kept byte-identical to canonical BY HAND with no sync script or drift check. This cycle had to flip the same fixture in three places. Add a sync/verify script (or make the runners read the sibling checkout) so a canonical edit cannot silently miss a vendored copy.
-- [ ] [#recommendeddecidewhether] [recommended] Decide whether the domain *Cell family (QueueCell / TopicCell / RelayCell / MergeCell / TimerCell / LeaseCell / CircuitBreakerCell / PresenceCell / ...) follows the kernel to *Source, or is deliberately pinned as spec-level naming. Three independent bindings flagged it as the largest remaining Cell-vocabulary surface. It must move in lockstep across all 9 bindings, so it needs a decision before anyone starts. RECOMMENDATION 2026-07-26 (agent): KEEP *Cell. The kernel renamed the two value-node KINDS (Source/Computed) and kept Cell as the concept for a value-bearing reactive node. A QueueCell is not a kind — it composes them (five Source<u64> reader-version cells plus derived readers), so QueueSource would imply "written from outside, folds under a merge policy", which is false for a queue. Same for TimerCell/LeaseCell/CircuitBreakerCell/PresenceCell: each is a composite of a pure core plus projecting cells. KEPT OPEN: naming must converge with the operator before editing (9 bindings in lockstep + deprecation surface on every public type). Unblocks on a yes/no. If YES, scope is: spec cell-model.md first, then 9 bindings in lockstep with deprecated aliases, plus a decision on whether MergeCell collapses entirely (under the kernel it is already Source<T,M> with a non-default policy)
 <!-- /agent:backlog -->
 
 ## Review

@@ -1374,7 +1374,7 @@ Can you preserve the second paragraph too?
     }
 
     #[test]
-    fn normalize_final_template_content_repairs_concurrent_multiline_prompt_before_response() {
+    fn shared_final_template_closeout_repairs_concurrent_multiline_prompt_before_response() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("haiven-sdk.md");
         let snapshot = "\
@@ -1423,15 +1423,18 @@ Created the proposal and implementation plan.
 ";
 
         std::fs::write(&doc, before_current).unwrap();
-        let repaired = normalize_final_template_content(
-            &doc,
+        let closeout = finalize_template_closeout_content(FinalTemplateCloseoutRequest {
+            file: &doc,
             base,
-            Some(snapshot),
-            Some(before_current),
-            merged,
-            Some(response),
-        )
+            snapshot: Some(snapshot),
+            before_current,
+            current_at_response_capture: before_current,
+            content: merged,
+            response,
+            mode: FinalTemplateNormalizationMode::Required,
+        })
         .unwrap();
+        let repaired = closeout.content;
 
         let first_prompt = repaired.find("❯ Please reference job-offer.md.").unwrap();
         let response_heading = repaired.find("### Re: Haiven SDK proposal").unwrap();
@@ -1449,6 +1452,7 @@ Created the proposal and implementation plan.
             1,
             "response repair must not duplicate the response:\n{repaired}"
         );
+        assert!(!closeout.cleaned_resolved_backlog_prompts);
         assert!(!response_precedes_prompt_in_exchange_with_partial_baseline(
             &repaired,
             Some(response),

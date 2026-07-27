@@ -2605,6 +2605,68 @@ fn normalize_final_template_content(
     Ok(normalized)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FinalTemplateNormalizationMode {
+    Required,
+    PreserveAdoptedAuthority,
+}
+
+struct FinalTemplateCloseout {
+    content: String,
+    cleaned_resolved_backlog_prompts: bool,
+}
+
+struct FinalTemplateCloseoutRequest<'a> {
+    file: &'a Path,
+    base: &'a str,
+    snapshot: Option<&'a str>,
+    before_current: &'a str,
+    current_at_response_capture: &'a str,
+    content: &'a str,
+    response: &'a str,
+    mode: FinalTemplateNormalizationMode,
+}
+
+fn finalize_template_closeout_content(
+    request: FinalTemplateCloseoutRequest<'_>,
+) -> Result<FinalTemplateCloseout> {
+    if request.mode == FinalTemplateNormalizationMode::PreserveAdoptedAuthority {
+        return Ok(FinalTemplateCloseout {
+            content: request.content.to_string(),
+            cleaned_resolved_backlog_prompts: false,
+        });
+    }
+
+    let mut content = normalize_final_template_content(
+        request.file,
+        request.base,
+        request.snapshot,
+        Some(request.before_current),
+        request.content,
+        Some(request.response),
+    )?;
+    let cleaned =
+        agent_doc_document::write_normalization::cleanup_resolved_backlog_prompts_after_response(
+            request.base,
+            request.current_at_response_capture,
+            &content,
+        )?;
+    let cleaned_resolved_backlog_prompts = cleaned.is_some();
+    if let Some(cleaned) = cleaned {
+        log_resolved_backlog_prompt_cleanup(request.file, cleaned.removed);
+        content = normalize_template_structure_or_fail_preserving(
+            &cleaned.content,
+            request.file,
+            Some(request.before_current),
+        )?;
+    }
+
+    Ok(FinalTemplateCloseout {
+        content,
+        cleaned_resolved_backlog_prompts,
+    })
+}
+
 #[cfg(test)]
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
     agent_doc_document_realtime_io::atomic_write_through_authority(path, content)

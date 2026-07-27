@@ -1,9 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_document::write_normalization::{
-    cleanup_resolved_backlog_prompts_after_response, strip_boundary_for_dedup,
-};
+use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_document_realtime::write_policy::{
     SnapshotPersistMode, committed_snapshot_union_excluding_carry_forward,
     snapshot_content_to_persist, snapshot_persist_mode, snapshot_persist_mode_with_current,
@@ -690,33 +688,24 @@ pub(crate) fn run_template(
             eprintln!("[write] Current document changed since response baseline. Merging...");
             agent_doc_merge_io::merge_contents(base, &content_ours, content_current)?
         };
-        let mut final_content = normalize_final_template_content(
-            file,
-            base,
-            snapshot_doc.as_deref(),
-            Some(content_current),
-            &final_content,
-            Some(&response),
-        )?;
         // Prompt cleanup is scoped to the operator cut observed before this
         // turn started mutating the document. Granular agent-authored backlog
         // changes may already be visible in `content_current`; treating those
         // as operator prompts resurrects/deletes the wrong queue intent.
-        let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
+        let final_closeout = finalize_template_closeout_content(FinalTemplateCloseoutRequest {
+            file,
             base,
-            &current_content,
-            &final_content,
-        )?;
-        let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
-        if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-            log_resolved_backlog_prompt_cleanup(file, cleaned.removed);
-            final_content = normalize_template_structure_or_fail_preserving(
-                &cleaned.content,
-                file,
-                Some(content_current),
-            )?;
-        }
-        Ok((final_content, cleaned_applied))
+            snapshot: snapshot_doc.as_deref(),
+            before_current: content_current,
+            current_at_response_capture: &current_content,
+            content: &final_content,
+            response: &response,
+            mode: FinalTemplateNormalizationMode::Required,
+        })?;
+        Ok((
+            final_closeout.content,
+            final_closeout.cleaned_resolved_backlog_prompts,
+        ))
     };
 
     let initial_payload = recompute_final(&content_current)?;
@@ -1471,34 +1460,29 @@ pub(crate) fn run_stream(
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&rebased);
             (rebased, doc.encode_state(), false)
         };
-        let mut final_content = if skip_final_normalize {
-            final_content
-        } else {
-            normalize_final_template_content(
-                file,
-                base,
-                snapshot_doc.as_deref(),
-                Some(content_current),
-                &final_content,
-                Some(&response),
-            )?
-        };
-        let cleaned_resolved_backlog_prompts = if skip_final_normalize {
-            None
-        } else {
-            cleanup_resolved_backlog_prompts_after_response(base, &current_content, &final_content)?
-        };
-        let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
-        if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-            log_resolved_backlog_prompt_cleanup(file, cleaned.removed);
-            final_content = normalize_template_structure_or_fail_preserving(
-                &cleaned.content,
-                file,
-                Some(content_current),
-            )?;
+        let final_closeout = finalize_template_closeout_content(FinalTemplateCloseoutRequest {
+            file,
+            base,
+            snapshot: snapshot_doc.as_deref(),
+            before_current: content_current,
+            current_at_response_capture: &current_content,
+            content: &final_content,
+            response: &response,
+            mode: if skip_final_normalize {
+                FinalTemplateNormalizationMode::PreserveAdoptedAuthority
+            } else {
+                FinalTemplateNormalizationMode::Required
+            },
+        })?;
+        let final_content = final_closeout.content;
+        if final_closeout.cleaned_resolved_backlog_prompts {
             crdt_state = agent_doc_merge::crdt::CrdtDoc::from_text(&final_content).encode_state();
         }
-        Ok((final_content, crdt_state, cleaned_applied))
+        Ok((
+            final_content,
+            crdt_state,
+            final_closeout.cleaned_resolved_backlog_prompts,
+        ))
     };
 
     let initial_payload = recompute_final(&content_current)?;

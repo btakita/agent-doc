@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#readmeexamplesreference]
+
+
+> **Queue prompt:**
+>
 > do [#lazilyrenameinverted]
 
 
@@ -579,7 +584,19 @@ Verified `#lazilyrenameinverted` and staged it as an ownership decision.
 - Recommendation: KEEP `Cell`/`CellSlot` as the native implementation class names and treat `Source`/`SourceSlot` as the canonical public handle aliases. This preserves runtime identity while presenting v2 vocabulary to callers.
 - Do not flip the class declaration merely for textual consistency; that is a breaking runtime/type-identity change with no semantic gain.
 - Changed paths: none. Verification: source and mypyc configuration audit. Confidence: high. Escalation: operator/spec-owner yes/no decision required before changing this policy.
-<!-- agent:boundary:cb9636af -->
+
+### Re: Response
+
+Completed `#readmeexamplesreference` across the four affected bindings.
+
+- Go: replaced nonexistent `NewCell` with `NewSource` and `*Cell[V]` with `*Source[V]` (`2b85984`, pushed).
+- C++: removed claims that deleted `CellHandle`/`SlotHandle` types remain a live internal layer; map docs now name `Source`/`Computed`, and architecture docs describe the actual SlotId-backed handles (`c711f11`, pushed).
+- Dart: removed the nonexistent `Signal` compatibility-constructor claim from README, status table, and AGENTS (`ac39979`, pushed).
+- Python: made `SourceSlot` the canonical README spelling while identifying `CellSlot` only as its native class; examples use `SourceSlot`/`source` (`012bc22`, pushed). The unrelated `.claude/worktrees/...` entry was untouched.
+- Root submodule pointers committed and pushed as `2673e9792`.
+
+Verification: `git diff --check` and `make check` passed in all four bindings. One-shot CI checks: Go, C++, and Dart runs were in progress; lazily-py and the root have no workflow named `CI`. Confidence: high. Escalation: none.
+<!-- agent:boundary:bdb3543d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -596,7 +613,7 @@ Verified `#lazilyrenameinverted` and staged it as an ownership decision.
 - ~~do [#lzcspackage]~~
 - ~~do [#asyncplanenever]~~
 - ~~do [#lazilyrenameinverted]~~
-- do [#readmeexamplesreference]
+- ~~do [#readmeexamplesreference]~~
 - do [#signalgetsignallive]
 - do [#recommendeddecidewhether]
 - do [#lazilycppconformance]
@@ -632,7 +649,6 @@ Verified `#lazilyrenameinverted` and staged it as an ownership decision.
 - [ ] [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
 - [ ] [#lazilycppcollections] lazily-cpp: 15 collections fixtures still uncovered — 9 with no coverage at all (cellmap_atomic_move, cellmap_independence, keyed_reconciliation_lis, semtree_incremental, stableid_alignment, textcrdt_convergence, textcrdt_delta_sync, workqueue_competing_delivery, workqueue_lease_deadletter) and 6 hand-transcribed (mergecell_algebra, 5x queuecell_*). Largest single body of remaining conformance work; spans five separate primitives. Tracked in the KNOWN_UNCOVERED ledger.
 - [ ] [#trackedcopieslazily] The tracked copies of lazily-spec conformance fixtures inside lazily-py (tests/conformance), lazily-dart (test/conformance), lazily-rs (tests/conformance) and lazily-go (test/conformance) are kept byte-identical to canonical BY HAND with no sync script or drift check. This cycle had to flip the same fixture in three places. Add a sync/verify script (or make the runners read the sibling checkout) so a canonical edit cannot silently miss a vendored copy.
-- [ ] [#readmeexamplesreference] README examples reference types that no longer exist: lazily-go README:82 `lazily.NewCell` (never defined, example does not compile) and README:209 `*Cell[V]`; lazily-cpp README:54,280,387 + AGENTS.md:43 `CellHandle`/`SlotHandle` (deleted); lazily-dart README:38,329 claims a `Signal` back-compat alias that does not exist; lazily-py README:225 calls `CellSlot` canonical.
 - [ ] [#signalgetsignallive] signal/getSignal still live and UNDEPRECATED on the threadsafe/async planes after the sync plane retired them: lazily-kt ThreadSafeContext.kt:195,247 + AsyncContext.kt:624, lazily-js reactive-async.d.ts:85, lazily-zig root.zig:86,90. Deprecate or migrate to eager Computed.
 - [ ] [#recommendeddecidewhether] [recommended] Decide whether the domain *Cell family (QueueCell / TopicCell / RelayCell / MergeCell / TimerCell / LeaseCell / CircuitBreakerCell / PresenceCell / ...) follows the kernel to *Source, or is deliberately pinned as spec-level naming. Three independent bindings flagged it as the largest remaining Cell-vocabulary surface. It must move in lockstep across all 9 bindings, so it needs a decision before anyone starts. RECOMMENDATION 2026-07-26 (agent): KEEP *Cell. The kernel renamed the two value-node KINDS (Source/Computed) and kept Cell as the concept for a value-bearing reactive node. A QueueCell is not a kind — it composes them (five Source<u64> reader-version cells plus derived readers), so QueueSource would imply "written from outside, folds under a merge policy", which is false for a queue. Same for TimerCell/LeaseCell/CircuitBreakerCell/PresenceCell: each is a composite of a pure core plus projecting cells. KEPT OPEN: naming must converge with the operator before editing (9 bindings in lockstep + deprecation surface on every public type). Unblocks on a yes/no. If YES, scope is: spec cell-model.md first, then 9 bindings in lockstep with deprecated aliases, plus a decision on whether MergeCell collapses entirely (under the kernel it is already Source<T,M> with a non-default policy)
 <!-- /agent:backlog -->

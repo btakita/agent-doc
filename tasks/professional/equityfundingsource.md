@@ -188,11 +188,30 @@ Deployed the already-pushed EFS commit `c3e899ff` from an isolated clean worktre
 - The temporary deployment worktree was removed after verification. Existing unrelated TMO changes remain untouched.
 
 Confidence: high.
-<!-- agent:boundary:e67ba9e9 -->
+
+### Re: Contact Office padding and deployment — gpt-5
+
+> **Queue prompt:** https://www.equityfundingsource.com/contact > Office needs padding ![img_3.png](img_3.png). depoly
+
+Fixed, pushed, and deployed to staging and production.
+
+The Contact markup already requested padding, but the deployed stylesheet was a partial Tailwind artifact that omitted the generated padding and responsive-grid utilities. I fixed the asset completeness contract, made the Worker packer and runtime asset resolver share it, and explicitly safelisted the server-rendered Contact utilities so clean builds always emit the required rules.
+
+- Changed paths: `app/equityfundingsource/app/index.css.ts`, `app/equityfundingsource/assets/index.ts`, `app/equityfundingsource/bin/pack-assets.ts`, `tests/assets-css-selection.test.ts`, `prds/equity-funding-source-lending-portal-prd.md`, and `tests/prd.test.ts`.
+- Commit/push: EFS `e8d537bd` (`fix(public): require complete utility CSS`) is on `origin/main`.
+- Verification commands: `bun test tests/assets-css-selection.test.ts tests/prd.test.ts`; full `make check` in the working tree and again in an isolated clean worktree; clean `build:worker`; live HTTP, CSS-marker, HTML-manifest, and Chromium screenshot checks on staging and production.
+- Focused tests passed. Both full `make check` runs exited 0; the digest's lone `error: d1 down` match is an intentional simulated-error assertion, not a failed test. The required one-time `gh run list --workflow CI --limit 1` lookup found no workflow named `CI`.
+- Clean-build proof: the packed stylesheet contains `.p-4`, `.p-7`, `.md\:p-8`, `.lg\:grid-cols-12`, `.lg\:col-span-7`, and `.lg\:col-span-5`.
+- Staging: Worker version `e2c25803-3275-41bd-9ba1-a7a21be2f228` deployed; `/contact` returned HTTP 200 and the browser screenshot showed the Office card padded, the fastest-path links padded, and the intended 7/5-column desktop layout.
+- Production: deployment status reports version `132e22a5-79a0-47b6-b88e-fa5151bc85f8` at 100%. Both apex and `www` Contact URLs return HTTP 200, the live HTML references `/index.server-D7NVJXON_4MQUX3U6.css`, that stylesheet contains all six required utilities, and the production screenshot confirms the corrected spacing and layout.
+- Escalation/status: Wrangler again returned Cloudflare code 10000 while resynchronizing routes after production activation because the token lacks Workers Routes Edit. The existing custom-domain routes remained active and served the verified new version, so no rollback was needed; the already-tracked route-token permission item remains the correct remediation.
+- The isolated deployment worktree was removed. Existing unrelated TMO worktree changes were preserved and excluded from the commit and deployment bundles.
+
+Confidence: high.
+<!-- agent:boundary:7c5a1cf5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- deploy to staging + production
 <!-- /agent:queue -->
 
 ## Backlog

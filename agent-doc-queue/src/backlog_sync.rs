@@ -378,13 +378,6 @@ impl FollowUpQueuePlacement {
         }
     }
 
-    pub fn sync_mode(self) -> BacklogQueueSyncMode {
-        match self {
-            Self::Prepend => BacklogQueueSyncMode::Prepend,
-            Self::Append => BacklogQueueSyncMode::Append,
-        }
-    }
-
     /// Operator-facing verb for closeout logs.
     pub fn log_verb(self) -> &'static str {
         match self {
@@ -394,11 +387,12 @@ impl FollowUpQueuePlacement {
     }
 }
 
-/// `#queueatcreate`: enqueue backlog ids created THIS cycle, from content.
+/// `#queueatcreate` / `#backlogqueuepopulation`: enqueue backlog ids made
+/// actionable THIS cycle, from content.
 ///
-/// Companion to `sync_same_cycle_pending_adds_into_go_queue`, but pure: the
+/// Companion to `sync_same_cycle_actionable_backlog_into_go_queue`, but pure: the
 /// caller owns persistence, so the enqueue can ride the SAME write path as the
-/// backlog mutation that created the ids. That matters because the queue
+/// backlog mutation that activated the ids. That matters because the queue
 /// maintenance persistence path hard-requires a ready editor model and discards
 /// its work otherwise, while the backlog write path converges and succeeds — so
 /// sharing the backlog's path is what keeps the two components in step.
@@ -409,12 +403,12 @@ impl FollowUpQueuePlacement {
 ///
 /// Returns `None` when nothing changes (no opt-in, no queue component, or every
 /// id is already queued).
-pub fn enqueue_created_ids_in_content(
+pub fn enqueue_actionable_ids_in_content(
     content: &str,
-    created_ids: &[String],
+    actionable_ids: &[String],
     placement: FollowUpQueuePlacement,
 ) -> anyhow::Result<Option<String>> {
-    if created_ids.is_empty() {
+    if actionable_ids.is_empty() {
         return Ok(None);
     }
     let components = element::parse(content)?;
@@ -439,7 +433,7 @@ pub fn enqueue_created_ids_in_content(
         .flat_map(|comp| backlog::active_item_ids(&content[comp.open_end..comp.close_start]))
         .map(|id| id.trim().to_ascii_lowercase())
         .collect();
-    let queueable: Vec<String> = created_ids
+    let queueable: Vec<String> = actionable_ids
         .iter()
         .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
         .filter(|id| !id.is_empty() && open_backlog.contains(id))
@@ -945,7 +939,7 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
 
-        let updated = enqueue_created_ids_in_content(
+        let updated = enqueue_actionable_ids_in_content(
             content,
             &["fresh".into()],
             FollowUpQueuePlacement::Prepend,
@@ -995,7 +989,7 @@ mod tests {
                 "[#b] priority=5 after=#a depends",
             );
 
-        let updated = enqueue_created_ids_in_content(
+        let updated = enqueue_actionable_ids_in_content(
             &content,
             &["c".into(), "b".into(), "a".into()],
             FollowUpQueuePlacement::Prepend,
@@ -1036,7 +1030,7 @@ mod tests {
                 FollowUpQueuePlacement::Append,
             ] {
                 let updated =
-                    enqueue_created_ids_in_content(&content, &["fresh".into()], placement)
+                    enqueue_actionable_ids_in_content(&content, &["fresh".into()], placement)
                         .unwrap()
                         .unwrap_or_else(|| panic!("{label}/{placement:?}: expected an enqueue"));
                 let queue: Vec<&str> = updated

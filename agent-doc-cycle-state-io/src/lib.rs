@@ -217,6 +217,12 @@ pub struct CycleState {
     /// brand-new same-cycle add from a pre-existing item.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_added_ids: Vec<String>,
+    /// `#backlogqueuepopulation`: tracked-work ids that became actionable this
+    /// cycle and therefore may need insert-only mirroring into an explicit
+    /// go-mode `agent:queue`. Adds and ungates record here; gates, done
+    /// transitions, and unrelated operator queue deletions do not.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_actionable_ids: Vec<String>,
     /// True when the preflight-current document already had completed tracked
     /// work that closeout pending maintenance should reap. This lets closeout
     /// distinguish status-only cycles from tracked-work cycles without reading
@@ -1212,6 +1218,7 @@ pub fn start_preflight_with_task(
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
         pending_added_ids: Vec::new(),
+        pending_actionable_ids: Vec::new(),
         tracked_work_maintenance_required_at_preflight: file_content
             .map(agent_doc_document::tracked_work_projection::tracked_work_maintenance_required),
         ipc_snapshot_adoption_blocked: false,
@@ -1721,6 +1728,47 @@ pub fn pending_added_ids(file: &Path) -> std::collections::HashSet<String> {
         .ok()
         .flatten()
         .map(|state| state.pending_added_ids.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// `#backlogqueuepopulation`: record ids that became actionable during the
+/// current closeout so queue reconciliation mirrors only explicit mutation
+/// intent. This avoids resurrecting operator-deleted queue entries.
+pub fn record_pending_actionable_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+
+    let mut changed = false;
+    for id in ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if !state
+            .pending_actionable_ids
+            .iter()
+            .any(|existing| existing == &id)
+        {
+            state.pending_actionable_ids.push(id);
+            changed = true;
+        }
+    }
+
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#backlogqueuepopulation`: ids made actionable by an add or ungate in this
+/// cycle. Empty when no cycle state exists.
+pub fn pending_actionable_ids(file: &Path) -> std::collections::HashSet<String> {
+    load(file)
+        .ok()
+        .flatten()
+        .map(|state| state.pending_actionable_ids.into_iter().collect())
         .unwrap_or_default()
 }
 
@@ -3024,6 +3072,7 @@ fn synthetic_state_with_id(
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
         pending_added_ids: Vec::new(),
+        pending_actionable_ids: Vec::new(),
         // A synthetic cycle did not observe a preflight document. Preserve
         // that distinction instead of asserting a false preflight fact that
         // the state projection cannot reproduce.
@@ -3562,6 +3611,38 @@ mod tests {
         assert_eq!(
             load(&doc).unwrap().unwrap().pending_kept_open_ids,
             vec!["abc1".to_string(), "z9".to_string()]
+        );
+    }
+
+    #[test]
+    fn record_pending_actionable_ids_is_normalized_and_distinct_from_add_proof() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state = record_pending_actionable_ids(
+            &doc,
+            &[
+                "#PhaseB".to_string(),
+                "phaseb".to_string(),
+                "phasea".to_string(),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            state.pending_actionable_ids,
+            vec!["phaseb".to_string(), "phasea".to_string()]
+        );
+        assert!(
+            state.pending_added_ids.is_empty(),
+            "ungated queue candidates are actionable without pretending they were newly added"
+        );
+        assert_eq!(
+            pending_actionable_ids(&doc),
+            std::collections::HashSet::from(["phasea".to_string(), "phaseb".to_string()])
         );
     }
 

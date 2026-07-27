@@ -1311,6 +1311,11 @@ fn apply_pending_and_status_mutations(
                     for id in &options.pending_ungate {
                         backlog_cmd::ungate(file, id)?;
                     }
+                    record_pending_actionable_mutations(
+                        file,
+                        &same_cycle_added_ids,
+                        &options.pending_ungate,
+                    )?;
                     for gt in &options.pending_resolve_gate {
                         backlog_cmd::resolve_gate(file, gt)?;
                     }
@@ -1350,6 +1355,22 @@ fn apply_pending_and_status_mutations(
         set_status_with_options(file, status_text, options.force_disk)?;
     }
 
+    Ok(())
+}
+
+/// `#backlogqueuepopulation`: collapse every mutation that makes tracked work
+/// executable into one binary-owned cycle fact. The queue reconciler consumes
+/// this set after the backlog mutations land; unrelated open items are excluded
+/// so operator queue deletions remain authoritative.
+fn record_pending_actionable_mutations(
+    file: &Path,
+    added_ids: &[String],
+    ungated_ids: &[String],
+) -> Result<()> {
+    let ids: Vec<String> = added_ids.iter().chain(ungated_ids).cloned().collect();
+    if !ids.is_empty() {
+        agent_doc_cycle_state_io::record_pending_actionable_ids(file, &ids)?;
+    }
     Ok(())
 }
 
@@ -1577,22 +1598,20 @@ fn run_command_inner(
                 )?;
             }
         }
-        // `#queueatcreate`: the `--backlog-only` path used to return here, so a
-        // tracked-work-only write NEVER enqueued the items it had just created —
-        // the backlog grew and `agent:queue` silently did not, even with the
-        // backlog's `queue` attribute set. That is the "backlog items are not
-        // being added to the queue at all" report: agents that file follow-ups
-        // through `--backlog-only` (the natural call when there is no response to
-        // write) produced items nothing would ever pick up. Run the same
-        // same-cycle sync the full write path runs, with the same placement
-        // rules, so both paths keep backlog and queue in step.
+        // `#queueatcreate` / `#backlogqueuepopulation`: the `--backlog-only`
+        // path used to return here, so a tracked-work-only write could commit an
+        // add or ungate without mirroring the newly actionable ids into the
+        // explicit queue. Run the same binary-owned reconciliation as the full
+        // closeout path before returning.
         if commit_mode != CommitMode::None {
             let placement = follow_up_queue_placement(&options)?;
             if let Err(e) = with_backlog_effects(|| {
-                agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(file, placement)
+                agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue(
+                    file, placement,
+                )
             }) {
                 eprintln!(
-                    "[queue] warning: same-cycle pending-add queue sync failed: {}",
+                    "[queue] warning: same-cycle actionable backlog queue sync failed: {}",
                     e
                 );
             }
@@ -2027,32 +2046,31 @@ fn run_command_inner(
         }
     }
 
-    // `#pendingaddqueuesync`: `--pending-add*` mutations are applied during
-    // write/finalize, after preflight's backlog→queue sync has already run.
-    // Once the current head has been consumed, enqueue same-cycle pending adds
-    // into active go-mode backlog queues so captured follow-up work is not
-    // stranded outside the drain. `#queueatcreate`: placement defaults to the
-    // queue head so a follow-up filed by this turn is picked up next, rather
-    // than buried behind the existing queue.
+    // `#pendingaddqueuesync` / `#backlogqueuepopulation`: add and ungate
+    // mutations are applied during write/finalize, after preflight's
+    // backlog→queue sync has already run. Once the current head has been
+    // consumed, reconcile ids made actionable this cycle into active go-mode
+    // queues. Placement defaults to the queue head so a follow-up filed by this
+    // turn is picked up next rather than buried behind the existing queue.
     if write_result.is_ok() && commit_mode != CommitMode::None {
         let placement = follow_up_queue_placement(&options)?;
         match commit_mode {
             CommitMode::None => {}
             CommitMode::BestEffort => {
                 if let Err(e) = with_backlog_effects(|| {
-                    agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(
+                    agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue(
                         file, placement,
                     )
                 }) {
                     eprintln!(
-                        "[queue] warning: same-cycle pending-add queue sync failed: {}",
+                        "[queue] warning: same-cycle actionable backlog queue sync failed: {}",
                         e
                     );
                 }
             }
             CommitMode::Required => {
                 with_backlog_effects(|| {
-                    agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(
+                    agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue(
                         file, placement,
                     )
                 })?;
@@ -2715,6 +2733,35 @@ mod tests {
         assert!(write_outcome_retains_closeout_mutations(&Ok(())));
         assert!(write_outcome_retains_closeout_mutations(&retained));
         assert!(!write_outcome_retains_closeout_mutations(&semantic_failure));
+    }
+
+    #[test]
+    fn actionable_mutation_record_unifies_adds_and_ungates_for_queue_closeout() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+
+        record_pending_actionable_mutations(
+            &doc,
+            &["added".to_string()],
+            &[
+                "#Ungated".to_string(),
+                "ungated".to_string(),
+                "phase2".to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(
+            agent_doc_cycle_state_io::pending_actionable_ids(&doc),
+            std::collections::HashSet::from([
+                "added".to_string(),
+                "ungated".to_string(),
+                "phase2".to_string(),
+            ])
+        );
     }
 
     #[allow(clippy::too_many_arguments)]

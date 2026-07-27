@@ -4388,11 +4388,11 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
 /// Closeout-side repair for same-cycle backlog capture.
 ///
 /// Preflight's normal backlog→queue sync runs before `finalize` / `write`
-/// applies `--pending-add*` mutations, so a go-mode document can commit a fresh
-/// backlog item without a matching queue head. This helper runs after closeout
-/// queue consumption, enqueuing only ids that were explicitly recorded as
-/// same-cycle pending additions. It never applies a full priority/sync recompute,
-/// so it cannot move the head that the current response just consumed.
+/// applies backlog mutations, so a go-mode document can commit a fresh or newly
+/// ungated backlog item without a matching queue head. This helper runs after
+/// closeout queue consumption, enqueuing only ids explicitly recorded as made
+/// actionable in this cycle. It never applies a full queue recompute, so it
+/// cannot resurrect unrelated operator-deleted heads.
 ///
 /// `#queueatcreate`: placement is caller-chosen and defaults to the queue HEAD.
 /// This used to hardcode `Append`, which buried every follow-up behind the whole
@@ -4401,12 +4401,12 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
 /// follow-up filed by the turn that just ran is, by construction, the most
 /// task-relevant work in the document, so the head is the right default; agents
 /// that deliberately do not want to preempt the current drain pass `Append`.
-pub fn sync_same_cycle_pending_adds_into_go_queue(
+pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     file: &Path,
     placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
 ) -> Result<Vec<String>> {
-    let added_this_cycle = agent_doc_cycle_state_io::pending_added_ids(file);
-    if added_this_cycle.is_empty() {
+    let actionable_this_cycle = agent_doc_cycle_state_io::pending_actionable_ids(file);
+    if actionable_this_cycle.is_empty() {
         return Ok(Vec::new());
     }
 
@@ -4425,7 +4425,9 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(
     let entries = match agent_doc_queue::document_queue::parse(queue_body) {
         Ok(entries) => entries,
         Err(e) => {
-            eprintln!("[write] queue: same-cycle pending-add sync skipped — parse warning: {e}");
+            eprintln!(
+                "[write] queue: same-cycle actionable backlog sync skipped — parse warning: {e}"
+            );
             return Ok(Vec::new());
         }
     };
@@ -4456,7 +4458,7 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(
     else {
         return Ok(Vec::new());
     };
-    let pending_norm: std::collections::HashSet<String> = added_this_cycle
+    let actionable_norm: std::collections::HashSet<String> = actionable_this_cycle
         .into_iter()
         .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
         .filter(|id| !id.is_empty())
@@ -4465,7 +4467,7 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(
         .ids
         .into_iter()
         .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
-        .filter(|id| pending_norm.contains(id))
+        .filter(|id| actionable_norm.contains(id))
         .collect();
     if backlog_ids.is_empty() {
         return Ok(Vec::new());
@@ -4513,13 +4515,26 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(
         .iter()
         .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
         .collect::<std::collections::HashSet<String>>();
-    let Some(synced) = agent_doc_queue::document_queue::sync_backlog_into_queue(
-        &entries,
+    // `#backlogqueuepopulation`: use the insert-only backlog ingress helper for
+    // the primary path too. Besides preserving every pre-existing queue byte,
+    // this is the single place that orders a newly actionable block by hard
+    // `after=#id` dependencies and then priority.
+    let Some(current_content) = agent_doc_queue::backlog_sync::enqueue_actionable_ids_in_content(
+        &content,
         &backlog_ids,
-        placement.sync_mode(),
-    ) else {
+        placement,
+    )?
+    else {
         return Ok(Vec::new());
     };
+    let updated_components = agent_doc_element::element::parse(&current_content)?;
+    let updated_queue = updated_components
+        .iter()
+        .find(|component| component.name == "queue")
+        .context("queue component disappeared during actionable backlog reconciliation")?;
+    let synced = agent_doc_queue::document_queue::parse(
+        &current_content[updated_queue.open_end..updated_queue.close_start],
+    )?;
     let mut seen = std::collections::HashSet::new();
     let synced_ids: Vec<String> = synced
         .iter()
@@ -4530,13 +4545,6 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(
     if synced_ids.is_empty() {
         return Ok(Vec::new());
     }
-
-    let new_body = agent_doc_queue::document_queue::render(&synced);
-    let current_content = {
-        let comps = agent_doc_element::element::parse(&content)?;
-        let q = comps.iter().find(|c| c.name == "queue").unwrap();
-        q.replace_content(&content, &new_body)
-    };
     // `#queueatcreate` / `#5d9f`: two persistence paths with different
     // reachability is the bug surface. `persist_queue_maintenance_doc` requires a
     // ready editor model and discards its work otherwise, but the backlog add
@@ -4557,12 +4565,12 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(
         &current_content,
         &content,
         project_root.as_deref(),
-        "pending_add_sync",
+        "actionable_backlog_sync",
     ) {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "queue_pending_add_sync_persist_fallback file={} reason={} (#queueatcreate)",
+                "queue_actionable_backlog_sync_persist_fallback file={} reason={} (#queueatcreate)",
                 file.display(),
                 primary_err
             ),
@@ -4574,12 +4582,12 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(
         // — which reads like an authority failure but is purely structural.
         agent_doc_element_backlog_io::backlog_cmd::apply_document_rewrite(
             file,
-            "pending_add_sync_fallback",
+            "actionable_backlog_sync_fallback",
             |live| {
                 // Recompute against the live document: the primary attempt may
                 // have observed a different image, and the backlog write that
                 // created these ids already landed there.
-                agent_doc_queue::backlog_sync::enqueue_created_ids_in_content(
+                agent_doc_queue::backlog_sync::enqueue_actionable_ids_in_content(
                     live,
                     &backlog_ids,
                     placement,
@@ -4588,14 +4596,14 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(
         )
         .with_context(|| {
             format!(
-                "same-cycle queue enqueue failed on both the queue-maintenance path ({primary_err}) \
+                "same-cycle actionable backlog enqueue failed on both the queue-maintenance path ({primary_err}) \
                  and the tracked-work fallback"
             )
         })?;
     }
     adopt_edited_queue_head_into_snapshot(file, &current_content);
     eprintln!(
-        "[write] queue: {} {} same-cycle pending-add id(s) into active go queue",
+        "[write] queue: {} {} same-cycle actionable backlog id(s) into active go queue",
         placement.log_verb(),
         synced_ids.len()
     );
@@ -7239,9 +7247,10 @@ mod tests {
         )
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_pending_actionable_ids(&doc, &["fresh".to_string()])
+            .unwrap();
 
-        let synced = sync_same_cycle_pending_adds_into_go_queue(
+        let synced = sync_same_cycle_actionable_backlog_into_go_queue(
             &doc,
             agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
         )
@@ -7263,6 +7272,65 @@ mod tests {
             "snapshot queue region must include the appended closeout head:\n{snap}"
         );
     }
+
+    /// `#backlogqueuepopulation`: a triage closeout that ungates an ordered
+    /// batch must populate the explicit queue in the same transaction. The
+    /// dependency graph, not mutation argument order, owns the inserted block.
+    #[test]
+    fn closeout_sync_populates_same_cycle_ungates_in_dependency_order() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: triage — gpt-5\n\nUngated the implementation batch.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- ~do [#triage]~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#c] priority=1 after=#b final phase\n",
+            "- [ ] [#b] priority=5 after=#a middle phase\n",
+            "- [ ] [#a] priority=9 prerequisite phase\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_pending_actionable_ids(
+            &doc,
+            &["c".to_string(), "b".to_string(), "a".to_string()],
+        )
+        .unwrap();
+
+        let synced = sync_same_cycle_actionable_backlog_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::Prepend,
+        )
+        .unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(synced, vec!["a", "b", "c"]);
+        let a = updated.find("- do [#a]").unwrap();
+        let b = updated.find("- do [#b]").unwrap();
+        let c = updated.find("- do [#c]").unwrap();
+        let triage = updated.find("- ~do [#triage]~").unwrap();
+        assert!(
+            a < b && b < c && c < triage,
+            "ungated items must mirror ahead of the answered triage prompt in dependency order:\n{updated}"
+        );
+    }
+
     /// `#queueatcreate`: agents that deliberately do not want a follow-up to
     /// preempt the current drain pass `Append`.
     #[test]
@@ -7295,9 +7363,10 @@ mod tests {
         )
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_pending_actionable_ids(&doc, &["fresh".to_string()])
+            .unwrap();
 
-        let synced = sync_same_cycle_pending_adds_into_go_queue(
+        let synced = sync_same_cycle_actionable_backlog_into_go_queue(
             &doc,
             agent_doc_queue::backlog_sync::FollowUpQueuePlacement::Append,
         )
@@ -7344,9 +7413,10 @@ mod tests {
         )
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_pending_actionable_ids(&doc, &["fresh".to_string()])
+            .unwrap();
 
-        let synced = sync_same_cycle_pending_adds_into_go_queue(
+        let synced = sync_same_cycle_actionable_backlog_into_go_queue(
             &doc,
             agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
         )

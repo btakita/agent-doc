@@ -419,15 +419,23 @@ Semantics:
     so an agent capturing follow-ups mid-loop cannot amplify the queue unboundedly
     or churn `pending_done_guard`. Held ids join on the next activation. Explicit
     per-item enqueue markers bypass this hold for the marked id.
-  - **go-mode** (`queue: go` or marker-side `go`, the continuous-backlog-loop opt-in) — fresh
-    backlog `queue`-attr ids *append immediately* (not only when the queue drains),
-    so the `queue` attribute populates the live queue as intended. Append/Prepend
+- **go-mode** (`queue: go` or marker-side `go`, the continuous-backlog-loop opt-in) — fresh
+    backlog `queue`-attr ids and pre-existing gated ids explicitly ungated by the
+    closeout are mirrored immediately (not only when the queue drains), so the
+    `queue` attribute populates the live queue as intended. Append/Prepend
     stay idempotent and processed items drop out of `active_item_ids` once marked
     `[/]`/`[x]`, so the queue stays bounded by the open backlog. Context-accretion
     thresholds must not stop this self-driving loop: direct `run` starts the next
     queue item in a fresh backend session, while managed pane go-mode interleaves
     the harness-native clear command (`/clear`, or OpenCode `/new`) at an idle gap
     and then continues draining the same head.
+- **Same-closeout actionable reconciliation (`#backlogqueuepopulation`).**
+  Adds and ungates record a mutation-scoped `pending_actionable_ids` set. After
+  current-head consumption, closeout insert-only mirrors exactly that set into
+  the explicit queue, ordering the new block by hard `after=#id` dependencies
+  before priority and preserving every existing queue byte. It never sweeps all
+  open backlog ids at closeout, because doing so would resurrect unrelated
+  operator-deleted queue entries.
 - `agent:backlog` and the legacy `pending` alias may carry the attribute; the
   first queue-tagged component's mode wins and active ids from every queue-tagged
   source are taken in document order. `agent:icebox queue` warns and does not

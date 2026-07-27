@@ -2599,7 +2599,7 @@ fn finalize_pending_add_prepends_to_active_go_backlog_queue_after_consuming_head
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "[write] queue: prepended 1 same-cycle pending-add id(s)",
+            "[write] queue: prepended 1 same-cycle actionable backlog id(s)",
         ));
 
     let committed = head_blob(tmp.path());
@@ -2658,7 +2658,7 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_at_active_go_queue_head() 
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "[write] queue: prepended 3 same-cycle pending-add id(s)",
+            "[write] queue: prepended 3 same-cycle actionable backlog id(s)",
         ));
 
     let committed = head_blob(tmp.path());
@@ -2728,7 +2728,7 @@ fn finalize_pending_add_back_appends_to_active_go_queue() {
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "[write] queue: appended 1 same-cycle pending-add id(s)",
+            "[write] queue: appended 1 same-cycle actionable backlog id(s)",
         ));
 
     let committed = head_blob(tmp.path());

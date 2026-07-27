@@ -227,7 +227,30 @@ Verification:
 - Dart commit/push: `1d92bd9` (`fix: guard ComputedMap entries`).
 - Root pointer commit/push: `784b2621d`.
 - Required one-shot CI inspection: run `30235586745` was in progress; not polled.
-<!-- agent:boundary:70cd169b -->
+
+### Re: #recommendedspecdecision — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedspecdecision]
+
+
+Decision recorded in lazily-spec:
+
+1. Atomic move is Core and binds every execution flavor a binding advertises, not only `SourceMap`. A missing context is staged out of the peer group; an advertised thread-safe/async map that lacks Core is non-conforming. Test runners may not substitute a base-context map, ad hoc mutex, or dictionary.
+2. Thread-safety is not a binary label. A realm-local `serialized` context can be meaningful when it supplies a distinct linearization boundary, so it joins portable Core feature tests it supports. It does not join `shared-graph` concurrency stress/model-check tests. A binding may declare the context absent instead; a duplicate type alone does not count as support.
+
+This settles the JS/Dart question without pretending either shares one graph across workers/isolates: both are currently classified `serialized`, not `shared-graph`. Their supported Core surfaces remain in the peer suite; incomplete features remain staged.
+
+Changed `cell-model.md`, `docs/reactive-graph.md`, and the coverage decision note. Spec commit/push: `756d238`; root pointer: `c78eda5d9`.
+
+Verification:
+
+- 151 spec tests passed.
+- Lean build passed (9 jobs).
+- Aggregate `make check` reached only the pre-existing sibling README coverage-sync drift (Python, Kotlin, Dart, Go, C++); those concurrent sibling files were preserved rather than rewritten. This change did not alter `coverage.json`.
+- Required one-shot CI inspection: run `30235761708` was in progress; not polled.
+<!-- agent:boundary:8f6b61f5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -236,7 +259,7 @@ Verification:
 - ~~do [#lazilyasynccomputedmapde]~~
 - ~~do [#lazilytwoimplementations]~~
 - ~~do [#lazilydartcomputedmap]~~
-- do [#recommendedspecdecision]
+- ~~do [#recommendedspecdecision]~~
 - do [#lazilyasyncmap]
 <!-- /agent:queue -->
 
@@ -244,7 +267,6 @@ Verification:
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
-- [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.
 <!-- /agent:backlog -->
 
 ## Review

@@ -2602,11 +2602,13 @@ mod tests {
         let _owner = agent_doc_document_realtime::write_authority::owner_scope_guard();
         let error = materialize_response_cell_projection(&canonical, &desired).unwrap_err();
 
+        let detail = format!("{error:#}");
         assert!(
-            error
-                .to_string()
-                .contains("no editor replica was registered"),
-            "zero-replica editor ownership should defer without a disk projection: {error:#}"
+            detail.contains("editor_attached_model_missing")
+                && detail.contains("disk remained non-authoritative")
+                && detail.contains("re-registration"),
+            "zero-replica editor ownership should enter binary-owned model recovery \
+             without a disk projection: {detail}"
         );
         assert_eq!(
             fs::read_to_string(&canonical).unwrap(),

@@ -556,6 +556,7 @@ version = "0.35.31"
 dependencies = [
  "agent-doc-debounce",
  "agent-doc-document-realtime",
+ "agent-doc-element",
  "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-ipc-io",

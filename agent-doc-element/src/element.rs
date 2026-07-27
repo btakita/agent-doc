@@ -1445,6 +1445,79 @@ pub fn repair_standalone_orphan_comment_terminators(doc: &str) -> Option<String>
     Some(repaired)
 }
 
+/// Remove the one recoverable component-close duplication produced when a
+/// response replay races editor convergence.
+///
+/// The repair is intentionally narrow: the unmatched close must be the only
+/// mismatch, the same component must already have closed successfully, and
+/// removing that one complete marker line must restore structural integrity.
+/// Marker-looking text in code or blockquotes is ignored.
+pub fn repair_single_unmatched_duplicate_component_close(doc: &str) -> Option<String> {
+    let ignored = find_code_ranges(doc)
+        .into_iter()
+        .chain(find_quoted_ranges(doc))
+        .collect::<Vec<_>>();
+    let mut stack: Vec<String> = Vec::new();
+    let mut balanced_closes = HashMap::<String, usize>::new();
+    let mut unmatched: Option<(usize, usize)> = None;
+    let mut offset = 0usize;
+
+    for line in doc.split_inclusive('\n') {
+        let line_start = offset;
+        let line_end = line_start + line.len();
+        offset = line_end;
+        let leading = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let marker_start = line_start + leading;
+        if ignored
+            .iter()
+            .any(|&(start, end)| marker_start >= start && marker_start < end)
+        {
+            continue;
+        }
+
+        let trimmed = line.trim();
+        let Some(inner) = trimmed
+            .strip_prefix("<!--")
+            .and_then(|value| value.strip_suffix("-->"))
+            .map(str::trim)
+        else {
+            continue;
+        };
+        if inner.starts_with("agent:boundary:") {
+            continue;
+        }
+        if let Some(name) = inner.strip_prefix("/agent:") {
+            if stack.last().is_some_and(|open| open == name) {
+                stack.pop();
+                *balanced_closes.entry(name.to_string()).or_default() += 1;
+            } else if stack.is_empty()
+                && balanced_closes.get(name).copied().unwrap_or_default() > 0
+                && unmatched.is_none()
+            {
+                unmatched = Some((line_start, line_end));
+            } else {
+                return None;
+            }
+        } else if let Some(rest) = inner.strip_prefix("agent:") {
+            let name = rest.split_whitespace().next().unwrap_or_default();
+            if name.is_empty() {
+                return None;
+            }
+            stack.push(name.to_string());
+        }
+    }
+    if !stack.is_empty() {
+        return None;
+    }
+    let (start, end) = unmatched?;
+    let mut repaired = String::with_capacity(doc.len() - (end - start));
+    repaired.push_str(&doc[..start]);
+    repaired.push_str(&doc[end..]);
+    structural_corruption_reason(&repaired)
+        .is_none()
+        .then_some(repaired)
+}
+
 /// Detect structural corruption that must never be adopted as a snapshot base
 /// (`#dupcontent`). Returns `Some(reason)` when the document is corrupt:
 /// - a parse failure (mismatched / unclosed markers),

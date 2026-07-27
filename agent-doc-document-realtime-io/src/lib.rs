@@ -1027,9 +1027,35 @@ fn atomic_write_rebased_through_authority_inner(
     if agent_doc_document_realtime::write_authority::is_visible_document(path) {
         let mut post_proof_rebases = 0usize;
         loop {
-            let Some(relay_write) =
-                apply_canonical_replace_if_attached(path, projection_base, content, source)?
-            else {
+            let relay_write =
+                match apply_canonical_replace_if_attached(path, projection_base, content, source) {
+                    Ok(relay_write) => relay_write,
+                    Err(err)
+                        if agent_doc_crdt_relay_io::crdt_authority_for_file(path)
+                            .editor_attached() =>
+                    {
+                        let detail = format!("{err:#}");
+                        let reason = if detail.contains("editor_attached_model_missing") {
+                            DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
+                        } else {
+                            DocumentWriteDeferredReason::CrdtDeliveryAckPending
+                        };
+                        let intent_id = ensure_deferred_document_write_intent(
+                            path,
+                            projection_base,
+                            content,
+                            source,
+                            reason,
+                        )?;
+                        return Err(err.context(format!(
+                        "{source}: retained editor-owned write for {} before retrying live model \
+                         reconciliation (intent_id={intent_id})",
+                        path.display()
+                    )));
+                    }
+                    Err(err) => return Err(err),
+                };
+            let Some(relay_write) = relay_write else {
                 break;
             };
 
@@ -2336,7 +2362,11 @@ pub fn apply_canonical_replace_if_attached(
                                     source,
                                     live_editors,
                                     delivery_version,
-                                    signal_immediately: true,
+                                    // This frontier was just created by this
+                                    // transaction. Subscribe first so a normal
+                                    // editor ACK can settle it without an
+                                    // unnecessary recovery broadcast.
+                                    signal_immediately: false,
                                 },
                                 &mut delivery_wait_elapsed,
                             )? == AckRecoveryWait::ForegroundDeadline
@@ -2916,75 +2946,6 @@ fn rebase_agent_candidate_over_editor_cut(
     agent_doc_merge::crdt::merge_by_component(Some(&base_state), agent_target, &editor_reconciled)
 }
 
-/// Remove one whole-line component close that is provably an unmatched replay
-/// duplicate. The scan mirrors the component parser's stack discipline and
-/// ignores markers in code/quoted ranges. We only repair when there is exactly
-/// one unmatched close, the same component already had a balanced close, and
-/// deleting that line restores the complete projection integrity contract.
-fn remove_single_unmatched_duplicate_component_close(content: &str) -> Option<String> {
-    let ignored = agent_doc_element::element::find_code_ranges(content)
-        .into_iter()
-        .chain(agent_doc_element::element::find_quoted_ranges(content))
-        .collect::<Vec<_>>();
-    let mut stack: Vec<String> = Vec::new();
-    let mut balanced_closes = std::collections::HashMap::<String, usize>::new();
-    let mut unmatched: Option<(usize, usize, String)> = None;
-    let mut offset = 0usize;
-
-    for line in content.split_inclusive('\n') {
-        let line_start = offset;
-        let line_end = line_start + line.len();
-        offset = line_end;
-        let leading = line.len() - line.trim_start_matches([' ', '\t']).len();
-        let marker_start = line_start + leading;
-        if ignored
-            .iter()
-            .any(|&(start, end)| marker_start >= start && marker_start < end)
-        {
-            continue;
-        }
-
-        let trimmed = line.trim();
-        let Some(inner) = trimmed
-            .strip_prefix("<!--")
-            .and_then(|value| value.strip_suffix("-->"))
-            .map(str::trim)
-        else {
-            continue;
-        };
-        if inner.starts_with("agent:boundary:") {
-            continue;
-        }
-        if let Some(name) = inner.strip_prefix("/agent:") {
-            if stack.last().is_some_and(|open| open == name) {
-                stack.pop();
-                *balanced_closes.entry(name.to_string()).or_default() += 1;
-            } else if stack.is_empty()
-                && balanced_closes.get(name).copied().unwrap_or_default() > 0
-                && unmatched.is_none()
-            {
-                unmatched = Some((line_start, line_end, name.to_string()));
-            } else {
-                return None;
-            }
-        } else if let Some(rest) = inner.strip_prefix("agent:") {
-            let name = rest.split_whitespace().next().unwrap_or_default();
-            if name.is_empty() {
-                return None;
-            }
-            stack.push(name.to_string());
-        }
-    }
-    if !stack.is_empty() {
-        return None;
-    }
-    let (start, end, _) = unmatched?;
-    let mut repaired = String::with_capacity(content.len() - (end - start));
-    repaired.push_str(&content[..start]);
-    repaired.push_str(&content[end..]);
-    agent_projection_integrity_valid(&repaired).then_some(repaired)
-}
-
 /// Remove the earlier of exactly two standalone boundary markers inside the
 /// one parseable exchange component. Boundary markers are binary-owned
 /// protocol frontiers; retaining the last frontier is the same ordering rule
@@ -3073,7 +3034,9 @@ pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Optio
         normalized = repaired;
     }
     if !agent_projection_integrity_valid(&normalized) {
-        normalized = remove_single_unmatched_duplicate_component_close(&normalized)?;
+        normalized = agent_doc_element::element::repair_single_unmatched_duplicate_component_close(
+            &normalized,
+        )?;
     }
     (normalized != content && agent_projection_integrity_valid(&normalized)).then_some(normalized)
 }

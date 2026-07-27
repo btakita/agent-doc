@@ -1890,16 +1890,21 @@ fn apply_response_cell_on_hub(
         );
     }
     let canonical = hub.canonical_text();
+    let normalized =
+        agent_doc_element::element::repair_single_unmatched_duplicate_component_close(&canonical)
+            .unwrap_or_else(|| canonical.clone());
+    let repaired_scaffolding = normalized != canonical;
     let outcome = if let Some(committed_content) = committed_content {
         agent_doc_merge::response_cell::supersede_uncommitted_response_tail(
-            &canonical,
+            &normalized,
             committed_content,
             response,
         )?
     } else {
-        agent_doc_merge::response_cell::add_response_cell(&canonical, response)?
+        agent_doc_merge::response_cell::add_response_cell(&normalized, response)?
     };
-    let (update_bytes, targets) = if outcome.applied {
+    let applied = repaired_scaffolding || outcome.applied;
+    let (update_bytes, targets) = if applied {
         let packet = hub.apply_canonical_replace(&canonical, &outcome.content)?;
         (packet.update.len(), packet.targets.len())
     } else {
@@ -1912,7 +1917,7 @@ fn apply_response_cell_on_hub(
     let projection = hub.projection_bytes();
     save_crdt_projection_with_lineage(file, &projection, hub.lineage())?;
     Ok(ResponseCellRelayWrite {
-        applied: outcome.applied,
+        applied,
         cell_id: outcome.cell_id,
         content_hash: agent_doc_hash::content_hash(&outcome.content),
         content: outcome.content,
@@ -3782,6 +3787,55 @@ mod tests {
             .expect("replay should still use the relay");
         assert!(!replay.applied);
         assert_eq!(replay.cell_id, first.cell_id);
+        assert_eq!(replay.content, first.content);
+    }
+
+    #[test]
+    fn response_cell_repairs_duplicate_review_close_on_live_canonical_cut() {
+        let (_dir, doc) = temp_doc("duplicate-review-close.md");
+        let live_cut = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:current -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- [#operator-added] keep the row typed during this turn\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [x] reviewed\n",
+            "<!-- /agent:review -->\n",
+            "<!-- /agent:review -->\n",
+        );
+        std::fs::write(&doc, live_cut).unwrap();
+        let mut hub = RelayHub::from_text(CANONICAL_CLIENT_ID, live_cut);
+        let response = "### Re: operator prompt — gpt-5\n\nDone once.";
+
+        let first = apply_response_cell_on_hub(
+            &mut hub,
+            &doc,
+            CrdtAuthority::GitAuthoritative,
+            None,
+            response,
+        )
+        .expect("response transaction should repair binary scaffolding before parsing");
+
+        assert!(first.applied);
+        assert_eq!(first.content.matches("<!-- /agent:review -->").count(), 1);
+        assert!(first.content.contains("[#operator-added]"));
+        assert!(!first.content.contains("operator-deleted"));
+        assert_eq!(first.content.matches(response).count(), 1);
+        assert!(agent_doc_element::element::structural_corruption_reason(&first.content).is_none());
+
+        let replay = apply_response_cell_on_hub(
+            &mut hub,
+            &doc,
+            CrdtAuthority::GitAuthoritative,
+            None,
+            response,
+        )
+        .expect("exact replay should remain idempotent after repair");
+        assert!(!replay.applied);
         assert_eq!(replay.content, first.content);
     }
 

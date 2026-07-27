@@ -137,13 +137,19 @@ The Home link was completed and deployed in the prior response. This entry only 
 Completed and deployed both requested changes. Production now serves all 35 required site image assets with HTTP 200, non-empty `image/*` responses, including the contact/about banners, team portraits, funded-deal photos, logo fallbacks, and hero fallback. The main navigation now starts with an active Home link.
 
 The EFS change is committed and pushed as `77a8b324` (`fix(public): ship site photos and Home nav (#fixbrokenphotos)`). The production Worker is running version `02ede09a-79d8-4c53-8832-bd8cb77ff1f0`. The only remaining deployment-operations issue is already tracked as `#efs-prod-route-token`: the current Cloudflare token activates the Worker version but lacks Workers Routes Edit, so Wrangler route synchronization exits with Cloudflare code 10000 while the existing production route remains live.
-<!-- agent:boundary:53715774 -->
+
+### Re: About-page photos — gpt-5
+
+> **Queue prompt:** The about page is missing photos as well.
+
+Fixed and deployed with the broader production photo repair. The About route banner and its supporting team imagery are now shipped as tracked public assets, and the production URLs return HTTP 200 with non-empty image responses. The implementation is included in pushed EFS commit `77a8b324` and production Worker version `02ede09a-79d8-4c53-8832-bd8cb77ff1f0`.
+<!-- agent:boundary:1521c170 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority start -->
 - ~~do [#fixbrokenphotos]~~
 - ~~do [#homelinkmain]~~
-- The about page is missing photos as well.
+- ~~The about page is missing photos as well.~~
 - The office hours are 9am-5pm PST.
 <!-- /agent:queue -->
 

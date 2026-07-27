@@ -35,17 +35,17 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260727-050845.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260727-050924.md`*
 
 Compacted content:
-- Archived 36 response topic(s): #adbacklogorphanseg; closeout settling latency; closeout settling latency; 33 more
-- Prior summary/context: prior compacted content: Archived 13 response topic(s): #jbsurfaceswap; preflight ↔ session-check reactive unificatio...
-<!-- agent:boundary:f128ce63 -->
+- Archived 2 response topic(s): Live Sync Tmux Layout crash verification; Live Sync Tmux Layout crash verification
+- Prior summary/context: prior compacted content: Archived 36 response topic(s): #adbacklogorphanseg; closeout settling latency; closeout sett...
+<!-- agent:boundary:b50ca63f -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 📌 do [#tmuxsynccrashlog]
+- ~~📌 do [#tmuxsynccrashlog]~~
 - 📌 do [#60ev]
 - 📌 do [#2y8j]
 - 📌 do [#cdtcutover]
@@ -94,7 +94,6 @@ Compacted content:
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
-- [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
 - [ ] [#60ev] [focused-cycle] plan-dynamic-context-injection-ledger.md — TRIAGED 2026-07-19: entirely unstarted 5-phase build (#adctxreactive / #adctxledger / #adctxpreflight / #adctxorchestrate / #adctxcompact); none of those tags appear anywhere in the Rust tree. This is greenfield architecture, not a drainable queue item — it needs its own cycle per phase. Best entry point is Phase 1 (#adctxreactive): the plan specifies it as a PURE, testable lazily-rs-backed projection module that performs no SQLite writes and does not call tsift (callers feed it snapshots), with three named memoization tests. That phase can land and be verified in isolation with no runtime risk to live documents, and everything else sequences behind it.
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md

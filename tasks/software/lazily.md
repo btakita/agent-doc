@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -221,6 +221,11 @@ No repository paths changed for this command. Goal creation was confirmed by the
 
 ### Re: release + publish all lazily packages — gpt-5
 
+> **Queue prompt:**
+>
+> release + publish all lazily packages
+
+
 Released the eligible lazily suite from the capability-gated conformance baseline:
 
 - `lazily-spec` **v0.37.0** and `lazily-formal` **v0.37.0**: tags and GitHub releases are live.
@@ -235,29 +240,47 @@ Released the eligible lazily suite from the capability-gated conformance baselin
 Every eligible language candidate passed its repository `make check` plus its applicable package dry-run. The superproject aggregate check encountered five agent-doc controller-socket timeouts under the 8,240-test parallel load; the representative controller test and the complete related preflight group both passed serially, isolating this as live-controller load contention rather than a lazily regression. The nine released submodule pointers were committed and pushed in root commit `9d6ee7946`; unrelated JavaScript README/build output, Zig AGENTS changes, Python worktree state, and session-document edits were excluded from that pointer commit.
 
 The release policy now matches the requested network-suite model: peers join tests per exact supported capability, and incomplete bindings—especially C#—remain staged/skipped instead of being treated as suite-wide implementations.
-<!-- agent:boundary:8ae1b298 -->
+
+### Re: complete [#lzcsqueues] — gpt-5
+
+Completed the remaining C# queue/relay parity work and admitted C# to the full RelayCell feature group.
+
+Production surface:
+
+- Added value-aware `RelayMeter<T>` support for encoded `Bytes`, distinct pending `Keys`, and reactive logical-clock `Age`, while preserving `Count` and maintaining all configured measurements across live dimension retuning.
+- Added tracked `Bytes`, `PendingKeys`, `Age`, and active-policy `Measure` reads; exact high-water gating; drain/drop/spill reset semantics; and fail-closed missing-meter or cross-context clock validation.
+- Added the shared-core `Outbox<T>` and credit-metered `Inbox<T>` roles, token-bucket `RatePolicy`, operation `WindowPolicy`, TTL `ExpiryPolicy`, stable FIFO-tie `PriorityStorage<T>`, and sound commutative `KeyedRelay<TKey,T>` sharding.
+- Kept durable spill replay constraints and transport-independent convergence on the existing `RelayCell<T>` core rather than duplicating relay behavior in the role facades.
+
+Normative proof:
+
+- Added 13 new relay metering/role/policy integration tests; the focused Relay suite passes 28/28.
+- Mutation proof changed exact bound admission from `measure >= high_water` to `measure > high_water`; Bytes, Keys, and Age tests all failed at equality, then passed after restoration.
+- lazily-cs `make check`: 154/154 passed with zero skips; `netstandard2.1`, `net8.0`, and `net10.0` builds and package checks pass; the runtime conformance ledger remains exact at 92/124 opened plus 32 known-uncovered.
+- lazily-cs `make format-check`: passed.
+- Canonical coverage now marks C# shipped for the complete RelayCell row. The spec gate passed 151 tests, the Lean build, coverage synchronization, fixture synchronization, and async-v2 naming checks.
+- Every generated sibling coverage-table update passed its repository `make check`, including the full Rust gate.
+- Workspace `make check` passed on rerun with 8,241/8,241 agent-doc tests. Its first pass ended only at an unrelated `corky-core --lib` invocation; that exact target passed immediately and the complete aggregate rerun was green.
+
+Commits are complete and exact-path staged history is clean: lazily-cs `e3bed9d` + `e89fce4`, lazily-spec `ae03868`, generated one-line coverage commits in the other bindings, and root pointer commit `a9a275f4f`. The required pushes follow this binary-owned document closeout. Pre-existing C# `AGENTS.md`, queue-flavor README hunks, JavaScript size-report hunks, build trees, and unrelated workspace changes remain uncommitted and unstaged.
+
+Confidence is high. No escalation was required. The umbrella C# staging ledger now depends only on `#lzcscrdt`, `#lzcsipc`, `#lzcssync`, and `#lzcsplane`.
+<!-- agent:boundary:4a4fbb52 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzcsnugetpublish]~~
-- ~~do [#lzcspackage]~~
-- ~~do [#asyncplanenever]~~
-- ~~do [#lazilyconformancecoverag]~~
-- ~~/goal Add missing lazily-cs features~~
-- release + publish all lazily packages
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsqueues] lazily-cs: PARTIAL/STAGED — QueueCell + QueueStorage shipped at 01d2cf3; WorkQueueCell shipped at fafb88f; TopicCell shipped at 17256ce; Relay core and Count BackpressurePolicy shipped at 5ac24cc; SpillStore shipped at 3e79b92; Relay Transport shipped at 0cca2e6; Spill overflow integration shipped at c5d678d with idempotent-or-deduplicated replay guard and lossless cold+hot reconstruction. Keep C# eligible only for exact capabilities. Still add Bytes/Keys/Age meters before admitting C# to the full RelayCell peer group. (stays open: Bytes/Keys/Age metering and normative integration tests remain.)
 - [ ] [#lzcscrdt] lazily-cs: PARTIAL/STAGED — HLC, ICellCrdt/IRegisterCrdt, LWW/MV registers, PnCounter, and the ReplicatedCell reactive bridge shipped at f1f32e2 with algebraic, replay-idempotence, and invalidation-suppression tests. Keep C# eligible only for these exact CRDT register capabilities. Still implement TextCrdt + delta sync, SeqCrdt, CrdtTree, and LosslessTreeCrdt including dotted-frontier anti-entropy and concurrent-merge convergence, then replay the textcrdt, seqcrdt, crdt-tree, and lossless-tree corpora before full CRDT peer admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24). (stays open: TextCrdt/delta, SeqCrdt, CrdtTree, LosslessTreeCrdt, and their conformance runners remain.)
 - [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
 - [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
 - [ ] [#lzcsplane] lazily-cs: PARTIAL/STAGED — CausalReceipt/CausalReceipts schema/projection shipped at 967c44e; all 17 typed signaling frames, strict exact codec, authoritative SignalingRoom, anti-spoof server-stamped sender, sorted self-excluding rosters, unknown-target handling, and leave semantics shipped at d663074 with canonical signaling client/server fixture replay. Runtime coverage is now 61/124 with 63 known-uncovered. Admit C# only to the exact causal-receipts and signaling-wire/open-room peer groups. Still implement general state projection/mirror, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay service, agent-doc, and remaining message-passing corpora. Plan rows 33-39. (stays open: state mirror, command plane, FFI, permissions, handshake, instrumentation/benchmarks, and remaining corpora.)
-- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Reverified 2026-07-27 at lazily-cs 813983e: 92/124 canonical fixtures are runtime-opened and 32 are explicitly known-uncovered; 141/141 tests, package checks, and the conformance guard pass. Membership, coordination, presence, resilience, and service remain admitted alongside the previously shipped reactive graph, collections, statechart, materialization, queue, IPC, durable-outbox, causal-receipts, signaling, temporal, rate-shaping, and windowing slices. (stays open: close only after #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, and #lzcsplane ship their remaining production surfaces and canonical replays; until then admit C# only to exact feature groups whose implementation and fixture replay are present.)
+- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Reverified 2026-07-27 at lazily-cs e89fce4: 92/124 canonical fixtures are runtime-opened and 32 are explicitly known-uncovered; 154/154 tests, all three target frameworks, package checks, and the conformance guard pass. RelayCell is now fully admitted, including Count/Bytes/Keys/Age metering, Inbox/Outbox, SpillStore/Transport, Rate/Window/Expiry/Priority, and keyed sharding, alongside the previously shipped exact slices. (stays open: close only after #lzcscrdt, #lzcsipc, #lzcssync, and #lzcsplane ship their remaining production surfaces and canonical replays; until then admit C# only to exact feature groups whose implementation and fixture replay are present.)
 <!-- /agent:backlog -->
 
 ## Review

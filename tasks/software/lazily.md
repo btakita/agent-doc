@@ -31,6 +31,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> do [#trackedcopieslazily]
+
+
+> **Queue prompt:**
+>
 > do [#lazilycppcollections]
 
 
@@ -61,7 +66,17 @@ Completed `#lazilycppcollections`.
 The backlog count was stale: 9 of the described 15 collection fixtures were already canonical (CellMap 2, WorkQueue 2, QueueCell 5). I added one JSON-driven C++ conformance runner for the six genuinely missing fixtures: keyed reconciliation/LIS, MergeCell algebra, SemTree incremental folds, StableId alignment, TextCRDT convergence, and TextCRDT delta sync. The runner interprets fixture operations and asserts observable values, identities/cache behavior, edit scripts, version vectors, and policy flags rather than merely recording fixture IDs.
 
 Updated CMake registration and the canonical coverage ledger; collections now have zero `KNOWN_UNCOVERED` entries and the coverage floor increased from 86 to 102. Focused replay and full C++ `make check` passed. C++ commit `88b5ec1` and root pointer commit `f604ce8cb` were pushed. One-shot C++ CI run `30233261670` was in progress; the root repository has no workflow named `CI`. Root `make check` still exits 2 in unrelated concurrent `src/agent-doc` work; no unrelated changes were modified.
-<!-- agent:boundary:516985d7 -->
+
+### Re: Response
+
+Completed `#trackedcopieslazily`.
+
+Added `lazily-spec/scripts/sync-conformance-fixtures.mjs` as the canonical-owner gate for the selected fixture subsets vendored by lazily-py, lazily-dart, lazily-rs, and lazily-go. `--check` verifies every present mirror byte-for-byte, `--sync` refreshes existing tracked copies without expanding each binding's intentional subset, and `--require-all` turns missing sibling checkouts into failures for the multi-repository suite. The normal lazily-spec `make check` now verifies present mirrors; explicit Make targets expose check-all and sync modes.
+
+The live all-peer check compared 97 fixtures across all four bindings with zero drift. Three mutation tests prove formatting-only byte drift fails, sync repairs it, orphan mirrors fail, and optional versus required sibling behavior is explicit. All 151 schema/script tests and the Lean build passed. The initial full lazily-spec check was blocked only by unrelated stale coverage tables in five sibling READMEs; standalone spec CI run `30233612436` completed successfully, and the superproject `make check` passed. The root repository has no workflow named `CI`.
+
+Pushed lazily-spec commit `5fa4b98` and root pointer commit `a13bd1419`.
+<!-- agent:boundary:c2aaa553 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -69,7 +84,7 @@ Updated CMake registration and the canonical coverage ledger; collections now ha
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lazilycppconformance]~~
 - ~~do [#lazilycppcollections]~~
-- do [#trackedcopieslazily]
+- ~~do [#trackedcopieslazily]~~
 - do [#firstunificationwire]
 - do [#prototypeunifiedreactive]
 - do [#lazilyphaseextract]
@@ -97,7 +112,6 @@ Updated CMake registration and the canonical coverage ledger; collections now ha
 - [ ] [#lazilytwoimplementations] lazily-js: two implementations disagree on moveTo with a negative index — reactive-family.js:270 uses Math.min(index, Math.max(len-1,0)) with no lower clamp, collections.js:196 uses Math.max(0, Math.min(index, len-1)). moveTo(key,-1) splices before the last element in one and at 0 in the other. Untested in both; pick one before any unification silently changes a published surface.
 - [ ] [#lazilydartcomputedmap] lazily-dart: ComputedMap entries are Slot, not Computed (collections.dart:430). Post-v2 Slot is the UNGUARDED pass-through while Computed carries the == memo guard — so ComputedMap does not have the guard its name implies, and this leaks publicly through handle(). Decide whether the handle becomes Computed.
 - [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.
-- [ ] [#trackedcopieslazily] The tracked copies of lazily-spec conformance fixtures inside lazily-py (tests/conformance), lazily-dart (test/conformance), lazily-rs (tests/conformance) and lazily-go (test/conformance) are kept byte-identical to canonical BY HAND with no sync script or drift check. This cycle had to flip the same fixture in three places. Add a sync/verify script (or make the runners read the sibling checkout) so a canonical edit cannot silently miss a vendored copy.
 <!-- /agent:backlog -->
 
 ## Review

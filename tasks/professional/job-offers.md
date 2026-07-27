@@ -809,8 +809,8 @@ Haiven is materially riskier.
 For your debt and homeownership goals, the best risk-adjusted structure remains **Acadian as the primary income source plus Haiven as a prepaid, milestone-bounded contract**, subject to Acadian’s written approval.
 
 The full analysis and expanded `#acadianterms` diligence are committed in [job-offers.md](</home/brian/work/btakita/agent-loop/tasks/professional/job-offers.md:769>). Session closeout passed.
-<!-- agent:boundary:6ae03a53 -->
 What about the 1% equity? What is Haiven's chances of reaching Discord levels or near Discord levels within year 1, 2, 3, 4, 5+?
+<!-- agent:boundary:8f8f45d8 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -109,14 +109,22 @@ pub fn finalize_successful_commit(
     file: &Path,
     prior_head_doc: Option<&str>,
 ) {
+    let started = std::time::Instant::now();
     effects.log_cycle(file, "commit", None, None);
     effects.log_op(
         file,
         &format!("{} file={}", OpsLogEvent::CommitSuccess, file.display()),
     );
     effects.log_closeout_commit_completed(file, OpsLogEvent::CommitSuccess.as_str());
+    let log_ms = started.elapsed().as_millis();
+    let state_started = std::time::Instant::now();
+    let snapshot_started = std::time::Instant::now();
     let snap = effects.load_snapshot(file);
+    let snapshot_ms = snapshot_started.elapsed().as_millis();
+    let current_read_started = std::time::Instant::now();
     let file_content = effects.read_to_string(file).ok();
+    let current_read_ms = current_read_started.elapsed().as_millis();
+    let pipeline_started = std::time::Instant::now();
     if let Err(e) = effects.mark_pipeline_committed(
         file,
         OpsLogEvent::CommitSuccess.as_str(),
@@ -125,7 +133,22 @@ pub fn finalize_successful_commit(
     ) {
         eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
     }
-    if let Some(file_content) = file_content.as_deref() {
+    let pipeline_ms = pipeline_started.elapsed().as_millis();
+    let capture_started = std::time::Instant::now();
+    // Capture state is projected from the cycle phase. The primary pipeline
+    // transition above already made that phase terminal, so submitting
+    // WriteApplied + Committed again only repeats the command-plane round trips.
+    // Retain the capture transition as a recovery fallback when the primary
+    // terminal transition failed.
+    if effects.cycle_is_terminal(file) {
+        effects.log_op(
+            file,
+            &format!(
+                "capture_commit_folded_into_terminal_cycle file={} basis=cycle_phase",
+                file.display()
+            ),
+        );
+    } else if let Some(file_content) = file_content.as_deref() {
         if let Err(e) = effects.mark_capture_committed(file, file_content) {
             eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
         }
@@ -134,6 +157,9 @@ pub fn finalize_successful_commit(
             "[commit] capture-state update skipped: current document content unavailable (non-fatal)"
         );
     }
+    let capture_ms = capture_started.elapsed().as_millis();
+    let state_ms = state_started.elapsed().as_millis();
+    let queue_started = std::time::Instant::now();
     if let Some(continuation) = effects.reconcile_queue_continuation(file, "commit") {
         effects.log_op(
             file,
@@ -160,9 +186,28 @@ pub fn finalize_successful_commit(
             );
         }
     }
+    let queue_ms = queue_started.elapsed().as_millis();
+    let hooks_started = std::time::Instant::now();
     let session_id = effects.read_session_id(file);
     effects.fire_post_commit(file, &session_id);
     effects.fire_doc_event(file, "post_commit");
+    let hooks_ms = hooks_started.elapsed().as_millis();
+    effects.log_op(
+        file,
+        &format!(
+            "commit_finalize_latency file={} total_ms={} phases=logs:{}ms,state:{}ms,queue:{}ms,hooks:{}ms state_phases=snapshot:{}ms,current_read:{}ms,pipeline:{}ms,capture:{}ms",
+            file.display(),
+            started.elapsed().as_millis(),
+            log_ms,
+            state_ms,
+            queue_ms,
+            hooks_ms,
+            snapshot_ms,
+            current_read_ms,
+            pipeline_ms,
+            capture_ms,
+        ),
+    );
 }
 
 pub fn log_already_current_local_drift_handoff(
@@ -262,4 +307,97 @@ pub fn finalize_already_committed_noop(
         );
     }
     let _ = effects.reconcile_queue_continuation(file, "commit_already_current");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct TerminalEffects {
+        capture_calls: AtomicUsize,
+        logs: Mutex<Vec<String>>,
+    }
+
+    impl PostCommitCleanupEffects for TerminalEffects {
+        fn read_to_string(&self, _file: &Path) -> Result<String> {
+            Ok("---\nsession: test\n---\n".to_string())
+        }
+
+        fn load_snapshot(&self, _file: &Path) -> Option<String> {
+            None
+        }
+
+        fn cycle_is_terminal(&self, _file: &Path) -> bool {
+            true
+        }
+
+        fn log_cycle(
+            &self,
+            _file: &Path,
+            _event: &str,
+            _snapshot_content: Option<&str>,
+            _file_content: Option<&str>,
+        ) {
+        }
+
+        fn log_op(&self, _file: &Path, message: &str) {
+            self.logs.lock().unwrap().push(message.to_string());
+        }
+
+        fn log_closeout_commit_completed(&self, _file: &Path, _reason: &str) {}
+
+        fn mark_pipeline_committed(
+            &self,
+            _file: &Path,
+            _event: &str,
+            _snapshot_content: Option<&str>,
+            _file_content: Option<&str>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn mark_capture_committed(&self, _file: &Path, _current_content: &str) -> Result<()> {
+            self.capture_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn reconcile_queue_continuation(
+            &self,
+            _file: &Path,
+            _phase: &str,
+        ) -> Option<QueueContinuationProof> {
+            None
+        }
+
+        fn read_session_id(&self, _file: &Path) -> String {
+            "test".to_string()
+        }
+
+        fn fire_post_commit(&self, _file: &Path, _session_id: &str) {}
+
+        fn fire_doc_event(&self, _file: &Path, _event: &str) {}
+    }
+
+    #[test]
+    fn terminal_cycle_folds_capture_commit_without_repeating_phase_transitions() {
+        let effects = TerminalEffects::default();
+        finalize_successful_commit(
+            &effects,
+            Path::new("/tmp/agent-doc-terminal-capture-fold.md"),
+            None,
+        );
+
+        assert_eq!(effects.capture_calls.load(Ordering::SeqCst), 0);
+        assert!(
+            effects
+                .logs
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line.contains("capture_commit_folded_into_terminal_cycle"))
+        );
+    }
 }

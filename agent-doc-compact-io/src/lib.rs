@@ -479,6 +479,7 @@ pub fn run_in_controller(
     commit: bool,
     force_disk: bool,
 ) -> Result<()> {
+    let compact_started = std::time::Instant::now();
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -569,6 +570,7 @@ pub fn run_in_controller(
         eprintln!("[compact] no compaction changes; leaving document and commit state untouched");
         return Ok(());
     }
+    let prepare_ms = compact_started.elapsed().as_millis();
 
     // Create a pre-compact git tag at HEAD only after integrity and semantic
     // mutation validation. Skipped if tag == Some("skip").
@@ -583,6 +585,7 @@ pub fn run_in_controller(
     // the committed target omits it. Keep both through flush + commit closeout so
     // the HEAD-only projection can never reset the converged editor lineage
     // (`#jb-compact-two-target-lineage`).
+    let apply_started = std::time::Instant::now();
     let targets = if resolved.is_template() {
         // The live Lazily authority is compacted through the normal intent seam;
         // `apply_compacted_document` then checkpoints only the resulting baseline
@@ -676,6 +679,8 @@ pub fn run_in_controller(
         );
         inline_targets
     };
+    let apply_ms = apply_started.elapsed().as_millis();
+    let post_apply_started = std::time::Instant::now();
 
     // The durable op epoch is consumed only after the compact target has
     // crossed the authoritative write and snapshot boundary. Any earlier
@@ -737,6 +742,8 @@ pub fn run_in_controller(
     // "JB Compact Exchange left uncommitted changes" defect.
     let snapshot_status = agent_doc_snapshot_io::verify_snapshot_committed(file)?;
     let dirty = compact_dirty(changed, &snapshot_status);
+    let post_apply_ms = post_apply_started.elapsed().as_millis();
+    let commit_started = std::time::Instant::now();
     if commit {
         if dirty {
             commit_compacted_authoritative(file, &targets.committed, &targets.live)?;
@@ -853,6 +860,22 @@ pub fn run_in_controller(
             file.display()
         );
     }
+    let commit_ms = commit_started.elapsed().as_millis();
+    let total_ms = compact_started.elapsed().as_millis();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "compact_latency file={} total_ms={} phases=prepare:{}ms,apply:{}ms,post_apply:{}ms,commit:{}ms commit={} force_disk={}",
+            file.display(),
+            total_ms,
+            prepare_ms,
+            apply_ms,
+            post_apply_ms,
+            commit_ms,
+            commit,
+            force_disk,
+        ),
+    );
 
     Ok(())
 }

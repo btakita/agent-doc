@@ -1496,6 +1496,7 @@ where
         }
     }
 
+    let elapsed_pre_reposition = t_total.elapsed().as_millis();
     let t_reposition = std::time::Instant::now();
     let _snap_changed = agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
         ports.boundary_reposition,
@@ -1606,6 +1607,7 @@ where
         eprintln!("[perf] commit.git_commit: {}ms", elapsed_commit);
     }
 
+    let post_commit_finalize_started = std::time::Instant::now();
     let commit_outcome = agent_doc_git_io::commit_result_reporting::report_commit_output(
         ports.commit_result_reporting,
         file,
@@ -1631,8 +1633,12 @@ where
         agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Failed
         | agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Error => {}
     }
+    let elapsed_post_commit_finalize = post_commit_finalize_started.elapsed().as_millis();
 
+    let transient_cleanup_started = std::time::Instant::now();
     let mut vcs_refresh_signaled = None;
+    let mut elapsed_transient_cleanup = 0;
+    let mut elapsed_postcommit_check = 0;
     if commit_outcome == agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Success {
         vcs_refresh_signaled =
             agent_doc_git_io::transient_cleanup::signal_vcs_refresh(ports.transient_cleanup, file);
@@ -1668,13 +1674,16 @@ where
                         e
                     );
                 }
-            }
         }
+        }
+        elapsed_transient_cleanup = transient_cleanup_started.elapsed().as_millis();
 
+        let postcommit_check_started = std::time::Instant::now();
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
             ports.post_commit_cleanup,
             file,
         );
+        elapsed_postcommit_check = postcommit_check_started.elapsed().as_millis();
 
         if in_submodule {
             update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
@@ -1682,6 +1691,27 @@ where
     }
 
     let elapsed_total = t_total.elapsed().as_millis();
+    let elapsed_post_commit = elapsed_total.saturating_sub(
+        elapsed_pre_reposition
+            .saturating_add(elapsed_reposition)
+            .saturating_add(elapsed_commit),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "commit_latency file={} total_ms={} phases=pre_reposition:{}ms,reposition:{}ms,git_commit:{}ms,post_commit:{}ms post_commit_phases=finalize:{}ms,transient_cleanup:{}ms,worktree_check:{}ms did_commit={}",
+            file.display(),
+            elapsed_total,
+            elapsed_pre_reposition,
+            elapsed_reposition,
+            elapsed_commit,
+            elapsed_post_commit,
+            elapsed_post_commit_finalize,
+            elapsed_transient_cleanup,
+            elapsed_postcommit_check,
+            did_commit,
+        ),
+    );
     if elapsed_total > 0 {
         eprintln!("[perf] commit total: {}ms", elapsed_total);
     }

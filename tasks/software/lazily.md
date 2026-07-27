@@ -36,14 +36,44 @@ Please restart IDEA once more, then send `continue` so I can commit the agent-do
 
 Implementation is complete, green, committed, pushed, and CI passed. IDEA still runs plugin 0.2.299; plugin 0.2.300 is installed but requires activation.
 
-Please restart IDEA once more, then send `continue` so I can commit the agent-doc closeout.
-<!-- agent:boundary:be241d70 -->
+### Re: do [#lzcstemporal] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzcstemporal]
+
+
+Completed and shipped the full lazily-cs temporal, rate-shaping, and windowing phase.
+
+- Added `Optional<T>` plus production logical-clock `ManualLogicalClock`, `TimerCell`, `IntervalCell`, `CronCell`, and value-preserving `DeadlineCell<T>`.
+- Added `DebounceCell<T>`, leading/trailing `ThrottleCell<T>`, count/time `SampleCell<T>`, deterministic `SplitMix64Random`, and strict-threshold `ProbabilisticSampleCell<T>`.
+- Added count/time tumbling, count sliding, and gap-based session windows over the production `MergePolicy<T>` algebra.
+- Every emitted output is a real reactive `Source`; held, dropped, early, and empty-window operations do not touch it, so fixture invalidation assertions exercise the library rather than runner bookkeeping.
+- Added `TemporalRateWindowConformanceTests.cs`, which discovers and opens all 4 temporal, 6 rate-shaping, and 4 windowing canonical fixtures, asserts exact returns/state/output/invalidation behavior, and carries positive fixture and step floors.
+- Removed exactly those 14 runtime-opened fixtures from the known-uncovered ledger. Coverage advanced from 61/124 with 63 known-uncovered to 75/124 with 49 known-uncovered.
+- Mutation proof: changing probabilistic admission from `draw < rate` to `draw <= rate` made the canonical rate-shaping runner fail at the exact `draw == 0.5` boundary; the restored implementation passed.
+
+Verification and publication:
+
+- Targeted phase suite: 5/5 passed.
+- lazily-cs `make check`: 136/136 passed; coverage gate reported 75/124 opened and 49 known-uncovered.
+- lazily-cs `make format-check`: passed.
+- Workspace `make check`: passed, including 8,222/8,222 agent-doc tests and the remaining workspace suites.
+- lazily-cs CI for `d5bba73`: completed successfully on the required one-shot inspection.
+- Root repository has no workflow named `CI`.
+- Pushed lazily-cs commit `d5bba73`; pushed root submodule pointer `6434c3b53`.
+- Preserved pre-existing lazily-cs `AGENTS.md`, `README.md`, and untracked `build/`, plus unrelated workspace changes.
+
+Confidence is high: the complete canonical corpora, true reactive invalidation probes, merge-policy-path counter, large logical-clock jump, mutation check, full binding gate, workspace gate, and CI are green. No escalation was required.
+
+C# may now join the exact temporal, rate-shaping, and windowing peer groups in the single feature suite. Unsupported capabilities remain staged and skipped rather than advertised.
+<!-- agent:boundary:0f4b5f8a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 do [#lzcstemporal]
+- ~~do [#lzcstemporal]~~
 - do [#lzcscluster]
 - do [#lzcspackage]
 - do [#asyncplanenever]
@@ -60,11 +90,10 @@ Please restart IDEA once more, then send `continue` so I can commit the agent-do
 - [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
 - [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
 - [ ] [#lzcsplane] lazily-cs: PARTIAL/STAGED — CausalReceipt/CausalReceipts schema/projection shipped at 967c44e; all 17 typed signaling frames, strict exact codec, authoritative SignalingRoom, anti-spoof server-stamped sender, sorted self-excluding rosters, unknown-target handling, and leave semantics shipped at d663074 with canonical signaling client/server fixture replay. Runtime coverage is now 61/124 with 63 known-uncovered. Admit C# only to the exact causal-receipts and signaling-wire/open-room peer groups. Still implement general state projection/mirror, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay service, agent-doc, and remaining message-passing corpora. Plan rows 33-39. (stays open: state mirror, command plane, FFI, permissions, handshake, instrumentation/benchmarks, and remaining corpora.)
-- [ ] 🚧 [#lzcstemporal] lazily-cs: TimerCell/IntervalCell/CronCell/DeadlineCell over a logical clock, debounce/throttle/sample/probabilistic-sample, tumbling/sliding/session windows; replay temporal + rateshape + windowing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 40, 41, 45)
 - [ ] [#lzcscluster] lazily-cs: MembershipCell (SWIM + Phi-accrual), LeaseCell/LeaderCell/LockCell/SemaphoreCell/BarrierCell, presence/awareness/ephemeral, circuit breaker/retry/bulkhead/timeout, health/readiness/discovery/registry; replay membership + coordination + presence + resilience + service corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 42-44, 46-47)
 - [ ] [#lzcspackage] lazily-cs: multi-target netstandard2.1 / net8.0 alongside net10.0 (INumber<T> in the merge algebra needs a shim or policy split), add a release workflow, publish Lazily to NuGet — needs a NuGet API key from the operator
 - [ ] [#asyncplanenever] STAGED implementation — finish the async v2 kernel naming migration in C++, Go, Python, and Zig per tasks/plan-lazily-async-v2-migration.md. Rust, JavaScript, Kotlin, and C# already expose AsyncSource/AsyncComputed. Preserve deprecated aliases in published bindings, collapse live memo constructors into guarded computed, and settle the public AsyncComputedState vs formal AsyncSlotState distinction without renaming the formal model mechanically.
-- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-27: 48/124 canonical fixtures opened, 76 known-uncovered (reactive-graph 21, collections 10, statechart 7, materialization 3, familysync 1, QueueCell 5, WorkQueueCell 2, and TopicCell 4 are covered). The remaining fixtures are genuinely missing product surfaces, not runner-wiring gaps. Keep open and work it down only by shipping the explicit tasks in tasks/software/lazily-cs-parity-plan.md (#lzcscollections, #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, #lzcstemporal, #lzcscluster, #lzcsplane); admit C# to each capability group only when that production surface and canonical replay ship.
+- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-27: 75/124 canonical fixtures opened, 49 known-uncovered. Temporal (4), rate-shaping (6), and windowing (4) are now runtime-opened at d5bba73 alongside the previously admitted reactive graph, collections, statechart, materialization, queue, IPC, durable-outbox, causal-receipts, and signaling slices. Keep open and work the remaining ledger down only by shipping explicit tasks in tasks/software/lazily-cs-parity-plan.md; admit C# to each capability group only when that production surface and canonical replay ship.
 <!-- /agent:backlog -->
 
 ## Review

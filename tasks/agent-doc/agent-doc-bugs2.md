@@ -623,7 +623,17 @@ Confidence: high. Escalation: none.
 The Zed extension is at `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed`.
 
 The `#nsfz` cycle is complete; agent-doc v0.35.49 is installed and published with the dead Zed LSP replica fix.
-<!-- agent:boundary:1b27212e -->
+
+### Re: Supervisor restart association live proof
+
+Completed `#suprestassoc-live`.
+
+- Before and after the restart, `equityfundingsource.md` remained bound to session `62fe1f41-886c-4f3d-b6fa-48d46106ec27`, pane `%44`, window `@33`, generation 1574.
+- The restart was accepted as receipt 43; the live EFS status reports `restart_count=1` and a healthy supervisor.
+- `agent-doc-bugs2.md` independently remained bound to session `b26b9957-8de6-4eae-bb98-5d7fe4d6b781`, pane `%35`, window `@33`, generation 1822.
+
+The actor/admin projection did not re-associate EFS with the bugs2 pane or session.
+<!-- agent:boundary:c40bcbab -->
 <!-- /agent:exchange -->
 ## Queue
 

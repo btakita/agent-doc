@@ -266,7 +266,15 @@ The express requirement is in the offer letter’s **“External Contracting”*
 It requires disclosure of the **activities**, not literally a list of every party by name. Naming the parties is my risk-reduction recommendation because Section 11 of the other agreement says compensation from third-party services goes to Haiven unless its Board unanimously approves otherwise in writing. See [lines 191–195](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L191-L195). A named disclosure makes it much harder to dispute what the approval covers.
 
 Section 4 also prohibits consulting or business activity related to Haiven’s business or conflicting with your obligations, but does not itself establish a disclosure procedure. See [lines 142–147](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L142-L147).
-<!-- agent:boundary:6e04c1b1 -->
+
+### Re: Please let me know where they stated I need to disclose my other parties.
+
+The express requirement is in the offer letter’s **“External Contracting”** paragraph: “Limited external contracting is permissible, provided that such activities do not interfere with your responsibilities at Haiven and are disclosed to the Company.” See [lines 82–83](../professional/haiven/haiven-offer-letter-brian-takita-jul-2026.md#L82-L83).
+
+It requires disclosure of the **activities**, not literally every party by name. Naming the parties is a risk-reduction recommendation so any written approval clearly covers them. That matters because Section 11 says compensation from third-party services goes to Haiven unless the Board unanimously approves otherwise in writing. See [lines 191–195](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L191-L195).
+
+Section 4 restricts consulting or business activity related to Haiven’s business or conflicting with your obligations, but does not itself prescribe disclosure by name. See [lines 142–147](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L142-L147).
+<!-- agent:boundary:66447555 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -274,6 +282,7 @@ Section 4 also prohibits consulting or business activity related to Haiven’s b
 <!-- agent:queue go -->
 - Please let me know where they stated I need to disclose my other parties.
 - Please do not over-disclose. If Haiven is not asking for the number of hours worked for my other contracts, please don't include the number.
+- re: "These activities will be performed outside Haiven working time using separate equipment, accounts, repositories, credentials, and systems. I will not use or disclose Haiven confidential information in them, disclose their confidential information to Haiven, or allow them to materially interfere with my Haiven duties.". I will use my same machine for all contract work. I will also be running AI with brief task switching during my Haiven hours. Should I disclose that or not? It will not interfere with fulfilling my Haiven work.
 <!-- /agent:queue -->
 
 ## Backlog

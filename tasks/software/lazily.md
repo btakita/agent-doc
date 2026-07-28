@@ -125,7 +125,30 @@ Confidence: high. Escalation: none. No additional backlog follow-up is needed be
 ### Re: Response
 
 One duplicate orphan line remains outside all agent-doc components at line 158. Please delete only the stray `- [ ] [#lzstdlibbarrier] ...` line in IDEA, save, and send `continue`. The completed item is already archived, so removing this duplicate is the only remaining closeout step.
-<!-- agent:boundary:4b1ce5b2 -->
+
+### Re: portable stdlib coverage plan — gpt-5
+
+> **Queue prompt:**
+>
+> Please ensure the stdlib is in lazily-spec + lazily-formal + comformance tests + peer tests + all implementations.
+
+Created `tasks/software/plan-lazily-stdlib-conformance-rollout.md` and integrated it with the existing single-network-suite, channel-matrix, and peer-rollout plans.
+
+The plan separates the new stdlib `Timer` / caller-driven `Timeout` / `RevisionBarrier` contract from the older `resilience::TimeoutCell` already present in all nine coverage tables. It defines canonical lazily-spec schemas and deterministic fixtures, Lean state machines and safety laws, per-binding public API/corpus gates, versioned peer capabilities, channel-delivered feature triggers, mutation proofs, CI tiers, and release gates.
+
+Feature participation is capability-driven. Unsupported implementations remain explicit `staged_peers`, are excluded from that feature's eligible group, and receive no pass credit. A feature with fewer than two eligible implementations reports `insufficient_eligible_peers` rather than a vacuous green. C# remains semantically active for CRDT convergence but staged independently for stdlib and executable channel capabilities until those production surfaces pass.
+
+Changed paths:
+
+- `tasks/software/plan-lazily-stdlib-conformance-rollout.md`
+- `tasks/software/plan-lazily-interop-network-suite.md`
+- `tasks/software/plan-lazily-interop-channel-matrix.md`
+- `tasks/software/plan-lazily-interop-peer-rollout.md`
+
+Verification: `git diff --cached --check` passed before commit; tsift parsed the new 281-line plan into 114 Markdown nodes; targeted checks confirmed the feature ids, staging rules, C# treatment, execution phases, and resilience/stdlib distinction. Commit: `723da4580` (`plan: stage portable stdlib conformance rollout`).
+
+Confidence: high. Escalation: none. Implementation is captured as six ordered, plan-backed backlog phases rather than falsely claiming all bindings already support the new stdlib surface.
+<!-- agent:boundary:f039825d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -133,13 +156,19 @@ One duplicate orphan line remains outside all agent-doc components at line 158. 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzstdlibbarrier]: Should we also add other concurrency "primitives" to the lazily library?~~
 - ~~do [#lzstdlibtimeout]~~
-- Please ensure the stdlib is in lazily-spec + lazily-formal + comformance tests + peer tests + all implementations.
+- ~~Please ensure the stdlib is in lazily-spec + lazily-formal + comformance tests + peer tests + all implementations.~~
 - release + publish lazily
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzstdlibspec] Implement Phase 0 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: land lazily-spec stdlib docs/schema/fixtures/coverage rows and lazily-formal Timer/Timeout/RevisionBarrier models and laws, with fixture-count, assertion-floor, and mutation gates.
+- [ ] [#lzstdlibrsfixtures] Implement Phase 1 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: replay the canonical stdlib corpus against lazily-rs production APIs and add production-backed Rust peer feature controls without treating Rust as the oracle.
+- [ ] [#lzstdlibportsnative] Implement Phase 2 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Zig, Go, and C++, including race/sanitizer and peer feature scenarios.
+- [ ] [#lzstdlibportsmanaged] Implement Phase 3 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Python, Kotlin, JavaScript, and Dart, with deterministic clock/wait seams and honest runtime/channel carve-outs.
+- [ ] [#lzstdlibcspromote] Implement Phase 4 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: add .NET stdlib production surfaces and corpus runners, then promote C# per feature and per executable channel only when evidence is green.
+- [ ] [#lzstdlibmatrixrelease] Implement Phase 5 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: run the capability-driven all-peer/all-channel matrix, enforce CI and mutation gates, publish coverage evidence, and release bindings inside-out only after every claimed cell is green.
 <!-- /agent:backlog -->
 
 ## Review

@@ -367,7 +367,39 @@ Changed paths: none. No source commit, deployment, test suite, or CI lookup was 
 Escalation: none. The locally stored bootstrap password no longer authenticates against production, so I did not rotate or guess credentials; provisioning used the established one-time D1 path and invitations used the public passwordless admin sign-in flow.
 
 Confidence: high.
-<!-- agent:boundary:b733a03c -->
+Is info@equityfundingsource.com configured to receive all incoming admin emails? 
+
+### Re: `info@equityfundingsource.com` admin email routing — gpt-5
+
+> Is info@equityfundingsource.com configured to receive all incoming admin emails?
+
+No. The active production Worker sends only the secure-message/admin-alert channel to `info@equityfundingsource.com`; the other staff notification channels are split across different addresses:
+
+- Secure borrower/broker/lender message alerts and related admin/security alerts: `info@equityfundingsource.com`
+- Contact-form submissions: `btak.dev@gmail.com`
+- Application leads: `brian.takita@gmail.com`
+- Investor-interest submissions: `brian.takita@gmail.com`
+- Failed/unmatched inbound message replies: `btak.dev+efs@gmail.com`
+
+The inbound reply-processing address is `reply@efs.briantakita.me`, so it is separate from `info@`.
+
+I also checked public mail routing: `equityfundingsource.com` currently uses Google mail (`smtp.google.com`). That confirms Google accepts mail for the domain, but the repository and Cloudflare deployment cannot prove whether `info@` is provisioned as a Google Workspace mailbox, group, or alias. Verifying that last point requires access to the Google Workspace Admin configuration.
+
+**Verification**
+
+- Active production deployment: Worker version `b9b00945-32e3-44a3-8391-2d6f496b8971` at 100%.
+- The deployed version's environment bindings match the recipient split above.
+- Recipient-selection code confirms each notification type uses its dedicated production variable.
+- DNS MX lookup returns `0 smtp.google.com.`
+
+**Changed paths:** None.
+
+**Commands:** `tsift source-read/search` for recipient configuration and call sites; production `wrangler deployments status` and `versions view`; `dig MX equityfundingsource.com`.
+
+**Confidence:** High for application-generated notifications and the deployed Worker configuration; limited for the Google Workspace mailbox/alias itself because that admin configuration is not available here.
+
+**Escalation:** None. This was a read-only audit; no routing was changed.
+<!-- agent:boundary:fbf73ba7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

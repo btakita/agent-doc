@@ -518,13 +518,34 @@ The architectural split is now explicit:
 The requested job-offers reroute was retried live. The first retry exposed one remaining Codex UI shape: pane `%23` was idle but rendered its empty composer as `› |`, which route misclassified as operator text. Version 0.35.45 recognizes only that exact cursor-placeholder shape as dispatch-ready while preserving protection for populated input. After installation, the identical `route --dispatch-only --plain-trigger` rescued `%23` and successfully sent the job-offers reopen with accepted queued-behind-active-turn proof.
 
 Verification: focused closeout, controller, harness, idle-watch, and JetBrains regressions passed; full `make check` passed on both final code cuts; `git diff --check`, `make install-full`, and `make install` passed; the installed binary reports 0.35.45 and the JetBrains package was installed to all four detected IDEs. Commits `3ae1c6f2d` (0.35.44) and `33913b893` (0.35.45), `main`, and tags `v0.35.44`/`v0.35.45` are pushed. The 0.35.45 Release workflow was queued at the required one-time post-push check; it was not polled.
-<!-- agent:boundary:ad5422fd -->
+
+### Re: Response
+
+Implemented and released the Zed editor extension in agent-doc v0.35.46.
+
+The right boundary is: register agent-doc as a supplemental language server for Zed's existing Markdown language, but reserve agent-doc behavior for documents with a valid, non-empty `agent_doc_session` frontmatter field. Zed selects language servers by language/extension rather than an in-buffer frontmatter predicate, so a separate competing `.md` language would be brittle. In the implemented design, ordinary Markdown is a strict no-op: no controller registration, polling, diagnostics, edits, or agent-doc semantics. Adding or removing the marker switches the mode live.
+
+Delivered:
+
+- `editors/zed`: a Zed extension that launches `agent-doc zed-lsp` for Markdown buffers.
+- `agent-doc-zed-lsp-io`: a focused stdio LSP with full document synchronization and the frontmatter gate.
+- Real-time CRDT transport: local Zed edits publish controller deltas; remote deltas use `workspace/applyEdit`; delivery is acknowledged only after Zed reports the resulting visible buffer through `didChange`.
+- Echo suppression and duplicate apply-edit coalescing.
+- Demand-driven 250 ms polling only while agent-doc documents are attached.
+- PID-scoped, crash-safe editor registration that preserves other editors attached to the same document.
+- CLI, workspace, README, specification, and version-history integration.
+
+Verification passed: focused Zed LSP and multi-editor liveness tests, Zed extension host compilation, framed installed-LSP smoke test, `git diff --check`, and the full `make check` suite (8,258 passed, 241 skipped, including formal models). `make install-full` and `make install` completed successfully; the installed binary reports `agent-doc 0.35.46` and exposes `zed-lsp`.
+
+Release: commit `0e994624a` (`feat(zed): add frontmatter-gated realtime extension`) is pushed to `main`, and tag `v0.35.46` is published.
+
+For local use, in Zed choose **Extensions → Install Dev Extension** and select `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed`.
+<!-- agent:boundary:1b66fe2e -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - Please create a Zed editor plugin/language extension for agent-doc.
-- ~~📌 do [#skillharnessplugin]~~
 - 📌 do [#crdtauth6]
 - 📌 do [#nsfz]
 - 📌 do [#suprestassoc-live]

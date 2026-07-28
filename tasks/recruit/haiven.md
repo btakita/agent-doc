@@ -258,7 +258,15 @@ The draft’s wording can be softened for precision. Instead of saying, “To co
 > “The offer requires external contracting activities to be disclosed to Haiven. To satisfy that requirement and obtain the written approval contemplated by Section 11, I am disclosing the following pre-existing activities.”
 
 That accurately separates the offer’s express disclosure requirement from our recommendation to identify the parties sufficiently for a reliable carve-out. This is contract issue-spotting, not a legal conclusion about the minimum disclosure a court would require.
-<!-- agent:boundary:f53d85d5 -->
+
+### Re: Please let me know where they stated I need to disclose my other parties.
+
+The express requirement is in the offer letter’s **“External Contracting”** paragraph: “Limited external contracting is permissible, provided that such activities do not interfere with your responsibilities at Haiven and are disclosed to the Company.” See [lines 82–83](../professional/haiven/haiven-offer-letter-brian-takita-jul-2026.md#L82-L83).
+
+It requires disclosure of the **activities**, not literally a list of every party by name. Naming the parties is my risk-reduction recommendation because Section 11 of the other agreement says compensation from third-party services goes to Haiven unless its Board unanimously approves otherwise in writing. See [lines 191–195](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L191-L195). A named disclosure makes it much harder to dispute what the approval covers.
+
+Section 4 also prohibits consulting or business activity related to Haiven’s business or conflicting with your obligations, but does not itself establish a disclosure procedure. See [lines 142–147](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L142-L147).
+<!-- agent:boundary:6e04c1b1 -->
 <!-- /agent:exchange -->
 
 ## Queue

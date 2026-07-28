@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.59
+
+_JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **Restarted harnesses now honor the documented 30-second startup deadline (`#nsfz` / `#startupdeadline`).** Live dogfood against a deliberately non-ready Codex child exposed that the fail-closed path and durable `startup_miss` marker were correct but still used the older 60-second constant. The production budget is now pinned to 30 seconds by a regression assertion, and the supervisor diagnostic example matches the executable contract.
+
 ## 0.35.58
 
 _JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._

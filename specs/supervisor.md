@@ -390,7 +390,7 @@ Example:
 [1713041390] [supervisor] restart_eval pane=%12 harness=codex exit_code=129 exit_kind=signal exit_signal="Hangup" exit_status="Terminated by Hangup" auto_trigger_outcome=sent ctrl_d=false state=healthy action=restart_after
 [1713041390] [supervisor] auto_restart delay=2s with_continue=true restart_count=1
 [1713041391] [supervisor] codex_spawn pid=54444 mode=continue
-[1713041421] [supervisor] auto_trigger_timeout pane=%12 harness=codex reason=no_prompt_after_60s
+[1713041421] [supervisor] auto_trigger_timeout pane=%12 harness=codex reason=no_prompt_after_30s
 [1713041425] [supervisor] resume_restart_failed pane=%12 harness=codex outcome=timeout recent_failures=1 window_secs=900 restart_count=1
 [1713041450] [supervisor] supervisor_exit reason=user_quit_clean_exit pane=%12 restart_count=1
 [1713041450] session_end

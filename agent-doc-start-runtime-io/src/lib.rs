@@ -220,7 +220,7 @@ const AUTO_TRIGGER_LIVE_PANE_READY_CONFIRM_TICKS: u32 = 2;
 /// forever. The auto-trigger runs on its own `AutoTriggerMonitor`, not the
 /// Lean-proofed `wait_machine::tick`, so the global `no_hang` theorem is
 /// unaffected.
-const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(60);
+const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(30);
 /// Consecutive idle-over-busy polls the idle-queue watch must observe before it
 /// reconciles a stale-busy actor back to ready (`#stale-busy-after-auto-inject-no-clear`).
 /// At `AUTO_TRIGGER_POLL_INTERVAL` (500ms) this is ~2s of proven idle pane
@@ -3213,7 +3213,7 @@ mod tests {
         );
     }
     #[test]
-    fn auto_trigger_timeout_exceeds_global_hang_ceiling_for_continue_restart() {
+    fn auto_trigger_timeout_pins_30_second_contract_and_exceeds_global_hang_ceiling() {
         // `#contrestartdispatch`: the auto-trigger no-prompt deadline must be
         // longer than the 10s `GLOBAL_HANG_CEILING`. A continue-mode
         // `restart-supervisor` relaunches `claude --continue`, which resumes a
@@ -3224,6 +3224,11 @@ mod tests {
         // operator came up unclaimed (controller stuck at `operator_ready`). Guard
         // that it is generous enough for harness startup yet still bounded (fails
         // closed, never an unbounded hang).
+        assert_eq!(
+            AUTO_TRIGGER_TIMEOUT,
+            Duration::from_secs(30),
+            "#startupdeadline promises operators a hard 30s fail-closed boundary"
+        );
         assert!(
             AUTO_TRIGGER_TIMEOUT > agent_doc_turn::wait_machine::GLOBAL_HANG_CEILING,
             "auto-trigger startup budget {:?} must exceed the 10s responsiveness ceiling so a \

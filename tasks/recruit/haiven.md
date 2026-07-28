@@ -453,7 +453,32 @@ My priority order is:
 If you want the lowest-friction version, you can accept Haiven's actual home-state law and legal seat while retaining items 2–4. The current email already presents that compromise rather than demanding Connecticut.
 
 This is contract issue-spotting, not legal advice; counsel should review the completed Exhibit A and final agreement before signature.
-<!-- agent:boundary:d4ec32ab -->
+
+### Re: Mirrored draft update and August 10 availability — gpt-5
+
+> **Queue prompt:**
+>
+> Updates go to both the md draft + the open brave tab at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp
+
+> “I expect to start later than usual on Monday, August 10, and may miss or join the 10:00 a.m. PT weekly standup and iteration-planning meeting late.” I will miss the meeting entirely. I may even need to take a vacation day.
+>
+> But I plan on making up the hours for the week.
+
+Updated both destinations. The scheduling paragraph now says:
+
+> I will be unavailable for the Monday, August 10, 10:00 a.m. PT weekly standup and iteration-planning meeting and will miss it entirely. I may need to take the full day off and will confirm that as soon as possible. I plan to make up the hours elsewhere during that week, subject to Haiven’s time-off policy. I may also have an occasional conflict with that recurring meeting. When a conflict arises, I will give advance notice when possible, provide written planning notes, and make up the time and planning coordination before or after the meeting.
+
+The prior “may miss or join ... late” wording is removed.
+
+Verification:
+
+- [haiven-offer-revision-email-draft.md](../professional/haiven/haiven-offer-revision-email-draft.md) is updated and committed as `b55fb99bd`.
+- The open threaded Gmail reply is updated and remains unsent.
+- An independent second-tab reload verified the server-backed 9,178-character body, the corrected schedule language, no old “may miss or join” text, intact paragraph breaks, recipients `craig@haiven.gg` and `luke@haiven.gg`, subject **“Re: Haiven Offer Letter,”** and the `Thanks, / Brian` closing.
+- The Send button was not clicked.
+
+The existing `#haiven-paper` review gate still requires completing and attaching the proposed Exhibit A before sending, then obtaining Haiven’s acknowledgement in the final documents.
+<!-- agent:boundary:8fc4cdfd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -462,7 +487,7 @@ This is contract issue-spotting, not legal advice; counsel should review the com
 - My mailing address is PO Box 571, North Grosvenordale, CT 06255. My physical address (if needed) is 1 Park St, #2 - 571, North Grosvenordale, CT 06255.
 - ~~Is "Please use Connecticut law and a Connecticut or remote forum. If arbitration remains, it should proceed remotely under the AAA Employment/Workplace Rules, preserve all statutory remedies and fee-shifting, and require Haiven to pay the arbitration and arbitrator costs other than a filing fee no greater than the fee for filing the same claim in court." something Haiven may contest? If we go to arbitration, I think a virtual hearing is a good idea. Why was AAA suggested?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Please mention that I will be coming in late on Monday Aug 10. The weekly standup/iteration planning is at 10 PT on Mondays. Mention that I may have the occasional conflict for the weekly standup/iteration planning and I can make up the time + planning either before or after the planning. I will also provide notes if I do have a schedule conflict.~~ — auto-struck: answered this cycle (#ftstrike)
-- Updates go to both the md draft + the open brave tab at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp
+- ~~Updates go to both the md draft + the open brave tab at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

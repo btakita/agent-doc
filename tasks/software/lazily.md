@@ -85,20 +85,34 @@ Published lazily-cs commit `c35ca1a` (`feat: add production interop peer`) to `o
 Changed paths are confined to the C# peer project/solution/Makefile/README and the supervisor registry, nine-way scenario, README, CLI test, rollout plans, and lazily-cs submodule pointer. The pre-existing lazily-cs `AGENTS.md` edit, generated `build/` tree, and unrelated untracked supervisor Python artifact were not staged.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:b8766f08 -->
+
+### Re: #lzstdlibbarrier — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzstdlibbarrier]: Should we also add other concurrency "primitives" to the lazily library?
+
+
+Yes, but only where a primitive adds a Lazily-specific reactive or effect-lifecycle guarantee. I added `lazily::stdlib::RevisionBarrier` as that missing bridge: producers publish monotone revisions, waiters require a revision newer than `after_revision` plus a derived predicate, and generation tracking closes the check-to-sleep lost-wakeup window. It accepts the existing stdlib `Timer` as a deadline budget and a barrier-owned cancellation token, and returns typed satisfied, timed-out, cancelled, disposed, or unavailable outcomes.
+
+Keyed side-effect receipts remain application-owned rather than becoming storage or transport policy inside the primitive. Applications update their receipt ledger and call `notify`; the tests demonstrate a keyed receipt satisfying a waiter at the current revision.
+
+I deliberately did not add generic mutexes, semaphores, latches, channels, or task groups. Rust already owns local synchronization, while Lazily already has distributed `LockCell`, `SemaphoreCell`, `BarrierCell`, and `QuorumCell`. The README now records this admission rule for future stdlib additions.
+
+Verification passed: the focused seven-test suite covers already-satisfied state, predicate/revision races and lost wakeups, cancellation, `Timer` deadlines, disposal, foreign cancellation inputs, and keyed receipts; the full `make check` matrix also passed. Published lazily-rs commit: `1aefa60`; superproject pointer commit: `fdc93f4b6`; CI run `30384803931` was queued at the required single inspection.
+<!-- agent:boundary:393ebc19 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lzstdlibbarrier]: Should we also add other concurrency "primitives" to the lazily library?
+- ~~do [#lzstdlibbarrier]: Should we also add other concurrency "primitives" to the lazily library?~~
 - do [#lzstdlibtimeout]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstdlibbarrier] Add a Lazily standard-library RevisionBarrier/effect-receipt abstraction over existing reactive, revision, and synchronization primitives, outside the graph kernel. Wait for after_revision plus a derived predicate using wake-on-change; accept deadline and cancellation inputs; return typed satisfied/timed-out/cancelled/disposed-or-unavailable outcomes; optionally prove keyed side-effect receipts while leaving receipt storage and transport policy outside the primitive. Test lost wakeups, already-satisfied state, revision races, cancellation, deadlines, disposal, and keyed receipts; document using the stdlib Timer as the deadline budget.
 - [ ] [#lzstdlibtimeout] Add a Lazily standard-library Timeout adapter composed from stdlib Timer, outside the graph kernel. Accept a caller-supplied operation/future/wait primitive instead of owning an executor; use a monotone deadline; return typed Completed/TimedOut/Cancelled/Unavailable outcomes; require no mandatory async runtime or hidden thread; expose a deterministic clock/wait seam. Test completion-before-deadline, timeout, cancellation-versus-completion races, zero duration, and repeated terminal reads.
 <!-- /agent:backlog -->
 

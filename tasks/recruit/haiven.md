@@ -5,7 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -533,16 +533,24 @@ I would replace the original document-request paragraph with:
 That acknowledges what Craig sent and asks only for material information that remains missing. I have not changed the markdown or Gmail draft because these prompts asked for judgment rather than directing an edit; under your standing instruction, any approved wording change should be mirrored to both destinations.
 
 This is contract issue-spotting, not legal advice. Counsel should review the final arbitration language, particularly any waiver or fee provision.
-<!-- agent:boundary:23b277ca -->
+
+### Re: Mailing and physical addresses — gpt-5
+
+> My mailing address is PO Box 571, North Grosvenordale, CT 06255. My physical address (if needed) is 1 Park St, #2 - 571, North Grosvenordale, CT 06255.
+
+Confirmed. Use the addresses as follows:
+
+- **Mailing address:** PO Box 571, North Grosvenordale, CT 06255
+- **Physical work address, only when required:** 1 Park St, #2 - 571, North Grosvenordale, CT 06255
+- **General job location:** Remote—Connecticut
+
+The revision email already distinguishes the mailing and physical addresses this way, so no further draft change is needed for this prompt.
+<!-- agent:boundary:b99f60ab -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- My mailing address is PO Box 571, North Grosvenordale, CT 06255. My physical address (if needed) is 1 Park St, #2 - 571, North Grosvenordale, CT 06255.
-- ~~Is "Please use Connecticut law and a Connecticut or remote forum. If arbitration remains, it should proceed remotely under the AAA Employment/Workplace Rules, preserve all statutory remedies and fee-shifting, and require Haiven to pay the arbitration and arbitrator costs other than a filing fee no greater than the fee for filing the same claim in court." something Haiven may contest? If we go to arbitration, I think a virtual hearing is a good idea. Why was AAA suggested?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Please mention that I will be coming in late on Monday Aug 10. The weekly standup/iteration planning is at 10 PT on Mondays. Mention that I may have the occasional conflict for the weekly standup/iteration planning and I can make up the time + planning either before or after the planning. I will also provide notes if I do have a schedule conflict.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Updates go to both the md draft + the open brave tab at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

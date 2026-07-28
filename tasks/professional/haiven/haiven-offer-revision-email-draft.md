@@ -2,14 +2,14 @@
 
 ## Before sending
 
-Replace each bracketed placeholder with:
+This version intentionally does not volunteer hours, task-switching practices,
+or use of a separate physical computer. The offer requires disclosure of the
+outside activities, not those operational details. It also avoids saying that
+the activities occur entirely outside Haiven time.
 
-- the exact legal entity name from the applicable agreement;
-- the registered entity name for MonsterRodHolders.com and Equity Funding Source, if applicable.
-
-Attach a completed prior-inventions schedule (Exhibit A) or state when it will
-be provided. Do not say the outside activities occur entirely outside Haiven
-time or cannot interfere unless that separation can be maintained in practice.
+Before sending, confirm Luke's recipient address rather than inferring it from
+Haiven's domain. Attach a completed prior-inventions schedule (Exhibit A), or
+state when it will be provided.
 
 ---
 
@@ -51,18 +51,19 @@ plan and proposed stock-option agreement before I sign.
 
 ## 2. Formal disclosure and approval of existing outside engagements
 
-To comply with the offer’s disclosure requirement, I am formally disclosing
-the following pre-existing activities:
+The offer requires external contracting activities to be disclosed to Haiven.
+To satisfy that requirement and obtain the written approval contemplated by
+Section 11, I am disclosing these pre-existing activities:
 
-- **Apollo Solutions [exact contracting entity]:** My contract/freelance
-counterparty for a technology engagement in which Acadian Financial Services
-is the current end client. I do not contract directly with Acadian.
-- **MonsterRodHolders.com [exact legal entity, if any]:** My pre-existing
-independently owned business/activity and its associated website, products,
-software, content, operations, compensation, and intellectual property.
-- **Equity Funding Source [exact legal entity]:** My pre-existing independent
-business/engagement and its associated website, software, content,
-operations, compensation, and intellectual property.
+- **Apollo Solutions:** My existing contracting counterparty for a technology
+engagement in which Acadian Financial Services is the current end client. I do
+not contract directly with Acadian.
+- **MonsterRodHolders.com:** My pre-existing independently owned business and
+its associated website, products, software, content, operations, compensation,
+and intellectual property.
+- **Equity Funding Source:** My pre-existing independent engagement and its
+associated website, software, content, operations, compensation, and
+intellectual property.
 
 These activities will not materially interfere with my Haiven duties. I will
 keep Haiven and third-party confidential information, accounts, repositories,
@@ -166,6 +167,5 @@ receive the revised documents or countersigned addendum.
 
 I’m looking forward to working together.
 
-Best,
-
+Thanks,
 Brian

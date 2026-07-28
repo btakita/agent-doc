@@ -781,7 +781,34 @@ The live verification response and `#jbtsiftnosub2verify` completion are durable
 **Confidence:** High.
 
 **Escalation:** None.
-<!-- agent:boundary:e0368c2c -->
+
+### Re: do [#compactreactiveprojectionverify] — gpt-5.6-sol
+
+Gated — the fresh-restart live verification failed on the newer compatible generation (JetBrains plugin 0.2.305, superseding the requested 0.2.300; native library 0.35.52).
+
+**Live result:** I saved all buffers, cleanly restarted IntelliJ IDEA 2026.1, confirmed plugin 0.2.305 and `libagent_doc` 0.35.52 loaded, then typed one reversible 305-event burst into the 108,555-byte `agent-doc-bugs2.md`. IDEA accepted the xdotool burst in 1.25 seconds and initially answered the active-window probe immediately, but the plugin did not compact the operation stream:
+
+- `ops.log`: `editor_ops_recorded count=305 ... transaction=batch`.
+- IDEA log: nine observed `native.applyLocal file=agent-doc-bugs2.md ... insert_chars=1` calls at sequential offsets from 108294 onward, arriving roughly every 10–16 seconds over about 67 seconds.
+- Controller projection repeatedly remained `delivery_converged=false` while canonical length advanced one character at a time.
+- Post-baseline marker counts: `coalesced_exact_editor_adopt_after_quiet=0`; `exact_editor_adopt_then_atomic_reregister=0`. The old atomic-reregister churn did not recur, but it has been replaced by an equally invalid per-character native drain with no quiet coalescing.
+
+This disproves the responsiveness/coalescing predicate, so `#compactreactiveprojectionverify` must not be marked done. I gated it on implementation and filed `#compactreactiveprojectionlivefail` with the exact regression evidence and required deterministic test/re-proof.
+
+**Bounded wedge proof:** the same IDEA log contains a natural `native call exceeded 10000ms; disabled the wedged generation to keep the IDE responsive` event at 03:17:25, followed by no further native-generation work until the 03:21 restart and fresh load. The bounded-timeout/fail-closed half therefore has real evidence; the typing/coalescing half fails.
+
+**Cleanup:** stopped the failed fresh IDE generation to halt its queued per-character worker, restored only this session document from its proven pre-burst committed blob, and ran targeted agent-doc repair. The file is byte-for-byte back at baseline SHA-256 `d74e661c32bf39a83f2b7777195f4d900c6ed6af699ee65a0ec30b46bfba21b2`; `git status` shows no residual document edit.
+
+**Changed paths:** No product-source changes; agent-doc backlog/status mutations only.
+
+**Commands:** plugin/log inspection; focus-guarded `xdotool`; graceful IDEA TERM/relaunch; bounded marker counts; `sha256sum`; exact single-file `git restore --source=HEAD`; targeted `agent-doc repair`.
+
+**Verification:** Failed as described; cleanup hash and repository status passed.
+
+**Confidence:** High.
+
+**Escalation:** Implementation fix required in `#compactreactiveprojectionlivefail` before repeating this operator proof.
+<!-- agent:boundary:33cdeb9e -->
 <!-- /agent:exchange -->
 ## Queue
 

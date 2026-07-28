@@ -601,12 +601,27 @@ The live CRDT proof and its v0.35.47 repairs were already completed and committe
 - **Verification:** the prior committed response contains the IntelliJ round-trip proof, exact VS Code controller/canonical hash proof, regression coverage, full 8,258-test `make check`, install, commit, push, and tag evidence. This cycle confirms those delivery facts remain current and closes only the stale document state.
 - **Confidence:** high.
 - **Escalation:** none.
-<!-- agent:boundary:2955ad09 -->
+
+### Re: #nsfz — gpt-5
+
+Implemented and live-dogfooded the startup-deadline fail-closed path. The first real unauthenticated Codex run exposed a contributing bug: Codex's first-run sign-in selector was being mistaken for a dispatch-ready composer, so agent-doc could advance the login UI instead of timing out. Codex authentication selector, browser-wait, and device-code screens are now explicit dispatch blockers; an actual prompt appearing after authentication scrollback is still accepted.
+
+A clean isolated unauthenticated Codex restart stayed `prompt_ready=false`, never received the agent-doc trigger, and recorded `startup_miss` with `reason=no_prompt` at the configured 60-second deadline. The stderr contract is `session did not become dispatch-ready in 60s (no_prompt) ... failing closed instead of hanging`. The backlog's original 30-second example is stale: later cold-resume work deliberately increased the bounded readiness budget to 60 seconds, while preserving the required bounded fail-closed behavior.
+
+Changed paths: `agent-doc-harness/src/lib.rs`, `specs/07-session-tmux-commands.md`, `VERSIONS.md`, and the workspace version manifests/lockfile for 0.35.48. Added three regression tests covering the sign-in selector, browser-auth wait, and a genuine prompt after auth scrollback.
+
+Verification: `cargo test -p agent-doc-harness codex_auth`, full `cargo test -p agent-doc-harness`, `cargo build --bin agent-doc`, live tmux/Codex dogfood, `make check`, and `git diff --check` all passed. The single required CI snapshot was in progress. `make install-full` and `make install` succeeded; `/home/brian/.cargo/bin/agent-doc --version` reports 0.35.48.
+
+Released as commit `b111e4179` (`fix(harness): block Codex auth screens from dispatch`) and tag `v0.35.48`; both are pushed. The superproject pointer was recorded locally in `cbb56d355`. The generated untracked `editors/zed/extension.wasm` was intentionally excluded.
+
+Zed extension full path: `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:ea6d27f5 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~📌 do [#crdtauth6]~~
 - 📌 do [#nsfz]
 - 📌 do [#suprestassoc-live]
 - 📌 do [#jbedtledgerverify]

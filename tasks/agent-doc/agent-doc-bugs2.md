@@ -633,13 +633,26 @@ Completed `#suprestassoc-live`.
 - `agent-doc-bugs2.md` independently remained bound to session `b26b9957-8de6-4eae-bb98-5d7fe4d6b781`, pane `%35`, window `@33`, generation 1822.
 
 The actor/admin projection did not re-associate EFS with the bugs2 pane or session.
-<!-- agent:boundary:c40bcbab -->
+
+### Re: `#suprestassoc-live` — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> 📌 do [#suprestassoc-live]
+
+
+Live verification passed. Before restarting the EFS supervisor, `equityfundingsource.md` was bound to session `62fe1f41-886c-4f3d-b6fa-48d46106ec27`, pane `%44`, window `@33`, generation `1574`; `agent-doc-bugs2.md` was independently bound to session `b26b9957-8de6-4eae-bb98-5d7fe4d6b781`, pane `%35`, window `@33`, generation `1822`.
+
+`agent-doc session restart-supervisor tasks/professional/equityfundingsource.md` produced replacement receipt `43`. The EFS child process changed and its restart count advanced, while its session, pane, window, and actor generation remained exactly `62fe1f41-886c-4f3d-b6fa-48d46106ec27` / `%44` / `@33` / `1574`. The bugs2 actor independently remained `b26b9957-8de6-4eae-bb98-5d7fe4d6b781` / `%35` / `@33` / `1822`.
+
+The actor/admin projection therefore preserved document ownership through the live supervisor replacement; EFS did not re-associate to the bugs2 pane or session.
+<!-- agent:boundary:650e4a65 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~📌 do [#nsfz]~~
-- 📌 do [#suprestassoc-live]
+- ~~📌 do [#suprestassoc-live]~~
 - 📌 do [#jbedtledgerverify]
 - 📌 do [#0dsr]
 - 📌 do [#30p6]
@@ -679,7 +692,6 @@ The actor/admin projection did not re-associate EFS with the bugs2 pane or sessi
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
-- [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
 <!-- /agent:backlog -->
 
 ## Review

@@ -466,7 +466,33 @@ The original item was stale: it said production predated the hibernation change,
 **Escalation:** None. Redeploying the same already-live fix would add risk without changing production.
 
 **Commit:** No EFS source commit was needed; this cycle only closes the stale session-document verification item.
-<!-- agent:boundary:0b88b393 -->
+
+### Re: Automated EFS email subdomain — gpt-5
+
+> **Queue prompt:** `reply@efs.briantakita.me` must not be used. The Equity Funding Source automated-email subdomain must be used.
+
+Agreed. Use **`reply@efs.equityfundingsource.com`** as the canonical automated-mail identity. Do not use `reply@reply.equityfundingsource.com`—the repeated `reply` adds no useful separation—and remove `reply@efs.briantakita.me` entirely from EFS production configuration.
+
+The intended boundary is:
+
+- Automated application mail From/Reply-To: `Equity Funding Source <reply@efs.equityfundingsource.com>`
+- Automated sending and inbound-reply domain: `efs.equityfundingsource.com`, owned by Cloudflare Email Service
+- Human mailboxes such as `info@equityfundingsource.com` and `contact@equityfundingsource.com`: remain on the apex domain and Google Workspace
+
+This keeps system mail visibly and operationally separate from Workspace without the awkward `reply@reply…` form. Cloudflare supports onboarding a subdomain as a separate Email Sending domain and independently enabling Email Routing on that subdomain, so the apex Google MX configuration can remain untouched. See [Cloudflare: Email Service subdomains](https://developers.cloudflare.com/email-service/configuration/subdomains/) and [send-binding sender restrictions](https://developers.cloudflare.com/email-service/configuration/send-bindings/).
+
+I added `#efs-email-subdomain` as the implementation item: onboard the subdomain, update every sender/Reply-To and Worker allowlist, add tests, deploy, and verify login, invite, notification, and reply flows end-to-end.
+
+**Changed paths:** None; this cycle records the naming/ownership decision and implementation contract.
+
+**Commands:** Current EFS sender/reply configuration inspection plus current official Cloudflare Email Service documentation review.
+
+**Verification:** Cloudflare documents that Email Sending treats each subdomain as a separate sending domain and that Email Routing can be enabled for the subdomain independently; the Worker binding can restrict sending to the new canonical address.
+
+**Confidence:** High.
+
+**Escalation:** Implementation requires Cloudflare Email Service onboarding for `efs.equityfundingsource.com` before production can send from the new address.
+<!-- agent:boundary:8b9b8a02 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
@@ -474,7 +500,7 @@ The original item was stale: it said production predated the hibernation change,
 - do [#tmo-sandbox-purge-apply]
 - do [#efs-prod-route-token]
 - ~~efs@equityfundingsource.com does not exist. All outbound emails should use reply@efs.equityfundingsource.com. Should we use reply@reply.equityfundingsource.com instead or something different? These automated emails need to be distinct from Google Workspaces.~~ — auto-struck: answered this cycle (#ftstrike)
-- `reply@efs.briantakita.me` must not be used. The equityfundingsource automated email subdomain must be used.
+- `reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.
 <!-- /agent:queue -->
 
 ## Backlog

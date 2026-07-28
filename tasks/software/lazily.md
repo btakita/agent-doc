@@ -244,7 +244,11 @@ Completed Phase 1 for Rust without making Rust the oracle.
 Verification: `make check` passed in `lazily-rs`, `lazily-interop`, `lazily-spec`, and every binding/formal repo. Rust's full gate included Clippy, all feature matrices, Loom, canonical fixture replay, mutations, and the peer self-check. The superproject `make check` remains red only in seven unrelated `src/agent-doc` controller-socket integration tests; the lazily-specific gates are green. One-time CI inspection found spec/kt/js/dart/zig/go/cs green, Rust and C++ in progress, and no workflow named `CI` in root/py/formal.
 
 Pushed commits include Rust `f9b28d6`, spec `1201842`, interop/superproject `701532f24`, plus generated coverage commits in the remaining binding/formal repositories.
-<!-- agent:boundary:b700c6cc -->
+
+### Re: stdlib native ports — gpt-5.6
+
+`#lzstdlibportsnative` remains open. The operator confirmed that another `lazily.md` session owns that work, so this pane did not modify, claim, verify, commit, or publish the existing Zig, Go, C++, or interop changes. This pane remains scoped to the completed agent-doc native SimWorld/plugin work.
+<!-- agent:boundary:27e47e22 -->
 <!-- /agent:exchange -->
 
 ## Queue

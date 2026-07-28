@@ -126,7 +126,14 @@ The answer can differ if you travel to Massachusetts, maintain a business locati
 Still insist on the fully diluted 1% in signed writing with the exact option count, denominator, measurement date, Board-approval deadline, and vesting commencement date. Still fix the pre-cliff vesting language, Section 11, Exhibit A/IP scope, the noncompete paragraph, signing-bonus definitions, arbitration costs, and the missing stock-plan documents.
 
 For counsel, the best fit is now a **Connecticut employment/startup lawyer comfortable with multistate remote work**, with the Acadian agreement included in the review. The most urgent practical request to Haiven is: correct the work location to Connecticut, confirm CT payroll compliance, and countersign the Acadian carve-out alongside the fully diluted equity confirmation.
-<!-- agent:boundary:18f5eefa -->
+❯ Please draft an email clearing explaining what needs to be changed and why. Disclose my other contracts (Acadian Financial Services, monsterrodholders.com, Equity Funding Source) to be in compliance with the contract.
+
+### Re: Response
+
+The `agent-doc` cycle cannot start because the prior committed projection is still awaiting JetBrains delivery acknowledgment. Your new email-drafting prompt is detected and preserved.
+
+Please reload or close/reopen `haiven.md` in JetBrains, then invoke the same `agent-doc` command again. No replacement or forced write was attempted.
+<!-- agent:boundary:40f35837 -->
 <!-- /agent:exchange -->
 
 ## Queue

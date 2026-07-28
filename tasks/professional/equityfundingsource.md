@@ -431,6 +431,11 @@ I also checked public mail routing: `equityfundingsource.com` currently uses Goo
 **Escalation:** None. This was a read-only audit; no routing was changed.
 ### Re: `efs@equityfundingsource.com` — gpt-5
 
+> **Queue prompt:**
+>
+> do [#explainefsequityfundings]
+
+
 > **Queue prompt:** Please explain what `efs@equityfundingsource.com` is. Judith is asking. Was this email set up by the system for automated emails?
 
 Yes—with one important distinction. `efs@equityfundingsource.com` is configured as the EFS website’s **automated outbound sender address**. Production authorizes it on Cloudflare’s Send Email binding and uses it as the From address for system-generated messages, including login/admin links, invitations, password resets, application and contact workflows, secure-message notifications, lending-group notifications, and other portal mail.
@@ -459,11 +464,10 @@ Document correction: the malformed command text in the preceding response should
 The response is durably retained but not yet committed because the live editor has no registered replica. Please refresh/reopen the agent-doc editor integration; the same capture should resume automatically without resubmission.
 
 Preflight also warned that the local `agent-doc` install is stale relative to source and recommends `make install` in `src/agent-doc`.
-<!-- agent:boundary:5242241d -->
+<!-- agent:boundary:47275fe9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
-- Please explain what efs@equityfundingsource.com is? Judith is asking. Was this email setup by the system for automated emails?
 <!-- /agent:queue -->
 
 ## Backlog

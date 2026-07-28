@@ -54,6 +54,18 @@ pub struct IpcResult {
     pub skipped_committed_cycle: bool,
 }
 
+/// Truthful outcome of a post-commit editor-boundary delivery attempt.
+///
+/// `RetainedForRetry` is intentionally distinct from `Delivered`: refining an
+/// already-retained reconnect target preserves the future delivery obligation;
+/// it does not prove that any live editor has consumed the target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundaryRepositionAttempt {
+    Delivered,
+    RetainedForRetry,
+    Unavailable,
+}
+
 /// Return `true` when every non-empty incoming response patch body is already
 /// present in the document's `HEAD` content.
 ///
@@ -221,10 +233,10 @@ pub fn build_ipc_patches_json(
 /// CRDT path must also materialize the acknowledged canonical target to disk;
 /// otherwise Git/editor can commit the new singleton boundary while the
 /// working tree retains the superseded placement.
-pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
+pub fn try_ipc_reposition_boundary(file: &Path) -> BoundaryRepositionAttempt {
     let canonical = match file.canonicalize() {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(_) => return BoundaryRepositionAttempt::Unavailable,
     };
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
@@ -257,7 +269,8 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             // transient projection. Retaining `(HEAD)` here would reintroduce a
             // stale working-tree diff when the JetBrains replica reconnects.
             let target = agent_doc_document::transient_markers::strip_head_markers(&target);
-            let (transport, result) = if pending.source.is_force_disk() {
+            let force_disk_projection = pending.source.is_force_disk();
+            let (transport, result) = if force_disk_projection {
                 (
                     "force_disk_projection",
                     agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(
@@ -276,6 +289,11 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
                             agent_doc_document_realtime_io::DocumentWriteDeferredReason::ExtendPendingEditorReconnectTarget,
                     ),
                 )
+            };
+            let delivery = if force_disk_projection && result.is_ok() {
+                BoundaryRepositionAttempt::Delivered
+            } else {
+                BoundaryRepositionAttempt::RetainedForRetry
             };
             match result {
                 Ok(intent_id) => {
@@ -304,7 +322,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
                     );
                 }
             }
-            return true;
+            return delivery;
         }
         match agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
             file,
@@ -322,7 +340,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
                     ),
                 );
                 eprintln!("[commit] CRDT boundary refresh materialized");
-                return true;
+                return BoundaryRepositionAttempt::Delivered;
             }
             Err(err) => {
                 eprintln!(
@@ -337,10 +355,10 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             .ok()
             .flatten()
     else {
-        return false;
+        return BoundaryRepositionAttempt::Unavailable;
     };
     if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid) {
-        return false;
+        return BoundaryRepositionAttempt::Unavailable;
     }
 
     let result = if normalize_prefix_lines.is_empty() {
@@ -403,11 +421,11 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
                     normalize_prefix_lines.len()
                 );
             }
-            true
+            BoundaryRepositionAttempt::Delivered
         }
         Ok(false) => {
             eprintln!("[commit] IPC reposition: no receipt (non-fatal)");
-            false
+            BoundaryRepositionAttempt::Unavailable
         }
         Err(e) => {
             eprintln!("[commit] IPC reposition failed (non-fatal): {}", e);
@@ -418,7 +436,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
                             "[commit] IPC listener degraded for {} after repeated reposition receipt timeouts",
                             file.display()
                         );
-                        return false;
+                        return BoundaryRepositionAttempt::Unavailable;
                     }
                     Ok(false) => {}
                     Err(record_err) => eprintln!(
@@ -427,7 +445,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
                     ),
                 }
             }
-            false
+            BoundaryRepositionAttempt::Unavailable
         }
     }
 }
@@ -739,7 +757,10 @@ mod tests {
 
         let target = post_commit_reposition_target(working, Some("committed-id"), &[])
             .expect("boundary before the response must move to the exchange tail");
-        assert!(try_ipc_reposition_boundary(&doc));
+        assert_eq!(
+            try_ipc_reposition_boundary(&doc),
+            BoundaryRepositionAttempt::Delivered,
+        );
 
         assert_eq!(fs::read_to_string(&doc).unwrap(), target);
         assert_eq!(

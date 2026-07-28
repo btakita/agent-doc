@@ -1916,7 +1916,10 @@ fn discard_pending_capture_for_manual_repair(
     effects.apply_closeout_recovery_mutation(
         file,
         agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
-            content: Some(current_doc),
+            projection:
+                agent_doc_flow_io::closeout::RetiredCaptureProjection::RefreshFromContent(
+                    current_doc,
+                ),
             clear_pending_response: true,
             clear_undo_content: true,
             mark_cycle_committed_event: Some("repair_respect_manual_exchange_tail_removal"),
@@ -2039,7 +2042,8 @@ pub fn retire_stale_capture_if_drifted(
             effects.apply_closeout_recovery_mutation(
                 file,
                 agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
-                    content: None,
+                    projection:
+                        agent_doc_flow_io::closeout::RetiredCaptureProjection::ResolveContentOnDemand,
                     clear_pending_response: true,
                     clear_undo_content: true,
                     mark_cycle_committed_event: None,

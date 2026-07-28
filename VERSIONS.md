@@ -4,6 +4,15 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.64
+
+_JetBrains plugin 0.2.307; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **Retained editor deliveries now have one typed, terminal closeout gate across preflight, finalize, and session-check.** The runtime rejects a genuinely new finalize response before capture/admission when a historical effect remains, allows only a retry whose captured response is present in the retained target, retries controller settlement without force-disk replacement, and prevents session-check from reporting success while the same gate would reject the next cycle.
+- **Visible-delivery receipts distinguish editor delivery from a target merely retained for retry.** Post-commit boundary repositioning no longer reports a refined retained intent as delivered, compact waits behind unacknowledged delivery, and a reliable editor owner with zero live replicas retains the merged canonical target without crossing a zero-recipient CRDT write.
+- **Superseded captured-only recovery reaches a fixed point in one bounded metadata pass.** The recovery classifier drains the finite unambiguous stale prefix, rejects repeated identities or an excessive stack, resolves editor-visible content once, and refreshes recovery projections once after the batch instead of churning snapshot/CRDT state for every rejected historical finalize.
+- **Closed-set workflow provenance is typed at development call sites.** Retained-write cycle boundaries and captured-finalize native-save sources are enums; architecture tests forbid the former free-text siblings and require the historical-effect guard to precede the response write/capture boundary.
+
 ## 0.35.63
 
 _JetBrains plugin 0.2.307; VS Code extension 0.2.59; Zed extension 0.1.0._

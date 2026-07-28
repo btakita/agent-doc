@@ -818,7 +818,54 @@ mod tests {
     }
 
     #[test]
-fn observed_recovery_evidence_loads_from_projection_without_capture_sidecar() {
+    fn closeout_recovery_drains_superseded_capture_stack_in_one_pass() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier — gpt-5\n\nOlder.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        for attempt in 0..4 {
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+            agent_doc_capture_io::capture_response(
+                &doc,
+                &format!("### Re: repeated prompt — gpt-5\n\nRejected capture {attempt}.\n"),
+            )
+            .unwrap();
+        }
+        let visible = base.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: repeated prompt — gpt-5\n\nA later answer already landed.\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, &visible).unwrap();
+
+        let recovery = apply_closeout_recovery(&doc).unwrap();
+        match recovery {
+            RecoveryApplication::Applied { action, .. } => {
+                assert!(action.contains("in one metadata-only pass"), "{action}");
+            }
+            other => panic!("expected fixed-point stale-capture recovery, got {other:?}"),
+        }
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            visible,
+            "stale-capture drainage must not rewrite visible document content",
+        );
+        let second = apply_closeout_recovery(&doc).unwrap();
+        assert!(
+            !matches!(
+                second,
+                RecoveryApplication::Applied { ref action, .. }
+                    if action.contains("superseded captured-only")
+            ),
+            "one recovery invocation must leave no second stale-capture retirement pass: {second:?}",
+        );
+    }
+
+    #[test]
+    fn observed_recovery_evidence_loads_from_projection_without_capture_sidecar() {
         let base = concat!(
             "---\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -858,35 +905,35 @@ fn observed_recovery_evidence_loads_from_projection_without_capture_sidecar() {
                 assert!(proof.contains("repeated prompt"));
             }
             other => panic!("expected projected supersession proof, got {other:?}"),
+        }
     }
-}
 
-#[test]
-fn observed_recovery_evidence_ignores_stale_snapshot_when_visible_hash_matches() {
-    let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
-    let (_dir, doc) = setup_git_project_with_doc(base);
-    agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+    #[test]
+    fn observed_recovery_evidence_ignores_stale_snapshot_when_visible_hash_matches() {
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
 
-    let recorded = observe_closeout_recovery_evidence(&doc).unwrap();
-    agent_doc_snapshot_io::checkpoint_document_baseline(
-        &doc,
-        "obsolete snapshot sidecar baseline",
-        agent_doc_ops_log_io::log_op,
-    )
-    .unwrap();
+        let recorded = observe_closeout_recovery_evidence(&doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            "obsolete snapshot sidecar baseline",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
-    let loaded = load_current_observed_closeout_recovery_evidence(&doc)
-        .unwrap()
-        .expect("snapshot sidecar drift must not veto current typed recovery evidence");
-    assert_eq!(loaded.visible_markdown_hash, recorded.visible_markdown_hash);
-    assert_eq!(
-        loaded.snapshot_hash, recorded.snapshot_hash,
-        "the typed observation retains its recorded snapshot as advisory evidence"
-    );
-}
+        let loaded = load_current_observed_closeout_recovery_evidence(&doc)
+            .unwrap()
+            .expect("snapshot sidecar drift must not veto current typed recovery evidence");
+        assert_eq!(loaded.visible_markdown_hash, recorded.visible_markdown_hash);
+        assert_eq!(
+            loaded.snapshot_hash, recorded.snapshot_hash,
+            "the typed observation retains its recorded snapshot as advisory evidence"
+        );
+    }
 
-#[test]
-fn classify_recovery_missing_response_body_uses_observed_projection_without_capture_sidecar() {
+    #[test]
+    fn classify_recovery_missing_response_body_uses_observed_projection_without_capture_sidecar() {
         let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
         let response = "### Re: hello — gpt-5\n\nCaptured but never committed.\n";
         let (_dir, doc) = setup_git_project_with_doc(base);

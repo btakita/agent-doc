@@ -133,6 +133,22 @@ pub trait SessionCheckEffects {
         event: &str,
     ) -> Result<Option<&'static str>>;
     fn resume_captured_finalize(&self, file: &Path) -> Result<CapturedFinalizeResumeOutcome>;
+    /// Resume a durable document-write effect after terminal authority/disk
+    /// convergence has made its semantic replay safe.
+    ///
+    /// The default keeps pure/read-only fixtures inert. Production closeout
+    /// effects override this with the same recovery transition preflight uses.
+    fn recover_retained_document_write(&self, _file: &Path) -> Result<bool> {
+        Ok(false)
+    }
+    /// Shared derived gate consumed by both preflight and session-check.
+    ///
+    /// Returning `true` must prevent a clean closeout report: otherwise
+    /// preflight can refuse a new cycle immediately after session-check says
+    /// the prior one is clean.
+    fn retained_document_write_blocks(&self, _file: &Path) -> bool {
+        false
+    }
 }
 
 /// CLI entry: check the end-of-cycle write invariant for `file`.
@@ -511,6 +527,29 @@ fn run_with_options_inner(
     if stale_projection_healed {
         crate::invalidate_current_document_pass(file);
     }
+    // Terminal convergence can turn an `AwaitConvergence` retained write into
+    // a causally replayable `ReplayStranded` transition. Session-check owns the
+    // same recovery as preflight so it cannot report "ok" while the very next
+    // preflight refuses the unchanged retained effect.
+    let retained_write_recovered =
+        crate::profile::timed("recover_retained_document_write", || {
+            effects.recover_retained_document_write(file)
+        })?;
+    if retained_write_recovered {
+        crate::invalidate_current_document_pass(file);
+        let recovered_authority = crate::resolve_current_document_content(
+            file,
+            "session_check_retained_write_recovered",
+        )?;
+        let recovered_disk =
+            crate::resolve_disk_document_content(file, "session_check_retained_write_recovered")?;
+        ensure_terminal_authority_disk_convergence(
+            file,
+            &recovered_authority,
+            &recovered_disk,
+            effects,
+        )?;
+    }
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
     // markers. Never gates closeout — emitted regardless of the check outcome.
@@ -851,6 +890,11 @@ fn inspect_with_warnings_inner(
         status: inspect_core(file, effects)?,
         warnings: Vec::new(),
     };
+    report.status = retained_write_gate_status(
+        report.status,
+        effects.retained_document_write_blocks(file),
+        file,
+    );
     if matches!(report.status, SessionCheckStatus::Ok(_)) {
         // Build one CycleContext for the guard sweep and seed it with the resolved
         // CurrentDocument. Guards that need content, frontmatter, or components
@@ -1086,6 +1130,22 @@ fn inspect_with_warnings_inner(
     Ok(report)
 }
 
+fn retained_write_gate_status(
+    status: SessionCheckStatus,
+    retained_write_blocks: bool,
+    file: &Path,
+) -> SessionCheckStatus {
+    if retained_write_blocks && matches!(status, SessionCheckStatus::Ok(_)) {
+        SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: retained document-write delivery remains unsettled for {}; automatic controller reconciliation remains scheduled. Refusing a false clean closeout because preflight would block the same effect. Run only `agent-doc session-check {}` after recovery settles; do not resubmit finalize/write, force disk, or replace the queued edit.",
+            file.display(),
+            file.display(),
+        ))
+    } else {
+        status
+    }
+}
+
 ///
 /// Kept out of the read-only `inspect*` path on purpose: only the mutating
 /// command entrypoints (`enforce_clean_closeout` on the finalize boundary,
@@ -1210,6 +1270,9 @@ fn enforce_clean_closeout_inner(file: &Path, effects: &impl SessionCheckEffects)
         eprintln!("[session-check] WARNING: {message}");
     }
     self_heal_late_ipc_overapplication(file, effects)?;
+    if effects.recover_retained_document_write(file)? {
+        crate::invalidate_current_document_pass(file);
+    }
     let report = inspect_with_warnings(file, effects)?;
     for warning in report.warnings {
         eprintln!("{}", warning);
@@ -2034,6 +2097,35 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
 mod terminal_convergence_tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn retained_write_gate_never_preserves_false_ok_status() {
+        let file = Path::new("/tmp/retained-session.md");
+        let gated = retained_write_gate_status(
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+            true,
+            file,
+        );
+        match gated {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("retained document-write delivery remains unsettled"));
+                assert!(message.contains("preflight would block the same effect"));
+                assert!(!message.contains("reload"));
+            }
+            SessionCheckStatus::Ok(message) => {
+                panic!("retained write incorrectly preserved clean status: {message}")
+            }
+        }
+    }
+
+    #[test]
+    fn retained_write_gate_preserves_existing_interruption() {
+        let existing = SessionCheckStatus::Interrupted("existing interruption".to_string());
+        assert_eq!(
+            retained_write_gate_status(existing.clone(), true, Path::new("/tmp/doc.md")),
+            existing,
+        );
+    }
 
     struct TestEffects;
 

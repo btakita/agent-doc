@@ -79,7 +79,7 @@ where
     fn recover_retained_document_write(&self, file: &Path) -> Result<bool> {
         agent_doc_document_realtime_io::recover_retained_document_write_before_new_cycle(
             file,
-            "preflight_retained_write_recovery",
+            agent_doc_document_realtime_io::RetainedWriteCycleBoundary::Preflight,
         )
     }
 
@@ -100,7 +100,7 @@ where
         // no companion call for a third consumer to omit.
         agent_doc_document_realtime_io::retained_write_blocks_new_cycle(
             file,
-            "preflight_retained_document_write_gate",
+            agent_doc_document_realtime_io::RetainedWriteCycleBoundary::Preflight.gate_source(),
         )
     }
 

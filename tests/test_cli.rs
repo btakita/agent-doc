@@ -31708,3 +31708,73 @@ fn test_transfer_items_supports_icebox_component() {
         "unmatched icebox item should stay in source:\n{target_after}"
     );
 }
+
+#[test]
+fn retained_write_boundary_flags_are_typed_at_development_call_sites() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
+    let preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
+    let session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-closeout-runtime-io/src/lib.rs")).unwrap();
+    let finalize =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
+
+    assert!(
+        realtime.contains("pub enum RetainedWriteCycleBoundary")
+            && realtime.contains("FinalizePreCapture")
+            && realtime.contains("pub const fn recovery_source")
+            && realtime.contains("pub const fn gate_source"),
+        "closed-set retained-write transition flags must be owned by one Rust enum",
+    );
+    assert!(
+        realtime.contains("enum ZeroReplicaRepairSource")
+            && realtime.contains("ZeroReplicaRepairSource::RetainedIntentValidation.as_str()")
+            && realtime.contains("ZeroReplicaRepairSource::CanonicalProjection.as_str()")
+            && realtime.contains("ZeroReplicaRepairSource::ReconnectLineage.as_str()")
+            && realtime
+                .matches("\"zero_replica_repair_retained_intent\"")
+                .count()
+                == 1
+            && realtime
+                .matches("\"repair_force_disk_canonical_projection\"")
+                .count()
+                == 1
+            && realtime.matches("\"repair_force_disk\"").count() == 1,
+        "zero-replica repair stage flags must be enum variants outside their string boundary",
+    );
+    assert!(
+        preflight.contains("RetainedWriteCycleBoundary::Preflight")
+            && !preflight.contains("\"preflight_retained_write_recovery\"")
+            && session_check.contains("RetainedWriteCycleBoundary::SessionCheck")
+            && !session_check.contains("\"session_check_retained_write_recovery\"")
+            && finalize.contains("RetainedWriteCycleBoundary::FinalizePreCapture")
+            && !finalize.contains("\"finalize_pre_capture_retained_write_recovery\""),
+        "development/runtime call sites must pass typed variants, not free-text transition flags",
+    );
+    assert!(
+        session_check.contains("enum CapturedFinalizeSource")
+            && session_check
+                .contains("CapturedFinalizeSource::NativeSaveWithoutRetainedIntent")
+            && !session_check.contains(
+                "settle_acknowledged_captured_projection_through_authority(\n                file,\n                \"session_check_capture_without_retained_intent_native_save\"",
+            ),
+        "captured-finalize native-save siblings must remain typed at call sites",
+    );
+
+    let run_start = finalize
+        .find("fn run_command_inner(")
+        .expect("finalize runtime entrypoint");
+    let run_body = &finalize[run_start..];
+    let guard = run_body
+        .find("guard_historical_retained_write_before_new_capture(file, commit_mode)?;")
+        .expect("historical retained-write guard");
+    let capture_boundary = run_body
+        .find("let write_result = if options.is_ipc")
+        .expect("response capture/write boundary");
+    assert!(
+        guard < capture_boundary,
+        "historical retained effects must reject before response capture/admission",
+    );
+}

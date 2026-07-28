@@ -379,13 +379,17 @@ impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
         _committed_boundary_id: Option<&str>,
         _normalize_prefix_lines: &[String],
     ) -> Result<agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery> {
-        Ok(
-            if agent_doc_write_ipc_io::try_ipc_reposition_boundary(file) {
+        Ok(match agent_doc_write_ipc_io::try_ipc_reposition_boundary(file) {
+            agent_doc_write_ipc_io::BoundaryRepositionAttempt::Delivered => {
                 agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Delivered
-            } else {
+            }
+            agent_doc_write_ipc_io::BoundaryRepositionAttempt::RetainedForRetry => {
+                agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::RetainedForRetry
+            }
+            agent_doc_write_ipc_io::BoundaryRepositionAttempt::Unavailable => {
                 agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Unavailable
-            },
-        )
+            }
+        })
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {

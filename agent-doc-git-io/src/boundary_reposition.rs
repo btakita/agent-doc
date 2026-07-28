@@ -5,7 +5,14 @@ use std::path::Path;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoundaryRepositionDelivery {
     Delivered,
+    RetainedForRetry,
     Unavailable,
+}
+
+impl BoundaryRepositionDelivery {
+    const fn marks_visible_delivery(self) -> bool {
+        matches!(self, Self::Delivered)
+    }
 }
 
 pub trait BoundaryRepositionEffects {
@@ -99,7 +106,12 @@ pub fn reposition_boundary_in_snapshot(
                         eprintln!(
                             "[commit] delivered boundary reposition to the Lazily editor head"
                         );
-                        changed = true;
+                        changed |= BoundaryRepositionDelivery::Delivered.marks_visible_delivery();
+                    }
+                    Ok(BoundaryRepositionDelivery::RetainedForRetry) => {
+                        eprintln!(
+                            "[commit] editor boundary reposition retained for retry; visible delivery remains pending"
+                        );
                     }
                     Ok(BoundaryRepositionDelivery::Unavailable) => {
                         eprintln!("[commit] editor boundary reposition retained for retry");
@@ -123,6 +135,18 @@ pub fn reposition_boundary_in_snapshot(
     }
 
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BoundaryRepositionDelivery;
+
+    #[test]
+    fn retained_boundary_target_is_not_visible_delivery_proof() {
+        assert!(BoundaryRepositionDelivery::Delivered.marks_visible_delivery());
+        assert!(!BoundaryRepositionDelivery::RetainedForRetry.marks_visible_delivery());
+        assert!(!BoundaryRepositionDelivery::Unavailable.marks_visible_delivery());
+    }
 }
 
 fn atomic_write_repositioned(

@@ -641,6 +641,15 @@ Snapshots never create a realtime state. A snapshot can contribute a candidate
 delta to `AgentDeltaReady`; it cannot move a document to `MergePlanned`,
 `ApplyInFlight`, or `AppliedVerified` by itself.
 
+Closed-set workflow flags and transition provenance are typed enums in the
+development harness. Free-text strings are permitted only at presentation or
+serialization boundaries (`as_str`, logs, SQLite, or IPC). A matching frontend
+enum is required only when the value crosses the editor wire protocol; internal
+controller provenance such as `RetainedWriteCycleBoundary::{Preflight,
+SessionCheck, FinalizePreCapture}` remains binary-only. Regression tests must
+pin both the enum variants and their serialized tokens so a new consumer cannot
+invent a near-duplicate free-text flag.
+
 A deferred response target also cannot overrule a newer `ApplyInFlight` CP
 frontier that already contains the latest complete response. That newer live
 target supersedes the deferred assistant tail and rebases reconnect proof on the

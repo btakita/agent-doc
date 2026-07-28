@@ -1556,6 +1556,8 @@ fn run_command_inner(
         );
     }
 
+    guard_historical_retained_write_before_new_capture(file, commit_mode)?;
+
     if options.pending_only {
         apply_pending_and_status_mutations(
             file,
@@ -2099,6 +2101,75 @@ fn run_command_inner(
         (Ok(()), Err(commit_err)) => Err(commit_err),
         (Err(write_err), Err(commit_err)) => Err(write_err.context(commit_err.to_string())),
     }
+}
+
+/// Reject a fresh response before it can create capture/intent state when an
+/// older document-write effect is still unfinished.
+///
+/// Preflight owns the same gate, but `finalize` can auto-reopen a committed
+/// cycle for a new response. Without this write-entry guard, that shortcut
+/// captured the new response first and only then discovered the historical
+/// delivery sink. Every rejected retry therefore left another captured-only
+/// orphan behind the same already-answered heading.
+fn guard_historical_retained_write_before_new_capture(
+    file: &Path,
+    commit_mode: CommitMode,
+) -> Result<()> {
+    if commit_mode != CommitMode::Required {
+        return Ok(());
+    }
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let open_capture = state.as_ref().is_some_and(|state| {
+        state.capture_id.is_some()
+            && state.response_sha256.is_some()
+            && matches!(
+                state.phase,
+                agent_doc_turn::CyclePhase::ResponseCaptured
+                    | agent_doc_turn::CyclePhase::WriteApplied
+            )
+    });
+    let retrying_same_capture = if open_capture {
+        match (
+            agent_doc_capture_io::load_active(file)?,
+            agent_doc_document_realtime_io::pending_document_write(file),
+        ) {
+            (Some(capture), Some(pending)) => retained_target_contains_capture_response(
+                &capture.response_body,
+                &pending.target_content,
+            ),
+            _ => false,
+        }
+    } else {
+        false
+    };
+    if retrying_same_capture {
+        return Ok(());
+    }
+
+    let boundary = agent_doc_document_realtime_io::RetainedWriteCycleBoundary::FinalizePreCapture;
+    let recovered =
+        agent_doc_document_realtime_io::recover_retained_document_write_before_new_cycle(
+            file, boundary,
+        )?;
+    if recovered {
+        agent_doc_document_realtime_io::retained_write_settlement(
+            file,
+            boundary.recovered_settlement_source(),
+        );
+    }
+    if agent_doc_document_realtime_io::retained_write_blocks_new_cycle(file, boundary.gate_source())
+    {
+        anyhow::bail!(
+            "[finalize] retained document-write delivery from a prior cycle remains unsettled for {}; refusing the new response before capture/admission. Automatic controller reconciliation remains scheduled. Run only `agent-doc session-check {}` after it settles; do not resubmit finalize, force disk, or replace the queued edit.",
+            file.display(),
+            file.display(),
+        );
+    }
+    Ok(())
+}
+
+fn retained_target_contains_capture_response(response: &str, retained_target: &str) -> bool {
+    agent_doc_turn::response_replay::response_materialized_in_content(response, retained_target)
 }
 
 /// `#queueatcreate`: resolve where items created this cycle land in the queue.
@@ -2729,6 +2800,27 @@ mod tests {
         assert!(write_outcome_retains_closeout_mutations(&Ok(())));
         assert!(write_outcome_retains_closeout_mutations(&retained));
         assert!(!write_outcome_retains_closeout_mutations(&semantic_failure));
+    }
+
+    #[test]
+    fn pre_capture_guard_only_bypasses_for_the_matching_retained_capture() {
+        let current_response = "### Re: Disclosure requirement\n\nCurrent accepted answer.\n";
+        let current_target =
+            format!("<!-- agent:exchange -->\n{current_response}<!-- /agent:exchange -->\n");
+        let historical_target = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: Disclosure requirement\n\nAn older, superseded answer.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(retained_target_contains_capture_response(
+            current_response,
+            &current_target,
+        ));
+        assert!(
+            !retained_target_contains_capture_response(current_response, historical_target),
+            "an unrelated historical retained effect must not authorize a fresh capture retry",
+        );
     }
 
     #[test]

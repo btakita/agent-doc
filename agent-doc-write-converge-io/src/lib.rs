@@ -4598,11 +4598,7 @@ mod tests {
             }))
         }
 
-        fn guard_visible_delivery_convergence(
-            &self,
-            _file: &Path,
-            _source: &str,
-        ) -> Result<()> {
+        fn guard_visible_delivery_convergence(&self, _file: &Path, _source: &str) -> Result<()> {
             anyhow::bail!("retained delivery is still awaiting its visible ACK")
         }
 

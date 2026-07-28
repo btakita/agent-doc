@@ -349,6 +349,20 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         agent_doc_repair_io::recover_missing_commit_boundary(&REPAIR_IO_EFFECTS, file, event)
     }
 
+    fn recover_retained_document_write(&self, file: &Path) -> Result<bool> {
+        agent_doc_document_realtime_io::recover_retained_document_write_before_new_cycle(
+            file,
+            agent_doc_document_realtime_io::RetainedWriteCycleBoundary::SessionCheck,
+        )
+    }
+
+    fn retained_document_write_blocks(&self, file: &Path) -> bool {
+        agent_doc_document_realtime_io::retained_write_blocks_new_cycle(
+            file,
+            agent_doc_document_realtime_io::RetainedWriteCycleBoundary::SessionCheck.gate_source(),
+        )
+    }
+
     fn resume_captured_finalize(
         &self,
         file: &Path,

@@ -2152,6 +2152,27 @@ pub fn settle_acknowledged_captured_projection_through_authority(
     Ok(Some(text))
 }
 
+/// Closed-set provenance for the explicit zero-replica repair transaction.
+///
+/// These values become strings only when crossing an existing logging or
+/// state-event API; repair policy call sites remain exhaustively typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ZeroReplicaRepairSource {
+    RetainedIntentValidation,
+    CanonicalProjection,
+    ReconnectLineage,
+}
+
+impl ZeroReplicaRepairSource {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::RetainedIntentValidation => "zero_replica_repair_retained_intent",
+            Self::CanonicalProjection => "repair_force_disk_canonical_projection",
+            Self::ReconnectLineage => "repair_force_disk",
+        }
+    }
+}
+
 /// Repair-only zero-replica recovery.
 ///
 /// Ordinary editor-owned writes must never fall back to disk when the owner has
@@ -2192,8 +2213,48 @@ pub fn atomic_repair_write_if_current_through_authority(
     }
 
     let canonical = try_resolve_current_document_content(path, source)?;
-    let retained_target = if visible_write_content_matches(&canonical, content) {
+    let retained_zero_replica_target =
+        pending_document_write_journal(path)
+            .into_iter()
+            .rev()
+            .find(|pending| {
+                matches!(
+                    pending.reason,
+                    DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
+                        | DocumentWriteDeferredReason::ExtendPendingEditorReconnectTarget
+                ) && pending
+                    .target_hash
+                    .eq_ignore_ascii_case(&agent_doc_hash::content_hash(&pending.target_content))
+                    && (pending.target_content == content
+                        || pending.expected_content.as_deref().is_some_and(|expected| {
+                            pending
+                                .expected_hash
+                                .eq_ignore_ascii_case(&agent_doc_hash::content_hash(expected))
+                                && visible_write_content_matches(&canonical, expected)
+                        }))
+            });
+    let retained_target = if canonical == content {
         canonical
+    } else if let Some(pending) = retained_zero_replica_target {
+        // A zero-recipient ordinary write deliberately leaves the relay
+        // canonical untouched. Explicit repair may still use the journaled
+        // semantic target as its audited force-disk proof when that intent is
+        // content-addressed and based on the exact current canonical.
+        validate_canonical_document_target(
+            path,
+            &pending.target_content,
+            ZeroReplicaRepairSource::RetainedIntentValidation.as_str(),
+        )?;
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "{source}_retained_zero_replica_repair_target file={} intent_id={} target_hash={} authority=durable_intent expected_canonical_exact=true",
+                path.display(),
+                pending.intent_id,
+                pending.target_hash,
+            ),
+        );
+        pending.target_content
     } else {
         // The editor may advance between repair composition and the serialized
         // CRDT apply. `apply_canonical_replace_if_attached` rebases the repair
@@ -2247,13 +2308,26 @@ pub fn atomic_repair_write_if_current_through_authority(
         agent_doc_hash::content_hash(&retained_target),
         agent_doc_hash::content_hash(&disk),
     );
+    adopt_verified_editor_text_through_relay_authority(
+        path,
+        &retained_target,
+        ZeroReplicaRepairSource::CanonicalProjection.as_str(),
+    )?;
+    let repaired_canonical = try_resolve_current_document_content(path, source)?;
+    anyhow::ensure!(
+        repaired_canonical == retained_target,
+        "{source}: zero-replica repair projection for {} reached disk but not the protected relay canonical (expected_hash={}, canonical_hash={})",
+        path.display(),
+        agent_doc_hash::content_hash(&retained_target),
+        agent_doc_hash::content_hash(&repaired_canonical),
+    );
     clear_all_deferred_document_write_intents(path, source)?;
     if reconnect_base != retained_target {
         ensure_deferred_document_write_intent(
             path,
             &reconnect_base,
             &retained_target,
-            "repair_force_disk",
+            ZeroReplicaRepairSource::ReconnectLineage.as_str(),
             DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection,
         )?;
     }
@@ -2705,7 +2779,7 @@ pub fn apply_canonical_replace_if_attached(
                         let zero_replica_visible_write_proven = live_editors == 0
                             && relay_text == effective_target
                             && durable_visible_write_content_proves_target(file, &effective_target);
-                        if live_editors == 0 && relay_text == effective_target {
+                        if live_editors == 0 {
                             if zero_replica_visible_write_proven {
                                 agent_doc_ops_log_io::log_op(
                                     file,
@@ -2716,6 +2790,15 @@ pub fn apply_canonical_replace_if_attached(
                                     ),
                                 );
                             } else {
+                                // Admit no new CRDT frontier until it has at
+                                // least one delivery recipient. Previously this
+                                // guard covered only an exact canonical no-op;
+                                // a genuine queue/dedupe mutation still crossed
+                                // the relay with `targets=0`, manufacturing the
+                                // retained intent that the next preflight could
+                                // never reconcile. Preserve the merged target in
+                                // the durable journal and let replica
+                                // re-registration replay it.
                                 let intent_id = ensure_deferred_document_write_intent(
                                     file,
                                     &relay_text,
@@ -2726,7 +2809,7 @@ pub fn apply_canonical_replace_if_attached(
                                 let recycle_status = agent_doc_controller_io::project_controller::
                     schedule_stale_editor_replica_cp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor owns the document but no relay replica is registered; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
+                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor is the current authority, but no editor replica was registered with the relay; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
                                     file.display(),
                                 )));
                             }
@@ -2815,19 +2898,8 @@ pub fn apply_canonical_replace_if_attached(
                             &relay_text,
                             &effective_target,
                             source,
-                            if live_editors == 0 {
-                                DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
-                            } else {
-                                DocumentWriteDeferredReason::CrdtDeliveryAckPending
-                            },
+                            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
                         )?;
-
-                        let zero_replica_intent =
-                            if live_editors == 0 && !zero_replica_visible_write_proven {
-                                Some(retained_intent_id)
-                            } else {
-                                None
-                            };
 
                         match apply_cp_write_through_relay_authority(
                             file,
@@ -2839,22 +2911,19 @@ pub fn apply_canonical_replace_if_attached(
                             Ok(Some(relay_write))
                                 if relay_write.applied && relay_write.targets == 0 =>
                             {
-                                let intent_id = zero_replica_intent.unwrap_or_else(|| {
-                                    "durable-intent-recorded-before-cp-write".to_string()
-                                });
                                 agent_doc_ops_log_io::log_op(
                                     file,
                                     &format!(
                                         "{source}_crdt_write_deferred file={} intent_id={} content_hash={} targets=0 live_editors=0 recovery=await_editor_replica_no_disk_write",
                                         file.display(),
-                                        intent_id,
+                                        retained_intent_id,
                                         relay_write.content_hash,
                                     ),
                                 );
                                 let recycle_status = agent_doc_controller_io::project_controller::
                                     schedule_stale_editor_replica_cp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
+                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={retained_intent_id}), but the editor replica disappeared during delivery admission; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
                                     file.display(),
                                 )));
                             }
@@ -4053,7 +4122,6 @@ pub fn deferred_document_write_reconnect_content(
         )?;
         return Ok(Some(pending.target_content));
     }
-
     let disk_content = std::fs::read_to_string(file).ok();
     // `#boundarysplice`: heal a welded boundary marker in the editor canonical at
     // intake. The corruption is in `editor_content` itself, so every downstream
@@ -4097,6 +4165,17 @@ pub fn deferred_document_write_reconnect_content(
             continue;
         }
         if merged_hash.eq_ignore_ascii_case(&intent.expected_hash) {
+            merged = intent.target_content.clone();
+            continue;
+        }
+        if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&merged)
+            == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                &intent.target_content,
+            )
+        {
+            // The durable intent differs only in binary-owned cycle scaffolding.
+            // Replaying its exact target replaces the old marker generation;
+            // component-additive rebasing would otherwise weld both boundaries.
             merged = intent.target_content.clone();
             continue;
         }
@@ -6600,7 +6679,50 @@ pub fn retained_write_is_stranded(file: &Path, source: &str) -> bool {
     )
 }
 
-/// Recover a causally replayable retained write before preflight opens a new
+/// Binary-owned cycle boundary requesting retained-write recovery.
+///
+/// These values are internal transition provenance, not editor wire protocol.
+/// Keeping the closed set typed prevents preflight, session-check, and finalize
+/// from silently inventing mismatched recovery/gate source labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetainedWriteCycleBoundary {
+    Preflight,
+    SessionCheck,
+    FinalizePreCapture,
+    RegressionTest,
+}
+
+impl RetainedWriteCycleBoundary {
+    pub const fn recovery_source(self) -> &'static str {
+        match self {
+            Self::Preflight => "preflight_retained_write_recovery",
+            Self::SessionCheck => "session_check_retained_write_recovery",
+            Self::FinalizePreCapture => "finalize_pre_capture_retained_write_recovery",
+            Self::RegressionTest => "preflight_retained_write_recovery_test",
+        }
+    }
+
+    pub const fn gate_source(self) -> &'static str {
+        match self {
+            Self::Preflight => "preflight_retained_document_write_gate",
+            Self::SessionCheck => "session_check_retained_write_gate",
+            Self::FinalizePreCapture => "finalize_pre_capture_retained_write_gate",
+            Self::RegressionTest => "retained_write_recovery_test_gate",
+        }
+    }
+
+    pub const fn recovered_settlement_source(self) -> &'static str {
+        match self {
+            Self::Preflight => "preflight_retained_write_recovered_settlement",
+            Self::SessionCheck => "session_check_retained_write_recovered_settlement",
+            Self::FinalizePreCapture => "finalize_pre_capture_retained_write_recovered_settlement",
+            Self::RegressionTest => "retained_write_recovery_test_settlement",
+        }
+    }
+}
+
+/// Recover a causally replayable retained write before a binary-owned boundary
+/// opens or accepts a new response cycle (`#0dsr`).
 /// response cycle (`#0dsr`).
 ///
 /// Editor reconnect already replays this journal, but a healthy long-lived
@@ -6609,9 +6731,13 @@ pub fn retained_write_is_stranded(file: &Path, source: &str) -> bool {
 /// make progress. Reuse the same content-bearing semantic rebase over the exact
 /// current authority cut, then clear the journal only after canonical and disk
 /// both prove the replayed target. A delivery still in flight stays untouched.
-pub fn recover_retained_document_write_before_new_cycle(file: &Path, source: &str) -> Result<bool> {
+pub fn recover_retained_document_write_before_new_cycle(
+    file: &Path,
+    boundary: RetainedWriteCycleBoundary,
+) -> Result<bool> {
     use agent_doc_state_backbone::retained_write::RecoveryAction;
 
+    let source = boundary.recovery_source();
     let action = retained_write_settlement(file, source).recovery_action();
     let intent_id = match action {
         RecoveryAction::Continue => return Ok(false),
@@ -6844,6 +6970,36 @@ pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_write_cycle_boundaries_own_closed_set_source_flags() {
+        let cases = [
+            (
+                RetainedWriteCycleBoundary::Preflight,
+                "preflight_retained_write_recovery",
+                "preflight_retained_document_write_gate",
+            ),
+            (
+                RetainedWriteCycleBoundary::SessionCheck,
+                "session_check_retained_write_recovery",
+                "session_check_retained_write_gate",
+            ),
+            (
+                RetainedWriteCycleBoundary::FinalizePreCapture,
+                "finalize_pre_capture_retained_write_recovery",
+                "finalize_pre_capture_retained_write_gate",
+            ),
+        ];
+        for (boundary, recovery, gate) in cases {
+            assert_eq!(boundary.recovery_source(), recovery);
+            assert_eq!(boundary.gate_source(), gate);
+            assert!(
+                boundary
+                    .recovered_settlement_source()
+                    .contains("settlement")
+            );
+        }
+    }
 
     /// `#crdtackprofile`: the accumulator must charge time to the state an
     /// iteration *ended* in, and must aggregate repeat visits to one state.
@@ -8122,6 +8278,16 @@ mod tests {
             baseline,
             "the editor-owned file projection must not change behind JetBrains"
         );
+        assert_eq!(
+            try_resolve_current_document_content(&file, "zero_replica_admission_verify").unwrap(),
+            baseline,
+            "a zero-recipient mutation must be retained before apply, not installed as a new canonical frontier",
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("targets=0 live_editors=0 recovery=await_editor_replica_no_disk_write"),
+            "pre-admission must avoid manufacturing a zero-target CRDT transition:\n{log}",
+        );
 
         let projection =
             agent_doc_controller_io::project_controller::load_state_backbone_projection(dir.path())
@@ -9220,15 +9386,54 @@ mod tests {
                 "retained_committed_projection_zero_replica_verify",
             )
             .unwrap(),
-            committed,
+            editor_base,
+            "a retained target is not current editor authority before reconnect replay",
         );
         let pending = pending_document_write(&file).expect("retained delivery intent");
         assert_eq!(pending.expected_content.as_deref(), Some(editor_base));
         assert_eq!(pending.target_content, committed);
 
-        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+        let (replacement_id, replacement_bootstrap) =
+            test_support_register_replica_for_file(&file, identity)
+                .unwrap()
+                .expect("replacement editor replica should register before deferred replay");
+        let replayed = deferred_document_write_reconnect_content(&file, editor_base)
             .unwrap()
-            .expect("replacement editor replica should attach");
+            .expect("replacement editor should receive the retained committed projection");
+        assert_eq!(replayed, committed);
+        let replacement_replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            replacement_id,
+            &replacement_bootstrap,
+        )
+        .unwrap();
+        let replacement_text = replacement_replica.text();
+        replacement_replica.apply_local_edit(0, replacement_text.len() as u32, &replayed);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &file,
+            identity,
+            &replacement_replica.encode_state(),
+        )
+        .unwrap()
+        .expect("editor replay should publish the retained committed projection");
+        let relay_current =
+            agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file).unwrap();
+        let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } = relay_current else {
+            panic!("replacement replica should expose current relay text: {relay_current:?}");
+        };
+        assert_eq!(text, committed);
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_committed_projection_post_register_verify",
+            )
+            .unwrap(),
+            committed,
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), editor_base);
+        let pending =
+            pending_document_write(&file).expect("replay must retain native-save lineage");
+        assert_eq!(pending.expected_content.as_deref(), Some(editor_base));
+        assert_eq!(pending.target_content, committed);
         let ack = ack_next_crdt_delivery(file.clone(), identity);
         assert!(
             settle_retained_committed_projection_through_authority(
@@ -9286,9 +9491,28 @@ mod tests {
                 .is_some()
         );
 
-        let (_replacement_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+        let (replacement_id, replacement_bootstrap) =
+            test_support_register_replica_for_file(&file, identity)
+                .unwrap()
+                .expect("replacement editor replica should register before deferred replay");
+        let replayed = deferred_document_write_reconnect_content(&file, editor_base)
             .unwrap()
-            .expect("replacement editor replica should bootstrap from retained canonical");
+            .expect("replacement editor should receive the retained capture after registration");
+        assert_eq!(replayed, captured_target);
+        let replacement_replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            replacement_id,
+            &replacement_bootstrap,
+        )
+        .unwrap();
+        let replacement_text = replacement_replica.text();
+        replacement_replica.apply_local_edit(0, replacement_text.len() as u32, &replayed);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &file,
+            identity,
+            &replacement_replica.encode_state(),
+        )
+        .unwrap()
+        .expect("editor replay should publish the retained capture");
         assert_eq!(
             try_resolve_current_document_content(
                 &file,
@@ -9685,9 +9909,28 @@ mod tests {
                 .is_some()
         );
 
-        let (_replacement_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+        let (replacement_id, replacement_bootstrap) =
+            test_support_register_replica_for_file(&file, identity)
+                .unwrap()
+                .expect("replacement editor replica should register before deferred replay");
+        let replayed = deferred_document_write_reconnect_content(&file, editor_base)
             .unwrap()
-            .expect("replacement editor replica should bootstrap from retained canonical");
+            .expect("replacement editor should receive the retained non-capture target");
+        assert_eq!(replayed, normalized_target);
+        let replacement_replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            replacement_id,
+            &replacement_bootstrap,
+        )
+        .unwrap();
+        let replacement_text = replacement_replica.text();
+        replacement_replica.apply_local_edit(0, replacement_text.len() as u32, &replayed);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &file,
+            identity,
+            &replacement_replica.encode_state(),
+        )
+        .unwrap()
+        .expect("editor replay should publish the retained non-capture target");
         assert_eq!(
             try_resolve_current_document_content(
                 &file,
@@ -9757,7 +10000,7 @@ mod tests {
 
         let recovered = recover_retained_document_write_before_new_cycle(
             &file,
-            "preflight_retained_write_recovery_test",
+            RetainedWriteCycleBoundary::RegressionTest,
         )
         .unwrap();
         let ops =
@@ -9998,7 +10241,18 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
         test_support_register_replica_for_file(&file, identity)
             .unwrap()
-            .expect("replacement editor replica should bootstrap from retained canonical");
+            .expect("replacement editor replica should register before deferred replay");
+        let replayed = deferred_document_write_reconnect_content(&file, baseline)
+            .unwrap()
+            .expect("replacement editor should receive the retained target after registration");
+        assert_eq!(replayed, editor_target);
+        adopt_verified_editor_text_through_relay_authority(
+            &file,
+            &replayed,
+            "live_editor_projection_historical_ack_post_register",
+        )
+        .unwrap()
+        .expect("editor replay should publish the retained target");
         assert_eq!(
             try_resolve_current_document_content(
                 &file,

@@ -746,6 +746,18 @@ enum CloseoutRecoveryCycleView {
 }
 
 impl CloseoutRecoveryCycleView {
+    fn capture_identity(&self) -> Option<(String, String)> {
+        match self {
+            Self::Checkpoint(state) => {
+                Some((state.cycle_id.clone(), state.capture_id.as_ref()?.clone()))
+            }
+            Self::Projection(projection) => Some((
+                projection.cycle_id.as_ref()?.clone(),
+                projection.capture_id.as_ref()?.clone(),
+            )),
+        }
+    }
+
     fn recovery_cycle_input(&self) -> Option<CloseoutRecoveryCycleInput> {
         match self {
             Self::Checkpoint(state) => Some(CloseoutRecoveryCycleInput {
@@ -1517,44 +1529,105 @@ pub fn apply_closeout_recovery(
     file: &Path,
     effects: &dyn CloseoutEffects,
 ) -> Result<RecoveryApplication> {
-    let state = classify_closeout_recovery_state_for_file(file, effects);
-    if matches!(
-        state,
-        CloseoutRecoveryState::OpenCycle
-            | CloseoutRecoveryState::MissingResponseBody
-            | CloseoutRecoveryState::UnsafeUserContentDrift
-    ) {
-        let decision =
-            decide_closeout_recovery(file, CloseoutRecoveryDecisionInput::default(), effects);
-        if let CloseoutRecoveryDecision::RetireStaleCapture { proof, .. } = decision {
-            let visible_doc =
-                effects.resolve_current_document(file, "closeout_recovery_retire_stale_capture")?;
-            apply_closeout_recovery_mutation(
-                file,
-                CloseoutRecoveryMutation::RetireStaleCapture {
-                    content: Some(visible_doc.content()),
-                    clear_pending_response: true,
-                    clear_undo_content: true,
-                    mark_cycle_committed_event: None,
-                    mark_cycle_abandoned_event: Some("closeout_recovery_retire_stale_capture"),
-                    reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
-                },
-                effects,
-            )?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "closeout_recovery_retire_stale_capture file={} proof={}",
-                    file.display(),
-                    proof.replace('\n', " ")
-                ),
+    // Rejected finalize attempts historically stacked captured-only orphans
+    // behind the same already-answered heading. One `repair --apply` pass
+    // retired only the newest projection, forcing the caller to classify and
+    // mutate again for every historical generation. Drain the finite,
+    // unambiguously-superseded prefix to a fixed point in this single
+    // binary-owned mutation boundary. A repeated identity or an excessive
+    // stack fails closed instead of spinning.
+    const MAX_STALE_CAPTURE_DRAIN: usize = 256;
+    let mut retired = 0usize;
+    let mut first_state = None;
+    let mut seen = std::collections::HashSet::new();
+    let mut visible_content = None;
+    while retired < MAX_STALE_CAPTURE_DRAIN {
+        let Some(candidate) = classify_next_stale_capture_retirement(file, effects)? else {
+            break;
+        };
+        let StaleCaptureRetirement {
+            state,
+            identity,
+            proof,
+        } = candidate;
+        anyhow::ensure!(
+            seen.insert(identity.clone()),
+            "closeout stale-capture recovery for {} did not advance past cycle={} capture={}; refusing a metadata recovery loop",
+            file.display(),
+            identity.0,
+            identity.1,
+        );
+        if visible_content.is_none() {
+            visible_content = Some(
+                effects
+                    .resolve_current_document(file, "closeout_recovery_retire_stale_capture_stack")?
+                    .content()
+                    .to_string(),
             );
-            return Ok(RecoveryApplication::Applied {
-                state,
-                action: format!("retired stale captured response recovery ({proof})"),
-            });
         }
+        retire_stale_capture(
+            file,
+            &identity,
+            &proof,
+            visible_content
+                .as_deref()
+                .expect("stale-capture drain resolved visible content"),
+            effects,
+        )?;
+        if first_state.is_none() {
+            first_state = Some(state);
+        }
+        retired += 1;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "closeout_recovery_stale_capture_drain_progress file={} count={} cycle_id={} capture_id={} proof={}",
+                file.display(),
+                retired,
+                identity.0,
+                identity.1,
+                proof.replace('\n', " "),
+            ),
+        );
     }
+    if retired == MAX_STALE_CAPTURE_DRAIN {
+        anyhow::ensure!(
+            classify_next_stale_capture_retirement(file, effects)?.is_none(),
+            "closeout stale-capture recovery for {} reached its safety bound of {}; refusing to assume the historical stack is finite",
+            file.display(),
+            MAX_STALE_CAPTURE_DRAIN,
+        );
+    }
+    if retired > 0 {
+        let state = first_state.expect("retired stale capture records its classified state");
+        apply_closeout_recovery_mutation(
+            file,
+            CloseoutRecoveryMutation::RefreshRecoveryProjectionFromContent {
+                content: visible_content
+                    .as_deref()
+                    .expect("stale-capture drain resolved visible content"),
+                write_visible_file: false,
+                reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
+            },
+            effects,
+        )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "closeout_recovery_stale_capture_stack_drained file={} count={} content_mutated=false",
+                file.display(),
+                retired,
+            ),
+        );
+        return Ok(RecoveryApplication::Applied {
+            state,
+            action: format!(
+                "retired {retired} superseded captured-only recovery record(s) in one metadata-only pass"
+            ),
+        });
+    }
+
+    let state = classify_closeout_recovery_state_for_file(file, effects);
     match state {
         CloseoutRecoveryState::Clean => Ok(RecoveryApplication::NothingToDo),
         CloseoutRecoveryState::OpenEmptyPreflight => {
@@ -1583,6 +1656,77 @@ pub fn apply_closeout_recovery(
     }
 }
 
+struct StaleCaptureRetirement {
+    state: CloseoutRecoveryState,
+    identity: (String, String),
+    proof: String,
+}
+
+fn classify_next_stale_capture_retirement(
+    file: &Path,
+    effects: &dyn CloseoutEffects,
+) -> Result<Option<StaleCaptureRetirement>> {
+    let state = classify_closeout_recovery_state_for_file(file, effects);
+    if !matches!(
+        state,
+        CloseoutRecoveryState::OpenCycle
+            | CloseoutRecoveryState::MissingResponseBody
+            | CloseoutRecoveryState::UnsafeUserContentDrift
+    ) {
+        return Ok(None);
+    }
+    let decision =
+        decide_closeout_recovery(file, CloseoutRecoveryDecisionInput::default(), effects);
+    let CloseoutRecoveryDecision::RetireStaleCapture { proof, .. } = decision else {
+        return Ok(None);
+    };
+    let identity = load_closeout_recovery_cycle_view(file)?
+        .and_then(|cycle| cycle.capture_identity())
+        .with_context(|| {
+            format!(
+                "stale-capture classifier selected retirement without an active capture identity for {}",
+                file.display()
+        )
+    })?;
+    Ok(Some(StaleCaptureRetirement {
+        state,
+        identity,
+        proof,
+    }))
+}
+
+fn retire_stale_capture(
+    file: &Path,
+    identity: &(String, String),
+    proof: &str,
+    visible_content: &str,
+    effects: &dyn CloseoutEffects,
+) -> Result<()> {
+    apply_closeout_recovery_mutation(
+        file,
+        CloseoutRecoveryMutation::RetireStaleCapture {
+            projection: RetiredCaptureProjection::DeferRefreshWithContent(visible_content),
+            clear_pending_response: true,
+            clear_undo_content: true,
+            mark_cycle_committed_event: None,
+            mark_cycle_abandoned_event: Some("closeout_recovery_retire_stale_capture"),
+            reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
+        },
+        effects,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "closeout_recovery_retire_stale_capture file={} cycle_id={} capture_id={} proof={}",
+            file.display(),
+            identity.0,
+            identity.1,
+            proof.replace('\n', " "),
+        ),
+    );
+    Ok(())
+}
+
 /// Durable mutation primitive for closeout recovery (`#smrecoverymutate`).
 ///
 /// Policy decides *which* recovery is allowed before this point. This primitive
@@ -1602,13 +1746,40 @@ pub enum CloseoutRecoveryMutation<'a> {
         reason: CloseoutRecoveryMutationReason,
     },
     RetireStaleCapture {
-        content: Option<&'a str>,
+        projection: RetiredCaptureProjection<'a>,
         clear_pending_response: bool,
         clear_undo_content: bool,
         mark_cycle_committed_event: Option<&'a str>,
         mark_cycle_abandoned_event: Option<&'a str>,
         reason: CloseoutRecoveryMutationReason,
     },
+}
+
+/// Controls whether one stale-capture retirement refreshes recovery
+/// projections immediately or participates in a batch-owned refresh.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RetiredCaptureProjection<'a> {
+    RefreshFromContent(&'a str),
+    DeferRefreshWithContent(&'a str),
+    ResolveContentOnDemand,
+}
+
+impl<'a> RetiredCaptureProjection<'a> {
+    const fn content(self) -> Option<&'a str> {
+        match self {
+            Self::RefreshFromContent(content) | Self::DeferRefreshWithContent(content) => {
+                Some(content)
+            }
+            Self::ResolveContentOnDemand => None,
+        }
+    }
+
+    const fn refresh_content(self) -> Option<&'a str> {
+        match self {
+            Self::RefreshFromContent(content) => Some(content),
+            Self::DeferRefreshWithContent(_) | Self::ResolveContentOnDemand => None,
+        }
+    }
 }
 
 pub fn apply_closeout_recovery_mutation(
@@ -1658,7 +1829,7 @@ pub fn apply_closeout_recovery_mutation(
             );
         }
         CloseoutRecoveryMutation::RetireStaleCapture {
-            content,
+            projection,
             clear_pending_response,
             clear_undo_content,
             mark_cycle_committed_event,
@@ -1670,9 +1841,10 @@ pub fn apply_closeout_recovery_mutation(
                 eprintln!("[repair] warning: failed to clear undo checkpoint: {}", e);
             }
             agent_doc_capture_io::mark_discarded(file)?;
-            if let Some(content) = content {
+            if let Some(content) = projection.refresh_content() {
                 refresh_recovery_projection_from_content(file, content)?;
             }
+            let content = projection.content();
             if let Some(event) = mark_cycle_committed_event {
                 effects.mark_committed_frontmatter(file, event, content, content)?;
             } else if let Some(event) = mark_cycle_abandoned_event {

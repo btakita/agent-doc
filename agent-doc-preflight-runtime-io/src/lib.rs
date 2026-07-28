@@ -76,6 +76,13 @@ where
         agent_doc_commit_io::commit(file)
     }
 
+    fn recover_retained_document_write(&self, file: &Path) -> Result<bool> {
+        agent_doc_document_realtime_io::recover_retained_document_write_before_new_cycle(
+            file,
+            "preflight_retained_write_recovery",
+        )
+    }
+
     fn retained_document_write(&self, file: &Path) -> bool {
         // `#retainedsettlereactive`: ask the shared derived verdict, not the raw
         // `pending_document_write(..).is_some()`. That reload arbitrated the

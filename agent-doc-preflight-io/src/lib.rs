@@ -732,6 +732,10 @@ pub trait PreflightCycleCompletionEffects {
 
     fn commit(&self, file: &Path) -> Result<bool>;
 
+    /// Replay a stranded retained write over the settled current authority
+    /// before the gate decides whether a new cycle may open (`#0dsr`).
+    fn recover_retained_document_write(&self, file: &Path) -> Result<bool>;
+
     /// Whether a retained document write genuinely blocks a new cycle.
     ///
     /// `#retainedclearreactive`: reading this **is** the settlement. The
@@ -828,6 +832,13 @@ pub fn enforce_cycle_completion(
     file: &Path,
     effects: &impl PreflightCycleCompletionEffects,
 ) -> Result<(bool, bool)> {
+    // A retained semantic journal used to resume only when an editor
+    // reconnected or closed. A healthy long-lived editor could therefore leave
+    // a safe replay stranded forever. Run the typed recovery transition before
+    // reading the shared gate; it is fail-closed and preserves a delivery whose
+    // authority/disk planes still differ (`#0dsr`).
+    let retained_recovered = effects.recover_retained_document_write(file)?;
+
     // A retained document-write effect is an unfinished durable sink, even
     // when an older repair accidentally made its closeout cycle look terminal.
     // Reading the gate settles a `Satisfied` intent through the controller's
@@ -951,14 +962,17 @@ pub fn enforce_cycle_completion(
             file,
             &format!("resume_commit_success file={}", file.display()),
         );
-        return Ok((recovered || ipc_dogfood_note_appended, committed));
+        return Ok((
+            retained_recovered || recovered || ipc_dogfood_note_appended,
+            committed,
+        ));
     }
 
     let Some(state) = state else {
-        return Ok((false, false));
+        return Ok((retained_recovered, false));
     };
     if !state.is_open() {
-        return Ok((false, false));
+        return Ok((retained_recovered, false));
     }
 
     let ipc_hint = agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(file)?
@@ -1103,7 +1117,7 @@ pub fn enforce_cycle_completion(
     }
 
     Ok((
-        recovered || ipc_dogfood_note_appended || self_healed_abandoned,
+        retained_recovered || recovered || ipc_dogfood_note_appended || self_healed_abandoned,
         committed,
     ))
 }
@@ -5189,8 +5203,10 @@ mod tests {
     struct TestPreflightCycleCompletionEffects {
         repair_calls: std::cell::Cell<usize>,
         commit_calls: std::cell::Cell<usize>,
+        recovery_calls: std::cell::Cell<usize>,
         gate_reads: std::cell::Cell<usize>,
         retained_document_write: std::cell::Cell<bool>,
+        recovery_succeeds: bool,
         /// The `Satisfied` verdict. `#retainedclearreactive`: settling is a
         /// consequence of *reading* the derived verdict — the controller's
         /// per-document effect is subscribed to the same cell — so the stub
@@ -5208,6 +5224,14 @@ mod tests {
         fn commit(&self, _file: &Path) -> Result<bool> {
             self.commit_calls.set(self.commit_calls.get() + 1);
             Ok(false)
+        }
+
+        fn recover_retained_document_write(&self, _file: &Path) -> Result<bool> {
+            self.recovery_calls.set(self.recovery_calls.get() + 1);
+            if self.recovery_succeeds {
+                self.retained_document_write.set(false);
+            }
+            Ok(self.recovery_succeeds)
         }
 
         fn retained_document_write(&self, _file: &Path) -> bool {
@@ -10176,6 +10200,32 @@ mod tests {
                 .to_string()
                 .contains("binary-owned response delivery is retained"),
         );
+        assert_eq!(effects.repair_calls.get(), 0);
+        assert_eq!(effects.commit_calls.get(), 0);
+    }
+
+    #[test]
+    fn enforce_cycle_completion_recovers_stranded_write_before_reading_gate() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let effects = TestPreflightCycleCompletionEffects {
+            retained_document_write: std::cell::Cell::new(true),
+            recovery_succeeds: true,
+            // If the gate runs before recovery, this proves the regression by
+            // taking the interruption branch.
+            session_interruption: Some(
+                "[session-check] INTERRUPTED: retained write was not replayed".to_string(),
+            ),
+            ..Default::default()
+        };
+
+        let (recovered, committed) =
+            enforce_cycle_completion(&doc, &effects).expect("preflight should recover and proceed");
+        assert!(recovered);
+        assert!(!committed);
+        assert_eq!(effects.recovery_calls.get(), 1);
+        assert_eq!(effects.gate_reads.get(), 1);
         assert_eq!(effects.repair_calls.get(), 0);
         assert_eq!(effects.commit_calls.get(), 0);
     }

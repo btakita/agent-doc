@@ -206,6 +206,25 @@ pub enum SettlementVerdict {
     },
 }
 
+/// What preflight should do with the shared settlement verdict before opening
+/// a new cycle (`#0dsr`).
+///
+/// Settlement answers whether the retained write has already landed. Recovery
+/// answers the next transition when it has not. Keeping that decision here
+/// prevents preflight, session-check, and editor reconnect from inventing
+/// separate replay policies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecoveryAction {
+    /// No replay is needed or no authoritative observation is available.
+    Continue,
+    /// Authority and disk still differ, so the existing delivery must settle;
+    /// replaying now would race a live write.
+    AwaitConvergence { intent_id: String },
+    /// Authority and disk agree but do not contain the intent. Waiting cannot
+    /// make progress; replay the durable semantic journal over that settled cut.
+    ReplayStranded { intent_id: String },
+}
+
 impl SettlementVerdict {
     /// The single question `preflight` asks. `Unobserved` answers `false`
     /// deliberately: an unobservable plane is not proof of an outstanding write.
@@ -224,6 +243,27 @@ impl SettlementVerdict {
             Self::Unobserved { intent_id }
             | Self::Satisfied { intent_id, .. }
             | Self::Unsettled { intent_id, .. } => Some(intent_id.as_str()),
+        }
+    }
+
+    /// The exhaustive preflight recovery decision derived from this verdict.
+    pub fn recovery_action(&self) -> RecoveryAction {
+        match self {
+            Self::NoRetainedIntent | Self::Unobserved { .. } | Self::Satisfied { .. } => {
+                RecoveryAction::Continue
+            }
+            Self::Unsettled {
+                intent_id,
+                cause: UnsettledCause::AuthorityDiskDiverged,
+            } => RecoveryAction::AwaitConvergence {
+                intent_id: intent_id.clone(),
+            },
+            Self::Unsettled {
+                intent_id,
+                cause: UnsettledCause::PayloadAbsentFromConvergedContent,
+            } => RecoveryAction::ReplayStranded {
+                intent_id: intent_id.clone(),
+            },
         }
     }
 }
@@ -553,6 +593,51 @@ mod tests {
             }
             other => panic!("expected Unsettled, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn converged_missing_payload_requests_stranded_replay() {
+        let verdict = settlement_verdict(
+            Some(&intent("stamped", true)),
+            Some(&observed("settled-current", false)),
+            Some(&observed("settled-current", false)),
+        );
+        assert_eq!(
+            verdict.recovery_action(),
+            RecoveryAction::ReplayStranded {
+                intent_id: "intent-1".to_string(),
+            },
+            "waiting cannot change a missing payload once authority and disk agree"
+        );
+    }
+
+    #[test]
+    fn diverged_planes_await_existing_delivery_instead_of_replaying() {
+        let verdict = settlement_verdict(
+            Some(&intent("stamped", true)),
+            Some(&observed("authority", false)),
+            Some(&observed("disk", false)),
+        );
+        assert_eq!(
+            verdict.recovery_action(),
+            RecoveryAction::AwaitConvergence {
+                intent_id: "intent-1".to_string(),
+            },
+            "preflight must not race a write whose authority and disk planes still differ"
+        );
+    }
+
+    #[test]
+    fn satisfied_and_unobserved_verdicts_do_not_replay() {
+        let satisfied = settlement_verdict(
+            Some(&intent("exact", false)),
+            Some(&observed("exact", false)),
+            Some(&observed("exact", false)),
+        );
+        assert_eq!(satisfied.recovery_action(), RecoveryAction::Continue);
+
+        let unobserved = settlement_verdict(Some(&intent("exact", false)), None, None);
+        assert_eq!(unobserved.recovery_action(), RecoveryAction::Continue);
     }
 
     /// The 2026-07-26 deadlock. A closeout writes twice: the `pending_write`

@@ -202,6 +202,16 @@ capture/finalize/force-disk operation is admitted. A bounded foreground retry ma
 hand the unchanged intent to asynchronous supervisor recovery, but must never
 misreport the retained delivery as an instruction for the agent to retry it.
 
+Every Run Agent Doc preflight invokes retained-write recovery before it admits a
+new cycle. The state-backbone policy classifies the retained verdict: satisfied
+or unobserved intent continues, authority/disk divergence waits for the existing
+delivery to converge, and only an intent whose payload is absent from an
+authority/disk-agreed cut is replayed as stranded. Replay uses the existing
+content-bearing journal base and target to apply the retained agent delta over
+the current operator cut. It must preserve newer operator text, validate the
+rebased document, and clear the intent only after canonical authority and disk
+both equal the replayed target.
+
 Queue recomputation is allowed to update future queue state without retargeting
 the current turn. The active HEAD set is the runnable prompt or prompts the
 realtime scheduler has proven are currently executing after queue normalization,

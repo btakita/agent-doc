@@ -6377,6 +6377,87 @@ pub fn retained_write_is_stranded(file: &Path, source: &str) -> bool {
     )
 }
 
+/// Recover a causally replayable retained write before preflight opens a new
+/// response cycle (`#0dsr`).
+///
+/// Editor reconnect already replays this journal, but a healthy long-lived
+/// editor may never reconnect. Once the shared settlement verdict proves that
+/// authority and disk agree while the intent is still absent, waiting cannot
+/// make progress. Reuse the same content-bearing semantic rebase over the exact
+/// current authority cut, then clear the journal only after canonical and disk
+/// both prove the replayed target. A delivery still in flight stays untouched.
+pub fn recover_retained_document_write_before_new_cycle(file: &Path, source: &str) -> Result<bool> {
+    use agent_doc_state_backbone::retained_write::RecoveryAction;
+
+    let action = retained_write_settlement(file, source).recovery_action();
+    let intent_id = match action {
+        RecoveryAction::Continue => return Ok(false),
+        RecoveryAction::AwaitConvergence { intent_id } => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "retained_write_preflight_recovery_deferred file={} source={} intent_id={} reason=authority_disk_diverged",
+                    file.display(),
+                    source,
+                    intent_id,
+                ),
+            );
+            return Ok(false);
+        }
+        RecoveryAction::ReplayStranded { intent_id } => intent_id,
+    };
+
+    let canonical = try_resolve_current_document_content(file, source)?;
+    let Some(replayed_target) = deferred_document_write_reconnect_content(file, &canonical)? else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "retained_write_preflight_recovery_deferred file={} source={} intent_id={} reason=no_safe_replay_target",
+                file.display(),
+                source,
+                intent_id,
+            ),
+        );
+        return Ok(false);
+    };
+    validate_canonical_document_target(file, &replayed_target, source)?;
+
+    if replayed_target != canonical {
+        atomic_write_if_current_through_authority(file, &replayed_target, &canonical, source)?;
+    }
+
+    let settled_canonical = try_resolve_current_document_content(file, source)?;
+    let settled_disk = resolve_disk_current_document_content(file, source)?;
+    if settled_canonical != replayed_target || settled_disk != replayed_target {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "retained_write_preflight_recovery_deferred file={} source={} intent_id={} reason=replay_not_converged target_hash={} canonical_hash={} disk_hash={}",
+                file.display(),
+                source,
+                intent_id,
+                agent_doc_hash::content_hash(&replayed_target),
+                agent_doc_hash::content_hash(&settled_canonical),
+                agent_doc_hash::content_hash(&settled_disk),
+            ),
+        );
+        return Ok(false);
+    }
+
+    clear_all_deferred_document_write_intents(file, source)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "retained_write_preflight_recovered file={} source={} intent_id={} target_hash={} canonical_disk_exact=true operator_cut_preserved=true",
+            file.display(),
+            source,
+            intent_id,
+            agent_doc_hash::content_hash(&replayed_target),
+        ),
+    );
+    Ok(true)
+}
+
 /// The shared derived fact. `preflight` and `session-check` both read this.
 ///
 /// The verdict is derived in the **controller's** per-document graph whenever a
@@ -6396,8 +6477,9 @@ pub fn retained_write_is_stranded(file: &Path, source: &str) -> bool {
 /// wearing a costume), so it applies the clear directly and says so.
 pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict {
     let settlement = observe_retained_write_settlement(file, source);
+    let local_verdict = settlement.verdict();
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
-        return settle_actorless_document(file, settlement.verdict(), source);
+        return settle_actorless_document(file, local_verdict, source);
     };
     let (authority, disk) = settlement.observations();
     let observations = agent_doc_controller_io::project_controller::RetainedWriteObservations {
@@ -6421,6 +6503,19 @@ pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict
         file,
         &observations,
     ) {
+        Ok(verdict) if verdict != local_verdict => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "retained_write_settlement_controller_projection_lag file={} source={} controller_intent_id={} durable_intent_id={} action=use_durable_observation",
+                    file.display(),
+                    source,
+                    verdict.intent_id().unwrap_or("none"),
+                    local_verdict.intent_id().unwrap_or("none"),
+                ),
+            );
+            local_verdict
+        }
         Ok(verdict) => verdict,
         Err(e) => {
             agent_doc_ops_log_io::log_op(
@@ -6431,7 +6526,7 @@ pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict
                     source,
                 ),
             );
-            settle_actorless_document(file, settlement.verdict(), source)
+            settle_actorless_document(file, local_verdict, source)
         }
     }
 }
@@ -9007,6 +9102,14 @@ mod tests {
         )
         .unwrap();
         assert!(pending_document_write(&file).is_some());
+        assert!(
+            matches!(
+                retained_write_settlement(&file, "preflight_retained_write_verdict_test")
+                    .recovery_action(),
+                agent_doc_state_backbone::retained_write::RecoveryAction::ReplayStranded { .. }
+            ),
+            "authority and disk agree while the retained content delta is absent",
+        );
 
         assert!(
             settle_retained_captured_projection_through_authority(
@@ -9359,6 +9462,56 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), normalized_target);
+    }
+
+    #[test]
+    fn preflight_replays_stranded_retained_write_over_newer_operator_cut() {
+        let editor_base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- existing work\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Prompt\n\n",
+            "Recover the interrupted operation.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let retained_target = editor_base.replace(
+            "- existing work\n",
+            "- existing work\n- recovered retained write\n",
+        );
+        let operator_cut = editor_base.replace(
+            "Recover the interrupted operation.\n",
+            "Recover the interrupted operation.\n\nOperator text written after the interruption.\n",
+        );
+        let (dir, file, _canonical) = temp_doc(&operator_cut);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            editor_base,
+            &retained_target,
+            "serialized_atomic_write",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        assert!(pending_document_write(&file).is_some());
+
+        let recovered = recover_retained_document_write_before_new_cycle(
+            &file,
+            "preflight_retained_write_recovery_test",
+        )
+        .unwrap();
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            recovered,
+            "every preflight should replay a proven-stranded retained write; ops={ops}",
+        );
+
+        let settled = std::fs::read_to_string(&file).unwrap();
+        assert!(settled.contains("- recovered retained write"));
+        assert!(settled.contains("Operator text written after the interruption."));
+        assert!(pending_document_write(&file).is_none());
     }
 
     #[test]

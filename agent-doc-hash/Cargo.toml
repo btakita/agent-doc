@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-hash"
-version = "0.35.49"
+version = "0.35.50"
 edition = "2024"
 description = "Content hashing helpers for agent-doc"
 license = "MIT"

@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.50
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._
+
+- **Every Run Agent Doc preflight now recovers any proven-stranded retained write (`#0dsr`).** The shared state-backbone policy distinguishes a delivery still converging from an intent absent from an authority/disk-agreed cut. Only the latter replays through the content-bearing journal, semantically rebasing the retained agent delta over newer operator text and clearing it after canonical and disk equality. A newly launched controller whose reactive pending-intent projection lags the durable journal can no longer suppress this recovery: its verdict is reconciled with the same policy evaluated over the caller's current durable observations.
+
 ## 0.35.49
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._

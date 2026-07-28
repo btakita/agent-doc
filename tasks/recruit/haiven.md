@@ -294,20 +294,52 @@ The direct requirement is in the offer letter’s **“External Contracting”**
 That language requires disclosure of the **activities**, not literally every party by name. Naming the parties is a risk-reduction recommendation so the written approval clearly identifies what it covers. This matters because Section 11 says compensation from third-party services goes to Haiven unless its Board unanimously approves otherwise in writing. See [lines 191–195](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L191-L195).
 
 Section 4 restricts consulting or business activity related to Haiven’s business or conflicting with your obligations, but does not itself prescribe disclosure by name. See [lines 142–147](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L142-L147).
-<!-- agent:boundary:fc3af24d -->
+
+### Re: do [#haiven-paper] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#haiven-paper]
+
+
+The revision package is ready for your review.
+
+I revised [haiven-offer-revision-email-draft.md](../professional/haiven/haiven-offer-revision-email-draft.md) to:
+
+- request a binding option grant equal to 1.00% of fully diluted capitalization, with the exact share count, denominator, measurement date, Board-action deadline, vesting start, and option terms;
+- disclose Apollo Solutions as the contracting counterparty and Acadian Financial Services as its end client, plus MonsterRodHolders.com and Equity Funding Source;
+- request express written compensation, IP, confidentiality, and outside-work carve-outs;
+- correct the noncompete inconsistency, vesting and bonus terms, Connecticut work/payroll/forum provisions, and home-office-payment language; and
+- avoid volunteering hours, task-switching, same-machine use, or a claim that the work occurs only off-hours or on separate equipment.
+
+On the disclosure question: I would not volunteer the brief AI task-switching or same-machine details. The documents require disclosure of the outside activities and approval of their compensation/conflict carve-outs; they do not request a minute-by-minute workflow or hardware inventory. Do not make a false separate-device or off-hours statement, and answer truthfully if Haiven asks. Operationally, keep accounts, browser/OS profiles, repositories, credentials, storage, and AI contexts logically separated, and never cross confidential information or use an unapproved AI service for Haiven material. This is contract-risk guidance, not legal advice.
+
+> **Queue prompt:**
+>
+> The email I'm replying to is at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp. Use chromium-bridge to draft the reply. Do not send. I will look it over.
+
+Using Chromium Bridge, I opened that exact Gmail conversation and replaced the partial reply with the full six-section revision request. The threaded draft is addressed to **Craig Fryar and Luke Richey** with subject **“Re: Haiven Offer Letter.”** I independently reloaded the conversation in a second browser tab and verified that the complete 7,830-character body, all six sections, and the `Thanks, / Brian` closing were autosaved. I did **not** press Send.
+
+For clarity, the correct draft to review is the threaded **“Re: Haiven Offer Letter”** draft. An earlier standalone draft with subject **“Haiven offer documents -- requested clarifications and outside-engagement disclosure”** also remains in Gmail; it was not sent and can be discarded after you confirm the threaded reply looks right.
+
+The source changes are committed as `fc671c26e`; the private mail-source commit is `5da3f14`. I moved `#haiven-paper` to review: the remaining steps require your approval/send action and Haiven's revised, countersigned documents.
+<!-- agent:boundary:c60b21d1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- do [#haiven-paper]
-- The email I'm replying to is at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp. Use chromium-bridge to draft the reply. Do not send. I will look it over.
+- ~~do [#haiven-paper]~~
+- ~~The email I'm replying to is at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp. Use chromium-bridge to draft the reply. Do not send. I will look it over.~~ — auto-struck: answered this cycle (#ftstrike)
+- My mailing address is PO Box 571, North Grosvenordale, CT 06255. My physical address (if needed) is 1 Park St, #2 - 571, North Grosvenordale, CT 06255.
+- Is "Please use Connecticut law and a Connecticut or remote forum. If arbitration remains, it should proceed remotely under the AAA Employment/Workplace Rules, preserve all statutory remedies and fee-shifting, and require Haiven to pay the arbitration and arbitrator costs other than a filing fee no greater than the fee for filing the same claim in court." something Haiven may contest? If we go to arbitration, I think a virtual hearing is a good idea. Why was AAA suggested?
+- Please mention that I will be coming in late on Monday Aug 10. The weekly standup/iteration planning is at 10 PT on Mondays. Mention that I may have the occasional conflict for the weekly standup/iteration planning and I can make up the time + planning either before or after the planning. I will also provide notes if I do have a schedule conflict.
+- Updates go to both the md draft + the open brave tab at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#haiven-paper] Revise and send tasks/professional/haiven/haiven-offer-revision-email-draft.md, then obtain revised, countersigned Haiven documents before signing: Connecticut work/payroll terms; fully diluted 1% numerator, denominator, and Board approval; and express compensation/IP/outside-work carve-outs for the Apollo Solutions engagement serving Acadian Financial Services, MonsterRodHolders.com, and Equity Funding Source.
 <!-- /agent:backlog -->
 
 ## Icebox

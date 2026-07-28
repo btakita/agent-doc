@@ -478,7 +478,27 @@ Verification:
 - The Send button was not clicked.
 
 The existing `#haiven-paper` review gate still requires completing and attaching the proposed Exhibit A before sending, then obtaining Haiven’s acknowledgement in the final documents.
-<!-- agent:boundary:8fc4cdfd -->
+
+### Re: Connecticut pay-frequency sentence — gpt-5
+
+> Is “The current twice-monthly pay schedule should either be changed to weekly or biweekly or accompanied by confirmation that Haiven has the Connecticut Labor Commissioner waiver required for a less-frequent schedule.” necessary?
+
+**The compliance issue is real, but that detailed sentence is not necessary in the negotiation email.**
+
+Connecticut's current statute generally requires employers to pay employees weekly or once every two weeks. The Labor Commissioner may approve less-frequent regular pay periods, provided affected employees are paid at least monthly. See [Conn. Gen. Stat. §§ 31-71b and 31-71i](https://www.cga.ct.gov/current/pub/chap_558.htm) and the Connecticut Department of Labor's [wage-payment guidance](https://portal.ct.gov/dol/divisions/wage-and-workplace-standards/wage-and-hour?language=en_US).
+
+A twice-monthly or semimonthly schedule is not the same as biweekly: it normally produces 24 rather than 26 paydays and sometimes leaves more than two weeks between paydays. Therefore, the waiver question is legitimate. But payroll-law compliance is Haiven's responsibility, and you do not need to prescribe the remedy in an already-long request for contract revisions.
+
+I recommend replacing the sentence with:
+
+> Please confirm that Haiven's payroll provider will use a Connecticut-compliant pay schedule.
+
+That preserves the issue without sounding adversarial or making the offer contingent on seeing a waiver. An even lower-friction option is to remove the sentence from this email and confirm the Connecticut payroll schedule during onboarding before the first pay period.
+
+My preference is the short confirmation because the offer expressly describes a twice-monthly schedule, so retaining a written question is useful. I have not changed the markdown or Gmail draft yet because you asked whether the sentence was necessary rather than directing an edit.
+
+This is legal issue-spotting, not a legal opinion on whether Haiven already has a valid waiver.
+<!-- agent:boundary:e5b67b88 -->
 <!-- /agent:exchange -->
 
 ## Queue

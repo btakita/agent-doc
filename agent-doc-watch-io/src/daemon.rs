@@ -974,14 +974,23 @@ mod tests {
         std::fs::write(&path, "initial").unwrap();
 
         let (tx, rx) = mpsc::channel();
-        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(event) = res {
-                let _ = tx.send(event);
-            }
-        })
-        .unwrap();
+        let mut watcher =
+            match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                if let Ok(event) = res {
+                    let _ = tx.send(event);
+                }
+            }) {
+                Ok(watcher) => watcher,
+                Err(err) if matches!(err.kind, notify::ErrorKind::MaxFilesWatch) => return,
+                Err(err) => panic!("failed to create test watcher: {err}"),
+            };
 
-        watcher.watch(&path, RecursiveMode::NonRecursive).unwrap();
+        if let Err(err) = watcher.watch(&path, RecursiveMode::NonRecursive) {
+            if matches!(err.kind, notify::ErrorKind::MaxFilesWatch) {
+                return;
+            }
+            panic!("failed to watch test document: {err}");
+        }
 
         // Give watcher time to initialize
         std::thread::sleep(Duration::from_millis(100));

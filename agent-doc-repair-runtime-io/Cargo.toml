@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-repair-runtime-io"
-version = "0.35.61"
+version = "0.35.62"
 edition = "2024"
 description = "Runtime repair recovery callbacks for agent-doc"
 license = "MIT"
@@ -11,15 +11,15 @@ publish = false
 name = "agent_doc_repair_runtime_io"
 
 [dependencies]
-agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.61" }
-agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.61" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.61" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.61" }
-agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.61" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.61" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.61" }
-agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.61" }
-agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.61" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.61" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.61" }
+agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.62" }
+agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.62" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.62" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.62" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.62" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.62" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.62" }
+agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.62" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.62" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.62" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.62" }
 anyhow = "1"

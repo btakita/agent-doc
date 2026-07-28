@@ -824,6 +824,10 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConve
         apply_canonical_replace_if_attached(file, expected_current, content, source)
     }
 
+    fn guard_visible_delivery_convergence(&self, file: &Path, source: &str) -> Result<()> {
+        crate::guard_visible_delivery_convergence(file, source)
+    }
+
     fn guard_visible_write_expected_current(
         &self,
         file: &Path,

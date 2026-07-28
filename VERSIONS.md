@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.62
+
+_JetBrains plugin 0.2.307; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **Strong document convergence no longer discards the visible-delivery receipt before queue or backlog maintenance returns.** The runtime convergence effects now cross the shared ACK barrier after both attached writes and already-current targets, so `queue consume`, queue sync/prune, tracked-work edits, and other structural follow-up cannot report success and begin a second mutation while the first target exists only as a retained delivery intent. Raw capture remains retainable for asynchronous recovery; only APIs promising completed convergence acquire the stronger contract.
+
 ## 0.35.61
 
 _JetBrains plugin 0.2.307; VS Code extension 0.2.59; Zed extension 0.1.0._

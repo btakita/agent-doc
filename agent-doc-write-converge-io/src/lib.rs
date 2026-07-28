@@ -1821,6 +1821,16 @@ pub trait EditorConvergenceEffects {
         Ok(None)
     }
 
+    /// Await proof that any attached-editor delivery accepted above is visible.
+    ///
+    /// The default is inert for detached/test effects. Runtime effects override
+    /// this with the controller-owned ACK barrier so a strong convergence call
+    /// cannot return success while only a retained delivery intent exists.
+    fn guard_visible_delivery_convergence(&self, file: &Path, source: &str) -> Result<()> {
+        let _ = (file, source);
+        Ok(())
+    }
+
     fn guard_visible_write_expected_current(
         &self,
         file: &Path,
@@ -4201,6 +4211,7 @@ pub fn converge_document_or_disk(
     source: &str,
 ) -> Result<()> {
     if try_editor_converge(effects, file, target, current, source)? {
+        effects.guard_visible_delivery_convergence(file, source)?;
         return Ok(());
     }
     anyhow::bail!(
@@ -4217,6 +4228,7 @@ pub fn converge_or_disk_write(
     source: &str,
 ) -> Result<()> {
     if try_editor_converge(effects, file, target, current, source)? {
+        effects.guard_visible_delivery_convergence(file, source)?;
         return Ok(());
     }
     anyhow::bail!(
@@ -4475,6 +4487,8 @@ mod tests {
 
     struct CrdtOnlyConvergenceEffects;
 
+    struct RetainedCrdtConvergenceEffects;
+
     struct PublishedBufferConvergenceEffects {
         content: String,
     }
@@ -4561,6 +4575,57 @@ mod tests {
         }
     }
 
+    impl EditorConvergenceEffects for RetainedCrdtConvergenceEffects {
+        fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+            panic!("retained CRDT convergence must not fall through to a disk write")
+        }
+
+        fn apply_canonical_replace_if_attached(
+            &self,
+            _file: &Path,
+            _expected_current: &str,
+            content: &str,
+            _source: &str,
+        ) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
+            Ok(Some(agent_doc_crdt_relay_io::CpRelayWrite {
+                applied: true,
+                content_len: content.len(),
+                content_hash: agent_doc_hash::content_hash(content),
+                update_bytes: 1,
+                targets: 1,
+                live_editors: 1,
+                delivery_converged: false,
+            }))
+        }
+
+        fn guard_visible_delivery_convergence(
+            &self,
+            _file: &Path,
+            _source: &str,
+        ) -> Result<()> {
+            anyhow::bail!("retained delivery is still awaiting its visible ACK")
+        }
+
+        fn guard_visible_write_expected_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected_current: &str,
+        ) -> Result<()> {
+            panic!("retained CRDT convergence must not enter the legacy write path")
+        }
+
+        fn atomic_write_if_current(
+            &self,
+            _file: &Path,
+            _content: &str,
+            _expected_current: &str,
+            _source: &str,
+        ) -> Result<()> {
+            panic!("retained CRDT convergence must not enter the legacy write path")
+        }
+    }
+
     #[test]
     fn attached_crdt_write_has_no_secondary_transport() {
         let dir = TempDir::new().unwrap();
@@ -4584,6 +4649,41 @@ mod tests {
         assert!(log.contains("transport=crdt_relay"));
         assert!(log.contains("secondary_transport=none"));
         assert!(!log.contains("editor_convergence_attempt"));
+    }
+
+    #[test]
+    fn strong_convergence_blocks_secondary_effects_until_retained_delivery_is_acked() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let current = "# Session\n\nCurrent.\n";
+        let target = "# Session\n\nCurrent.\n\nQueued maintenance.\n";
+        fs::write(&doc, current).unwrap();
+
+        assert!(
+            try_editor_converge(
+                &RetainedCrdtConvergenceEffects,
+                &doc,
+                target,
+                current,
+                "retained_raw_convergence",
+            )
+            .unwrap()
+        );
+
+        let error = converge_document_or_disk(
+            &RetainedCrdtConvergenceEffects,
+            &doc,
+            target,
+            current,
+            "queue_maintenance",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("retained delivery is still awaiting its visible ACK")
+        );
     }
 
     #[test]

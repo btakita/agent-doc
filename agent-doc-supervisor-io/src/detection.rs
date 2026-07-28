@@ -184,6 +184,49 @@ where
     Some(supervisor_detection::pane_has_busy_cue(&content, harness))
 }
 
+/// One live-pane observation used to decide whether an idle-queue payload is
+/// already drafted or whether the composer is safe for a fresh dispatch.
+///
+/// Keeping the captured content and both classifications in one value prevents
+/// diagnostics and policy from accidentally describing different tmux samples.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupervisorPanePayloadObservation {
+    pub pane_id: String,
+    pub content: String,
+    pub cursor_y: Option<usize>,
+    pub payload_already_pending: bool,
+    pub dispatch_ready: bool,
+}
+
+pub fn supervisor_pane_payload_observation<S>(
+    state: &S,
+    payload: &str,
+    harness: &HarnessConfig,
+) -> Option<SupervisorPanePayloadObservation>
+where
+    S: SupervisorDetectionState + ?Sized,
+{
+    let pane_id = state.owned_pane_id()?;
+    let tmux = tmux_router::Tmux::default_server();
+    let content = agent_doc_tmux_io::capture_pane(&tmux, &pane_id).ok()?;
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(&tmux, &pane_id);
+    let payload_already_pending = dispatch_payload_pending_in_current_input(
+        &content,
+        payload,
+        |line| harness.is_dispatch_ready_prompt_line(line),
+        |line| harness.is_prompt_line(line),
+    );
+    let dispatch_ready =
+        supervisor_detection::pane_dispatch_ready_at_cursor(&content, harness, cursor_y);
+    Some(SupervisorPanePayloadObservation {
+        pane_id,
+        content,
+        cursor_y,
+        payload_already_pending,
+        dispatch_ready,
+    })
+}
+
 pub fn supervisor_pane_payload_already_pending<S>(
     state: &S,
     payload: &str,

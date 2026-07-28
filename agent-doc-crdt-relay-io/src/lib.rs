@@ -4113,18 +4113,15 @@ mod tests {
             editor_process_id("jetbrains-1234-a1b2:/tmp/doc.md:refresh-2"),
             Some(1234)
         );
-    assert_eq!(
-        editor_process_id("vscode-5678-c3d4:/tmp/doc.md"),
-        Some(5678)
-    );
-    assert_eq!(
-        editor_process_id("zed-9012-e5f6:/tmp/doc.md"),
-        Some(9012)
-    );
-    assert_eq!(editor_process_id("intellij:legacy"), None);
-    assert_eq!(editor_process_id("jetbrains-not-a-pid-id"), None);
-    assert_eq!(editor_process_id("zed-not-a-pid-id"), None);
-}
+        assert_eq!(
+            editor_process_id("vscode-5678-c3d4:/tmp/doc.md"),
+            Some(5678)
+        );
+        assert_eq!(editor_process_id("zed-9012-e5f6:/tmp/doc.md"), Some(9012));
+        assert_eq!(editor_process_id("intellij:legacy"), None);
+        assert_eq!(editor_process_id("jetbrains-not-a-pid-id"), None);
+        assert_eq!(editor_process_id("zed-not-a-pid-id"), None);
+    }
 
     #[test]
     fn logical_replica_identity_collapses_only_numeric_refresh_generations() {

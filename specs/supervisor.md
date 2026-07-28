@@ -478,12 +478,25 @@ distinct from the one-shot restart auto-trigger:
     head that differs from the last one dispatched.
   - `SkipNotIdle` whenever the pane is mid-turn — the same
     no-inject-into-active-turn invariant the route busy path enforces.
-  - `SkipAlreadyDispatched` dedups a head that is still present after a dispatch
-    (cycle not yet consumed, or the dispatch failed to drain), so a stuck head
-    cannot hot-loop the watch every idle tick.
+- `SkipAlreadyDispatched` dedups a head that is still present after a dispatch
+(cycle not yet consumed, or the dispatch failed to drain), so a stuck head
+cannot hot-loop the watch every idle tick.
+- Before tmux delivery, the watcher derives payload recognition and
+dispatch-ready state from one live pane capture. A missing capture defers
+without writing or recording the head; a non-ready composer that does not hold
+the queue payload is treated as operator-owned and also defers.
+- A capture that proves the queue payload is the current draft may submit the
+harness Enter key once. A capture that instead proves an empty dispatch-ready
+composer may retire only the matching stale prompt-dispatch projection before a
+fresh text+Enter attempt. Prompt-dispatch deduplication is never itself delivery
+proof and cannot cause the queue head to be recorded as dispatched.
+- The watcher persists a redacted pane snapshot together with its
+`payload_already_pending`, `dispatch_ready`, and selected-action observation,
+deduped by queue head and capture hash, so a stranded draft can be diagnosed
+without separate, race-prone pane and policy samples.
 - If actor state, supervisor runtime actor state, and controller lease are all
-  `ready` while a stale Codex queued-draft renderer cue still makes the pane
-  probe look `alive-busy`, the watch debounces that ready/busy conflict for the
+`ready` while a stale Codex queued-draft renderer cue still makes the pane
+probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   stale-busy repair window, logs `owned_pane_ready_busy_conflict`, and treats the
   pane as dispatchable. Active-turn, permission, hook-review, shell-search,
   help, and clean-exit blockers still produce `SkipNotIdle`.

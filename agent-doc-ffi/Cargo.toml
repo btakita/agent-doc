@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-ffi"
-version = "0.35.50"
+version = "0.35.51"
 edition = "2024"
 description = "C/JNA FFI exports for agent-doc editor integrations"
 license = "MIT"
@@ -19,13 +19,13 @@ name = "agent_doc_ffi"
 # returning -1/null for the life of the IDE -- exactly the outage catch_unwind
 # exists to prevent.
 parking_lot = "0.12"
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.50" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.50" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.50" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.50" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.50" }
-agent-doc-syntax = { path = "../agent-doc-syntax", version = "0.35.50" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.50" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.51" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.51" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.51" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.51" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.51" }
+agent-doc-syntax = { path = "../agent-doc-syntax", version = "0.35.51" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.51" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

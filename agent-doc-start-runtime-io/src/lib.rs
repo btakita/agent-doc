@@ -2052,6 +2052,29 @@ impl SupervisorShared {
         }
     }
 
+    /// Retire a matching dispatch projection only after the live pane has
+    /// independently proved an empty, dispatch-ready composer. This recovery
+    /// keeps an earlier accepted write from suppressing a later real retry.
+    fn clear_matching_prompt_dispatch_projection_for_retry(
+        &self,
+        source: &str,
+        bytes: &str,
+    ) -> bool {
+        let Some(key) = self.prompt_dispatch_projection_key(source, bytes) else {
+            return false;
+        };
+        let mut projection = self.prompt_dispatch_projection.lock();
+        if projection
+            .as_ref()
+            .is_some_and(|current| current.key == key)
+        {
+            *projection = None;
+            true
+        } else {
+            false
+        }
+    }
+
     fn refresh_binary_stale(&self) -> bool {
         let Some(current) =
             agent_doc_controller_io::project_controller::current_binary_identity().ok()

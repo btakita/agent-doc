@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.51
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._
+
+- **Go-mode idle-queue delivery now fails closed on ambiguous composer state (`#30p6`).** The watcher classifies payload recognition and dispatch readiness from one pane capture: an unavailable capture or operator-owned draft defers without writing, a proven queue draft receives at most one bare Enter, and a proven empty composer clears only the matching stale prompt-dispatch projection before a fresh text+Enter retry. Redacted, change-deduped snapshots retain each live capture with its computed decision, so a future stall has race-free forensic evidence instead of a pane-only guess.
+
 ## 0.35.50
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._

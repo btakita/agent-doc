@@ -834,6 +834,122 @@ fn idle_queue_pending_payload_needs_enter_resubmit(
         && !already_resubmitted
 }
 
+/// `#30p6`: policy for the only safe actions after one live pane sample.
+///
+/// A missing capture or a non-ready composer is not permission to write. A
+/// matching draft is either submitted once or treated as already owned, while a
+/// same-sample empty composer authorizes a fresh dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdleQueuePendingPayloadAction {
+    ResubmitEnter,
+    SkipProvenPending,
+    DispatchFresh,
+    DeferUnobservable,
+    DeferComposerOwned,
+}
+
+impl IdleQueuePendingPayloadAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ResubmitEnter => "resubmit_enter",
+            Self::SkipProvenPending => "skip_proven_pending",
+            Self::DispatchFresh => "dispatch_fresh",
+            Self::DeferUnobservable => "defer_unobservable",
+            Self::DeferComposerOwned => "defer_composer_owned",
+        }
+    }
+}
+
+fn idle_queue_pending_payload_action(
+    harness_binary: &str,
+    payload_already_pending: Option<bool>,
+    dispatch_ready: Option<bool>,
+    already_resubmitted: bool,
+) -> IdleQueuePendingPayloadAction {
+    match payload_already_pending {
+        Some(true)
+            if idle_queue_pending_payload_needs_enter_resubmit(
+                harness_binary,
+                Some(true),
+                already_resubmitted,
+            ) =>
+        {
+            IdleQueuePendingPayloadAction::ResubmitEnter
+        }
+        Some(true) => IdleQueuePendingPayloadAction::SkipProvenPending,
+        Some(false) if dispatch_ready == Some(true) => IdleQueuePendingPayloadAction::DispatchFresh,
+        Some(false) => IdleQueuePendingPayloadAction::DeferComposerOwned,
+        None => IdleQueuePendingPayloadAction::DeferUnobservable,
+    }
+}
+
+fn record_idle_queue_payload_observation(
+    file: &Path,
+    harness: &agent_doc_harness::HarnessConfig,
+    head: &str,
+    payload: &str,
+    observation: Option<&SupervisorPanePayloadObservation>,
+    action: IdleQueuePendingPayloadAction,
+) {
+    let (pane, cursor_y, pending, dispatch_ready, capture_len, capture_hash, snapshot_path) =
+        if let Some(observation) = observation {
+            let outcome = agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(
+                file,
+                &observation.pane_id,
+                &harness.binary,
+                "idle_queue_payload_observation",
+                &observation.content,
+                agent_doc_ops_log_io::log_op,
+            );
+            (
+                observation.pane_id.as_str(),
+                observation
+                    .cursor_y
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                observation.payload_already_pending.to_string(),
+                observation.dispatch_ready.to_string(),
+                outcome.snapshot.len.to_string(),
+                outcome.snapshot.hash,
+                outcome
+                    .snapshot
+                    .path
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+            )
+        } else {
+            (
+                "unknown",
+                "unknown".to_string(),
+                "unknown".to_string(),
+                "unknown".to_string(),
+                "unknown".to_string(),
+                "unknown".to_string(),
+                "none".to_string(),
+            )
+        };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "idle_queue_payload_observation file={} harness={} pane={} head_bytes={} head_sha256={} payload_bytes={} payload_sha256={} cursor_y={} payload_already_pending={} dispatch_ready={} action={} capture_len={} capture_hash={} snapshot_path={}",
+            file.display(),
+            harness.binary,
+            pane,
+            head.len(),
+            agent_doc_hash::content_hash(head),
+            payload.len(),
+            agent_doc_hash::content_hash(payload),
+            cursor_y,
+            pending,
+            dispatch_ready,
+            action.as_str(),
+            capture_len,
+            capture_hash,
+            snapshot_path,
+        ),
+    );
+}
+
 fn context_reset_dedupe_head<'a>(
     active_head: Option<&'a str>,
     last_context_reset_head: Option<&'a str>,
@@ -949,6 +1065,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut last_context_clear_at: Option<u64> = None;
             let mut context_reset_in_flight = false;
             let mut last_pending_enter_resubmitted: Option<String> = None;
+            let mut last_go_payload_observation_key: Option<String> = None;
             let mut clear_cooldown_logged = false;
             let mut route_submit_in_flight_logged = false;
             let mut context_clear_route_wait_logged = false;
@@ -3753,23 +3870,55 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         let drain_payload = idle_queue_drain_payload(&head, trigger_command);
                         let payload_kind = idle_queue_drain_payload_kind(&head);
                         let slash_command = idle_queue_head_slash_command(&head);
-                        // `#qflood2`: never stack a trigger already pending in the
-                        // composer. For Enter-key profiles, a proven-pending
-                        // draft may simply be waiting for the bare submit key, so
-                        // submit it once.
-                        let payload_already_pending =
-                            supervisor_pane_payload_already_pending(
-                                &shared,
-                                &drain_payload,
-                                &harness,
-                            );
-                        let resubmit_key = format!("drain:{head}");
-                        if idle_queue_pending_payload_needs_enter_resubmit(
-                            &harness.binary,
-                            payload_already_pending,
-                            last_pending_enter_resubmitted.as_deref()
-                                == Some(resubmit_key.as_str()),
-                        ) {
+                    // `#qflood2` / `#30p6`: classify the pending payload and
+                    // composer readiness from one capture. An unavailable or
+                    // operator-owned composer is a defer state, never implicit
+                    // permission to append text or claim a dispatch.
+                    let payload_observation =
+                        supervisor_pane_payload_observation(&shared, &drain_payload, &harness);
+                    let payload_already_pending = payload_observation
+                        .as_ref()
+                        .map(|observation| observation.payload_already_pending);
+                    let dispatch_ready = payload_observation
+                        .as_ref()
+                        .map(|observation| observation.dispatch_ready);
+                    let resubmit_key = format!("drain:{head}");
+                    let pending_action = idle_queue_pending_payload_action(
+                        &harness.binary,
+                        payload_already_pending,
+                        dispatch_ready,
+                        last_pending_enter_resubmitted.as_deref()
+                            == Some(resubmit_key.as_str()),
+                    );
+                    let observation_key = format!(
+                        "{}:{}:{}:{}:{}",
+                        agent_doc_hash::content_hash(&head),
+                        payload_observation
+                            .as_ref()
+                            .map(|observation| agent_doc_hash::content_hash(&observation.content))
+                            .unwrap_or_else(|| "uncapturable".to_string()),
+                        payload_already_pending
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        dispatch_ready
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        pending_action.as_str(),
+                    );
+                    if last_go_payload_observation_key.as_deref()
+                        != Some(observation_key.as_str())
+                    {
+                        record_idle_queue_payload_observation(
+                            &path,
+                            &harness,
+                            &head,
+                            &drain_payload,
+                            payload_observation.as_ref(),
+                            pending_action,
+                        );
+                        last_go_payload_observation_key = Some(observation_key);
+                    }
+                    if pending_action == IdleQueuePendingPayloadAction::ResubmitEnter {
                             match idle_queue_resubmit_pending_payload(
                                 &path,
                                 &shared,
@@ -3835,10 +3984,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 }
                             }
                         }
-                        if drain_dispatch_dedup_skip(payload_already_pending) {
-                            last_dispatched = Some(head.clone());
-                            log_event(
-                                &mut session_log,
+                    if pending_action == IdleQueuePendingPayloadAction::SkipProvenPending {
+                        last_dispatched = Some(head.clone());
+                        log_event(
+                            &mut session_log,
                                 &format!(
                                     "idle_queue_watch_drain_skipped harness={} reason=trigger_already_pending payload_kind={}",
                                     harness.binary, payload_kind
@@ -3852,10 +4001,51 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     harness.binary,
                                     payload_kind
                                 ),
-                            );
-                            continue;
-                        }
-                        match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload, &harness) {
+                        );
+                        continue;
+                    }
+                    if matches!(
+                        pending_action,
+                        IdleQueuePendingPayloadAction::DeferUnobservable
+                            | IdleQueuePendingPayloadAction::DeferComposerOwned
+                    ) {
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "idle_queue_watch_drain_deferred harness={} reason={} payload_kind={}",
+                                harness.binary,
+                                pending_action.as_str(),
+                                payload_kind,
+                            ),
+                        );
+                        continue;
+                    }
+                    debug_assert_eq!(
+                        pending_action,
+                        IdleQueuePendingPayloadAction::DispatchFresh
+                    );
+                    // A prior accepted write may have left the local projection
+                    // behind even though this exact pane capture proves an empty
+                    // composer. Clear only that matching projection; otherwise
+                    // `auto_trigger_inject_command` would suppress the real retry
+                    // as a duplicate and falsely return `Sent`.
+                    if shared.clear_matching_prompt_dispatch_projection_for_retry(
+                        "auto_trigger",
+                        &drain_payload,
+                    ) {
+                        agent_doc_ops_log_io::log_op(
+                            &path,
+                            &format!(
+                                "idle_queue_dispatch_projection_recovered file={} harness={} reason=same_capture_dispatch_ready payload_kind={} head_sha256={} payload_sha256={}",
+                                path.display(),
+                                harness.binary,
+                                payload_kind,
+                                agent_doc_hash::content_hash(&head),
+                                agent_doc_hash::content_hash(&drain_payload),
+                            ),
+                        );
+                    }
+                    match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload, &harness) {
                             AutoTriggerOutcome::Sent => {
                                 if paused_failsafe_active {
                                     log_event(
@@ -4448,6 +4638,34 @@ mod tests {
             Some(true),
             true
         ));
+    }
+
+    #[test]
+    fn pending_payload_action_fails_closed_without_same_capture_readiness() {
+        assert_eq!(
+            idle_queue_pending_payload_action("codex", None, None, false),
+            IdleQueuePendingPayloadAction::DeferUnobservable
+        );
+        assert_eq!(
+            idle_queue_pending_payload_action("codex", Some(false), Some(false), false),
+            IdleQueuePendingPayloadAction::DeferComposerOwned
+        );
+        assert_eq!(
+            idle_queue_pending_payload_action("codex", Some(false), Some(true), false),
+            IdleQueuePendingPayloadAction::DispatchFresh
+        );
+    }
+
+    #[test]
+    fn pending_payload_action_resubmits_once_then_keeps_proven_draft_owned() {
+        assert_eq!(
+            idle_queue_pending_payload_action("codex", Some(true), Some(false), false),
+            IdleQueuePendingPayloadAction::ResubmitEnter
+        );
+        assert_eq!(
+            idle_queue_pending_payload_action("codex", Some(true), Some(false), true),
+            IdleQueuePendingPayloadAction::SkipProvenPending
+        );
     }
 
     #[test]

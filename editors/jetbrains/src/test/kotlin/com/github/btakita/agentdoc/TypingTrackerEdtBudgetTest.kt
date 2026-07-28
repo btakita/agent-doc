@@ -291,6 +291,12 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("applied = true")
         val repositionBody = watcher.substringAfter("\"repositionBoundary\"")
             .substringBefore("} else if (result != content)")
+        val socketApplyBody = watcher.substringAfter("val stateGeneration = StateProjectionBridge.recordEditorPatchQueued")
+            .substringBefore("if (applied || wasNoOp)")
+        val refreshFunction = watcher.substringAfter("private fun refreshContentViaDocument")
+            .substringBefore("private fun repositionBoundaryViaDocument")
+        val repositionFunction = watcher.substringAfter("private fun repositionBoundaryViaDocument")
+            .substringBefore("private fun scheduleRepositionRetry")
 
         assertTrue(
             "agent-doc IPC patch writes should not set the unsynced-local-operator flag",
@@ -306,6 +312,15 @@ class TypingTrackerEdtBudgetTest {
             "socket boundary reposition writes should not look like operator typing",
             repositionBody.contains("CrdtReplicaManager.withAgentAppliedEditorMutation(filePath)") &&
                 repositionBody.contains("applyMinimalDocumentEditUtil(document, content, result)"),
+        )
+        assertTrue(
+            "native op-capture fencing must precede every socket-driven EDT mutation",
+            socketApplyBody.indexOf("prepareNonOperatorEditorMutationOnWorker(patch.file)") in
+                0 until socketApplyBody.indexOf("invokeAndWait") &&
+                refreshFunction.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
+                0 until refreshFunction.indexOf("invokeAndWait") &&
+                repositionFunction.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
+                0 until repositionFunction.indexOf("invokeLater"),
         )
     }
 
@@ -339,6 +354,24 @@ class TypingTrackerEdtBudgetTest {
         val source = Files.readString(managerPath)
         val listenerBody = source.substringAfter("override fun documentChanged")
             .substringBefore("private fun seedAndAttachFromDocument")
+        val prepareMutationBody = source
+            .substringAfter("fun prepareNonOperatorEditorMutationOnWorker")
+            .substringBefore("fun forceRefreshOpenDocumentReplica")
+        val localMutationEpochBody = source
+            .substringAfter("private fun advanceNonOperatorMutationEpoch")
+            .substringBefore("\n        }")
+        val remoteEditorApplyBody = source
+            .substringAfter("private fun applyRemoteTextOnEdt")
+            .substringBefore("private fun readRawDiskText")
+        val postRegisterReplayBody = source
+            .substringAfter("private fun replayDeferredWriteAfterRegistration")
+            .substringBefore("private fun installListener")
+        val replaceDeliveryBody = source
+            .substringAfter("private fun applyReplaceDelivery")
+            .substringBefore("private fun queueRemoteTextApply")
+        val queueRemoteApplyBody = source
+            .substringAfter("private fun queueRemoteTextApply")
+            .substringBefore("private fun scheduleRemoteEditorApply")
 
         assertTrue(
             "CRDT documentChanged should enqueue local CRDT forwarding onto the replica worker",
@@ -395,9 +428,30 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("return null"),
         )
         assertTrue(
-            "every non-operator editor projection must close the prior native op-capture epoch",
-            source.contains("AgentDocLib.get()?.agent_doc_clear_editor_op_epoch(filePath)") &&
+            "every non-operator editor projection must close the prior native op-capture epoch on a worker before EDT dispatch",
+            prepareMutationBody.contains("check(!javax.swing.SwingUtilities.isEventDispatchThread())") &&
+                prepareMutationBody.contains("lib.agent_doc_clear_editor_op_epoch(filePath) == 1") &&
+                source.contains("prepareNonOperatorEditorMutationOnWorker(filePath)") &&
                 source.contains("advanceNonOperatorMutationEpoch(filePath)"),
+        )
+        assertFalse(
+            "the EDT-local mutation epoch must not cross the native ABI",
+            localMutationEpochBody.contains("AgentDocLib") ||
+                localMutationEpochBody.contains("agent_doc_clear_editor_op_epoch"),
+        )
+        assertFalse(
+            "the queued remote editor apply must not cross the native ABI from the EDT",
+            remoteEditorApplyBody.contains("AgentDocLib") ||
+                remoteEditorApplyBody.contains("agent_doc_clear_editor_op_epoch"),
+        )
+        assertTrue(
+            "native op-capture fencing must precede every CRDT-driven EDT mutation",
+            postRegisterReplayBody.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
+                0 until postRegisterReplayBody.indexOf("invokeAndWait") &&
+                replaceDeliveryBody.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
+                0 until replaceDeliveryBody.indexOf("invokeAndWait") &&
+                queueRemoteApplyBody.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
+                0 until queueRemoteApplyBody.indexOf("remoteEditorApplies.ingress"),
         )
         assertFalse(
             "an existing CRDT replica must never be overwritten from an unproven full editor snapshot",

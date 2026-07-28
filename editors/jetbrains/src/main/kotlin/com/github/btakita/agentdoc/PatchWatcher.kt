@@ -381,6 +381,16 @@ class PatchWatcher(private val project: Project) : Disposable {
                     )
                     return APPLY_FAILED
                 }
+                if (!CrdtReplicaManager.prepareNonOperatorEditorMutationOnWorker(patch.file)) {
+                    LOG.warn("[socket] patch retained because native op-capture fencing failed for ${patch.file}")
+                    StateProjectionBridge.recordEditorRetryRequested(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                        "native_op_epoch_fence_failed",
+                    )
+                    return APPLY_FAILED
+                }
                 var applied = false
                 var wasNoOp = false
                 ApplicationManager.getApplication().invokeAndWait {
@@ -440,9 +450,12 @@ class PatchWatcher(private val project: Project) : Disposable {
                 }
                 val boundaryId = extractStringField(json, "boundary_id")
                 val preserveHead = extractBooleanField(json, "preserve_head")
-                repositionBoundaryViaDocument(file, boundaryId, preserveHead)
-                recordDocumentActivity(file, "socket-reposition")
-                APPLY_APPLIED
+                if (repositionBoundaryViaDocument(file, boundaryId, preserveHead)) {
+                    recordDocumentActivity(file, "socket-reposition")
+                    APPLY_APPLIED
+                } else {
+                    APPLY_FAILED
+                }
             }
             EditorIntent.RefreshContent.token -> {
                 val file = extractStringField(json, "file") ?: return APPLY_FAILED
@@ -585,6 +598,10 @@ class PatchWatcher(private val project: Project) : Disposable {
         expectedHash: String?,
         expectedLen: Int?,
     ): Boolean {
+        if (!CrdtReplicaManager.prepareNonOperatorEditorMutationOnWorker(filePath)) {
+            LOG.warn("[socket] refresh_content retained because native op-capture fencing failed for $filePath")
+            return false
+        }
         var applied = false
         ApplicationManager.getApplication().invokeAndWait {
             val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
@@ -660,7 +677,15 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Applies immediately on the EDT. The CP/binary owns debounce and retry
      * scheduling before it sends editor IPC.
      */
-    private fun repositionBoundaryViaDocument(filePath: String, boundaryId: String? = null, preserveHead: Boolean = false) {
+    private fun repositionBoundaryViaDocument(
+        filePath: String,
+        boundaryId: String? = null,
+        preserveHead: Boolean = false,
+    ): Boolean {
+        if (!CrdtReplicaManager.prepareNonOperatorEditorMutationOnWorker(filePath)) {
+            LOG.warn("[socket] reposition retained because native op-capture fencing failed for $filePath")
+            return false
+        }
         ApplicationManager.getApplication().invokeLater {
             val reposStart = System.nanoTime()
             val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeLater
@@ -717,6 +742,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             val reposMs = (System.nanoTime() - reposStart) / 1_000_000
             if (reposMs > 50) LOG.info("[perf] repositionBoundary: ${reposMs}ms $filePath")
         }
+        return true
     }
 
     /**

@@ -649,6 +649,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-replica-raced")
             return false
         }
+        if (!prepareNonOperatorEditorMutationOnWorker(filePath)) {
+            log.warn("[crdt-replica] post-register replay retained because native op-capture fencing failed for $filePath")
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-op-epoch")
+            return false
+        }
 
         var applied = false
         var persisted = false
@@ -1161,6 +1166,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         var installed = false
         var deferredEditorText: String? = null
         val replicaText = forwarder.replicaText()
+        if (!prepareNonOperatorEditorMutationOnWorker(filePath)) {
+            log.warn("[crdt-replica] replace delivery retained because native op-capture fencing failed for $filePath")
+            scheduleTemplateGuardRecoveryRetry(filePath, "replace-delivery-op-epoch")
+            return false
+        }
         try {
             ApplicationManager.getApplication().invokeAndWait {
                 val edtStarted = System.nanoTime()
@@ -1278,6 +1288,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 staleForwarder = forwarder,
                 remoteState = remoteState,
             )
+        }
+        if (!prepareNonOperatorEditorMutationOnWorker(filePath)) {
+            log.warn("[crdt-replica] remote editor apply retained because native op-capture fencing failed for $filePath")
+            scheduleTemplateGuardRecoveryRetry(filePath, "remote-editor-apply-op-epoch")
+            return RemoteTextApplyDisposition.RetryFailClosed
         }
         remoteEditorApplyPaths.add(filePath)
         val outcome = remoteEditorApplies.ingress(
@@ -2253,6 +2268,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
         }
 
+        /**
+         * Close the Rust-owned operator-op epoch before an editor projection is
+         * handed to the EDT. The native generation proxy deliberately rejects
+         * calls from the event-dispatch thread, so this durable transition and
+         * the local editor mutation are a two-stage handoff.
+         *
+         * This operation is idempotent. Returning false keeps the projection
+         * retained for retry instead of applying text without its causal fence.
+         */
+        fun prepareNonOperatorEditorMutationOnWorker(filePath: String): Boolean {
+            check(!javax.swing.SwingUtilities.isEventDispatchThread()) {
+                "native op-capture fencing must complete before dispatching an editor mutation to the EDT"
+            }
+            val lib = AgentDocLib.get() ?: return true
+            return lib.agent_doc_clear_editor_op_epoch(filePath) == 1
+        }
+
         fun forceRefreshOpenDocumentReplica(project: Project, filePath: String, reason: String) {
             runOnEdtNonBlocking {
                 if (project.isDisposed) return@runOnEdtNonBlocking
@@ -2355,11 +2387,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             nonOperatorMutationEpochs[filePath]?.get() ?: 0L
 
         private fun advanceNonOperatorMutationEpoch(filePath: String): Long {
-            val epoch = nonOperatorMutationEpochs
+            return nonOperatorMutationEpochs
                 .computeIfAbsent(filePath) { AtomicLong(0L) }
                 .incrementAndGet()
-        AgentDocLib.get()?.agent_doc_clear_editor_op_epoch(filePath)
-            return epoch
         }
     }
 

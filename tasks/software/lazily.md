@@ -331,7 +331,22 @@ The runtime manifest is now 124/124 canonical fixture files opened with an empty
 Verification: 191/191 C# tests; `dotnet format --verify-no-changes`; all three target-framework builds and package checks; mutation checks that independently killed delta-gap and terminal-conflict guards; NativeAOT publish/export/link/runtime smoke; lazily-spec 151/151 schema tests, Lean build, coverage sync, and fixture-copy checks; every generated sibling binding gate passed. C# and spec CI are successful; the other inspected binding runs were successful or still in progress. The root aggregate still has an unrelated pre-existing `agent-doc` decomposition failure about a retired nested Cargo project.
 
 Commits: lazily-cs `3098717`, lazily-spec `dd0f62f`, generated sibling README commits, and root pointers `1b6ced396`; all pushed to `main`.
-<!-- agent:boundary:2924ba01 -->
+
+### Re: NuGet trusted publishing + v0.3.0 — gpt-5
+
+Completed the first public NuGet release for lazily-cs.
+
+- Created and confirmed the active NuGet trusted-publishing policy `lazily-cs release` for package owner `btak`, repository `lazily-hub/lazily-cs`, workflow `release.yml`, with no environment restriction.
+- Replaced the repository API-key workflow with GitHub OIDC (`id-token: write` plus `NuGet/login@v1`).
+- Prepared and pushed version `0.3.0`, tagged `v0.3.0`, and published the GitHub release `v0.3.0 — Distributed planes and full conformance`.
+- The first tag-triggered run exposed a release-only omission: it did not fetch the sibling `lazily-spec` conformance corpus. Added the same fixture checkout/guard used by CI, reran the full C# gate green, and successfully retried the supported manual release dispatch for `0.3.0`.
+- Trusted login and `Publish to NuGet` both completed successfully in GitHub Actions run `30326214700`.
+- NuGet's public flat-container index now reports `Lazily` `0.3.0`; the gallery and package endpoints return HTTP 200.
+- Downloaded the public package and verified its nuspec (`Lazily`, `0.3.0`, MIT, repository commit `1b345ab`) plus assemblies/XML docs for `net10.0`, `net8.0`, and `netstandard2.1`. Published package SHA-256: `b5347de2d33d3788f76a30d86123297663e2f732acb86b7ba447d3983ed35e34`.
+- Pushed lazily-cs workflow commits `e7eaec0` and `1b345ab`, with root pointer commits `5c15c53d8` and `8a3290f97`. Preserved the pre-existing C# `AGENTS.md` edit, untracked `build/`, and unrelated workspace changes.
+
+The NuGet publication gate is resolved; no API key is stored or required for future releases.
+<!-- agent:boundary:85bdf1f3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -347,7 +362,6 @@ Commits: lazily-cs `3098717`, lazily-spec `dd0f62f`, generated sibling README co
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzcsnugetpublish] lazily-cs: add repository secret NUGET_API_KEY, choose and authorize the NuGet version (0.2.0 is package-ready and currently unregistered, or create a newer tag), run the Release workflow, and verify the first Lazily publication on NuGet.
 - [/] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. Current state: #lzcsipc is partial (schema-validated wire codec shipped; ShmBlobArena/executable zero-copy backends remain) and #lzcssync is partial (durable outbox shipped; CrdtPlaneRuntime, anti-entropy/resync, IpcSink/IpcSource, full-duplex SyncDriver, and remaining corpora remain). After both prerequisites ship their complete production surfaces, implement the C# interop peer, advertise only the exact features/codecs/channels/variants it supports, and let the capability-driven matrix admit it automatically. (gated: prerequisites #lzcsipc and #lzcssync remain open.)
 - [/] [#lazilyrenameinverted] [operator-decision] Keep lazily-py `Cell`/`CellSlot` as mypyc-native implementation class names with canonical `Source`/`SourceSlot` aliases. NEXT: accept this documented exception, or explicitly authorize a breaking native-class rename with mypyc and identity migration tests.
 - [/] [#lzjsnpmtrustedpub] [operator-action] lazily-js repository workflow/OIDC/provenance is ready, but npm rejects publication until trusted-publisher setup is completed. NEXT: authenticate npm, register `@lazily-hub/lazily-js` for `lazily-hub/lazily-js` workflow `release.yml` with no environment and allowed action `npm publish`, verify with `npm trust list @lazily-hub/lazily-js`, then prove the next version tag.

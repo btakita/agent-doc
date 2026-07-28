@@ -338,7 +338,6 @@ Escalation: none. The locally stored bootstrap password no longer authenticates 
 Confidence: high.
 ### Re: Production admin accounts and invitations — gpt-5
 
-### Re: Production admin accounts and invitations — gpt-5
 
 > **Queue prompt:**
 >
@@ -394,15 +393,47 @@ I also checked public mail routing: `equityfundingsource.com` currently uses Goo
 
 **Changed paths:** None.
 
-**Commands:** `tsift source-read/search` for recipient configuration and call sites; production `wrangler deployments status` and `versions view`; `dig MX equityfundingsource.com`.
+**Commands:** `tsift source-read/search` for recipient configuration and call sites; production `wrangler deployments status` and `versions/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.mdsleep2keyReturnagent-doc-bugs2.mdsleep2keyReturnsleep2 view`; `dig MX equityfundingsource.com`.
 
 **Confidence:** High for application-generated notifications and the deployed Worker configuration; limited for the Google Workspace mailbox/alias itself because that admin configuration is not available here.
 
 **Escalation:** None. This was a read-only audit; no routing was changed.
-<!-- agent:boundary:5e83598a -->
+
+### Re: `efs@equityfundingsource.com` — gpt-5
+
+> **Queue prompt:** Please explain what `efs@equityfundingsource.com` is. Judith is asking. Was this email set up by the system for automated emails?
+
+Yes—with one important distinction. `efs@equityfundingsource.com` is configured as the EFS website’s **automated outbound sender address**. Production authorizes it on Cloudflare’s Send Email binding and uses it as the From address for system-generated messages, including login/admin links, invitations, password resets, application and contact workflows, secure-message notifications, lending-group notifications, and other portal mail.
+
+It is **not** the shared admin-notification destination. Those incoming staff notifications are routed separately—for example, secure-message admin alerts go to `info@equityfundingsource.com`, while other notification types use their own configured recipients. Secure-message replies use `reply@efs.briantakita.me`, not `efs@`.
+
+What I can confirm is that the application and Cloudflare production deployment were deliberately set up to **send from** `efs@`. That sender authorization does not itself create a Google Workspace inbox. The domain’s MX records point to Google, but without Google Workspace Admin access I cannot confirm whether `efs@` is also a mailbox or alias, or whether anyone monitors incoming mail sent to it.
+
+A concise explanation for Judith:
+
+> `efs@equityfundingsource.com` is the automated sending address used by the EFS website for login links, invitations, and other system notifications. It should not be treated as the shared staff inbox unless we separately confirm that Google Workspace has it configured as a monitored mailbox or alias.
+
+**Verification:** The active production Worker is version `b9b00945-32e3-44a3-8391-2d6f496b8971`. Its `EMAIL` binding explicitly authorizes `efs@equityfundingsource.com`, and its deployed `EFS_EMAIL_FROM`, `MESSAGE_NOTIFICATION_FROM`, and `LENDING_GROUP_NOTIFICATION_FROM` settings all use that address. DNS MX is `0 smtp.google.com.`
+
+**Changed paths:** None.
+
+**Commands:** Targeted `tsift` source/search and call-graph inspection; production `wrangler deployments status` and `wrangler versions view`; `dig +short MX equityfundingsource.com`.
+
+**Confidence:** High that `efs@` is the production automated sender; limited on whether it is also a monitored Google Workspace mailbox or alias.
+
+**Escalation:** None. Google Workspace Admin access would be required only to confirm the receiving-mailbox/alias side.
+
+Document correction: the malformed command text in the preceding response should read `wrangler versions view`; the inserted path/`sleep2` text was not part of the command.
+`efs@equityfundingsource.com` is the production system’s automated outbound sender for login links, invitations, password resets, and portal notifications. It is not the shared admin inbox. Whether it also exists as a monitored Google Workspace mailbox/alias cannot be confirmed without Workspace Admin access.
+
+The response is durably retained but not yet committed because the live editor has no registered replica. Please refresh/reopen the agent-doc editor integration; the same capture should resume automatically without resubmission.
+
+Preflight also warned that the local `agent-doc` install is stale relative to source and recommends `make install` in `src/agent-doc`.
+<!-- agent:boundary:c76f1404 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
+- Please explain what efs@equityfundingsource.com is? Judith is asking. Was this email setup by the system for automated emails?
 <!-- /agent:queue -->
 
 ## Backlog

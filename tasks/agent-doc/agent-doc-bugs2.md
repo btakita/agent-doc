@@ -808,12 +808,33 @@ This disproves the responsiveness/coalescing predicate, so `#compactreactiveproj
 **Confidence:** High.
 
 **Escalation:** Implementation fix required in `#compactreactiveprojectionlivefail` before repeating this operator proof.
-<!-- agent:boundary:33cdeb9e -->
+
+### Re: do [#compactreactiveprojectionverify] — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> do [#compactreactiveprojectionverify]
+
+
+Closeout correction: the operator proof failed and must remain unresolved. The 305-event burst was accepted quickly by IDEA, but agent-doc drained sequential one-character `native.applyLocal` calls roughly every 10–16 seconds, with no `coalesced_exact_editor_adopt_after_quiet` recovery. The bounded 10-second native-call timeout/fail-closed behavior was independently confirmed.
+
+The verifier is gated pending implementation, and `#compactreactiveprojectionlivefail` records the focused fix and repeat-proof work.
+
+**Changed paths:** Session document tracked-work metadata only; no product-source changes.
+
+**Commands:** IDEA save/restart/stop; log and marker inspection; retained-write recovery preflight; `agent-doc finalize`.
+
+**Verification:** Coalescing predicate failed; bounded-timeout predicate passed; reversible burst cleanup passed.
+
+**Confidence:** High.
+
+**Escalation:** Implement the per-burst revision-scoped drain/coalescing fix before repeating the operator proof.
+<!-- agent:boundary:2c0c00f2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#compactreactiveprojectionverify]
+- ~~do [#compactreactiveprojectionverify]~~
 - ~~📌 do [#nsfz]~~
 - ~~📌 do [#suprestassoc-live]~~
 - ~~📌 do [#jbedtledgerverify]~~
@@ -840,7 +861,7 @@ This disproves the responsiveness/coalescing predicate, so `#compactreactiveproj
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
+- [ ] [#compactreactiveprojectionlivefail] [focused-cycle] #agent-doc-bug Fresh-restart live regression on IDEA 2026.1 + JetBrains plugin 0.2.305: a 305-event burst logged editor_ops_recorded count=305 transaction=batch, but CrdtReplicaForwarder drained sequential native.applyLocal insert_chars=1 operations roughly every 10–16 seconds while controller authority stayed delivery_converged=false; neither coalesced_exact_editor_adopt_after_quiet nor exact_editor_adopt_then_atomic_reregister appeared. Fix the editor-op drain so one burst becomes one revision-scoped update or at most one quiet recovery, add deterministic latency/conformance coverage, preserve the bounded native-call timeout/fail-closed behavior, and repeat #compactreactiveprojectionverify.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Plan: tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md
 - [ ] [#adstatechart2] [focused-cycle] #agent-doc-feature Phase E rung 2 (observability): wire session-check/status to READ adstatechart configuration() as an advisory named-snapshot (transport.x editor_sync.x closeout.x supervisor) alongside today's ops.log markers. No behavior change to closeout. Guard semantics must match whatever A-D shipped. PRD: tasks/agent-doc/prd-adstatechart-local-process-statechart.md
@@ -855,6 +876,7 @@ This disproves the responsiveness/coalescing predicate, so `#compactreactiveproj
 ## Review
  
 <!-- agent:review -->
+- [/] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
 - [/] [#preflightinbinary] [operator-verify] Live proof for #preflightinbinary AFTER the default flip (5ce9b06e6). The flip has landed: SKILL.md now says do NOT run preflight when the '[agent-doc] cycle contract ...' marker is present, and the hook is registered in this project's .claude/settings.json under UserPromptSubmit alongside turn-status. Needing a live session to confirm: (a) invoke /agent-doc <FILE> in a FRESH Claude Code session and confirm the marker + contract appear in context before the agent runs any tool, and that the agent does NOT shell to 'agent-doc preflight'; (b) confirm exactly ONE cycle id is opened for that turn — grep .agent-doc/logs/ops.log for preflight_diff_start, and confirm 'repaired stale preflight_started cycle' does NOT appear; that line is the tell that the agent still ran preflight and the round trip was merely absorbed by repair rather than removed; (c) confirm an ordinary prompt that merely mentions agent-doc produces no marker and no cycle; (d) confirm a Codex/OpenCode turn (no Claude hook, so no marker) still runs preflight explicitly and closes out normally. Scope note: reusable_by_reentrant_preflight is defence in depth only — start_preflight runs at preflight step 4, after repair at step 1, so in the live pipeline repair closes any prior open cycle before the guard sees it. What removes the double-open is the flip itself.
 - [/] [#jbsurfaceswap] [operator-verify] Live IDE proof for #jbsurfaceswap (agent-doc 27beeae2e, JB plugin 0.2.296). Both plugins now report one EditorSurface observation per event and the graph derives the intent; the planners are deleted. With the IDE restarted onto 0.2.296, confirm in a real session: (a) clicking between two side-by-side split editors moves the tmux active pane (derived Focus); (b) changing the editor split layout reconciles tmux (derived Sync) and shows the 'Sync: --col ... [focus: ...]' hint exactly once; (c) repeat focus events on the same editor cost nothing — the JB log line '[layout-sync] observe: ... intent=idle' with no controller command; (d) swap two tmux panes by hand, then click an editor tab WITHOUT changing the split, and confirm the pulled tmux probe reconciles the layout instead of only moving focus (#tmuxsyncstate); (e) closing the project releases the root (no growth in surface graphs across open/close cycles). Headless tests cover the fold, the probe seam, and the observation wire shape, but not the debounce/generation interaction with real editor event storms.
 - [/] [#jbpluginlazilyeffects] #agent-doc-feature The JetBrains/VS Code plugin should drive lazily state + Effects, not one-shot CLI commands. Today every editor action (file selected, layout changed, Sync Tmux Pane) shells a fresh agent-doc process that re-observes the world from scratch and returns one answer that is already stale, with no subscription and no invalidation. Keep the CLI supported as an entrypoint, but the plugin path should be: plugin reports an event -> FFI sets a Source in the document scope -> an Effect drives the tmux/pane consequence. Same Shared Foundation rule already in AGENTS.md, applied to observation rather than business logic. Consumes the derived owner map from syncownerreactive, so order it after that.

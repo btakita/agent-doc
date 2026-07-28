@@ -721,7 +721,30 @@ Proof:
 - Release verification: full release install succeeded; `agent-doc --version` reports `0.35.51`; active project controller marked for idle-boundary recycle.
 - Delivery: agent-doc commit `272d1cc27` and parent gitlink commit `7d881a288` are pushed; tag `v0.35.51`, PyPI manylinux wheel, and GitHub release are published. The required single CI observation was `in_progress`, not red; it was not polled.
 - Confidence: high. Escalation: none.
-<!-- agent:boundary:7654179d -->
+
+### Re: do [#opcapturelazily] — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> 📌 do [#opcapturelazily]
+
+
+Implemented and released as agent-doc 0.35.52.
+
+Op capture is now a typed Lazily state-backbone projection instead of a second mutable authority. `EditorOpCaptureCheckpointed` carries a complete monotonic epoch—exact base hash, ordered editor ops, canonical path, and freshness stamp—and `EditorOpCaptureCleared` consumes it. Same-base bursts serialize and append without loss; a base change starts a fresh epoch; exact-base replay remains fail-closed; and `CycleAbandoned` clears a stranded op epoch in the same reducer transition. The old `editor_op_captures` table remains only as one-way migration input and is deleted after the typed fact lands.
+
+The latency-sensitive paths stay bounded: live IDE callbacks use one controller-serialized read/derive/append transition, controller-internal merge/write work reads the in-memory projection directly through an O(1) local seam instead of self-RPC or full-ledger replay, and actorless startup uses one SQLite transaction. Complete checkpoint facts also make retention safe without reconstructing a growing epoch from every historical batch.
+
+Proof:
+
+- Changed paths: `agent-doc-state-backbone`, `agent-doc-op-capture-io`, controller RPC/runtime, `agent-doc-state-wire`, SQLite retention/migration support, the state-backbone spec, release manifests, and version history.
+- Tests cover same-base ordering, exact-base acceptance, stale-base fallback, base-change epoch reset, idempotent clear, abandonment-driven atomic clear, stale-epoch rejection, live controller serialization, one-way legacy migration, malformed legacy fallback, and GC.
+- `make check` passed: clippy; 8,272 workspace tests passed with 241 skipped; simulation, version-sync, lean checks, and all TLA+ models passed.
+- Release proof: commit `87c166476`, parent gitlink commit `c224bddaf`, installed binary `agent-doc 0.35.52`, PyPI wheel uploaded, tag `v0.35.52` pushed, and GitHub release published at https://github.com/btakita/agent-doc/releases/tag/v0.35.52.
+- The required single CI observation was `in_progress` for the new main push, not red; I did not poll it. Confidence: high. Escalation: none.
+
+The pre-existing untracked `editors/zed/extension.wasm` and unrelated dirty parent-repository changes were preserved.
+<!-- agent:boundary:eff99a46 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -731,7 +754,7 @@ Proof:
 - ~~📌 do [#jbedtledgerverify]~~
 - ~~📌 do [#0dsr]~~
 - ~~📌 do [#30p6]~~
-- 📌 do [#opcapturelazily]
+- ~~📌 do [#opcapturelazily]~~
 - 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#sidecarstate]
 - 📌 do [#adstatechart2]
@@ -754,7 +777,6 @@ Proof:
 <!-- agent:backlog priority priority queue -->
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
-- [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md
 - [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Plan: tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md
 - [ ] [#adstatechart2] [focused-cycle] #agent-doc-feature Phase E rung 2 (observability): wire session-check/status to READ adstatechart configuration() as an advisory named-snapshot (transport.x editor_sync.x closeout.x supervisor) alongside today's ops.log markers. No behavior change to closeout. Guard semantics must match whatever A-D shipped. PRD: tasks/agent-doc/prd-adstatechart-local-process-statechart.md

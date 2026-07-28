@@ -1,12 +1,13 @@
 # Plan: one Lazily cross-binding network conformance suite
 
-Status: Phase 0-1 implemented; production peer rollout pending
+Status: semantic peer rollout implemented; channel and feature rollout pending
 Owner: `src/lazily-interop`
 Contract: `src/lazily-interop/docs/peer-contract.md`
 Companion plans:
 
 - `tasks/software/plan-lazily-interop-peer-rollout.md`
 - `tasks/software/plan-lazily-interop-channel-matrix.md`
+- `tasks/software/plan-lazily-stdlib-conformance-rollout.md`
 
 ## Goal
 
@@ -143,6 +144,13 @@ Every scenario runs with at least three peers once the reference pair is green.
 Pairwise runs identify a culprit; three-way runs prevent one implementation from
 becoming the de facto oracle.
 
+Feature-specific local state machines, including stdlib Timer, Timeout, and
+RevisionBarrier, use the same orchestrator and capability selection. Their
+canonical fixture and rollout contract lives in
+`tasks/software/plan-lazily-stdlib-conformance-rollout.md`; channel-delivered
+triggers exercise production peer adapters without serializing language-local
+future or wait objects.
+
 ## Execution phases
 
 ### Phase 0 — freeze the contract and result schema
@@ -211,13 +219,11 @@ Status: complete for the applicable semantic plane. C# is a real
 transport channels, so the capability matrix continues to exclude it from
 channel cells until executable adapters ship.
 
-C# joins only after `#lzcsipc` and `#lzcssync` ship the real wire and runtime
-surfaces. The peer MUST wrap Lazily library code; it may not reimplement the
-protocol inside the test executable.
-
-Until then, the registry reports C# as staged and excludes it from CRDT feature
-groups. That is neither a failure nor a pass for C#; the full nine-binding
-completion criterion remains open.
+The historical `#lzcsipc`/`#lzcssync` dependency for semantic CRDT participation
+is satisfied. New feature families remain independently capability-gated: C#
+stays staged for stdlib and channel scenarios until those production surfaces
+and executable adapters ship. The peer MUST wrap Lazily library code; it may not
+reimplement a feature protocol inside the test executable.
 
 Gate: C# passes the same mutation probes and network scenarios with no
 binding-specific fixture relaxation.
@@ -244,6 +250,8 @@ red, not skipped green.
 - Canonical JSON and required msgpack run cross-language, not self-round-trip.
 - Every spec channel has a direct-link scenario and a declared platform profile.
 - Every binding is exercised as both encoder and decoder.
+- Every advertised feature is exercised through its production implementation;
+  staged implementations remain visible and receive no pass credit.
 - Every red identifies the plane, pair, channel, codec, seed, and first
   divergence and provides a local replay command.
 - No scenario passes when zero frames, zero peers, or zero required channels ran.

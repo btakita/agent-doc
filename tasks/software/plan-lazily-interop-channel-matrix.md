@@ -3,13 +3,17 @@
 Parent: `tasks/software/plan-lazily-interop-network-suite.md`
 Contract: `src/lazily-interop/docs/peer-contract.md`
 Spec: `src/lazily-spec/protocol.md`
+Feature rollout: `tasks/software/plan-lazily-stdlib-conformance-rollout.md`
 
 ## Dimensions
 
-Keep three dimensions explicit:
+Keep four dimensions explicit:
 
+- **feature**: distributed CRDT plus independently advertised local feature
+  families such as `stdlib_timer_v1`, `stdlib_timeout_v1`, and
+  `stdlib_revision_barrier_v1`;
 - **frame**: Snapshot, Delta, CrdtSync, ResyncRequest, OutboxAck, receipts,
-  signaling;
+signaling;
 - **codec**: canonical JSON, required cross-language msgpack, optional postcard
   or binding-local positional formats;
 - **channel**: in-process FFI, shared memory, IPC stream, WebSocket, WebRTC data
@@ -144,7 +148,7 @@ reference-binding bugs.
 The JSON result schema records:
 
 ```text
-binding_a, binding_b, direction, profile, plane, channel, variant,
+binding_a, binding_b, direction, profile, plane, feature, channel, variant,
 codec, frame_family, scenario, seed, status, unsupported_reason,
 bytes_sent, bytes_received, first_divergence, replay_command
 ```
@@ -165,6 +169,8 @@ The human report renders:
 - The nightly full matrix has no unsupported required cells.
 - Every fault above has a mutation or simulation test that proves the harness
   goes red.
+- Every advertised feature trigger crosses each applicable claimed channel;
+  staged feature peers stay visible and receive no channel pass credit.
 - Zero-copy, ownership, framing, reconnect, chunking, and backpressure claims
   are asserted only on the channel that can prove them.
 - A transport red cannot change a semantic convergence result, and a semantic

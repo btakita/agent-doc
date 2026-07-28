@@ -2,6 +2,7 @@
 
 Parent: `tasks/software/plan-lazily-interop-network-suite.md`
 Contract: `src/lazily-interop/docs/peer-contract.md`
+Feature rollout: `tasks/software/plan-lazily-stdlib-conformance-rollout.md`
 
 ## Rule: adapters exercise the library
 
@@ -50,12 +51,18 @@ No binding is marked shipped from a self-round-trip.
 | Dart | `dart run bin/interop_peer.dart` | `CrdtPlane`, IPC streaming codec, FFI/arena/channel adapters | VM profile first, browser carve-outs explicit |
 | Go | `cmd/lazily-interop-peer` | distributed plane, `IpcMessage`, FFI/arena/channel adapters | race-enabled peer tests |
 | C++ | `tools/interop_peer.cpp` | `CrdtPlaneRuntime`, keyed/positional codec, FFI/arena/channel adapters | ASan/UBSan ownership profile |
-| C# | `src/Lazily.InteropPeer` console project | only real Lazily IPC/CRDT/sync code after `#lzcsipc`/`#lzcssync` | blocked until those surfaces ship |
+| C# | `src/Lazily.InteropPeer` console project | production CRDT runtime and IPC codec; feature/channel adapters only when their library surfaces ship | semantic peer green; stdlib/channel features staged independently |
 
 Peer selection is feature-driven. A binding joins a scenario only after its
 `hello.features` advertises the production surface that scenario requires.
 Unsupported bindings remain explicit `staged_peers` in results; they are not
 silently omitted and do not receive green credit.
+
+Feature adapters follow the same rule. A peer advertises
+`stdlib_timer_v1`, `stdlib_timeout_v1`, or `stdlib_revision_barrier_v1` only
+after the binding's public implementation and canonical fixture runner pass.
+The existing resilience `TimeoutCell` does not satisfy the stdlib Timeout
+feature.
 
 Entrypoint names are part of the plan, not wire authority; a binding may choose
 the idiomatic package location as long as `peers.toml` is stable.
@@ -141,6 +148,8 @@ The orchestrator records the binding commit SHA and executable hash in results.
 ## Per-binding completion checklist
 
 - Peer implementation and contract tests live in the binding repo.
+- Every advertised feature adapter calls the public binding implementation and
+  carries a mutation proving it is not a fixture-only state machine.
 - `peers.toml` registration lives in `lazily-interop`.
 - The binding's `make check` invokes peer self-check but not the whole matrix.
 - The central suite invokes real pairwise tests.

@@ -248,7 +248,43 @@ Pushed commits include Rust `f9b28d6`, spec `1201842`, interop/superproject `701
 ### Re: stdlib native ports — gpt-5.6
 
 `#lzstdlibportsnative` remains open. The operator confirmed that another `lazily.md` session owns that work, so this pane did not modify, claim, verify, commit, or publish the existing Zig, Go, C++, or interop changes. This pane remains scoped to the completed agent-doc native SimWorld/plugin work.
-<!-- agent:boundary:27e47e22 -->
+
+### Re: #lzstdlibportsnative — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzstdlibportsnative]
+
+
+Implemented and shipped Phase 2 native portable-stdlib conformance across Zig, Go, and C++.
+
+- Added production logical-clock `Timer`, caller-driven `Timeout`, and `RevisionBarrier` APIs in all three bindings. The APIs enforce checked deadline overflow, clock-regression rejection without timer state mutation, exact-deadline dominance, operation-before-cancellation precedence, typed unavailable results, terminal latching, register/recheck lost-wakeup protection, separate revision/wake generation, and receipt non-authority.
+- Added production-backed runners for all three canonical `lazily-spec/conformance/stdlib/*.json` fixtures in every native binding and removed their staged coverage exceptions.
+- Added independently advertised `stdlib_timer_v1`, `stdlib_timeout_v1`, and `stdlib_revision_barrier_v1` peer capabilities plus `feature_reset`, `feature_step`, and `feature_observe` controls. Each control delegates to the production API.
+- Extended `lazily-interop` with oracle-checked feature steps and non-vacuous `feature_steps_run` coverage. The three native peers run every canonical Timer, Timeout, and RevisionBarrier scenario as a three-way group, which checks every pair and the three-way agreement. The scenarios are now part of the single `network-suite` alongside the semantic and channel matrices.
+- Updated the canonical coverage matrix: Rust, Zig, Go, and C++ are green for all three stdlib rows; unsupported bindings remain staged independently per feature.
+
+Verification is green:
+
+- `lazily-go`: `make check` and `make race` (Go `-race`).
+- `lazily-zig`: `make check`.
+- `lazily-cpp`: `make check`; the new stdlib runner and peer execute under ASan+UBSan.
+- `lazily-interop`: `make check`, all 11 required mutants caught.
+- Full `make network-suite NETWORK_TIER=stdlib-phase2 NETWORK_SEED=1103`: semantic matrix, channel matrix, Timer, Timeout, and RevisionBarrier all passed.
+- Three-way observation totals: Timer 51, Timeout 57, RevisionBarrier 57; zero staged peers.
+- Canonical coverage sync/check passed.
+
+Pushed commits:
+
+- Go `612d896`
+- Zig `8cefc91`
+- C++ `7eeb0e7`
+- Spec `5b1c7e5`
+- Interop/root pointers `d240309a1`
+- Coverage-only syncs: Rust `3ccfff6`, Python `eb7e29c`, Kotlin `f3a6144`, JS `bc75340`, Dart `cb990ed`, C# `eb21925`, Formal `0fff845`.
+
+The one-time CI inspection found the new CI runs queued/in progress with no immediate red. Python, Formal, and the root repo have no workflow named `CI`.
+<!-- agent:boundary:87c51562 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -256,7 +292,7 @@ Pushed commits include Rust `f9b28d6`, spec `1201842`, interop/superproject `701
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzstdlibspec]~~
 - ~~do [#lzstdlibrsfixtures]~~
-- do [#lzstdlibportsnative]
+- ~~do [#lzstdlibportsnative]~~
 - do [#lzstdlibportsmanaged]
 - do [#lzstdlibcspromote]
 - do [#lzstdlibmatrixrelease]
@@ -266,7 +302,6 @@ Pushed commits include Rust `f9b28d6`, spec `1201842`, interop/superproject `701
 
 <!-- agent:backlog priority queue -->
 - [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
-- [ ] [#lzstdlibportsnative] Implement Phase 2 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Zig, Go, and C++, including race/sanitizer and peer feature scenarios.
 - [ ] [#lzstdlibportsmanaged] Implement Phase 3 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Python, Kotlin, JavaScript, and Dart, with deterministic clock/wait seams and honest runtime/channel carve-outs.
 - [ ] [#lzstdlibcspromote] Implement Phase 4 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: add .NET stdlib production surfaces and corpus runners, then promote C# per feature and per executable channel only when evidence is green.
 - [ ] [#lzstdlibmatrixrelease] Implement Phase 5 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: run the capability-driven all-peer/all-channel matrix, enforce CI and mutation gates, publish coverage evidence, and release bindings inside-out only after every claimed cell is green.

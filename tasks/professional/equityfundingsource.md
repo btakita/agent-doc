@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -304,7 +304,70 @@ Deployment proof:
 The production deploy command reported the known Cloudflare route-sync authentication error (`code 10000`) after the worker and asset upload. Deployment status confirms the new version is active at 100%, and both existing production domains are serving it.
 
 Confidence: high.
-<!-- agent:boundary:b469896d -->
+Please add the following accounts as production admins. Make sure they receive invite emails:
+- Judith Krug <judithkrug@gmail.com>
+- Robert Waldman <rwaldman100@gmail.com>
+- April Armas & Diko Baghdasarian <contact@equityfundingsource.com>
+
+> **Queue prompt:**
+>
+> Please add the following accounts as production admins. Make sure they receive invite emails:
+> - Judith Krug <judithkrug@gmail.com>
+> - Robert Waldman <rwaldman100@gmail.com>
+> - April Armas & Diko Baghdasarian <contact@equityfundingsource.com>
+
+Completed in production.
+
+- `judithkrug@gmail.com` — active admin confirmed.
+- `rwaldman100@gmail.com` — active admin confirmed.
+- `contact@equityfundingsource.com` — created as an active admin for April Armas and Diko Baghdasarian (`fff827c5-37d4-4f44-998a-fa504a825cf9`).
+
+Fresh passwordless admin invitation emails were issued to all three addresses. After the 60-second duplicate-suppression window, I deliberately issued a second traced send so delivery was directly observable; recipients may therefore see two messages, and either unexpired link is valid until one is used.
+
+Proof:
+
+- Production D1 Time Travel was healthy before the write, with bookmark `0000029b-00000000-000050b6-95fce639d9446d51e61c868ba1912106`.
+- Final D1 verification reports all three rows as `role='admin'`, `status='active'`.
+- Each account has a distinct fresh invitation token created during the traced send (`1785210402`, `1785210404`, and `1785210405`) with a 30-minute expiration.
+- All three tagged `POST /login/email?role=admin` requests returned HTTP 200 on production Worker version `b9b00945-32e3-44a3-8391-2d6f496b8971`; the live Worker trace reported `outcome: ok` with no email-delivery warning or exception.
+
+Changed paths: none. No source commit, deployment, test suite, or CI lookup was needed because this was a production account/data operation only. Existing unrelated TMO worktree changes were left untouched.
+
+Escalation: none. The locally stored bootstrap password no longer authenticates against production, so I did not rotate or guess credentials; provisioning used the established one-time D1 path and invitations used the public passwordless admin sign-in flow.
+
+Confidence: high.
+### Re: Production admin accounts and invitations — gpt-5
+
+### Re: Production admin accounts and invitations — gpt-5
+
+> **Queue prompt:**
+>
+> Please add the following accounts as production admins. Make sure they receive invite emails:
+> - Judith Krug <judithkrug@gmail.com>
+> - Robert Waldman <rwaldman100@gmail.com>
+> - April Armas & Diko Baghdasarian <contact@equityfundingsource.com>
+
+Completed in production.
+
+- `judithkrug@gmail.com` — active admin confirmed.
+- `rwaldman100@gmail.com` — active admin confirmed.
+- `contact@equityfundingsource.com` — created as an active admin for April Armas and Diko Baghdasarian (`fff827c5-37d4-4f44-998a-fa504a825cf9`).
+
+Fresh passwordless admin invitation emails were issued to all three addresses. After the 60-second duplicate-suppression window, I deliberately issued a second traced send so delivery was directly observable; recipients may therefore see two messages, and either unexpired link is valid until one is used.
+
+Proof:
+
+- Production D1 Time Travel was healthy before the write, with bookmark `0000029b-00000000-000050b6-95fce639d9446d51e61c868ba1912106`.
+- Final D1 verification reports all three rows as `role='admin'`, `status='active'`.
+- Each account has a distinct fresh invitation token created during the traced send (`1785210402`, `1785210404`, and `1785210405`) with a 30-minute expiration.
+- All three tagged `POST /login/email?role=admin` requests returned HTTP 200 on production Worker version `b9b00945-32e3-44a3-8391-2d6f496b8971`; the live Worker trace reported `outcome: ok` with no email-delivery warning or exception.
+
+Changed paths: none. No source commit, deployment, test suite, or CI lookup was needed because this was a production account/data operation only. Existing unrelated TMO worktree changes were left untouched.
+
+Escalation: none. The locally stored bootstrap password no longer authenticates against production, so I did not rotate or guess credentials; provisioning used the established one-time D1 path and invitations used the public passwordless admin sign-in flow.
+
+Confidence: high.
+<!-- agent:boundary:b733a03c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

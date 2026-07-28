@@ -7,9 +7,9 @@ or use of a separate physical computer. The offer requires disclosure of the
 outside activities, not those operational details. It also avoids saying that
 the activities occur entirely outside Haiven time.
 
-Before sending, confirm Luke's recipient address rather than inferring it from
-Haiven's domain. Attach a completed prior-inventions schedule (Exhibit A), or
-state when it will be provided.
+The threaded Gmail reply has confirmed recipient addresses for Craig and Luke.
+Exhibit A does not need to accompany this request, but it should be completed
+and acknowledged in the final documents before signing.
 
 ---
 
@@ -94,14 +94,21 @@ necessary to prevent an actual conflict. My preference is to replace Section
 carve-out and whatever Board approval the present language requires for the
 three activities above.
 
+Please also confirm that I may submit future outside activities for written
+approval under the same conflict-based standard, and that any approved
+activity will receive the same compensation, intellectual-property, and
+confidentiality protections.
+
 ## 3. Prior intellectual property
 
-Please incorporate a completed Exhibit A identifying my pre-existing
-repositories, software libraries, websites, products, writings, trademarks,
-and other projects, including those associated with the activities above. The
-agreement should confirm that this prior IP remains excluded from Company
-Inventions and Work Product. If Haiven later wants to use any excluded project,
-we can document that separately in writing.
+I will provide a proposed Exhibit A before signing that identifies my
+pre-existing open-source work, independently owned materials associated with
+my outside consulting, private projects, repositories, software libraries,
+websites, products, writings, trademarks, and other prior intellectual
+property. Please incorporate the completed schedule into the final agreement
+and confirm that the listed prior IP remains excluded from Company Inventions
+and Work Product. If Haiven later wants to use any excluded project, we can
+document that separately in writing.
 
 This is important because the current agreement broadly assigns inventions
 created during employment, uses a Washington-law exception even though I will
@@ -164,10 +171,11 @@ into a “pre-tax” rent payment. If Haiven offers home-office reimbursement, i
 should be a separate accountable-plan benefit that does not reduce base salary
 and has been approved by Haiven’s payroll/tax advisers.
 
-Please also provide the employee handbook, benefit summaries and
-employee/dependent premium costs, health-coverage effective date, vacation
-accrual/carryover policy, equity plan, and proposed option agreement before
-acceptance, since the offer incorporates several of those materials into the
+Thank you for providing the benefits snapshot. Before acceptance, please also
+confirm my health-coverage effective date and the employee contribution for
+each applicable coverage tier, and provide the employee handbook, vacation
+accrual/carryover policy, equity plan, and proposed option agreement, since the
+offer references or incorporates several of those materials into the
 employment relationship.
 
 ## 7. Scheduling note

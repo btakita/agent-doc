@@ -297,6 +297,10 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("private fun repositionBoundaryViaDocument")
         val repositionFunction = watcher.substringAfter("private fun repositionBoundaryViaDocument")
             .substringBefore("private fun scheduleRepositionRetry")
+        val nativeSideEffectBody = watcher.substringAfter("private fun runNativeSideEffectOffEdt")
+            .substringBefore("private fun appendOpsLog")
+        val disposeBody = watcher.substringAfter("override fun dispose()")
+            .substringBefore("companion object")
 
         assertTrue(
             "agent-doc IPC patch writes should not set the unsynced-local-operator flag",
@@ -321,6 +325,17 @@ class TypingTrackerEdtBudgetTest {
                 0 until refreshFunction.indexOf("invokeAndWait") &&
                 repositionFunction.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
                 0 until repositionFunction.indexOf("invokeLater"),
+        )
+        assertTrue(
+            "reposition native computation must leave the EDT before crossing FFI",
+            repositionFunction.indexOf("executeOnPooledThread") in
+                0 until repositionFunction.indexOf("NativePatching.repositionBoundaryToEnd"),
+        )
+        assertTrue(
+            "editor telemetry and lifecycle native effects must dispatch off the EDT",
+            nativeSideEffectBody.contains("SwingUtilities.isEventDispatchThread()") &&
+                nativeSideEffectBody.contains("executeOnPooledThread(block)") &&
+                disposeBody.contains("runNativeSideEffectOffEdt"),
         )
     }
 

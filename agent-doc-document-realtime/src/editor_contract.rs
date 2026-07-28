@@ -10,6 +10,11 @@ pub const OPERATOR_TEXT_AUTHORITY_CAPABILITY: &str = "operator_text_authority_v1
 /// The editor reports Lazily delivery receipts for visible-write proof.
 pub const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY: &str = "lazily_transport_receipts_v1";
 
+/// The editor consumes the shared typed intent vocabulary over its PID-scoped
+/// endpoint. Adapters advertise this only after every intent they accept has the
+/// same fail-closed and receipt behavior as the Rust contract.
+pub const TYPED_EDITOR_INTENTS_CAPABILITY: &str = "typed_editor_intents_v1";
+
 /// The editor and core can exchange the lossless semantic cell tree.
 pub const LOSSLESS_TREE_CRDT_CAPABILITY: &str = "lossless_tree_crdt_v1";
 
@@ -38,11 +43,139 @@ pub fn has_capability(capabilities: &[String], required: &str) -> bool {
 mod tests {
     use super::*;
 
+    const PLUGIN_PARITY: &str = include_str!("../../editors/plugin-parity.tsv");
+    const JETBRAINS_SOURCES: &[&str] = &[
+        include_str!(
+            "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"
+        ),
+        include_str!(
+            "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"
+        ),
+    ];
+    const VSCODE_SOURCES: &[&str] = &[
+        include_str!("../../editors/vscode/src/native.ts"),
+        include_str!("../../editors/vscode/src/editorIntent.ts"),
+    ];
+    const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
+
+    #[derive(Debug)]
+    struct FeatureParity<'a> {
+        feature: &'a str,
+        core: &'a str,
+        jetbrains: &'a str,
+        vscode: &'a str,
+        zed: &'a str,
+    }
+
+    fn parity_rows() -> Vec<FeatureParity<'static>> {
+        PLUGIN_PARITY
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let columns = line.split('\t').collect::<Vec<_>>();
+                assert_eq!(columns.len(), 5, "invalid plugin parity row: {line}");
+                FeatureParity {
+                    feature: columns[0],
+                    core: columns[1],
+                    jetbrains: columns[2],
+                    vscode: columns[3],
+                    zed: columns[4],
+                }
+            })
+            .collect()
+    }
+
+    fn adapter_sources(adapter: &str) -> &'static [&'static str] {
+        match adapter {
+            "jetbrains" => JETBRAINS_SOURCES,
+            "vscode" => VSCODE_SOURCES,
+            "zed" => ZED_SOURCES,
+            other => panic!("unknown editor adapter {other}"),
+        }
+    }
+
     #[test]
     fn required_capabilities_use_the_lazily_contract_vocabulary() {
         assert_eq!(
             REQUIRED_LAZILY_EDITOR_CAPABILITIES,
             ["operator_text_authority_v1", "lazily_transport_receipts_v1"]
         );
+    }
+
+    #[test]
+    fn plugin_feature_conformance_selects_only_supported_peers() {
+        let rows = parity_rows();
+        let known_features = [
+            OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+            TYPED_EDITOR_INTENTS_CAPABILITY,
+            LOSSLESS_TREE_CRDT_CAPABILITY,
+            PEER_REPLICA_PULL_CAPABILITY,
+            "native_hot_reload_generation_v1",
+        ];
+        assert_eq!(
+            rows.iter().map(|row| row.feature).collect::<Vec<_>>(),
+            known_features,
+            "the parity matrix must cover the shared Rust capability vocabulary in contract order",
+        );
+
+        for row in rows {
+            let adapters = [
+                ("jetbrains", row.jetbrains),
+                ("vscode", row.vscode),
+                ("zed", row.zed),
+            ];
+            if row.core == "required" {
+                assert_eq!(
+                    row.jetbrains, "supported",
+                    "JetBrains must implement required capability {}",
+                    row.feature,
+                );
+                assert_eq!(
+                    row.vscode, "supported",
+                    "VS Code must implement required capability {}",
+                    row.feature,
+                );
+            } else {
+                assert_eq!(row.core, "optional", "invalid core state for {}", row.feature);
+            }
+
+            let selected = adapters
+                .iter()
+                .filter(|(_, state)| matches!(*state, "supported" | "conditional"))
+                .map(|(adapter, _)| *adapter)
+                .collect::<Vec<_>>();
+            assert!(
+                !selected.is_empty()
+                    || row.core == "optional"
+                        && adapters.iter().all(|(_, state)| *state == "staged"),
+                "feature {} needs a conformance peer unless every adapter is explicitly staged",
+                row.feature,
+            );
+
+            for (adapter, state) in adapters {
+                assert!(
+                    matches!(state, "supported" | "conditional" | "staged"),
+                    "invalid {adapter} state {state} for {}",
+                    row.feature,
+                );
+                let advertised = adapter_sources(adapter)
+                    .iter()
+                    .any(|source| source.contains(row.feature));
+                match state {
+                    "supported" | "conditional" => assert!(
+                        advertised,
+                        "{adapter} is selected for {} conformance but does not advertise it",
+                        row.feature,
+                    ),
+                    "staged" => assert!(
+                        !advertised,
+                        "{adapter} advertises staged capability {} before parity is complete",
+                        row.feature,
+                    ),
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 }

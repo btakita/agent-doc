@@ -555,32 +555,40 @@ class PatchWatcher(private val project: Project) : Disposable {
      */
     private fun saveDocumentViaDocument(filePath: String, patchId: String?): Boolean {
         var savedContent: String? = null
+        var surfaceStatus = "failed"
         ApplicationManager.getApplication().invokeAndWait {
             val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
             if (targetFile == null) {
                 LOG.warn("[socket] save_document rejected: target file not found for $filePath")
-                recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "missing_file")
+                surfaceStatus = "missing_file"
                 return@invokeAndWait
             }
             val fdm = FileDocumentManager.getInstance()
             val document = fdm.getDocument(targetFile)
             if (document == null) {
                 LOG.warn("[socket] save_document rejected: no document for $filePath")
-                recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "missing_document")
+                surfaceStatus = "missing_document"
                 return@invokeAndWait
             }
 
             try {
                 fdm.saveDocument(document)
                 savedContent = document.text
+                surfaceStatus = "saved"
                 LOG.info("[socket] save_document flushed ${savedContent?.length ?: 0} chars for $filePath")
-                recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "saved")
             } catch (e: Exception) {
                 LOG.warn("[socket] save_document failed for $filePath", e)
-                recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "failed")
             }
         }
 
+        recordEditorSurfaceOps(
+            filePath,
+            "vcs_refresh_save",
+            "save_document",
+            "save_document",
+            patchId,
+            surfaceStatus,
+        )
         val content = savedContent ?: return false
         return writeEditorContentProjection(patchId, content, filePath)
     }
@@ -701,46 +709,54 @@ class PatchWatcher(private val project: Project) : Disposable {
             if (!fdm.isDocumentUnsaved(document)) {
                 fdm.reloadFromDisk(document)
             }
-
-            WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
-                val content = document.text
-                val proof = EditorApplyProof(content, document.modificationStamp)
-                val sourceContent =
-                    if (preserveHead && shouldPreferCommittedDiskContentForRepositionUtil(content, diskContent)) {
-                        diskContent
-                    } else {
-                        content
-                    }
+            val content = document.text
+            val proof = EditorApplyProof(content, document.modificationStamp)
+            val sourceContent =
+                if (preserveHead && shouldPreferCommittedDiskContentForRepositionUtil(content, diskContent)) {
+                    diskContent
+                } else {
+                    content
+                }
+            ApplicationManager.getApplication().executeOnPooledThread {
                 val result = if (preserveHead) {
                     NativePatching.repositionBoundaryToEndPreserveHead(sourceContent, boundaryId)
                         ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId, preserveHead = true)
                 } else {
                     NativePatching.repositionBoundaryToEnd(sourceContent, boundaryId)
                         ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
-                } ?: return@runWriteCommandAction
-                if (result != content && editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
-                    LOG.info(
-                        documentMutationDiagnosticUtil(
-                            "repositionBoundary", filePath, boundaryId, "document_api",
-                            content, result, document.modificationStamp, true,
-                        )
-                    )
-                    // Capture the exact target payload at debug level for
-                    // IPC-corruption forensics.
-                    if (LOG.isDebugEnabled) {
-                        LOG.debug(
-                            "[patch-watcher] minimal-edit target (repositionBoundary) for $filePath boundaryId=$boundaryId (${result.length} chars):\n$result"
-                        )
+                } ?: return@executeOnPooledThread
+                ApplicationManager.getApplication().invokeLater {
+                    WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
+                        if (
+                            result != content &&
+                            editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)
+                        ) {
+                            LOG.info(
+                                documentMutationDiagnosticUtil(
+                                    "repositionBoundary", filePath, boundaryId, "document_api",
+                                    content, result, document.modificationStamp, true,
+                                )
+                            )
+                            // Capture the exact target payload at debug level for
+                            // IPC-corruption forensics.
+                            if (LOG.isDebugEnabled) {
+                                LOG.debug(
+                                    "[patch-watcher] minimal-edit target (repositionBoundary) for $filePath boundaryId=$boundaryId (${result.length} chars):\n$result"
+                                )
+                            }
+                            CrdtReplicaManager.withAgentAppliedEditorMutation(filePath) {
+                                applyMinimalDocumentEditUtil(document, content, result)
+                            }
+                        } else if (result != content) {
+                            LOG.warn("[patch-watcher] stale editor generation during reposition for $filePath")
+                        }
+                    })
+                    val reposMs = (System.nanoTime() - reposStart) / 1_000_000
+                    if (reposMs > 50) {
+                        LOG.info("[perf] repositionBoundary: ${reposMs}ms $filePath")
                     }
-                    CrdtReplicaManager.withAgentAppliedEditorMutation(filePath) {
-                        applyMinimalDocumentEditUtil(document, content, result)
-                    }
-                } else if (result != content) {
-                    LOG.warn("[patch-watcher] stale editor generation during reposition for $filePath")
                 }
-            })
-            val reposMs = (System.nanoTime() - reposStart) / 1_000_000
-            if (reposMs > 50) LOG.info("[perf] repositionBoundary: ${reposMs}ms $filePath")
+            }
         }
         return true
     }
@@ -1076,20 +1092,22 @@ class PatchWatcher(private val project: Project) : Disposable {
         patchId: String?,
         status: String,
     ) {
-        val root = resolveRootFor(filePath) ?: return
-        val lib = AgentDocLib.get()
-        if (lib == null) {
-            LOG.warn("[patch-watcher] cannot record editor surface event: native library unavailable")
-            return
-        }
-        try {
-            if (!lib.agent_doc_record_editor_surface_event(
-                    root, "jetbrains", filePath, surface, action, agentCommand, patchId, status,
-                )) {
-                LOG.warn("[patch-watcher] native editor surface event rejected: $action status=$status")
+        runNativeSideEffectOffEdt {
+            val root = resolveRootFor(filePath) ?: return@runNativeSideEffectOffEdt
+            val lib = AgentDocLib.get()
+            if (lib == null) {
+                LOG.warn("[patch-watcher] cannot record editor surface event: native library unavailable")
+                return@runNativeSideEffectOffEdt
             }
-        } catch (e: Exception) {
-            LOG.warn("[patch-watcher] editor surface event ABI failed: ${e.message}", e)
+            try {
+                if (!lib.agent_doc_record_editor_surface_event(
+                        root, "jetbrains", filePath, surface, action, agentCommand, patchId, status,
+                    )) {
+                    LOG.warn("[patch-watcher] native editor surface event rejected: $action status=$status")
+                }
+            } catch (e: Exception) {
+                LOG.warn("[patch-watcher] editor surface event ABI failed: ${e.message}", e)
+            }
         }
     }
 
@@ -1099,20 +1117,30 @@ class PatchWatcher(private val project: Project) : Disposable {
         agentCommand: String,
         status: String,
     ) {
-        val root = project.basePath ?: return
-        val lib = AgentDocLib.get()
-        if (lib == null) {
-            LOG.warn("[patch-watcher] cannot record project surface event: native library unavailable")
-            return
-        }
-        try {
-            if (!lib.agent_doc_record_editor_surface_event(
-                    root, "jetbrains", ".", surface, action, agentCommand, null, status,
-                )) {
-                LOG.warn("[patch-watcher] native project surface event rejected: $action status=$status")
+        runNativeSideEffectOffEdt {
+            val root = project.basePath ?: return@runNativeSideEffectOffEdt
+            val lib = AgentDocLib.get()
+            if (lib == null) {
+                LOG.warn("[patch-watcher] cannot record project surface event: native library unavailable")
+                return@runNativeSideEffectOffEdt
             }
-        } catch (e: Exception) {
-            LOG.warn("[patch-watcher] project surface event ABI failed: ${e.message}", e)
+            try {
+                if (!lib.agent_doc_record_editor_surface_event(
+                        root, "jetbrains", ".", surface, action, agentCommand, null, status,
+                    )) {
+                    LOG.warn("[patch-watcher] native project surface event rejected: $action status=$status")
+                }
+            } catch (e: Exception) {
+                LOG.warn("[patch-watcher] project surface event ABI failed: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun runNativeSideEffectOffEdt(block: () -> Unit) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            ApplicationManager.getApplication().executeOnPooledThread(block)
+        } else {
+            block()
         }
     }
 
@@ -1579,20 +1607,24 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     override fun dispose() {
         running = false
-        val lib = AgentDocLib.get()
-        for (state in rootStates.values) {
-            val stopped = try {
-                state.ipcCallback == null && state.ipcCallbackV2 == null ||
-                    lib?.agent_doc_stop_ipc_listener(state.root) == 1
-            } catch (_: Exception) {
-                false
-            }
-            if (stopped) {
-                state.ipcCallback = null
-                state.ipcCallbackV2 = null
+        val states = rootStates.values.toList()
+        rootStates.clear()
+        runNativeSideEffectOffEdt {
+            val lib = AgentDocLib.get()
+            for (state in states) {
+                val stopped = try {
+                    state.ipcCallback == null && state.ipcCallbackV2 == null ||
+                        lib?.agent_doc_stop_ipc_listener(state.root) == 1
+                } catch (error: Exception) {
+                    LOG.warn("[native] failed to stop listener for ${state.root} during dispose", error)
+                    false
+                }
+                if (stopped) {
+                    state.ipcCallback = null
+                    state.ipcCallbackV2 = null
+                }
             }
         }
-        rootStates.clear()
     }
 
     companion object {

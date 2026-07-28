@@ -4,40 +4,41 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
+import java.awt.AWTEvent
 import java.awt.Container
 import java.awt.event.ContainerEvent
-import java.awt.event.ContainerListener
-import java.util.Collections
-import java.util.WeakHashMap
+import java.awt.event.AWTEventListener
+import java.awt.Toolkit
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import javax.swing.SwingUtilities
 
 /**
  * Detects editor layout changes (tab drags between splits, new splits, closed splits)
- * using a ContainerListener on EditorsSplitters. The listener is attached
- * recursively with a weak de-dup set, so new split subtrees are covered by
- * Swing container events instead of a fallback polling thread.
+ * using one process-wide AWT event listener filtered to this project's
+ * EditorsSplitters tree. A recursive ContainerListener used to attach to every
+ * transient Swing container under the editor; long-running IDE sessions grew
+ * that set into thousands of listeners and made every UI structure change
+ * progressively more expensive.
  */
 class LayoutChangeDetector(private val project: Project) {
 
     private val lastLayoutHash = AtomicReference<String?>(null)
     private val disposed = AtomicBoolean(false)
     private val fallbackGeneration = AtomicLong(0)
-    private val listenerCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private val listenerInstalled = AtomicBoolean(false)
     private val containerEventCount = java.util.concurrent.atomic.AtomicLong(0)
+    private val editorsRoot = AtomicReference<Container?>(null)
     private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-layout-events").apply { isDaemon = true }
     }
-    // WeakHashMap so GC'd containers don't accumulate; synchronized for EDT access
-    private val listenedContainers: MutableSet<Container> =
-        Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap()))
 
     fun start() {
-        // Attach ContainerListener to the splitters root (delayed — splitters may not exist yet)
+        // Resolve the splitters root before installing the filtered process listener.
         executor.schedule(init@{
             if (disposed.get()) return@init
             attachContainerListener()
@@ -47,6 +48,7 @@ class LayoutChangeDetector(private val project: Project) {
     fun dispose() {
         disposed.set(true)
         executor.shutdownNow()
+        detachContainerEventListener()
         instances.remove(project)
     }
 
@@ -58,35 +60,54 @@ class LayoutChangeDetector(private val project: Project) {
                 val managerEx = FileEditorManagerEx.getInstanceEx(project)
                 val splitters = managerEx.splitters
                 val root = splitters as? Container ?: return@invokeLater
-                addRecursiveContainerListener(root)
-                LOG.info("[layout] ContainerListener attached to EditorsSplitters")
+                editorsRoot.set(root)
+                if (listenerInstalled.compareAndSet(false, true)) {
+                    Toolkit.getDefaultToolkit().addAWTEventListener(
+                        containerEventListener,
+                        AWTEvent.CONTAINER_EVENT_MASK,
+                    )
+                }
+                LOG.info("[layout] one filtered AWT ContainerEvent listener attached to EditorsSplitters")
             } catch (e: Exception) {
-                LOG.debug("[layout] Failed to attach ContainerListener: ${e.message}")
+                LOG.debug("[layout] Failed to attach filtered container listener: ${e.message}")
             }
         }
     }
 
-    private val containerListener = object : ContainerListener {
-        override fun componentAdded(e: ContainerEvent) {
-            val count = containerEventCount.incrementAndGet()
-            (e.child as? Container)?.let { addRecursiveContainerListener(it) }
-            if (count % 100 == 0L) LOG.info("[state] containerEvents=$count listeners=${listenerCount.get()}")
-            scheduleSync("containerAdd")
+    private val containerEventListener = AWTEventListener { event ->
+        if (disposed.get() || project.isDisposed) return@AWTEventListener
+        val containerEvent = event as? ContainerEvent ?: return@AWTEventListener
+        val root = editorsRoot.get() ?: return@AWTEventListener
+        val source = containerEvent.container
+        val child = containerEvent.child
+        val belongsToEditorTree =
+            source === root ||
+                SwingUtilities.isDescendingFrom(source, root) ||
+                SwingUtilities.isDescendingFrom(child, root)
+        if (!belongsToEditorTree) return@AWTEventListener
+
+        val count = containerEventCount.incrementAndGet()
+        if (count % 500 == 0L) {
+            LOG.debug("[state] filteredContainerEvents=$count listeners=1")
         }
-        override fun componentRemoved(e: ContainerEvent) {
-            containerEventCount.incrementAndGet()
-            scheduleSync("containerRemove")
-        }
+        val sourceToken =
+            if (containerEvent.id == ContainerEvent.COMPONENT_ADDED) "containerAdd" else "containerRemove"
+        scheduleSync(sourceToken)
     }
 
-    private fun addRecursiveContainerListener(container: Container) {
-        if (!listenedContainers.add(container)) return // already attached — skip
-        container.addContainerListener(containerListener)
-        listenerCount.incrementAndGet()
-        for (child in container.components) {
-            if (child is Container) {
-                addRecursiveContainerListener(child)
+    private fun detachContainerEventListener() {
+        if (!listenerInstalled.compareAndSet(true, false)) return
+        val detach = Runnable {
+            try {
+                Toolkit.getDefaultToolkit().removeAWTEventListener(containerEventListener)
+            } finally {
+                editorsRoot.set(null)
             }
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+            detach.run()
+        } else {
+            ApplicationManager.getApplication().invokeLater(detach)
         }
     }
 

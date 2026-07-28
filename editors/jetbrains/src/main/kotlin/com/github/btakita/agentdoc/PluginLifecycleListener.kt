@@ -33,7 +33,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         // inside `pullMissingReplicas` for when the pull itself cannot be asked.
         CrdtReplicaManager.pullMissingReplicas(project, "plugin-startup")
         // Start watching for IPC patch files from agent-doc write --ipc
-        PatchWatcher.getInstance(project)
+        val patchWatcher = PatchWatcher.getInstance(project)
         // Highlight agent-doc-specific markdown structures in the editor.
         VisualHighlighterManager.getInstance(project)
         // Detect editor layout changes (tab drags, new splits) and sync tmux
@@ -42,7 +42,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         TurnStateBannerRefresher.getInstance(project).start()
         // Register EditorTabSyncListener via code (not XML) so it survives hot-reload
         val editorTabSync = EditorTabSyncListener.install(project)
-        project.messageBus.connect().subscribe(
+        project.messageBus.connect(project).subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             editorTabSync
         )
@@ -55,7 +55,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         // background agent, recovery, restart, or pane-focus events must never open
         // or select a different IDE document. The reverse focus mirror therefore
         // remains uninstalled.
-        project.messageBus.connect().subscribe(
+        project.messageBus.connect(project).subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             object : FileEditorManagerListener {
                 override fun selectionChanged(event: FileEditorManagerEvent) {
@@ -68,6 +68,7 @@ class PluginLifecycleListener : ProjectManagerListener {
                 override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
                     TypingTracker.scheduleOpenDocumentReport(file)
                     if (file.name.endsWith(".md")) {
+                        patchWatcher.registerRootForFile(file.path)
                         CrdtReplicaManager.requestRemoteDrain(project, file.path, "file-opened")
                     }
                 }
@@ -77,9 +78,13 @@ class PluginLifecycleListener : ProjectManagerListener {
                 }
             }
         )
+        FileEditorManager.getInstance(project).openFiles
+            .asSequence()
+            .filter { it.name.endsWith(".md") }
+            .forEach { patchWatcher.registerRootForFile(it.path) }
         TypingTracker.reportOpenMarkdownDocuments(project)
         // Detect file renames/moves and update sessions.json path
-        project.messageBus.connect().subscribe(
+        project.messageBus.connect(project).subscribe(
             VirtualFileManager.VFS_CHANGES,
             FileRenameListener(project)
         )

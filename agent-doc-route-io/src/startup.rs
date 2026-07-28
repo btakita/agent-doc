@@ -436,6 +436,14 @@ pub fn auto_start_ext_with_lock_mode(
     )
 }
 
+fn provision_only_visible_anchor(window_panes: &[String], split_before: bool) -> Option<String> {
+    if split_before {
+        window_panes.first().cloned()
+    } else {
+        window_panes.last().cloned()
+    }
+}
+
 /// Auto-start a new agent session in a specific tmux session.
 ///
 /// Strategy:
@@ -574,8 +582,10 @@ pub fn auto_start_in_session_with_lock_mode(
     let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
 
     // Try to split directly in an existing pane.
-    // When skip_wait=true (sync path), prefer panes in the target window (agent-doc window)
-    // over stash panes — splitting in the stash creates invisible panes.
+    // Provision-only focus/sync may anchor only inside the target agent-doc
+    // window. A durable registration in `stash` is ownership evidence, not a
+    // geometry anchor: splitting beside it creates an invisible extra pane and
+    // makes the following active-window focus guard reject the successful start.
     let window_panes = tmux
         .list_panes_ordered(&format!("{}:agent-doc", session_name))
         .unwrap_or_default();
@@ -583,13 +593,7 @@ pub fn auto_start_in_session_with_lock_mode(
         find_registered_pane_in_session(tmux, &registry_base_dir, session_name, "");
     let mut window_anchor_refusal = None;
     let existing_pane = if skip_wait {
-        // Sync path: find a pane in the agent-doc window (not stash)
-        let positional = if split_before {
-            window_panes.first().cloned() // leftmost by screen position
-        } else {
-            window_panes.last().cloned() // rightmost by screen position
-        };
-        positional.or(registered_anchor)
+        provision_only_visible_anchor(&window_panes, split_before)
     } else if registered_anchor.is_some() {
         registered_anchor
     } else if window_panes.is_empty() {
@@ -1191,6 +1195,20 @@ mod tests {
             route_owned_reap_policy_for_start(false, false, Some("  ")),
             RouteOwnedReapPolicy::Auto
         );
+    }
+
+    #[test]
+    fn provision_only_anchor_is_scoped_to_visible_agent_doc_window_panes() {
+        let visible = vec!["%left".to_string(), "%right".to_string()];
+        assert_eq!(
+            provision_only_visible_anchor(&visible, true).as_deref(),
+            Some("%left")
+        );
+        assert_eq!(
+            provision_only_visible_anchor(&visible, false).as_deref(),
+            Some("%right")
+        );
+        assert_eq!(provision_only_visible_anchor(&[], false), None);
     }
 
     #[test]

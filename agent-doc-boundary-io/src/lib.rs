@@ -42,6 +42,7 @@ fn signal_editor_refresh(file: &Path) {
                 &root,
                 registration.pid,
                 &registration.editor_id,
+                &canonical.to_string_lossy(),
             );
         }
     }

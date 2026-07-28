@@ -777,8 +777,9 @@ pub fn send_vcs_refresh_to_editor(
     project_root: &Path,
     editor_pid: u64,
     editor_id: &str,
+    file: &str,
 ) -> Result<bool> {
-    let mut message = vcs_refresh_message();
+    let mut message = vcs_refresh_message(file);
     message["editor_id"] = serde_json::Value::String(editor_id.to_string());
     message["editor_pid"] = serde_json::Value::from(editor_pid);
 

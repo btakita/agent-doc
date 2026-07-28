@@ -5,8 +5,10 @@
 //! Usage: `agent-doc focus <file.md>`
 //!
 //! ## Spec
-//! - `run(file, pane)`: entry point; delegates to `run_with_tmux` using the default
-//!   tmux server.
+//! - `run(file, pane)`: entry point. Without an explicit pane it delegates to the
+//!   Project Controller so one serialized owner can focus an existing pane or
+//!   resume a killed latest session before focusing it. An explicit pane remains
+//!   the direct tmux escape hatch.
 //! - `run_blocking(file, pane)`: legacy synchronous path; performs best-effort
 //!   stash promotion before selecting the resolved pane.
 //! - `run_with_tmux(file, pane_override, tmux)`: if `pane_override` is `Some`, skips
@@ -14,6 +16,8 @@
 //!   errors if the override pane is not alive.
 //! - When `pane_override` is `None`, reads the file from disk, parses YAML frontmatter,
 //!   and extracts the `agent_doc_session` UUID; errors if the field is absent.
+//! - The standalone `run_with_tmux*` helpers and explicit-pane path retain the
+//!   local resolution behavior below for layout internals and operator overrides.
 //! - When `.agent-doc/state.db` has a live local actor record for the document
 //!   session, focus prefers that actor-owned pane over stale durable registry
 //!   metadata without launching or waiting on the project controller.
@@ -70,6 +74,8 @@ use agent_doc_tmux::{FocusPaneDecision, decide_focus_pane};
 use tmux_router::Tmux;
 
 pub trait FocusEffects {
+    fn focus_or_resume_document_via_controller(&self, file: &Path) -> Result<()>;
+
     fn find_live_owner_pane_quiet(
         &self,
         tmux: &Tmux,
@@ -130,6 +136,9 @@ fn decide_registered_focus_candidate<'a>(
 }
 
 pub fn run(effects: &impl FocusEffects, file: &Path, pane: Option<&str>) -> Result<()> {
+    if pane.is_none() {
+        return effects.focus_or_resume_document_via_controller(file);
+    }
     run_with_tmux(effects, file, pane, &Tmux::default_server())
 }
 
@@ -330,6 +339,46 @@ pub fn run_with_tmux_opts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ControllerFocusEffects;
+
+    impl FocusEffects for ControllerFocusEffects {
+        fn focus_or_resume_document_via_controller(&self, _file: &Path) -> Result<()> {
+            Ok(())
+        }
+
+        fn find_live_owner_pane_quiet(
+            &self,
+            _tmux: &Tmux,
+            _file: &Path,
+            _session_id: &str,
+        ) -> Option<String> {
+            None
+        }
+
+        fn local_actor_record_pane_for_document(
+            &self,
+            _file: &Path,
+            _session_id: &str,
+            _tmux: &Tmux,
+        ) -> Option<String> {
+            None
+        }
+
+        fn pane_in_stash_window(&self, _tmux: &Tmux, _pane: &str) -> bool {
+            false
+        }
+
+        fn promote_pane_to_agent_doc_window(&self, _tmux: &Tmux, _pane: &str) -> Result<bool> {
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn default_focus_delegates_to_controller_before_local_file_or_registry_checks() {
+        let missing = Path::new("/definitely/missing/agent-doc-focus.md");
+        run(&ControllerFocusEffects, missing, None).unwrap();
+    }
 
     #[test]
     fn registered_focus_decision_selects_matching_live_owner() {

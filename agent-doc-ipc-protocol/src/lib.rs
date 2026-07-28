@@ -940,10 +940,11 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-/// Build a VCS refresh payload.
-pub fn vcs_refresh_message() -> serde_json::Value {
+/// Build a path-scoped VCS refresh payload.
+pub fn vcs_refresh_message(file: &str) -> serde_json::Value {
     serde_json::json!({
         "type": EditorIntent::RefreshVcs.as_str(),
+        "file": file,
     })
 }
 
@@ -962,9 +963,10 @@ pub fn reload_lib_message(lib_version: &str) -> serde_json::Value {
 }
 
 /// Build a VCS refresh probe payload.
-pub fn vcs_refresh_probe_message(probe: &str) -> serde_json::Value {
+pub fn vcs_refresh_probe_message(file: &str, probe: &str) -> serde_json::Value {
     serde_json::json!({
         "type": EditorIntent::RefreshVcs.as_str(),
+        "file": file,
         "probe": probe,
     })
 }
@@ -1601,12 +1603,14 @@ mod tests {
 
     #[test]
     fn vcs_refresh_messages_have_stable_type_and_probe_field() {
-        let message = vcs_refresh_message();
+        let message = vcs_refresh_message("/tmp/plan.md");
         assert_eq!(message["type"], "refresh_vcs");
+        assert_eq!(message["file"], "/tmp/plan.md");
         assert!(message.get("probe").is_none());
 
-        let probe = vcs_refresh_probe_message("ipc_degraded_self_heal");
+        let probe = vcs_refresh_probe_message("/tmp/plan.md", "ipc_degraded_self_heal");
         assert_eq!(probe["type"], "refresh_vcs");
+        assert_eq!(probe["file"], "/tmp/plan.md");
         assert_eq!(probe["probe"], "ipc_degraded_self_heal");
     }
 

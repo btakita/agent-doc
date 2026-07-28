@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.66
+
+_JetBrains plugin 0.2.309; VS Code extension 0.2.60; Zed extension 0.1.0._
+
+- **Default CLI focus and editor focus now share the same controller-owned resume transition.** `agent-doc focus <file>` no longer bypasses the Project Controller for local registry lookup, and a known closed actor or missing actor projection with a durable session may cross the typed `resume_latest` policy before pane selection. Focus restart uses typed `ProvisionOnly` startup policy: it creates, starts, and selects the replacement inside the short focus RPC, while readiness and layout convergence remain asynchronous. Provision-only startup anchors exclusively in the visible `agent-doc` window—an old registration in `stash` is never used as a split anchor—preventing an invisible replacement/third-pane result. Explicit `--pane` and `--blocking` remain operator escape hatches. Internal focus rejection causes are a closed-set `FocusPaneRejectReason` instead of free-text control flags.
+- **Editor integrations now bound refresh and lifecycle work to the affected document.** The shared `refresh_vcs` intent carries an absolute file path; JetBrains dirties only that file and VS Code refreshes only its containing repository instead of invoking a workspace-wide Git refresh. JetBrains also replaces recursively-installed Swing container listeners with one filtered AWT listener, starts native endpoints only for the project root and roots containing open Markdown files, performs targeted VFS lookup, and stops inbound native listeners before CRDT teardown. Native callbacks never wait indefinitely for an IntelliJ read permit, and CRDT re-registration captures editor objects on the EDT before continuing on a pooled thread, eliminating the reload/read-lock convoy that periodically froze IDEA.
+
 ## 0.35.65
 
 _JetBrains plugin 0.2.308; VS Code extension 0.2.59; Zed extension 0.1.0._

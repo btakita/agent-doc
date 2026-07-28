@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.DefaultLanguageHighlighterColors
@@ -31,6 +32,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import javax.swing.SwingUtilities
 
 class VisualHighlighterManager private constructor(private val project: Project) : Disposable {
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(VisualHighlighterManager::class.java)
@@ -137,13 +140,33 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
     private fun collectVisualTokens(document: Document): VisualTokenSnapshot? {
         return try {
-            val snapshot = ApplicationManager.getApplication().runReadAction<VisualDocumentText?> {
-                if (!isMarkdown(document)) return@runReadAction null
-                VisualDocumentText(
-                    text = document.text,
-                    modificationStamp = document.modificationStamp,
-                )
-            } ?: return null
+            val application = ApplicationManager.getApplication()
+            val snapshot =
+                if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
+                    if (!isMarkdown(document)) return null
+                    VisualDocumentText(
+                        text = document.text,
+                        modificationStamp = document.modificationStamp,
+                    )
+                } else {
+                    val applicationEx = application as? ApplicationEx ?: return null
+                    val result = AtomicReference<VisualDocumentText?>()
+                    if (
+                        !applicationEx.tryRunReadAction {
+                            if (isMarkdown(document)) {
+                                result.set(
+                                    VisualDocumentText(
+                                        text = document.text,
+                                        modificationStamp = document.modificationStamp,
+                                    ),
+                                )
+                            }
+                        }
+                    ) {
+                        return null
+                    }
+                    result.get() ?: return null
+                }
             VisualTokenSnapshot(
                 modificationStamp = snapshot.modificationStamp,
                 // FFI unavailability is not an empty token projection. Keeping

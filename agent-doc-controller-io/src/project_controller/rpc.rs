@@ -14730,9 +14730,24 @@ enum FocusPaneCandidateDecision<'a> {
         not_alive_reason: &'static str,
     },
     Reject {
-        reason: &'static str,
+        reason: FocusPaneRejectReason,
         pane_id: Option<&'a str>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusPaneRejectReason {
+    ActorNotFocusable,
+    MissingActorRecord,
+}
+
+impl FocusPaneRejectReason {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::ActorNotFocusable => "actor_not_focusable",
+            Self::MissingActorRecord => "missing_actor_record",
+        }
+    }
 }
 
 /// Reconcile the durable actor/registry projections against a pane whose
@@ -14763,7 +14778,7 @@ fn decide_focus_pane_candidate<'a>(
     if let Some((pane_id, focusable)) = actor {
         if !focusable {
             return FocusPaneCandidateDecision::Reject {
-                reason: "actor_not_focusable",
+                reason: FocusPaneRejectReason::ActorNotFocusable,
                 pane_id: Some(pane_id),
             };
         }
@@ -14783,7 +14798,7 @@ fn decide_focus_pane_candidate<'a>(
     }
 
     FocusPaneCandidateDecision::Reject {
-        reason: "missing_actor_record",
+        reason: FocusPaneRejectReason::MissingActorRecord,
         pane_id: None,
     }
 }
@@ -14798,16 +14813,29 @@ fn decide_focus_pane_candidate<'a>(
 /// cross-document focus steal cannot happen. Returns the rescued pane when the
 /// reject is safe to override.
 fn focus_reject_rescued_by_live_pane_owner<'a>(
-    reject_reason: &str,
+    reject_reason: FocusPaneRejectReason,
     pane_id: Option<&'a str>,
     pane_process_owner_document: Option<&str>,
     document_id: &str,
 ) -> Option<&'a str> {
-    if reject_reason != "actor_not_focusable" {
+    if reject_reason != FocusPaneRejectReason::ActorNotFocusable {
         return None;
     }
     let pane = pane_id?;
     (pane_process_owner_document == Some(document_id)).then_some(pane)
+}
+
+fn rejected_focus_should_resume_latest(
+    missing_pane_policy: MissingFocusPanePolicy,
+    reject_reason: FocusPaneRejectReason,
+    session_id: Option<&str>,
+) -> bool {
+    missing_pane_policy == MissingFocusPanePolicy::ResumeLatest
+        && session_id.is_some()
+        && matches!(
+            reject_reason,
+            FocusPaneRejectReason::ActorNotFocusable | FocusPaneRejectReason::MissingActorRecord
+        )
 }
 
 fn current_document_session_id(
@@ -14957,10 +14985,20 @@ fn handle_focus_document_pane_with_policy(
                     "focused_live_process_owner",
                     "live_owner_pane_not_alive",
                 )
+            } else if rejected_focus_should_resume_latest(
+                missing_pane_policy,
+                reason,
+                session_id.as_deref(),
+            ) {
+                (
+                    pane_id.unwrap_or_default().to_string(),
+                    "resuming_missing_actor_pane",
+                    reason.as_str(),
+                )
             } else {
                 return Ok(tmux_focus_receipt(
                     false,
-                    reason,
+                    reason.as_str(),
                     Some(document_id),
                     pane_id.map(ToOwned::to_owned),
                     None,
@@ -14977,14 +15015,15 @@ fn handle_focus_document_pane_with_policy(
             let file_arg = canonical.to_string_lossy().to_string();
             let stale_pane = pane_id.clone();
             pane_id = runtime_effects()?
-                .route_auto_start(
-                    &tmux,
-                    &canonical,
+                .route_auto_start(ControllerRouteAutoStartInvocation {
+                    tmux: &tmux,
+                    file: &canonical,
                     session_id,
-                    &file_arg,
-                    None,
-                    Some(agent_doc_harness::ResumeRequest::Latest),
-                )
+                    file_arg: &file_arg,
+                    window: None,
+                    policy: ControllerRouteAutoStartPolicy::ProvisionOnly,
+                    resume: Some(agent_doc_harness::ResumeRequest::Latest),
+                })
                 .with_context(|| {
                     format!(
                         "failed to resume killed selected-document session for {}",
@@ -16263,7 +16302,15 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         ),
     );
     runtime_effects()?
-        .route_auto_start(&tmux, &work.file, &work.session_id, &file_str, None, resume)
+        .route_auto_start(ControllerRouteAutoStartInvocation {
+            tmux: &tmux,
+            file: &work.file,
+            session_id: &work.session_id,
+            file_arg: &file_str,
+            window: None,
+            policy: ControllerRouteAutoStartPolicy::WaitForReady,
+            resume,
+        })
         .with_context(|| {
             format!(
                 "failed to cold-start replacement supervisor for {}",
@@ -17143,7 +17190,7 @@ mod tests {
         assert_eq!(
             decide_focus_pane_candidate(Some(("%closed", false)), Some("%stale"), None),
             FocusPaneCandidateDecision::Reject {
-                reason: "actor_not_focusable",
+                reason: FocusPaneRejectReason::ActorNotFocusable,
                 pane_id: Some("%closed"),
             },
         );
@@ -17156,7 +17203,7 @@ mod tests {
         // finished/blocked session's pane is still open and showing that doc.
         assert_eq!(
             focus_reject_rescued_by_live_pane_owner(
-                "actor_not_focusable",
+                FocusPaneRejectReason::ActorNotFocusable,
                 Some("%59"),
                 Some("doc-bugs2"),
                 "doc-bugs2",
@@ -17170,7 +17217,7 @@ mod tests {
         // A pane reused by a different document must NOT be focus-stolen.
         assert_eq!(
             focus_reject_rescued_by_live_pane_owner(
-                "actor_not_focusable",
+                FocusPaneRejectReason::ActorNotFocusable,
                 Some("%59"),
                 Some("doc-other"),
                 "doc-bugs2",
@@ -17180,7 +17227,7 @@ mod tests {
         // No live owner proof at all (bare shell / dead) also stands.
         assert_eq!(
             focus_reject_rescued_by_live_pane_owner(
-                "actor_not_focusable",
+                FocusPaneRejectReason::ActorNotFocusable,
                 Some("%59"),
                 None,
                 "doc-bugs2"
@@ -17190,13 +17237,37 @@ mod tests {
         // Only `actor_not_focusable` is rescuable; other rejects are untouched.
         assert_eq!(
             focus_reject_rescued_by_live_pane_owner(
-                "missing_actor_record",
+                FocusPaneRejectReason::MissingActorRecord,
                 Some("%59"),
                 Some("doc-bugs2"),
                 "doc-bugs2",
             ),
             None,
         );
+    }
+
+    #[test]
+    fn resume_latest_policy_crosses_closed_actor_reject_when_session_is_known() {
+        assert!(rejected_focus_should_resume_latest(
+            MissingFocusPanePolicy::ResumeLatest,
+            FocusPaneRejectReason::ActorNotFocusable,
+            Some("session"),
+        ));
+        assert!(rejected_focus_should_resume_latest(
+            MissingFocusPanePolicy::ResumeLatest,
+            FocusPaneRejectReason::MissingActorRecord,
+            Some("session"),
+        ));
+        assert!(!rejected_focus_should_resume_latest(
+            MissingFocusPanePolicy::ObserveOnly,
+            FocusPaneRejectReason::ActorNotFocusable,
+            Some("session"),
+        ));
+        assert!(!rejected_focus_should_resume_latest(
+            MissingFocusPanePolicy::ResumeLatest,
+            FocusPaneRejectReason::ActorNotFocusable,
+            None,
+        ));
     }
 
     #[test]

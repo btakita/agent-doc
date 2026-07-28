@@ -178,20 +178,20 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
 
     fn route_auto_start(
         &self,
-        tmux: &tmux_router::Tmux,
-        file: &Path,
-        session_id: &str,
-        file_arg: &str,
-        window: Option<&str>,
-        resume: Option<agent_doc_harness::ResumeRequest>,
+        invocation: agent_doc_controller_io::project_controller::ControllerRouteAutoStartInvocation<
+            '_,
+        >,
     ) -> anyhow::Result<String> {
-        agent_doc_route_io::startup::auto_start_resuming(
-            tmux,
-            file,
-            session_id,
-            file_arg,
-            window,
-            resume,
+        agent_doc_route_io::startup::auto_start_ext(
+            invocation.tmux,
+            invocation.file,
+            invocation.session_id,
+            invocation.file_arg,
+            invocation.window,
+            invocation.policy
+                == agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy::ProvisionOnly,
+            false,
+            invocation.resume,
             agent_doc_route_io::runtime_effects::route_startup_effects(),
         )
     }

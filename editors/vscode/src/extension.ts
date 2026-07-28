@@ -77,6 +77,26 @@ function monotonicMillis(): number {
     return Number(process.hrtime.bigint() / 1_000_000n);
 }
 
+interface GitRepositoryApi {
+    status(): Promise<void>;
+}
+
+interface GitExtensionApi {
+    getRepository(uri: vscode.Uri): GitRepositoryApi | null;
+}
+
+interface GitExtensionExports {
+    getAPI(version: 1): GitExtensionApi;
+}
+
+async function refreshVcsForFile(filePath: string): Promise<void> {
+    const extension = vscode.extensions.getExtension<GitExtensionExports>('vscode.git');
+    if (!extension) return;
+    const exports = extension.isActive ? extension.exports : await extension.activate();
+    const repository = exports.getAPI(1).getRepository(vscode.Uri.file(filePath));
+    await repository?.status();
+}
+
 // #qnodemerge4wire Phase 4: per-document text shadow (the previous full text).
 // VS Code's onDidChangeTextDocument carries only rangeLength (UTF-16) for the
 // deleted span, not the old fragment text, so we keep the prior text to compute
@@ -2368,7 +2388,7 @@ class PatchWatcher implements vscode.Disposable {
                 });
             }
             case EditorIntent.RefreshVcs:
-                await vscode.commands.executeCommand('git.refresh');
+                if (filePath) await refreshVcsForFile(filePath);
                 return 1;
             case EditorIntent.ReloadLibrary:
                 native.forceReloadLib(projectRoot);

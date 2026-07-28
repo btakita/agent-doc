@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.command.CommandProcessor
 import com.intellij.openapi.command.UndoConfirmationPolicy
 import com.intellij.openapi.editor.Document
@@ -25,6 +26,8 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
+import javax.swing.SwingUtilities
 
 private const val CRDT_LISTENER_WARN_MS = 10L
 private const val CRDT_WORKER_WARN_MS = 100L
@@ -452,7 +455,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val started = System.nanoTime()
             var chars = -1
             try {
-                val text = ApplicationManager.getApplication().runReadAction<String> { document.text }
+                val text = tryReadDocumentText(document)
+                    ?: return@execute
                 chars = text.length
                 shadows[filePath] = text
                 forwarderFor(filePath, text)
@@ -477,7 +481,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val started = System.nanoTime()
             var chars = -1
             try {
-                val text = editorText ?: ApplicationManager.getApplication().runReadAction<String> { document.text }
+                val text = editorText ?: tryReadDocumentText(document)
+                    ?: return@attach false
                 chars = text.length
                 // The open IntelliJ Document is the live authority. A forced refresh
                 // must never install a retained whole-document target before the
@@ -559,12 +564,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * deletion that was still waiting behind the debounce worker.
      */
     private fun publishClosingDocumentCut(filePath: String, document: Document): Boolean {
+        val closingText = tryReadDocumentText(document) ?: return false
         return try {
             executor.submit<Boolean> {
-                val text = ApplicationManager.getApplication().runReadAction<String> { document.text }
-                val forwarder = forwarderFor(filePath, text) ?: return@submit false
-                forwarder.ensureEditorText(text)
-                shadows[filePath] = text
+                val forwarder = forwarderFor(filePath, closingText) ?: return@submit false
+                forwarder.ensureEditorText(closingText)
+                shadows[filePath] = closingText
                 clearLocalPending(filePath)
                 if (forwarders.remove(filePath, forwarder)) {
                     forwarder.deregister()
@@ -749,8 +754,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     if (disposed.get() || staleBaselineRecoveryTasks[filePath] !== scheduled) {
                         return@Runnable
                     }
-                    val editorText =
-                        ApplicationManager.getApplication().runReadAction<String> { document.text }
+                val editorText = tryReadDocumentText(document)
+                    ?: run {
+                        scheduleStaleBaselineRecovery(filePath, document)
+                        return@Runnable
+                    }
                     val staleForwarder = forwarders[filePath] ?: return@Runnable
                     shadows[filePath] = editorText
                     adoptExactEditorBaseline(
@@ -1714,11 +1722,44 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         return false
     }
 
-    private fun editorBufferText(filePath: String): String? =
-        ApplicationManager.getApplication().runReadAction<String?> {
-            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@runReadAction null
-            FileDocumentManager.getInstance().getDocument(targetFile)?.text
+    private fun editorBufferText(filePath: String): String? {
+        val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return null
+        val application = ApplicationManager.getApplication()
+        if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
+            return FileDocumentManager.getInstance().getDocument(targetFile)?.text
         }
+        val applicationEx = application as? ApplicationEx ?: return null
+        val text = AtomicReference<String?>()
+        return if (
+            applicationEx.tryRunReadAction {
+                text.set(FileDocumentManager.getInstance().getDocument(targetFile)?.text)
+            }
+        ) {
+            text.get()
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Native/replica workers must never queue indefinitely behind IDEA's
+     * write-intent permit. EDT callers already own safe editor access; workers
+     * use ApplicationEx's immediate read attempt and let their retained event
+     * retry when a writer has priority.
+     */
+    private fun tryReadDocumentText(document: Document): String? {
+        val application = ApplicationManager.getApplication()
+        if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
+            return document.text
+        }
+        val applicationEx = application as? ApplicationEx ?: return null
+        val text = AtomicReference<String?>()
+        return if (applicationEx.tryRunReadAction { text.set(document.text) }) {
+            text.get()
+        } else {
+            null
+        }
+    }
 
     private fun contentHash(text: String): String =
         java.security.MessageDigest.getInstance("SHA-256")
@@ -2014,8 +2055,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             projects
                 .filterNot { it.isDisposed }
                 .forEach { project ->
-                    getInstance(project)
-                    forceRefreshOpenDocumentReplicas(project, "native-generation-handoff")
+                    runOnEdtNonBlocking {
+                        if (project.isDisposed) return@runOnEdtNonBlocking
+                        getInstance(project)
+                        forceRefreshOpenDocumentReplicas(project, "native-generation-handoff")
+                    }
                 }
         }
 
@@ -2087,27 +2131,32 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
 
         fun forceRefreshOpenDocumentReplicas(project: Project, reason: String) {
-            val manager = instances[project] ?: return
-            val openDocuments = ApplicationManager.getApplication().runReadAction<List<Triple<String, String, Document>>> {
+            runOnEdtNonBlocking {
+                if (project.isDisposed) return@runOnEdtNonBlocking
+                val manager = instances[project] ?: return@runOnEdtNonBlocking
                 val fileDocumentManager = FileDocumentManager.getInstance()
-                FileEditorManager.getInstance(project).openFiles
-                    .asSequence()
-                    .filter { it.name.endsWith(".md") }
-                    .mapNotNull { file ->
-                        fileDocumentManager.getDocument(file)?.let { document ->
-                            Triple(file.path, file.name, document)
+                val openDocuments =
+                    FileEditorManager.getInstance(project).openFiles
+                        .asSequence()
+                        .filter { it.name.endsWith(".md") }
+                        .mapNotNull { file ->
+                            fileDocumentManager.getDocument(file)?.let { document ->
+                                Triple(file.path, file.name, document)
+                            }
                         }
+                        .toList()
+                ApplicationManager.getApplication().executeOnPooledThread {
+                    if (project.isDisposed) return@executeOnPooledThread
+                    openDocuments.forEach { (filePath, fileName, document) ->
+                        manager.log.info("[crdt-replica] forcing open-document re-register for $fileName reason=$reason")
+                        manager.ensureOpenDocumentReplica(
+                            filePath,
+                            document,
+                            await = false,
+                            forceRefresh = true,
+                        )
                     }
-                    .toList()
-            }
-            openDocuments.forEach { (filePath, fileName, document) ->
-                manager.log.info("[crdt-replica] forcing open-document re-register for $fileName reason=$reason")
-                manager.ensureOpenDocumentReplica(
-                    filePath,
-                    document,
-                    await = false,
-                    forceRefresh = true,
-                )
+                }
             }
         }
 
@@ -2122,29 +2171,48 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
 
         fun forceRefreshOpenDocumentReplica(project: Project, filePath: String, reason: String) {
-            val manager = instances[project] ?: return
-            val openDocument = ApplicationManager.getApplication().runReadAction<Triple<String, String, Document>?> {
-                val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@runReadAction null
-                val document = FileDocumentManager.getInstance().getDocument(file) ?: return@runReadAction null
-                Triple(file.path, file.name, document)
-            } ?: return
-            val (resolvedFilePath, fileName, document) = openDocument
-            if (!manager.beginAckRecoveryReregister(resolvedFilePath)) {
-                manager.log.info(
-                    "[crdt-replica] coalesced delivery-ack re-register for $fileName reason=$reason",
-                )
-                manager.requestUrgentRemoteDrain(resolvedFilePath, "ack-recovery-reregister-coalesced")
-                return
+            runOnEdtNonBlocking {
+                if (project.isDisposed) return@runOnEdtNonBlocking
+                val manager = instances[project] ?: return@runOnEdtNonBlocking
+                val file =
+                    LocalFileSystem.getInstance().findFileByPath(filePath)
+                        ?: return@runOnEdtNonBlocking
+                val document =
+                    FileDocumentManager.getInstance().getDocument(file)
+                        ?: return@runOnEdtNonBlocking
+                val resolvedFilePath = file.path
+                val fileName = file.name
+                ApplicationManager.getApplication().executeOnPooledThread {
+                    if (project.isDisposed) return@executeOnPooledThread
+                    if (!manager.beginAckRecoveryReregister(resolvedFilePath)) {
+                        manager.log.info(
+                            "[crdt-replica] coalesced delivery-ack re-register for $fileName reason=$reason",
+                        )
+                        manager.requestUrgentRemoteDrain(
+                            resolvedFilePath,
+                            "ack-recovery-reregister-coalesced",
+                        )
+                        return@executeOnPooledThread
+                    }
+                    manager.log.info(
+                        "[crdt-replica] forcing delivery-ack re-register for $fileName reason=$reason",
+                    )
+                    manager.ensureOpenDocumentReplica(
+                        resolvedFilePath,
+                        document,
+                        await = false,
+                        forceRefresh = true,
+                    )
+                }
             }
-            manager.log.info(
-                "[crdt-replica] forcing delivery-ack re-register for $fileName reason=$reason",
-            )
-            manager.ensureOpenDocumentReplica(
-                resolvedFilePath,
-                document,
-                await = false,
-                forceRefresh = true,
-            )
+        }
+
+        private fun runOnEdtNonBlocking(block: () -> Unit) {
+            if (javax.swing.SwingUtilities.isEventDispatchThread()) {
+                block()
+            } else {
+                ApplicationManager.getApplication().invokeLater(block)
+            }
         }
 
         fun ensureReplicaForOpenDocument(

@@ -249,6 +249,22 @@ pub struct ControllerTmuxLayoutSyncStateReport {
     pub focus: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControllerRouteAutoStartPolicy {
+    WaitForReady,
+    ProvisionOnly,
+}
+
+pub struct ControllerRouteAutoStartInvocation<'a> {
+    pub tmux: &'a tmux_router::Tmux,
+    pub file: &'a Path,
+    pub session_id: &'a str,
+    pub file_arg: &'a str,
+    pub window: Option<&'a str>,
+    pub policy: ControllerRouteAutoStartPolicy,
+    pub resume: Option<agent_doc_harness::ResumeRequest>,
+}
+
 pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     fn consume_queue_prompt_force_disk(
         &self,
@@ -257,12 +273,7 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
 
     fn route_auto_start(
         &self,
-        tmux: &tmux_router::Tmux,
-        file: &Path,
-        session_id: &str,
-        file_arg: &str,
-        window: Option<&str>,
-        resume: Option<agent_doc_harness::ResumeRequest>,
+        invocation: ControllerRouteAutoStartInvocation<'_>,
     ) -> Result<String>;
 
     fn run_editor_route(
@@ -359,12 +370,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
 
     fn route_auto_start(
         &self,
-        _tmux: &tmux_router::Tmux,
-        _file: &Path,
-        _session_id: &str,
-        _file_arg: &str,
-        _window: Option<&str>,
-        _resume: Option<agent_doc_harness::ResumeRequest>,
+        _invocation: ControllerRouteAutoStartInvocation<'_>,
     ) -> Result<String> {
         anyhow::bail!("project controller test runtime does not route auto-start")
     }

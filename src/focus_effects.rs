@@ -8,6 +8,26 @@ pub(crate) struct CliFocusEffects;
 pub(crate) static FOCUS_EFFECTS: CliFocusEffects = CliFocusEffects;
 
 impl agent_doc_focus_io::FocusEffects for CliFocusEffects {
+    fn focus_or_resume_document_via_controller(&self, file: &Path) -> Result<()> {
+        let project_root =
+            agent_doc_project_root_io::project_root_for_target_or_cwd(None, Some(file))?;
+        let receipt =
+            agent_doc_controller_io::project_controller::focus_document_pane(&project_root, file)?;
+        if !receipt.focused {
+            anyhow::bail!(
+                "controller could not focus {}: {}",
+                file.display(),
+                receipt.reason
+            );
+        }
+        eprintln!(
+            "Focused pane {} ({})",
+            receipt.pane_id.as_deref().unwrap_or("<unknown>"),
+            file.display()
+        );
+        Ok(())
+    }
+
     fn find_live_owner_pane_quiet(
         &self,
         tmux: &Tmux,

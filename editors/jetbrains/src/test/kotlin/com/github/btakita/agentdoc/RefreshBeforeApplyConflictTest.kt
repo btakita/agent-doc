@@ -64,13 +64,18 @@ class RefreshBeforeApplyConflictTest {
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
         ).first { Files.exists(it) }
         val patchWatcher = Files.readString(patchWatcherPath)
-        val refreshVcs = functionBody(patchWatcher, "private fun refreshVcs()")
+        val refreshVcs = functionBody(patchWatcher, "private fun refreshVcs(filePath: String?)")
 
         assertFalse(
             "a VCS signal must not refresh every open content file behind unsaved editors",
             refreshVcs.contains("LocalFileSystem.getInstance().refresh"),
         )
-        assertTrue(refreshVcs.contains("VcsDirtyScopeManager.getInstance(project).markEverythingDirty()"))
+        assertFalse(
+            "a VCS signal must not dirty every repository in a monorepo",
+            refreshVcs.contains("markEverythingDirty"),
+        )
+        assertTrue(refreshVcs.contains("dirtyScope.fileDirty(file)"))
+        assertTrue(refreshVcs.contains("pendingVcsRefreshFiles"))
         assertTrue(refreshVcs.contains("without content VFS refresh"))
     }
 
@@ -203,6 +208,8 @@ class RefreshBeforeApplyConflictTest {
         val patchWatcher = read("PatchWatcher.kt")
         val layoutDetector = read("LayoutChangeDetector.kt")
         val visualHighlighter = read("VisualHighlighterManager.kt")
+        val nativeReload = read("NativeReloadCoordinator.kt")
+        val lifecycle = read("PluginLifecycleListener.kt")
 
         assertFalse("status widget must not own a Swing timer", turnWidget.contains("Alarm("))
         assertFalse("status widget must not call native projection while painting", turnWidget.contains("presentationForFile("))
@@ -224,12 +231,24 @@ class RefreshBeforeApplyConflictTest {
         assertFalse("PatchWatcher must block on WatchService events", patchWatcher.contains("watchService.poll("))
         assertFalse("reload broadcast must not use a polling interval", patchWatcher.contains("LIB_RELOAD_BROADCAST_POLL_MS"))
         assertFalse("PatchWatcher must not use CRDT event sidecars", patchWatcher.contains(".agent-doc/crdt-replica-events"))
+        assertFalse(
+            "missing-file recovery must not refresh the whole LocalFileSystem",
+            patchWatcher.contains("LocalFileSystem.getInstance().refresh(false)"),
+        )
         val patchWatcherStart = patchWatcher.substringAfter("fun start()")
             .substringBefore("/**\n     * Register a root directory")
         assertTrue(
-            "nested project-root discovery must leave the projectOpened EDT",
-            patchWatcherStart.indexOf("executeOnPooledThread") <
-                patchWatcherStart.indexOf("discoverNestedRoots(basePath)"),
+            "base-root listener startup must leave the projectOpened EDT",
+            patchWatcherStart.contains("executeOnPooledThread") &&
+                patchWatcherStart.contains("registerRoot(basePath)"),
+        )
+        assertFalse(
+            "plugin startup must not scan dormant nested project roots",
+            patchWatcher.contains("discoverNestedRoots"),
+        )
+        assertTrue(
+            "open editor files must register their concrete root on demand",
+            lifecycle.contains("patchWatcher.registerRootForFile(file.path)"),
         )
         val registerRoot = patchWatcher.substringAfter("fun registerRoot(root: String)")
             .substringBefore("internal fun quiesceNativeEndpointsForReload")
@@ -247,6 +266,17 @@ class RefreshBeforeApplyConflictTest {
         )
         assertFalse("layout detector must not run a fallback polling thread", layoutDetector.contains("startFallbackPoll"))
         assertFalse("layout detector must not define a polling interval", layoutDetector.contains("POLL_INTERVAL_MS"))
+        assertFalse(
+            "layout detector must not recursively attach listeners to the Swing tree",
+            layoutDetector.contains("addRecursiveContainerListener") ||
+                layoutDetector.contains(".addContainerListener("),
+        )
+        assertTrue(
+            "layout detector must own one removable filtered AWT listener",
+            layoutDetector.contains("AWTEventListener") &&
+                layoutDetector.contains("AWTEvent.CONTAINER_EVENT_MASK") &&
+                layoutDetector.contains("removeAWTEventListener"),
+        )
         assertTrue(
             "structural layout changes must use the same surface graph as focus changes",
             layoutDetector.contains("EditorTabSyncListener.install(project).onEditorLayoutChanged(project)"),
@@ -260,6 +290,29 @@ class RefreshBeforeApplyConflictTest {
         assertFalse("visual highlighter must not use a Swing timer", visualHighlighter.contains("Alarm("))
         assertFalse("visual highlighter must not tokenize the editor text on the UI apply path", visualHighlighter.contains("NativePatching.visualTokens(editor.document.text)"))
         assertTrue("visual highlighter tokenization must run on its event worker", visualHighlighter.contains("agent-doc-visual-highlighter-events"))
+        for ((name, source) in listOf(
+            "PatchWatcher" to patchWatcher,
+            "TypingTracker" to typingTracker,
+            "CrdtReplicaManager" to crdtReplica,
+            "VisualHighlighterManager" to visualHighlighter,
+        )) {
+            assertFalse(
+                "$name must not let a native/background worker block indefinitely on an IDEA read permit",
+                source.contains("runReadAction"),
+            )
+        }
+        assertTrue(
+            "native reload must stop inbound listeners before disposing CRDT managers",
+            nativeReload.indexOf("PatchWatcher.quiesceAllForNativeReload()") <
+                nativeReload.indexOf("CrdtReplicaManager.quiesceAllForNativeReload()"),
+        )
+        val forceRefreshReplica = crdtReplica.substringAfter("fun forceRefreshOpenDocumentReplica(")
+            .substringBefore("fun ensureReplicaForOpenDocument(")
+        assertTrue(forceRefreshReplica.contains("runOnEdtNonBlocking"))
+        assertFalse(
+            "native callbacks must not block waiting for an IDEA read permit",
+            forceRefreshReplica.contains("runReadAction"),
+        )
     }
 
     @Test

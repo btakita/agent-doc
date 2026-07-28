@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.Document
@@ -16,6 +17,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
+import javax.swing.SwingUtilities
 
 object EditorIdentity {
     val id: String = "jetbrains-${ProcessHandle.current().pid()}-${UUID.randomUUID()}"
@@ -226,9 +229,22 @@ object TypingTracker : DocumentListener {
     fun clearOpenDocumentReport(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         val filePath = file.path
-        val closingDocument = com.intellij.openapi.application.ApplicationManager.getApplication()
-            .runReadAction<com.intellij.openapi.editor.Document?> {
+        val application = com.intellij.openapi.application.ApplicationManager.getApplication()
+        val closingDocument =
+            if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
                 FileDocumentManager.getInstance().getDocument(file)
+            } else {
+                val applicationEx = application as? ApplicationEx
+                val document = AtomicReference<Document?>()
+                if (
+                    applicationEx?.tryRunReadAction {
+                        document.set(FileDocumentManager.getInstance().getDocument(file))
+                    } == true
+                ) {
+                    document.get()
+                } else {
+                    null
+                }
             }
         pendingContentReports.computeIfPresent(filePath) { _, state ->
             synchronized(state) {
@@ -267,10 +283,16 @@ object TypingTracker : DocumentListener {
         val lib = AgentDocLib.get() ?: return false
         val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return false
         if (!file.name.endsWith(".md")) return false
-        val document = com.intellij.openapi.application.ApplicationManager.getApplication()
-            .runReadAction<com.intellij.openapi.editor.Document?> {
-                FileDocumentManager.getInstance().getDocument(file)
-            } ?: return false
+        val documentRef = AtomicReference<Document?>()
+        val application =
+            com.intellij.openapi.application.ApplicationManager.getApplication() as? ApplicationEx
+                ?: return false
+        val readAccepted =
+            application.tryRunReadAction {
+                documentRef.set(FileDocumentManager.getInstance().getDocument(file))
+            }
+        if (!readAccepted) return false
+        val document = documentRef.get() ?: return false
         return reportFullContentNow(
             lib = lib,
             filePath = filePath,
@@ -346,6 +368,24 @@ object TypingTracker : DocumentListener {
 
     private fun monotonicMillis(): Long = System.nanoTime() / 1_000_000L
 
+    /**
+     * Native listener callbacks must never queue behind IDEA's write-intent
+     * permit. A blocking read here prevents listener shutdown, which in turn
+     * prevents native reload and can retain the callback thread indefinitely.
+     */
+    private fun tryReadDocumentText(document: Document): String? {
+        val application =
+            com.intellij.openapi.application.ApplicationManager.getApplication() as? ApplicationEx
+                ?: return null
+        if (application.isReadAccessAllowed) return document.text
+        val textRef = AtomicReference<String?>()
+        return if (application.tryRunReadAction { textRef.set(document.text) }) {
+            textRef.get()
+        } else {
+            null
+        }
+    }
+
     private fun reportFullContentNow(
         lib: AgentDocLib,
         filePath: String,
@@ -354,8 +394,13 @@ object TypingTracker : DocumentListener {
         requireAuthority: Boolean,
     ): Boolean {
         return try {
-            val text = com.intellij.openapi.application.ApplicationManager.getApplication()
-                .runReadAction<String> { document.text }
+            val text = tryReadDocumentText(document)
+            if (text == null) {
+                if (!requireAuthority) {
+                    scheduleFullContentReport(filePath, document)
+                }
+                return false
+            }
             // #falsetyping-guard: derive replica-churn provenance. A document that
             // is fully flushed to disk has no unsaved edits at all, so clear any
             // stale local-edit marker. Otherwise the buffer is unsaved: the edits

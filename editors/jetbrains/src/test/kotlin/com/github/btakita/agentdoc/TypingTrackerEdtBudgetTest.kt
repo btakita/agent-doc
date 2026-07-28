@@ -227,7 +227,9 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "socket-triggered publication should resolve the live editor document and publish without queued-op side effects",
             publishBody.contains("LocalFileSystem.getInstance().findFileByPath(filePath)") &&
-                publishBody.contains("runReadAction<com.intellij.openapi.editor.Document?>") &&
+                publishBody.contains("as? ApplicationEx") &&
+                publishBody.contains("application.tryRunReadAction") &&
+                !publishBody.contains(".runReadAction") &&
                 publishBody.contains("return reportFullContentNow(") &&
                 publishBody.contains("drainEditorOps = false") &&
                 publishBody.contains("requireAuthority = true"),
@@ -270,7 +272,7 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "the coalesced recovery must adopt one exact live editor cut and cancel its predecessor",
-            recoveryBody.contains("runReadAction<String> { document.text }") &&
+            recoveryBody.contains("tryReadDocumentText(document)") &&
                 recoveryBody.contains("reason = \"coalesced-local-delta-baseline-diverged\"") &&
                 recoveryBody.contains("staleBaselineRecoveryTasks.put(filePath, scheduled)?.cancel(false)"),
         )

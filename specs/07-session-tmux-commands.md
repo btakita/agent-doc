@@ -101,12 +101,23 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 `agent-doc focus <FILE> [--pane P] [--blocking|--synchronous]` focuses the pane that currently owns the document session.
 
+- Default focus runs through the Project Controller command plane, the same
+  serialized latest-wins boundary used by editor selection. When the actor is
+  closed/missing or its pane died but the document still has a durable session,
+  the typed `resume_latest` policy starts a replacement owner before selecting
+  it; a closed projection must not reject that recovery before the policy is
+  evaluated. Restart uses typed `ProvisionOnly` startup policy so pane
+  creation/start/selection completes inside the short focus RPC; harness
+  readiness and the safe-passive layout pass settle asynchronously.
+  Provision-only startup may split only beside a pane already visible in the
+  `agent-doc` window; a durable registration in `stash` is ownership evidence,
+  never a geometry anchor.
+- Explicit `--pane` remains a direct tmux selection escape hatch. `--blocking`
+  keeps the legacy synchronous local actor/registry resolver and may surface a
+  stashed pane before returning.
 - When the controller-local actor cache has a live actor for the document
-  session, focus must select that actor-owned pane.
-- Focus must not launch or wait on the project controller actor-binding RPC; it
-  is the editor fast path and must stay independent of slower reconciliation.
-- Focus may use the transactional registry row only as a fallback binding helper
-  when no live local actor-cache entry exists.
+  session, default focus selects that actor-owned pane. The transactional
+  registry remains a fallback binding helper inside controller reconciliation.
 - Live-owner precedence: a pane resolved from the local actor cache or the
   transactional registry only proves the pane is alive, not that it still owns
   the document. After a reroute / fresh-restart the session can move to a new
@@ -315,10 +326,10 @@ tmux-router registry metadata only as a projection of that binding.
 - Editor plugins may deduplicate repeated automatic selection/layout states, but
   a real markdown selection event must still reach the safe-passive
   reconciliation path even when its visible/focused signature matches the last
-  applied state. The immediate `agent-doc focus` fast path cannot create a
-  missing actor/supervisor; the follow-up `sync --no-autostart` pass owns that
-  safe cold-start so later `session clear`/status commands do not fail with
-  `stage=missing_actor` after simply navigating to the document.
+  applied state. The immediate controller focus transition may resume the
+  document's latest durable session when its actor/supervisor or pane is
+  missing. The follow-up `sync --no-autostart` pass remains passive and only
+  reconciles the resumed owner into the observed layout.
 - Safe-passive editor sync should not prove whether live unregistered agent
   panes in stash are still owned. Live agent-pane ownership proof and
   kill-or-preserve decisions belong to full sync/repair paths.

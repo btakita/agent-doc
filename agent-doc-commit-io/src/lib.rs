@@ -449,6 +449,7 @@ impl agent_doc_git_io::transient_cleanup::TransientCleanupEffects
                 &project_root,
                 registration.pid,
                 &registration.editor_id,
+                &canonical.to_string_lossy(),
             )?;
         }
         Ok(delivered)

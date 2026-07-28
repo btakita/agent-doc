@@ -66,7 +66,7 @@ Rust, JetBrains, and VS Code use the same `EditorIntent` names:
 | `refresh_content` | Republish the already-open editor value to Lazily |
 | `observe_lazily_current` | Return current value, generation, and causal proof |
 | `deliver_crdt_remote` | Integrate a remote Lazily change |
-| `refresh_vcs` | Refresh editor VCS decoration after a durable commit |
+| `refresh_vcs` | Refresh VCS decoration for the required absolute `file` after a durable commit |
 | `reload_library` | Reload a compatible native library only when the adapter can prove a safe boundary; otherwise require process restart |
 
 Every mutating intent carries `intent_id`, `cycle_id`, `expected_generation`,
@@ -134,6 +134,24 @@ An adapter that cannot prove that boundary must load no replacement and report
 that a process restart is required.
 Unknown adapter identities fail closed to restart-required.
 
+Editor adapters must keep lifecycle and refresh work bounded:
+
+- `refresh_vcs` is file-scoped. JetBrains dirties that file only; VS Code asks
+  only the containing repository to refresh status. A workspace-wide VFS or
+  VCS refresh is forbidden.
+- Native reload stops inbound callbacks before disposing the CRDT managers
+  they can call. A failed listener quiesce must not rebuild every replica from
+  a half-disposed generation.
+- Native callback threads never wait indefinitely for an editor read permit.
+  Capture editor-owned objects on the editor thread without blocking the
+  caller, then continue native, socket, and CRDT work on a pooled executor.
+- Layout observation uses one project/process-scoped listener filtered to the
+  active editor split tree; it does not recursively install a listener on every
+  Swing container.
+- Endpoint discovery is demand-driven by the project root and open Markdown
+  files. Dormant nested `.agent-doc` roots do not each receive a listener at
+  project startup.
+
 ## 7. User actions and routing
 
 Submit, claim, compact, and sync actions invoke the resolved `agent-doc` binary
@@ -171,3 +189,5 @@ Each adapter must cover:
 8. Missing ABI/capability fails closed without fallback.
 9. Save projects the existing buffer and does not replace it.
 10. Crash points at every state-machine transition converge under simulation.
+11. Refresh, reload, layout, and endpoint discovery stay within the bounded
+    scope above and never block the editor event thread on native work.

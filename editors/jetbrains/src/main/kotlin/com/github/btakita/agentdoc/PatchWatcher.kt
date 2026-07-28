@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.sun.jna.Pointer
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -17,6 +18,8 @@ import java.time.Instant
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicReference
+import javax.swing.SwingUtilities
 
 private enum class CrdtReplicaEventReason(val token: String) {
     RequestFullState("request_full_state"),
@@ -53,11 +56,12 @@ private enum class EditorIntent(val token: String) {
  * Document mutations arrive as typed messages and publish typed receipts;
  * normal realtime paths use minimal range edits so undo remains local.
  *
- * **Multi-root:** a single watcher tracks every nested `.agent-doc/` project
- * under `project.basePath` (scanned at startup) plus any additional roots
- * discovered at runtime via [registerRoot] (called by actions when they
- * resolve a submodule root via FFI). Each root has its own FFI socket listener
- * and shares the applied-delivery dedup cache.
+ * **Multi-root:** a single watcher starts with `project.basePath` and adds
+ * roots on demand when an editor document or action resolves a submodule root.
+ * It never scans the whole workspace for dormant `.agent-doc/` directories:
+ * every registered root owns a native listener, so eager discovery multiplied
+ * callbacks and made native generation handoff proportional to repository
+ * history instead of the currently open editor surface.
  */
 class PatchWatcher(private val project: Project) : Disposable {
     private val operatorTextAuthorityCapability = "operator_text_authority_v1"
@@ -131,37 +135,35 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     private fun currentContentForProjection(filePath: String): String? {
-        // VFS lookup + synchronous refresh must stay OUTSIDE a read action: a
-        // synchronous `refresh(false)` cannot run while holding the read lock.
-        var targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
-        if (targetFile == null) {
-            LocalFileSystem.getInstance().refresh(false)
-            targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
-        }
-        val file = targetFile
+        // Keep missing-file recovery path-scoped. A global LocalFileSystem
+        // refresh can turn one receipt into a monorepo VFS scan when inotify is
+        // degraded, blocking IDEA's write-intent queue.
+        val localFileSystem = LocalFileSystem.getInstance()
+        val file =
+            localFileSystem.findFileByPath(filePath)
+                ?: localFileSystem.refreshAndFindFileByIoFile(File(filePath))
         if (file == null) {
             LOG.warn("[content-projection] already_applied target file not found: $filePath")
             return null
         }
-        // #patchwatcher-readaccess: `getDocument()` / `document.text` touch the
-        // IntelliJ document model, which requires a read action. This method runs
-        // on the socket callback thread, so read the model inside a read action
-        // instead of tripping `softAssertReadAccess`.
-        return ApplicationManager.getApplication().runReadAction<String?> {
-            val document = FileDocumentManager.getInstance().getDocument(file)
-            if (document != null) {
-                document.text
-            } else {
-                try {
-                    String(file.contentsToByteArray(), file.charset)
-                } catch (e: Exception) {
-                    LOG.warn(
-                        "[content-projection] failed to read already_applied VFS content for $filePath",
-                        e,
-                    )
-                    null
-                }
+        // #patchwatcher-readaccess: this runs on a native socket callback.
+        // Never queue that callback behind IDEA's write-intent permit; the
+        // binary retains the intent and can retry when an immediate read is
+        // unavailable.
+        val application = ApplicationManager.getApplication()
+        if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
+            return FileDocumentManager.getInstance().getDocument(file)?.text
+        }
+        val applicationEx = application as? ApplicationEx ?: return null
+        val content = AtomicReference<String?>()
+        return if (
+            applicationEx.tryRunReadAction {
+                content.set(FileDocumentManager.getInstance().getDocument(file)?.text)
             }
+        ) {
+            content.get()
+        } else {
+            null
         }
     }
 
@@ -184,14 +186,6 @@ class PatchWatcher(private val project: Project) : Disposable {
         ApplicationManager.getApplication().executeOnPooledThread {
             if (!running || project.isDisposed) return@executeOnPooledThread
             registerRoot(basePath)
-            // Recursive workspace discovery performs filesystem I/O and may
-            // traverse a large monorepo. ProjectManager invokes `projectOpened`
-            // on the EDT, so doing this inline contributed to startup freezes
-            // and amplified IDEA's inotify-exhaustion fallback scan.
-            for (nested in discoverNestedRoots(basePath)) {
-                if (!running || project.isDisposed) break
-                registerRoot(nested)
-            }
         }
     }
 
@@ -218,6 +212,11 @@ class PatchWatcher(private val project: Project) : Disposable {
             startListener.run()
         }
         LOG.info("[lazily-endpoint] registered root: $root")
+    }
+
+    /** Register only the concrete project root that owns an open editor file. */
+    fun registerRootForFile(filePath: String) {
+        resolveRootFor(filePath)?.let(::registerRoot)
     }
 
     internal fun quiesceNativeEndpointsForReload(): Boolean {
@@ -249,39 +248,6 @@ class PatchWatcher(private val project: Project) : Disposable {
                 startSocketListenerViaFfi(state)
             }
         }
-    }
-
-    /**
-     * Scan under [basePath] for nested `.agent-doc/` dirs. Returns the PARENT of each
-     * match (the directory that contains `.agent-doc/`). Skips common build/VCS dirs
-     * and caps depth to avoid runaway traversals.
-     */
-    private fun discoverNestedRoots(basePath: String): List<String> {
-        val skip = setOf(
-            ".git", ".idea", ".gradle", ".agent-doc",
-            "node_modules", "target", "build", "dist", "out",
-            "venv", ".venv", "__pycache__",
-        )
-        val found = mutableListOf<String>()
-        val base = File(basePath).absoluteFile
-        fun scan(dir: File, depth: Int) {
-            if (depth > 6) return
-            val children = dir.listFiles() ?: return
-            for (child in children) {
-                if (!child.isDirectory) continue
-                if (child.name in skip) continue
-                val agentDocDir = File(child, ".agent-doc")
-                if (agentDocDir.isDirectory) {
-                    val absolute = child.absolutePath
-                    if (absolute != base.absolutePath) {
-                        found.add(absolute)
-                    }
-                }
-                scan(child, depth + 1)
-            }
-        }
-        scan(base, 0)
-        return found
     }
 
     /**
@@ -542,7 +508,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
             EditorIntent.RefreshVcs.token -> {
                 recordProjectSurfaceOps("vcs_refresh", "refresh_vcs", "commit_vcs_refresh", "triggered")
-                refreshVcs()
+                refreshVcs(extractStringField(json, "file"))
                 APPLY_APPLIED
             }
             EditorIntent.ReloadLibrary.token -> {
@@ -823,13 +789,10 @@ class PatchWatcher(private val project: Project) : Disposable {
         lastApplyWasNoOp = false
         lastApplyBlockedForFileCacheConflict = false
 
-        var targetFile = LocalFileSystem.getInstance().findFileByPath(patch.file)
-        if (targetFile == null) {
-            // Retry once after a short delay — file might not be indexed yet
-            Thread.sleep(200)
-            LocalFileSystem.getInstance().refresh(false)
-            targetFile = LocalFileSystem.getInstance().findFileByPath(patch.file)
-        }
+        val localFileSystem = LocalFileSystem.getInstance()
+        val targetFile =
+            localFileSystem.findFileByPath(patch.file)
+                ?: localFileSystem.refreshAndFindFileByIoFile(File(patch.file))
         if (targetFile == null) {
             LOG.warn("Target file not found: ${patch.file}")
             return false
@@ -1543,7 +1506,8 @@ class PatchWatcher(private val project: Project) : Disposable {
     private fun findCodeBlockRanges(doc: String) = findCodeBlockRangesUtil(doc)
 
     /** Debounce window for VCS refresh signals (ms). Multiple commits within this window coalesce into one refresh. */
-    private val vcsRefreshAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
+    private val vcsRefreshAlarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, this)
+    private val pendingVcsRefreshFiles = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val VCS_REFRESH_DEBOUNCE_MS = 500
 
     /**
@@ -1551,19 +1515,29 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Called when `agent-doc commit` writes a `vcs-refresh.signal` file.
      * Multiple signals within 500ms coalesce into a single refresh.
      */
-    private fun refreshVcs() {
+    private fun refreshVcs(filePath: String?) {
+        if (filePath.isNullOrBlank()) {
+            LOG.debug("[vcs] Ignoring unscoped VCS refresh intent")
+            return
+        }
+        pendingVcsRefreshFiles.add(filePath)
         vcsRefreshAlarm.cancelAllRequests()
         vcsRefreshAlarm.addRequest({
             try {
-                // Re-compute git gutter annotations without recursively refreshing
-                // project content. Open agent-doc Documents may intentionally be
-                // unsaved while CRDT/editor delivery converges; a workspace-wide
-                // VFS refresh turns that safe transient state into IntelliJ's
-                // memory-vs-disk File Cache Conflict dialog. Content-bearing apply
-                // paths refresh only their clean target file immediately before
-                // Document API mutation.
-                VcsDirtyScopeManager.getInstance(project).markEverythingDirty()
-                LOG.info("[vcs] Triggered VCS dirty-scope refresh after external commit without content VFS refresh (debounced)")
+                val paths = pendingVcsRefreshFiles.toList()
+                pendingVcsRefreshFiles.removeAll(paths.toSet())
+                val localFileSystem = LocalFileSystem.getInstance()
+                val dirtyScope = VcsDirtyScopeManager.getInstance(project)
+                var refreshed = 0
+                for (path in paths) {
+                    val file = localFileSystem.findFileByPath(path) ?: continue
+                    dirtyScope.fileDirty(file)
+                    refreshed += 1
+                }
+                LOG.info(
+                    "[vcs] Triggered $refreshed targeted VCS dirty-scope refresh(es) " +
+                        "after external commit without content VFS refresh",
+                )
             } catch (e: Exception) {
                 LOG.warn("[vcs] Failed to refresh VCS state", e)
             }

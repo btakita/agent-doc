@@ -22,16 +22,20 @@ internal object NativeReloadCoordinator {
             var replicaProjects = emptyList<com.intellij.openapi.project.Project>()
             var watchers = emptyList<PatchWatcher>()
             try {
-                val replicaQuiesce = CrdtReplicaManager.quiesceAllForNativeReload()
-                replicaProjects = replicaQuiesce.first
-                if (!replicaQuiesce.second) {
-                    log.warn("[native] reload failed closed; a CRDT worker did not terminate")
-                    return@executeOnPooledThread
-                }
+                // Stop inbound callbacks before tearing down the CRDT managers
+                // they call. The reverse order used to dispose every manager,
+                // discover one busy listener, then rebuild all open replicas in
+                // `finally`; that turned a failed reload into a read-lock convoy.
                 val watcherQuiesce = PatchWatcher.quiesceAllForNativeReload()
                 watchers = watcherQuiesce.first
                 if (!watcherQuiesce.second) {
                     log.warn("[native] reload failed closed; an IPC listener did not terminate")
+                    return@executeOnPooledThread
+                }
+                val replicaQuiesce = CrdtReplicaManager.quiesceAllForNativeReload()
+                replicaProjects = replicaQuiesce.first
+                if (!replicaQuiesce.second) {
+                    log.warn("[native] reload failed closed; a CRDT worker did not terminate")
                     return@executeOnPooledThread
                 }
                 when (val outcome = AgentDocLib.hotReload(libVersion)) {

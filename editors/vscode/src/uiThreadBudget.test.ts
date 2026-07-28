@@ -171,6 +171,26 @@ describe('editor UI thread budget', () => {
         assert.ok(handler.includes('observeSavedContent:'));
     });
 
+    it('VS Code refreshes only the repository containing the requested file', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const start = source.indexOf('async function refreshVcsForFile(filePath: string)');
+        assert.ok(start >= 0, 'path-scoped VCS refresh helper should exist');
+        const end = source.indexOf('// #qnodemerge4wire', start);
+        assert.ok(end > start, 'path-scoped VCS refresh helper should precede editor-op state');
+        const helper = source.slice(start, end);
+
+        assert.ok(helper.includes("vscode.extensions.getExtension<GitExtensionExports>('vscode.git')"));
+        assert.ok(helper.includes('getRepository(vscode.Uri.file(filePath))'));
+        assert.ok(helper.includes('await repository?.status()'));
+        assert.strictEqual(source.includes("executeCommand('git.refresh')"), false);
+
+        const handlerStart = source.indexOf('case EditorIntent.RefreshVcs:');
+        const handlerEnd = source.indexOf('case EditorIntent.ReloadLibrary:', handlerStart);
+        assert.ok(handlerEnd > handlerStart, 'refresh_vcs handler should precede reload_library');
+        const handler = source.slice(handlerStart, handlerEnd);
+        assert.ok(handler.includes('if (filePath) await refreshVcsForFile(filePath);'));
+    });
+
     it('VS Code reliable-sync liveness seeds restored tabs exactly once', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'reliableSyncLiveness.ts'), 'utf-8');
         assert.ok(source.includes('for (const document of vscode.workspace.textDocuments) reportOpen(document);'));

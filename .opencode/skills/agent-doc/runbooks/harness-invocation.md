@@ -9,7 +9,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 - Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, OpenCode `/agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
 - Do **not** treat that turn as successful until the response crosses `agent-doc finalize <FILE>` for the normal path or `agent-doc write --commit <FILE>` for a repair path.
 - Do **not** end a normal harness-native `agent-doc` turn with "not committed" or equivalent wording unless the user explicitly asked to leave the response uncommitted.
-- MCP auth / OAuth steps are part of that same turn. If a tool pauses for authentication or browser approval, resume the managed response afterward and still finish with `finalize` / `write --commit` plus `session-check`; the auth step is not the success boundary.
+- MCP auth / OAuth steps are part of that same turn. If a tool pauses for authentication or browser approval, resume the managed response afterward and still finish through connected `agent_doc_finalize`; its successful result is the terminal closeout report and includes queue continuation. Direct-exec paths still finish with `finalize` / `write --commit` plus `session-check`. The auth step is not the success boundary.
 - If `finalize`, `write --commit`, or `session-check` reports
   `editor_convergence_required` or missing `operator_text_authority_v1`, the
   harness has not proven that delivery preserves operator text. Do not report success, stop, continue an auto-queue, or emit a final answer that implies
@@ -26,7 +26,8 @@ The core workflow (preflight, respond, persist the response) is identical across
 
 ## Post-Preflight Planning
 
-- After `agent-doc preflight <FILE>`, the next dispatch step should consume a binary-owned planning record rather than improvise from raw prose alone.
+- **`#preflightinbinary`:** the Claude `UserPromptSubmit` hook (`agent-doc hook preflight-user-prompt-submit`, installed into `.claude/settings.json`) runs preflight in-process when the `agent-doc <FILE>` trigger arrives and prints the contract behind the `[agent-doc] cycle contract ...` marker. With the marker present the agent must NOT run `agent-doc preflight` — the round trip is what the hook removes. Harnesses without the hook (Codex `hooks.json`, OpenCode) still run it explicitly. A second preflight inside an open turn is safe either way: the binary reuses the open cycle instead of minting a second id (`reusable_by_reentrant_preflight`).
+- After preflight — hook-run or explicit — the next dispatch step should consume a binary-owned planning record rather than improvise from raw prose alone.
 - Run `agent-doc plan <FILE>` and execute the cycle from its `prompt_targets`, `repo_actions`, `required_commands`, `pending_mutations`, `handoff`, and `blockers`.
 - If the plan says `handoff=orchestrate`, run the emitted `agent-doc orchestrate ...` command before attempting a manual response.
 

@@ -10,14 +10,39 @@ semantically complete response checkpoints before the turn is sealed.
 - Incomplete token prefixes may be retained as crash-recovery evidence, but they
   are never a live-buffer sidecar and never become document authority.
 - At a semantic breakpoint, pipe the cumulative complete response through
-  `agent-doc response-checkpoint <FILE>`. The binary replaces the prior
-  uncommitted response tail in Lazily; it does not append another response.
+  `agent-doc response-checkpoint <FILE>`. Pass the response **cumulatively** —
+  every section so far, not just the new one. The binary appends only the
+  sections that are not already the tail of the exchange, so the visible result
+  is the same as replacing the prior uncommitted tail, without rewriting nodes
+  the editor already has. Replaying an unchanged cumulative response is a no-op
+  (`applied=false`), and finalize carrying the full response on top of earlier
+  checkpoints appends only what is left (`#crdtcaschkpt`).
 - A semantic breakpoint is the end of a complete `### Re:` section with balanced
   code fences and component/patch markers. In a multi-response stream, seeing the
   next `### Re:` heading proves that the preceding section is complete. Arbitrary
   token, sentence, timer, or byte-count boundaries are not checkpoints.
 - Checkpointing never consumes queue heads, mutates backlog/done, advances the
   cycle to `write_applied`, or commits.
+
+## When checkpointing is worth it
+
+Checkpointing is **opt-in, not a per-turn default**. Each checkpoint is a real
+editor round trip that waits for a delivery ACK, so it costs roughly as much as
+it saves unless the response is genuinely large or the document is contended.
+
+Measured on `tasks/agent-doc/agent-doc-bugs2.md` (`#crdtcaschkptdrive`): across
+five closeouts, `git_commit` plus `session_check` accounted for **94-96%** of
+total closeout latency (for example `total_ms=9479` = `git_commit:6491ms` +
+`session_check:2631ms`), leaving CRDT convergence in the low hundreds of
+milliseconds. A single checkpoint on the same document cost **1317ms** of
+`delivery_ack_pending` by itself. Checkpointing every section would therefore
+have made those turns slower, not faster.
+
+Reach for it when the finalize convergence window is *demonstrably* the
+bottleneck — a very large response, or a document under concurrent editing where
+`compare_and_swap_raced` shows up in `ops.log`. Confirm with the
+`closeout_latency` phase breakdown before adopting it as a habit; do not assume
+the convergence window is the expensive part, because usually it is not.
 
 ## Final write
 

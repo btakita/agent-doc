@@ -104,14 +104,31 @@ Verification passed: the focused seven-test suite covers already-satisfied state
 ### Re: Response
 
 IDEA still registers `lazily.md` as the primary authoritative editor, so the hashes cannot settle. Please save intentional edits and fully close that tab—or exit IDEA—then say `continue`. The retained response remains safe and no write was forced.
-<!-- agent:boundary:56171e09 -->
+
+### Re: #lzstdlibtimeout completion reconciliation — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzstdlibtimeout]
+
+
+Acknowledged the completed `[x] #lzstdlibtimeout` tail. The implementation and proof were already committed, so this reconciliation cycle makes no new code changes and does not repeat the implementation.
+
+Changed paths from the completed implementation: `src/lazily-rs/src/stdlib.rs`, `src/lazily-rs/tests/stdlib_timeout.rs`, `src/lazily-rs/README.md`, and `src/lazily-rs/AGENTS.md`.
+
+Commands and verification already completed: `cargo test --test stdlib_timeout` passed 6/6; `make check` passed its formatting, clippy, build, feature, loom, doctest, and conformance partitions. The local benchmark-budget check explicitly skipped because this checkout lacked Criterion evidence; conformance coverage passed 119/124 with five known-uncovered fixtures. GitHub CI run `30386744754` was queued at the required one-time inspection.
+
+Commits: lazily-rs `1d42da8` (pushed to `main`); superproject pointer `7d62ce4b5` (confirmed as an ancestor of current `HEAD`).
+
+Confidence: high. Escalation: none. No additional backlog follow-up is needed because the implementation, tests, documentation, and full local verification are complete.
+<!-- agent:boundary:cf153f00 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzstdlibbarrier]: Should we also add other concurrency "primitives" to the lazily library?~~
-- do [#lzstdlibtimeout]
+- ~~do [#lzstdlibtimeout]~~
 - Please ensure the stdlib is in lazily-spec + lazily-formal + comformance tests + peer tests + all implementations.
 - release + publish lazily
 <!-- /agent:queue -->
@@ -119,7 +136,6 @@ IDEA still registers `lazily.md` as the primary authoritative editor, so the has
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstdlibtimeout] Add a Lazily standard-library Timeout adapter composed from stdlib Timer, outside the graph kernel. Accept a caller-supplied operation/future/wait primitive instead of owning an executor; use a monotone deadline; return typed Completed/TimedOut/Cancelled/Unavailable outcomes; require no mandatory async runtime or hidden thread; expose a deterministic clock/wait seam. Test completion-before-deadline, timeout, cancellation-versus-completion races, zero duration, and repeated terminal reads.
 <!-- /agent:backlog -->
 
 ## Review

@@ -54,7 +54,7 @@ Verification:
 Published lazily-py commit `446d5b0` (`refactor: make Source the native cell class`) to `origin/main`. Recorded the superproject pointer in commit `9bd700443`. The repository has no GitHub Actions workflow named `CI`; `gh workflow list` reports only `poe precommit` and `wheels`, so no matching CI run exists to inspect.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:14fbcbea -->
+<!-- agent:boundary:d9d7d281 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -63,6 +63,7 @@ Confidence: high. Escalation: none.
 - ~~[ ] [#lzrevisionbarrier] Add a Lazily standard-library `RevisionBarrier` /~~
 - ~~[#lazilyrenameinverted]: I accept a breaking native-class rename.~~
 - complete [#lzinteropcs]
+- do [#lzstdlibbarrier]
 <!-- /agent:queue -->
 
 ## Backlog

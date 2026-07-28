@@ -660,13 +660,25 @@ The separate agreement says employment is at will and may end with or without go
 A suitable definition should be limited to objective serious misconduct—such as fraud, embezzlement, a relevant felony, willful material misconduct causing material harm, or an uncured material breach or willful failure to perform lawful duties after written notice and a reasonable cure period. It should not allow ordinary performance concerns, mistakes, disagreements, protected leave or complaints, or a general “not in the Company’s best interest” standard to trigger Cause automatically.
 
 No email, attachment, or follow-up was sent during this work.
-<!-- agent:boundary:debc916b -->
+
+### Re: Exact signing-bonus remittance — gpt-5
+
+> Also, ask when the signing bonus will be remitted?
+
+Yes. The revised documents should confirm the **exact remittance date and payment method for each installment**, not merely repeat “immediately” and “at official launch.” The precise question is:
+
+> Please confirm the exact remittance date for each $10,000 signing-bonus installment and whether each payment will be made through regular payroll or separately. Please state that the first installment is due no later than the first regular payroll following my July 29, 2026 start date and that the second is due on a date certain no later than December 31, 2026, regardless of whether an “official launch” is declared.
+
+The already-sent request covered the second installment’s date-certain issue, but it did not explicitly ask whether either installment would be remitted through payroll or a separate payment. Because Craig says revised documents are coming later today, I would inspect those first rather than send another immediate email. If the documents do not answer this, use the quoted question before signing.
+
+I added this verification point to `#haiven-paper`. No email was sent.
+<!-- agent:boundary:71aa0de4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Also, ask when the signing bonus will be remitted?
+- ~~Also, ask when the signing bonus will be remitted?~~
 - Please complete Exhibit A. The Dreamable agreements, specifically the end of engagement agreement, have an Exhibit A that you can reference.
 <!-- /agent:queue -->
 
@@ -678,7 +690,7 @@ No email, attachment, or follow-up was sent during this work.
 ## Review
 
 <!-- agent:review -->
-- [/] [#haiven-paper] Craig replied on July 28, 2026 that Haiven will revise and incorporate the requested provisions and send new documents later that day; he also accepted the August 10 and occasional-standup scheduling points. Do not send any correction, follow-up, attachment, or other external message without Brian’s explicit instruction containing “send.” Review the locally drafted proposed Exhibit A at tasks/professional/haiven/haiven-exhibit-a-proposed.md, especially ownership of Haiven-specific pre-employment material and the prospective future-outside-work clause. Then reconcile the revised Haiven documents against the requests, obtain Haiven’s acknowledged Exhibit A and countersigned documents, and complete final verification before signing.
+- [/] [#haiven-paper] Craig replied on July 28, 2026 that Haiven will revise and incorporate the requested provisions and send new documents later that day; he also accepted the August 10 and occasional-standup scheduling points. Do not send any correction, follow-up, attachment, or other external message without Brian’s explicit instruction containing “send.” Review the locally drafted proposed Exhibit A at tasks/professional/haiven/haiven-exhibit-a-proposed.md, especially ownership of Haiven-specific pre-employment material and the prospective future-outside-work clause. When the revised documents arrive, verify the exact remittance date and payment method for each $10,000 signing-bonus installment, a narrow definition of Cause, and every other requested revision. Then obtain Haiven’s acknowledged Exhibit A and countersigned documents and complete final verification before signing.
 <!-- /agent:review -->
 
 ## Icebox

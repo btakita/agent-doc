@@ -54,7 +54,38 @@ Verification:
 Published lazily-py commit `446d5b0` (`refactor: make Source the native cell class`) to `origin/main`. Recorded the superproject pointer in commit `9bd700443`. The repository has no GitHub Actions workflow named `CI`; `gh workflow list` reports only `poe precommit` and `wheels`, so no matching CI run exists to inspect.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:d9d7d281 -->
+
+### Re: #lzinteropcs — gpt-5
+
+> **Queue prompt:**
+>
+> complete [#lzinteropcs]
+
+
+Completed the C# production interop peer and promoted lazily-cs from registry-staged to capability-driven participation.
+
+Implementation:
+
+- Added `src/Lazily.InteropPeer`, a .NET console peer that implements the versioned NDJSON control contract.
+- Semantic writes, delivery, deduplication, frontier handling, and snapshots run through the production `CrdtPlaneRuntime`; frame serialization/deserialization runs through production `IpcWire`. The adapter does not use test-only wire DTOs.
+- The live hello manifest advertises exactly `distributed_crdt` and JSON. It advertises no channels or channel variants and records `msgpack`/`transport_links` carve-outs, so the channel matrix continues to exclude C# until executable channel adapters exist.
+- Added a production-path `--self-check` and made lazily-cs `make check` run it.
+- Activated `lazily-cs` in `src/lazily-interop/peers.toml`, promoted the semantic scenario from eight-way to nine-way, updated the capability-driven documentation/plans, and updated the supervisor test so a non-scenario peer is not falsely reported staged.
+
+Verification:
+
+- lazily-cs `make check`: passed; 191 tests, 0 skipped, all 124 canonical fixtures opened, package check passed, NativeAOT/FFI check passed, and peer self-check passed.
+- lazily-cs `make format-check`: passed.
+- lazily-interop `make check`: passed, including format, clippy, tests, schemas, and all 11 required mutation proofs.
+- Real nine-way supervisor scenario: passed with all 9 peers started, 9 frames emitted, 12 frames delivered, no staged peers, and no failures. C# emitted the winning frame to all eight other bindings, ingested Rust/Zig/Go frames, and reported duplicate C# delivery as applied=0.
+- The first cold run at the default 10-second timeout stopped before semantic execution because lazily-kt did not finish startup; the identical scenario with a 60-second startup timeout completed green.
+
+Published lazily-cs commit `c35ca1a` (`feat: add production interop peer`) to `origin/main`. Its CI run `30383718037` is queued. Recorded the suite promotion and submodule pointer in superproject commit `6dbb2fb4b` (`feat: admit C# to interop network suite`).
+
+Changed paths are confined to the C# peer project/solution/Makefile/README and the supervisor registry, nine-way scenario, README, CLI test, rollout plans, and lazily-cs submodule pointer. The pre-existing lazily-cs `AGENTS.md` edit, generated `build/` tree, and unrelated untracked supervisor Python artifact were not staged.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:df10144f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -62,8 +93,8 @@ Confidence: high. Escalation: none.
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~[ ] [#lzrevisionbarrier] Add a Lazily standard-library `RevisionBarrier` /~~
 - ~~[#lazilyrenameinverted]: I accept a breaking native-class rename.~~
-- complete [#lzinteropcs]
-- do [#lzstdlibbarrier]
+- ~~complete [#lzinteropcs]~~
+- do [#lzstdlibbarrier]: Should we also add other concurrency "primitives" to the lazily library?
 <!-- /agent:queue -->
 
 ## Backlog
@@ -75,7 +106,6 @@ Confidence: high. Escalation: none.
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. Current state: #lzcsipc is partial (schema-validated wire codec shipped; ShmBlobArena/executable zero-copy backends remain) and #lzcssync is partial (durable outbox shipped; CrdtPlaneRuntime, anti-entropy/resync, IpcSink/IpcSource, full-duplex SyncDriver, and remaining corpora remain). After both prerequisites ship their complete production surfaces, implement the C# interop peer, advertise only the exact features/codecs/channels/variants it supports, and let the capability-driven matrix admit it automatically. (gated: prerequisites #lzcsipc and #lzcssync remain open.)
 - [/] [#lzjsnpmtrustedpub] [operator-action] lazily-js repository workflow/OIDC/provenance is ready, but npm rejects publication until trusted-publisher setup is completed. NEXT: authenticate npm, register `@lazily-hub/lazily-js` for `lazily-hub/lazily-js` workflow `release.yml` with no environment and allowed action `npm publish`, verify with `npm trust list @lazily-hub/lazily-js`, then prove the next version tag.
 <!-- /agent:review -->
 

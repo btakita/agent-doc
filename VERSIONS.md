@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.43
+
+_JetBrains plugin 0.2.304; VS Code extension 0.2.57._
+
+- **The `agent-doc-orchestration` package is deleted after its focused-crate cutover (`#orchdecomp`).** Production command, turn, document-realtime, supervisor/controller, editor/tmux, route/session, closeout/commit, and repair behavior already lived in focused crates; the remaining package was only a source shell plus a broad dependency manifest and timestamp `build.rs`. Removing that nested Cargo project prevents Cargo/IDE discovery from indexing the obsolete graph. The CLI architecture guards now inspect the real root adapter and focused owners directly, while a dedicated decomposition test rejects any restored package, dependency, or Rust facade.
+
 ## 0.35.42
 
 _JetBrains plugin 0.2.303; VS Code extension 0.2.57._

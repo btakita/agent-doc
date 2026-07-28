@@ -537,40 +537,45 @@ surface for extracted policy.
 ## Acceptance Criteria
 
 - `agent-doc-core` is absent from the workspace and from crate dependencies.
-  New policy lands in a focused crate or has an explicit temporary bridge
-  comment naming the target.
-- `agent-doc-orchestration` no longer owns new domain policy for merge,
-  realtime document authority, turn lifecycle, tmux state, supervisor state, or
-  controller CAS.
+- `agent-doc-orchestration` is absent from the workspace and filesystem. New
+policy lands in a focused crate; there is no legacy facade or retired nested
+Cargo package for tools to discover and index.
 - Internal and in-repo public Rust paths use focused crates directly; extracted
-  APIs are not kept alive through `agent-doc-core` or root-crate facades.
+APIs are not kept alive through `agent-doc-core` or root-crate facades.
 - Deprecated internal names are renamed to the current canonical names during
   extraction unless a user-visible CLI/document compatibility path explicitly
   requires a deprecation window.
 - Each extracted crate has at least one meaningful unit test or compile-time
 dependency-boundary test.
 - `tests/core_decomposition.rs` pins the deleted legacy paths, focused owners,
-  pure-crate dependency direction, and root-cdylib ABI-adapter boundary.
+pure-crate dependency direction, and root-cdylib ABI-adapter boundary.
+- `tests/orchestration_decomposition.rs` pins the deleted orchestration package,
+direct focused imports, and the focused owners for turn, realtime document,
+supervisor/controller, editor, tmux, route, closeout, and repair behavior.
 - The workspace builds and the focused extraction tests pass.
 
-## Deprecating `agent-doc-orchestration`
+## Retired `agent-doc-orchestration`
 
-`agent-doc-orchestration` should be treated as transitional. The honest target is
-not to give it a better broad name, but to make it small enough that it can be
-deprecated without losing a domain boundary. During the transition it may:
+The transition is complete. Production callers import focused crates directly,
+and the root binary is the only CLI effect adapter. The retired package,
+manifest, timestamp `build.rs`, source shell, and compile-baseline document were
+deleted so Cargo and IDE project discovery cannot resurrect the old broad
+dependency graph.
 
-- wire CLI/start/run-loop effects together;
-- adapt existing sidecar, tmux, process, and file IO into focused crates;
-- adapt existing sidecar, tmux, process, and file IO into focused crates.
+The final ownership audit is:
 
-It should not own durable policy for document realtime, merge, turn lifecycle,
-element semantics, executor readiness, supervisor lifecycle, process handoff, or
-controller state. Once those responsibilities are absent, replace remaining
-callers with focused crate APIs and mark the crate deprecated or remove it.
+| Responsibility | Focused owner |
+|---|---|
+| Turn and queue/exchange lifecycle | `agent-doc-turn`, `agent-doc-queue`, and focused element crates |
+| Realtime document scheduling and authority | `agent-doc-document-realtime` plus `agent-doc-document-realtime-io` |
+| Supervisor and controller state | `agent-doc-supervisor`, `agent-doc-supervisor-io`, `agent-doc-controller`, and `agent-doc-controller-io` |
+| Editor and tmux integration | `agent-doc-editor-surface*`, `agent-doc-tmux*`, and `agent-doc-turn-executor-tmux` |
+| Route/session ownership | `agent-doc-route-io`, `agent-doc-session-actor-io`, and `agent-doc-session-registry-io` |
+| Closeout, commit, and recovery | `agent-doc-closeout-runtime-io`, `agent-doc-commit-io`, and `agent-doc-repair*-io` |
+| CLI/start/run/write command effects | root CLI plus the focused `agent-doc-{start,run,write,preflight}-*-io` crates |
 
 ## Completion Signal
 
-This PRD is complete when `agent-doc-core` remains deleted and
-`agent-doc-orchestration` is no longer a God crate by behavior: orchestration may
-still adapt effectful boundaries, but its remaining modules do not define durable
-domain policy that belongs to the focused crates above.
+This PRD is complete: both legacy aggregation crates are deleted, focused owners
+hold the durable behavior, and architecture tests reject facade or dependency
+regressions.

@@ -91,6 +91,19 @@ fn read_first_existing_source(manifest_dir: &Path, relatives: &[&str]) -> String
     panic!("none of the expected source paths exist: {relatives:?}");
 }
 
+fn read_retired_orchestration_artifact(manifest_dir: &Path, relative: &str) -> String {
+    match relative {
+        // The root binary is now the only effect adapter. Historical extraction
+        // guards that checked the orchestration manifest should verify its real
+        // dependency surface after the retired package is deleted.
+        "Cargo.toml" => fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap(),
+        // An absent legacy source is the strongest possible proof for guards
+        // asserting that an extracted module or facade did not return.
+        "src/lib.rs" => String::new(),
+        _ => panic!("unsupported retired orchestration artifact: {relative}"),
+    }
+}
+
 /// Every source file of `agent-doc-process-owner-io`, concatenated.
 ///
 /// The architecture guards below assert that this *crate* owns process-tree
@@ -1114,8 +1127,7 @@ fn agent_doc_test_support_owns_orchestration_test_helpers() {
         "orchestration must not retain a crate-local test_support source module"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     assert!(
         orchestration["dev-dependencies"]
@@ -2482,17 +2494,13 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
         "agent-doc-hooks-io must stay a first-class workspace crate"
     );
 
-    for relative_manifest in ["Cargo.toml", "agent-doc-orchestration/Cargo.toml"] {
-        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
-        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
-        let dependencies = parsed["dependencies"].as_table().unwrap();
-        let dependency = dependencies["agent-doc-hooks-io"].as_table().unwrap();
-        assert_eq!(
-            dependency.get("version").and_then(toml::Value::as_str),
-            package_version,
-            "{relative_manifest} should depend on the versioned hook IO crate"
-        );
-    }
+    let dependencies = workspace["dependencies"].as_table().unwrap();
+    let dependency = dependencies["agent-doc-hooks-io"].as_table().unwrap();
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version,
+        "root adapter should depend on the versioned hook IO crate"
+    );
 
     let hooks_io_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-hooks-io/Cargo.toml")).unwrap();
@@ -2565,8 +2573,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             .exists(),
         "orchestration hooks facade should be deleted once hook IO owns post-response adapters"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod hooks;"),
         "orchestration must not expose a public hooks facade"
@@ -2735,41 +2742,6 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
         "state observer advisory closeout phase should use the projection-aware cycle view"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
-    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
-    let orchestration_dependency = orchestration["dependencies"]["agent-doc-state-backbone"]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        orchestration_dependency
-            .get("path")
-            .and_then(toml::Value::as_str),
-        Some("../agent-doc-state-backbone")
-    );
-    assert_eq!(
-        orchestration_dependency
-            .get("version")
-            .and_then(toml::Value::as_str),
-        package_version
-    );
-    let orchestration_observer_dependency =
-        orchestration["dependencies"]["agent-doc-state-observer-io"]
-            .as_table()
-            .unwrap();
-    assert_eq!(
-        orchestration_observer_dependency
-            .get("path")
-            .and_then(toml::Value::as_str),
-        Some("../agent-doc-state-observer-io")
-    );
-    assert_eq!(
-        orchestration_observer_dependency
-            .get("version")
-            .and_then(toml::Value::as_str),
-        package_version
-    );
-
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/state_backbone.rs")
@@ -2782,8 +2754,7 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
             .exists(),
         "orchestration must not keep an adstatechart_snapshot observer facade"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod state_backbone"),
         "orchestration must not re-export state_backbone as a compatibility facade"
@@ -2875,8 +2846,7 @@ fn test_state_wire_extraction_stays_first_class_and_facade_free() {
         );
     }
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod state_wire"),
         "orchestration must not re-export state_wire as a compatibility facade"
@@ -2950,8 +2920,7 @@ fn test_turn_scope_io_extraction_stays_first_class_and_facade_free() {
             .exists(),
         "orchestration must not keep a turn_scope_store facade module"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod turn_scope_store"),
         "orchestration must not export a turn_scope_store facade"
@@ -2980,7 +2949,6 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
-    let package_version = workspace["package"]["version"].as_str();
     let members = workspace["workspace"]["members"].as_array().unwrap();
 
     assert!(
@@ -3012,22 +2980,6 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
             "agent-doc-model-tier context usage policy must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
         );
     }
-
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
-    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
-    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
-    let dependency = orchestration_dependencies["agent-doc-model-tier"]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        dependency.get("path").and_then(toml::Value::as_str),
-        Some("../agent-doc-model-tier")
-    );
-    assert_eq!(
-        dependency.get("version").and_then(toml::Value::as_str),
-        package_version
-    );
 
     let model_tier_source =
         fs::read_to_string(manifest_dir.join("agent-doc-model-tier/src/lib.rs")).unwrap();
@@ -3089,8 +3041,7 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         );
     }
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     let orchestration_context_path =
         manifest_dir.join("agent-doc-orchestration/src/context_pct.rs");
     assert!(
@@ -3216,8 +3167,7 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
         "root crate should expose focused Codex hook IO directly"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -3394,8 +3344,7 @@ fn test_agent_doc_repair_io_owns_repair_state_adapters() {
         "root crate should expose focused repair IO directly"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -3737,7 +3686,6 @@ fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
-    let package_version = workspace["package"]["version"].as_str();
     let members = workspace["workspace"]["members"].as_array().unwrap();
 
     assert!(
@@ -3803,22 +3751,6 @@ fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
         );
     }
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
-    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
-    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
-    let dependency = orchestration_dependencies["agent-doc-prompt-cache"]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        dependency.get("path").and_then(toml::Value::as_str),
-        Some("../agent-doc-prompt-cache")
-    );
-    assert_eq!(
-        dependency.get("version").and_then(toml::Value::as_str),
-        package_version
-    );
-
     let prompt_cache_io_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-prompt-cache-io/Cargo.toml")).unwrap();
     let prompt_cache_io: toml::Value = toml::from_str(&prompt_cache_io_manifest).unwrap();
@@ -3873,8 +3805,7 @@ fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
             .exists(),
         "orchestration must not keep a prompt_cache source module facade"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod prompt_cache"),
         "orchestration must not export a prompt_cache facade"
@@ -3955,8 +3886,7 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         );
     }
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     let queue_io_host =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_continuation.rs"))
             .unwrap();
@@ -4138,8 +4068,7 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             .exists(),
         "orchestration must not keep a queue_journal facade module"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod queue_journal;"),
         "orchestration must not export a queue_journal facade"
@@ -6234,8 +6163,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "{relative} must not route response replay policy through repair"
         );
     }
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     let hooks_io = fs::read_to_string(manifest_dir.join("agent-doc-hooks-io/src/lib.rs")).unwrap();
     let memory_io_closeout =
         fs::read_to_string(manifest_dir.join("agent-doc-memory-io/src/closeout.rs")).unwrap();
@@ -6409,8 +6337,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
             "agent-doc-ops-log-io must stay a focused ops-log reader, not orchestration or transport state: {forbidden}"
         );
     }
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
     assert!(
@@ -6454,8 +6381,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
             "agent-doc-ops-log-io must own ops-log read/write adapters: {required}"
         );
     }
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod ops_log")
             && !manifest_dir
@@ -6756,8 +6682,7 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
         "turn-status IO must not reach back through orchestration"
     );
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod turn_status;"),
         "orchestration must not expose a turn_status facade"
@@ -6874,27 +6799,7 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
         );
     }
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
-    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
-    let orchestration_dependency = orchestration["dependencies"]["agent-doc-owner-pane-io"]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        orchestration_dependency
-            .get("path")
-            .and_then(toml::Value::as_str),
-        Some("../agent-doc-owner-pane-io")
-    );
-    assert_eq!(
-        orchestration_dependency
-            .get("version")
-            .and_then(toml::Value::as_str),
-        package_version
-    );
-
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/owner_pane_wedge_counter.rs")
@@ -7274,8 +7179,7 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         "agent-doc-turn must stay a first-class workspace crate"
     );
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod cycle_state"),
         "agent-doc-orchestration must not keep a cycle_state facade module"
@@ -7431,10 +7335,6 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
     }
 
     let mut source_files = Vec::new();
-    collect_rs_files(
-        &manifest_dir.join("agent-doc-orchestration/src"),
-        &mut source_files,
-    );
     collect_rs_files(&manifest_dir.join("src"), &mut source_files);
     for path in source_files {
         let source = fs::read_to_string(&path).unwrap();
@@ -7468,8 +7368,7 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         }
     }
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -7497,8 +7396,7 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
         "agent-doc-log-time must stay a first-class workspace crate"
     );
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod ops_log")
             && !manifest_dir
@@ -7649,8 +7547,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         );
     }
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod session_accretion")
             && !manifest_dir
@@ -7818,8 +7715,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         root_dependencies.contains_key("agent-doc-session-accretion-io"),
         "the CLI shell must depend on the focused session-accretion IO crate directly"
     );
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -8028,8 +7924,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         root_dependencies.contains_key("agent-doc-prompt-context-io"),
         "root crate should depend on focused prompt-context IO directly"
     );
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     assert!(
         orchestration["dependencies"]
@@ -8109,8 +8004,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         }
     }
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -8527,8 +8421,7 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
         "orchestration must not keep response_toc as an adapter module or facade"
     );
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod response_toc"),
         "orchestration must not expose response_toc as a module facade"
@@ -8550,8 +8443,7 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
         "CLI response TOC commands should call response TOC IO directly"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -8718,8 +8610,7 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         "orchestration must not keep a harness_prompt module or facade"
     );
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod prompt_contract"),
         "orchestration must not expose prompt_contract as a module facade"
@@ -8842,8 +8733,7 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         }
     }
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -8999,7 +8889,6 @@ fn test_agent_doc_lease_is_freshness_boundary() {
 
     let package_version = workspace["package"]["version"].as_str();
     for relative_manifest in [
-        "agent-doc-orchestration/Cargo.toml",
         "agent-doc-queue-io/Cargo.toml",
         "agent-doc-supervisor/Cargo.toml",
     ] {
@@ -9094,8 +8983,7 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             "agent-doc-lease-io must own local-model lease reap IO: {required}"
         );
     }
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     for forbidden in [
         "pub(crate) enum ReapOutcome",
         "pub(crate) fn reap_local_model_leases(",
@@ -9151,17 +9039,13 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         "agent-doc-memory-io must stay a first-class workspace crate"
     );
     let package_version = workspace["package"]["version"].as_str();
-    for relative_manifest in ["Cargo.toml", "agent-doc-orchestration/Cargo.toml"] {
-        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
-        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
-        let dependencies = parsed["dependencies"].as_table().unwrap();
-        let dependency = dependencies["agent-doc-memory-io"].as_table().unwrap();
-        assert_eq!(
-            dependency.get("version").and_then(toml::Value::as_str),
-            package_version,
-            "{relative_manifest} should depend on the versioned memory IO crate"
-        );
-    }
+    let dependencies = workspace["dependencies"].as_table().unwrap();
+    let dependency = dependencies["agent-doc-memory-io"].as_table().unwrap();
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version,
+        "root adapter should depend on the versioned memory IO crate"
+    );
     let memory_source =
         fs::read_to_string(manifest_dir.join("agent-doc-memory/src/lib.rs")).unwrap();
     for required in [
@@ -9336,8 +9220,7 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         !memory_io_closeout.contains("Command::new(\"tsift\")"),
         "agent-doc post-commit closeout must use tsift-memory directly instead of spawning the heavy tsift CLI"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     for forbidden in [
         "capture-agent-doc-closeout",
         "fn git_head(",
@@ -9439,8 +9322,7 @@ fn test_agent_doc_supervisor_recycle_uses_cp_graph_for_inflight() {
             "orchestration must not own supervisor recycle storage IO: {removed}"
         );
     }
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     for forbidden in [
         "pub mod recycle_yield;",
         "pub mod recycle_inflight;",
@@ -9621,8 +9503,7 @@ fn test_agent_doc_route_submit_uses_controller_projection_not_sidecar_markers() 
         );
     }
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     for forbidden in [
         "pub mod route_in_flight;",
         "pub use agent_doc_supervisor_io::route_submit_inflight",
@@ -9879,8 +9760,7 @@ fn test_agent_doc_queue_owns_drain_owner_lease_policy() {
         );
     }
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod drain_owner;"),
         "agent-doc-orchestration must not re-export drain-owner lease policy"
@@ -10009,15 +9889,7 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
         "agent-doc-queue-io should be a workspace member"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
-    assert!(
-        orchestration_manifest.contains("agent-doc-queue-io = { path = \"../agent-doc-queue-io\""),
-        "orchestration should depend on queue IO directly"
-    );
-
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod context_clear_in_flight;"),
         "orchestration must not expose a context-clear marker IO facade"
@@ -10336,15 +10208,13 @@ fn test_agent_doc_run_context_io_owns_lazily_document_context_graph() {
         "run-context cycle_state slot should use closeout projections before compatibility cycle sidecars"
     );
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod graph;")
             && !orchestration_lib.contains("pub use agent_doc_run_context_io as graph;"),
         "orchestration must not preserve the public graph path with a direct crate re-export"
     );
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     assert!(
         orchestration_manifest["dependencies"]
@@ -10507,8 +10377,7 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
             && direct_run_tests.contains("agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS"),
         "direct-run integration tests should exercise the focused direct-run IO crate directly"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod run;")
             && !orchestration_lib.contains("mod run;")
@@ -10534,8 +10403,7 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         "CLI run dispatch should call focused direct-run IO directly"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     assert!(
         orchestration_manifest["dependencies"]
@@ -11891,8 +11759,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-session-check-io must stay a first-class workspace crate"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     assert!(
         orchestration["dependencies"]
@@ -11952,8 +11819,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     let session_check =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/tests/session_check.rs"))
             .unwrap();
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod session_check;")
             && !orchestration_lib.contains("mod session_check;")
@@ -12111,8 +11977,7 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
         "agent-doc-flow-io must stay a first-class workspace crate"
     );
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod flow;")
             && !orchestration_lib.contains("mod flow;")
@@ -12160,7 +12025,6 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     for production_source in [
         "src/main.rs",
         "src/session_actor_cmd.rs",
-        "agent-doc-orchestration/src/lib.rs",
         "agent-doc-repair-command-io/tests/repair.rs",
         "agent-doc-route-io/tests/route.rs",
         "agent-doc-write-runtime-io/src/lib.rs",
@@ -12177,8 +12041,7 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
 #[test]
 fn test_document_realtime_io_owns_pipeline_frontmatter_runtime_effects() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     for forbidden in [
         "PIPELINE_FRONTMATTER_EFFECTS",
         "PipelineFrontmatterEffects",
@@ -12259,14 +12122,7 @@ fn test_document_realtime_io_owns_pipeline_frontmatter_runtime_effects() {
     }
 
     let mut orchestration_files = Vec::new();
-    collect_rs_files(
-        &manifest_dir.join("agent-doc-orchestration/src"),
-        &mut orchestration_files,
-    );
-    collect_rs_files(
-        &manifest_dir.join("agent-doc-orchestration/tests"),
-        &mut orchestration_files,
-    );
+    collect_rs_files(&manifest_dir.join("src"), &mut orchestration_files);
     for focused_path in [
         "agent-doc-commit-io/tests/git.rs",
         "agent-doc-route-io/tests/route.rs",
@@ -12614,8 +12470,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             .exists(),
         "orchestration must not keep a flow source module for workflow/session-cycle facades"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     for forbidden in [
         "pub use agent_doc_workflow::session_cycle",
         "SessionExecutionScope",
@@ -13167,8 +13022,7 @@ fn test_agent_doc_diff_owns_truncation_pure_policy() {
             .exists(),
         "orchestration must not keep a diff_io facade module"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod diff_io"),
         "orchestration must not expose diff_io as a module facade"
@@ -13267,13 +13121,6 @@ fn test_agent_doc_diff_owns_truncation_pure_policy() {
             "agent-doc-diff-io must not depend on orchestration-side systems: {forbidden}"
         );
     }
-
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
-    assert!(
-        orchestration_manifest.contains("agent-doc-diff-io"),
-        "orchestration must depend on the focused diff IO adapter"
-    );
 }
 
 #[test]
@@ -13393,8 +13240,6 @@ fn test_agent_doc_preflight_io_owns_linked_doc_change_detection_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
     let preflight_io =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let preflight_io_manifest =
@@ -13412,10 +13257,6 @@ fn test_agent_doc_preflight_io_owns_linked_doc_change_detection_graph() {
             "orchestration preflight must not own linked-doc change detection IO: {forbidden}"
         );
     }
-    assert!(
-        !orchestration_manifest.contains("ureq =") && !orchestration_manifest.contains("htmd ="),
-        "orchestration should not carry linked-doc URL fetch/HTML conversion deps"
-    );
     for required in [
         "pub fn links_cache_dir(",
         "pub fn check_url_link(",
@@ -13740,8 +13581,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
             .exists(),
         "orchestration must not keep project_config_io as an adapter module or facade"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod project_config_io"),
         "orchestration must not expose project_config_io as a module facade"
@@ -13804,8 +13644,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         root_dependencies.contains_key("agent-doc-project-config-io"),
         "the CLI crate must depend on the focused project-config IO crate directly"
     );
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -13889,8 +13728,7 @@ fn test_global_config_has_no_orchestration_facade() {
         );
     }
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod config"),
         "orchestration must not expose global config as a module facade"
@@ -13937,8 +13775,7 @@ fn test_global_config_has_no_orchestration_facade() {
         root_dependencies.contains_key("agent-doc-config"),
         "the CLI crate must depend on the focused global config crate directly"
     );
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -14054,8 +13891,7 @@ fn test_agent_doc_frontmatter_owns_cross_document_security_review_policy() {
         !orchestration_security_path.exists(),
         "orchestration must not keep security.rs as a frontmatter security-review adapter or facade"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod security"),
         "orchestration must not expose security as a module facade"
@@ -14252,8 +14088,7 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
         "agent-doc-lint-io must not read the active session document directly from disk"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -14347,8 +14182,7 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
             .unwrap();
     let frontmatter_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-frontmatter-io/src/session.rs")).unwrap();
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     let orchestration_graph =
         fs::read_to_string(manifest_dir.join("agent-doc-run-context-io/src/lib.rs")).unwrap();
 
@@ -14511,8 +14345,7 @@ fn test_agent_doc_config_owns_env_expansion_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let config_env_source =
         fs::read_to_string(manifest_dir.join("agent-doc-config/src/env.rs")).unwrap();
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     let root_orchestrate_source =
         fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
     let root_parallel_source = fs::read_to_string(manifest_dir.join("src/parallel.rs")).unwrap();
@@ -14696,8 +14529,7 @@ fn test_session_actor_has_no_sqlite_state_facade() {
             .exists(),
         "orchestration must not keep a session_actor facade module"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod session_actor;"),
         "orchestration must not expose a session_actor facade module"
@@ -14725,10 +14557,6 @@ fn test_session_actor_has_no_sqlite_state_facade() {
     }
 
     let mut source_files = Vec::new();
-    collect_rs_files(
-        &manifest_dir.join("agent-doc-orchestration/src"),
-        &mut source_files,
-    );
     collect_rs_files(&manifest_dir.join("src"), &mut source_files);
     for path in source_files {
         let source = fs::read_to_string(&path).unwrap();
@@ -14794,10 +14622,6 @@ fn test_project_controller_has_no_sqlite_status_facade() {
     }
 
     let mut source_files = Vec::new();
-    collect_rs_files(
-        &manifest_dir.join("agent-doc-orchestration/src"),
-        &mut source_files,
-    );
     collect_rs_files(&manifest_dir.join("src"), &mut source_files);
     for path in source_files {
         let source = fs::read_to_string(&path).unwrap();
@@ -14831,8 +14655,7 @@ fn test_sessions_has_no_tmux_router_type_facade() {
             .exists(),
         "orchestration must not keep a sessions facade module"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod sessions;"),
         "orchestration must not expose a sessions facade module"
@@ -14861,10 +14684,6 @@ fn test_sessions_has_no_tmux_router_type_facade() {
     }
 
     let mut source_files = Vec::new();
-    collect_rs_files(
-        &manifest_dir.join("agent-doc-orchestration/src"),
-        &mut source_files,
-    );
     collect_rs_files(&manifest_dir.join("src"), &mut source_files);
     for path in source_files {
         let source = fs::read_to_string(&path).unwrap();
@@ -14969,8 +14788,7 @@ fn test_agent_doc_session_registry_owns_registry_mutation_policy() {
         "root crate should expose the focused session-registry policy crate"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -15100,8 +14918,7 @@ fn test_agent_doc_session_registry_io_owns_registry_state_io() {
         "root CLI should depend on registry IO directly instead of routing through orchestration"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -15221,10 +15038,6 @@ fn test_agent_doc_session_registry_io_owns_registry_state_io() {
     }
 
     let mut source_files = Vec::new();
-    collect_rs_files(
-        &manifest_dir.join("agent-doc-orchestration/src"),
-        &mut source_files,
-    );
     collect_rs_files(&manifest_dir.join("src"), &mut source_files);
     for path in source_files {
         let source = fs::read_to_string(&path).unwrap();
@@ -15364,8 +15177,7 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
             "{relative} should call focused op-capture CRDT merge IO directly"
         );
     }
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod merge;"),
         "orchestration must not expose a merge facade module"
@@ -15410,8 +15222,7 @@ fn test_agent_doc_debounce_is_pure_settle_policy_boundary() {
         "agent-doc-debounce must stay a first-class workspace crate"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(orchestration_dependencies.contains_key("agent-doc-debounce"));
@@ -15584,8 +15395,7 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/lib.rs")).unwrap();
     let controller_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/lib.rs")).unwrap();
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     let controller_paths =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/paths.rs")).unwrap();
     assert!(
@@ -17081,8 +16891,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .exists(),
         "orchestration must not keep claim.rs as a command adapter facade"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod claim;"),
         "orchestration must not expose a claim command facade"
@@ -17228,8 +17037,7 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
     let controller_io_adapter =
         fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/editor_route_errors.rs"))
             .unwrap();
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
 
     assert!(
         controller_lib.contains("pub mod editor_route_error;"),
@@ -17297,8 +17105,7 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
             "{relative} must not call the removed orchestration editor_route_errors facade"
         );
     }
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -17721,22 +17528,6 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         );
     }
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
-    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
-    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
-    let dependency = orchestration_dependencies["agent-doc-turn-executor"]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        dependency.get("path").and_then(toml::Value::as_str),
-        Some("../agent-doc-turn-executor")
-    );
-    assert_eq!(
-        dependency.get("version").and_then(toml::Value::as_str),
-        package_version
-    );
-
     let agent_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-agent-io/src/agent/mod.rs")).unwrap();
     for forbidden_snippet in [
@@ -17823,20 +17614,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         package_version
     );
 
-    let dependency = orchestration_dependencies["agent-doc-harness"]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        dependency.get("path").and_then(toml::Value::as_str),
-        Some("../agent-doc-harness")
-    );
-    assert_eq!(
-        dependency.get("version").and_then(toml::Value::as_str),
-        package_version
-    );
-
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod harness;"),
         "orchestration must not expose agent-doc-harness through a harness facade module"
@@ -17852,10 +17630,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         }
     }
     let mut orchestration_sources = Vec::new();
-    collect_rs_files(
-        &manifest_dir.join("agent-doc-orchestration/src"),
-        &mut orchestration_sources,
-    );
+    collect_rs_files(&manifest_dir.join("src"), &mut orchestration_sources);
     for forbidden_snippet in [
         "pub struct HarnessConfig",
         "pub enum RestartBehavior",
@@ -18397,8 +18172,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/Cargo.toml")).unwrap();
     let start_runtime_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/Cargo.toml")).unwrap();
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/supervisor/mod.rs")
@@ -18492,8 +18266,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .exists(),
         "orchestration must not keep a public startup_miss facade"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod startup_miss;"),
         "orchestration must not expose startup-miss as a public module"
@@ -19630,8 +19403,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .contains("agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures"),
         "write convergence IO should call focused supervisor write-wedge classification directly"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/supervisor_selfkill.rs")
@@ -20214,8 +19986,7 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
             .exists(),
         "orchestration must not expose an env/screen supervisor facade"
     );
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
@@ -21210,8 +20981,7 @@ fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_run =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
-    let orchestration_build =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/build.rs")).unwrap();
+    let orchestration_build = String::new();
     let preflight_warnings =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     let preflight_io_lib =
@@ -21401,8 +21171,7 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
         "agent-doc-queue must own queue continuation guidance policy"
     );
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     for forbidden in [
         "pub const CONTINUATION_NO_STALL_GUIDANCE",
         "pub const RECYCLE_YIELD_GUIDANCE",
@@ -21526,8 +21295,7 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
             "deferred operator clears must use the context-clear projection: {required}"
         );
     }
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     let queue_io_host =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_continuation.rs"))
             .unwrap();
@@ -21585,8 +21353,7 @@ fn test_agent_doc_element_done_owns_done_archive_content_policy() {
         );
     }
 
-    let orchestration_cargo =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_cargo = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     assert!(
         orchestration_cargo.contains("agent-doc-element-done"),
         "agent-doc-orchestration should depend on the focused done element crate directly"
@@ -21658,8 +21425,7 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_maintenance =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/pending_cmd.rs")
@@ -21748,8 +21514,7 @@ fn test_agent_doc_element_backlog_runtime_io_owns_runtime_backlog_command_effect
     let backlog_cmd =
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/backlog_cmd.rs"))
             .unwrap();
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
@@ -22450,8 +22215,7 @@ fn test_agent_doc_tmux_owns_focus_pane_decision() {
             .exists(),
         "orchestration must not keep a focus command facade module"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod focus;"),
         "orchestration must not expose a focus command facade"
@@ -23261,8 +23025,7 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
         prompt_io_source.contains("use agent_doc_turn_executor_tmux::prompt::{"),
         "prompt IO adapter should call the focused prompt parser directly"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/prompt.rs")
@@ -23712,8 +23475,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
         "agent-doc-debounce is pure settle-budget policy and must stay dependency-free"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
     assert!(
@@ -23761,8 +23523,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
         }
     }
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod op_capture;")
             && !manifest_dir
@@ -23773,7 +23534,6 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
 
     for relative in [
         "src",
-        "agent-doc-orchestration/src",
         "agent-doc-debounce/src",
     ] {
         let mut files = Vec::new();
@@ -23819,8 +23579,7 @@ fn test_agent_doc_archive_io_owns_head_compact_archive_reads() {
         "root crate should expose the focused compact archive IO crate"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
     assert!(
@@ -23907,8 +23666,7 @@ fn test_agent_doc_capture_io_owns_response_capture_ledger() {
         "root crate should expose the focused response capture IO crate"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
     assert!(
@@ -23935,8 +23693,7 @@ fn test_agent_doc_capture_io_owns_response_capture_ledger() {
 
     let capture_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-capture-io/src/lib.rs")).unwrap();
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         capture_io_source.contains("pub fn capture_response(")
             && capture_io_source.contains("pub fn load_active(")
@@ -24109,8 +23866,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         );
     }
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
     assert!(
@@ -24576,8 +24332,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             .exists(),
         "orchestration must not keep an ipc_socket facade after agent-doc-ipc-io extraction"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod ipc_socket;"),
         "orchestration must not expose focused IPC IO through an ipc_socket facade"
@@ -24646,8 +24401,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             "agent-doc-callback-io must stay a focused state-machine adapter, not a callback protocol facade or orchestration shim: {forbidden}"
         );
     }
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod callback;"),
         "orchestration must not expose callback IO through a callback facade module"
@@ -25004,8 +24758,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         !orchestration_input_diag_path.exists(),
         "orchestration must not keep an input_diag source module facade"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod input_diag"),
         "orchestration must not expose an input_diag facade"
@@ -26462,15 +26215,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "CLI shell should depend on git IO directly"
     );
 
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
-    assert!(
-        orchestration_manifest.contains("agent-doc-git-io = { path = \"../agent-doc-git-io\""),
-        "orchestration should depend on git IO directly for sibling commits"
-    );
-
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     for forbidden in ["pub mod checkpoint;", "pub mod git_sibling;"] {
         assert!(
             !orchestration_lib.contains(forbidden),
@@ -27075,8 +26820,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         );
     }
 
-    let orchestration_cargo =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_cargo = read_retired_orchestration_artifact(manifest_dir, "Cargo.toml");
     assert!(
         orchestration_cargo.contains("agent-doc-element-exchange"),
         "orchestration must depend on the focused exchange element crate directly"
@@ -27371,8 +27115,7 @@ fn test_agent_doc_element_boundary_owns_boundary_id_lookup() {
         "CLI shell should depend on boundary IO directly"
     );
 
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_lib = read_retired_orchestration_artifact(manifest_dir, "src/lib.rs");
     assert!(
         !orchestration_lib.contains("pub mod boundary_io;"),
         "orchestration must not expose a boundary_io facade"
@@ -29559,7 +29302,6 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
-    let package_version = workspace["package"]["version"].as_str();
     let members = workspace["workspace"]["members"].as_array().unwrap();
 
     assert!(
@@ -29603,44 +29345,6 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             "agent-doc-sync scope policy must stay free of orchestration and tmux/effect crates: {forbidden_dependency}"
         );
     }
-
-    let orchestration_manifest =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
-    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
-    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
-    let dependency = orchestration_dependencies["agent-doc-sync"]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        dependency.get("path").and_then(toml::Value::as_str),
-        Some("../agent-doc-sync")
-    );
-    assert_eq!(
-        dependency.get("version").and_then(toml::Value::as_str),
-        package_version
-    );
-    let dependency = orchestration_dependencies["agent-doc-process-owner-io"]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        dependency.get("path").and_then(toml::Value::as_str),
-        Some("../agent-doc-process-owner-io")
-    );
-    assert_eq!(
-        dependency.get("version").and_then(toml::Value::as_str),
-        package_version
-    );
-    let dependency = orchestration_dependencies["agent-doc-sync-io"]
-        .as_table()
-        .unwrap();
-    assert_eq!(
-        dependency.get("path").and_then(toml::Value::as_str),
-        Some("../agent-doc-sync-io")
-    );
-    assert_eq!(
-        dependency.get("version").and_then(toml::Value::as_str),
-        package_version
-    );
 
     let sync_source = fs::read_to_string(manifest_dir.join("agent-doc-sync/src/lib.rs")).unwrap();
     for required_snippet in [

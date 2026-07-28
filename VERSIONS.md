@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.49
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._
+
+- **Dead Zed language-server replicas no longer hold the delivery-ACK barrier forever.** The relay now extracts the sidecar PID from `zed-<pid>-…` identities as well as JetBrains and VS Code identities, so its existing stalled-delivery reconciliation removes a Zed replica after the LSP process exits even while the Zed application remains open. End-to-end reconciliation coverage uses the Zed identity shape that previously escaped liveness cleanup.
+
 ## 0.35.48
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._

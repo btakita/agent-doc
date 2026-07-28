@@ -451,7 +451,7 @@ fn replica_registration_lock(document_hash: &str) -> Result<Arc<Mutex<()>>> {
 /// `editor-pid-uuid` prefix, so only the decimal field immediately after the
 /// integration name is significant here.
 fn editor_process_id(identity: &str) -> Option<u32> {
-    let rest = ["jetbrains-", "vscode-"]
+    let rest = ["jetbrains-", "vscode-", "zed-"]
         .into_iter()
         .find_map(|prefix| identity.strip_prefix(prefix))?;
     let pid = rest.split('-').next()?;
@@ -4113,13 +4113,18 @@ mod tests {
             editor_process_id("jetbrains-1234-a1b2:/tmp/doc.md:refresh-2"),
             Some(1234)
         );
-        assert_eq!(
-            editor_process_id("vscode-5678-c3d4:/tmp/doc.md"),
-            Some(5678)
-        );
-        assert_eq!(editor_process_id("intellij:legacy"), None);
-        assert_eq!(editor_process_id("jetbrains-not-a-pid-id"), None);
-    }
+    assert_eq!(
+        editor_process_id("vscode-5678-c3d4:/tmp/doc.md"),
+        Some(5678)
+    );
+    assert_eq!(
+        editor_process_id("zed-9012-e5f6:/tmp/doc.md"),
+        Some(9012)
+    );
+    assert_eq!(editor_process_id("intellij:legacy"), None);
+    assert_eq!(editor_process_id("jetbrains-not-a-pid-id"), None);
+    assert_eq!(editor_process_id("zed-not-a-pid-id"), None);
+}
 
     #[test]
     fn logical_replica_identity_collapses_only_numeric_refresh_generations() {
@@ -4560,9 +4565,10 @@ mod tests {
         std::fs::write(&file, "# Session\n\nseed\n").unwrap();
         let file_str = file.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        // A jetbrains identity carries the editor pid, which is what
-        // `dead_editor_replica_ids` reconciles against.
-        let identity = format!("jetbrains-424242-abcd:{file_str}");
+        // A Zed LSP identity carries the sidecar pid, which is what
+        // `dead_editor_replica_ids` reconciles against when the sidecar exits
+        // while the Zed application itself remains alive.
+        let identity = format!("zed-424242-abcd:{file_str}");
         let (client_id, _bootstrap) = register_replica_for_file(&file, &identity)
             .unwrap()
             .expect("replica should attach");

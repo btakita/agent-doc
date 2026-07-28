@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.54
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._
+
+- **The typed local-process state chart is now load-bearing at the commit boundary (`#adstatechart3`).** The CRDT relay remains the authoritative editor-sync fact producer, while the default `adstatechart` feature routes commit acceptance through the typed Lazily `ThreadSafeStateChart` `send("commit", guards)` edge. Status observation now uses the thread-safe chart projection, feature-off builds preserve the former relay check as a fail-closed fallback, and a deterministic 64-cycle wedged-finalize simulation proves stale disk never commits.
+
 ## 0.35.53
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._

@@ -6,20 +6,19 @@
 //! `adstatechart_snapshot transport.x editor_sync.x closeout.x supervisor.x`
 //! marker to `ops.log` alongside the existing markers. It is **read-only**: the
 //! snapshot builds its own throwaway chart in
-//! [`agent_doc_state_backbone::adstatechart::configuration_snapshot`] and never
-//! touches the live write/commit path — no closeout behavior changes.
+//! [`agent_doc_state_backbone::adstatechart::configuration_snapshot_threadsafe`]
+//! and never mutates the live write/commit path.
 //!
 //! Every fact source fails safe to its chart-initial default, so a missing live
 //! buffer, unresolved project root, or absent cycle state degrades the advisory
-//! line rather than erroring the caller. The `editor_synced` guard used for the
-//! closeout region is the same `edit_epoch <= last_synced_epoch` the live commit
-//! path enforces (`git.rs` `commit_blocked_live_buffer_ahead_of_disk`), so the
-//! advisory never disagrees with the shipped A/C guard.
+//! line rather than erroring the caller. Rung 3 reads through the thread-safe
+//! chart variant so status observation and the load-bearing commit transition
+//! use the same chart family across threads.
 
 use std::path::Path;
 
 use agent_doc_state_backbone::adstatechart::{
-    ChartFacts, CloseoutPhase, ObservedPhases, configuration_snapshot,
+    ChartFacts, CloseoutPhase, ObservedPhases, configuration_snapshot_threadsafe,
 };
 use agent_doc_turn::CyclePhase;
 
@@ -142,7 +141,7 @@ fn doc_git_root_of(file: &Path) -> std::path::PathBuf {
 pub fn advisory_snapshot(file: &Path) -> String {
     let doc_git_root = doc_git_root_of(file);
     let (facts, observed) = assemble(file, &doc_git_root);
-    configuration_snapshot(&facts, &observed)
+    configuration_snapshot_threadsafe(&facts, &observed)
 }
 
 /// Emit the advisory snapshot to `ops.log` as a single read-only marker. Best

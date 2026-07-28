@@ -26,11 +26,11 @@
 //! [`guard_map`]. Guards stay pure and unit-testable; the chart never reads
 //! extended state. An absent/unknown guard name fails closed (`send` → `false`).
 //!
-//! Rung 1 is NOT wired into the live write path — it defines the chart, the
-//! guards, and proves the load-bearing rejected edge (`commit` while the editor
-//! buffer is ahead of disk). Rungs 2–4 (observability read, load-bearing
-//! closeout guard, fold-in of the `#mergestatemachine3` merge-ownership FSM)
-//! are tracked in `tasks/agent-doc/prd-adstatechart-local-process-statechart.md`.
+//! Rung 3 wires the chart into the live commit boundary: the CRDT relay produces
+//! the authoritative editor-sync fact, and [`closeout_commit_transition`] makes
+//! `send("commit", guards)` the acceptance decision. Rung 4 (fold-in of the
+//! `#mergestatemachine3` merge-ownership FSM) remains optional/future work in
+//! `tasks/agent-doc/prd-adstatechart-local-process-statechart.md`.
 
 use lazily::{ChartBuilder, ChartDef, StateBuilder, StateChart, ThreadSafeStateChart};
 use serde::{Deserialize, Serialize};
@@ -219,16 +219,43 @@ pub fn new_adstatechart_threadsafe(
     Ok(ThreadSafeStateChart::new(ctx, adstatechart_def()?))
 }
 
+/// Run the load-bearing `idle → written → committed` closeout transition over
+/// the typed thread-safe chart.
+///
+/// `commit_barrier_ready` is the CRDT relay's authoritative statement that the
+/// canonical replica covers every live editor. It is projected onto the chart's
+/// existing epoch-shaped `editor_synced` guard input rather than re-derived
+/// here: the relay owns the fact, while the chart owns whether the `commit` edge
+/// may fire. A chart construction/transition error is returned so the caller can
+/// fail closed.
+pub fn closeout_commit_transition(commit_barrier_ready: bool) -> Result<bool, String> {
+    let facts = ChartFacts {
+        edit_epoch: u64::from(!commit_barrier_ready),
+        last_synced_epoch: 0,
+        ..ChartFacts::default()
+    };
+    let guards = guard_map(&facts);
+
+    // #stategraphjoin-allow: bounded per-call pure transition at the commit
+    // boundary. The chart is driven from fixed facts, observed, and dropped;
+    // no long-lived owner or derived state can join this decision.
+    let ctx = lazily::ThreadSafeContext::new();
+    let chart = new_adstatechart_threadsafe(&ctx)?;
+    if !chart.send(&ctx, "write", &guards) {
+        return Err("adstatechart rejected required closeout write transition".to_string());
+    }
+    let accepted = chart.send(&ctx, "commit", &guards);
+    Ok(accepted && chart.matches(&ctx, "committed"))
+}
+
 // ------------------------------------------------------- observability read
 // Phase E rung 2 (`#adstatechart2`): an advisory, read-only projection of the
-// four orthogonal regions as a compact named snapshot. This does NOT gate
-// closeout — it constructs its own throwaway chart, drives it to the fact-implied
-// configuration, and reads `active_leaves()` back so session-check / status can
-// log `transport.x editor_sync.x closeout.x supervisor.x` alongside the existing
-// `ops.log` markers. The guard used for the closeout region is the same
-// `editor_synced` (`edit_epoch <= last_synced_epoch`) the live commit path uses
-// (`git.rs` `commit_blocked_live_buffer_ahead_of_disk`), so the advisory never
-// disagrees with the shipped A/C guard.
+// four orthogonal regions as a compact named snapshot. It constructs its own
+// throwaway chart, drives it to the fact-implied configuration, and reads
+// `active_leaves()` back so session-check / status can log
+// `transport.x editor_sync.x closeout.x supervisor.x` alongside the existing
+// `ops.log` markers. Rung 3 makes the separate
+// `closeout_commit_transition` path load-bearing.
 
 /// The observed closeout phase the snapshot should reflect. The closeout region
 /// is driven by the real write/commit lifecycle, which is not derivable from
@@ -486,6 +513,18 @@ mod tests {
         // Finish the cycle.
         assert!(chart.send(&ctx, "session_check_ok", &guard_map(&synced)));
         assert!(chart.matches(&ctx, "session_ok"));
+    }
+
+    #[test]
+    fn load_bearing_threadsafe_commit_transition_uses_relay_sync_fact() {
+        assert!(
+            closeout_commit_transition(true).expect("typed chart transition"),
+            "a converged relay cut must take the guarded commit edge"
+        );
+        assert!(
+            !closeout_commit_transition(false).expect("typed chart transition"),
+            "a relay cut behind a live editor must stay in written"
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -277,6 +277,16 @@ Section 4 restricts consulting or business activity related to Haiven’s busine
 
 ### Re: Disclosure requirement
 
+> **Queue prompt:**
+>
+> re: "These activities will be performed outside Haiven working time using separate equipment, accounts, repositories, credentials, and systems. I will not use or disclose Haiven confidential information in them, disclose their confidential information to Haiven, or allow them to materially interfere with my Haiven duties.". I will use my same machine for all contract work. I will also be running AI with brief task switching during my Haiven hours. Should I disclose that or not? It will not interfere with fulfilling my Haiven work.
+
+
+> **Queue prompt:**
+>
+> Please do not over-disclose. If Haiven is not asking for the number of hours worked for my other contracts, please don't include the number.
+
+
 > **Queue prompt:** Please let me know where they stated I need to disclose my other parties.
 
 The direct requirement is in the offer letter’s **“External Contracting”** paragraph: “Limited external contracting is permissible, provided that such activities do not interfere with your responsibilities at Haiven and are disclosed to the Company.” See [lines 82–83](../professional/haiven/haiven-offer-letter-brian-takita-jul-2026.md#L82-L83).
@@ -290,9 +300,7 @@ Section 4 restricts consulting or business activity related to Haiven’s busine
 ## Queue
 
 <!-- agent:queue go -->
-- ~~Please let me know where they stated I need to disclose my other parties.~~ — auto-struck: answered this cycle (#ftstrike)
-- Please do not over-disclose. If Haiven is not asking for the number of hours worked for my other contracts, please don't include the number.
-- re: "These activities will be performed outside Haiven working time using separate equipment, accounts, repositories, credentials, and systems. I will not use or disclose Haiven confidential information in them, disclose their confidential information to Haiven, or allow them to materially interfere with my Haiven duties.". I will use my same machine for all contract work. I will also be running AI with brief task switching during my Haiven hours. Should I disclose that or not? It will not interfere with fulfilling my Haiven work.
+- do [#haiven-paper]
 <!-- /agent:queue -->
 
 ## Backlog

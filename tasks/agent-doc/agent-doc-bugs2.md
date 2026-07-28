@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -601,508 +601,33 @@ The live CRDT proof and its v0.35.47 repairs were already completed and committe
 - **Verification:** the prior committed response contains the IntelliJ round-trip proof, exact VS Code controller/canonical hash proof, regression coverage, full 8,258-test `make check`, install, commit, push, and tag evidence. This cycle confirms those delivery facts remain current and closes only the stale document state.
 - **Confidence:** high.
 - **Escalation:** none.
+Compact Exchange error on this document: `agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: no such column: harness in SELECT document_id, session_id, cycle_id, harness, prompt_fingerprint, pack_ids_json, chunk_ids_json, token_count, created_at FROM context_manifest WHERE document_id = ?1 AND session_id = ?2 ORDER BY created_at DESC, rowid DESC LIMIT 1 at offset 119: Error code 1: SQL logic error`
+The required compact handoff failed before the session could proceed:
 
-### Re: #nsfz — gpt-5
+`context_manifest` is missing the `harness` column used by `compact_document`.
 
-Implemented and live-dogfooded the startup-deadline fail-closed path. The first real unauthenticated Codex run exposed a contributing bug: Codex's first-run sign-in selector was being mistaken for a dispatch-ready composer, so agent-doc could advance the login UI instead of timing out. Codex authentication selector, browser-wait, and device-code screens are now explicit dispatch blockers; an actual prompt appearing after authentication scrollback is still accepted.
-
-A clean isolated unauthenticated Codex restart stayed `prompt_ready=false`, never received the agent-doc trigger, and recorded `startup_miss` with `reason=no_prompt` at the configured 60-second deadline. The stderr contract is `session did not become dispatch-ready in 60s (no_prompt) ... failing closed instead of hanging`. The backlog's original 30-second example is stale: later cold-resume work deliberately increased the bounded readiness budget to 60 seconds, while preserving the required bounded fail-closed behavior.
-
-Changed paths: `agent-doc-harness/src/lib.rs`, `specs/07-session-tmux-commands.md`, `VERSIONS.md`, and the workspace version manifests/lockfile for 0.35.48. Added three regression tests covering the sign-in selector, browser-auth wait, and a genuine prompt after auth scrollback.
-
-Verification: `cargo test -p agent-doc-harness codex_auth`, full `cargo test -p agent-doc-harness`, `cargo build --bin agent-doc`, live tmux/Codex dogfood, `make check`, and `git diff --check` all passed. The single required CI snapshot was in progress. `make install-full` and `make install` succeeded; `/home/brian/.cargo/bin/agent-doc --version` reports 0.35.48.
-
-Released as commit `b111e4179` (`fix(harness): block Codex auth screens from dispatch`) and tag `v0.35.48`; both are pushed. The superproject pointer was recorded locally in `cbb56d355`. The generated untracked `editors/zed/extension.wasm` was intentionally excluded.
-
-Zed extension full path: `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed`.
-
-Confidence: high. Escalation: none.
-
-### Re: Zed extension path
-
-The Zed extension is at `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed`.
-
-The `#nsfz` cycle is complete; agent-doc v0.35.49 is installed and published with the dead Zed LSP replica fix.
-
-### Re: Supervisor restart association live proof
-
-Completed `#suprestassoc-live`.
-
-- Before and after the restart, `equityfundingsource.md` remained bound to session `62fe1f41-886c-4f3d-b6fa-48d46106ec27`, pane `%44`, window `@33`, generation 1574.
-- The restart was accepted as receipt 43; the live EFS status reports `restart_count=1` and a healthy supervisor.
-- `agent-doc-bugs2.md` independently remained bound to session `b26b9957-8de6-4eae-bb98-5d7fe4d6b781`, pane `%35`, window `@33`, generation 1822.
-
-The actor/admin projection did not re-associate EFS with the bugs2 pane or session.
-
-### Re: `#suprestassoc-live` — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> 📌 do [#suprestassoc-live]
-
-
-Live verification passed. Before restarting the EFS supervisor, `equityfundingsource.md` was bound to session `62fe1f41-886c-4f3d-b6fa-48d46106ec27`, pane `%44`, window `@33`, generation `1574`; `agent-doc-bugs2.md` was independently bound to session `b26b9957-8de6-4eae-bb98-5d7fe4d6b781`, pane `%35`, window `@33`, generation `1822`.
-
-`agent-doc session restart-supervisor tasks/professional/equityfundingsource.md` produced replacement receipt `43`. The EFS child process changed and its restart count advanced, while its session, pane, window, and actor generation remained exactly `62fe1f41-886c-4f3d-b6fa-48d46106ec27` / `%44` / `@33` / `1574`. The bugs2 actor independently remained `b26b9957-8de6-4eae-bb98-5d7fe4d6b781` / `%35` / `@33` / `1822`.
-
-The actor/admin projection therefore preserved document ownership through the live supervisor replacement; EFS did not re-associate to the bugs2 pane or session.
-
-### Re: `#jbedtledgerverify` — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> 📌 do [#jbedtledgerverify]
-
-
-Live verification passed on the current JetBrains plugin `0.2.305` (which supersedes the stale `0.2.280` pin) against the large `agent-doc-bugs2.md` session document.
-
-I invoked **Run Agent Doc** three times from IDEA. The first attempt (`1785223563296-1`) completed the EDT sequence `clicked → save_active_document → active_document_saved → route_prepare → route_command_built` in 6 ms, then moved `route_start`/`route_success` to a background thread and completed routing in 5.378 s. The second attempt completed the same EDT preparation in 1 ms. The immediate third click completed its EDT path in 1 ms and correctly terminated as `route_deduped_active_run` while the preceding route was still in flight. IDEA remained responsive throughout the clicks.
-
-The ledger preserved attempt grouping and stage order without interleaving. Every click/save/prepare stage was attributed to `AWT-EventQueue-0`; only asynchronous route execution used `Thread-152` / `Thread-155`. A direct check found no 2026-07-28 ledger entry whose `thread=` was `agent-doc-run-attempt-ledger`, so caller-thread capture is intact.
-
-### Re: `#0dsr` — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> 📌 do [#0dsr]
-
-
-Implemented and released as agent-doc `0.35.50`.
-
-Run Agent Doc preflight now attempts recovery for every retained document-write intent before reading the retained-write gate. The state-backbone policy owns an exhaustive transition:
-
-- no intent, unobserved, or already satisfied → continue;
-- authority/disk divergence → await the existing delivery without replay;
-- authority and disk agree but the retained delta is absent → replay the stranded intent.
-
-The replay path uses the existing content-bearing journal base and target, semantically rebases the retained agent delta over the current document cut, validates the result, writes through document authority, and clears the intent only after canonical authority and disk both equal the replayed target. Newer operator text is therefore preserved rather than replaced by stale retained content.
-
-The focused detached-authority test exposed another contributing factor: a newly launched controller could briefly report `NoRetainedIntent` while its reactive pending-intent projection lagged the durable journal. Controller verdicts are now reconciled with the same state-backbone policy evaluated from the caller's current durable observations, so projection startup lag cannot suppress recovery.
-
-Changed paths include `agent-doc-state-backbone/src/retained_write.rs`, `agent-doc-document-realtime-io/src/lib.rs`, `agent-doc-preflight-io/src/lib.rs`, `agent-doc-preflight-runtime-io/src/lib.rs`, `specs/14-realtime-workflow.md`, and the `0.35.50` release metadata.
-
-Verification:
-
-- focused state-backbone retained-write tests: passed;
-- focused preflight ordering/recovery tests: passed;
-- detached-authority operator-cut replay regression: passed;
-- `make check`: passed, including workspace tests and all six TLA model checks;
-- latest CI checked once: green;
-- `make install`: passed; local binary reports `agent-doc 0.35.50`.
-
-Release proof: agent-doc commit `d3e121b77` pushed to `main`, tag `v0.35.50` pushed, and superproject gitlink commit `97467e770` pushed. Confidence is high; no escalation or remaining follow-up is required. The pre-existing untracked `editors/zed/extension.wasm` and unrelated workspace changes were left untouched.
-
-### Re: do [#30p6] — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> 📌 do [#30p6]
-
-
-Implemented and released the Go-mode idle-queue dispatch fix as agent-doc `0.35.51`.
-
-The earlier `!later_has_prompt` theory is now ruled out by the real wrapped Codex-draft regression. The remaining failure was a two-part state-boundary bug: an unavailable/negative pane recognition could fall through to a fresh dispatch, while a stale matching `PromptDispatchProjection` made that fallback return `Sent` as a duplicate without touching tmux. The watcher then recorded the queue head as dispatched even though the composer had never been submitted.
-
-The corrected contract is fail-closed:
-
-- Payload recognition and dispatch readiness now come from one typed live-pane observation.
-- An unavailable capture defers without writing or recording the head.
-- A non-ready composer without the queue payload is treated as operator-owned and defers.
-- A proven queue draft receives at most one bare Enter resubmit.
-- A proven empty, dispatch-ready composer may clear only the matching stale dispatch projection before a real text+Enter retry.
-- Prompt-dispatch deduplication is no longer accepted as queue delivery proof.
-- Each changed observation persists a redacted pane snapshot together with the computed pending/ready/action values, deduped by head and capture hash. A future live stall therefore retains the capture and its recognition result atomically instead of requiring race-prone separate probes.
-
-Proof:
-
-- Changed paths: `agent-doc-supervisor-io/src/detection.rs`, `agent-doc-start-runtime-io/src/{idle_watch.rs,lib.rs}`, `specs/supervisor.md`, release metadata/manifests, and bundled skill version headers.
-- Focused verification: new fail-closed action-matrix tests pass; the one-shot Enter regression passes; the real wrapped Codex draft recognition regression passes; all 62 `agent-doc-supervisor-io` library tests pass; all 101 `agent-doc-start-runtime-io` library tests pass.
-- Repository verification: `make check` passed all 8,268 tests (241 skipped), clippy/format checks, and all TLA+ models.
-- Release verification: full release install succeeded; `agent-doc --version` reports `0.35.51`; active project controller marked for idle-boundary recycle.
-- Delivery: agent-doc commit `272d1cc27` and parent gitlink commit `7d881a288` are pushed; tag `v0.35.51`, PyPI manylinux wheel, and GitHub release are published. The required single CI observation was `in_progress`, not red; it was not polled.
-- Confidence: high. Escalation: none.
-
-### Re: do [#opcapturelazily] — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> 📌 do [#opcapturelazily]
-
-
-Implemented and released as agent-doc 0.35.52.
-
-Op capture is now a typed Lazily state-backbone projection instead of a second mutable authority. `EditorOpCaptureCheckpointed` carries a complete monotonic epoch—exact base hash, ordered editor ops, canonical path, and freshness stamp—and `EditorOpCaptureCleared` consumes it. Same-base bursts serialize and append without loss; a base change starts a fresh epoch; exact-base replay remains fail-closed; and `CycleAbandoned` clears a stranded op epoch in the same reducer transition. The old `editor_op_captures` table remains only as one-way migration input and is deleted after the typed fact lands.
-
-The latency-sensitive paths stay bounded: live IDE callbacks use one controller-serialized read/derive/append transition, controller-internal merge/write work reads the in-memory projection directly through an O(1) local seam instead of self-RPC or full-ledger replay, and actorless startup uses one SQLite transaction. Complete checkpoint facts also make retention safe without reconstructing a growing epoch from every historical batch.
-
-Proof:
-
-- Changed paths: `agent-doc-state-backbone`, `agent-doc-op-capture-io`, controller RPC/runtime, `agent-doc-state-wire`, SQLite retention/migration support, the state-backbone spec, release manifests, and version history.
-- Tests cover same-base ordering, exact-base acceptance, stale-base fallback, base-change epoch reset, idempotent clear, abandonment-driven atomic clear, stale-epoch rejection, live controller serialization, one-way legacy migration, malformed legacy fallback, and GC.
-- `make check` passed: clippy; 8,272 workspace tests passed with 241 skipped; simulation, version-sync, lean checks, and all TLA+ models passed.
-- Release proof: commit `87c166476`, parent gitlink commit `c224bddaf`, installed binary `agent-doc 0.35.52`, PyPI wheel uploaded, tag `v0.35.52` pushed, and GitHub release published at https://github.com/btakita/agent-doc/releases/tag/v0.35.52.
-- The required single CI observation was `in_progress` for the new main push, not red; I did not poll it. Confidence: high. Escalation: none.
-
-The pre-existing untracked `editors/zed/extension.wasm` and unrelated dirty parent-repository changes were preserved.
-
-### Re: do [#jbtsiftnosub2verify] — gpt-5.6-sol
-
-Done. I ran the JetBrains `Run Agent Doc` action against a disposable project-root Markdown document after proving it had no actor, registry entry, supervisor, or tmux pane (`closed-clean`, `pane=none`). IDEA invoked `cp:editor_route --dispatch-only --plain-trigger`, created fresh pane `%52`, and submitted the reopen instead of leaving it in the composer.
-
-**Live proof:**
-
-- IDEA logged `SubmitAction actionPerformed` and the project-root `editor_route` request for `tasks/agent-doc/jbtsiftnosub2verify-live.md`.
-- `ops.log` recorded `route_owned_start_policy ... pane=%52`, `dispatch_inject ... transport=supervisor_ipc`, `route_submit_observation ... result=accepted ... trigger_visible=false`, `route_actor_dispatch_start_proven ... proof=consumed`, `route_dispatch_only_sent ... proof=consumed`, and `fresh_route_dispatch_only`.
-- The pane capture showed the submitted `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/jbtsiftnosub2verify-live.md` turn in scrollback and an empty Codex composer afterward (only the placeholder remained), so there was no typed-but-unsubmitted draft.
-- The scratch cycle reached `commit_success`; `agent-doc session-check` returned committed cycle `cycle-1785230111599`; `startup_miss` remained `none`.
-
-**Marker migration:** the backlog's required `fresh_route_stranded_trigger_resubmit` + `fresh_route_start_acknowledged_after_resubmit` pair is now legacy for this JetBrains path. The current plugin deliberately routes with `--dispatch-only`, and `agent-doc-route-io/src/startup.rs` returns through `fresh_route_dispatch_only` before the non-dispatch-only cycle-ack/resubmit classifier. Because the live submit succeeded on the first attempt, no stranded-draft resubmit was needed. The current equivalent proof is the accepted/consumed dispatch-start sequence above; retaining the old pair as a JetBrains acceptance requirement would incorrectly fail healthy current runs.
-
-**Cleanup:** closed both scratch editor tabs, killed only disposable pane `%52`, ran targeted `agent-doc fix` (removed its one stale session entry), and removed the scratch files. No test pane or tracked scratch artifact remains.
-
-**Changed paths:** `.codex/skills/agent-doc/SKILL.md` was refreshed from the installed 0.35.51 copy to the running binary's 0.35.52 skill during mandatory skill-version alignment; no agent-doc product source was changed.
-
-**Commands:** `tsift status`; bounded `rg`/`tsift source-read`; `agent-doc session status`; IDEA open + focus-guarded `xdotool` shortcut; bounded `ops.log`/`idea.log` inspection; `tmux capture-pane`; scratch `agent-doc session-check`; targeted `agent-doc fix`.
-
-**Verification:** live no-pane JetBrains route passed on agent-doc 0.35.52; submitted trigger consumed, composer cleared, cycle committed, no FreshStart startup-miss.
-
-**Confidence:** High.
-
-**Escalation:** None.
-
-### Re: `#jbtsiftnosub2verify` closeout recovery — gpt-5.6-sol
-
-The live verification response and `#jbtsiftnosub2verify` completion are durable. The stale stop-hook ledger was reconciled; the empty preflight cycle created during recovery was explicitly abandoned so it did not consume the next queue prompt. The disposable `%52` pane and scratch artifacts remain removed, `agent-doc-bugs2.md` is reopened in IDEA, and the terminal invariant check is clean.
-
-**Changed paths:** No additional product-source changes.
-
-**Verification:** `agent-doc session-check` returned `ok`; no queue continuation is required.
-
-**Confidence:** High.
-
-**Escalation:** None.
-
-### Re: do [#compactreactiveprojectionverify] — gpt-5.6-sol
-
-Gated — the fresh-restart live verification failed on the newer compatible generation (JetBrains plugin 0.2.305, superseding the requested 0.2.300; native library 0.35.52).
-
-**Live result:** I saved all buffers, cleanly restarted IntelliJ IDEA 2026.1, confirmed plugin 0.2.305 and `libagent_doc` 0.35.52 loaded, then typed one reversible 305-event burst into the 108,555-byte `agent-doc-bugs2.md`. IDEA accepted the xdotool burst in 1.25 seconds and initially answered the active-window probe immediately, but the plugin did not compact the operation stream:
-
-- `ops.log`: `editor_ops_recorded count=305 ... transaction=batch`.
-- IDEA log: nine observed `native.applyLocal file=agent-doc-bugs2.md ... insert_chars=1` calls at sequential offsets from 108294 onward, arriving roughly every 10–16 seconds over about 67 seconds.
-- Controller projection repeatedly remained `delivery_converged=false` while canonical length advanced one character at a time.
-- Post-baseline marker counts: `coalesced_exact_editor_adopt_after_quiet=0`; `exact_editor_adopt_then_atomic_reregister=0`. The old atomic-reregister churn did not recur, but it has been replaced by an equally invalid per-character native drain with no quiet coalescing.
-
-This disproves the responsiveness/coalescing predicate, so `#compactreactiveprojectionverify` must not be marked done. I gated it on implementation and filed `#compactreactiveprojectionlivefail` with the exact regression evidence and required deterministic test/re-proof.
-
-**Bounded wedge proof:** the same IDEA log contains a natural `native call exceeded 10000ms; disabled the wedged generation to keep the IDE responsive` event at 03:17:25, followed by no further native-generation work until the 03:21 restart and fresh load. The bounded-timeout/fail-closed half therefore has real evidence; the typing/coalescing half fails.
-
-**Cleanup:** stopped the failed fresh IDE generation to halt its queued per-character worker, restored only this session document from its proven pre-burst committed blob, and ran targeted agent-doc repair. The file is byte-for-byte back at baseline SHA-256 `d74e661c32bf39a83f2b7777195f4d900c6ed6af699ee65a0ec30b46bfba21b2`; `git status` shows no residual document edit.
-
-**Changed paths:** No product-source changes; agent-doc backlog/status mutations only.
-
-**Commands:** plugin/log inspection; focus-guarded `xdotool`; graceful IDEA TERM/relaunch; bounded marker counts; `sha256sum`; exact single-file `git restore --source=HEAD`; targeted `agent-doc repair`.
-
-**Verification:** Failed as described; cleanup hash and repository status passed.
-
-**Confidence:** High.
-
-**Escalation:** Implementation fix required in `#compactreactiveprojectionlivefail` before repeating this operator proof.
-
-### Re: do [#compactreactiveprojectionverify] — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> do [#compactreactiveprojectionverify]
-
-
-Closeout correction: the operator proof failed and must remain unresolved. The 305-event burst was accepted quickly by IDEA, but agent-doc drained sequential one-character `native.applyLocal` calls roughly every 10–16 seconds, with no `coalesced_exact_editor_adopt_after_quiet` recovery. The bounded 10-second native-call timeout/fail-closed behavior was independently confirmed.
-
-The verifier is gated pending implementation, and `#compactreactiveprojectionlivefail` records the focused fix and repeat-proof work.
-
-**Changed paths:** Session document tracked-work metadata only; no product-source changes.
-
-**Commands:** IDEA save/restart/stop; log and marker inspection; retained-write recovery preflight; `agent-doc finalize`.
-
-**Verification:** Coalescing predicate failed; bounded-timeout predicate passed; reversible burst cleanup passed.
-
-**Confidence:** High.
-
-**Escalation:** Implement the per-burst revision-scoped drain/coalescing fix before repeating the operator proof.
-
-### Re: 📌 do [#sidecarstate] — Codex
-
-> **Queue prompt:**
->
-> 📌 do [#sidecarstate]
-
-
-Implemented and released a focused Phase 3 sidecar-retirement slice. `load_current_observed_closeout_recovery_evidence` now accepts typed Lazily recovery evidence when its visible-document hash matches current document authority; an obsolete snapshot baseline can no longer veto that evidence. The projection still carries its recorded snapshot hash as advisory recovery context, and the existing visible-hash mismatch rejection remains intact.
-
-changed_paths:
-- `src/agent-doc/agent-doc-flow-io/src/closeout.rs`
-- `src/agent-doc/agent-doc-flow-io/tests/flow_closeout.rs`
-- `src/agent-doc/{Cargo.toml,Cargo.lock,pyproject.toml,VERSIONS.md,SKILL.md,.claude/skills/agent-doc/SKILL.md}` plus workspace dependency-version manifests for 0.35.53
-- `tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md`
-
-commands:
-- `cargo test -p agent-doc-flow-io --test flow_closeout observed_recovery_evidence`
-- focused manifest and bundled-skill version guards
-- `make check`
-- `make install`
-- source and parent `git push origin main`
-- tag/push `v0.35.53`
-- `agent-doc admin recycle`
-- GitHub release `v0.35.53`; trusted PyPI workflow queued
-
-verification:
-- focused recovery-evidence regression: pass
-- final full suite: 8,273 passed, 241 skipped
-- TLA+ model checks: pass
-- installed CLI: `agent-doc 0.35.53`
-- latest inspected CI run: green
-- source commit `cc7c760d3`; release commit `88cd98f0c`; parent commits `916533ab1` and `ca0df1d56`
-
-confidence: high for the authority fix and regression coverage; release artifacts are installed/pushed/tagged, with compatible PyPI wheels delegated to the queued trusted-publishing workflow.
-
-escalation: the direct local `maturin publish` build succeeded but PyPI rejected its generic `linux_x86_64` wheel tag; the repository's release-triggered manylinux/macOS/Windows workflow is the supported publication path and is queued. No operator action is required unless that workflow later fails.
-
-The broader `#sidecarstate` item remains open: other detailed guard/recovery payload cutovers and the later state-vector barrier still need focused cycles.
-
-### Re: 📌 do [#adstatechart2] — Codex
-
-> **Queue prompt:**
->
-> 📌 do [#adstatechart2]
-
-
-Verified and resolved `#adstatechart2` as already implemented. The observability rung originally landed in `c8ed0f7c4` and survived the crate-decomposition cutover into `agent-doc-state-observer-io`: session-check calls `log_advisory_snapshot` before inspection, which computes the four-region `configuration()` view and appends one `adstatechart_snapshot advisory=1 transport.x editor_sync.x closeout.x supervisor.x` marker to `ops.log`. It remains read-only and does not gate or mutate closeout.
-
-changed_paths:
-- none — this was a stale backlog row for implementation already present in the current tree
-
-commands:
-- `tsift graph log_advisory_snapshot --callers --json`
-- `tsift --envelope search 'adstatechart_snapshot' --path .agent-doc/logs/ops.log --budget normal`
-- `cargo test -p agent-doc-state-backbone adstatechart`
-- `cargo test -p agent-doc-state-observer-io`
-
-verification:
-- production call graph: `session-check run_with_options_inner` → `log_advisory_snapshot`
-- live workspace ledger: repeated named snapshots observed for both `transport.degraded` and `transport.socket`, with editor-sync, closeout, and supervisor leaves present
-- focused chart/observer tests: pass
-- the immediately preceding 0.35.53 full gate also passed 8,273 tests and all TLA+ checks on this same source tree
-
-confidence: high — source wiring, focused tests, and real session-check ops-log evidence agree.
-
-escalation: none. No standalone `status` command exists; the advisory snapshot is logged alongside session-check's status result, matching the PRD's non-load-bearing observability rung. `#adstatechart3` remains the separate load-bearing transition.
-
-### Re: `#adstatechart3` — load-bearing closeout chart — gpt-5
-
-> **Queue prompt:**
->
-> 📌 do [#adstatechart3]
-
-
-Completed and released as agent-doc **0.35.54**.
-
-The historical typed-builder/version prerequisites were already superseded in-tree: `adstatechart` already used Lazily's typed `ChartBuilder` and the backbone is on Lazily 0.53.0 (newer than the requested 0.19). This cycle completed the missing production cutover:
-
-- The CRDT relay remains the authoritative producer of the editor-sync/commit-barrier fact.
-- The default `adstatechart` feature now makes the typed `ThreadSafeStateChart` `send("commit", guards)` edge the commit acceptance authority.
-- Chart construction/transition errors reject the commit. Builds with `adstatechart` disabled preserve the former relay check as a fail-closed fallback; `--no-default-features` coverage proves it.
-- Session/status observation now reads the thread-safe chart projection.
-- A deterministic `WedgedFinalizeSimWorld` drives 64 wedged-finalize → direct-commit cycles through the production guard: all 64 stale-disk attempts are rejected, and only a subsequently converged relay cut commits.
-
-Proof:
-
-- `changed_paths`: `agent-doc-state-backbone/src/adstatechart.rs`, `agent-doc-git-io/src/live_buffer_guard.rs`, `agent-doc-git-io/Cargo.toml`, `agent-doc-state-observer-io/src/lib.rs`, `Cargo.lock`, workspace 0.35.54 manifest/version surfaces, `VERSIONS.md`, and the parent `src/agent-doc` gitlink. The pre-existing untracked `editors/zed/extension.wasm` was not staged or modified.
-- `commands`: focused Cargo tests for state-backbone/state-observer/git-io; `cargo test -p agent-doc-git-io --no-default-features`; commit-io tests; architecture-scope guard; full `make check`; `make install`; version/install checks; exact staged-diff checks; source and parent pushes; controller recycle; tag push.
-- `verification`: focused suites green; feature-off fallback green; commit-coordinator green; architecture-scope guard green; full clean rerun of `make check` green (8,275 tests across 166 binaries plus project SimWorld/formal gates). Latest inspected CI was green for 0.35.53. The tag-triggered 0.35.54 Release workflow is running; it owns GitHub Release creation and the trusted PyPI handoff.
-- `release`: source commit `5033157f0`, parent gitlink commit `8dfdc6887`, tag `v0.35.54`, installed CLI `agent-doc 0.35.54`; both `main` branches and the tag are pushed. The active document controller is marked to recycle at its next idle boundary.
-- `confidence`: high.
-- `escalation`: none.
-
-### Re: #adstatechartkt — gpt-5
-
-> **Queue prompt:**
->
-> 📌 do [#adstatechartkt]
-
-
-Implemented and shipped the JetBrains merge-ownership chart integration.
-
-The backlog’s lazily-kt `0.9.0` premise had been superseded: the plugin was already on `0.36.1`, while the released local/API-compatible generation is `0.39.0`. I advanced the dependency to `0.39.0` and replaced `CrdtReplicaForwarder`’s independently mutated volatile `attached` Boolean with a `ChartBuilder`-defined `ThreadSafeStateChart`. All document charts join one project-lifetime `ThreadSafeContext`; registration now traverses `Detached → Attached → EditorOwnsBuffer`, retirement traverses back to `Detached`, and reads take one atomic active-configuration snapshot. The Kotlin transition matrix exactly pins all six phases and seven events from `agent_doc_merge::ownership`; invalid edges remain fail-closed. Rust/controller state remains authoritative for disk-write permission.
-
-Shipped versions: agent-doc `0.35.55`, JetBrains plugin `0.2.306`. The plugin was installed to all four detected JetBrains IDE installations. Because this adds a Kotlin class, a running IDE loads it on its next restart; I added a non-blocking operator verification item for that live smoke test.
-
-Proof:
-
-- changed_paths: `editors/jetbrains/build.gradle.kts`, `editors/jetbrains/gradle.properties`, `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/{MergeOwnershipStateChart,CrdtReplicaForwarder,CrdtReplicaManager}.kt`, `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/{MergeOwnershipStateChartTest,CrdtReplicaForwarderTest}.kt`, release/version manifests, `VERSIONS.md`
-- commands: focused Gradle tests; `./gradlew test buildPlugin signPlugin`; dependency insight; `make check`; `make install`; `agent-doc skill install --all`; `cargo run --quiet -- audit-docs`; source/parent commits and pushes; `agent-doc admin recycle`; tag/push `v0.35.55`; one CI and Release status inspection
-- verification: complete JetBrains test/build/sign pipeline passed; dependency resolves `io.github.lazily:lazily:0.39.0 -> project :lazily-kt`; full agent-doc gate passed `8275/8275` tests (241 skipped), Clippy, simulator, version sync, Lean gate, and all six TLA+ models; post-install docs audit passed with no blocking issues; installed CLI reports `agent-doc 0.35.55`; controller recycle returned `recycled=true`
-- commits: source `acca0715f` (`feat: use typed JetBrains merge ownership chart`), parent gitlink `da4a8e2db`; both pushed; tag `v0.35.55` pushed
-- CI: CI run `30353866230` and Release run `30353884483` were both `in_progress` for `acca0715f` at the single required inspection; no polling performed
-- confidence: high
-- escalation: none; a JetBrains restart/live smoke test is intentionally operator-owned and non-blocking
-
-### Re: #adstatechartjs — gpt-5
-
-> **Queue prompt:**
->
-> 📌 do [#adstatechartjs]
-
-
-Implemented, installed, and released the typed lazily-js merge-ownership projection for the VS Code extension.
-
-- Added `MergeOwnershipStateChart`, built with `ChartBuilder`/`StateBuilder` from the published `@lazily-hub/lazily-js/statechart` API. Its six phases, seven events, idempotent edges, and rejected edges match `agent_doc_merge::ownership::transition_merge_ownership` exactly.
-- Replaced `CrdtReplicaForwarder.attached` mutation with a derived state-chart projection. Successful registration advances through `editor_attached` and `editor_buffer_observed`; deregistration advances through `editor_detached`; rejected lifecycle edges fail closed. The Rust controller remains authoritative for disk-write permission.
-- Added happy-path coverage and an exhaustive 6×7 transition-matrix parity test, plus forwarder lifecycle assertions.
-- Corrected the stale backlog package premise: the package is `@lazily-hub/lazily-js`, and its released line is `0.x`. The extension now consumes latest-published `0.29.1`. Local `0.30.1` remains independently blocked by the existing npm Trusted Publisher/2FA operator item `#lzjsnpmtrustedpub`; it is not needed for this integration.
-- Released agent-doc `0.35.56` / VS Code extension `0.2.59`. Installed binary `0.35.56`, synchronized all managed skill surfaces, installed VS Code `btakita.agent-doc@0.2.59`, recycled the project controller, pushed source commit `d55c89e41`, tag `v0.35.56`, and parent gitlink commit `88ec92d4a`.
-
-Proof:
-
-- Changed paths: `editors/vscode/src/mergeOwnershipStateChart.ts`, `editors/vscode/src/mergeOwnershipStateChart.test.ts`, `editors/vscode/src/crdtReplica.ts`, `editors/vscode/src/crdtReplica.test.ts`, VS Code package/lock/native version files, `VERSIONS.md`, and the mechanical agent-doc `0.35.56` release manifests.
-- Commands: `npm install`, `npm test`, `npm run package`, `make check`, `make install`, `agent-doc plugin install vscode --local`, `agent-doc skill install --all`, `cargo run --quiet -- audit-docs`, source/parent commit and push, project recycle, tag/push.
-- Verification: focused VS Code suite passed 160/160; repository-wide `make check` passed (including 8,275 tests and all TLA+ model checks); VSIX packaging passed; docs audit reported no blocking issues; installed versions report agent-doc `0.35.56` and VS Code `0.2.59`.
-- CI snapshot: source CI and Release workflows were both `in_progress` for `d55c89e41`; per repository policy they were recorded once and not polled.
-- Confidence: high. The exhaustive transition matrix is checked directly against the Rust authority vocabulary and the live package/export was verified before integration.
-- Escalation: one operator verification remains because VS Code must reload/restart its Extension Host to activate the structurally new bundled module.
-
-### Re: 📌 do [#ipcauthority]
-
-> **Queue prompt:**
->
-> 📌 do [#ipcauthority]
-
-
-Implemented and released `#ipcauthority` in agent-doc 0.35.57.
-
-Architecture contract now enforced:
-
-- Whole-buffer authority is a closed typed set: only current reliable-sync/CRDT operator text is admissible. File reads, snapshots, and `content_ours` remain audit provenance and are not representable as write authority.
-- IPC adapters reject audit candidates before full-buffer editor repair, disk fallback, baseline checkpointing, or closeout success.
-- Component-scoped response replay remains valid only when the editor returns a fresh Lazily visible-write receipt; that receipt upgrades the candidate to reliable-sync authority before closeout continues.
-- Reconciliation now upgrades provenance even when the current reliable-sync buffer is byte-identical to the candidate.
-- Misleading `content_ours_adopted` telemetry now reports that reliable-sync visible content was retained.
-
-Proof:
-
-- Added an exhaustive whole-buffer transition matrix covering all delivery kinds, authority values, source-match states, enablement states, and scope rejections.
-- Added pure closeout-provenance tests: Lazily visible-write applies; `ContentOurs` and `FileRead` reject.
-- Added runtime adapter coverage proving a file-read dedupe candidate never reaches `fullContent`, editor delivery, or disk mutation.
-- Preserved and strengthened the live component-replay regression: successful replay must upgrade `ContentOurs` to `LazilyVisibleWriteEvent`.
-- Focused Rust suite: 162 passed.
-- Full `make check`: passed.
-- `make install`: passed; installed binary reports `agent-doc 0.35.57`.
-- `agent-doc audit-docs`: no blocking issues (two pre-existing mtime advisories only).
-
-Release:
-
-- Source commit `d839186f4` pushed to `agent-doc/main`.
-- Tag `v0.35.57` pushed.
-- Parent gitlink commit `60bf481d7` pushed to `agent-loop/main`.
-- CI and Release workflows were queued when checked once, per the no-poll policy.
-- The project controller is marked to recycle at its next idle boundary.
-
-No actionable follow-up items were created.
-
-### Re: 📌 do [#ipcliveness] — gpt-5
-
-> **Queue prompt:**
->
-> 📌 do [#ipcliveness]
-
-
-Completed as a verification-only closeout: this backlog entry was stale, and all three IPC-liveness concerns are already resolved in the released `v0.35.57` tree.
-
-- **Bounded connect:** `agent-doc-ipc-io` wraps socket connection in a watchdog and returns an `IPC connect timeout` after the configured 3-second bound instead of allowing a caller to hang indefinitely.
-- **Bounded listener reads:** accepted editor connections receive a 30-second read timeout. A half-open client therefore exits its connection worker and releases the inflight guard rather than leaking a thread/file descriptor indefinitely.
-- **Negative acknowledgement / current authority:** file IPC first gained explicit `.nack` delivery in `c94e71ab3` (`feat(editors): write file-IPC negative-ack on patch apply failure`). The subsequent Lazily-authority cutover in `ef00649df` retired file IPC from the live delivery plane entirely. Current unavailable-endpoint handling is a state-machine transition; it does not emit or poll patch files.
-
-Architecture invariant: every live IPC wait has a finite liveness bound, and the current delivery state machine has one authority rather than an active legacy file-IPC fallback. Policy remains in `agent-doc-ipc-io`; listener socket configuration and connect watchdog execution are the effect boundary.
-
-Verification:
-
-- `cargo test -p agent-doc-ipc-io` — passed, including `connect_watchdog_returns_before_a_wedged_connect_finishes`, `half_open_listener_connection_closes_after_read_timeout`, and `quiesced_listener_joins_connection_workers_and_removes_socket`.
-- `cargo test --test test_cli test_exchange_recovery_reenters_the_monotonic_write_pipeline -- --exact` — passed; the guard rejects retired file-IPC seams including `try_editor_converge_file_ipc`, `write_file_ipc_and_poll_delivery`, and `.agent-doc/ack-content`.
-- Current source revision: `d839186f4`, tagged `v0.35.57`.
-
-Changed paths: none. This was an already-shipped verification closeout, so no version bump or duplicate implementation was appropriate. Confidence: high. Escalation: none.
-
-### Re: 📌 do [#ipcverhandshake] — Codex
-
-> **Queue prompt:**
->
-> 📌 do [#ipcverhandshake]
-
-
-Implemented and released the IPC version/build handshake as agent-doc **v0.35.58**.
-
-The wire invariant is now fail-closed: before any editor mutation reaches the plugin callback, each connection must complete a hello/ack exchange with an exact `{ protocol_version, build_id }` match. Protocol skew, build skew, malformed handshakes, and legacy clients are rejected with terminal, diagnosable receipts. `reload_library` is the sole pre-handshake control message; the client retains a raw reload-only fallback so a newly installed binary can ask an older listener to reload without allowing an unsafe mutation.
-
-Policy ownership and effect boundaries are explicit:
-
-- `agent-doc-ipc-protocol` owns the peer identity, hello/ack schema, validation, rejection receipts, protocol version, and reload classification.
-- `agent-doc-ipc-io` enforces negotiation per connection before dispatching editor intents and records handshake rejection diagnostics.
-- The CLI and cdylib inject the same build-scoped identity, `<package-version>+<build-timestamp>`, so same-semver rebuild skew is detectable rather than inferred from filesystem mtime/inode state.
-- The configuration specification documents the PID-scoped socket, mandatory negotiation, fail-closed behavior, and narrow reload exception.
-
-Regression and integration proof covers exact identity acceptance, protocol/build skew rejection, legacy mutation rejection before the callback, and preservation of the reload compatibility path. Verification completed successfully:
-
-- `cargo test -p agent-doc-ipc-protocol -p agent-doc-ipc-io`
-- `cargo check --workspace`
-- full `make check` (8,283-test suite plus simulator/formal gates)
-- changed-file rustfmt checks and `git diff --cached --check`
-- one release-parity `make install-full`
-- installed CLI reports `agent-doc 0.35.58`
-- managed Claude/Codex/OpenCode/Cursor skill surfaces were synchronized; the prior stale OpenCode mirror is fixed
-- `agent-doc admin recycle` marked the controller for the next idle boundary
-
-Release completed:
-
-- source commit `1b4e56ee7` pushed to `agent-doc/main`
-- tag `v0.35.58` pushed
-- manylinux wheel uploaded successfully to PyPI
-- GitHub release: https://github.com/btakita/agent-doc/releases/tag/v0.35.58
-- parent gitlink and refreshed OpenCode/Cursor surfaces committed as `0ad92cee1` and pushed to `agent-loop/main`
-- the latest CI run was `in_progress` at the required single check; it was not polled
-
-The repository-wide `agent-doc audit-docs` still reports 403 pre-existing findings across unrelated projects/worktrees, but the release-specific managed-version mismatch that prompted the audit is resolved. Confidence is high: the mutation gate is proven at both protocol and listener integration boundaries, and the full workspace/release gates passed. No escalation or operator follow-up is required.
-
-### Re: 📌 do [#5qjj] — gpt-5
-
-> **Queue prompt:**
->
-> 📌 do [#5qjj]
-
-
-Advanced `#5qjj` through every agent-doable verification step, but the final two-surface proof remains a genuine operator-visible gate.
-
-Current surface state:
-
-- VSCodium is running and reports `btakita.agent-doc@0.2.59`.
-- The installed 0.2.59 bytecode contains the aggregate presentation path: `realtime_steering.count > 1` renders `(<count> edits)`, while `realtime_steering.verbatim` supplies the full hover tooltip.
-- The current JetBrains package is 0.2.306.
-- No JetBrains IDE process is running, so its banner and hover cannot be observed from this cycle.
-
-Automated evidence is green:
-
-- `npm test` in `editors/vscode` passed.
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests "com.github.btakita.agentdoc.TurnStateBridgeTest"` passed.
-- `cargo test -p agent-doc-controller-io realtime_steering_event_carries_the_full_crdt_aggregate` passed.
-- The source tree acquired no tracked changes; the pre-existing untracked `editors/zed/extension.wasm` remains untouched.
-- The latest CI run for the preceding v0.35.58 source push is still `in_progress`; it was checked once and not polled.
-
-The remaining unblocker is exact: restart/open a JetBrains IDE with plugin 0.2.306 and reload VSCodium with extension 0.2.59; on each surface, start an agent-doc turn, make at least two distinct complete exchange edits, confirm the banner/status item reports the aggregate edit count and its hover contains every edit in full, then invoke agent-doc once and confirm the handoff contains the aggregate without submitting a partial edit. Because that visual state cannot be established while JetBrains is absent, I gated `#5qjj` rather than falsely marking it complete.
-
-Changed path: only the binary-owned session-document backlog/review transition produced by this finalize. Confidence is high in the implementation and automated projection path; confidence in live editor rendering remains intentionally unclaimed until the stated operator proof.
-<!-- agent:boundary:8b9f60b8 -->
+No repository work or document finalization was performed.
+<!-- agent:boundary:3b555125 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- 📌 do [#nsfz]
+- 📌 do [#suprestassoc-live]
+- 📌 do [#jbedtledgerverify]
+- 📌 do [#0dsr]
+- 📌 do [#30p6]
+- 📌 do [#opcapturelazily]
+- 📌 do [#jbtsiftnosub2verify]
+- 📌 do [#sidecarstate]
+- 📌 do [#adstatechart2]
+- 📌 do [#adstatechart3]
+- 📌 do [#adstatechartkt]
+- 📌 do [#adstatechartjs]
+- 📌 do [#ipcauthority]
+- 📌 do [#ipcliveness]
+- 📌 do [#ipcverhandshake]
+- 📌 do [#5qjj]
 <!-- /agent:queue -->
 
 ## Notes
@@ -1113,17 +638,28 @@ Changed path: only the binary-owned session-document backlog/review transition p
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#compactreactiveprojectionlivefail] [focused-cycle] #agent-doc-bug Fresh-restart live regression on IDEA 2026.1 + JetBrains plugin 0.2.305: a 305-event burst logged editor_ops_recorded count=305 transaction=batch, but CrdtReplicaForwarder drained sequential native.applyLocal insert_chars=1 operations roughly every 10–16 seconds while controller authority stayed delivery_converged=false; neither coalesced_exact_editor_adopt_after_quiet nor exact_editor_adopt_then_atomic_reregister appeared. Fix the editor-op drain so one burst becomes one revision-scoped update or at most one quiet recovery, add deterministic latency/conformance coverage, preserve the bounded native-call timeout/fail-closed behavior, and repeat #compactreactiveprojectionverify.
-- [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Phase 3 progress shipped in agent-doc 0.35.53: current observed closeout-recovery evidence now validates the typed projection against live visible-document authority only, so stale compatibility snapshot-baseline drift cannot veto a current typed observation; the recorded snapshot hash remains advisory recovery evidence. Remaining: complete the other detailed guard/recovery payload cutovers and later state-vector barrier work in tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md.
-- [ ] [#adstatechartktlive] [operator-verify] After restarting a JetBrains IDE onto plugin 0.2.306, open/edit/close an agent-doc markdown document and verify the CRDT replica reaches editor_owns_buffer then detached with no classloader or File Cache Conflict error.
-- [ ] [#adstatechartjslive] [operator-verify] Reload or restart the VS Code/VSCodium Extension Host onto agent-doc 0.2.59, then open, edit, and close an agent-doc markdown document; verify registration reaches editor-owned buffer state, edits sync normally, close/deregister succeeds, and no merge-ownership rejection appears.
+- [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
+- [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
+- [ ] [#0dsr] [focused-cycle] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Tagged [focused-cycle] 2026-07-19 — this is WRITE-PATH work whose failure modes are destructive (replaying a stale intent clobbers operator text; broken idempotency double-archives a compact), so it needs fresh context, not a mid-drain slot. MAP (the expensive part, traced 2026-07-19): (1) durable journal = pending_write_journal, agent-doc-state-backbone/src/lib.rs:1433 — deduped by intent_id, entries cleared on DocumentWriteConverged; (2) accessor = pending_document_write_journal, agent-doc-document-realtime-io/src/lib.rs:2824; (3) EXISTING replay = deferred_document_write_reconnect_content, same file :3115 — but triggered only by editor RECONNECT (:1214) and closing cut (:3571), which is the actual gap: a retained intent waits for a reconnect that may never come; (4) settle entry points already exposed to preflight via its effects = settle_retained_committed_projection / settle_retained_captured_projection, agent-doc-closeout-runtime-io/src/lib.rs:170/226/289; (5) the repair step to hook = agent-doc-preflight-command-io/src/run.rs:296, which runs on every Run Agent Doc. IDEMPOTENCY NOTE: intent_id dedup gives you 'do not replay the SAME intent twice' for free, but it does NOT prove replaying a STALE intent over newer content is safe — that guard still has to be designed and is the real risk. Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms' and left work retained with no operator surface to resume it.
+- [ ] [#30p6] [focused-cycle] Go-mode idle-queue dispatch adds the run to the composer but never submits it — SUSPECT WEAKENED 2026-07-19 by evidence. Gate chain confirmed: idle_queue_pending_payload_needs_enter_resubmit = pending_draft_enter_resubmit() (true unconditionally, NOT the filter) && drain_dispatch_dedup_skip(payload_already_pending) && !already_resubmitted, with drain_dispatch_dedup_skip = matches!(x, Some(true)) — so the resubmit fires only on positive recognition, and None (pane uncapturable) or Some(false) (recognition failed) both strand the draft. My earlier prime suspect was the trailing !later_has_prompt condition in route_trigger_visible_in_current_draft (dispatch.rs:412). The #64we capture ARGUES AGAINST it: a real stranded codex draft shows NO is_prompt_line after the trigger (codex patterns are ❯ > ›; the footer line starts 'gpt-5.5'), so that condition would have returned true and the resubmit would have fired. Remaining candidates: payload_already_pending == None (live_pane_content unavailable at the decision point), or recognition failing earlier in the chain. CONFIRM BY capturing the pane AND the computed payload_already_pending together at a live stall — the pane capture alone is not sufficient, which is what this pass established.
+- [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
+- [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md
+- [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.
+- [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Plan: tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md
+- [ ] [#adstatechart2] [focused-cycle] #agent-doc-feature Phase E rung 2 (observability): wire session-check/status to READ adstatechart configuration() as an advisory named-snapshot (transport.x editor_sync.x closeout.x supervisor) alongside today's ops.log markers. No behavior change to closeout. Guard semantics must match whatever A-D shipped. PRD: tasks/agent-doc/prd-adstatechart-local-process-statechart.md
+- [ ] [#adstatechart3] [focused-cycle] #agent-doc-feature Phase E rung 3 (load-bearing): switch adstatechart to the typed lazily 0.19 ChartBuilder, bump agent-doc-state-backbone to lazily 0.19, use ThreadSafeStateChart for cross-thread status observation, and replace the ad-hoc editor_synced check at the finalize/commit site with chart send(commit, guards) plus a fail-closed fallback when the feature is off. SimWorld: N wedged-finalize->direct-commit cycles never commit from stale disk. Live editor proof gated behind decomposition + install. PRD rung 3.
+- [ ] [#adstatechartkt] [focused-cycle] lazily-kt 0.9.0 SHIPPED (ChartBuilder + ThreadSafeStateChart + shared fromStates + context-free engine; GitHub Packages via release.yml, tag v0.9.0; full test suite green). REMAINING: bump the JetBrains plugin's lazily-kt dependency to 0.9.0 and consume ChartBuilder/ThreadSafeStateChart for the merge-ownership state machine (#mergestatemachine3 fold-in).
+- [ ] [#adstatechartjs] [focused-cycle] lazily-js 1.1.0 SHIPPED (ChartBuilder + statechart.d.ts builder types + shared fromStates; tag v1.1.0; 169/169 tests green). No thread-safe/async chart in js (no reactive Context, no threads). REMAINING: npm publish is operator-2FA-gated (#lzjsnpmpub: npm login then npm publish --access public), then bump the VS Code plugin @lazily/js dep to 1.1.0 and consume ChartBuilder.
+- [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
+- [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
+- [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
+- [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
+- [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#5qjj] [operator-verify] #steeringmirrorverify — CURRENT LIVE PROOF 2026-07-28: JetBrains plugin 0.2.306 and VSCodium extension 0.2.59 are the required surfaces. Restart/open JetBrains and reload VSCodium; on each surface start an agent-doc turn, make at least two distinct complete exchange edits, verify the banner/status item reports the aggregate count and the full hover contains every edit, then invoke agent-doc once and confirm one aggregate handoff is queued without submitting a partial edit. Automated controller, JetBrains presentation, and VSCodium suites pass; blocked only on this visual two-surface proof.
-- [/] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
 - [/] [#preflightinbinary] [operator-verify] Live proof for #preflightinbinary AFTER the default flip (5ce9b06e6). The flip has landed: SKILL.md now says do NOT run preflight when the '[agent-doc] cycle contract ...' marker is present, and the hook is registered in this project's .claude/settings.json under UserPromptSubmit alongside turn-status. Needing a live session to confirm: (a) invoke /agent-doc <FILE> in a FRESH Claude Code session and confirm the marker + contract appear in context before the agent runs any tool, and that the agent does NOT shell to 'agent-doc preflight'; (b) confirm exactly ONE cycle id is opened for that turn — grep .agent-doc/logs/ops.log for preflight_diff_start, and confirm 'repaired stale preflight_started cycle' does NOT appear; that line is the tell that the agent still ran preflight and the round trip was merely absorbed by repair rather than removed; (c) confirm an ordinary prompt that merely mentions agent-doc produces no marker and no cycle; (d) confirm a Codex/OpenCode turn (no Claude hook, so no marker) still runs preflight explicitly and closes out normally. Scope note: reusable_by_reentrant_preflight is defence in depth only — start_preflight runs at preflight step 4, after repair at step 1, so in the live pipeline repair closes any prior open cycle before the guard sees it. What removes the double-open is the flip itself.
 - [/] [#jbsurfaceswap] [operator-verify] Live IDE proof for #jbsurfaceswap (agent-doc 27beeae2e, JB plugin 0.2.296). Both plugins now report one EditorSurface observation per event and the graph derives the intent; the planners are deleted. With the IDE restarted onto 0.2.296, confirm in a real session: (a) clicking between two side-by-side split editors moves the tmux active pane (derived Focus); (b) changing the editor split layout reconciles tmux (derived Sync) and shows the 'Sync: --col ... [focus: ...]' hint exactly once; (c) repeat focus events on the same editor cost nothing — the JB log line '[layout-sync] observe: ... intent=idle' with no controller command; (d) swap two tmux panes by hand, then click an editor tab WITHOUT changing the split, and confirm the pulled tmux probe reconciles the layout instead of only moving focus (#tmuxsyncstate); (e) closing the project releases the root (no growth in surface graphs across open/close cycles). Headless tests cover the fold, the probe seam, and the observation wire shape, but not the debounce/generation interaction with real editor event storms.
 - [/] [#jbpluginlazilyeffects] #agent-doc-feature The JetBrains/VS Code plugin should drive lazily state + Effects, not one-shot CLI commands. Today every editor action (file selected, layout changed, Sync Tmux Pane) shells a fresh agent-doc process that re-observes the world from scratch and returns one answer that is already stale, with no subscription and no invalidation. Keep the CLI supported as an entrypoint, but the plugin path should be: plugin reports an event -> FFI sets a Source in the document scope -> an Effect drives the tmux/pane consequence. Same Shared Foundation rule already in AGENTS.md, applied to observation rather than business logic. Consumes the derived owner map from syncownerreactive, so order it after that.

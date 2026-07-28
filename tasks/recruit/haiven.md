@@ -545,7 +545,29 @@ Confirmed. Use the addresses as follows:
 - **General job location:** Remote—Connecticut
 
 The revision email already distinguishes the mailing and physical addresses this way, so no further draft change is needed for this prompt.
-<!-- agent:boundary:b99f60ab -->
+
+### Re: Exhibit A scope and sending the Haiven revision request — gpt-5
+
+> If Exhibit A is required, please include my open source work, outside consulting work, private projects, and future outside work.
+>
+> If Exhibit A is not required for this email, let's get this out because I have a deadline.
+
+**Exhibit A was not required to accompany this negotiation email.** It is important before signing because an empty Exhibit A would represent that you have no prior inventions, but the proposed schedule can follow while Haiven considers the requested revisions.
+
+The threaded Gmail reply has now been **sent** to **Craig Fryar and Luke Richey** under **“Re: Haiven Offer Letter.”** Gmail displayed **“Message sent,”** and the reply editor and Send control disappeared. No Exhibit A was attached.
+
+I updated the sent email to say that you will provide a proposed Exhibit A before signing covering:
+
+- pre-existing open-source work;
+- independently owned materials associated with outside consulting, while excluding client or other third-party IP and secrets;
+- private projects, repositories, libraries, websites, products, writings, trademarks, and other prior IP.
+
+Unknown future work cannot meaningfully be itemized on a prior-inventions schedule. The email therefore separately asks Haiven to allow future outside activities to be submitted for written approval under the same conflict-based standard, with equivalent compensation, IP, and confidentiality protections for approved activities.
+
+I also revised the benefits paragraph to acknowledge Craig’s benefits snapshot and request only the missing coverage-effective-date, contribution-tier, handbook, vacation, and equity materials.
+
+The matching source is [haiven-offer-revision-email-draft.md](../professional/haiven/haiven-offer-revision-email-draft.md), committed as `7d47ee0c5`. The `#haiven-paper` review gate now records that the email was sent and retains Exhibit A plus revised-document verification as pre-signature work.
+<!-- agent:boundary:2b55104e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -561,7 +583,7 @@ The revision email already distinguishes the mailing and physical addresses this
 ## Review
 
 <!-- agent:review -->
-- [/] [#haiven-paper] [operator-action] Review and send the threaded Gmail reply to Craig Fryar and Luke Richey under “Re: Haiven Offer Letter.” Before sending, complete and attach a proposed Exhibit A covering prior IP and third-party materials (without disclosing client secrets). Then provide Haiven’s revised, countersigned documents and acknowledged Exhibit A for final verification before signing.
+- [/] [#haiven-paper] The threaded Gmail reply was sent to Craig Fryar and Luke Richey under “Re: Haiven Offer Letter” on July 28, 2026 without Exhibit A. Before signing, complete a proposed Exhibit A covering pre-existing open-source work, independently owned consulting materials, and private projects without disclosing third-party secrets; obtain Haiven’s acknowledged Exhibit A and revised, countersigned documents; then provide them for final verification.
 <!-- /agent:review -->
 
 ## Icebox

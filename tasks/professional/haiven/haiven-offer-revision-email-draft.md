@@ -130,9 +130,11 @@ promised protections difficult to apply.
 ## 5. Connecticut work location, payroll, and dispute provisions
 
 I will perform the role remotely from Connecticut. Please update the offer’s
-“Greater Boston, MA” location to my Connecticut address and confirm that Haiven
+“Greater Boston, MA” location to “Remote—Connecticut” and confirm that Haiven
 or its payroll provider is set up for Connecticut withholding, unemployment,
-workers’ compensation, and Connecticut Paid Leave.
+workers’ compensation, and Connecticut Paid Leave. For employment and payroll
+records, my physical work address is 1 Park St, #2 - 571, North Grosvenordale,
+CT 06255. My mailing address is PO Box 571, North Grosvenordale, CT 06255.
 
 The current twice-monthly pay schedule should either be changed to weekly or
 biweekly or accompanied by confirmation that Haiven has the Connecticut Labor
@@ -140,11 +142,20 @@ Commissioner waiver required for a less-frequent schedule.
 
 The documents also conflict: the offer selects Wyoming law and Laramie County
 courts, while the other agreement selects Washington law, Spokane courts, and
-Spokane arbitration. Please use Connecticut law and a Connecticut or remote
-forum. If arbitration remains, it should proceed remotely under the AAA
-Employment/Workplace Rules, preserve all statutory remedies and fee-shifting,
-and require Haiven to pay the arbitration and arbitrator costs other than a
-filing fee no greater than the fee for filing the same claim in court.
+Spokane arbitration. Please reconcile them into a single governing-law and
+dispute-resolution framework. Because I will perform my work from Connecticut,
+my preference is Connecticut law and a Connecticut legal forum or arbitral
+seat. If Haiven prefers its home-state law and legal seat, I am open to
+discussing that once the documents identify one state consistently.
+
+If arbitration remains, please use the AAA Employment/Workplace Arbitration
+Rules, with hearings conducted virtually by default unless the parties agree
+otherwise or the arbitrator determines that an in-person hearing is necessary.
+Haiven should pay the AAA administrative fees and arbitrator compensation, with
+my filing fee capped at the fee required to file an equivalent claim in court.
+The arbitrator should be authorized to award every remedy and any statutory
+fee-shifting available in court, and the agreement should preserve any
+non-waivable protections of the state where I perform my work.
 
 ## 6. Home-office payment and remaining documents
 
@@ -158,6 +169,15 @@ employee/dependent premium costs, health-coverage effective date, vacation
 accrual/carryover policy, equity plan, and proposed option agreement before
 acceptance, since the offer incorporates several of those materials into the
 employment relationship.
+
+## 7. Scheduling note
+
+I expect to start later than usual on Monday, August 10, and may miss or join
+the 10:00 a.m. PT weekly standup and iteration-planning meeting late. I may also
+have an occasional conflict with that recurring meeting. When a conflict
+arises, I will give advance notice when possible, provide written planning
+notes, and make up the time and planning coordination before or after the
+meeting.
 
 I’m raising these items to make the written documents consistent with the deal
 we discussed and to avoid ambiguity for either side. I’m happy to discuss them

@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -1070,28 +1070,39 @@ Release completed:
 - the latest CI run was `in_progress` at the required single check; it was not polled
 
 The repository-wide `agent-doc audit-docs` still reports 403 pre-existing findings across unrelated projects/worktrees, but the release-specific managed-version mismatch that prompted the audit is resolved. Confidence is high: the mutation gate is proven at both protocol and listener integration boundaries, and the full workspace/release gates passed. No escalation or operator follow-up is required.
-<!-- agent:boundary:10cd271a -->
+
+### Re: 📌 do [#5qjj] — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 do [#5qjj]
+
+
+Advanced `#5qjj` through every agent-doable verification step, but the final two-surface proof remains a genuine operator-visible gate.
+
+Current surface state:
+
+- VSCodium is running and reports `btakita.agent-doc@0.2.59`.
+- The installed 0.2.59 bytecode contains the aggregate presentation path: `realtime_steering.count > 1` renders `(<count> edits)`, while `realtime_steering.verbatim` supplies the full hover tooltip.
+- The current JetBrains package is 0.2.306.
+- No JetBrains IDE process is running, so its banner and hover cannot be observed from this cycle.
+
+Automated evidence is green:
+
+- `npm test` in `editors/vscode` passed.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests "com.github.btakita.agentdoc.TurnStateBridgeTest"` passed.
+- `cargo test -p agent-doc-controller-io realtime_steering_event_carries_the_full_crdt_aggregate` passed.
+- The source tree acquired no tracked changes; the pre-existing untracked `editors/zed/extension.wasm` remains untouched.
+- The latest CI run for the preceding v0.35.58 source push is still `in_progress`; it was checked once and not polled.
+
+The remaining unblocker is exact: restart/open a JetBrains IDE with plugin 0.2.306 and reload VSCodium with extension 0.2.59; on each surface, start an agent-doc turn, make at least two distinct complete exchange edits, confirm the banner/status item reports the aggregate edit count and its hover contains every edit in full, then invoke agent-doc once and confirm the handoff contains the aggregate without submitting a partial edit. Because that visual state cannot be established while JetBrains is absent, I gated `#5qjj` rather than falsely marking it complete.
+
+Changed path: only the binary-owned session-document backlog/review transition produced by this finalize. Confidence is high in the implementation and automated projection path; confidence in live editor rendering remains intentionally unclaimed until the stated operator proof.
+<!-- agent:boundary:8b9f60b8 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#compactreactiveprojectionverify]~~
-- ~~📌 do [#nsfz]~~
-- ~~📌 do [#suprestassoc-live]~~
-- ~~📌 do [#jbedtledgerverify]~~
-- ~~📌 do [#0dsr]~~
-- ~~📌 do [#30p6]~~
-- ~~📌 do [#opcapturelazily]~~
-- ~~📌 do [#jbtsiftnosub2verify]~~
-- ~~📌 do [#sidecarstate]~~
-- ~~📌 do [#adstatechart2]~~
-- ~~📌 do [#adstatechart3]~~
-- ~~📌 do [#adstatechartkt]~~
-- ~~📌 do [#adstatechartjs]~~
-- ~~📌 do [#ipcauthority]~~
-- ~~📌 do [#ipcliveness]~~
-- ~~📌 do [#ipcverhandshake]~~
-- 📌 do [#5qjj]
 <!-- /agent:queue -->
 
 ## Notes
@@ -1103,7 +1114,6 @@ The repository-wide `agent-doc audit-docs` still reports 403 pre-existing findin
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#compactreactiveprojectionlivefail] [focused-cycle] #agent-doc-bug Fresh-restart live regression on IDEA 2026.1 + JetBrains plugin 0.2.305: a 305-event burst logged editor_ops_recorded count=305 transaction=batch, but CrdtReplicaForwarder drained sequential native.applyLocal insert_chars=1 operations roughly every 10–16 seconds while controller authority stayed delivery_converged=false; neither coalesced_exact_editor_adopt_after_quiet nor exact_editor_adopt_then_atomic_reregister appeared. Fix the editor-op drain so one burst becomes one revision-scoped update or at most one quiet recovery, add deterministic latency/conformance coverage, preserve the bounded native-call timeout/fail-closed behavior, and repeat #compactreactiveprojectionverify.
-- [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Phase 3 progress shipped in agent-doc 0.35.53: current observed closeout-recovery evidence now validates the typed projection against live visible-document authority only, so stale compatibility snapshot-baseline drift cannot veto a current typed observation; the recorded snapshot hash remains advisory recovery evidence. Remaining: complete the other detailed guard/recovery payload cutovers and later state-vector barrier work in tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md.
 - [ ] [#adstatechartktlive] [operator-verify] After restarting a JetBrains IDE onto plugin 0.2.306, open/edit/close an agent-doc markdown document and verify the CRDT replica reaches editor_owns_buffer then detached with no classloader or File Cache Conflict error.
 - [ ] [#adstatechartjslive] [operator-verify] Reload or restart the VS Code/VSCodium Extension Host onto agent-doc 0.2.59, then open, edit, and close an agent-doc markdown document; verify registration reaches editor-owned buffer state, edits sync normally, close/deregister succeeds, and no merge-ownership rejection appears.
@@ -1112,6 +1122,7 @@ The repository-wide `agent-doc audit-docs` still reports 403 pre-existing findin
 ## Review
  
 <!-- agent:review -->
+- [/] [#5qjj] [operator-verify] #steeringmirrorverify — CURRENT LIVE PROOF 2026-07-28: JetBrains plugin 0.2.306 and VSCodium extension 0.2.59 are the required surfaces. Restart/open JetBrains and reload VSCodium; on each surface start an agent-doc turn, make at least two distinct complete exchange edits, verify the banner/status item reports the aggregate count and the full hover contains every edit, then invoke agent-doc once and confirm one aggregate handoff is queued without submitting a partial edit. Automated controller, JetBrains presentation, and VSCodium suites pass; blocked only on this visual two-surface proof.
 - [/] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
 - [/] [#preflightinbinary] [operator-verify] Live proof for #preflightinbinary AFTER the default flip (5ce9b06e6). The flip has landed: SKILL.md now says do NOT run preflight when the '[agent-doc] cycle contract ...' marker is present, and the hook is registered in this project's .claude/settings.json under UserPromptSubmit alongside turn-status. Needing a live session to confirm: (a) invoke /agent-doc <FILE> in a FRESH Claude Code session and confirm the marker + contract appear in context before the agent runs any tool, and that the agent does NOT shell to 'agent-doc preflight'; (b) confirm exactly ONE cycle id is opened for that turn — grep .agent-doc/logs/ops.log for preflight_diff_start, and confirm 'repaired stale preflight_started cycle' does NOT appear; that line is the tell that the agent still ran preflight and the round trip was merely absorbed by repair rather than removed; (c) confirm an ordinary prompt that merely mentions agent-doc produces no marker and no cycle; (d) confirm a Codex/OpenCode turn (no Claude hook, so no marker) still runs preflight explicitly and closes out normally. Scope note: reusable_by_reentrant_preflight is defence in depth only — start_preflight runs at preflight step 4, after repair at step 1, so in the live pipeline repair closes any prior open cycle before the guard sees it. What removes the double-open is the flip itself.
 - [/] [#jbsurfaceswap] [operator-verify] Live IDE proof for #jbsurfaceswap (agent-doc 27beeae2e, JB plugin 0.2.296). Both plugins now report one EditorSurface observation per event and the graph derives the intent; the planners are deleted. With the IDE restarted onto 0.2.296, confirm in a real session: (a) clicking between two side-by-side split editors moves the tmux active pane (derived Focus); (b) changing the editor split layout reconciles tmux (derived Sync) and shows the 'Sync: --col ... [focus: ...]' hint exactly once; (c) repeat focus events on the same editor cost nothing — the JB log line '[layout-sync] observe: ... intent=idle' with no controller command; (d) swap two tmux panes by hand, then click an editor tab WITHOUT changing the split, and confirm the pulled tmux probe reconciles the layout instead of only moving focus (#tmuxsyncstate); (e) closing the project releases the root (no growth in surface graphs across open/close cycles). Headless tests cover the fold, the probe seam, and the observation wire shape, but not the debounce/generation interaction with real editor event storms.

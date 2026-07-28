@@ -29,6 +29,10 @@ pub const LOSSLESS_TREE_CRDT_CAPABILITY: &str = "lossless_tree_crdt_v1";
 /// side needs to be upgraded first and there is no flag day.
 pub const PEER_REPLICA_PULL_CAPABILITY: &str = "peer_replica_pull_v1";
 
+/// The adapter exposes its production CRDT forwarder, controller transport, and
+/// native FFI node through the headless cross-editor conformance harness.
+pub const CROSS_EDITOR_NATIVE_HARNESS_CAPABILITY: &str = "cross_editor_native_harness_v1";
+
 /// Required capabilities for a plugin that participates in live authority.
 pub const REQUIRED_LAZILY_EDITOR_CAPABILITIES: [&str; 2] = [
     OPERATOR_TEXT_AUTHORITY_CAPABILITY,
@@ -51,10 +55,14 @@ mod tests {
         include_str!(
             "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"
         ),
+        include_str!(
+            "../../editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/CrossEditorHarnessMain.kt"
+        ),
     ];
     const VSCODE_SOURCES: &[&str] = &[
         include_str!("../../editors/vscode/src/native.ts"),
         include_str!("../../editors/vscode/src/editorIntent.ts"),
+        include_str!("../../editors/vscode/src/crossEditorHarness.ts"),
     ];
     const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
 
@@ -112,6 +120,7 @@ mod tests {
             LOSSLESS_TREE_CRDT_CAPABILITY,
             PEER_REPLICA_PULL_CAPABILITY,
             "native_hot_reload_generation_v1",
+            CROSS_EDITOR_NATIVE_HARNESS_CAPABILITY,
         ];
         assert_eq!(
             rows.iter().map(|row| row.feature).collect::<Vec<_>>(),
@@ -137,7 +146,11 @@ mod tests {
                     row.feature,
                 );
             } else {
-                assert_eq!(row.core, "optional", "invalid core state for {}", row.feature);
+                assert_eq!(
+                    row.core, "optional",
+                    "invalid core state for {}",
+                    row.feature
+                );
             }
 
             let selected = adapters

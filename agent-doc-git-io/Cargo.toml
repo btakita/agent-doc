@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-git-io"
-version = "0.35.67"
+version = "0.35.68"
 edition = "2024"
 description = "Git command I/O adapters for agent-doc"
 license = "MIT"
@@ -20,21 +20,21 @@ adstatechart = ["dep:agent-doc-state-backbone"]
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.67" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.67" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.67" }
-agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.35.67" }
-agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.67" }
-agent-doc-element-exchange-io = { path = "../agent-doc-element-exchange-io", version = "0.35.67" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.67" }
-agent-doc-git = { path = "../agent-doc-git", version = "0.35.67" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.67" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.67" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.67" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.67", optional = true }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.67" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.67" }
-agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.67" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.68" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.68" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.68" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.35.68" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.68" }
+agent-doc-element-exchange-io = { path = "../agent-doc-element-exchange-io", version = "0.35.68" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.68" }
+agent-doc-git = { path = "../agent-doc-git", version = "0.35.68" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.68" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.68" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.68" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.68", optional = true }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.68" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.68" }
+agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.68" }
 anyhow = "1"
 similar = "2"
 tempfile = "3"

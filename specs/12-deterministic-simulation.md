@@ -258,8 +258,10 @@ all.
 ## Editor integration harness (`#swint`)
 
 The simulator also owns a deterministic editor-buffer actor, `SimEditor`, that
-speaks the same Lazily reliable-sync + CRDT replica protocol as the JetBrains /
-VS Code plugins. It publishes editor-visible text through the controller-owned
+speaks the same Lazily reliable-sync + CRDT replica protocol as the editor
+plugins. It does **not** load an IDE host, the Kotlin/TypeScript plugin classes,
+or the native FFI binding; it is the fast production-Rust protocol/core layer.
+It publishes editor-visible text through the controller-owned
 replica relay and reads "current document" back through the production
 `realtime_model::resolve_current_doc` seam (rung 3b, `#rtwatch`) — the same seam
 `preflight` / `write` / `session-check` source the current document through.
@@ -271,10 +273,10 @@ save (flush to disk), close (deregister the replica and publish a reliable-sync
 OR-set close), adopt a CRDT-merged
 broadcast from a peer editor, reload from disk, and absorb an external disk
 write (agent-doc patchback) while open. Each editor is one of `EditorKind`
-(`Generic`, `JetBrains`, `VsCode`); the read-authority contract is identical
+(`Generic`, `JetBrains`, `VsCode`, `Zed`); the read-authority contract is identical
 across kinds, and the kind only changes the surfaced `CacheConflict` signal
-(JetBrains modal dialog vs VS Code non-modal badge) for an external disk write
-that lands while the buffer is dirty.
+(JetBrains modal dialog, VS Code non-modal badge, or Zed keep-buffer action) for
+an external disk write that lands while the buffer is dirty.
 
 - Slice 1 (foundation): `simeditor_unsaved_buffer_edit_resolves_to_editor_buffer_and_survives_commit`
   is the deterministic form of the live-only `#rtwverify` proof — an unsaved
@@ -308,8 +310,40 @@ that lands while the buffer is dirty.
   `drain_owner` lease: an editor-queued edit routes to the owner pane, a fresh
   drain-owner lease (`#kp5z`) gates the supervisor drain, the controller drain
   applies + commits the document (the edit survives), the stuck-handoff reaper
-  rejects stale-generation handoff/reap under multi-owner contention, and the
-  committed document broadcasts back so both editors reconverge on disk.
+rejects stale-generation handoff/reap under multi-owner contention, and the
+committed document broadcasts back so both editors reconverge on disk.
+- Slice 5 (three equal peers):
+`three_simulated_editors_are_equal_peers_and_reconnect_to_the_same_crdt_cut`
+opens JetBrains, VS Code, and Zed replicas at one frontier, makes a concurrent
+local edit in all three before any pull, and requires every peer to converge
+through the production relay and exact content-hash ACK path. Zed then
+disconnects while the other two continue editing and must catch up from its
+retained frontier on reconnect. Zed participates here because this layer tests
+the shared protocol/core; its native plugin endpoint remains staged.
+
+The cross-editor suite adds two deliberately named layers in
+`tests/cross_editor_simworld.rs`:
+
+- `cross_editor_plugin_protocol_harnesses_peer_through_real_agent_doc_controller`
+runs production-shaped Rust replicas through an actual `agent-doc` binary and
+Project Controller socket. It proves controller protocol behavior, not native
+plugin execution.
+- `native_plugin_harnesses_peer_through_real_agent_doc_controller`, invoked by
+`make cross-editor-simworld`, starts the shipped JetBrains
+`CrdtReplicaForwarder` / `CpSocketReplicaTransport` / `NativeReplicaNode` and
+the shipped VS Code `CrdtReplicaForwarder` /
+`ControllerSocketReplicaTransport` / `NativeReplicaNode` as headless peer
+processes. Both load the just-built `libagent_doc`, exchange concurrent edits
+through the real controller, ACK the converged cut, and prove offline reconnect.
+This executes native plugin logic but intentionally does not emulate the IDE
+Document/VFS GUI host; live editor smokes still own that final wiring.
+
+Peer selection is capability-driven by `editors/plugin-parity.tsv`. A peer joins
+the native suite only when all required feature rows, including
+`cross_editor_native_harness_v1`, are `supported`. A `staged` peer is explicitly
+excluded, and the test asserts the staging row so missing implementations cannot
+produce a vacuous green. JetBrains and VS Code are supported; Zed remains staged
+until its native endpoint and receipts exist.
 
 Real tmux tests are still required in `make tmux-ci` for pane/window movement,
 `tmux-router` reconcile behavior, shell/process ownership proof, and end-to-end

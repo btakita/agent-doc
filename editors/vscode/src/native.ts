@@ -216,7 +216,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
-export const EDITOR_PLUGIN_VERSION = '0.2.61';
+export const EDITOR_PLUGIN_VERSION = '0.2.62';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 // #ctrlkillreregister Tier 3: this extension calls agent_doc_peer_replicas_missing
@@ -813,7 +813,12 @@ function copyStateBuffer(ptr: any, len: number): Uint8Array | null {
     if (!ptr) return null;
     try {
         if (len <= 0) return Buffer.alloc(0);
-        return Buffer.from(koffi.view(ptr, len));
+        // koffi.view is borrowed native memory. Buffer.from(ArrayBuffer) keeps
+        // sharing that allocation, so returning it after agent_doc_free_state
+        // produces a use-after-free and corrupts replica updates in flight.
+        // Copy through the borrowed Buffer while the allocation is still live.
+        const borrowed = Buffer.from(koffi.view(ptr, len));
+        return Buffer.from(borrowed);
     } finally {
         if (_free_state) _free_state(ptr, len);
     }

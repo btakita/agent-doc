@@ -1252,6 +1252,7 @@ impl RelayHub {
         generation: u64,
         applied_content_hash: Option<&str>,
     ) -> Result<bool> {
+        let canonical_content_hash = content_hash(&self.canonical.text());
         let member = self
             .members
             .get_mut(&client_id)
@@ -1261,18 +1262,31 @@ impl RelayHub {
             .iter()
             .position(|update| update.patch_id == patch_id && update.generation == generation)
         else {
-            return Ok(false);
+            // A cumulative ACK may already have drained this exact or an older
+            // generation. Plugins still ACK every item returned by one pull,
+            // so those remaining receipts must be idempotent.
+            return Ok(generation <= member.last_ack_generation);
         };
         if let Some(applied_content_hash) = applied_content_hash {
             // A coalescing editor may apply several queued generations as one
             // visible target. Its final hash is a cumulative receipt: matching a
             // later pending target proves every older delivery through that
             // target is represented, so advance the whole prefix atomically.
-            let Some(matched_pos) = member
+            let matched_pos = member
                 .pending
                 .iter()
                 .rposition(|update| update.expected_content_hash == applied_content_hash)
-            else {
+                .or_else(|| {
+                    // A peer may apply this remote delivery after making a
+                    // concurrent local edit. Its visible text is then causally
+                    // ahead of the delivery's historical target, so no pending
+                    // generation has that exact hash. Matching the relay's
+                    // current canonical hash is still an exact convergence
+                    // proof and cumulatively ACKs every queued remote delivery.
+                    (applied_content_hash == canonical_content_hash)
+                        .then(|| member.pending.len().saturating_sub(1))
+                });
+            let Some(matched_pos) = matched_pos else {
                 self.pending_rebootstrap.insert(client_id);
                 return Ok(false);
             };
@@ -2306,6 +2320,45 @@ mod tests {
         assert!(hub.pending_updates(2).unwrap().is_empty());
         assert_eq!(hub.delivery_snapshot()[0].last_ack_generation, 2);
         assert!(hub.delivery_converged());
+        assert!(
+            hub.ack_delivery_with_content_hash(
+                2,
+                &pending[1].patch_id,
+                pending[1].generation,
+                Some(&pending[1].expected_content_hash),
+            )
+            .unwrap(),
+            "a plugin may still ACK each item after the first cumulative receipt drains the batch"
+        );
+    }
+
+    #[test]
+    fn causally_ahead_peer_can_ack_an_older_delivery_with_current_canonical_hash() {
+        let mut hub = RelayHub::from_text(1, "base\n");
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        let frontier = "base\n".len() as u32;
+
+        hub.apply_local(2, frontier, 0, "from-two\n").unwrap();
+        let pending_for_three = hub.pending_updates(3).unwrap().pop().unwrap();
+        hub.apply_local(3, frontier, 0, "from-three\n").unwrap();
+        let canonical_hash = content_hash(&hub.canonical_text());
+
+        assert_ne!(
+            pending_for_three.expected_content_hash, canonical_hash,
+            "the target's concurrent local edit must make it causally ahead of the historical delivery"
+        );
+        assert!(
+            hub.ack_delivery_with_content_hash(
+                3,
+                &pending_for_three.patch_id,
+                pending_for_three.generation,
+                Some(&canonical_hash),
+            )
+            .unwrap(),
+            "an exact current-canonical hash proves the older remote delivery is included"
+        );
+        assert!(hub.pending_updates(3).unwrap().is_empty());
     }
 
     #[test]

@@ -46,6 +46,9 @@ dependencies {
     // bundled); unit tests run OUTSIDE the IDE so they need it on the test classpath.
     compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // The IDE supplies Gson in production; the standalone native-plugin harness
+    // needs the same API on its non-IDE JavaExec runtime classpath.
+    testRuntimeOnly("com.google.code.gson:gson:2.11.0")
     testImplementation("junit:junit:4.13.2")
 }
 
@@ -66,6 +69,32 @@ intellijPlatform {
 }
 
 tasks {
+    register<JavaExec>("runCrossEditorHarness") {
+        group = "verification"
+        description = "Run the production JetBrains CRDT/native endpoint for cross-editor SimWorld"
+        dependsOn(testClasses)
+        classpath =
+            sourceSets["test"].runtimeClasspath +
+            configurations["intellijPlatformTestClasspath"]
+        mainClass.set("com.github.btakita.agentdoc.CrossEditorHarnessMainKt")
+        standardInput = System.`in`
+        doFirst {
+            // IntelliJ's launcher normally provides this property. The headless
+            // harness still uses the IDE-bundled JNA classes and native dispatch
+            // library; locate that exact library from the resolved platform.
+            val platformLoader =
+                configurations["intellijPlatformTestClasspath"].files.first {
+                    it.name == "platform-loader.jar"
+                }
+            val jnaDispatch =
+                platformLoader.parentFile
+                    .resolve("jna")
+                    .walkTopDown()
+                    .first { it.name.startsWith("libjnidispatch") || it.name == "jnidispatch.dll" }
+            systemProperty("jna.boot.library.path", jnaDispatch.parentFile.absolutePath)
+        }
+    }
+
     patchPluginXml {
         sinceBuild.set("242")
         untilBuild.set(provider { null })

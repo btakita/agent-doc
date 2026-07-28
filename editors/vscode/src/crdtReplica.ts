@@ -331,11 +331,16 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
         return response ? parseRegisterResponse(response) : null;
     }
 
-    async broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void> {
-        await this.send(this.controllerRequest('replica_update', filePath, identity, {
-            update_b64: Buffer.from(update).toString('base64'),
-        }));
+  async broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void> {
+    const response = await this.send(this.controllerRequest('replica_update', filePath, identity, {
+      update_b64: Buffer.from(update).toString('base64'),
+    }));
+    if (!response?.ok) {
+      throw new Error(
+        `controller rejected replica_update: ${response?.error ?? 'controller_socket_unavailable'}`,
+      );
     }
+  }
 
     async pushDocumentOps(filePath: string, lineage: string | null, deltaJson: string): Promise<boolean> {
         const payload = lineage == null ? deltaJson : JSON.stringify({ lineage, delta_json: deltaJson });

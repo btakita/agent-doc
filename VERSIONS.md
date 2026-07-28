@@ -4,6 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.68
+
+_JetBrains plugin 0.2.311; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Cross-editor SimWorld now distinguishes protocol simulation from native-plugin execution.** The fast deterministic layer treats JetBrains, VS Code, and Zed as equal CRDT peers and proves concurrent-edit convergence plus offline reconnect. `make cross-editor-simworld` separately launches the shipped JetBrains and VS Code forwarders, Project Controller transports, and native FFI nodes against a real `agent-doc` controller; capability staging keeps Zed out of this native peer group until its endpoint and receipts exist.
+- **VS Code native CRDT state buffers are copied before their Rust allocation is freed.** Koffi no longer returns a borrowed view after `agent_doc_free_state`, preventing corrupted `replica_update` payloads. The controller transport also surfaces rejected updates instead of silently continuing with a divergent local replica.
+- **Cumulative CRDT ACKs are idempotent for every delivery in a pulled batch.** A causally-ahead peer may ACK the current canonical hash, and later per-item receipts for generations already drained by that cumulative ACK succeed without reintroducing delivery backpressure.
+
 ## 0.35.67
 
 _JetBrains plugin 0.2.310; VS Code extension 0.2.61; Zed extension 0.1.0._

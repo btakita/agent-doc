@@ -1,4 +1,4 @@
-.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit timings install install-full install-editor-plugins install-hooks clean init-python wheel publish publish-pypi bump-plugin lean tla
+.PHONY: build build-release release test sim-medium cross-editor-simworld tmux-ci clippy check precommit timings install install-full install-editor-plugins install-hooks clean init-python wheel publish publish-pypi bump-plugin lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -74,13 +74,24 @@ sim-medium:
 	fi; \
 	rm -f "$$log"
 
+# Compile and run the shipped JetBrains and VS Code CRDT forwarders, controller
+# transports, and native FFI nodes as peers through a real agent-doc controller.
+# Zed stays staged by editors/plugin-parity.tsv until its native endpoint exists.
+cross-editor-simworld:
+	@set -e; \
+	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
+	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --lib --quiet; \
+	( cd editors/vscode && npm run compile ); \
+	( cd editors/jetbrains && ./gradlew --no-daemon --console=plain -q testClasses ); \
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --test cross_editor_simworld native_plugin_harnesses_peer_through_real_agent_doc_controller -- --ignored --nocapture --test-threads=1
+
 # Live tmux integration sweep. These tests are intentionally ignored in the
 # default development suite and run on CI where tmux is installed.
 tmux-ci:
 	@set -e; \
 	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
 	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --quiet; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --all-targets -- --ignored --test-threads="$(TMUX_TEST_THREADS)"
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --all-targets -- --ignored --skip native_plugin_harnesses_peer_through_real_agent_doc_controller --test-threads="$(TMUX_TEST_THREADS)"
 
 # Lint
 clippy:

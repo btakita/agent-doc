@@ -9658,6 +9658,10 @@ enum EditorKind {
     /// VS Code: buffer events keep the dirty buffer; an external disk change is
     /// flagged non-modally and the in-memory buffer stays authoritative.
     VsCode,
+    /// Zed: the production extension is currently staged for editor-authority
+    /// support, but the deterministic peer uses the same non-modal dirty-buffer
+    /// authority contract so three-replica schedules can be exercised now.
+    Zed,
 }
 
 impl EditorKind {
@@ -9666,6 +9670,7 @@ impl EditorKind {
             Self::Generic => "generic",
             Self::JetBrains => "jetbrains",
             Self::VsCode => "vscode",
+            Self::Zed => "zed",
         }
     }
 }
@@ -9683,6 +9688,9 @@ enum CacheConflict {
     JetBrainsDialog,
     /// VS Code non-modal "file changed on disk" badge; buffer stays dirty.
     VsCodeKeepBuffer,
+    /// Zed keeps the dirty buffer and surfaces the external change without
+    /// replacing the editor-owned text.
+    ZedKeepBuffer,
 }
 
 /// A deterministic editor-buffer actor that speaks the CRDT relay protocol
@@ -9707,7 +9715,7 @@ impl SimEditor {
     }
 
     fn attach_with_id(kind: EditorKind, path: &Path, editor_id: &str) -> Result<Self> {
-        let buffer = std::fs::read_to_string(path)
+        let _disk_buffer = std::fs::read_to_string(path)
             .map_err(|err| anyhow!("SimEditor attach read {}: {err}", path.display()))?;
         let key = editor_buffer_key(path);
         let document_hash = agent_doc_hash::document_id_for_path(path);
@@ -9725,6 +9733,7 @@ impl SimEditor {
                 .ok_or_else(|| anyhow!("SimEditor attach could not register CRDT replica"))?;
         let replica =
             agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)?;
+        let buffer = replica.text();
         Ok(Self {
             kind,
             path: path.to_path_buf(),
@@ -9749,6 +9758,10 @@ impl SimEditor {
         Self::attach(EditorKind::VsCode, path)
     }
 
+    fn zed(path: &Path) -> Result<Self> {
+        Self::attach(EditorKind::Zed, path)
+    }
+
     /// Type an unsaved edit: the buffer now holds `content` ahead of disk. Publishes
     /// the local edit through the CRDT relay so the production realtime feed
     /// surfaces it as a genuine unsaved edit (the `#queue-user-edit-overwrite`
@@ -9758,6 +9771,70 @@ impl SimEditor {
         self.dirty = true;
         self.generation += 1;
         Ok(())
+    }
+
+    /// Apply one editor-local delta without first pulling peer updates. Keeping
+    /// this operation separate from delivery lets tests model genuinely
+    /// concurrent edits from several editor replicas against the same frontier.
+    fn type_unsaved_delta(&mut self, offset: usize, delete_len: usize, insert: &str) -> Result<()> {
+        let end = offset
+            .checked_add(delete_len)
+            .filter(|end| *end <= self.buffer.len())
+            .ok_or_else(|| anyhow!("SimEditor local delta is outside the buffer"))?;
+        if !self.buffer.is_char_boundary(offset) || !self.buffer.is_char_boundary(end) {
+            return Err(anyhow!("SimEditor local delta splits a UTF-8 code point"));
+        }
+        self.replica
+            .apply_local_edit(offset as u32, delete_len as u32, insert);
+        let update = self.replica.encode_state();
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &self.path,
+            &self.replica_identity,
+            &update,
+        )?
+        .ok_or_else(|| anyhow!("SimEditor relay update refused under detached authority"))?;
+        self.buffer.replace_range(offset..end, insert);
+        self.dirty = true;
+        self.generation += 1;
+        Ok(())
+    }
+
+    /// Pull every pending peer delivery through the same relay/ACK contract the
+    /// production plugins use. Returns the number of remote deliveries applied.
+    fn pull_peer_updates(&mut self) -> Result<usize> {
+        let Some(pull) = agent_doc_crdt_relay_io::pull_replica_updates_for_file(
+            &self.path,
+            &self.replica_identity,
+        )?
+        else {
+            return Ok(0);
+        };
+        let mut applied = 0;
+        for update in pull.updates {
+            self.replica.apply_update(&update.update)?;
+            let acknowledged =
+                agent_doc_crdt_relay_io::ack_replica_update_for_file_with_content_hash(
+                    &self.path,
+                    &self.replica_identity,
+                    &update.patch_id,
+                    update.generation,
+                    Some(&update.expected_content_hash),
+                )?
+                .ok_or_else(|| anyhow!("SimEditor ACK refused under detached authority"))?;
+            if !acknowledged {
+                return Err(anyhow!(
+                    "SimEditor relay did not acknowledge generation {}",
+                    update.generation
+                ));
+            }
+            applied += 1;
+        }
+        if applied > 0 {
+            self.buffer = self.replica.text();
+            self.dirty = true;
+            self.generation += 1;
+        }
+        Ok(applied)
     }
 
     /// Flush the buffer to disk (Ctrl-S): buffer == disk, clean. The relay
@@ -9821,6 +9898,7 @@ impl SimEditor {
         self.generation += 1;
         Ok(match self.kind {
             EditorKind::JetBrains => CacheConflict::JetBrainsDialog,
+            EditorKind::Zed => CacheConflict::ZedKeepBuffer,
             // VS Code and the generic seam both keep the dirty buffer non-modally.
             EditorKind::VsCode | EditorKind::Generic => CacheConflict::VsCodeKeepBuffer,
         })
@@ -10048,7 +10126,9 @@ fn simeditor_jb_and_vscode_buffer_authority_parity_with_kind_specific_conflict()
         let expected = match kind {
             EditorKind::JetBrains => CacheConflict::JetBrainsDialog,
             EditorKind::VsCode => CacheConflict::VsCodeKeepBuffer,
-            EditorKind::Generic => unreachable!("loop only covers JB + VS Code"),
+            EditorKind::Generic | EditorKind::Zed => {
+                unreachable!("loop only covers JB + VS Code")
+            }
         };
         assert_eq!(conflict, expected, "{kind:?}: cache-conflict signal");
 
@@ -10076,6 +10156,65 @@ fn simeditor_jb_and_vscode_buffer_authority_parity_with_kind_specific_conflict()
         );
         drop(dir);
     }
+}
+
+#[test]
+fn three_simulated_editors_are_equal_peers_and_reconnect_to_the_same_crdt_cut() {
+    // Cross-editor SimWorld: JetBrains, VS Code, and Zed each own an independent
+    // replica. All three edit from the same frontier before receiving peer
+    // deliveries, then converge through the production relay + ACK path. Zed is
+    // intentionally included here even while its real plugin parity row remains
+    // staged: simulation proves the protocol contract without claiming the
+    // production extension has shipped editor authority.
+    let disk = "shared baseline\n";
+    let (dir, doc) = editor_project(disk);
+    let mut jetbrains = SimEditor::jetbrains(&doc).unwrap();
+    let mut vscode = SimEditor::vscode(&doc).unwrap();
+    let mut zed = SimEditor::zed(&doc).unwrap();
+    let frontier = disk.len();
+
+    jetbrains
+        .type_unsaved_delta(frontier, 0, "jetbrains peer\n")
+        .unwrap();
+    vscode
+        .type_unsaved_delta(frontier, 0, "vscode peer\n")
+        .unwrap();
+    zed.type_unsaved_delta(frontier, 0, "zed peer\n").unwrap();
+
+    for _ in 0..3 {
+        jetbrains.pull_peer_updates().unwrap();
+        vscode.pull_peer_updates().unwrap();
+        zed.pull_peer_updates().unwrap();
+    }
+
+    let converged = jetbrains.buffer.clone();
+    assert_eq!(vscode.buffer, converged);
+    assert_eq!(zed.buffer, converged);
+    for marker in ["jetbrains peer", "vscode peer", "zed peer"] {
+        assert!(
+            converged.contains(marker),
+            "three-peer convergence lost {marker}: {converged:?}"
+        );
+    }
+
+    // A disconnected peer must not block the live pair. When it reconnects, its
+    // controller bootstrap catches it up to the exact same canonical cut.
+    zed.close().unwrap();
+    let next_offset = jetbrains.buffer.len();
+    jetbrains
+        .type_unsaved_delta(next_offset, 0, "after zed disconnect\n")
+        .unwrap();
+    vscode.pull_peer_updates().unwrap();
+    let reconnected_zed = SimEditor::zed(&doc).unwrap();
+
+    assert_eq!(vscode.buffer, jetbrains.buffer);
+    assert_eq!(reconnected_zed.buffer, jetbrains.buffer);
+    assert!(reconnected_zed.buffer.contains("after zed disconnect"));
+
+    jetbrains.close().unwrap();
+    vscode.close().unwrap();
+    reconnected_zed.close().unwrap();
+    drop(dir);
 }
 
 // -------- Slice 3: tmux + integrated system --------

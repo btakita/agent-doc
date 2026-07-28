@@ -15,12 +15,17 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+import { createRequire } from 'node:module';
 import {
     GraphView,
     agentDocProjectionFromView,
     applyIpcMessageToView,
     type AgentDocProjection,
 } from './stateMirror.js';
+
+const requireFromExtension = createRequire(import.meta.url);
+/** Owned Rust C strings must remain pointers until decoded and explicitly freed. */
+export const OWNED_C_STRING_POINTER = 'void*' as const;
 
 // Result struct returned by FFI functions that produce text
 interface FfiPatchResult {
@@ -206,7 +211,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
-export const EDITOR_PLUGIN_VERSION = '0.2.57';
+export const EDITOR_PLUGIN_VERSION = '0.2.58';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 // #ctrlkillreregister Tier 3: this extension calls agent_doc_peer_replicas_missing
@@ -276,7 +281,7 @@ function ensureLoaded(projectRoot?: string): boolean {
     loadAttempted = true;
 
     try {
-        koffi = require('koffi');
+        koffi = requireFromExtension('koffi');
     } catch {
         console.log('[agent-doc/native] koffi not available, FFI disabled');
         return false;
@@ -299,6 +304,16 @@ function ensureLoaded(projectRoot?: string): boolean {
         return true;
     } catch (e: any) {
         console.log(`[agent-doc/native] failed to load ${libPath}: ${e.message}`);
+        return false;
+    }
+}
+
+/** Proves the ESM extension can resolve its packaged native dependency. */
+export function koffiModuleAvailable(): boolean {
+    try {
+        requireFromExtension.resolve('koffi');
+        return true;
+    } catch {
         return false;
     }
 }
@@ -475,9 +490,13 @@ function bindFunctions(): void {
         _admin_handoff_json = null;
         _admin_repair_projection_json = null;
     }
-    _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
+    _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', OWNED_C_STRING_POINTER, ['str']);
     try {
-        _document_id_for_path = lib.func('agent_doc_document_id_for_path', 'char*', ['str']);
+        _document_id_for_path = lib.func(
+            'agent_doc_document_id_for_path',
+            OWNED_C_STRING_POINTER,
+            ['str'],
+        );
         _is_session_document = lib.func('agent_doc_is_session_document', 'int', ['str']);
         _reliable_sync_liveness_enqueue = lib.func(
             'agent_doc_reliable_sync_liveness_enqueue',
@@ -570,10 +589,17 @@ function bindFunctions(): void {
     }
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_state = lib.func('agent_doc_free_state', 'void', ['void*', 'size_t']);
-    _free_string = lib.func('agent_doc_free_string', 'void', ['char*']);
-    _version = lib.func('agent_doc_version', 'char*', []);
+    // These Rust functions return owned C allocations. Bind them as opaque
+    // pointers so Koffi does not eagerly convert `char *` to a JS string before
+    // the wrapper can decode and release the original allocation.
+    _free_string = lib.func('agent_doc_free_string', 'void', [OWNED_C_STRING_POINTER]);
+    _version = lib.func('agent_doc_version', OWNED_C_STRING_POINTER, []);
     try {
-        _state_projection = lib.func('agent_doc_state_projection', 'char*', ['str']);
+        _state_projection = lib.func(
+            'agent_doc_state_projection',
+            OWNED_C_STRING_POINTER,
+            ['str'],
+        );
         _record_state_event = lib.func('agent_doc_record_state_event', 'int32', ['str', 'str']);
         _editor_content_applied_for_editor_v1 = lib.func(
             'agent_doc_editor_content_applied_for_editor_v1',
@@ -604,7 +630,11 @@ function bindFunctions(): void {
         // Project Controller→plugin turn-state projection (Shared Foundation parity with the JB
         // plugin). Optional so an older cdylib without the symbol does not break
         // the rest of the bindings.
-        _turn_projection = lib.func('agent_doc_turn_projection', 'char*', ['str']);
+        _turn_projection = lib.func(
+            'agent_doc_turn_projection',
+            OWNED_C_STRING_POINTER,
+            ['str'],
+        );
     } catch (e: any) {
         console.log(`[agent-doc/native] turn projection ABI unavailable: ${e.message}`);
         _turn_projection = null;
@@ -613,7 +643,11 @@ function bindFunctions(): void {
         // #r5at lazily-js reactive mirror: warm subscribe (snapshot/delta) over
         // the FFI state backbone. Optional so an older cdylib without the symbol
         // does not break the rest of the bindings.
-        _state_subscribe = lib.func('agent_doc_state_subscribe', 'char*', ['str', 'uint64']);
+        _state_subscribe = lib.func(
+            'agent_doc_state_subscribe',
+            OWNED_C_STRING_POINTER,
+            ['str', 'uint64'],
+        );
     } catch (e: any) {
         console.log(`[agent-doc/native] state subscribe ABI unavailable: ${e.message}`);
         _state_subscribe = null;
@@ -626,7 +660,11 @@ function bindFunctions(): void {
             'int32',
             ['str', 'str', 'str', 'int64', 'str', 'int64'],
         );
-        _document_base_hash = lib.func('agent_doc_document_base_hash', 'char*', ['str']);
+        _document_base_hash = lib.func(
+            'agent_doc_document_base_hash',
+            OWNED_C_STRING_POINTER,
+            ['str'],
+        );
     } catch (e: any) {
         console.log(`[agent-doc/native] editor-op capture ABI unavailable: ${e.message}`);
         _record_editor_op = null;
@@ -662,7 +700,11 @@ function bindFunctions(): void {
             'void*',
             ['uint64', koffi.out(koffi.pointer('size_t'))],
         );
-        _replica_text = lib.func('agent_doc_replica_text', 'char*', ['uint64']);
+        _replica_text = lib.func(
+            'agent_doc_replica_text',
+            OWNED_C_STRING_POINTER,
+            ['uint64'],
+        );
         _replica_close = lib.func('agent_doc_replica_close', 'int32', ['uint64']);
     } catch (e: any) {
         console.log(`[agent-doc/native] replica ABI unavailable: ${e.message}`);

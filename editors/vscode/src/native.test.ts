@@ -13,8 +13,10 @@ import {
   nativeShadowCopyPath,
   projectionSummary,
   writePidLock,
-  removePidLock,
-  utf16RangeToUtf8Bytes,
+    removePidLock,
+    utf16RangeToUtf8Bytes,
+    koffiModuleAvailable,
+    OWNED_C_STRING_POINTER,
 } from './native.js';
 import { fileURLToPath } from 'node:url';
 
@@ -57,6 +59,16 @@ describe('utf16RangeToUtf8Bytes (#qnodemerge4wire non-ASCII offset semantics)', 
             byteOffset: 1,
             deleteBytes: 4,
         });
+    });
+});
+
+describe('koffi ESM resolution (#crdtauth6)', () => {
+    it('resolves the packaged native dependency from compiled ESM', () => {
+        assert.strictEqual(koffiModuleAvailable(), true);
+    });
+
+    it('keeps Rust-owned C strings opaque until the wrapper frees them', () => {
+        assert.strictEqual(OWNED_C_STRING_POINTER, 'void*');
     });
 });
 

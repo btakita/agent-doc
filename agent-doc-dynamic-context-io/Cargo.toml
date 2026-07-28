@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-dynamic-context-io"
-version = "0.35.46"
+version = "0.35.47"
 edition = "2024"
 description = "Dynamic context-pack and injection-ledger adapters for agent-doc"
 license = "MIT"
@@ -12,14 +12,14 @@ name = "agent_doc_dynamic_context_io"
 
 [dependencies]
 anyhow = "1"
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.46" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.46" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.46" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.46" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.46" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.46" }
-agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.35.46" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.46" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.47" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.47" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.47" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.47" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.47" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.47" }
+agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.35.47" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.47" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"

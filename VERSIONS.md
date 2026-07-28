@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.47
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._
+
+- **VS Code's packaged ESM extension now reaches the native CRDT replica seam (`#crdtauth6`).** `native.ts` resolves the external Koffi dependency with `createRequire(import.meta.url)` instead of an undefined CommonJS global, and owned Rust C strings are bound as opaque pointers so the wrapper decodes and frees each allocation exactly once rather than passing Koffi's eager JS string conversion back into native code. A live controller registration from the compiled VS Code classes bootstrapped the exact 94,865-character canonical document and deregistered cleanly; the existing JetBrains listener/socket path independently demonstrated local apply, Rust fan-out, remote apply, and hash-matched ACK.
+
 ## 0.35.46
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.57; Zed extension 0.1.0._

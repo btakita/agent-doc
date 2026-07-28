@@ -405,7 +405,55 @@ I also processed the remaining queue instructions:
 My recommendation is to keep Connecticut as the opening preference but treat it as tradeable. The higher-value protections are a usable virtual process, no half-share of arbitrator costs, preservation of court-equivalent remedies and fee-shifting, work-state mandatory protections, and one internally consistent clause.
 
 This is contract issue-spotting rather than Connecticut, Wyoming, or Washington legal advice; counsel should review final language before signature.
-<!-- agent:boundary:6b07d323 -->
+
+### Re: Exhibit A and Connecticut preference — gpt-5
+
+> **Queue prompt:**
+>
+> Please mention that I will be coming in late on Monday Aug 10. The weekly standup/iteration planning is at 10 PT on Mondays. Mention that I may have the occasional conflict for the weekly standup/iteration planning and I can make up the time + planning either before or after the planning. I will also provide notes if I do have a schedule conflict.
+
+That scheduling note is now in both the markdown and the autosaved, unsent Gmail reply. It says you expect to start later than usual on Monday, August 10, may miss or join the 10:00 a.m. PT meeting late, and will handle occasional conflicts with advance notice when possible, written planning notes, and make-up time/planning coordination before or after the meeting.
+
+> Should I fill out Exhibit A with this email?
+
+**Yes. My preference is to attach a completed proposed Exhibit A to this email rather than send an empty schedule.** The agreement says an empty Exhibit A means you are representing that you have no prior inventions. A completed attachment gives Haiven a concrete schedule to acknowledge in the revised agreement instead of leaving the exclusion vague.
+
+Exhibit A should identify, without exposing source code or client secrets:
+
+- each pre-existing product, business, repository organization, library, domain, brand, publication, workflow, or other material in which you have an ownership interest;
+- the owner—Brian personally, your applicable entity, or a third party;
+- a short non-confidential description and identifying URL/repository organization where appropriate;
+- that it existed or was developed before Haiven employment; and
+- that Haiven receives no ownership or license except through a separate signed agreement.
+
+For **MonsterRodHolders.com** and **Equity Funding Source**, list the relevant entities and the associated domains, brands, software, repositories, content, data, processes, product materials, and other pre-existing IP with enough specificity to identify the excluded body of work.
+
+For **Apollo Solutions / Acadian Financial Services**, do not claim their work product as your property. Identify it as pre-existing third-party engagement/material governed by the applicable agreements, excluded from Haiven's ownership, and not available for disclosure or use by Haiven. Do not include confidential architecture, data, code, or client details.
+
+Exhibit A is necessary but not sufficient. It handles prior-IP identification; you still need the separate signed outside-engagement approval and compensation carve-out because Sections 4 and 11 address conflicts and third-party compensation, not just ownership of prior inventions.
+
+If the attachment is not ready when the email must go out, the fallback is to say that a completed proposed Exhibit A will follow before signature and not sign until Haiven acknowledges it. Sending it with the email is cleaner because the recipients can review the requested revisions and exclusions as one package.
+
+I updated the existing `#haiven-paper` review gate to require completing and attaching Exhibit A before sending, then obtaining Haiven's acknowledgement in the final documents.
+
+> Why are we requiring CT jurisdiction?
+
+**We are not requiring it anymore. The revised draft calls Connecticut your preference and explicitly says you are open to Haiven's home-state law and legal seat once Haiven chooses one state consistently.**
+
+The reason to raise Connecticut is that it is your work location, so it is a sensible negotiation anchor for accessibility and work-state protections. The present documents are inconsistent—Wyoming in the offer and Washington/Spokane in the other agreement—so asking them to reconcile the conflict is important. Insisting that Connecticut win that negotiation is less important.
+
+My priority order is:
+
+1. one consistent law/forum framework instead of conflicting Wyoming and Washington clauses;
+2. virtual arbitration hearings by default;
+3. no employee half-share of AAA administrative or arbitrator costs;
+4. preservation of court-equivalent remedies, statutory fee-shifting, and non-waivable protections where you work; and
+5. Connecticut law/seat as a negotiable preference.
+
+If you want the lowest-friction version, you can accept Haiven's actual home-state law and legal seat while retaining items 2–4. The current email already presents that compromise rather than demanding Connecticut.
+
+This is contract issue-spotting, not legal advice; counsel should review the completed Exhibit A and final agreement before signature.
+<!-- agent:boundary:d4ec32ab -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -413,7 +461,7 @@ This is contract issue-spotting rather than Connecticut, Wyoming, or Washington 
 <!-- agent:queue go -->
 - My mailing address is PO Box 571, North Grosvenordale, CT 06255. My physical address (if needed) is 1 Park St, #2 - 571, North Grosvenordale, CT 06255.
 - ~~Is "Please use Connecticut law and a Connecticut or remote forum. If arbitration remains, it should proceed remotely under the AAA Employment/Workplace Rules, preserve all statutory remedies and fee-shifting, and require Haiven to pay the arbitration and arbitrator costs other than a filing fee no greater than the fee for filing the same claim in court." something Haiven may contest? If we go to arbitration, I think a virtual hearing is a good idea. Why was AAA suggested?~~ — auto-struck: answered this cycle (#ftstrike)
-- Please mention that I will be coming in late on Monday Aug 10. The weekly standup/iteration planning is at 10 PT on Mondays. Mention that I may have the occasional conflict for the weekly standup/iteration planning and I can make up the time + planning either before or after the planning. I will also provide notes if I do have a schedule conflict.
+- ~~Please mention that I will be coming in late on Monday Aug 10. The weekly standup/iteration planning is at 10 PT on Mondays. Mention that I may have the occasional conflict for the weekly standup/iteration planning and I can make up the time + planning either before or after the planning. I will also provide notes if I do have a schedule conflict.~~ — auto-struck: answered this cycle (#ftstrike)
 - Updates go to both the md draft + the open brave tab at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp
 <!-- /agent:queue -->
 
@@ -425,7 +473,7 @@ This is contract issue-spotting rather than Connecticut, Wyoming, or Washington 
 ## Review
 
 <!-- agent:review -->
-- [/] [#haiven-paper] [operator-action] Threaded Gmail reply to Craig Fryar and Luke Richey is drafted and unsent under “Re: Haiven Offer Letter”; Brian must review and send it, then provide Haiven’s revised countersigned documents for final verification before signing.
+- [/] [#haiven-paper] [operator-action] Review and send the threaded Gmail reply to Craig Fryar and Luke Richey under “Re: Haiven Offer Letter.” Before sending, complete and attach a proposed Exhibit A covering prior IP and third-party materials (without disclosing client secrets). Then provide Haiven’s revised, countersigned documents and acknowledged Exhibit A for final verification before signing.
 <!-- /agent:review -->
 
 ## Icebox

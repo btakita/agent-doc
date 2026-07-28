@@ -16,7 +16,9 @@
 //! ## Protocol
 //!
 //! Messages are newline-delimited JSON (NDJSON). Each message is a single line
-//! terminated by `\n`. The receiver reads lines and parses each as JSON.
+//! terminated by `\n`. Every connection starts with `ipc_hello` /
+//! `ipc_hello_ack` build-and-protocol negotiation. No editor intent reaches the
+//! plugin callback until that handshake succeeds.
 //!
 //! Message types:
 //! - `{"type": "apply_canonical", "file": "...", "patches": [...], "frontmatter": "..."}` — apply canonical deltas
@@ -35,10 +37,13 @@
 //! same typed socket messages; neither plugin consumes filesystem delivery signals.
 
 use agent_doc_ipc_protocol::{
-    SocketReceiptClassification, classify_socket_receipt, early_receipt_line,
-    early_receipt_ops_marker, early_receipt_tagged_message, ipc_accept_thread_ops_marker,
+    IPC_PROTOCOL_VERSION, IpcHandshakeError, IpcPeerIdentity, SocketReceiptClassification,
+    classify_socket_receipt, early_receipt_line, early_receipt_ops_marker,
+    early_receipt_tagged_message, ipc_accept_thread_ops_marker, ipc_handshake_rejection,
+    ipc_hello_ack_message, ipc_hello_message, message_is_reload_library,
     message_requests_early_receipt, observe_lazily_current_message, refresh_content_message,
-    reload_lib_message, save_document_message, vcs_refresh_message,
+    reload_lib_message, save_document_message, validate_ipc_hello, validate_ipc_hello_ack,
+    vcs_refresh_message,
 };
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
@@ -87,6 +92,38 @@ const IPC_CONNECT_TIMEOUT_SECS: u64 = 3;
 const IPC_LISTENER_READ_TIMEOUT_SECS: u64 = 30;
 const IPC_LISTENER_MAX_INFLIGHT_HANDLERS: u64 = 64;
 const IPC_LISTENER_RESOURCE_BACKOFF: Duration = Duration::from_millis(250);
+static LOCAL_IPC_BUILD_ID: OnceLock<String> = OnceLock::new();
+
+/// Inject the top-level binary/native-library build identity used by the IPC
+/// handshake. Repeating the same identity is idempotent; changing it inside one
+/// loaded process is rejected because that would make compatibility depend on
+/// call order.
+pub fn set_local_build_id(build_id: &str) -> Result<()> {
+    if build_id.trim().is_empty() {
+        return Err(anyhow::anyhow!("IPC build id must not be empty"));
+    }
+    if let Some(existing) = LOCAL_IPC_BUILD_ID.get() {
+        if existing == build_id {
+            return Ok(());
+        }
+        return Err(anyhow::anyhow!(
+            "IPC build id already initialized as {existing}, refusing {build_id}"
+        ));
+    }
+    LOCAL_IPC_BUILD_ID
+        .set(build_id.to_string())
+        .map_err(|_| anyhow::anyhow!("IPC build id initialization raced"))
+}
+
+fn local_ipc_identity() -> IpcPeerIdentity {
+    IpcPeerIdentity::new(
+        IPC_PROTOCOL_VERSION,
+        LOCAL_IPC_BUILD_ID
+            .get()
+            .cloned()
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
+    )
+}
 
 /// Early-receipt opt-in for the sender (`#ipc-early-receipt` / `#saev`, Phase 2).
 ///
@@ -321,6 +358,24 @@ fn send_message_with_timeout_inner(
     receipt_timeout: Duration,
     pending_mode: PendingReceiptMode,
 ) -> Result<Option<String>> {
+    send_message_with_timeout_inner_with_identity(
+        project_root,
+        target_pid,
+        message,
+        receipt_timeout,
+        pending_mode,
+        &local_ipc_identity(),
+    )
+}
+
+fn send_message_with_timeout_inner_with_identity(
+    project_root: &Path,
+    target_pid: Option<u64>,
+    message: &serde_json::Value,
+    receipt_timeout: Duration,
+    pending_mode: PendingReceiptMode,
+    client_identity: &IpcPeerIdentity,
+) -> Result<Option<String>> {
     let stream = match target_pid {
         Some(pid) => try_connect_for_pid(project_root, pid)?,
         None => try_connect(project_root)?,
@@ -340,6 +395,14 @@ fn send_message_with_timeout_inner(
 
     // interprocess Stream implements Read + Write via halves
     let (reader_half, mut writer_half) = stream.split();
+    let mut reader = BufReader::new(reader_half);
+
+    perform_client_handshake(
+        &mut reader,
+        &mut writer_half,
+        client_identity,
+        receipt_timeout,
+    )?;
 
     // Send NDJSON message. When early receipt is enabled, tag outgoing `patch`
     // messages so an early-receipt-aware listener emits an `accepted` receipt
@@ -355,7 +418,6 @@ fn send_message_with_timeout_inner(
     // receipt proves liveness and lets the binary keep waiting for the terminal
     // receipt instead of declaring a false timeout while the plugin is still
     // applying.
-    let mut reader = BufReader::new(reader_half);
     loop {
         let mut receipt_line = String::new();
         match reader.read_line(&mut receipt_line) {
@@ -397,6 +459,94 @@ fn send_message_with_timeout_inner(
             }
             Err(e) => return Err(anyhow::anyhow!("IPC receipt read error: {}", e)),
         }
+    }
+}
+
+fn perform_client_handshake<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    client_identity: &IpcPeerIdentity,
+    timeout: Duration,
+) -> Result<()> {
+    let mut hello = serde_json::to_string(&ipc_hello_message(client_identity))?;
+    hello.push('\n');
+    writer
+        .write_all(hello.as_bytes())
+        .context("IPC handshake write error")?;
+    writer.flush().context("IPC handshake flush error")?;
+
+    let mut ack = String::new();
+    match reader.read_line(&mut ack) {
+        Ok(0) => Err(anyhow::anyhow!(
+            "IPC handshake: plugin closed connection without negotiating"
+        )),
+        Ok(_) => validate_ipc_hello_ack(ack.trim(), client_identity)
+            .map_err(anyhow::Error::new)
+            .context("IPC handshake rejected"),
+        Err(error) if ipc_read_error_is_timeout(&error) => Err(anyhow::anyhow!(
+            "IPC handshake timeout ({}ms)",
+            timeout.as_millis()
+        )),
+        Err(error) => Err(anyhow::anyhow!("IPC handshake read error: {error}")),
+    }
+}
+
+fn is_ipc_handshake_error(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<IpcHandshakeError>().is_some())
+        || error.to_string().starts_with("IPC handshake")
+}
+
+fn send_legacy_reload_to_pid(
+    project_root: &Path,
+    pid: u64,
+    message: &serde_json::Value,
+    receipt_timeout: Duration,
+) -> Result<Option<String>> {
+    if !message_is_reload_library(&message.to_string()) {
+        return Err(anyhow::anyhow!(
+            "pre-handshake compatibility path accepts reload_library only"
+        ));
+    }
+    let stream = try_connect_for_pid(project_root, pid)?;
+    if let Err(error) = stream.set_send_timeout(Some(receipt_timeout)) {
+        eprintln!("[ipc-socket] warning: failed to set legacy reload send timeout: {error}");
+    }
+    if let Err(error) = stream.set_recv_timeout(Some(receipt_timeout)) {
+        eprintln!("[ipc-socket] warning: failed to set legacy reload receipt timeout: {error}");
+    }
+    let (reader_half, mut writer_half) = stream.split();
+    let mut payload = serde_json::to_string(message)?;
+    payload.push('\n');
+    writer_half.write_all(payload.as_bytes())?;
+    writer_half.flush()?;
+
+    let mut reader = BufReader::new(reader_half);
+    let mut receipt = String::new();
+    match reader.read_line(&mut receipt) {
+        Ok(0) => Err(anyhow::anyhow!(
+            "legacy reload: plugin closed connection without responding"
+        )),
+        Ok(_) => {
+            let receipt = receipt.trim().to_string();
+            match classify_socket_receipt(&receipt) {
+                SocketReceiptClassification::Applied => Ok(Some(receipt)),
+                SocketReceiptClassification::AlreadyApplied => Ok(Some(receipt)),
+                SocketReceiptClassification::Pending => Err(anyhow::anyhow!(
+                    "legacy reload returned non-terminal receipt: {receipt}"
+                )),
+                SocketReceiptClassification::Rejected
+                | SocketReceiptClassification::Unsupported => Err(anyhow::anyhow!(
+                    "legacy reload rejected or unsupported: {receipt}"
+                )),
+            }
+        }
+        Err(error) if ipc_read_error_is_timeout(&error) => Err(anyhow::anyhow!(
+            "legacy reload receipt timeout ({}ms)",
+            receipt_timeout.as_millis()
+        )),
+        Err(error) => Err(anyhow::anyhow!("legacy reload receipt read error: {error}")),
     }
 }
 
@@ -633,7 +783,27 @@ pub fn send_reload_library_to_editor(
     message["editor_id"] = serde_json::Value::String(editor_id.to_string());
     message["editor_pid"] = serde_json::Value::from(editor_pid);
 
-    send_message_to_pid(project_root, editor_pid, &message).map(|_| true)
+    match send_message_to_pid(project_root, editor_pid, &message) {
+        Ok(_) => Ok(true),
+        Err(handshake_error) if is_ipc_handshake_error(&handshake_error) => {
+            eprintln!(
+                "[ipc-socket] incompatible listener handshake; attempting reload-only compatibility path: {handshake_error:#}"
+            );
+            send_legacy_reload_to_pid(
+                project_root,
+                editor_pid,
+                &message,
+                Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
+            )
+            .with_context(|| {
+                format!(
+                    "IPC listener version mismatch and reload-only compatibility request failed; original negotiation error: {handshake_error:#}"
+                )
+            })
+            .map(|_| true)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Start a socket listener (for use by the FFI library / plugin).
@@ -665,6 +835,7 @@ where
         ops_logger,
         Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
         None,
+        local_ipc_identity(),
     )
 }
 
@@ -690,6 +861,7 @@ where
         ops_logger,
         Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
         Some(shutdown),
+        local_ipc_identity(),
     )
 }
 
@@ -705,6 +877,7 @@ fn start_listener_with_logger_and_read_timeout<F>(
     ops_logger: OpsLogger,
     listener_read_timeout: Duration,
     shutdown: Option<Arc<AtomicBool>>,
+    listener_identity: IpcPeerIdentity,
 ) -> Result<()>
 where
     F: Fn(&str) -> Option<String> + Send + Sync + 'static,
@@ -779,6 +952,7 @@ where
                 }
                 let handler = std::sync::Arc::clone(&handler);
                 let handler_root_buf = root_buf.clone();
+                let listener_identity = listener_identity.clone();
                 // #jbacceptwedge: count and log the fresh handler thread
                 // BEFORE spawning, so the inflight count reported in the
                 // marker reflects the post-increment state of this accept.
@@ -790,16 +964,89 @@ where
                     .name("agent-doc-ipc-conn".to_string())
                     .spawn(move || {
                         let _inflight_guard = InflightConnectionGuard;
-                        let (reader_half, mut writer_half) = stream.split();
-                        let mut reader = BufReader::new(reader_half);
-                        let mut line = String::new();
+                    let (reader_half, mut writer_half) = stream.split();
+                    let mut reader = BufReader::new(reader_half);
+                    let mut line = String::new();
+                    let mut handshake_complete = false;
 
-                        while reader.read_line(&mut line).unwrap_or(0) > 0 {
-                            let trimmed = line.trim();
-                            if !trimmed.is_empty() {
-                                match begin_observe_lazily_current_projection(
-                                    &handler_root_buf,
-                                    trimmed,
+                    while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() {
+                            if !handshake_complete {
+                                // Reload is the sole pre-handshake exception. It is a
+                                // read-only generation handoff used to replace a peer
+                                // too old to speak the current handshake.
+                                if message_is_reload_library(trimmed) {
+                                    if let Some(response) = handler(trimmed) {
+                                        let mut response = response;
+                                        response.push('\n');
+                                        if let Err(error) =
+                                            writer_half.write_all(response.as_bytes())
+                                        {
+                                            eprintln!(
+                                                "[ipc-socket] reload compatibility receipt write error: {error}"
+                                            );
+                                        }
+                                        if let Err(error) = writer_half.flush() {
+                                            eprintln!(
+                                                "[ipc-socket] reload compatibility receipt flush error: {error}"
+                                            );
+                                        }
+                                    }
+                                    line.clear();
+                                    continue;
+                                }
+                                match validate_ipc_hello(trimmed, &listener_identity) {
+                                    Ok(()) => {
+                                        let mut ack =
+                                            ipc_hello_ack_message(&listener_identity).to_string();
+                                        ack.push('\n');
+                                        if let Err(error) = writer_half.write_all(ack.as_bytes()) {
+                                            eprintln!(
+                                                "[ipc-socket] handshake ack write error: {error}"
+                                            );
+                                            break;
+                                        }
+                                        if let Err(error) = writer_half.flush() {
+                                            eprintln!(
+                                                "[ipc-socket] handshake ack flush error: {error}"
+                                            );
+                                            break;
+                                        }
+                                        handshake_complete = true;
+                                    }
+                                    Err(error) => {
+                                        ops_logger(
+                                            &handler_root_buf,
+                                            &format!(
+                                                "ipc_handshake_rejected reason={} detail={error}",
+                                                error.reason()
+                                            ),
+                                        );
+                                        let mut rejection =
+                                            ipc_handshake_rejection(&error, &listener_identity);
+                                        rejection.push('\n');
+                                        if let Err(write_error) =
+                                            writer_half.write_all(rejection.as_bytes())
+                                        {
+                                            eprintln!(
+                                                "[ipc-socket] handshake rejection write error: {write_error}"
+                                            );
+                                        }
+                                        if let Err(flush_error) = writer_half.flush() {
+                                            eprintln!(
+                                                "[ipc-socket] handshake rejection flush error: {flush_error}"
+                                            );
+                                        }
+                                        break;
+                                    }
+                                }
+                                line.clear();
+                                continue;
+                            }
+                            match begin_observe_lazily_current_projection(
+                                &handler_root_buf,
+                                trimmed,
                                 ) {
                                     ObserveLazilyCurrentAdmission::Duplicate { key } => {
                                         ops_logger(
@@ -972,6 +1219,7 @@ mod tests {
                 noop_ops_logger,
                 Duration::from_millis(100),
                 None,
+                local_ipc_identity(),
             )
             .ok()
         });
@@ -1001,6 +1249,157 @@ mod tests {
         drop(writer);
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
+    }
+
+    #[test]
+    fn listener_rejects_legacy_mutation_before_plugin_callback() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let callback_reached = Arc::new(AtomicBool::new(false));
+        let listener_identity = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "listener-build");
+
+        let root_clone = root.clone();
+        let shutdown_clone = Arc::clone(&shutdown);
+        let callback_reached_clone = Arc::clone(&callback_reached);
+        let server = thread::spawn(move || {
+            start_listener_with_logger_and_read_timeout(
+                &root_clone,
+                move |_| {
+                    callback_reached_clone.store(true, Ordering::SeqCst);
+                    Some(r#"{"type":"receipt","status":"applied"}"#.to_string())
+                },
+                noop_ops_logger,
+                Duration::from_secs(1),
+                Some(shutdown_clone),
+                listener_identity,
+            )
+        });
+        wait_for_test_listener(&root);
+
+        let stream = try_connect_with_timeout_for_pid(
+            &root,
+            u64::from(std::process::id()),
+            Duration::from_secs(1),
+        )
+        .expect("connect to test listener");
+        stream
+            .set_recv_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let (reader_half, mut writer_half) = stream.split();
+        writer_half
+            .write_all(
+                br#"{"type":"apply_canonical","file":"/tmp/plan.md","patches":[]}
+"#,
+            )
+            .unwrap();
+        writer_half.flush().unwrap();
+        let mut reader = BufReader::new(reader_half);
+        let mut rejection = String::new();
+        reader.read_line(&mut rejection).unwrap();
+        let rejection: serde_json::Value = serde_json::from_str(rejection.trim()).unwrap();
+
+        assert_eq!(rejection["status"], "rejected");
+        assert_eq!(rejection["reason"], "ipc_handshake_required");
+        assert!(
+            !callback_reached.load(Ordering::SeqCst),
+            "legacy mutation reached the plugin callback before negotiation"
+        );
+
+        stop_test_listener(&root, shutdown, server);
+    }
+
+    #[test]
+    fn build_skew_blocks_mutation_but_reload_compatibility_remains_available() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let mutation_reached = Arc::new(AtomicBool::new(false));
+        let reload_reached = Arc::new(AtomicBool::new(false));
+        let listener_identity = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "stale-listener-build");
+
+        let root_clone = root.clone();
+        let shutdown_clone = Arc::clone(&shutdown);
+        let mutation_reached_clone = Arc::clone(&mutation_reached);
+        let reload_reached_clone = Arc::clone(&reload_reached);
+        let server = thread::spawn(move || {
+            start_listener_with_logger_and_read_timeout(
+                &root_clone,
+                move |message| {
+                    if message_is_reload_library(message) {
+                        reload_reached_clone.store(true, Ordering::SeqCst);
+                    } else {
+                        mutation_reached_clone.store(true, Ordering::SeqCst);
+                    }
+                    Some(r#"{"type":"receipt","status":"applied"}"#.to_string())
+                },
+                noop_ops_logger,
+                Duration::from_secs(2),
+                Some(shutdown_clone),
+                listener_identity,
+            )
+        });
+        wait_for_test_listener(&root);
+
+        let error = send_message_with_timeout_inner_with_identity(
+            &root,
+            Some(u64::from(std::process::id())),
+            &serde_json::json!({"type": "apply_canonical", "file": "/tmp/plan.md"}),
+            Duration::from_secs(1),
+            PendingReceiptMode::WaitForTerminal,
+            &IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "new-client-build"),
+        )
+        .expect_err("build skew must reject before mutation");
+        assert!(
+            format!("{error:#}").contains("IPC build mismatch"),
+            "unexpected skew error: {error:#}"
+        );
+        assert!(!mutation_reached.load(Ordering::SeqCst));
+
+        assert!(
+            send_reload_library_to_editor(
+                &root,
+                u64::from(std::process::id()),
+                "test-editor",
+                env!("CARGO_PKG_VERSION"),
+            )
+            .expect("reload-only compatibility path should remain available")
+        );
+        assert!(reload_reached.load(Ordering::SeqCst));
+        assert!(!mutation_reached.load(Ordering::SeqCst));
+
+        stop_test_listener(&root, shutdown, server);
+    }
+
+    fn wait_for_test_listener(root: &Path) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !socket_path(root).exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            socket_path(root).exists(),
+            "listener socket was not published"
+        );
+    }
+
+    fn stop_test_listener(
+        root: &Path,
+        shutdown: Arc<AtomicBool>,
+        server: thread::JoinHandle<Result<()>>,
+    ) {
+        shutdown.store(true, Ordering::SeqCst);
+        if let Err(error) = wake_listener(root) {
+            assert!(
+                !socket_path(root).exists(),
+                "failed to wake a still-present test listener: {error:#}"
+            );
+        }
+        server
+            .join()
+            .expect("listener thread should join")
+            .expect("listener shutdown should succeed");
     }
 
     #[test]

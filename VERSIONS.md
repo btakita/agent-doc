@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.58
+
+_JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **Editor IPC now negotiates protocol and build identity before admitting document intents (`#ipcverhandshake`).** Each PID-scoped connection performs an `ipc_hello` / `ipc_hello_ack` exchange carrying the protocol version and a build-scoped ID shared by the CLI and native library. Missing, protocol-skewed, or build-skewed peers receive a terminal rejection before the plugin callback can mutate document state. The non-mutating `reload_library` control intent remains available on a narrow pre-handshake compatibility path so a newly installed build can replace an old listener.
+
 ## 0.35.57
 
 _JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._

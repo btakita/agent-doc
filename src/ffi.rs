@@ -798,6 +798,14 @@ fn spawn_ipc_listener<F>(root_str: String, label: &'static str, handler: F) -> i
 where
     F: Fn(&str) -> Option<String> + Send + Sync + 'static,
 {
+    if let Err(error) = agent_doc_ipc_io::set_local_build_id(concat!(
+        env!("CARGO_PKG_VERSION"),
+        "+",
+        env!("AGENT_DOC_BUILD_TIMESTAMP")
+    )) {
+        eprintln!("[ffi] failed to initialize IPC build identity: {error}");
+        return 0;
+    }
     if NATIVE_GENERATION_QUIESCING.load(Ordering::SeqCst) {
         eprintln!("[ffi] refusing to start IPC listener while native generation is quiescing");
         return 0;

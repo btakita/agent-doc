@@ -118,14 +118,16 @@ When none hold, the gate returns an error naming the opt-in paths (`agent-doc in
 
 ## Socket IPC
 
-Socket-based IPC via Unix domain sockets (`.agent-doc/ipc.sock`) is the primary IPC transport. The editor plugin starts a listener via `agent_doc_start_ipc_listener()` FFI call on project open. The CLI sender connects, sends NDJSON messages, and waits for ack.
+Socket-based IPC via PID-scoped Unix domain sockets (`.agent-doc/ipc-<pid>.sock`) is the live editor transport. The editor plugin starts a listener via the `agent_doc_start_ipc_listener()` FFI call on project open. The CLI sender connects to the registered editor endpoint, sends NDJSON messages, and waits for receipts.
 
-**Protocol:** Newline-delimited JSON (NDJSON). Message types:
+**Protocol:** Newline-delimited JSON (NDJSON). Every connection begins with an `ipc_hello` / `ipc_hello_ack` exchange carrying `protocol_version` and the top-level build ID. Both fields must match before an editor intent reaches the plugin callback. A missing or mismatched handshake returns a terminal rejected receipt, so old/new process skew fails before document mutation. `reload_library` is the only pre-handshake control intent: it is non-mutating and permits a newer install to replace a listener too old to negotiate the current protocol.
+
+Post-handshake message types:
 - `{"type": "apply_canonical", "file": "...", "patches": [...], ...}` — apply canonical component deltas
 - `{"type": "reposition", "file": "..."}` — reposition boundary marker
 - `{"type": "refresh_vcs"}` — trigger VCS/VFS refresh
 
-**Detached behavior:** If no editor owns the document, the authority resolver may project to disk. If an editor owns it but its PID-scoped socket is unavailable, the write remains retained and fails closed; there is no file-IPC fallback.
+**Detached behavior:** If no editor owns the document, the authority resolver may project to disk. If an editor owns it but its PID-scoped socket is unavailable or incompatible, the write remains retained and fails closed; there is no file-IPC fallback.
 
 ## IPC Write Verification
 

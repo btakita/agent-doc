@@ -46,6 +46,228 @@ impl EditorIntent {
     }
 }
 
+/// Version of the connection-level IPC negotiation contract.
+///
+/// Every connection must negotiate this protocol before an editor intent can
+/// reach the plugin callback. Bump this only for an incompatible wire change.
+pub const IPC_PROTOCOL_VERSION: u32 = 1;
+
+/// Build and protocol identity for one IPC peer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcPeerIdentity {
+    pub protocol_version: u32,
+    pub build_id: String,
+}
+
+impl IpcPeerIdentity {
+    pub fn new(protocol_version: u32, build_id: impl Into<String>) -> Self {
+        Self {
+            protocol_version,
+            build_id: build_id.into(),
+        }
+    }
+}
+
+/// A connection-level compatibility failure detected before an editor intent
+/// is admitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IpcHandshakeError {
+    Malformed {
+        expected_type: &'static str,
+    },
+    UnexpectedType {
+        expected_type: &'static str,
+        received_type: Option<String>,
+    },
+    ProtocolMismatch {
+        expected: u32,
+        received: u32,
+    },
+    BuildMismatch {
+        expected: String,
+        received: String,
+    },
+}
+
+impl IpcHandshakeError {
+    pub const fn reason(&self) -> &'static str {
+        match self {
+            Self::Malformed { .. } | Self::UnexpectedType { .. } => "ipc_handshake_required",
+            Self::ProtocolMismatch { .. } => "ipc_protocol_mismatch",
+            Self::BuildMismatch { .. } => "ipc_build_mismatch",
+        }
+    }
+}
+
+impl fmt::Display for IpcHandshakeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Malformed { expected_type } => {
+                write!(f, "malformed IPC handshake; expected {expected_type}")
+            }
+            Self::UnexpectedType {
+                expected_type,
+                received_type,
+            } => write!(
+                f,
+                "IPC handshake required {expected_type}, received {}",
+                received_type.as_deref().unwrap_or("<missing type>")
+            ),
+            Self::ProtocolMismatch { expected, received } => write!(
+                f,
+                "IPC protocol mismatch: listener={expected}, client={received}"
+            ),
+            Self::BuildMismatch { expected, received } => {
+                write!(
+                    f,
+                    "IPC build mismatch: listener={expected}, client={received}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for IpcHandshakeError {}
+
+/// Build the first line sent by an IPC client.
+pub fn ipc_hello_message(identity: &IpcPeerIdentity) -> serde_json::Value {
+    serde_json::json!({
+        "type": "ipc_hello",
+        "protocol_version": identity.protocol_version,
+        "build_id": identity.build_id,
+    })
+}
+
+/// Build the listener's successful response to [`ipc_hello_message`].
+pub fn ipc_hello_ack_message(identity: &IpcPeerIdentity) -> serde_json::Value {
+    serde_json::json!({
+        "type": "ipc_hello_ack",
+        "protocol_version": identity.protocol_version,
+        "build_id": identity.build_id,
+    })
+}
+
+/// Validate the client identity before admitting an editor intent.
+pub fn validate_ipc_hello(
+    line: &str,
+    listener_identity: &IpcPeerIdentity,
+) -> Result<(), IpcHandshakeError> {
+    validate_ipc_identity_message(line, "ipc_hello", listener_identity)
+}
+
+/// Validate the listener identity before sending an editor intent.
+pub fn validate_ipc_hello_ack(
+    line: &str,
+    client_identity: &IpcPeerIdentity,
+) -> Result<(), IpcHandshakeError> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+        && value.get("type").and_then(serde_json::Value::as_str) == Some("receipt")
+        && value.get("status").and_then(serde_json::Value::as_str) == Some("rejected")
+    {
+        match value.get("reason").and_then(serde_json::Value::as_str) {
+            Some("ipc_protocol_mismatch") => {
+                if let Some(listener_protocol) = value
+                    .get("protocol_version")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|version| u32::try_from(version).ok())
+                {
+                    return Err(IpcHandshakeError::ProtocolMismatch {
+                        expected: client_identity.protocol_version,
+                        received: listener_protocol,
+                    });
+                }
+            }
+            Some("ipc_build_mismatch") => {
+                if let Some(listener_build) =
+                    value.get("build_id").and_then(serde_json::Value::as_str)
+                {
+                    return Err(IpcHandshakeError::BuildMismatch {
+                        expected: client_identity.build_id.clone(),
+                        received: listener_build.to_string(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    validate_ipc_identity_message(line, "ipc_hello_ack", client_identity)
+}
+
+fn validate_ipc_identity_message(
+    line: &str,
+    expected_type: &'static str,
+    expected_identity: &IpcPeerIdentity,
+) -> Result<(), IpcHandshakeError> {
+    let value: serde_json::Value =
+        serde_json::from_str(line).map_err(|_| IpcHandshakeError::Malformed { expected_type })?;
+    let received_type = value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    if received_type.as_deref() != Some(expected_type) {
+        return Err(IpcHandshakeError::UnexpectedType {
+            expected_type,
+            received_type,
+        });
+    }
+    let protocol_version = value
+        .get("protocol_version")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or(IpcHandshakeError::Malformed { expected_type })?;
+    if protocol_version != expected_identity.protocol_version {
+        return Err(IpcHandshakeError::ProtocolMismatch {
+            expected: expected_identity.protocol_version,
+            received: protocol_version,
+        });
+    }
+    let build_id = value
+        .get("build_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|build_id| !build_id.is_empty())
+        .ok_or(IpcHandshakeError::Malformed { expected_type })?;
+    if build_id != expected_identity.build_id {
+        return Err(IpcHandshakeError::BuildMismatch {
+            expected: expected_identity.build_id.clone(),
+            received: build_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Build a terminal rejection that old clients already understand while
+/// preserving exact compatibility evidence for newer clients and diagnostics.
+pub fn ipc_handshake_rejection(
+    error: &IpcHandshakeError,
+    listener_identity: &IpcPeerIdentity,
+) -> String {
+    serde_json::json!({
+        "type": "receipt",
+        "status": "rejected",
+        "reason": error.reason(),
+        "detail": error.to_string(),
+        "protocol_version": listener_identity.protocol_version,
+        "build_id": listener_identity.build_id,
+    })
+    .to_string()
+}
+
+/// Reload is the only pre-handshake control intent. It never mutates document
+/// state and must remain available to replace an old native listener that
+/// cannot negotiate the new protocol.
+pub fn message_is_reload_library(message: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(message)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .as_deref()
+        == Some(EditorIntent::ReloadLibrary.as_str())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallbackRequest {
     pub doc_path: String,
@@ -944,18 +1166,80 @@ impl FullContentIpcMode {
 mod tests {
     use super::{
         AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
-        FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource,
-        SocketReceiptClassification, build_ipc_node_patches_json, callback_request,
-        callback_request_is_expired, callback_response, callback_response_matches_request,
-        callback_urgency_for_elapsed, classify_socket_receipt, early_receipt_line,
-        early_receipt_ops_marker, early_receipt_tagged_message,
-        effective_unmatched_for_patch_payload, ipc_accept_thread_ops_marker,
-        is_already_applied_receipt_error_message, is_socket_receipt_timeout_error,
-        is_socket_status_error, message_requests_early_receipt, normalization_repair_patch_message,
+        FullContentRepairRedelivery, IPC_PROTOCOL_VERSION, IpcDiskRepairReason, IpcHandshakeError,
+        IpcPeerIdentity, IpcRepairDecision, IpcSnapshotSource, SocketReceiptClassification,
+        build_ipc_node_patches_json, callback_request, callback_request_is_expired,
+        callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
+        classify_socket_receipt, early_receipt_line, early_receipt_ops_marker,
+        early_receipt_tagged_message, effective_unmatched_for_patch_payload,
+        ipc_accept_thread_ops_marker, ipc_handshake_rejection, ipc_hello_ack_message,
+        ipc_hello_message, is_already_applied_receipt_error_message,
+        is_socket_receipt_timeout_error, is_socket_status_error, message_is_reload_library,
+        message_requests_early_receipt, normalization_repair_patch_message,
         observe_lazily_current_message, patch_message, pending_callback_from_request,
         queue_convergence_message, refresh_content_message, reload_lib_message, reposition_message,
-        save_document_message, vcs_refresh_message, vcs_refresh_probe_message,
+        save_document_message, validate_ipc_hello, validate_ipc_hello_ack, vcs_refresh_message,
+        vcs_refresh_probe_message,
     };
+
+    #[test]
+    fn ipc_handshake_accepts_exact_protocol_and_build_identity() {
+        let identity = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.35.58+build-a");
+        let hello = ipc_hello_message(&identity).to_string();
+        let ack = ipc_hello_ack_message(&identity).to_string();
+
+        assert_eq!(validate_ipc_hello(&hello, &identity), Ok(()));
+        assert_eq!(validate_ipc_hello_ack(&ack, &identity), Ok(()));
+    }
+
+    #[test]
+    fn ipc_handshake_rejects_protocol_and_build_skew() {
+        let listener = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.35.58+build-b");
+        let old_protocol = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION - 1, "0.35.58+build-b");
+        let old_build = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.35.57+build-a");
+
+        assert_eq!(
+            validate_ipc_hello(&ipc_hello_message(&old_protocol).to_string(), &listener),
+            Err(IpcHandshakeError::ProtocolMismatch {
+                expected: IPC_PROTOCOL_VERSION,
+                received: IPC_PROTOCOL_VERSION - 1,
+            })
+        );
+        assert_eq!(
+            validate_ipc_hello(&ipc_hello_message(&old_build).to_string(), &listener),
+            Err(IpcHandshakeError::BuildMismatch {
+                expected: "0.35.58+build-b".to_string(),
+                received: "0.35.57+build-a".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn ipc_handshake_rejects_legacy_mutation_before_admission() {
+        let identity = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.35.58+build-b");
+        let legacy_mutation = r#"{"type":"apply_canonical","file":"/tmp/plan.md","patches":[]}"#;
+        let error = validate_ipc_hello(legacy_mutation, &identity)
+            .expect_err("a mutation cannot substitute for the connection handshake");
+
+        assert_eq!(error.reason(), "ipc_handshake_required");
+        let rejection: serde_json::Value =
+            serde_json::from_str(&ipc_handshake_rejection(&error, &identity)).unwrap();
+        assert_eq!(rejection["status"], "rejected");
+        assert_eq!(rejection["reason"], "ipc_handshake_required");
+        assert_eq!(rejection["protocol_version"], IPC_PROTOCOL_VERSION);
+        assert_eq!(rejection["build_id"], "0.35.58+build-b");
+    }
+
+    #[test]
+    fn reload_library_is_the_only_pre_handshake_control_intent() {
+        assert!(message_is_reload_library(
+            r#"{"type":"reload_library","lib_version":"0.35.58"}"#
+        ));
+        assert!(!message_is_reload_library(
+            r#"{"type":"apply_canonical","file":"/tmp/plan.md"}"#
+        ));
+        assert!(!message_is_reload_library("not json"));
+    }
 
     #[test]
     fn classify_socket_receipt_treats_pending_status_as_pending() {

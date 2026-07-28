@@ -3762,6 +3762,14 @@ fn try_main() -> anyhow::Result<()> {
     // `#orchver` — stamp the real top-level binary version into controller/supervisor
     // identities so the stale-binary warning reports the installed executable version.
     agent_doc_controller_io::project_controller::set_binary_version(env!("CARGO_PKG_VERSION"));
+    // `#ipcverhandshake` — use the same build-scoped identity in the CLI and
+    // native library so cross-process skew is proven on the wire before any
+    // editor intent is admitted.
+    agent_doc_ipc_io::set_local_build_id(concat!(
+        env!("CARGO_PKG_VERSION"),
+        "+",
+        env!("AGENT_DOC_BUILD_TIMESTAMP")
+    ))?;
     agent_doc_controller_io::project_controller::install_runtime_effects(
         &PROJECT_CONTROLLER_RUNTIME_EFFECTS,
     );

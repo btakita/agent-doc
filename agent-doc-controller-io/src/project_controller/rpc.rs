@@ -8024,6 +8024,18 @@ impl Drop for StateActorTestHandle {
     }
 }
 
+fn install_local_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
+    let runtime = Arc::downgrade(runtime);
+    agent_doc_state_wire::set_local_document_projection_reader(move |document_hash| {
+        runtime.upgrade().and_then(|runtime| {
+            runtime
+                .document_state_projection(document_hash)
+                .ok()
+                .flatten()
+        })
+    });
+}
+
 #[cfg(feature = "test-support")]
 pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTestHandle> {
     let sock = socket_path(project_root);
@@ -8050,6 +8062,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     let actor_root = project_root.to_path_buf();
     let thread = std::thread::spawn(move || {
         agent_doc_cycle_state_io::set_in_controller_request(true);
+        install_local_document_projection_reader(&runtime);
         while !thread_stop.load(Ordering::SeqCst) && actor_root.is_dir() {
             match listener.accept() {
                 Ok(stream) => {
@@ -8201,6 +8214,7 @@ pub(crate) fn serve_with_options(
     };
     let durable_project_root = bootstrap.project_root.clone();
     let runtime = ControllerRuntime::new_arc(bootstrap)?;
+    install_local_document_projection_reader(&runtime);
     // P4: rebuild every controller-acknowledged liveness fact before the socket
     // becomes visible. Sender frames may already have been pruned after their ACK;
     // the receiver journal is therefore the recycle authority, not a lease scan.
@@ -9328,7 +9342,14 @@ pub(crate) fn handle_request_for_client(
     runtime: &Arc<ControllerRuntime>,
 ) -> Result<(String, bool)> {
     let mut request_should_stop = false;
-    let response = match handle_request_locked(line, runtime, &mut request_should_stop) {
+    let handled = handle_request_locked(line, runtime, &mut request_should_stop);
+    if agent_doc_state_wire::take_local_state_db_dirty()
+        && let Err(err) = runtime.refresh_memory()
+    {
+        eprintln!("[controller] refresh after local Lazily append failed: {err:#}");
+        return Err(err).context("refresh live projection after controller-local state append");
+    }
+    let response = match handled {
         Ok(response) => response,
         Err(err) => {
             eprintln!("[controller] request error: {err:#}");
@@ -9602,6 +9623,11 @@ pub(crate) fn handle_request_locked(
             runtime.wait_for_supervisor_recycle_settle(SUPERVISOR_RECYCLE_SETTLE_WAIT),
         ),
         "state_event_append" => controller_envelope(handle_state_event_append(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "editor_op_capture_update" => controller_envelope(handle_editor_op_capture_update(
             &bootstrap_snapshot,
             runtime.as_ref(),
             request,
@@ -11161,6 +11187,103 @@ pub(crate) fn handle_state_event_append(
         }
     }
     append_apply_state_event(bootstrap, runtime, event)
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum EditorOpCaptureUpdate {
+    Append {
+        base_hash: String,
+        ops_json: String,
+        updated_ms: u64,
+        event_nonce: String,
+    },
+    Clear {
+        event_nonce: String,
+    },
+}
+
+/// Atomically derive and append the next complete editor-op epoch checkpoint.
+///
+/// The controller serializes the read/derive/append boundary per process. Each
+/// fact is a complete snapshot, so ledger retention can discard superseded
+/// checkpoints without losing operations and controller restart replay remains
+/// independent of the former `editor_op_captures` table.
+fn handle_editor_op_capture_update(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<bool> {
+    let file = request_file(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let payload = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let update: EditorOpCaptureUpdate =
+        serde_json::from_str(&payload).context("decode editor-op capture update")?;
+    let _write_guard = runtime.editor_op_capture_writes.lock();
+    let current = runtime.document_state_projection(&document_hash)?;
+    let generation = current
+        .as_ref()
+        .map(|document| document.document.editor_op_capture_generation)
+        .unwrap_or_default();
+
+    let (event_id, fact) = match update {
+        EditorOpCaptureUpdate::Append {
+            base_hash,
+            ops_json,
+            updated_ms,
+            event_nonce,
+        } => {
+            let mut incoming: Vec<serde_json::Value> =
+                serde_json::from_str(&ops_json).context("decode incoming editor-op batch")?;
+            if incoming.is_empty() {
+                return Ok(false);
+            }
+            let (epoch, complete_ops) = match current
+                .as_ref()
+                .and_then(|document| document.document.editor_op_capture.as_ref())
+            {
+                Some(active) if active.base_hash == base_hash => {
+                    let mut complete: Vec<serde_json::Value> =
+                        serde_json::from_str(&active.ops_json)
+                            .context("decode active editor-op epoch")?;
+                    complete.append(&mut incoming);
+                    (active.epoch, complete)
+                }
+                _ => (generation.saturating_add(1), incoming),
+            };
+            let event_id =
+                format!("editor-op-capture-checkpoint:{document_hash}:{epoch}:{event_nonce}");
+            (
+                event_id,
+                agent_doc_state_backbone::StateFact::EditorOpCaptureCheckpointed {
+                    document_hash,
+                    canonical_path: file.to_string_lossy().into_owned(),
+                    epoch,
+                    base_hash,
+                    ops_json: serde_json::to_string(&complete_ops)
+                        .context("encode complete editor-op epoch")?,
+                    updated_ms,
+                },
+            )
+        }
+        EditorOpCaptureUpdate::Clear { event_nonce } => {
+            let epoch = generation.saturating_add(1);
+            let event_id =
+                format!("editor-op-capture-cleared:{document_hash}:{epoch}:{event_nonce}");
+            (
+                event_id,
+                agent_doc_state_backbone::StateFact::EditorOpCaptureCleared {
+                    document_hash,
+                    epoch,
+                },
+            )
+        }
+    };
+    append_apply_state_event(
+        bootstrap,
+        runtime,
+        agent_doc_state_backbone::StateEvent::new(event_id, fact),
+    )
 }
 
 /// Read-only live-projection query (`#lazily-hot-path`): return the controller's
@@ -17199,6 +17322,70 @@ mod tests {
             .unwrap()
             .and_then(|d| d.closeout.phase);
         assert_eq!(phase, Some(agent_doc_turn::CyclePhase::WriteApplied));
+    }
+
+    #[test]
+    fn editor_op_capture_update_serializes_complete_lazily_epoch() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/op-capture.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+
+        for (nonce, ops_json) in [
+            ("one", r#"[{"insert":"a"}]"#),
+            ("two", r#"[{"insert":"b"}]"#),
+        ] {
+            let request: ControllerRequest = serde_json::from_value(serde_json::json!({
+                "command": "editor_op_capture_update",
+                "file": doc,
+                "diagnostic_payload": serde_json::to_string(&serde_json::json!({
+                    "action": "append",
+                    "base_hash": "base-a",
+                    "ops_json": ops_json,
+                    "updated_ms": 10,
+                    "event_nonce": nonce,
+                })).unwrap(),
+            }))
+            .unwrap();
+            assert!(handle_editor_op_capture_update(&bootstrap, &runtime, request).unwrap());
+        }
+
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let projected = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        let capture = projected
+            .document
+            .editor_op_capture
+            .expect("active capture");
+        assert_eq!(capture.epoch, 1);
+        assert_eq!(
+            serde_json::from_str::<Vec<serde_json::Value>>(&capture.ops_json)
+                .unwrap()
+                .len(),
+            2,
+            "same-base callbacks must serialize into one complete checkpoint"
+        );
+
+        let request: ControllerRequest = serde_json::from_value(serde_json::json!({
+            "command": "editor_op_capture_update",
+            "file": doc,
+            "diagnostic_payload": serde_json::to_string(&serde_json::json!({
+                "action": "clear",
+                "event_nonce": "clear",
+            })).unwrap(),
+        }))
+        .unwrap();
+        assert!(handle_editor_op_capture_update(&bootstrap, &runtime, request).unwrap());
+        let projected = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        assert!(projected.document.editor_op_capture.is_none());
+        assert_eq!(projected.document.editor_op_capture_generation, 2);
     }
 
     #[test]

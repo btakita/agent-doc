@@ -271,6 +271,23 @@ pub enum StateFact {
         document_hash: String,
         generation: u64,
     },
+    /// Ordered editor operations captured against one exact merge base.
+    ///
+    /// `ops_json` is an opaque serialized `Vec<EditorOp>` owned by
+    /// `agent-doc-op-capture-io`. Keeping the content opaque avoids coupling the
+    /// state model to the merge crate while still making the checkpoint a typed,
+    /// replayable Lazily fact. Each checkpoint contains the complete active
+    /// epoch, so it safely supersedes older checkpoints during retention.
+    EditorOpCaptureCheckpointed {
+        document_hash: String,
+        canonical_path: String,
+        epoch: u64,
+        base_hash: String,
+        ops_json: String,
+        updated_ms: u64,
+    },
+    /// Clear the active editor-op epoch while retaining a monotonic epoch.
+    EditorOpCaptureCleared { document_hash: String, epoch: u64 },
     FileWatchChangeObserved {
         document_hash: String,
         path: String,
@@ -851,6 +868,8 @@ impl StateFact {
             | Self::UndoCheckpointCleared { document_hash, .. }
             | Self::CrdtRecoveryProjectionCheckpointed { document_hash, .. }
             | Self::CrdtRecoveryProjectionCleared { document_hash, .. }
+            | Self::EditorOpCaptureCheckpointed { document_hash, .. }
+            | Self::EditorOpCaptureCleared { document_hash, .. }
             | Self::FileWatchChangeObserved { document_hash, .. }
             | Self::DocumentDiskWriteObserved { document_hash, .. }
             | Self::DocumentAuthorityObserved { document_hash, .. }
@@ -942,6 +961,8 @@ impl StateFact {
             | Self::UndoCheckpointCleared { .. }
             | Self::CrdtRecoveryProjectionCheckpointed { .. }
             | Self::CrdtRecoveryProjectionCleared { .. }
+            | Self::EditorOpCaptureCheckpointed { .. }
+            | Self::EditorOpCaptureCleared { .. }
             | Self::FileWatchChangeObserved { .. }
             | Self::DocumentDiskWriteObserved { .. }
             | Self::DocumentAuthorityObserved { .. }
@@ -1003,6 +1024,8 @@ impl StateFact {
                 "crdt_recovery_projection_checkpointed"
             }
             Self::CrdtRecoveryProjectionCleared { .. } => "crdt_recovery_projection_cleared",
+            Self::EditorOpCaptureCheckpointed { .. } => "editor_op_capture_checkpointed",
+            Self::EditorOpCaptureCleared { .. } => "editor_op_capture_cleared",
             Self::FileWatchChangeObserved { .. } => "file_watch_change_observed",
             Self::DocumentDiskWriteObserved { .. } => "document_disk_write_observed",
             Self::DocumentAuthorityObserved { .. } => "document_authority_observed",
@@ -1469,6 +1492,35 @@ impl DocumentStateProjection {
             StateFact::CrdtRecoveryProjectionCleared { generation, .. } => {
                 self.document.crdt_recovery_projection_generation = *generation;
                 self.document.crdt_recovery_projection = None;
+            }
+            StateFact::EditorOpCaptureCheckpointed {
+                epoch,
+                canonical_path,
+                base_hash,
+                ops_json,
+                updated_ms,
+                ..
+            } => {
+                if *epoch >= self.document.editor_op_capture_generation {
+                    self.document.editor_op_capture_generation = *epoch;
+                    self.document.editor_op_capture = Some(EditorOpCaptureProjection {
+                        epoch: *epoch,
+                        canonical_path: canonical_path.clone(),
+                        base_hash: base_hash.clone(),
+                        ops_json: ops_json.clone(),
+                        updated_ms: *updated_ms,
+                    });
+                } else {
+                    self.reject_stale(StateDomain::Document, StateOwner::DocumentWriter);
+                }
+            }
+            StateFact::EditorOpCaptureCleared { epoch, .. } => {
+                if *epoch >= self.document.editor_op_capture_generation {
+                    self.document.editor_op_capture_generation = *epoch;
+                    self.document.editor_op_capture = None;
+                } else {
+                    self.reject_stale(StateDomain::Document, StateOwner::DocumentWriter);
+                }
             }
             StateFact::FileWatchChangeObserved {
                 path,
@@ -2094,6 +2146,11 @@ impl DocumentStateProjection {
                 self.closeout.realtime_steering = TurnSteeringProjection::none();
                 self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "abandoned");
+                // A stranded cycle and its captured editor frontier are one
+                // document-scoped state transition. Clearing the projection in
+                // this reducer arm prevents an abandoned epoch from being
+                // replayed after the cycle itself is gone.
+                self.document.clear_editor_op_capture();
             }
             StateFact::FalseStaleCaptureReactivated {
                 cycle_id,
@@ -2752,6 +2809,12 @@ pub struct DocumentProjection {
     /// Monotonic checkpoint/clear generation for cold CRDT restart state.
     #[serde(default)]
     pub crdt_recovery_projection_generation: u64,
+    /// Active editor-op epoch captured against one exact merge base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor_op_capture: Option<EditorOpCaptureProjection>,
+    /// Monotonic checkpoint/clear generation retained after consumption.
+    #[serde(default)]
+    pub editor_op_capture_generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_file_watch_change: Option<FileWatchChangeProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2782,6 +2845,23 @@ pub struct DocumentProjection {
     /// ordering comparison.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_converged_write: Option<ConvergedWriteProjection>,
+}
+
+impl DocumentProjection {
+    pub fn clear_editor_op_capture(&mut self) {
+        self.editor_op_capture_generation = self.editor_op_capture_generation.saturating_add(1);
+        self.editor_op_capture = None;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorOpCaptureProjection {
+    pub epoch: u64,
+    pub canonical_path: String,
+    pub base_hash: String,
+    /// Opaque serialized `Vec<EditorOp>` owned by op-capture I/O.
+    pub ops_json: String,
+    pub updated_ms: u64,
 }
 
 /// The newest write that converged on a document.
@@ -8616,5 +8696,66 @@ mod tests {
             ProofGateMachine::transition(ProofGatePhase::Observed, ProofGateEvent::MarkerDisproved),
             None
         );
+    }
+
+    #[test]
+    fn editor_op_capture_epoch_is_monotonic_and_rejects_stale_checkpoint() {
+        let mut projection = DocumentStateProjection::new("doc");
+        projection.apply_fact(&StateFact::EditorOpCaptureCheckpointed {
+            document_hash: "doc".into(),
+            canonical_path: "/tmp/doc.md".into(),
+            epoch: 1,
+            base_hash: "base-a".into(),
+            ops_json: r#"[{"insert":"a"}]"#.into(),
+            updated_ms: 10,
+        });
+        projection.apply_fact(&StateFact::EditorOpCaptureCheckpointed {
+            document_hash: "doc".into(),
+            canonical_path: "/tmp/doc.md".into(),
+            epoch: 2,
+            base_hash: "base-b".into(),
+            ops_json: r#"[{"insert":"b"}]"#.into(),
+            updated_ms: 20,
+        });
+        projection.apply_fact(&StateFact::EditorOpCaptureCheckpointed {
+            document_hash: "doc".into(),
+            canonical_path: "/tmp/doc.md".into(),
+            epoch: 1,
+            base_hash: "stale".into(),
+            ops_json: "[]".into(),
+            updated_ms: 30,
+        });
+
+        let active = projection
+            .document
+            .editor_op_capture
+            .as_ref()
+            .expect("newest epoch remains active");
+        assert_eq!(active.epoch, 2);
+        assert_eq!(active.base_hash, "base-b");
+        assert_eq!(projection.document.editor_op_capture_generation, 2);
+        assert_eq!(projection.rejected_stale_events.len(), 1);
+    }
+
+    #[test]
+    fn abandoning_cycle_atomically_clears_editor_op_epoch() {
+        let mut projection = DocumentStateProjection::new("doc");
+        projection.apply_fact(&StateFact::EditorOpCaptureCheckpointed {
+            document_hash: "doc".into(),
+            canonical_path: "/tmp/doc.md".into(),
+            epoch: 4,
+            base_hash: "base".into(),
+            ops_json: "[]".into(),
+            updated_ms: 10,
+        });
+        projection.apply_fact(&StateFact::CycleAbandoned {
+            document_hash: "doc".into(),
+            cycle_id: "cycle".into(),
+            reason: "operator_clear".into(),
+        });
+
+        assert!(projection.document.editor_op_capture.is_none());
+        assert_eq!(projection.document.editor_op_capture_generation, 5);
+        assert_eq!(projection.closeout.phase, Some(CyclePhase::Abandoned));
     }
 }

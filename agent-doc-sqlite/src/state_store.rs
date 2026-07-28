@@ -1046,6 +1046,14 @@ fn run_state_event_retention_if_due(conn: &Connection) {
             ),
         ),
         (
+            "editor_op_capture_checkpointed",
+            prune_superseding_fact_to(conn, "editor_op_capture_checkpointed", 2),
+        ),
+        (
+            "editor_op_capture_cleared",
+            prune_superseding_fact_to(conn, "editor_op_capture_cleared", 2),
+        ),
+        (
             "response_captured",
             prune_superseding_fact_to(
                 conn,
@@ -1836,11 +1844,10 @@ pub fn clear_editor_transport_health_in_db(conn: &Connection, document_hash: &st
     )? > 0)
 }
 
-/// Ordered editor operations captured against one exact Lazily base.
+/// Legacy editor-op capture row retained only as one-way migration input.
 ///
-/// This is state-machine input in the single project ledger. It must never be
-/// projected to a per-document file because a stale file can replay deleted
-/// operator text after reconnect.
+/// New writes belong to typed `state_events` facts. These accessors remain
+/// while older installations may still have an `editor_op_captures` row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorOpCaptureRecord {
     pub document_hash: String,

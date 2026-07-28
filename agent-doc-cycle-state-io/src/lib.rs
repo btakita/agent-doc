@@ -60,25 +60,14 @@ use std::path::Path;
 pub mod command_plane;
 pub mod pipeline_frontmatter;
 
-thread_local! {
-    /// Whether the current thread is serving a project-controller request
-    /// in-process. Client helpers (`load_document_projection`, the `mark_*`
-    /// command-plane path) consult this to avoid self-RPC: when set they use the
-    /// local path instead of round-tripping to the controller socket, which
-    /// would deadlock the single-request serve loop (`#lazily-hot-path`:
-    /// controller-internal callers must not self-RPC). Set by the controller's
-    /// serve entry point.
-    static IN_CONTROLLER_REQUEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
 /// Mark whether the current thread is handling a project-controller request
 /// in-process. Set `true` for the lifetime of the controller serve loop.
 pub fn set_in_controller_request(value: bool) {
-    IN_CONTROLLER_REQUEST.with(|flag| flag.set(value));
+    agent_doc_state_wire::set_in_controller_request(value);
 }
 
 pub(crate) fn in_controller_request() -> bool {
-    IN_CONTROLLER_REQUEST.with(|flag| flag.get())
+    agent_doc_state_wire::in_controller_request()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

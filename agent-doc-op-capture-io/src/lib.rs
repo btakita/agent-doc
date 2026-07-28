@@ -5,37 +5,36 @@
 //! `replay_editor_ops`) already trusts the editor's *real* operations over a
 //! Myers diff-guess when those ops replay onto the merge base exactly. This
 //! module is the durable plumbing that gets those ops from the editor to the
-//! merge through the project's single `state.db` ledger:
+//! merge through the typed Lazily state backbone:
 //!
-//! - **Persistence** — one `editor_op_captures` row holds the ordered ops the
-//!   editor reported, plus the `base_hash` of the buffer text they were captured
-//!   *against*. Keying by base hash is the safety anchor: ops are only ever
-//!   trusted by a merge whose resolved base hashes to the same value, so a
-//!   stale/advanced base silently disqualifies them (the merge falls back to
-//!   the diff-guess — never worse than today).
+//! - **Persistence** — `EditorOpCaptureCheckpointed` is a complete, typed state
+//!   fact containing the ordered ops and exact `base_hash`. The former
+//!   `editor_op_captures` table is read only as one-way migration input.
 //! - **Append discipline** — recording an op against a *different* base than
-//!   the one currently stored starts a fresh epoch (the prior ops were captured
-//!   against a base that no longer applies).
+//!   the projected base starts a fresh monotonic epoch. A live controller
+//!   serializes read/derive/append; cold startup performs the same transition in
+//!   one SQLite transaction.
 //! - **Consume + clear** — once a merge has loaded the ops for its base they are
-//!   cleared, so the next epoch starts clean and stale ops can never leak into a
-//!   later, unrelated merge.
+//!   cleared with `EditorOpCaptureCleared`, so op capture and cycle phase are one
+//!   atomically projectable model.
 //!
 //! ## Agentic Contracts
 //! - `record_editor_op` is append-only within an epoch and resets the epoch when
 //!   `base_hash` changes; it never silently drops an op.
 //! - `editor_ops_for_base` returns `Some(ops)` **only** when the stored
 //!   `base_hash` matches the hash of the supplied base text; otherwise `None`.
-//! - `clear_op_capture` is idempotent — clearing an absent row is `Ok(())`.
+//! - `clear_op_capture` is idempotent — clearing an absent epoch is `Ok(())`.
 //! - `agent_doc_hash::content_hash` is the single source of the base-hash
 //!   function shared by the producer (editor, via FFI) and the consumer (merge).
 //!
 //! Wiring point (`#qnodemerge4wire` part 3): `merge::merge_contents_crdt_with_ops`
 //! loads ops via `editor_ops_for_base`, passes them to `merge_with_editor_ops`,
-//! and clears the row after the merge. No per-document file is on this hot path.
+//! and clears the epoch after the merge. No per-document file or bespoke table
+//! is on this hot path.
 
 use agent_doc_hash::content_hash;
 use agent_doc_merge::crdt::EditorOp;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -87,6 +86,8 @@ fn base_hash_recomputes_for_doc_for_tests(doc: &Path) -> u64 {
 /// The per-document operation epoch stored in `state.db`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpCaptureState {
+    /// Monotonic Lazily epoch. A base change or explicit clear advances it.
+    pub epoch: u64,
     /// SHA256 hex of the buffer text the ops were captured against — the merge
     /// base they replay onto. The merge trusts the ops only when its resolved
     /// base hashes to this value.
@@ -105,32 +106,137 @@ fn state_db_identity(doc: &Path) -> Result<(PathBuf, String, String)> {
     Ok((project_root, hash, canonical.to_string_lossy().into_owned()))
 }
 
+fn event_nonce() -> String {
+    static NONCE: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{}-{}-{}",
+        std::process::id(),
+        now_nanos(),
+        NONCE.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+fn capture_from_document_projection(
+    document: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+) -> Result<(u64, Option<OpCaptureState>)> {
+    let generation = document
+        .map(|document| document.document.editor_op_capture_generation)
+        .unwrap_or_default();
+    let Some(capture) = document.and_then(|document| document.document.editor_op_capture.as_ref())
+    else {
+        return Ok((generation, None));
+    };
+    let ops = serde_json::from_str::<Vec<EditorOp>>(&capture.ops_json)
+        .context("decode Lazily editor-op epoch")?;
+    Ok((
+        generation,
+        Some(OpCaptureState {
+            epoch: capture.epoch,
+            base_hash: capture.base_hash.clone(),
+            ops,
+            updated_ms: capture.updated_ms,
+        }),
+    ))
+}
+
+fn load_projected_capture(
+    doc: &Path,
+    project_root: &Path,
+    document_hash: &str,
+) -> Result<(u64, Option<OpCaptureState>)> {
+    if agent_doc_state_wire::in_controller_request()
+        && let Some(document) = agent_doc_state_wire::local_document_projection(document_hash)
+    {
+        return capture_from_document_projection(document.as_ref());
+    }
+    let controller_socket = agent_doc_controller::paths::socket_path(project_root);
+    if controller_socket.exists() && !agent_doc_state_wire::in_controller_request() {
+        let request = serde_json::json!({
+            "command": "document_state_projection",
+            "file": doc,
+        });
+        match agent_doc_state_wire::send_ndjson_request_to_actor(
+            &controller_socket,
+            &request,
+            EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
+        ) {
+            Ok(raw) => {
+                #[derive(serde::Deserialize)]
+                struct ProjectionEnvelope {
+                    ok: bool,
+                    data: Option<agent_doc_state_backbone::DocumentStateProjection>,
+                    error: Option<String>,
+                }
+                let envelope: ProjectionEnvelope =
+                    serde_json::from_str(&raw).context("decode editor-op state projection")?;
+                if !envelope.ok {
+                    anyhow::bail!(
+                        "editor-op state projection rejected: {}",
+                        envelope.error.as_deref().unwrap_or("unknown error")
+                    );
+                }
+                return capture_from_document_projection(envelope.data.as_ref());
+            }
+            Err(agent_doc_state_wire::ActorRequestError::Connect(_))
+            | Err(agent_doc_state_wire::ActorRequestError::Timeout(_)) => {
+                // Read-only evidence may fall back to the durable projection
+                // while the controller is momentarily unavailable.
+            }
+            Err(err) => return Err(err).context("read Lazily editor-op projection"),
+        }
+    }
+
+    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    let rows =
+        agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(document_hash))?;
+    let mut ledger = agent_doc_state_backbone::EventLedger::new();
+    for row in rows {
+        let event: agent_doc_state_backbone::StateEvent =
+            serde_json::from_str(&row.payload_json)
+                .with_context(|| format!("decode state event {}", row.event_id))?;
+        ledger.append(event);
+    }
+    let projection = ledger.project();
+    capture_from_document_projection(projection.document(document_hash))
+}
+
+fn clear_legacy_capture(project_root: &Path, document_hash: &str) {
+    if let Ok(conn) = agent_doc_sqlite::state_store::open_state_db(project_root) {
+        let _ = agent_doc_sqlite::state_store::clear_editor_op_capture_in_db(&conn, document_hash);
+    }
+}
+
 /// Load the operation epoch for `doc`, if present.
 ///
-/// A malformed row is treated as absent (logged) rather than failing the
-/// merge — a corrupt capture must never block a write.
+/// The typed Lazily projection is authoritative. A pre-migration table row is
+/// imported exactly once only when the projection has never observed an
+/// editor-op epoch or clear marker.
 pub fn load_op_capture(doc: &Path) -> Result<Option<OpCaptureState>> {
     let (project_root, document_hash, _) = state_db_identity(doc)?;
+    let (generation, projected) = load_projected_capture(doc, &project_root, &document_hash)?;
+    if projected.is_some() || generation > 0 {
+        return Ok(projected);
+    }
+
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    let Some(record) =
+    let Some(legacy) =
         agent_doc_sqlite::state_store::load_editor_op_capture_from_db(&conn, &document_hash)?
     else {
         return Ok(None);
     };
-    match serde_json::from_str::<Vec<EditorOp>>(&record.ops_json) {
-        Ok(ops) => Ok(Some(OpCaptureState {
-            base_hash: record.base_hash,
-            ops,
-            updated_ms: record.updated_at_ms,
-        })),
-        Err(e) => {
+    drop(conn);
+    let ops = match serde_json::from_str::<Vec<EditorOp>>(&legacy.ops_json) {
+        Ok(ops) => ops,
+        Err(err) => {
             eprintln!(
-                "[op-capture] ignoring malformed state row document_hash={} ({e}); falling back to diff-guess",
-                document_hash,
+                "[op-capture] ignoring malformed legacy capture document_hash={document_hash} ({err}); falling back to diff-guess"
             );
-            Ok(None)
+            return Ok(None);
         }
-    }
+    };
+    record_editor_ops(doc, &legacy.base_hash, ops)?;
+    clear_legacy_capture(&project_root, &document_hash);
+    load_projected_capture(doc, &project_root, &document_hash).map(|(_, capture)| capture)
 }
 
 /// True when there are **pending** captured editor ops for `doc` — live
@@ -172,38 +278,104 @@ pub fn record_editor_ops(doc: &Path, base_hash: &str, ops: Vec<EditorOp>) -> Res
         return Ok(());
     }
     let (project_root, document_hash, canonical_path) = state_db_identity(doc)?;
+    let ops_json = serde_json::to_string(&ops)?;
+    let updated_ms = now_millis();
+    let nonce = event_nonce();
+    let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
+    if controller_socket.exists() && !agent_doc_state_wire::in_controller_request() {
+        let payload = serde_json::json!({
+            "action": "append",
+            "base_hash": base_hash,
+            "ops_json": ops_json,
+            "updated_ms": updated_ms,
+            "event_nonce": nonce,
+        });
+        let request = serde_json::json!({
+            "command": "editor_op_capture_update",
+            "file": doc,
+            "diagnostic_payload": serde_json::to_string(&payload)?,
+        });
+        match agent_doc_state_wire::send_ndjson_request_to_actor(
+            &controller_socket,
+            &request,
+            EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
+        ) {
+            Ok(raw) => {
+                #[derive(serde::Deserialize)]
+                struct UpdateEnvelope {
+                    ok: bool,
+                    error: Option<String>,
+                }
+                let envelope: UpdateEnvelope =
+                    serde_json::from_str(&raw).context("decode editor-op append response")?;
+                if !envelope.ok {
+                    anyhow::bail!(
+                        "Lazily editor-op append rejected: {}",
+                        envelope.error.as_deref().unwrap_or("unknown error")
+                    );
+                }
+                clear_legacy_capture(&project_root, &document_hash);
+                return Ok(());
+            }
+            Err(agent_doc_state_wire::ActorRequestError::Connect(_))
+                if !controller_socket.exists() => {}
+            Err(err) => return Err(err).context("append Lazily editor-op checkpoint"),
+        }
+    }
+
     let mut conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
         &project_root,
         EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
     )?;
+    let local_current = agent_doc_state_wire::in_controller_request()
+        .then(|| load_projected_capture(doc, &project_root, &document_hash))
+        .transpose()?;
     let tx = conn.transaction()?;
-    let existing =
-        agent_doc_sqlite::state_store::load_editor_op_capture_from_db(&tx, &document_hash)?;
-    let mut state = match existing {
-        Some(existing) if existing.base_hash == base_hash => OpCaptureState {
-            base_hash: existing.base_hash,
-            ops: serde_json::from_str(&existing.ops_json).unwrap_or_default(),
-            updated_ms: existing.updated_at_ms,
-        },
-        _ => OpCaptureState {
-            base_hash: base_hash.to_string(),
-            ops: Vec::new(),
-            updated_ms: 0,
-        },
+    let (generation, existing) = match local_current {
+        Some(current) => current,
+        None => {
+            let rows = agent_doc_sqlite::state_store::load_state_events_from_db(
+                &tx,
+                Some(&document_hash),
+            )?;
+            let mut ledger = agent_doc_state_backbone::EventLedger::new();
+            for row in rows {
+                ledger.append(serde_json::from_str(&row.payload_json)?);
+            }
+            let projection = ledger.project();
+            capture_from_document_projection(projection.document(&document_hash))?
+        }
     };
-    state.ops.extend(ops);
-    state.updated_ms = now_millis();
-    agent_doc_sqlite::state_store::upsert_editor_op_capture_in_db(
-        &tx,
-        &agent_doc_sqlite::state_store::EditorOpCaptureRecord {
-            document_hash,
+    let (epoch, mut complete_ops) = match existing {
+        Some(existing) if existing.base_hash == base_hash => (existing.epoch, existing.ops),
+        _ => (generation.saturating_add(1), Vec::new()),
+    };
+    complete_ops.extend(ops);
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!("editor-op-capture-checkpoint:{document_hash}:{epoch}:{nonce}"),
+        agent_doc_state_backbone::StateFact::EditorOpCaptureCheckpointed {
+            document_hash: document_hash.clone(),
             canonical_path,
-            base_hash: state.base_hash,
-            ops_json: serde_json::to_string(&state.ops)?,
-            updated_at_ms: state.updated_ms,
+            epoch,
+            base_hash: base_hash.to_string(),
+            ops_json: serde_json::to_string(&complete_ops)?,
+            updated_ms,
+        },
+    );
+    let payload_json = serde_json::to_string(&event)?;
+    agent_doc_sqlite::state_store::insert_state_event_in_db(
+        &tx,
+        &agent_doc_sqlite::state_store::StateEventInsert {
+            event_id: &event.event_id,
+            document_hash: event.document_hash(),
+            domain: event.domain().label(),
+            fact_type: event.fact.label(),
+            payload_json: &payload_json,
         },
     )?;
+    agent_doc_sqlite::state_store::clear_editor_op_capture_in_db(&tx, &document_hash)?;
     tx.commit()?;
+    agent_doc_state_wire::mark_local_state_db_dirty();
     Ok(())
 }
 
@@ -266,23 +438,134 @@ pub fn editor_ops_for_base(doc: &Path, base_text: &str) -> Result<Option<Vec<Edi
     }
 }
 
-/// Clear the op-capture row for `doc`. Idempotent — clearing an absent row succeeds.
+/// Clear the active Lazily op-capture epoch. Idempotent at the public boundary:
+/// clearing an absent epoch succeeds while retaining a monotonic clear marker.
 pub fn clear_op_capture(doc: &Path) -> Result<()> {
     let (project_root, document_hash, _) = state_db_identity(doc)?;
-    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    agent_doc_sqlite::state_store::clear_editor_op_capture_in_db(&conn, &document_hash)?;
+    let nonce = event_nonce();
+    let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
+    if controller_socket.exists() && !agent_doc_state_wire::in_controller_request() {
+        let payload = serde_json::json!({
+            "action": "clear",
+            "event_nonce": nonce,
+        });
+        let request = serde_json::json!({
+            "command": "editor_op_capture_update",
+            "file": doc,
+            "diagnostic_payload": serde_json::to_string(&payload)?,
+        });
+        match agent_doc_state_wire::send_ndjson_request_to_actor(
+            &controller_socket,
+            &request,
+            EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
+        ) {
+            Ok(raw) => {
+                #[derive(serde::Deserialize)]
+                struct UpdateEnvelope {
+                    ok: bool,
+                    error: Option<String>,
+                }
+                let envelope: UpdateEnvelope =
+                    serde_json::from_str(&raw).context("decode editor-op clear response")?;
+                if !envelope.ok {
+                    anyhow::bail!(
+                        "Lazily editor-op clear rejected: {}",
+                        envelope.error.as_deref().unwrap_or("unknown error")
+                    );
+                }
+                clear_legacy_capture(&project_root, &document_hash);
+                return Ok(());
+            }
+            Err(agent_doc_state_wire::ActorRequestError::Connect(_))
+                if !controller_socket.exists() => {}
+            Err(err) => return Err(err).context("clear Lazily editor-op epoch"),
+        }
+    }
+
+    let mut conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
+        &project_root,
+        EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
+    )?;
+    let local_generation = agent_doc_state_wire::in_controller_request()
+        .then(|| load_projected_capture(doc, &project_root, &document_hash))
+        .transpose()?
+        .map(|(generation, _)| generation);
+    let tx = conn.transaction()?;
+    let generation = match local_generation {
+        Some(generation) => generation,
+        None => {
+            let rows = agent_doc_sqlite::state_store::load_state_events_from_db(
+                &tx,
+                Some(&document_hash),
+            )?;
+            let mut ledger = agent_doc_state_backbone::EventLedger::new();
+            for row in rows {
+                ledger.append(serde_json::from_str(&row.payload_json)?);
+            }
+            ledger
+                .project()
+                .document(&document_hash)
+                .map(|document| document.document.editor_op_capture_generation)
+                .unwrap_or_default()
+        }
+    };
+    let epoch = generation.saturating_add(1);
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!("editor-op-capture-cleared:{document_hash}:{epoch}:{nonce}"),
+        agent_doc_state_backbone::StateFact::EditorOpCaptureCleared {
+            document_hash: document_hash.clone(),
+            epoch,
+        },
+    );
+    let payload_json = serde_json::to_string(&event)?;
+    agent_doc_sqlite::state_store::insert_state_event_in_db(
+        &tx,
+        &agent_doc_sqlite::state_store::StateEventInsert {
+            event_id: &event.event_id,
+            document_hash: event.document_hash(),
+            domain: event.domain().label(),
+            fact_type: event.fact.label(),
+            payload_json: &payload_json,
+        },
+    )?;
+    agent_doc_sqlite::state_store::clear_editor_op_capture_in_db(&tx, &document_hash)?;
+    tx.commit()?;
+    agent_doc_state_wire::mark_local_state_db_dirty();
     Ok(())
 }
 
-/// Garbage-collect op-capture rows whose `updated_ms` is older than
-/// `max_age_secs`. Returns the number removed. A row with no usable timestamp
-/// is also removed, since it cannot be a
-/// fresh in-flight epoch. Best-effort: individual failures are logged, not
-/// propagated.
+/// Garbage-collect projected epochs whose `updated_ms` is older than
+/// `max_age_secs`, plus any unmigrated legacy rows.
 pub fn gc_op_captures(project_root: &Path, max_age_secs: u64) -> Result<usize> {
     let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
     let cutoff_ms = now_millis().saturating_sub(max_age_secs.saturating_mul(1000));
-    agent_doc_sqlite::state_store::gc_editor_op_captures_in_db(&conn, cutoff_ms)
+    let rows = agent_doc_sqlite::state_store::load_state_events_from_db(&conn, None)?;
+    let mut ledger = agent_doc_state_backbone::EventLedger::new();
+    for row in rows {
+        ledger.append(serde_json::from_str(&row.payload_json)?);
+    }
+    let stale_paths = ledger
+        .project()
+        .documents
+        .values()
+        .filter_map(|document| document.document.editor_op_capture.as_ref())
+        .filter(|capture| capture.updated_ms == 0 || capture.updated_ms < cutoff_ms)
+        .map(|capture| PathBuf::from(&capture.canonical_path))
+        .collect::<Vec<_>>();
+    let legacy_removed =
+        agent_doc_sqlite::state_store::gc_editor_op_captures_in_db(&conn, cutoff_ms)?;
+    drop(conn);
+    let mut cleared = 0;
+    for path in stale_paths {
+        match clear_op_capture(&path) {
+            Ok(()) => cleared += 1,
+            Err(err) => eprintln!(
+                "[op-capture] warning: failed to GC Lazily epoch for {}: {err:#}",
+                path.display()
+            ),
+        }
+    }
+    Ok(legacy_removed + cleared)
 }
 
 fn now_millis() -> u64 {
@@ -292,6 +575,13 @@ fn now_millis() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
 }
 
 #[cfg(test)]
@@ -423,6 +713,7 @@ mod tests {
         .unwrap();
         let capture = load_op_capture(&doc).unwrap().unwrap();
         assert_eq!(capture.base_hash, h);
+        assert_eq!(capture.epoch, 1);
         assert_eq!(capture.ops.len(), 1);
     }
 
@@ -449,6 +740,7 @@ mod tests {
         )
         .unwrap();
         let capture = load_op_capture(&doc).unwrap().unwrap();
+        assert_eq!(capture.epoch, 1, "same-base append stays in one epoch");
         assert_eq!(capture.ops.len(), 2);
     }
 
@@ -508,6 +800,7 @@ mod tests {
             },
         )
         .unwrap();
+        let first_epoch = load_op_capture(&doc).unwrap().unwrap().epoch;
         let h2 = content_hash("base two\n");
         record_editor_op(
             &doc,
@@ -520,6 +813,7 @@ mod tests {
         .unwrap();
         let capture = load_op_capture(&doc).unwrap().unwrap();
         assert_eq!(capture.base_hash, h2);
+        assert_eq!(capture.epoch, first_epoch + 1);
         assert_eq!(capture.ops.len(), 1, "new base must start a fresh epoch");
     }
 
@@ -584,6 +878,53 @@ mod tests {
     }
 
     #[test]
+    fn legacy_row_migrates_once_into_lazily_epoch() {
+        let (_dir, doc) = setup_doc();
+        let (project_root, document_hash, canonical_path) = state_db_identity(&doc).unwrap();
+        let base_hash = content_hash("legacy base\n");
+        let legacy_ops = vec![EditorOp::Insert {
+            offset: 0,
+            text: "migrated".into(),
+        }];
+        let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).unwrap();
+        agent_doc_sqlite::state_store::upsert_editor_op_capture_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::EditorOpCaptureRecord {
+                document_hash: document_hash.clone(),
+                canonical_path,
+                base_hash: base_hash.clone(),
+                ops_json: serde_json::to_string(&legacy_ops).unwrap(),
+                updated_at_ms: now_millis(),
+            },
+        )
+        .unwrap();
+        drop(conn);
+
+        let migrated = load_op_capture(&doc).unwrap().expect("migrated epoch");
+        assert_eq!(migrated.epoch, 1);
+        assert_eq!(migrated.base_hash, base_hash);
+        assert_eq!(migrated.ops, legacy_ops);
+        let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).unwrap();
+        assert!(
+            agent_doc_sqlite::state_store::load_editor_op_capture_from_db(&conn, &document_hash)
+                .unwrap()
+                .is_none(),
+            "legacy authority must be consumed after the typed fact lands"
+        );
+        assert_eq!(
+            agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
+                &conn,
+                &document_hash,
+                "editor_op_capture_checkpointed",
+                1,
+            )
+            .unwrap()
+            .len(),
+            1,
+        );
+    }
+
+    #[test]
     fn gc_removes_stale_and_zero_timestamp_rows() {
         let (dir, doc) = setup_doc();
         // Fresh epoch (current timestamp) — should survive a generous max_age.
@@ -599,18 +940,32 @@ mod tests {
         .unwrap();
         let removed = gc_op_captures(dir.path(), 3600).unwrap();
         assert_eq!(removed, 0, "fresh row must not be GC'd");
-        // Force a zero timestamp (no usable epoch) — should be reaped.
+        // Supersede it with a zero-timestamp Lazily checkpoint (no usable
+        // epoch freshness) — should be reaped with a typed clear fact.
         let capture = load_op_capture(&doc).unwrap().unwrap();
         let (project_root, document_hash, canonical_path) = state_db_identity(&doc).unwrap();
         let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).unwrap();
-        agent_doc_sqlite::state_store::upsert_editor_op_capture_in_db(
-            &conn,
-            &agent_doc_sqlite::state_store::EditorOpCaptureRecord {
-                document_hash,
+        let epoch = capture.epoch + 1;
+        let event = agent_doc_state_backbone::StateEvent::new(
+            format!("test-zero-timestamp:{document_hash}:{epoch}"),
+            agent_doc_state_backbone::StateFact::EditorOpCaptureCheckpointed {
+                document_hash: document_hash.clone(),
                 canonical_path,
+                epoch,
                 base_hash: capture.base_hash,
                 ops_json: serde_json::to_string(&capture.ops).unwrap(),
-                updated_at_ms: 0,
+                updated_ms: 0,
+            },
+        );
+        let payload_json = serde_json::to_string(&event).unwrap();
+        agent_doc_sqlite::state_store::insert_state_event_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::StateEventInsert {
+                event_id: &event.event_id,
+                document_hash: event.document_hash(),
+                domain: event.domain().label(),
+                fact_type: event.fact.label(),
+                payload_json: &payload_json,
             },
         )
         .unwrap();

@@ -40,6 +40,8 @@ Examples:
 
 - `PreflightStarted`
 - `BaselineSaved`
+- `EditorOpCaptureCheckpointed`
+- `EditorOpCaptureCleared`
 - `QueueHeadSelected`
 - `QueueHeadCompleted`
 - `QueueContextClearDeferred`
@@ -121,7 +123,7 @@ document components. Required projections include:
 
 | Projection | Owns |
 |---|---|
-| Document projection | current component bodies, boundaries, snapshot relation, prompt-bearing tail, editor attachment, CRDT relay model/replica status, document-model ensure outcome |
+| Document projection | current component bodies, boundaries, snapshot relation, prompt-bearing tail, editor attachment, CRDT relay model/replica status, captured editor-op epoch, document-model ensure outcome |
 | Queue projection | active head, struck/completed heads, drainability, backlog-to-queue sync, context-clear phase |
 | Closeout projection | latest cycle phase, captured response materialization, pending write boundary |
 | Transport projection | PID-scoped endpoint, named binary intent, expected generation/hash, editor accepted/visible/rejected facts, retry/backoff state |

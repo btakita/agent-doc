@@ -28,10 +28,62 @@ use anyhow::Context;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use interprocess::local_socket::{GenericFilePath, ToFsName, traits::Stream as _};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::time::Duration;
+
+type LocalDocumentProjectionReader = Box<dyn Fn(&str) -> Option<DocumentStateProjection>>;
+
+thread_local! {
+    /// True while this thread is serving a project-controller request.
+    ///
+    /// Low-level state clients use this shared marker to avoid sending an IPC
+    /// request back into the controller thread that is already serving them.
+    static IN_CONTROLLER_REQUEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// A controller-internal client had to append through the durable cold path
+    /// to avoid self-IPC. The request boundary consumes this bit and refreshes
+    /// the live projection once, regardless of how many facts the command wrote.
+    static LOCAL_STATE_DB_DIRTY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Controller-thread direct projection reader. Internal consumers use this
+    /// O(1) seam instead of self-IPC or replaying the entire durable ledger.
+    static LOCAL_DOCUMENT_PROJECTION_READER: RefCell<Option<LocalDocumentProjectionReader>> =
+        const { RefCell::new(None) };
+}
+
+pub fn set_in_controller_request(value: bool) {
+    IN_CONTROLLER_REQUEST.with(|flag| flag.set(value));
+}
+
+pub fn in_controller_request() -> bool {
+    IN_CONTROLLER_REQUEST.with(|flag| flag.get())
+}
+
+pub fn mark_local_state_db_dirty() {
+    if in_controller_request() {
+        LOCAL_STATE_DB_DIRTY.with(|flag| flag.set(true));
+    }
+}
+
+pub fn take_local_state_db_dirty() -> bool {
+    LOCAL_STATE_DB_DIRTY.with(|flag| flag.replace(false))
+}
+
+pub fn set_local_document_projection_reader(
+    reader: impl Fn(&str) -> Option<DocumentStateProjection> + 'static,
+) {
+    LOCAL_DOCUMENT_PROJECTION_READER.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(reader));
+    });
+}
+
+/// `None` means no controller-local reader is installed. `Some(None)` means
+/// the live projection has no state for this document yet.
+pub fn local_document_projection(document_hash: &str) -> Option<Option<DocumentStateProjection>> {
+    LOCAL_DOCUMENT_PROJECTION_READER
+        .with(|slot| slot.borrow().as_ref().map(|reader| reader(document_hash)))
+}
 
 #[derive(Debug)]
 pub enum ActorRequestError {

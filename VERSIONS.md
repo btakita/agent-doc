@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.52
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._
+
+- **Editor-operation capture now lives in the typed Lazily state backbone (`#opcapturelazily`).** Complete, monotonic op epochs are projected beside document and cycle state; matching-base bursts append in controller-serialized order, base changes start a fresh epoch, consumes emit a typed clear, and cycle abandonment clears the stranded epoch in the same reducer transition. The former `editor_op_captures` table is one-way migration input only. Controller-local merges read the live projection directly instead of replaying the ledger or self-RPCing, while actorless startup retains a single transactional fallback.
+
 ## 0.35.51
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._

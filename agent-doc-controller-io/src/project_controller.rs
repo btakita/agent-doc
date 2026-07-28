@@ -497,6 +497,10 @@ pub(crate) struct ControllerRuntime {
     coordination_graph: ControllerCoordinationGraph,
     supervisor_recycle_graph: ControllerSupervisorRecycleGraph,
     supervisor_recycle_waiters: Condvar,
+    /// Serialize editor-op epoch read/derive/append transitions. The checkpoint
+    /// fact contains the complete epoch, so two concurrent IDE callbacks must
+    /// not derive from the same predecessor and overwrite one another.
+    editor_op_capture_writes: Mutex<()>,
     /// `#lazily-hot-path` W1 — notified whenever the in-memory state projection
     /// advances (`apply_state_event` / `refresh_memory`). Bounded awaits park here
     /// instead of making every waiter re-poll the projection on its own timer, so
@@ -1016,6 +1020,7 @@ impl ControllerRuntime {
             coordination_graph,
             supervisor_recycle_graph,
             supervisor_recycle_waiters: Condvar::new(),
+            editor_op_capture_writes: Mutex::new(()),
             state_projection_waiters: Condvar::new(),
             document_graphs: ControllerDocumentGraphs::new_in(&scope),
             recycle_requested: AtomicBool::new(false),
@@ -7152,6 +7157,7 @@ agent:queue\n\
             supervisor_recycle_graph,
             coordination_graph,
             supervisor_recycle_waiters: Condvar::new(),
+            editor_op_capture_writes: Mutex::new(()),
             state_projection_waiters: Condvar::new(),
             document_graphs: ControllerDocumentGraphs::new_in(&scope),
             recycle_requested: AtomicBool::new(false),

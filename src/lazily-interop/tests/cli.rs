@@ -85,3 +85,38 @@ fn all_required_mutants_are_caught() {
     assert_eq!(proofs.len(), 11);
     assert!(proofs.iter().all(|proof| proof["caught"] == true));
 }
+
+#[test]
+fn one_stdlib_implementation_is_insufficient_and_other_peers_are_staged() {
+    let output = Command::new(binary())
+        .args([
+            "run",
+            "--registry",
+            "tests/fixtures/stdlib-feature-gate-peers.toml",
+            "--scenario",
+            "tests/fixtures/stdlib-feature-gate.json",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("run stdlib feature gate");
+    assert!(
+        !output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("JSON result");
+    assert_eq!(report["status"], "fail");
+    assert_eq!(
+        report["failures"][0]["category"],
+        "insufficient_eligible_peers"
+    );
+    assert_eq!(report["peers"], serde_json::json!(["rust"]));
+    assert_eq!(report["staged_peers"][0]["peer"], "staged");
+    assert!(
+        report["staged_peers"][0]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("stdlib_timer_v1"))
+    );
+}

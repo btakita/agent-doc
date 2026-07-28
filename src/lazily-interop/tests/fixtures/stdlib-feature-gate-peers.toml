@@ -1,0 +1,6 @@
+[peers.rust]
+command = ["{self}", "reference-peer"]
+env = { LAZILY_INTEROP_EXTRA_FEATURES = "stdlib_timer_v1" }
+
+[peers.staged]
+command = ["{self}", "reference-peer"]

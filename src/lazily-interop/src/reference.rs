@@ -154,13 +154,23 @@ impl ReferencePeer {
         });
         #[cfg(not(unix))]
         let channel_variants = json!({});
+        let mut features = vec!["distributed_crdt".to_owned(), "transport_links".to_owned()];
+        if let Ok(extra) = std::env::var("LAZILY_INTEROP_EXTRA_FEATURES") {
+            features.extend(
+                extra
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|feature| !feature.is_empty())
+                    .map(str::to_owned),
+            );
+        }
 
         json!({
             "ok": true,
             "binding": "lazily-interop-reference",
             "version": env!("CARGO_PKG_VERSION"),
             "protocol_version": PROTOCOL_VERSION,
-            "features": ["distributed_crdt", "transport_links"],
+            "features": features,
             "codecs": ["json"],
             "channels": channels,
             "channel_variants": channel_variants,

@@ -42,11 +42,14 @@
       "uniqueItems": true,
       "items": {
         "enum": [
-          "distributed_crdt",
-          "reliable_sync",
-          "causal_receipts",
-          "signaling",
-          "transport_links"
+            "distributed_crdt",
+            "reliable_sync",
+            "causal_receipts",
+            "signaling",
+            "transport_links",
+            "stdlib_timer_v1",
+            "stdlib_timeout_v1",
+            "stdlib_revision_barrier_v1"
         ]
       }
     },

@@ -32,7 +32,10 @@
         "reliable_sync",
         "causal_receipts",
         "signaling",
-        "transport_links"
+        "transport_links",
+        "stdlib_timer_v1",
+        "stdlib_timeout_v1",
+        "stdlib_revision_barrier_v1"
       ]
     },
     "Request": {
@@ -45,6 +48,9 @@
             "local_set",
             "deliver",
             "snapshot",
+            "feature_reset",
+            "feature_step",
+            "feature_observe",
             "bye",
             "link_open",
             "link_send",

@@ -1,0 +1,16 @@
+{
+  "name": "stdlib-timer-feature-gate",
+  "seed": 1,
+  "peers": [
+    {"name": "rust", "peer_id": 1},
+    {"name": "staged", "peer_id": 2}
+  ],
+  "required_features": ["stdlib_timer_v1"],
+  "required_codecs": ["json"],
+  "required_channels": [],
+  "frame_sets": {},
+  "steps": [
+    {"op": "assert_converged"}
+  ],
+  "expected_snapshot": []
+}

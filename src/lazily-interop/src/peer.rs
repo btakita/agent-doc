@@ -19,6 +19,9 @@ const FEATURES: &[&str] = &[
     "causal_receipts",
     "signaling",
     "transport_links",
+    "stdlib_timer_v1",
+    "stdlib_timeout_v1",
+    "stdlib_revision_barrier_v1",
 ];
 const CHANNELS: &[&str] = &[
     "in_process_ffi",

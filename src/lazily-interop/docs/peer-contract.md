@@ -49,10 +49,12 @@ ops with. The orchestrator assigns it; a peer that minted its own would make the
 transcript non-reproducible.
 
 `features` declares production surfaces the peer actually wraps:
-`distributed_crdt`, `reliable_sync`, `causal_receipts`, `signaling`, and
-`transport_links`. A feature scenario forms its peer group only from bindings
-that advertise the feature. A binding that does not implement the feature yet
-is reported as **staged** and receives no green credit for that scenario.
+`distributed_crdt`, `reliable_sync`, `causal_receipts`, `signaling`,
+`transport_links`, `stdlib_timer_v1`, `stdlib_timeout_v1`, and
+`stdlib_revision_barrier_v1`. A feature scenario forms its peer group only from
+bindings that advertise the feature. A binding that does not implement the
+feature yet is reported as **staged** and receives no green credit for that
+scenario.
 
 `codecs` and `channels` declare which wire codecs and transports the peer
 implements. `channel_variants` names concrete implementations of each advertised
@@ -112,6 +114,29 @@ called repeatedly, including between deliveries.
 ```json
 {"ok": true, "cells": [{"node": 1, "key": "doc/title", "state": {"Inline": [66]}}]}
 ```
+
+### Portable stdlib feature controls
+
+The channel-neutral stdlib controls replay canonical fixture steps against a
+peer's production library API:
+
+```json
+{"cmd": "feature_reset", "feature": "stdlib_timer_v1"}
+{"cmd": "feature_step", "feature": "stdlib_timer_v1", "step": {"op": "start", "now": 0, "duration": 10}}
+{"cmd": "feature_observe", "feature": "stdlib_timer_v1"}
+```
+
+`feature_reset` discards only the named feature adapter. `feature_step` returns
+`{"ok": true, "feature": "...", "observation": {...}}`; `feature_observe`
+returns the most recent observation without advancing state. The adapter may
+retain clock-origin and fixture-to-API translation metadata, but it MUST call
+the public production `Timer`, `Timeout`, or revision-barrier surface. A
+test-only second state machine is not eligible.
+
+The supervisor stages a peer that does not advertise the requested feature.
+Fewer than two eligible peers is a failing
+`insufficient_eligible_peers` result, never a vacuous pass. A peer that
+advertises a feature but rejects one of these controls fails closed.
 
 ### `bye`
 

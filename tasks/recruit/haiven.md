@@ -25,7 +25,13 @@ queue: stop
 Compacted content:
 - Archived 20 response topic(s): simplify LOADTEST.md + DESIGN.md + README.md; why a friend-frame beats sender-side resolution; opportunistic batching, max-size caps, and whether in-process still wins; 17 more
 - Prior summary/context: prior compacted content: Archived 12 response topic(s): writeNext CAS placement + increase test coverage; coverage to...
-<!-- agent:boundary:e9bd8d64 -->
+Please read through:
+- [haiven-offer-letter-brian-takita-jul-2026.md](../professional/haiven/haiven-offer-letter-brian-takita-jul-2026.md)
+- [haiven-at-will-employee-contractor-agreement.md](../professional/haiven/haiven-at-will-employee-contractor-agreement.md)
+
+Does everything look good? Should I ask for the fully-diluted 1% equity in writing?
+The `agent-doc` workflow is paused: a prior document projection is awaiting editor/controller reconnection. Three checks returned the same interrupted state, so no new response or forced write was issued. Reconnect or close the document editor, then invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md` again.
+<!-- agent:boundary:4ed6fe4f -->
 <!-- /agent:exchange -->
 
 ## Queue

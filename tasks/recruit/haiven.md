@@ -20,18 +20,11 @@ queue: stop
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/e715e181b73b2efd56586b6dc037817620083b669835f8f4d448e1adedf65952-20260728-162847.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/e715e181b73b2efd56586b6dc037817620083b669835f8f4d448e1adedf65952-20260728-171529.md`*
 
 Compacted content:
-- Archived 20 response topic(s): simplify LOADTEST.md + DESIGN.md + README.md; why a friend-frame beats sender-side resolution; opportunistic batching, max-size caps, and whether in-process still wins; 17 more
-- Prior summary/context: prior compacted content: Archived 12 response topic(s): writeNext CAS placement + increase test coverage; coverage to...
-Please read through:
-- [haiven-offer-letter-brian-takita-jul-2026.md](../professional/haiven/haiven-offer-letter-brian-takita-jul-2026.md)
-- [haiven-at-will-employee-contractor-agreement.md](../professional/haiven/haiven-at-will-employee-contractor-agreement.md)
-
-Does everything look good? Should I ask for the fully-diluted 1% equity in writing?
-The `agent-doc` workflow is paused: a prior document projection is awaiting editor/controller reconnection. Three checks returned the same interrupted state, so no new response or forced write was issued. Reconnect or close the document editor, then invoke `agent-doc /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md` again.
-<!-- agent:boundary:4ed6fe4f -->
+- Prior summary/context: prior compacted content: Archived 20 response topic(s): simplify LOADTEST.md + DESIGN.md + README.md; why a friend-fr...
+<!-- agent:boundary:47da8314 -->
 <!-- /agent:exchange -->
 
 ## Queue

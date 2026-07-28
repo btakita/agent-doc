@@ -623,12 +623,12 @@ Confidence: high. Escalation: none.
 The Zed extension is at `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed`.
 
 The `#nsfz` cycle is complete; agent-doc v0.35.49 is installed and published with the dead Zed LSP replica fix.
-<!-- agent:boundary:4fb43868 -->
+<!-- agent:boundary:1b27212e -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 📌 do [#nsfz]
+- ~~📌 do [#nsfz]~~
 - 📌 do [#suprestassoc-live]
 - 📌 do [#jbedtledgerverify]
 - 📌 do [#0dsr]

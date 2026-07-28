@@ -540,12 +540,37 @@ Verification passed: focused Zed LSP and multi-editor liveness tests, Zed extens
 Release: commit `0e994624a` (`feat(zed): add frontmatter-gated realtime extension`) is pushed to `main`, and tag `v0.35.46` is published.
 
 For local use, in Zed choose **Extensions → Install Dev Extension** and select `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed`.
-<!-- agent:boundary:1b66fe2e -->
+> **Queue prompt:** Please create a Zed editor plugin/language extension for agent-doc.
+
+### Re: Zed editor plugin/language extension — gpt-5
+
+Completed and released in agent-doc v0.35.46. The extension registers a supplemental language server for Zed's existing Markdown language, while a valid, non-empty `agent_doc_session` frontmatter field is the live activation gate. Ordinary Markdown remains a strict no-op.
+
+- **Changed paths:** `editors/zed/`, `agent-doc-zed-lsp-io/`, controller/realtime registration code, CLI wiring, workspace metadata, README, SPEC, and version history.
+- **Commands:** focused Cargo tests and checks, framed LSP smoke test, `make check`, `make install-full`, `make install`, commit, push, and tag publication.
+- **Verification:** 8,258 tests passed and 241 skipped; Zed extension host compilation passed; installed `agent-doc 0.35.46` exposes `zed-lsp`; commit `0e994624a` and tag `v0.35.46` are published.
+- **Confidence:** high.
+- **Escalation:** none. Install the development extension from `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed` using Zed's **Extensions → Install Dev Extension** action.
+
+### Re: Zed editor plugin/language extension — gpt-5
+
+> **Queue prompt:**
+>
+> Please create a Zed editor plugin/language extension for agent-doc.
+
+Completed and released in agent-doc v0.35.46. The extension registers a supplemental language server for Zed's existing Markdown language, while a valid, non-empty `agent_doc_session` frontmatter field is the live activation gate. Ordinary Markdown remains a strict no-op.
+
+- **Changed paths:** `editors/zed/`, `agent-doc-zed-lsp-io/`, controller/realtime registration code, CLI wiring, workspace metadata, README, SPEC, and version history.
+- **Commands:** focused Cargo tests and checks, framed LSP smoke test, `make check`, `make install-full`, `make install`, commit, push, and tag publication.
+- **Verification:** 8,258 tests passed and 241 skipped; Zed extension host compilation passed; installed `agent-doc 0.35.46` exposes `zed-lsp`; commit `0e994624a` and tag `v0.35.46` are published.
+- **Confidence:** high.
+- **Escalation:** none. Install the development extension from `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed` using Zed's **Extensions → Install Dev Extension** action.
+<!-- agent:boundary:c8df656b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Please create a Zed editor plugin/language extension for agent-doc.
+- ~~Please create a Zed editor plugin/language extension for agent-doc.~~
 - 📌 do [#crdtauth6]
 - 📌 do [#nsfz]
 - 📌 do [#suprestassoc-live]

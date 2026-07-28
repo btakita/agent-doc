@@ -945,7 +945,31 @@ Proof:
 - CI: CI run `30353866230` and Release run `30353884483` were both `in_progress` for `acca0715f` at the single required inspection; no polling performed
 - confidence: high
 - escalation: none; a JetBrains restart/live smoke test is intentionally operator-owned and non-blocking
-<!-- agent:boundary:7b0cf50f -->
+
+### Re: #adstatechartjs — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 do [#adstatechartjs]
+
+
+Implemented, installed, and released the typed lazily-js merge-ownership projection for the VS Code extension.
+
+- Added `MergeOwnershipStateChart`, built with `ChartBuilder`/`StateBuilder` from the published `@lazily-hub/lazily-js/statechart` API. Its six phases, seven events, idempotent edges, and rejected edges match `agent_doc_merge::ownership::transition_merge_ownership` exactly.
+- Replaced `CrdtReplicaForwarder.attached` mutation with a derived state-chart projection. Successful registration advances through `editor_attached` and `editor_buffer_observed`; deregistration advances through `editor_detached`; rejected lifecycle edges fail closed. The Rust controller remains authoritative for disk-write permission.
+- Added happy-path coverage and an exhaustive 6×7 transition-matrix parity test, plus forwarder lifecycle assertions.
+- Corrected the stale backlog package premise: the package is `@lazily-hub/lazily-js`, and its released line is `0.x`. The extension now consumes latest-published `0.29.1`. Local `0.30.1` remains independently blocked by the existing npm Trusted Publisher/2FA operator item `#lzjsnpmtrustedpub`; it is not needed for this integration.
+- Released agent-doc `0.35.56` / VS Code extension `0.2.59`. Installed binary `0.35.56`, synchronized all managed skill surfaces, installed VS Code `btakita.agent-doc@0.2.59`, recycled the project controller, pushed source commit `d55c89e41`, tag `v0.35.56`, and parent gitlink commit `88ec92d4a`.
+
+Proof:
+
+- Changed paths: `editors/vscode/src/mergeOwnershipStateChart.ts`, `editors/vscode/src/mergeOwnershipStateChart.test.ts`, `editors/vscode/src/crdtReplica.ts`, `editors/vscode/src/crdtReplica.test.ts`, VS Code package/lock/native version files, `VERSIONS.md`, and the mechanical agent-doc `0.35.56` release manifests.
+- Commands: `npm install`, `npm test`, `npm run package`, `make check`, `make install`, `agent-doc plugin install vscode --local`, `agent-doc skill install --all`, `cargo run --quiet -- audit-docs`, source/parent commit and push, project recycle, tag/push.
+- Verification: focused VS Code suite passed 160/160; repository-wide `make check` passed (including 8,275 tests and all TLA+ model checks); VSIX packaging passed; docs audit reported no blocking issues; installed versions report agent-doc `0.35.56` and VS Code `0.2.59`.
+- CI snapshot: source CI and Release workflows were both `in_progress` for `d55c89e41`; per repository policy they were recorded once and not polled.
+- Confidence: high. The exhaustive transition matrix is checked directly against the Rust authority vocabulary and the live package/export was verified before integration.
+- Escalation: one operator verification remains because VS Code must reload/restart its Extension Host to activate the structurally new bundled module.
+<!-- agent:boundary:4a9b5e1b -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -962,7 +986,7 @@ Proof:
 - ~~📌 do [#adstatechart2]~~
 - ~~📌 do [#adstatechart3]~~
 - ~~📌 do [#adstatechartkt]~~
-- 📌 do [#adstatechartjs]
+- ~~📌 do [#adstatechartjs]~~
 - 📌 do [#ipcauthority]
 - 📌 do [#ipcliveness]
 - 📌 do [#ipcverhandshake]
@@ -980,11 +1004,11 @@ Proof:
 - [ ] [#compactreactiveprojectionlivefail] [focused-cycle] #agent-doc-bug Fresh-restart live regression on IDEA 2026.1 + JetBrains plugin 0.2.305: a 305-event burst logged editor_ops_recorded count=305 transaction=batch, but CrdtReplicaForwarder drained sequential native.applyLocal insert_chars=1 operations roughly every 10–16 seconds while controller authority stayed delivery_converged=false; neither coalesced_exact_editor_adopt_after_quiet nor exact_editor_adopt_then_atomic_reregister appeared. Fix the editor-op drain so one burst becomes one revision-scoped update or at most one quiet recovery, add deterministic latency/conformance coverage, preserve the bounded native-call timeout/fail-closed behavior, and repeat #compactreactiveprojectionverify.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Phase 3 progress shipped in agent-doc 0.35.53: current observed closeout-recovery evidence now validates the typed projection against live visible-document authority only, so stale compatibility snapshot-baseline drift cannot veto a current typed observation; the recorded snapshot hash remains advisory recovery evidence. Remaining: complete the other detailed guard/recovery payload cutovers and later state-vector barrier work in tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md.
-- [ ] [#adstatechartjs] [focused-cycle] lazily-js 1.1.0 SHIPPED (ChartBuilder + statechart.d.ts builder types + shared fromStates; tag v1.1.0; 169/169 tests green). No thread-safe/async chart in js (no reactive Context, no threads). REMAINING: npm publish is operator-2FA-gated (#lzjsnpmpub: npm login then npm publish --access public), then bump the VS Code plugin @lazily/js dep to 1.1.0 and consume ChartBuilder.
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
 - [ ] [#adstatechartktlive] [operator-verify] After restarting a JetBrains IDE onto plugin 0.2.306, open/edit/close an agent-doc markdown document and verify the CRDT replica reaches editor_owns_buffer then detached with no classloader or File Cache Conflict error.
+- [ ] [#adstatechartjslive] [operator-verify] Reload or restart the VS Code/VSCodium Extension Host onto agent-doc 0.2.59, then open, edit, and close an agent-doc markdown document; verify registration reaches editor-owned buffer state, edits sync normally, close/deregister succeeds, and no merge-ownership rejection appears.
 <!-- /agent:backlog -->
 
 ## Review

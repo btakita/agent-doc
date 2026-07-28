@@ -492,15 +492,15 @@ I added `#efs-email-subdomain` as the implementation item: onboard the subdomain
 **Confidence:** High.
 
 **Escalation:** Implementation requires Cloudflare Email Service onboarding for `efs.equityfundingsource.com` before production can send from the new address.
-<!-- agent:boundary:8b9b8a02 -->
+<!-- agent:boundary:45b2b024 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#efs-deploy-hibernation]~~
 - do [#tmo-sandbox-purge-apply]
 - do [#efs-prod-route-token]
-- ~~efs@equityfundingsource.com does not exist. All outbound emails should use reply@efs.equityfundingsource.com. Should we use reply@reply.equityfundingsource.com instead or something different? These automated emails need to be distinct from Google Workspaces.~~ — auto-struck: answered this cycle (#ftstrike)
-- `reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.
+- ~~efs@equityfundingsource.com does not exist. All outbound emails should use reply@efs.equityfundingsource.com. Should we use reply@reply.equityfundingsource.com instead or something different? These automated emails need to be distinct from Google Workspaces.~~
+- 🚧 `reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.
 <!-- /agent:queue -->
 
 ## Backlog

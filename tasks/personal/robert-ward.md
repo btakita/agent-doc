@@ -1,11 +1,16 @@
 ---
 agent_doc_session: aaca1487-6409-4c94-88d6-97b579485190
+resume: a25943f9-7890-4069-b5cb-af75bc20d34a
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
 links:
 - ../professional/judith-krug.md
+agent_doc_model_tier: high
+queue: go
 ---
 
 Robert Ward is a long time friend who lives in LA.
@@ -810,5 +815,22 @@ Yes — and there are stronger, dated records than Street View. In rough order o
 4. **Current photos of the signage.** The temporary post-fire signs are very likely *still* the same ones. Photograph spacing, count, visibility, and whether there's any "reduced speed ahead" warning. Circumstantial, but it corroborates her testimony.
 
 Bottom line: she doesn't need Street View to shift the burden. A CPRA/discovery request forces the agency to *produce* proof the limit was properly authorized and posted — and if they can't, that's her strongest argument for dismissal.
-<!-- agent:boundary:bc1dd507 -->
+
+### Re: Claude dental conversation emailed to Robert — gpt-5
+
+Sent the full conversation to Robert through `corky`.
+
+- **To:** robertward3@yahoo.com
+- **From:** brian.takita@gmail.com
+- **Subject:** Broken teeth, implants, and grinding protection
+- **Included:** the original Claude link and a cleaned, complete copy of the discussion about broken teeth, titanium implant considerations, and protecting teeth from grinding
+- **Draft record:** `mail/drafts/2026-07-27-broken-teeth-implants-and-grinding-protection.md`
+- **Gmail message/thread ID:** `19fa6d39fef75f27`
+
+`corky` reported `action: sent` via the Gmail API.
+<!-- agent:boundary:9de34f3b -->
 <!-- /agent:exchange -->
+
+<!-- agent:queue go -->
+Please send the contents of https://claude.ai/chat/6c16049b-ddbc-4258-a27e-29022f158111 to robert-ward via email. Use corky to send the email.
+<!-- /agent:queue -->

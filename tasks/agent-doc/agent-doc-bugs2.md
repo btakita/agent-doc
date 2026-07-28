@@ -586,12 +586,27 @@ In Zed, open the command palette and choose **Extensions: Install Dev Extension*
 `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed`
 
 The extension launches `agent-doc zed-lsp`; `/home/brian/.cargo/bin/agent-doc` is already installed at v0.35.47. If Zed was launched without that directory in `PATH`, configure the extension to use the absolute binary path or launch Zed from a shell that includes `/home/brian/.cargo/bin`.
-<!-- agent:boundary:77d9299b -->
+
+### Re: `#crdtauth6` closeout reconciliation — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 do [#crdtauth6]
+
+
+The live CRDT proof and its v0.35.47 repairs were already completed and committed in the preceding response, but the backlog mutation did not land, leaving `#crdtauth6` incorrectly unchecked and mirrored at the queue head. This cycle reconciles that stale closeout and marks the item done; it does not repeat the editor proof or publish another release.
+
+- **Changed paths:** no source paths changed in this reconciliation. Zed's generated untracked `editors/zed/extension.wasm` was observed and left untouched.
+- **Commands/evidence:** refreshed the Codex agent-doc skill to the installed v0.35.47 contract; admitted and planned the new response cycle; read the exchange, queue, and backlog; verified `main` equals `origin/main`; verified `HEAD` and tag `v0.35.47` both resolve to `3c59da92a8a616bbeb9f9e293b8105e5bb447d65`; verified the installed CLI reports `agent-doc 0.35.47`.
+- **Verification:** the prior committed response contains the IntelliJ round-trip proof, exact VS Code controller/canonical hash proof, regression coverage, full 8,258-test `make check`, install, commit, push, and tag evidence. This cycle confirms those delivery facts remain current and closes only the stale document state.
+- **Confidence:** high.
+- **Escalation:** none.
+<!-- agent:boundary:2955ad09 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 📌 do [#crdtauth6]
+- ~~📌 do [#crdtauth6]~~
 - 📌 do [#nsfz]
 - 📌 do [#suprestassoc-live]
 - 📌 do [#jbedtledgerverify]
@@ -633,7 +648,6 @@ The extension launches `agent-doc zed-lsp`; `/home/brian/.cargo/bin/agent-doc` i
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
-- [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
 <!-- /agent:backlog -->

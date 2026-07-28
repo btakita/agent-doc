@@ -659,7 +659,39 @@ Live verification passed on the current JetBrains plugin `0.2.305` (which supers
 I invoked **Run Agent Doc** three times from IDEA. The first attempt (`1785223563296-1`) completed the EDT sequence `clicked → save_active_document → active_document_saved → route_prepare → route_command_built` in 6 ms, then moved `route_start`/`route_success` to a background thread and completed routing in 5.378 s. The second attempt completed the same EDT preparation in 1 ms. The immediate third click completed its EDT path in 1 ms and correctly terminated as `route_deduped_active_run` while the preceding route was still in flight. IDEA remained responsive throughout the clicks.
 
 The ledger preserved attempt grouping and stage order without interleaving. Every click/save/prepare stage was attributed to `AWT-EventQueue-0`; only asynchronous route execution used `Thread-152` / `Thread-155`. A direct check found no 2026-07-28 ledger entry whose `thread=` was `agent-doc-run-attempt-ledger`, so caller-thread capture is intact.
-<!-- agent:boundary:8029fbb9 -->
+
+### Re: `#0dsr` — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> 📌 do [#0dsr]
+
+
+Implemented and released as agent-doc `0.35.50`.
+
+Run Agent Doc preflight now attempts recovery for every retained document-write intent before reading the retained-write gate. The state-backbone policy owns an exhaustive transition:
+
+- no intent, unobserved, or already satisfied → continue;
+- authority/disk divergence → await the existing delivery without replay;
+- authority and disk agree but the retained delta is absent → replay the stranded intent.
+
+The replay path uses the existing content-bearing journal base and target, semantically rebases the retained agent delta over the current document cut, validates the result, writes through document authority, and clears the intent only after canonical authority and disk both equal the replayed target. Newer operator text is therefore preserved rather than replaced by stale retained content.
+
+The focused detached-authority test exposed another contributing factor: a newly launched controller could briefly report `NoRetainedIntent` while its reactive pending-intent projection lagged the durable journal. Controller verdicts are now reconciled with the same state-backbone policy evaluated from the caller's current durable observations, so projection startup lag cannot suppress recovery.
+
+Changed paths include `agent-doc-state-backbone/src/retained_write.rs`, `agent-doc-document-realtime-io/src/lib.rs`, `agent-doc-preflight-io/src/lib.rs`, `agent-doc-preflight-runtime-io/src/lib.rs`, `specs/14-realtime-workflow.md`, and the `0.35.50` release metadata.
+
+Verification:
+
+- focused state-backbone retained-write tests: passed;
+- focused preflight ordering/recovery tests: passed;
+- detached-authority operator-cut replay regression: passed;
+- `make check`: passed, including workspace tests and all six TLA model checks;
+- latest CI checked once: green;
+- `make install`: passed; local binary reports `agent-doc 0.35.50`.
+
+Release proof: agent-doc commit `d3e121b77` pushed to `main`, tag `v0.35.50` pushed, and superproject gitlink commit `97467e770` pushed. Confidence is high; no escalation or remaining follow-up is required. The pre-existing untracked `editors/zed/extension.wasm` and unrelated workspace changes were left untouched.
+<!-- agent:boundary:f2b54828 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -667,7 +699,7 @@ The ledger preserved attempt grouping and stage order without interleaving. Ever
 - ~~📌 do [#nsfz]~~
 - ~~📌 do [#suprestassoc-live]~~
 - ~~📌 do [#jbedtledgerverify]~~
-- 📌 do [#0dsr]
+- ~~📌 do [#0dsr]~~
 - 📌 do [#30p6]
 - 📌 do [#opcapturelazily]
 - 📌 do [#jbtsiftnosub2verify]
@@ -691,7 +723,6 @@ The ledger preserved attempt grouping and stage order without interleaving. Ever
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
-- [ ] [#0dsr] [focused-cycle] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Tagged [focused-cycle] 2026-07-19 — this is WRITE-PATH work whose failure modes are destructive (replaying a stale intent clobbers operator text; broken idempotency double-archives a compact), so it needs fresh context, not a mid-drain slot. MAP (the expensive part, traced 2026-07-19): (1) durable journal = pending_write_journal, agent-doc-state-backbone/src/lib.rs:1433 — deduped by intent_id, entries cleared on DocumentWriteConverged; (2) accessor = pending_document_write_journal, agent-doc-document-realtime-io/src/lib.rs:2824; (3) EXISTING replay = deferred_document_write_reconnect_content, same file :3115 — but triggered only by editor RECONNECT (:1214) and closing cut (:3571), which is the actual gap: a retained intent waits for a reconnect that may never come; (4) settle entry points already exposed to preflight via its effects = settle_retained_committed_projection / settle_retained_captured_projection, agent-doc-closeout-runtime-io/src/lib.rs:170/226/289; (5) the repair step to hook = agent-doc-preflight-command-io/src/run.rs:296, which runs on every Run Agent Doc. IDEMPOTENCY NOTE: intent_id dedup gives you 'do not replay the SAME intent twice' for free, but it does NOT prove replaying a STALE intent over newer content is safe — that guard still has to be designed and is the real risk. Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms' and left work retained with no operator surface to resume it.
 - [ ] [#30p6] [focused-cycle] Go-mode idle-queue dispatch adds the run to the composer but never submits it — SUSPECT WEAKENED 2026-07-19 by evidence. Gate chain confirmed: idle_queue_pending_payload_needs_enter_resubmit = pending_draft_enter_resubmit() (true unconditionally, NOT the filter) && drain_dispatch_dedup_skip(payload_already_pending) && !already_resubmitted, with drain_dispatch_dedup_skip = matches!(x, Some(true)) — so the resubmit fires only on positive recognition, and None (pane uncapturable) or Some(false) (recognition failed) both strand the draft. My earlier prime suspect was the trailing !later_has_prompt condition in route_trigger_visible_in_current_draft (dispatch.rs:412). The #64we capture ARGUES AGAINST it: a real stranded codex draft shows NO is_prompt_line after the trigger (codex patterns are ❯ > ›; the footer line starts 'gpt-5.5'), so that condition would have returned true and the resubmit would have fired. Remaining candidates: payload_already_pending == None (live_pane_content unavailable at the decision point), or recognition failing earlier in the chain. CONFIRM BY capturing the pane AND the computed payload_already_pending together at a live stall — the pane capture alone is not sufficient, which is what this pass established.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 - [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md

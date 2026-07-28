@@ -121,7 +121,11 @@ Commands and verification already completed: `cargo test --test stdlib_timeout` 
 Commits: lazily-rs `1d42da8` (pushed to `main`); superproject pointer `7d62ce4b5` (confirmed as an ancestor of current `HEAD`).
 
 Confidence: high. Escalation: none. No additional backlog follow-up is needed because the implementation, tests, documentation, and full local verification are complete.
-<!-- agent:boundary:cf153f00 -->
+
+### Re: Response
+
+One duplicate orphan line remains outside all agent-doc components at line 158. Please delete only the stray `- [ ] [#lzstdlibbarrier] ...` line in IDEA, save, and send `continue`. The completed item is already archived, so removing this duplicate is the only remaining closeout step.
+<!-- agent:boundary:4b1ce5b2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -155,4 +159,5 @@ Confidence: high. Escalation: none. No additional backlog follow-up is needed be
 
 <!-- completed work archived in tasks/software/lazily.done.md -->
 <!-- /agent:done -->
-- [ ] [#lzstdlibbarrier] Add a Lazily standard-library RevisionBarrier/effect-receipt abstraction over existing reactive, revision, and synchronization primitives, outside the graph kernel. Wait for after_revision plus a derived predicate using wake-on-change; accept deadline and cancellation inputs; return typed satisfied/timed-out/cancelled/disposed-or-unavailable outcomes; optionally prove keyed side-effect receipts while leaving receipt storage and transport policy outside the primitive. Test lost wakeups, already-satisfied state, revision races, cancellation, deadlines, disposal, and keyed receipts; document using the stdlib Timer as the deadline budget.
+eturn typed satisfied/timed-out/cancelled/disposed-or-unavailable outcomes; optionally prove keyed side-effect receipts while leaving receipt storage and transport policy outside the primitive. Test lost wakeups, already-satisfied state, revision races, cancellation, deadlines, disposal, and keyed receipts; document using the stdlib Timer as the deadline budget.
+cate orphan line remains outside all agent-doc components at line 158. Please delete only the stray `- [ ] [#lzstdlibbarrier] ...` line in IDEA, save, and send `continue`. The completed item is already archived, so removing this duplicate is the only remaining closeout step.

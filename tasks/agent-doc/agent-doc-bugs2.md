@@ -476,15 +476,28 @@ Completed the former `agent-doc-core` decomposition audit and closed the remaini
 - Focused `agent-doc-sync` / `agent-doc-ffi` tests and the new architecture test passed. Full `make check` passed after fixing one hidden managed-skill version mismatch; `git diff --check` and the private-name scan passed.
 - Released and installed Agent Doc `0.35.42` with JetBrains plugin `0.2.303`. The required full-profile parity install succeeded, PyPI upload succeeded, the controller recycled successfully, and tag `v0.35.42` was pushed. The GitHub tag workflow owns the multi-platform release assets; the single required CI lookup showed the latest completed run green and was not polled again.
 - Agent Doc commit: `4a1421610` (`refactor: complete core decomposition`). Superproject pointer: `1ab3407d9`.
-<!-- agent:boundary:843c1c4e -->
+
+### Re: #orchdecomp — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 do [#orchdecomp]
+
+
+Completed the orchestration decomposition and released it as Agent Doc 0.35.43.
+
+- Deleted the retired `agent-doc-orchestration` package completely: its broad dependency manifest, always-rerun timestamp `build.rs`, source shell, and stale compile-baseline document are gone. Cargo and IDE project discovery can no longer index that obsolete nested graph.
+- Retargeted the historical CLI architecture guards to the real root effect adapter and focused crates. Added `tests/orchestration_decomposition.rs` to reject restoration of the package, dependency edges, or `agent_doc_orchestration::` facades and to pin the focused turn, document-realtime, supervisor/controller, editor/tmux, route, closeout, and repair owners.
+- Updated the crate-decomposition PRD with the final ownership audit and completion signal.
+- Full verification passed with bounded nextest concurrency: 8,249/8,249 tests passed (241 skipped), plus the wider simulator, version/Lean checks, and all TLA models. The CLI architecture suite and focused decomposition tests pass; privacy-denylist and diff checks are clean; `agent-doc --version` reports 0.35.43. The single required CI lookup was green.
+- Released commit `0e7d33119` (`refactor: retire orchestration crate`) to `main`, pushed tag `v0.35.43`, and successfully uploaded the 0.35.43 wheel to PyPI. JetBrains plugin 0.2.304 is installed in four configured IDEs, and the project controller recycled onto the new generation.
+- Committed parent submodule pointer `f9eececbd` locally. I did not push the parent branch because it already contained unrelated unpushed commit `d0cd25736`; publishing that operator-owned commit would exceed this task's authority. The Agent Doc repository, release tag, package, installation, and controller cutover are all complete.
+<!-- agent:boundary:0eab5121 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~📌 do [#2y8j]~~
-- ~~📌 do [#cdtcutover]~~
-- ~~📌 do [#coredecomp]~~
-- 📌 do [#orchdecomp]
+- ~~📌 do [#orchdecomp]~~
 - 📌 do [#skillharnessplugin]
 - 📌 do [#crdtauth6]
 - 📌 do [#nsfz]
@@ -529,7 +542,6 @@ Completed the former `agent-doc-core` decomposition audit and closed the remaini
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
-- [ ] [#orchdecomp] [focused-cycle] Decompose the `agent-doc-orchestration` God crate along effect boundaries. Audit turn lifecycle, document realtime scheduling, queue/exchange lifecycle, closeout/commit, editor IPC, supervisor/controller state, tmux integration, recovery/repair, and session routing; move stable responsibilities into `agent-doc-turn`, `agent-doc-document`/document-realtime, `agent-doc-supervisor`/controller-state crates, `agent-doc-editor`, `agent-doc-tmux`, and narrow closeout/recovery crates as appropriate. Leave `agent-doc-orchestration` as a shrinking effect adapter only, not a deprecated compatibility facade; callers should move directly to the owning focused crate and pure merge/document code should stay out of orchestration.
 - [ ] [#skillharnessplugin] [focused-cycle] Create the agent-doc integration plugin for `skill-harness`: implement an agent-doc-owned `SkillHarnessPlugin` adapter, define its detection and skill-path contract without depending on `agent-doc-core`, register/document the integration path, and add tests proving `skill-harness` can resolve agent-doc through the plugin boundary after `agent-doc-core` removal.
 - [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.

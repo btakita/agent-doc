@@ -744,7 +744,32 @@ Proof:
 - The required single CI observation was `in_progress` for the new main push, not red; I did not poll it. Confidence: high. Escalation: none.
 
 The pre-existing untracked `editors/zed/extension.wasm` and unrelated dirty parent-repository changes were preserved.
-<!-- agent:boundary:eff99a46 -->
+
+### Re: do [#jbtsiftnosub2verify] — gpt-5.6-sol
+
+Done. I ran the JetBrains `Run Agent Doc` action against a disposable project-root Markdown document after proving it had no actor, registry entry, supervisor, or tmux pane (`closed-clean`, `pane=none`). IDEA invoked `cp:editor_route --dispatch-only --plain-trigger`, created fresh pane `%52`, and submitted the reopen instead of leaving it in the composer.
+
+**Live proof:**
+
+- IDEA logged `SubmitAction actionPerformed` and the project-root `editor_route` request for `tasks/agent-doc/jbtsiftnosub2verify-live.md`.
+- `ops.log` recorded `route_owned_start_policy ... pane=%52`, `dispatch_inject ... transport=supervisor_ipc`, `route_submit_observation ... result=accepted ... trigger_visible=false`, `route_actor_dispatch_start_proven ... proof=consumed`, `route_dispatch_only_sent ... proof=consumed`, and `fresh_route_dispatch_only`.
+- The pane capture showed the submitted `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/jbtsiftnosub2verify-live.md` turn in scrollback and an empty Codex composer afterward (only the placeholder remained), so there was no typed-but-unsubmitted draft.
+- The scratch cycle reached `commit_success`; `agent-doc session-check` returned committed cycle `cycle-1785230111599`; `startup_miss` remained `none`.
+
+**Marker migration:** the backlog's required `fresh_route_stranded_trigger_resubmit` + `fresh_route_start_acknowledged_after_resubmit` pair is now legacy for this JetBrains path. The current plugin deliberately routes with `--dispatch-only`, and `agent-doc-route-io/src/startup.rs` returns through `fresh_route_dispatch_only` before the non-dispatch-only cycle-ack/resubmit classifier. Because the live submit succeeded on the first attempt, no stranded-draft resubmit was needed. The current equivalent proof is the accepted/consumed dispatch-start sequence above; retaining the old pair as a JetBrains acceptance requirement would incorrectly fail healthy current runs.
+
+**Cleanup:** closed both scratch editor tabs, killed only disposable pane `%52`, ran targeted `agent-doc fix` (removed its one stale session entry), and removed the scratch files. No test pane or tracked scratch artifact remains.
+
+**Changed paths:** `.codex/skills/agent-doc/SKILL.md` was refreshed from the installed 0.35.51 copy to the running binary's 0.35.52 skill during mandatory skill-version alignment; no agent-doc product source was changed.
+
+**Commands:** `tsift status`; bounded `rg`/`tsift source-read`; `agent-doc session status`; IDEA open + focus-guarded `xdotool` shortcut; bounded `ops.log`/`idea.log` inspection; `tmux capture-pane`; scratch `agent-doc session-check`; targeted `agent-doc fix`.
+
+**Verification:** live no-pane JetBrains route passed on agent-doc 0.35.52; submitted trigger consumed, composer cleared, cycle committed, no FreshStart startup-miss.
+
+**Confidence:** High.
+
+**Escalation:** None.
+<!-- agent:boundary:3f6f2adc -->
 <!-- /agent:exchange -->
 ## Queue
 

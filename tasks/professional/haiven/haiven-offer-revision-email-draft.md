@@ -5,7 +5,6 @@
 Replace each bracketed placeholder with:
 
 - the exact legal entity name from the applicable agreement;
-- truthful approximate weekly hours and expected duration; and
 - the registered entity name for MonsterRodHolders.com and Equity Funding Source, if applicable.
 
 Attach a completed prior-inventions schedule (Exhibit A) or state when it will
@@ -56,17 +55,14 @@ To comply with the offer’s disclosure requirement, I am formally disclosing
 the following pre-existing activities:
 
 - **Apollo Solutions [exact contracting entity]:** My contract/freelance
-  counterparty for a technology engagement in which Acadian Financial Services
-  is the current end client; approximately [hours] per week through [date or
-  “ongoing”]. I do not contract directly with Acadian.
+counterparty for a technology engagement in which Acadian Financial Services
+is the current end client. I do not contract directly with Acadian.
 - **MonsterRodHolders.com [exact legal entity, if any]:** My pre-existing
-  independently owned business/activity and its associated website, products,
-  software, content, operations, compensation, and intellectual property;
-  approximately [hours] per week.
+independently owned business/activity and its associated website, products,
+software, content, operations, compensation, and intellectual property.
 - **Equity Funding Source [exact legal entity]:** My pre-existing independent
-  business/engagement and its associated website, software, content,
-  operations, compensation, and intellectual property; approximately [hours]
-  per week.
+business/engagement and its associated website, software, content,
+operations, compensation, and intellectual property.
 
 These activities will be performed outside Haiven working time using separate
 equipment, accounts, repositories, credentials, and systems. I will not use or
@@ -83,7 +79,7 @@ Contracting Agreement:
   third party, as their governing agreements require;
 - Haiven acquires no ownership or license merely because an activity continues
   during my employment;
-- Haiven will not require disclosure of another party’s confidential
+t- Haiven will not require disclosure of another party’s confidential
   information;
 - the approval cannot be revoked retroactively or used to claim compensation
   already earned; and

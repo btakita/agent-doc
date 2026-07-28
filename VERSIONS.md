@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.53
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._
+
+- **Current typed closeout-recovery evidence is no longer vetoed by a stale compatibility snapshot (`#sidecarstate`).** The loader still requires its visible-document hash to match current document authority, but snapshot-baseline drift remains advisory evidence rather than overriding the Lazily state projection.
+
 ## 0.35.52
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._

@@ -769,18 +769,31 @@ Done. I ran the JetBrains `Run Agent Doc` action against a disposable project-ro
 **Confidence:** High.
 
 **Escalation:** None.
-<!-- agent:boundary:7364a593 -->
+
+### Re: `#jbtsiftnosub2verify` closeout recovery — gpt-5.6-sol
+
+The live verification response and `#jbtsiftnosub2verify` completion are durable. The stale stop-hook ledger was reconciled; the empty preflight cycle created during recovery was explicitly abandoned so it did not consume the next queue prompt. The disposable `%52` pane and scratch artifacts remain removed, `agent-doc-bugs2.md` is reopened in IDEA, and the terminal invariant check is clean.
+
+**Changed paths:** No additional product-source changes.
+
+**Verification:** `agent-doc session-check` returned `ok`; no queue continuation is required.
+
+**Confidence:** High.
+
+**Escalation:** None.
+<!-- agent:boundary:e0368c2c -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#compactreactiveprojectionverify]
 - ~~📌 do [#nsfz]~~
 - ~~📌 do [#suprestassoc-live]~~
 - ~~📌 do [#jbedtledgerverify]~~
 - ~~📌 do [#0dsr]~~
 - ~~📌 do [#30p6]~~
 - ~~📌 do [#opcapturelazily]~~
-- 📌 do [#jbtsiftnosub2verify]
+- ~~📌 do [#jbtsiftnosub2verify]~~
 - 📌 do [#sidecarstate]
 - 📌 do [#adstatechart2]
 - 📌 do [#adstatechart3]

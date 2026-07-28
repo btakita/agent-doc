@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -148,21 +148,52 @@ Changed paths:
 Verification: `git diff --cached --check` passed before commit; tsift parsed the new 281-line plan into 114 Markdown nodes; targeted checks confirmed the feature ids, staging rules, C# treatment, execution phases, and resilience/stdlib distinction. Commit: `723da4580` (`plan: stage portable stdlib conformance rollout`).
 
 Confidence: high. Escalation: none. Implementation is captured as six ordered, plan-backed backlog phases rather than falsely claiming all bindings already support the new stdlib surface.
-<!-- agent:boundary:f039825d -->
+
+### Re: Lazily release publication — gpt-5
+
+> **Queue prompt:**
+>
+> release + publish lazily
+
+Released the currently completed Lazily package surfaces without over-claiming the planned portable-stdlib rollout.
+
+Rust:
+
+- Bumped `lazily` from `0.53.0` to `0.54.0` because the already-published `0.53.0` archive predates `src/stdlib.rs`.
+- Full lazily-rs `make check` passed. `cargo publish --dry-run --locked` passed and packaged 219 files; the package manifest explicitly included `src/stdlib.rs` plus the Timer, Timeout, and RevisionBarrier tests.
+- Published `lazily 0.54.0` to crates.io. `cargo search lazily --limit 1` resolves `0.54.0`.
+- Pushed lazily-rs commit `8e77f5c` (`release: 0.54.0`), annotated tag `v0.54.0`, and GitHub release `https://github.com/lazily-hub/lazily-rs/releases/tag/v0.54.0`.
+- Recorded the new submodule pointer in superproject commit `b1b6565fa` (`release: point lazily-rs to 0.54.0`). The workspace-level `make check` passed on the confirming run; an initial transient `corky-core` failure passed immediately in isolation before the full rerun.
+
+NuGet / C#:
+
+- Confirmed `Lazily 0.3.0` is live in the NuGet v3 registry and the trusted-publishing release run `30326214700` completed successfully.
+- Did not mint a misleading second package version for the two post-tag commits: they add the repository's `Lazily.InteropPeer` executable and release-fixture checkout, not a new surface in the packed `Lazily` library.
+
+JavaScript:
+
+- `v0.30.1` is already tagged and released on GitHub, but npm still resolves `@lazily-hub/lazily-js` to `0.29.1`.
+- The tagged OIDC job built and tested the package and emitted signed provenance, then npm rejected the publish with `E404` / no package permission. Local npm credentials are also absent.
+- Opened the package publishing-access page through chromium-bridge in Brave. npm requires physical security-key reauthentication before the trusted publisher can be configured. The page is parked at that challenge; no npm publication is claimed.
+- Captured a gated `#lzjspublish` follow-up with the deterministic publisher configuration: GitHub Actions, organization `lazily-hub`, repository `lazily-js`, workflow `release.yml`, allowed action `npm publish`, then rerun release job `30309980372` and verify `0.30.1` from the registry.
+
+The broad all-binding stdlib release remains correctly gated behind `#lzstdlibspec`, `#lzstdlibrsfixtures`, the native/managed/C# port phases, and `#lzstdlibmatrixrelease`. The other bindings were not republished from documentation-only coverage commits, and unsupported stdlib peers remain staged rather than receiving false pass or release credit.
+
+The required one-time Rust CI inspection saw prior run `30386744754` red only because its signaling-worker job did not check out the sibling lazily-spec signaling fixtures; the Rust stdlib/release change itself passed the complete local repository gate.
+
+Confidence: high for Rust and NuGet publication; npm is explicitly gated on operator authentication. Escalation: physical npm security-key confirmation.
+<!-- agent:boundary:d64cd33e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzstdlibbarrier]: Should we also add other concurrency "primitives" to the lazily library?~~
-- ~~do [#lzstdlibtimeout]~~
-- ~~Please ensure the stdlib is in lazily-spec + lazily-formal + comformance tests + peer tests + all implementations.~~
-- release + publish lazily
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
 - [ ] [#lzstdlibspec] Implement Phase 0 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: land lazily-spec stdlib docs/schema/fixtures/coverage rows and lazily-formal Timer/Timeout/RevisionBarrier models and laws, with fixture-count, assertion-floor, and mutation gates.
 - [ ] [#lzstdlibrsfixtures] Implement Phase 1 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: replay the canonical stdlib corpus against lazily-rs production APIs and add production-backed Rust peer feature controls without treating Rust as the oracle.
 - [ ] [#lzstdlibportsnative] Implement Phase 2 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Zig, Go, and C++, including race/sanitizer and peer feature scenarios.

@@ -100,7 +100,11 @@ Keyed side-effect receipts remain application-owned rather than becoming storage
 I deliberately did not add generic mutexes, semaphores, latches, channels, or task groups. Rust already owns local synchronization, while Lazily already has distributed `LockCell`, `SemaphoreCell`, `BarrierCell`, and `QuorumCell`. The README now records this admission rule for future stdlib additions.
 
 Verification passed: the focused seven-test suite covers already-satisfied state, predicate/revision races and lost wakeups, cancellation, `Timer` deadlines, disposal, foreign cancellation inputs, and keyed receipts; the full `make check` matrix also passed. Published lazily-rs commit: `1aefa60`; superproject pointer commit: `fdc93f4b6`; CI run `30384803931` was queued at the required single inspection.
-<!-- agent:boundary:393ebc19 -->
+
+### Re: Response
+
+IDEA still registers `lazily.md` as the primary authoritative editor, so the hashes cannot settle. Please save intentional edits and fully close that tab—or exit IDEA—then say `continue`. The retained response remains safe and no write was forced.
+<!-- agent:boundary:56171e09 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -108,6 +112,8 @@ Verification passed: the focused seven-test suite covers already-satisfied state
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzstdlibbarrier]: Should we also add other concurrency "primitives" to the lazily library?~~
 - do [#lzstdlibtimeout]
+- Please ensure the stdlib is in lazily-spec + lazily-formal + comformance tests + peer tests + all implementations.
+- release + publish lazily
 <!-- /agent:queue -->
 
 ## Backlog

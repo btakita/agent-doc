@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -48,19 +48,33 @@ Compacted content:
 I did not execute the TMO sandbox purge or issue any `DeleteLoan` operations. The queued `do #tmo-sandbox-purge-apply` directive is the auto-mirrored queue item that its own safety text explicitly says is not approval for permanent deletion.
 
 The item remains gated pending an explicit operator instruction approving the sandbox purge after acknowledging that attachment bytes and deleted RecIDs are not recoverable. Before any approved purge, I will take the documented snapshot and preserve the 16-loan target list, keep-list, and dry-run evidence required by `docs/TMO/snapshot.md` and `docs/TMO/delete-loan.md`.
-<!-- agent:boundary:1764ff3d -->
+
+### Re: EFS production route token — gpt-5
+
+> **Queue prompt:**
+>
+> do [#efs-prod-route-token]
+
+
+Completed `#efs-prod-route-token`.
+
+- Granted the account-owned production token at `passage:btak/equityfundingsource/production/cloudflare_api_token` domain-scoped **Workers Routes Write** access for `equityfundingsource.com`; the token value was updated in place and remains active.
+- Deployed committed EFS revision `c6d4133ec38278d4f7428f0d6d8919be466b1288` from an isolated temporary worktree with `bun run deploy:worker:production:no-migrate`. The command exited 0, including Wrangler route synchronization, and produced Worker version `58884065-ce70-4ce4-9ae2-98c30e08ebcb`.
+- Verified through Cloudflare that the existing custom-domain bindings were preserved unchanged: `equityfundingsource.com` and `www.equityfundingsource.com` both remain attached to service `equityfundingsource-production`, environment `production`, in zone `426085c68d8d584075c824ff1d715926`.
+- Verified both public URLs return HTTP 200.
+- Changed paths: no repository files were changed; the original dirty worktree was left untouched, and the temporary worktree was removed after verification.
+
+Confidence: high. No escalation remains for this item.
+<!-- agent:boundary:2e7a0c14 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#tmo-sandbox-purge-apply]~~
-- do [#efs-prod-route-token]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.
-- [ ] [#efs-prod-route-token] [recommended] [operator-verify] Grant the EFS production Cloudflare API token Workers Routes Edit for equityfundingsource.com. Production deploys activate the new Worker version, but Wrangler route synchronization returns Cloudflare code 10000; verify a subsequent production deploy exits 0 without changing the existing route.
 <!-- /agent:backlog -->
 
 ## Review

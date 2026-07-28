@@ -323,14 +323,96 @@ Using Chromium Bridge, I opened that exact Gmail conversation and replaced the p
 For clarity, the correct draft to review is the threaded **“Re: Haiven Offer Letter”** draft. An earlier standalone draft with subject **“Haiven offer documents -- requested clarifications and outside-engagement disclosure”** also remains in Gmail; it was not sent and can be discarded after you confirm the threaded reply looks right.
 
 The source changes are committed as `fc671c26e`; the private mail-source commit is `5da3f14`. I moved `#haiven-paper` to review: the remaining steps require your approval/send action and Haiven's revised, countersigned documents.
-<!-- agent:boundary:32f8f12a -->
+
+### Re: Connecticut/AAA rationale and mirrored Haiven draft updates — gpt-5
+
+> **Queue prompt:**
+>
+> Is "Please use Connecticut law and a Connecticut or remote forum. If arbitration remains, it should proceed remotely under the AAA Employment/Workplace Rules, preserve all statutory remedies and fee-shifting, and require Haiven to pay the arbitration and arbitrator costs other than a filing fee no greater than the fee for filing the same claim in court." something Haiven may contest? If we go to arbitration, I think a virtual hearing is a good idea. Why was AAA suggested?
+
+> Please explain my rationale for the CT jurisdiction + AAA arbitration.
+>
+> If I were to move, would my jurisdiction change? Should I use Haiven's jurisdiction with remote hearings for consistency?
+
+Yes, Haiven may contest parts of the request, but the rationale is coherent. Four distinct concepts matter:
+
+1. **Governing law** — which state's substantive law applies.
+2. **Legal forum or arbitral seat** — where court proceedings are filed or the arbitration is legally located.
+3. **Hearing format** — virtual or in person.
+4. **Administrator and rules** — here, AAA and its employment rules.
+
+A virtual hearing does not determine governing law or legal jurisdiction. Connecticut law and a Connecticut arbitral seat can use a videoconference hearing; Haiven's home-state law and seat can use the same virtual format.
+
+#### Your Connecticut rationale
+
+Connecticut is where you expect to perform the job and where an employment dispute would directly affect you. Requesting Connecticut law and a Connecticut forum or arbitral seat would:
+
+- give you an accessible legal framework rather than requiring cross-country travel;
+- align the contract with the state where you perform the employment relationship; and
+- reduce uncertainty about the effect of mandatory protections in the state where you work.
+
+It also responds to an actual inconsistency in Haiven's documents: the offer letter selects Wyoming law and Laramie County courts, while Section 13.1 of the contractor agreement selects AAA arbitration in Spokane County, Washington. Your central request is: **replace two conflicting dispute frameworks with one clear framework that a Connecticut-based remote employee can realistically use.** Connecticut is a reasonable opening preference, not something you need to characterize as legally mandatory.
+
+#### Why AAA was suggested
+
+AAA was not introduced from scratch. Haiven's Section 13.1 already requires arbitration under AAA's Employment Dispute Resolution Rules. Retaining AAA avoids proposing a different provider while updating the reference to AAA's current **Employment/Workplace Arbitration Rules**.
+
+AAA's current framework also supports the protections you want:
+
+- AAA caps an individual's administrative filing fee at $350 and generally allocates the remaining administrative fees and arbitrator compensation to the company, absent a post-dispute agreement otherwise. That differs materially from Haiven's clause requiring you to pay half of arbitration costs and expenses. See AAA's [Employment/Workplace Fee Schedule](https://www.adr.org/rules-forms-and-fees/employment/employmentworkplace-fee-schedule-costs-of-arbitration/) and [employment overview](https://www.adr.org/industries/employment/).
+- AAA's 2025 changes make virtual hearings the default, while allowing an in-person hearing when requested and appropriate. See AAA's [rule-change announcement](https://www.adr.org/press-releases/aaa-updates-consumer-and-employment-arbitration-rules/) and [rule-change summary](https://www.adr.org/news-and-insights/the-aaa-s-2024-2025-arbitration-rule-changes-a-breakdown/).
+
+The contract should expressly replace its 50/50 cost provision so it does not create an avoidable conflict with the AAA fee schedule.
+
+#### What Haiven may contest
+
+From most to least likely:
+
+1. **Connecticut governing law or seat.** Haiven may prefer one home-state law for all employees, although its drafts first need to reconcile Wyoming and Washington.
+2. **Deleting the 50/50 arbitration-cost term.** This changes an express economic term, but it is a well-supported request because current AAA employment fees generally place administrative and arbitrator costs on the company.
+3. **Virtual hearings by default.** This should be comparatively easy because it tracks AAA's current default. A balanced clause permits an in-person hearing if the parties agree or the arbitrator finds it necessary.
+4. **Preserving statutory remedies and fee-shifting.** This should be least controversial. It does not mean Haiven automatically pays your attorney; it preserves the arbitrator's authority to award remedies and attorney fees that applicable law would permit in court.
+
+#### If you move
+
+Moving would not ordinarily rewrite the contract's selected governing law or arbitral seat. Those terms remain as signed unless the parties amend them. But the state where you actually work can change which mandatory employment laws and payroll, tax, leave, registration, or similar obligations apply. Some mandatory protections may apply despite a choice-of-law clause. That analysis is state- and fact-specific, so disclose a move to Haiven and review the agreement then.
+
+For that reason, describe Connecticut as your **expected work location at signing and preferred law/seat**, not as a permanent personal “jurisdiction.”
+
+#### Should you use Haiven's jurisdiction with remote hearings?
+
+That is a sensible fallback, but it does not create consistency until Haiven chooses between Wyoming and Washington. I would prioritize:
+
+1. one unambiguous governing-law and dispute-resolution framework;
+2. hearings virtual by default;
+3. no employee half-share of administrative and arbitrator costs;
+4. preservation of all remedies and statutory fee-shifting available in court; and
+5. Connecticut law and seat as preferred but negotiable.
+
+If Haiven insists on its actual home-state law and legal seat, accepting that can be reasonable after it identifies one state and explains the choice. Preserve non-waivable protections of the state where you work. A legal seat in Haiven's state and a fully virtual hearing can coexist.
+
+#### Draft language now used
+
+I replaced the imprecise phrase “Connecticut or remote forum.” The draft now says Connecticut is your preference, explicitly leaves Haiven's single home-state framework open for discussion, and separately makes hearings virtual by default. It also preserves court-equivalent remedies, statutory fee-shifting, work-state protections, and the current AAA employer-cost model.
+
+I also processed the remaining queue instructions:
+
+- The draft identifies the job location as **Remote—Connecticut**, gives the physical work address as **1 Park St, #2 - 571, North Grosvenordale, CT 06255**, and gives **PO Box 571, North Grosvenordale, CT 06255** as the mailing address.
+- It says you expect to start later than usual on **Monday, August 10, 2026**, may miss or join the **10:00 a.m. PT** standup/iteration-planning meeting late, and may occasionally have a conflict with that recurring meeting. It promises advance notice when possible, written planning notes, and make-up time/planning coordination before or after the meeting.
+- I updated both [haiven-offer-revision-email-draft.md](../professional/haiven/haiven-offer-revision-email-draft.md) and the open threaded Gmail reply. The markdown change is committed as `021abe453`.
+- I independently reloaded a second Gmail tab and verified the server-backed draft: 9,018 characters, Craig and Luke only, subject **“Re: Haiven Offer Letter,”** correct opening and `Thanks, / Brian` closing, all new location/arbitration/scheduling markers, and preserved paragraph breaks. The Send button remains available and was not clicked.
+
+My recommendation is to keep Connecticut as the opening preference but treat it as tradeable. The higher-value protections are a usable virtual process, no half-share of arbitrator costs, preservation of court-equivalent remedies and fee-shifting, work-state mandatory protections, and one internally consistent clause.
+
+This is contract issue-spotting rather than Connecticut, Wyoming, or Washington legal advice; counsel should review final language before signature.
+<!-- agent:boundary:6b07d323 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
 - My mailing address is PO Box 571, North Grosvenordale, CT 06255. My physical address (if needed) is 1 Park St, #2 - 571, North Grosvenordale, CT 06255.
-- Is "Please use Connecticut law and a Connecticut or remote forum. If arbitration remains, it should proceed remotely under the AAA Employment/Workplace Rules, preserve all statutory remedies and fee-shifting, and require Haiven to pay the arbitration and arbitrator costs other than a filing fee no greater than the fee for filing the same claim in court." something Haiven may contest? If we go to arbitration, I think a virtual hearing is a good idea. Why was AAA suggested?
+- ~~Is "Please use Connecticut law and a Connecticut or remote forum. If arbitration remains, it should proceed remotely under the AAA Employment/Workplace Rules, preserve all statutory remedies and fee-shifting, and require Haiven to pay the arbitration and arbitrator costs other than a filing fee no greater than the fee for filing the same claim in court." something Haiven may contest? If we go to arbitration, I think a virtual hearing is a good idea. Why was AAA suggested?~~ — auto-struck: answered this cycle (#ftstrike)
 - Please mention that I will be coming in late on Monday Aug 10. The weekly standup/iteration planning is at 10 PT on Mondays. Mention that I may have the occasional conflict for the weekly standup/iteration planning and I can make up the time + planning either before or after the planning. I will also provide notes if I do have a schedule conflict.
 - Updates go to both the md draft + the open brave tab at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp
 <!-- /agent:queue -->

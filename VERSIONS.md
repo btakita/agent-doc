@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.56
+
+_JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **VS Code merge ownership now uses lazily-js's typed state chart (`#adstatechartjs`).** The extension dependency advances from `@lazily-hub/lazily-js` 0.27.0 to the latest published 0.29.1; the historical `1.1.0`/`@lazily/js` backlog names were superseded by the package's actual scoped `0.x` release line. `CrdtReplicaForwarder` now derives attachment from a `ChartBuilder`-defined `StateChart`, routing registration, buffer observation, and retirement through the same six-phase/seven-event vocabulary as the binary rather than mutating a standalone Boolean. The Rust/controller projection remains authoritative for disk-write permission. Full transition-matrix and forwarder lifecycle tests keep rejected edges fail-closed. Local lazily-js 0.30.1 remains independently blocked on its existing npm Trusted Publisher/2FA operator action; the extension does not depend on that unpublished build.
+
 ## 0.35.55
 
 _JetBrains plugin 0.2.306; VS Code extension 0.2.58; Zed extension 0.1.0._

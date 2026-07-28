@@ -8,6 +8,10 @@ import {
     reliableSyncDocumentOpPush,
     reliableSyncTextAdoptPush,
 } from './native.js';
+import {
+    MergeOwnershipStateChart,
+    type MergeOwnershipPhase,
+} from './mergeOwnershipStateChart.js';
 import { peerReplicaRebuildPaths } from './peerReplicaPull.js';
 
 /**
@@ -436,10 +440,10 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
 }
 
 export class CrdtReplicaForwarder {
-    attached = false;
     private clientId = 0;
     private pushedVersion: Uint8Array | null = null;
     private lineage: string | null = null;
+    private readonly ownership = new MergeOwnershipStateChart();
 
     constructor(
         private readonly filePath: string,
@@ -451,6 +455,14 @@ export class CrdtReplicaForwarder {
 
     get currentClientId(): number {
         return this.clientId;
+    }
+
+    get attached(): boolean {
+        return this.ownership.editorAttached;
+    }
+
+    get ownershipPhase(): MergeOwnershipPhase {
+        return this.ownership.phase;
     }
 
     async register(): Promise<boolean> {
@@ -482,7 +494,16 @@ export class CrdtReplicaForwarder {
             await this.transport.deregister(this.filePath, this.identity);
             return false;
         }
-        this.attached = true;
+        if (!this.ownership.send('editor_attached')) {
+            throw new Error(
+                `merge-ownership chart rejected editor attach from ${this.ownership.phase}`,
+            );
+        }
+        if (!this.ownership.send('editor_buffer_observed')) {
+            throw new Error(
+                `merge-ownership chart rejected buffer ownership from ${this.ownership.phase}`,
+            );
+        }
         this.pushedVersion = incremental
             ? ack.canonicalStateVector ?? new Uint8Array()
             : this.node.stateVector?.() ?? new Uint8Array();
@@ -583,7 +604,11 @@ export class CrdtReplicaForwarder {
         this.node.close(this.clientId);
         this.pushedVersion = null;
         this.lineage = null;
-        this.attached = false;
+        if (!this.ownership.send('editor_detached')) {
+            throw new Error(
+                `merge-ownership chart rejected editor detach from ${this.ownership.phase}`,
+            );
+        }
     }
 }
 

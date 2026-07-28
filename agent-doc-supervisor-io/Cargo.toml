@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-supervisor-io"
-version = "0.35.55"
+version = "0.35.56"
 edition = "2024"
 description = "Supervisor marker storage I/O for agent-doc"
 license = "MIT"
@@ -11,27 +11,27 @@ publish = false
 name = "agent_doc_supervisor_io"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.55" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.56" }
 # `#relaylockpoison`: locks here are parking_lot, not `std::sync` — the workspace
 # keeps `panic=unwind` so the cdylib's `catch_unwind` guards survive a panic in a
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-config = { path = "../agent-doc-config", version = "0.35.55" }
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.55" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.55" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.55" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.55" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.55" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.55" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.55" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.55" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.55" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.55" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.55" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.55" }
-agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.55" }
-agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.55" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.35.56" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.56" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.56" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.56" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.56" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.56" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.56" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.56" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.56" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.56" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.56" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.56" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.56" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.56" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.56" }
 anyhow = "1"
 lazily = "0.53.0"
 indexmap = { version = "2", features = ["serde"] }

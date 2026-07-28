@@ -161,6 +161,7 @@ describe('crdt replica manager', () => {
         );
 
         assert.strictEqual(await forwarder.register(), true);
+        assert.strictEqual(forwarder.ownershipPhase, 'editor_owns_buffer');
         assert.deepStrictEqual(Array.from(node.openedState ?? []), [1, 2, 3]);
         assert.deepStrictEqual(Array.from(registeredStateVector ?? []), [6, 7]);
         assert.deepStrictEqual(Array.from(node.updates[0] ?? []), [8, 9]);
@@ -169,6 +170,8 @@ describe('crdt replica manager', () => {
             1,
             'the retained local suffix must be published from the canonical frontier',
         );
+        await forwarder.deregister();
+        assert.strictEqual(forwarder.ownershipPhase, 'detached');
     });
 
     it('requires visible-content proof before replaying a retained ACK', () => {

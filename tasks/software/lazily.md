@@ -304,7 +304,22 @@ Mutation proof changed the production FNV prime: canonical `arena_blob.json` fai
 Shipped commits are lazily-cs `935996d`, lazily-spec `ba62af1`, sibling coverage commits `1eb95c2`, `6814627`, `1e97133`, `254604d`, `b42de92`, `2035d1d`, `22c66ce`, `6ee3e9d`, and `d6f4a1e`, with root pointer commit `883aaa5a1`; all were pushed. The one-shot CI inspection found C#, spec, Kotlin, JavaScript, Dart, Zig, Go, and C++ successful; Rust in progress; and no CI workflow in Python, formal, or the root. It was not polled further.
 
 Pre-existing C#/JS/Zig/Python and root worktree changes were preserved and excluded. C# may now join all three exact IPC feature groups; only sync and plane remain staged.
-<!-- agent:boundary:835fc041 -->
+
+### Re: #lzcssync — gpt-5
+
+Completed and shipped the C# reliable-sync phase.
+
+- Added the production `CrdtPlaneRuntime`: HLC-stamped op log, max-stamp convergence, per-peer frontiers, cold/full and frontier-relative anti-entropy replies, causal-stability watermark, stable-key routing, and real `ReplicatedCell` local/remote integration.
+- Added strict `ResyncRequest` / `OutboxAck` IPC variants, the pure `ResyncCoordinator`, OR-set/LWW liveness cells and derived liveness registry, lease-gated peer eviction policy, and quorum-gated distributed-queue policy.
+- Extended the storage-independent durable outbox with retained-depth reporting, atomic state-snapshot coalescing, lossless same-direction QueueCell batch fusion, and durable unacked reclamation.
+- Added `IpcSink` / `IpcSource`, injected clock/snapshot seams, and a bounded full-duplex `SyncDriver` with append-before-send, retain-on-failure, reconnect replay, cursor acknowledgements, gap resync, strict snapshot coverage, source-failure propagation, and stall diagnostics.
+- Replayed the seven formerly staged fixtures: `distributed/anti_entropy_converge.json` plus all six remaining reliable-sync fixtures. Runtime coverage is now **113/124**, with only the 8 message-passing fixtures, 2 agent-doc projection fixtures, and `collections/mergecell_algebra.json` left for the final plane/audit work.
+- Mutation proof: changing contiguous-delta classification made the resync corpus fail; changing the CRDT winner from max-stamp to min-stamp made anti-entropy convergence fail. Both mutations were restored.
+- Verification: `dotnet format --verify-no-changes`, **180/180 tests**, C# `make check`, and lazily-spec `make check` all pass.
+- Published C# commits `1f8a7ac` / `25d4ebd`, spec coverage commit `02e9f65`, synchronized every sibling README, and advanced the root pointers in `679a7ee5a`. One-shot CI: spec is green; C#, Rust, Kotlin, JS, Dart, Go, and C++ are in progress; Zig is queued; root/Python/formal have no workflow named `CI`. Per the runbook, I did not poll.
+
+The remaining implementation phase is `#lzcsplane`, followed by the full parity audit.
+<!-- agent:boundary:5da0f490 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -315,7 +330,6 @@ Pre-existing C#/JS/Zig/Python and root worktree changes were preserved and exclu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
 - [ ] [#lzcsplane] lazily-cs: PARTIAL/STAGED — CausalReceipt/CausalReceipts schema/projection shipped at 967c44e; all 17 typed signaling frames, strict exact codec, authoritative SignalingRoom, anti-spoof server-stamped sender, sorted self-excluding rosters, unknown-target handling, and leave semantics shipped at d663074 with canonical signaling client/server fixture replay. Runtime coverage is now 61/124 with 63 known-uncovered. Admit C# only to the exact causal-receipts and signaling-wire/open-room peer groups. Still implement general state projection/mirror, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay service, agent-doc, and remaining message-passing corpora. Plan rows 33-39. (stays open: state mirror, command plane, FFI, permissions, handshake, instrumentation/benchmarks, and remaining corpora.)
 - [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Reverified 2026-07-27 at lazily-cs 935996d: 106/124 canonical fixtures are runtime-opened and 18 are explicitly known-uncovered; 165/165 tests, all three target frameworks, package checks, and the conformance guard pass. All three IPC rows are now admitted (Snapshot/Delta/CrdtSync wire, exact ShmBlobArena, and executable BlobBackend transport for shm, Arrow, and in-process backends), alongside the previously shipped exact slices. (stays open: close only after #lzcssync and #lzcsplane ship their remaining production surfaces and canonical replays; until then admit C# only to exact feature groups whose implementation and fixture replay are present.)
 <!-- /agent:backlog -->

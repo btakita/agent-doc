@@ -1536,6 +1536,31 @@ pub fn register_replica_for_file_incremental(
     )
 }
 
+/// Register an explicit editor-sidecar replica and seed its crash-safe reactive
+/// authority before entering the normal authority-gated registration path.
+///
+/// Existing native plugins publish liveness before `replica_register`. An LSP
+/// sidecar has no in-process FFI host, so its `didOpen` carries the sidecar PID
+/// and the controller installs the same process-exit watch directly.
+pub fn register_editor_replica_for_file_incremental(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+    editor_pid: u32,
+) -> Result<Option<ReplicaRegistration>> {
+    let doc = file.display().to_string();
+    agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_open(&doc, true);
+    agent_doc_document_realtime::editor_attach::editor_attach().attach(&doc, editor_pid);
+    match register_replica_for_file_incremental(file, identity, retained_state_vector) {
+        Ok(registration) => Ok(registration),
+        Err(error) => {
+            agent_doc_document_realtime::editor_attach::editor_attach()
+                .detach_pid(&doc, editor_pid);
+            Err(error)
+        }
+    }
+}
+
 #[cfg(test)]
 fn register_replica_for_file_with_liveness(
     file: &Path,
@@ -1707,6 +1732,23 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
             hub_evicted,
         ),
     );
+    Ok(removed)
+}
+
+/// Deregister one editor sidecar without clearing another editor process's
+/// attachment for the same document.
+pub fn deregister_editor_replica_for_file(
+    file: &Path,
+    identity: &str,
+    editor_pid: u32,
+) -> Result<bool> {
+    let removed = deregister_replica_for_file(file, identity)?;
+    let doc = file.display().to_string();
+    let attach = agent_doc_document_realtime::editor_attach::editor_attach();
+    attach.detach_pid(&doc, editor_pid);
+    if !attach.is_attached(&doc) {
+        agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_closed(&doc);
+    }
     Ok(removed)
 }
 

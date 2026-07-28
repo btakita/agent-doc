@@ -318,6 +318,36 @@ pub(crate) fn request_controller<T: DeserializeOwned>(
     request_controller_with_timeout(project_root, request, CONTROLLER_RPC_TIMEOUT)
 }
 
+/// Send one editor-replica request through the project controller.
+///
+/// This is the focused client seam used by editor sidecars. It lazily launches
+/// the controller exactly like other mutating client requests.
+pub fn request_crdt_replica(
+    project_root: &Path,
+    file: &Path,
+    diagnostic_payload: serde_json::Value,
+) -> Result<serde_json::Value> {
+    request_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "crdt_replica".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(diagnostic_payload.to_string()),
+        },
+        CONTROLLER_RPC_TIMEOUT,
+    )
+}
+
 #[cfg(any(test, feature = "test-support"))]
 pub fn request_crdt_replica_for_test(
     project_root: &Path,
@@ -5765,6 +5795,10 @@ struct ControllerCrdtReplicaPayload {
     content_hash: Option<String>,
     awareness_b64: Option<String>,
     source: Option<String>,
+    /// Process identity of an editor sidecar that cannot publish liveness
+    /// through the native editor FFI.
+    #[serde(default)]
+    editor_pid: Option<u32>,
     /// `#ackeditorstamps`: editor-side wall-clock epoch ms for the first three
     /// moments of the delivery-ACK round trip. Absent from any replica that has
     /// not been updated, so every consumer must treat them as optional.
@@ -6803,11 +6837,22 @@ fn controller_crdt_replica_data(
                 .map(base64_standard_decode)
                 .transpose()
                 .context("CRDT replica register payload has invalid state_vector_b64")?;
-            match agent_doc_crdt_relay_io::register_replica_for_file_incremental(
-                canonical,
-                identity,
-                retained_state_vector.as_deref(),
-            )? {
+            let registration = match payload.editor_pid {
+                Some(editor_pid) => {
+                    agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
+                        canonical,
+                        identity,
+                        retained_state_vector.as_deref(),
+                        editor_pid,
+                    )?
+                }
+                None => agent_doc_crdt_relay_io::register_replica_for_file_incremental(
+                    canonical,
+                    identity,
+                    retained_state_vector.as_deref(),
+                )?,
+            };
+            match registration {
                 Some(registration) => Ok(serde_json::json!({
                     "client_id": registration.client_id,
                     "bootstrap_b64": base64_standard_encode(&registration.bootstrap),
@@ -6822,8 +6867,12 @@ fn controller_crdt_replica_data(
             }
         }
         "replica_deregister" => {
-            let removed =
-                agent_doc_crdt_relay_io::deregister_replica_for_file(canonical, identity)?;
+            let removed = match payload.editor_pid {
+                Some(editor_pid) => agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+                    canonical, identity, editor_pid,
+                )?,
+                None => agent_doc_crdt_relay_io::deregister_replica_for_file(canonical, identity)?,
+            };
             Ok(serde_json::json!({ "removed": removed }))
         }
         "replica_update" => {

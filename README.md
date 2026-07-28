@@ -164,6 +164,14 @@ agent-doc plugin install vscode
 
 Or install from the VS Code Marketplace. Add a task with `"command": "agent-doc run ${file}"` and bind it to a keybinding.
 
+**Zed**
+
+Install `editors/zed` as a Zed dev extension. It starts the supplemental
+`agent-doc zed-lsp` server alongside Zed's normal Markdown support. Only buffers
+with valid, non-empty `agent_doc_session` frontmatter enter agent-doc mode;
+ordinary Markdown buffers are a strict no-op. See
+[`editors/zed/README.md`](editors/zed/README.md).
+
 **Vim/Neovim**
 
 ```vim

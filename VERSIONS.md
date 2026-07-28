@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.46
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.57; Zed extension 0.1.0._
+
+- **Zed now has a frontmatter-gated supplemental Markdown language server.** The extension launches `agent-doc zed-lsp` for Zed's existing Markdown language, but only valid non-empty `agent_doc_session` frontmatter attaches a realtime CRDT replica. Ordinary Markdown stays a strict no-op. Local changes publish controller deltas; remote changes cross `workspace/applyEdit` and are ACKed only after their visible hash returns through `didChange`. Explicit sidecar PID registration and PID-scoped detach preserve crash-safe authority and concurrent JetBrains/VS Code replicas.
+
 ## 0.35.45
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.57._

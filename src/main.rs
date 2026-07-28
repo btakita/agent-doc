@@ -2319,6 +2319,8 @@ enum Commands {
         #[command(subcommand)]
         action: McpAction,
     },
+    /// Run the supplemental Markdown language server used by the Zed extension
+    ZedLsp,
     /// Serve a localhost HTTP markdown editor for one document or a project session list
     Serve {
         /// Path to a session document or project directory. Defaults to the nearest project root from CWD.
@@ -4518,6 +4520,7 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Mcp { action } => match action {
             McpAction::Serve { project_root } => mcp::serve(project_root.as_deref()),
         },
+        Commands::ZedLsp => agent_doc_zed_lsp_io::run(),
         Commands::Serve {
             file,
             host,

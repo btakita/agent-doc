@@ -223,6 +223,27 @@ impl EditorAttach {
         }
     }
 
+    /// Mark one `(doc, pid)` pair closed without disturbing another editor
+    /// process attached to the same document.
+    ///
+    /// Language-server sidecars are separate editor processes, so their
+    /// `didClose` must not detach a JetBrains or VS Code replica that happens
+    /// to share the document.
+    pub fn detach_pid(&self, doc: &str, pid: u32) {
+        let key = (doc.to_string(), pid);
+        if !self.registered.is_present(&key)
+            || !self.registered.observe(&self.ctx, &key).unwrap_or(false)
+        {
+            return;
+        }
+        self.set_registered(doc, pid, false);
+        if !self.pid_has_registered_doc(pid)
+            && let Some(watcher) = self.watcher.lock().as_ref()
+        {
+            watcher.unwatch(pid);
+        }
+    }
+
     /// Whether any still-registered document is attached to `pid`.
     fn pid_has_registered_doc(&self, pid: u32) -> bool {
         self.registered
@@ -395,6 +416,28 @@ mod tests {
             w.unwatched.lock().contains(&1234),
             "the last doc for the pid detached ⇒ release the OS watch"
         );
+    }
+
+    #[test]
+    fn pid_scoped_deregister_preserves_another_editor_for_the_document() {
+        let (ea, w) = with_watcher();
+        ea.attach("plan.md", 100);
+        ea.attach("plan.md", 200);
+
+        ea.detach_pid("plan.md", 100);
+
+        assert!(ea.is_attached("plan.md"), "pid 200 still owns the document");
+        assert!(
+            w.unwatched.lock().contains(&100),
+            "the sidecar pid released its watch"
+        );
+        assert!(
+            !w.unwatched.lock().contains(&200),
+            "the remaining editor stays watched"
+        );
+
+        ea.detach_pid("plan.md", 200);
+        assert!(!ea.is_attached("plan.md"));
     }
 
     #[test]

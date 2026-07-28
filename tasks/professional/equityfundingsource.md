@@ -441,18 +441,45 @@ Preflight also warned that the local `agent-doc` install is stale relative to so
 The `agent-doc` cycle is paused because the live editor has unsaved authoritative changes conflicting with a retained projection.
 
 Save, reload, or close/reopen the document so editor and disk converge. The retained operation will resume automatically; do not force-disk or submit another response payload.
-<!-- agent:boundary:514604a9 -->
+
+### Re: `#efs-deploy-hibernation` — gpt-5
+
+> **Queue prompt:**
+>
+> do [#efs-deploy-hibernation]
+
+
+> **Queue prompt:** do [`#efs-deploy-hibernation`]
+
+Completed by verification; no new production deployment was necessary.
+
+The original item was stale: it said production predated the hibernation change, but production has since been deployed repeatedly. The active Worker is version `b9b00945-32e3-44a3-8391-2d6f496b8971`, created July 27, 2026 and serving 100% of traffic. This session’s prior deployment record ties that version to EFS commit `d51135c6`; `git merge-base --is-ancestor b75f92ca d51135c6` exits 0, proving the deployed source includes the July 18 `#efs-do-hibernation` commit. Current source also retains `state.acceptWebSocket()` in all three Durable Object room implementations.
+
+**Changed paths:** None.
+
+**Commands:** Production `wrangler deployments status --env production`; `git merge-base --is-ancestor b75f92ca d51135c6`; targeted `tsift` inspection of `acceptWebSocket` call sites; `git status --short --branch`.
+
+**Verification:** Production version `b9b00945-32e3-44a3-8391-2d6f496b8971` is active at 100%; `b75f92ca` is an ancestor of the deployed `d51135c6` source commit; the hibernation calls remain present in `AdminEventsRoom`, `PortalMessagesRoom`, and `BorrowerChatRoom`.
+
+**Confidence:** High.
+
+**Escalation:** None. Redeploying the same already-live fix would add risk without changing production.
+
+**Commit:** No EFS source commit was needed; this cycle only closes the stale session-document verification item.
+<!-- agent:boundary:0b88b393 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- efs@equityfundingsource.com does not exist. All outbound emails should use reply@efs.equityfundingsource.com. Should we use reply@reply.equityfundingsource.com instead or something different? These automated emails need to be distinct from Google Workspaces.
+- ~~do [#efs-deploy-hibernation]~~
+- do [#tmo-sandbox-purge-apply]
+- do [#efs-prod-route-token]
+- ~~efs@equityfundingsource.com does not exist. All outbound emails should use reply@efs.equityfundingsource.com. Should we use reply@reply.equityfundingsource.com instead or something different? These automated emails need to be distinct from Google Workspaces.~~ — auto-struck: answered this cycle (#ftstrike)
 - `reply@efs.briantakita.me` must not be used. The equityfundingsource automated email subdomain must be used.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#efs-deploy-hibernation] [operator-verify] Deploy the worker so #efs-do-hibernation's billing fix is actually live. The code shipped in EFS b75f92ca (2026-07-18 18:23 EDT) but the newest production deployment is version 1b9c8d69 from 2026-07-18 16:03 UTC / 12:03 EDT — SIX HOURS EARLIER. The live worker still runs the non-hibernating rooms, so the ~328,500 GB-s per always-on room is still accruing. Blocked on operator go only because 23 commits sit between the deployed version and HEAD (hibernation, TMO backup/restore/snapshot/orphan tooling, admin binding queue, Dropbox fail-soft, TMO contacts/vesting-gap admin screens), so 'make deploy' ships far more than the DO change and needs a deliberate go. Verify after deploying with 'CLOUDFLARE_API_TOKEN="$(passage show btak/equityfundingsource/cloudflare_api_token | head -1)" bunx wrangler deployments list --name equityfundingsource' and confirm the newest version postdates b75f92ca.
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). UNBLOCKED 2026-07-19: #tmo-snapshot-verify passed — the snapshot tool ran against real TMO sandbox and reported complete=true (loans=18 fundings=5 attachment_metas=20 lenders=1 borrowers=16, zero errors), so the gate command 'bun ./bin/tmo-snapshot.ts --covers <the 16> --out tmp/tmo-before-purge.json' is now known-good. Take that snapshot immediately before purging. Still held on operator go ONLY because DeleteLoan is permanent with no TMO-side undo. Note the snapshot is evidence, not a restore: attachment BYTES are not captured (20 attachment metas across 554466/AVW580/MBQ435/SRV532/TST766 would be unrecoverable), and RecIDs do not round-trip. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
 - [ ] [#efs-prod-route-token] [recommended] [operator-verify] Grant the EFS production Cloudflare API token Workers Routes Edit for equityfundingsource.com. Production deploys activate the new Worker version, but Wrangler route synchronization returns Cloudflare code 10000; verify a subsequent production deploy exits 0 without changing the existing route.
 <!-- /agent:backlog -->

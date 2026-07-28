@@ -787,7 +787,7 @@ Note I sent this straight through because you said "auto-send" — my default is
 
 Send an email to robert-ward containing the suggestions.
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc (HEAD)
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
 ```text
 **IPC proof issue dogfood log**
@@ -810,6 +810,5 @@ Yes — and there are stronger, dated records than Street View. In rough order o
 4. **Current photos of the signage.** The temporary post-fire signs are very likely *still* the same ones. Photograph spacing, count, visibility, and whether there's any "reduced speed ahead" warning. Circumstantial, but it corroborates her testimony.
 
 Bottom line: she doesn't need Street View to shift the burden. A CPRA/discovery request forces the agency to *produce* proof the limit was properly authorized and posted — and if they can't, that's her strongest argument for dismissal.
-
-<!-- agent:boundary:fca08505 -->
+<!-- agent:boundary:bc1dd507 -->
 <!-- /agent:exchange -->

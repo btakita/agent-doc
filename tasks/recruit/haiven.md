@@ -5,7 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -294,13 +294,14 @@ The direct requirement is in the offer letter’s **“External Contracting”**
 That language requires disclosure of the **activities**, not literally every party by name. Naming the parties is a risk-reduction recommendation so the written approval clearly identifies what it covers. This matters because Section 11 says compensation from third-party services goes to Haiven unless its Board unanimously approves otherwise in writing. See [lines 191–195](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L191-L195).
 
 Section 4 restricts consulting or business activity related to Haiven’s business or conflicting with your obligations, but does not itself prescribe disclosure by name. See [lines 142–147](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L142-L147).
-<!-- agent:boundary:94416c9d -->
+<!-- agent:boundary:fc3af24d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
 - do [#haiven-paper]
+- The email I'm replying to is at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp. Use chromium-bridge to draft the reply. Do not send. I will look it over.
 <!-- /agent:queue -->
 
 ## Backlog

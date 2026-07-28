@@ -4,6 +4,7 @@ import com.sun.jna.Pointer
 import com.sun.jna.ptr.LongByReference
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import io.github.lazily.ThreadSafeContext
 import java.io.File
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.Channels
@@ -43,16 +44,22 @@ class CrdtReplicaForwarder(
     private val identity: String,
     private val node: ReplicaNode,
     private val transport: ReplicaTransport,
+    // Production passes the project-owned context. The default keeps this
+    // injectable seam lightweight for isolated transport/native-node tests.
+    ownershipContext: ThreadSafeContext = ThreadSafeContext(),
     private val resumeState: ReplicaResumeState? = null,
 ) {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaForwarder::class.java)
     private var pushedVersion: ByteArray? = null
     private var lineage: String? = null
+    private val ownership = MergeOwnershipStateChart(ownershipContext)
 
     /** True once [register] succeeded and the replica is bound. */
-    @Volatile
-    var attached: Boolean = false
-        private set
+    val attached: Boolean
+        get() = ownership.editorAttached
+
+    internal val ownershipPhase: MergeOwnershipPhase
+        get() = ownership.phase
 
     var clientId: Long = 0
         private set
@@ -123,7 +130,12 @@ class CrdtReplicaForwarder(
                 transport.deregister(filePath, identity)
                 return false
             }
-            attached = true
+            check(ownership.send(MergeOwnershipEvent.EditorAttached)) {
+                "merge-ownership chart rejected editor attach from ${ownership.phase}"
+            }
+            check(ownership.send(MergeOwnershipEvent.EditorBufferObserved)) {
+                "merge-ownership chart rejected buffer ownership from ${ownership.phase}"
+            }
             pushedVersion =
                 if (incremental) ack.canonicalStateVector?.copyOf() else node.stateVector()
             if (incremental) {
@@ -313,7 +325,9 @@ class CrdtReplicaForwarder(
         pushedVersion = null
         lineage = null
         logSlow("native.close", closeStarted)
-        attached = false
+        check(ownership.send(MergeOwnershipEvent.EditorDetached)) {
+            "merge-ownership chart rejected editor detach from ${ownership.phase}"
+        }
     }
 
     private fun logSlow(

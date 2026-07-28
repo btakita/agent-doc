@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import io.github.lazily.ThreadSafeContext
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -137,10 +138,11 @@ class CrdtReplicaForwarderTest {
     fun `register opens the replica from the canonical bootstrap`() {
         val node = FakeNode()
         val transport = CapturingTransport(bootstrap = "BASE".toByteArray())
-        val fwd = CrdtReplicaForwarder("plan.md", "intellij:1", node, transport)
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:1", node, transport, ThreadSafeContext())
 
         assertTrue(fwd.register())
         assertTrue(fwd.attached)
+        assertEquals(MergeOwnershipPhase.EditorOwnsBuffer, fwd.ownershipPhase)
         assertTrue(transport.registered)
         assertTrue(node.opened)
         assertEquals("BASE", String(node.openedWith!!))
@@ -191,6 +193,7 @@ class CrdtReplicaForwarderTest {
 
         assertTrue(node.closed)
         assertFalse(fwd.attached)
+        assertEquals(MergeOwnershipPhase.Detached, fwd.ownershipPhase)
         assertFalse(transport.deregistered)
     }
 

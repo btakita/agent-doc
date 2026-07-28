@@ -15,6 +15,7 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import io.github.lazily.IngressOutcome
 import io.github.lazily.MergePolicy
+import io.github.lazily.ThreadSafeContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -288,6 +289,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         Thread(r, "agent-doc-crdt-replica-delivery").apply { isDaemon = true }
     }
     private val forwarders = ConcurrentHashMap<String, CrdtReplicaForwarder>()
+    // Every document ownership chart joins the manager's project-lifetime graph.
+    // This keeps cross-thread projections composable instead of creating a
+    // private reactive island per open editor.
+    private val ownershipContext = ThreadSafeContext()
     private val shadows = ConcurrentHashMap<String, String>()
     private val applyingRemote = ConcurrentHashMap.newKeySet<String>()
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
@@ -1788,6 +1793,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             identity = identity,
             node = NativeReplicaNode(),
             transport = CpSocketReplicaTransport(root),
+            ownershipContext = ownershipContext,
             resumeState = retainedResumeState,
         )
         if (!forwarder.register()) {

@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.55
+
+_JetBrains plugin 0.2.306; VS Code extension 0.2.58; Zed extension 0.1.0._
+
+- **JetBrains merge ownership now uses lazily-kt's typed thread-safe state chart (`#adstatechartkt`).** The plugin dependency advances from lazily-kt 0.36.1 to 0.39.0, and every CRDT replica forwarder joins a project-lifetime `ThreadSafeContext`. Registration, buffer observation, and retirement now traverse a `ChartBuilder`-defined `ThreadSafeStateChart` matching the binary's merge-ownership vocabulary instead of mutating a standalone volatile Boolean. The Rust/controller projection remains authoritative for disk-write permission; focused tests pin the happy path, fail-closed edges, cross-thread reads, and forwarder lifecycle integration.
+
 ## 0.35.54
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._

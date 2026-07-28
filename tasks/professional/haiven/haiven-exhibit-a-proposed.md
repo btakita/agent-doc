@@ -26,7 +26,7 @@ body of work.
 
 | Title or category | Date | Identifying number or description |
 | --- | --- | --- |
-| Personal software and open-source portfolio | Before July 29, 2026 | All repositories, releases, packages, documentation, specifications, designs, issue contributions, and other materials owned by Employee and existing before the employment commencement date under `github.com/btakita`, including public and private repositories. Representative core works include agent-doc, agent-doc-js, agent-kit, agent-loop, agent-memories, agent-resume, agent-rules, agent-runbooks, skill-harness, corky, chromium-bridge, eval-runner, tsift, tagpath, tmux-router, webmaster, community-pulse, and related tools, integrations, packages, bindings, documentation, tests, and distribution infrastructure. |
+| Personal software and open-source portfolio | Before July 29, 2026 | All 335 repositories visible to Employee under `github.com/btakita` as of July 28, 2026 (292 public and 43 private), together with all Employee-owned releases, packages, documentation, specifications, designs, issue contributions, and related materials existing before the employment commencement date. Representative core works include agent-doc, agent-doc-js, agent-kit, agent-loop, agent-memories, agent-resume, agent-rules, agent-runbooks, skill-harness, module-harness, corky, instruction-files, chromium-bridge, eval-runner, tsift, tagpath, tmux-router, homebrew-tap, webmaster, community-pulse, lazily-rs, lazily-py, ctx-core, rappstack, briantakita.me-dev, philosophy, python-intentions, and related tools, integrations, packages, bindings, documentation, tests, and distribution infrastructure. Repository access or administration does not create an Employee ownership claim in a third party's code; only Employee's rights, if any, are reserved. |
 | Lazily and reactive-software ecosystem | Before July 29, 2026 | Lazily libraries and bindings; reactive maps, collections, cells, signals, synchronization, and related algorithms; ctx-core, rappstack, rmemo, and related frameworks, libraries, benchmarks, specifications, examples, and documentation. |
 | Agent, context, evaluation, and automation systems | Before July 29, 2026 | Pre-existing agent orchestration, document-session, memory, rule, runbook, skill, context-management, code-navigation, evaluation, correspondence, browser-control, and developer-tooling systems; associated protocols, schemas, prompts, workflows, test suites, deployment methods, and know-how. This includes private research and prototypes such as Patchboard and Patchboard MCP without disclosing their source code or confidential design details. |
 | Controlled GitHub organizations | Before July 29, 2026 | Employee's rights, if any, in repositories and materials existing before the employment commencement date under organizations owned or administered by Employee, including: `rappstack`, `existence-lang`, `aurovlog`, `autostores`, `cogov`, `ctx-core`, `esmfile`, `foresight-host`, `hyopjs`, `lastinglogic`, `linkument`, `persontric`, `proseui`, `prosey`, `rebuildjs`, `relementjs`, `relysjs`, `rmemojs`, `rr`, `tag-vector`, and `wanimato`. Third-party rights and contributions are excluded from Employee's claim. |
@@ -54,16 +54,18 @@ identify the applicable owner and any license in writing before signing.
 ## Effect of listing
 
 1. The Prior Works remain excluded from "Company Inventions," "Work
-   Product," and any other assignment to Haiven.
+   Product," and any other assignment to Haiven. Haiven has no claim to a
+   listed Prior Work.
 2. Continued maintenance, modification, enhancement, release, or derivative
    development of a listed Prior Work does not by itself transfer ownership to
    Haiven.
 3. Haiven receives no ownership or license merely because a Prior Work is
    listed, disclosed, or continued during employment.
 4. A Prior Work may be incorporated into a Haiven product only with prior
-   written authorization. Any resulting license will be limited to the
+   written authorization. Haiven receives only the rights available under the
    applicable published open-source license or a separate written license
-   signed by Employee and Haiven.
+   signed by Employee and Haiven; incorporation does not create a broader
+   implied or automatic license.
 5. Nothing in this schedule requires Employee to disclose source code,
    credentials, trade secrets, client information, or other material that
    Employee is not authorized to disclose.

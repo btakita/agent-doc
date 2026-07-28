@@ -492,7 +492,37 @@ I added `#efs-email-subdomain` as the implementation item: onboard the subdomain
 **Confidence:** High.
 
 **Escalation:** Implementation requires Cloudflare Email Service onboarding for `efs.equityfundingsource.com` before production can send from the new address.
-<!-- agent:boundary:45b2b024 -->
+
+### Re: Production automated email subdomain — gpt-5
+
+> **Queue prompt:** `reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.
+
+The EFS source is corrected and committed, but I did **not** deploy an unsafe production configuration. Production is still serving the prior Worker version until Cloudflare authorizes the EFS subdomain.
+
+The committed production configuration now uses only `reply@efs.equityfundingsource.com` for automated mail:
+
+- `EMAIL` binding allowlist: `reply@efs.equityfundingsource.com`
+- General automated `From`: `Equity Funding Source <reply@efs.equityfundingsource.com>`
+- Secure-message `From` and `Reply-To`: the same EFS subdomain identity
+- Lending-group `From`: the same EFS subdomain identity
+- Human mailboxes such as `info@equityfundingsource.com` remain destinations on Google Workspace, not automated senders
+
+The regression test now isolates the `[env.production]` section. It fails if production contains `briantakita.me`, `efs@equityfundingsource.com`, or `info@equityfundingsource.com` as an automated sender; the prior test falsely passed by matching staging text.
+
+**Changed paths:** `wrangler.toml`, `tests/borrower-message-notify.test.ts`, and `docs/deploy.md`.
+
+**Source commit:** EFS `c6d4133e` (`fix: use EFS production email subdomain`) on local `main`. It was not pushed or deployed because the external sending domain is not provisioned.
+
+**Verification:** `bun test tests/borrower-message-notify.test.ts` passed 19 tests; full `make check` exited 0; `git diff --check` passed. The repository has no GitHub Actions workflow named `CI`.
+
+**Production gate:** The documented EFS production token can list the existing `equityfundingsource.com` Email Sending zone, but both Wrangler and the direct Cloudflare subdomain API return authentication error `10000` when creating/enabling `efs.equityfundingsource.com`. The separately stored infrastructure token does not have access to the production EFS account. Deploying `c6d4133e` before onboarding would risk breaking all production email, so it was intentionally withheld.
+
+Grant the production credential at `passage:btak/equityfundingsource/production/cloudflare_api_token` write access for Email Sending, Email Routing, and the required DNS records on `equityfundingsource.com`. Then resume `#efs-email-subdomain`: enable Email Sending and Email Routing for `efs.equityfundingsource.com`, route `reply@efs.equityfundingsource.com` plus-addressed replies to the Worker, deploy `c6d4133e`, and verify login, invitation, notification, and inbound-reply flows end to end.
+
+The unrelated `#tmo-sandbox-purge-apply` item remains open. Its auto-mirrored queue directive is not operator approval for permanent TMO deletion, so no loans were deleted.
+
+**Confidence:** High for the source correction and test coverage; production activation is blocked solely by Cloudflare zone-write authority.
+<!-- agent:boundary:e4529e8f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
@@ -500,13 +530,14 @@ I added `#efs-email-subdomain` as the implementation item: onboard the subdomain
 - do [#tmo-sandbox-purge-apply]
 - do [#efs-prod-route-token]
 - ~~efs@equityfundingsource.com does not exist. All outbound emails should use reply@efs.equityfundingsource.com. Should we use reply@reply.equityfundingsource.com instead or something different? These automated emails need to be distinct from Google Workspaces.~~
-- 🚧 `reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.
+- ~~`reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). UNBLOCKED 2026-07-19: #tmo-snapshot-verify passed — the snapshot tool ran against real TMO sandbox and reported complete=true (loans=18 fundings=5 attachment_metas=20 lenders=1 borrowers=16, zero errors), so the gate command 'bun ./bin/tmo-snapshot.ts --covers <the 16> --out tmp/tmo-before-purge.json' is now known-good. Take that snapshot immediately before purging. Still held on operator go ONLY because DeleteLoan is permanent with no TMO-side undo. Note the snapshot is evidence, not a restore: attachment BYTES are not captured (20 attachment metas across 554466/AVW580/MBQ435/SRV532/TST766 would be unrecoverable), and RecIDs do not round-trip. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
+- [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.
+- [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge only after explicit operator go. The auto-mirrored queue directive is not approval for permanent `DeleteLoan` operations. Before any approved purge, take the documented snapshot; preserve the existing 16-loan target list, keep-list, dry-run evidence, and warning that attachment bytes and RecIDs are not recoverable. Recipes: `docs/TMO/delete-loan.md`, `docs/TMO/snapshot.md`.
 - [ ] [#efs-prod-route-token] [recommended] [operator-verify] Grant the EFS production Cloudflare API token Workers Routes Edit for equityfundingsource.com. Production deploys activate the new Worker version, but Wrangler route synchronization returns Cloudflare code 10000; verify a subsequent production deploy exits 0 without changing the existing route.
 <!-- /agent:backlog -->
 
@@ -618,3 +649,4 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 
 <!-- completed work archived in tasks/professional/equityfundingsource.done.md -->
 <!-- /agent:done -->
+~~`reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.~~ — auto-struck: answered this cycle (#ftstrike)

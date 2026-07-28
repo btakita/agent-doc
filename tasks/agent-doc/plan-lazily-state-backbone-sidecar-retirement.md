@@ -829,6 +829,10 @@ Status as of 2026-07-05 in `src/agent-doc`:
   committed-without-response-body guard now read through the projection-aware
   cycle loader. These production hot paths no longer re-read raw cycle JSON for
   closeout phase or guard evidence after a projected closeout exists.
+- Current observed closeout-recovery evidence now validates the typed projection
+  against live visible-document authority only. A stale compatibility snapshot
+  baseline can no longer veto a current typed observation; the snapshot hash
+  retained in that observation remains advisory recovery evidence.
 
 The queue/supervisor bullets are Phase 3 sidecar-retirement slices for narrow
 gates. The Phase 1 hook closes the first raw preflight failure shape, but it is

@@ -498,7 +498,42 @@ That preserves the issue without sounding adversarial or making the offer contin
 My preference is the short confirmation because the offer expressly describes a twice-monthly schedule, so retaining a written question is useful. I have not changed the markdown or Gmail draft yet because you asked whether the sentence was necessary rather than directing an edit.
 
 This is legal issue-spotting, not a legal opinion on whether Haiven already has a valid waiver.
-<!-- agent:boundary:e5b67b88 -->
+
+### Re: Arbitration remedies, non-waivable rights, and provided benefits summary — gpt-5
+
+> Is "The arbitrator should be authorized to award every remedy and any statutory fee-shifting available in court, and the agreement should preserve any non-waivable protections of the state where I perform my work." necessary? Can I agree not to follow those rules?
+
+**It is protective, but the exact sentence is not strictly necessary.** If the agreement unambiguously incorporates the current AAA Employment/Workplace Rules and contains no conflicting limitation, AAA Rule R-46 already permits the arbitrator to grant the remedies available in court, including attorney’s fees and costs when applicable law authorizes them. See the current [AAA Employment/Workplace Arbitration Rules, R-46](https://www.adr.org/media/0vrpbnm0/2025_employment_arbitration_rules.pdf).
+
+The problem is Haiven’s existing statement that each party bears its own counsel fees. That could create an avoidable dispute over whether the contract limits a statutory fee award. Therefore, I would either delete that limitation or retain a short clarification that expressly overrides it.
+
+You can agree to omit the savings language, choose a particular state’s law and arbitral seat, arbitrate instead of litigate, and waive rights that the applicable law permits you to waive. You cannot reliably make a genuinely **non-waivable** right disappear by signing a contract. The likely consequence of contrary language is a dispute over enforceability, not a dependable waiver. Which rights are non-waivable is statute- and jurisdiction-specific; not every rule of the state where you work automatically overrides the chosen law. As one concrete federal example, the EEOC says an agreement cannot bar an employee from filing or participating in an EEOC charge, and future discrimination claims cannot be released in advance. See the EEOC’s [non-waivable-rights guidance](https://www.eeoc.gov/laws/guidance/enforcement-guidance-non-waivable-employee-rights-under-eeoc-enforced-statutes) and [waiver guidance](https://www.eeoc.gov/employers/small-business/manager-responsibilities-waivers-discrimination-complaints).
+
+I recommend replacing the current sentence with the more precise version below:
+
+> Notwithstanding any provision requiring the parties to bear their own counsel fees, the arbitrator may award any remedy, including statutory attorney’s fees and costs, that a court of competent jurisdiction could award under applicable law. Nothing in this Agreement waives any substantive right or remedy that cannot lawfully be waived.
+
+This avoids suggesting that every law of every future work state necessarily applies. If Haiven deletes the own-counsel-fees limitation and confirms that the current AAA Employment/Workplace Rules control, the first sentence becomes largely redundant; the second remains a useful but mostly confirmatory savings clause.
+
+> Craig has already provided the health/vision plan to me.
+>
+> `/home/brian/work/btakita/agent-loop/tasks/professional/haiven/Haiven Benefits Summary (for Brian Takita).pdf`
+
+I reviewed the [Haiven benefits snapshot](<../professional/haiven/Haiven Benefits Summary (for Brian Takita).pdf>). It covers medical, dental, and vision options, so the email should **not** ask for generic benefit summaries again. It does not, however, fully answer the remaining questions:
+
+- the medical contribution shown is an approximate employee-plus-family amount, dental and vision show family amounts, and all final rates remain subject to underwriting; it does not provide a complete contribution schedule by enrollment tier;
+- April 1–December 31, 2026 is the plan period, not confirmation of your personal coverage effective date;
+- it expressly says the governing SBCs/plan documents and additional details will be provided separately; and
+- it does not include the employee handbook, vacation policy, equity plan, or proposed option agreement.
+
+I would replace the original document-request paragraph with:
+
+> Thank you for providing the benefits snapshot. Before acceptance, please also confirm my health-coverage effective date and the employee contribution for each applicable coverage tier, and provide the employee handbook, vacation accrual/carryover policy, equity plan, and proposed option agreement, since the offer references or incorporates several of those materials into the employment relationship.
+
+That acknowledges what Craig sent and asks only for material information that remains missing. I have not changed the markdown or Gmail draft because these prompts asked for judgment rather than directing an edit; under your standing instruction, any approved wording change should be mirrored to both destinations.
+
+This is contract issue-spotting, not legal advice. Counsel should review the final arbitration language, particularly any waiver or fee provision.
+<!-- agent:boundary:23b277ca -->
 <!-- /agent:exchange -->
 
 ## Queue

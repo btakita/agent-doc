@@ -209,7 +209,6 @@ The Contact markup already requested padding, but the deployed stylesheet was a 
 
 Confidence: high.
 
-Confidence: high.
 ### Re: Production Funded Deals — gpt-5
 
 > **Queue prompt:** None of the Funded Deals are showing up on https://www.equityfundingsource.com/funded-deals. Please copy the funded deals from staging into production.
@@ -229,7 +228,83 @@ The Funded Deals are already present and rendering in production, so I did not i
 Production already matches staging and renders all 18 funded deals with working images. No database write was needed.
 
 Closeout is durably captured but awaiting editor registration. Please refresh/reopen the agent-doc editor integration; then I can complete the pending session check without duplicating the response.
-<!-- agent:boundary:e0045eed -->
+
+Confidence: high.
+### Re: Funded deals are not visible — gpt-5
+
+> The funded deals in https://www.equityfundingsource.com/funded-deals are not appearing on the website. They seem to be not visible.
+
+Fixed and deployed to staging and production.
+
+The 18 funded deals were already present and marked `visible` in both databases. The actual problem was the production Tailwind bundle: it omitted the server-rendered funded-deal card aspect-ratio and responsive grid utilities, so the page collapsed into a very tall single-column list and most records appeared to be missing.
+
+Changed paths:
+
+- `app/equityfundingsource/app/index.css.ts` — retained the funded-deal aspect ratio, responsive two-/three-column grid, and hover-scale utilities.
+- `app/equityfundingsource/assets/index.ts` — required those rules in the CSS completeness check.
+- `tests/assets-css-selection.test.ts` — added regression coverage for the public-page utilities.
+- `prds/equity-funding-source-lending-portal-prd.md` and `tests/prd.test.ts` — documented and tested the production layout requirement.
+
+Source delivery:
+
+- Commit: `d51135c6` (`fix(public): restore funded-deals grid`)
+- Pushed to `origin/main`; local `HEAD` and `origin/main` both resolve to `d51135c660683150a9e3d949f2b6af3631e6349b`.
+- Unrelated pre-existing worktree changes were left untouched.
+
+Verification:
+
+- `bun test tests/assets-css-selection.test.ts tests/prd.test.ts tests/funded-deals.test.ts` — passed.
+- `bun run build:worker` — passed; packed CSS contains `.aspect-\[16\/10\]`, `.md\:grid-cols-2`, `.lg\:grid-cols-3`, and `.group-hover\:scale-105`.
+- `make check` — passed in both the working tree and an isolated checkout of the exact deployed commit. The digest's lone `error: d1 down` string is an intentional simulated-error assertion; the command exited 0.
+- `gh run list --workflow CI --limit 1` — the repository has no workflow named `CI`.
+
+Deployment proof:
+
+- Staging version: `cafc4674-968a-49ce-8237-1607d85ca1c3` at 100%.
+- Production version: `b9b00945-32e3-44a3-8391-2d6f496b8971` at 100%.
+- Staging, `https://www.equityfundingsource.com/funded-deals`, and `https://equityfundingsource.com/funded-deals` all return HTTP 200, render 18 deal cards, load 18/18 funded-deal photos with HTTP 200, and serve all four required CSS rules.
+- 1440×3000 Chromium checks on staging and production show the intended three-column card grid with multiple rows visible.
+
+The production deploy command reported the known Cloudflare route-sync authentication error (`code 10000`) after the worker and asset upload. Deployment status confirms the new version is active at 100%, and both existing production domains are serving it.
+### Re: Funded deals are not visible — gpt-5
+
+> The funded deals in https://www.equityfundingsource.com/funded-deals are not appearing on the website. They seem to be not visible.
+
+Fixed and deployed to staging and production.
+
+The 18 funded deals were already present and marked `visible` in both databases. The actual problem was the production Tailwind bundle: it omitted the server-rendered funded-deal card aspect-ratio and responsive grid utilities, so the page collapsed into a very tall single-column list and most records appeared to be missing.
+
+Changed paths:
+
+- `app/equityfundingsource/app/index.css.ts` — retained the funded-deal aspect ratio, responsive two-/three-column grid, and hover-scale utilities.
+- `app/equityfundingsource/assets/index.ts` — required those rules in the CSS completeness check.
+- `tests/assets-css-selection.test.ts` — added regression coverage for the public-page utilities.
+- `prds/equity-funding-source-lending-portal-prd.md` and `tests/prd.test.ts` — documented and tested the production layout requirement.
+
+Source delivery:
+
+- Commit: `d51135c6` (`fix(public): restore funded-deals grid`)
+- Pushed to `origin/main`; local `HEAD` and `origin/main` both resolve to `d51135c660683150a9e3d949f2b6af3631e6349b`.
+- Unrelated pre-existing worktree changes were left untouched.
+
+Verification:
+
+- `bun test tests/assets-css-selection.test.ts tests/prd.test.ts tests/funded-deals.test.ts` — passed.
+- `bun run build:worker` — passed; packed CSS contains `.aspect-\[16\/10\]`, `.md\:grid-cols-2`, `.lg\:grid-cols-3`, and `.group-hover\:scale-105`.
+- `make check` — passed in both the working tree and an isolated checkout of the exact deployed commit. The digest's lone `error: d1 down` string is an intentional simulated-error assertion; the command exited 0.
+- `gh run list --workflow CI --limit 1` — the repository has no workflow named `CI`.
+
+Deployment proof:
+
+- Staging version: `cafc4674-968a-49ce-8237-1607d85ca1c3` at 100%.
+- Production version: `b9b00945-32e3-44a3-8391-2d6f496b8971` at 100%.
+- Staging, `https://www.equityfundingsource.com/funded-deals`, and `https://equityfundingsource.com/funded-deals` all return HTTP 200, render 18 deal cards, load 18/18 funded-deal photos with HTTP 200, and serve all four required CSS rules.
+- 1440×3000 Chromium checks on staging and production show the intended three-column card grid with multiple rows visible.
+
+The production deploy command reported the known Cloudflare route-sync authentication error (`code 10000`) after the worker and asset upload. Deployment status confirms the new version is active at 100%, and both existing production domains are serving it.
+
+Confidence: high.
+<!-- agent:boundary:b469896d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

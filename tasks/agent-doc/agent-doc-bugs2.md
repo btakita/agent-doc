@@ -896,7 +896,33 @@ verification:
 confidence: high — source wiring, focused tests, and real session-check ops-log evidence agree.
 
 escalation: none. No standalone `status` command exists; the advisory snapshot is logged alongside session-check's status result, matching the PRD's non-load-bearing observability rung. `#adstatechart3` remains the separate load-bearing transition.
-<!-- agent:boundary:006d8451 -->
+
+### Re: `#adstatechart3` — load-bearing closeout chart — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 do [#adstatechart3]
+
+
+Completed and released as agent-doc **0.35.54**.
+
+The historical typed-builder/version prerequisites were already superseded in-tree: `adstatechart` already used Lazily's typed `ChartBuilder` and the backbone is on Lazily 0.53.0 (newer than the requested 0.19). This cycle completed the missing production cutover:
+
+- The CRDT relay remains the authoritative producer of the editor-sync/commit-barrier fact.
+- The default `adstatechart` feature now makes the typed `ThreadSafeStateChart` `send("commit", guards)` edge the commit acceptance authority.
+- Chart construction/transition errors reject the commit. Builds with `adstatechart` disabled preserve the former relay check as a fail-closed fallback; `--no-default-features` coverage proves it.
+- Session/status observation now reads the thread-safe chart projection.
+- A deterministic `WedgedFinalizeSimWorld` drives 64 wedged-finalize → direct-commit cycles through the production guard: all 64 stale-disk attempts are rejected, and only a subsequently converged relay cut commits.
+
+Proof:
+
+- `changed_paths`: `agent-doc-state-backbone/src/adstatechart.rs`, `agent-doc-git-io/src/live_buffer_guard.rs`, `agent-doc-git-io/Cargo.toml`, `agent-doc-state-observer-io/src/lib.rs`, `Cargo.lock`, workspace 0.35.54 manifest/version surfaces, `VERSIONS.md`, and the parent `src/agent-doc` gitlink. The pre-existing untracked `editors/zed/extension.wasm` was not staged or modified.
+- `commands`: focused Cargo tests for state-backbone/state-observer/git-io; `cargo test -p agent-doc-git-io --no-default-features`; commit-io tests; architecture-scope guard; full `make check`; `make install`; version/install checks; exact staged-diff checks; source and parent pushes; controller recycle; tag push.
+- `verification`: focused suites green; feature-off fallback green; commit-coordinator green; architecture-scope guard green; full clean rerun of `make check` green (8,275 tests across 166 binaries plus project SimWorld/formal gates). Latest inspected CI was green for 0.35.53. The tag-triggered 0.35.54 Release workflow is running; it owns GitHub Release creation and the trusted PyPI handoff.
+- `release`: source commit `5033157f0`, parent gitlink commit `8dfdc6887`, tag `v0.35.54`, installed CLI `agent-doc 0.35.54`; both `main` branches and the tag are pushed. The active document controller is marked to recycle at its next idle boundary.
+- `confidence`: high.
+- `escalation`: none.
+<!-- agent:boundary:2402cf3c -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -911,7 +937,7 @@ escalation: none. No standalone `status` command exists; the advisory snapshot i
 - ~~📌 do [#jbtsiftnosub2verify]~~
 - ~~📌 do [#sidecarstate]~~
 - ~~📌 do [#adstatechart2]~~
-- 📌 do [#adstatechart3]
+- ~~📌 do [#adstatechart3]~~
 - 📌 do [#adstatechartkt]
 - 📌 do [#adstatechartjs]
 - 📌 do [#ipcauthority]
@@ -931,7 +957,6 @@ escalation: none. No standalone `status` command exists; the advisory snapshot i
 - [ ] [#compactreactiveprojectionlivefail] [focused-cycle] #agent-doc-bug Fresh-restart live regression on IDEA 2026.1 + JetBrains plugin 0.2.305: a 305-event burst logged editor_ops_recorded count=305 transaction=batch, but CrdtReplicaForwarder drained sequential native.applyLocal insert_chars=1 operations roughly every 10–16 seconds while controller authority stayed delivery_converged=false; neither coalesced_exact_editor_adopt_after_quiet nor exact_editor_adopt_then_atomic_reregister appeared. Fix the editor-op drain so one burst becomes one revision-scoped update or at most one quiet recovery, add deterministic latency/conformance coverage, preserve the bounded native-call timeout/fail-closed behavior, and repeat #compactreactiveprojectionverify.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Phase 3 progress shipped in agent-doc 0.35.53: current observed closeout-recovery evidence now validates the typed projection against live visible-document authority only, so stale compatibility snapshot-baseline drift cannot veto a current typed observation; the recorded snapshot hash remains advisory recovery evidence. Remaining: complete the other detailed guard/recovery payload cutovers and later state-vector barrier work in tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md.
-- [ ] [#adstatechart3] [focused-cycle] #agent-doc-feature Phase E rung 3 (load-bearing): switch adstatechart to the typed lazily 0.19 ChartBuilder, bump agent-doc-state-backbone to lazily 0.19, use ThreadSafeStateChart for cross-thread status observation, and replace the ad-hoc editor_synced check at the finalize/commit site with chart send(commit, guards) plus a fail-closed fallback when the feature is off. SimWorld: N wedged-finalize->direct-commit cycles never commit from stale disk. Live editor proof gated behind decomposition + install. PRD rung 3.
 - [ ] [#adstatechartkt] [focused-cycle] lazily-kt 0.9.0 SHIPPED (ChartBuilder + ThreadSafeStateChart + shared fromStates + context-free engine; GitHub Packages via release.yml, tag v0.9.0; full test suite green). REMAINING: bump the JetBrains plugin's lazily-kt dependency to 0.9.0 and consume ChartBuilder/ThreadSafeStateChart for the merge-ownership state machine (#mergestatemachine3 fold-in).
 - [ ] [#adstatechartjs] [focused-cycle] lazily-js 1.1.0 SHIPPED (ChartBuilder + statechart.d.ts builder types + shared fromStates; tag v1.1.0; 169/169 tests green). No thread-safe/async chart in js (no reactive Context, no threads). REMAINING: npm publish is operator-2FA-gated (#lzjsnpmpub: npm login then npm publish --access public), then bump the VS Code plugin @lazily/js dep to 1.1.0 and consume ChartBuilder.
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.

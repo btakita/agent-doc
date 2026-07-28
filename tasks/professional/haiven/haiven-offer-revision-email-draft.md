@@ -64,11 +64,10 @@ software, content, operations, compensation, and intellectual property.
 business/engagement and its associated website, software, content,
 operations, compensation, and intellectual property.
 
-These activities will be performed outside Haiven working time using separate
-equipment, accounts, repositories, credentials, and systems. I will not use or
-disclose Haiven confidential information in them, disclose their confidential
-information to Haiven, or allow them to materially interfere with my Haiven
-duties.
+These activities will not materially interfere with my Haiven duties. I will
+keep Haiven and third-party confidential information, accounts, repositories,
+credentials, and work product logically separated, and I will not use or
+disclose confidential information across engagements.
 
 Please confirm in the signed documents that Haiven approves their continuation
 and that, notwithstanding Sections 3, 4, 8, and 11 of the At-Will Employee and
@@ -79,7 +78,7 @@ Contracting Agreement:
   third party, as their governing agreements require;
 - Haiven acquires no ownership or license merely because an activity continues
   during my employment;
-t- Haiven will not require disclosure of another party’s confidential
+- Haiven will not require disclosure of another party’s confidential
   information;
 - the approval cannot be revoked retroactively or used to claim compensation
   already earned; and

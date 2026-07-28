@@ -28,12 +28,24 @@ completed
 Compacted content:
 - Archived 15 response topic(s): Response; do [#lzcstemporal]; do [#lzcscluster]; 12 more
 - Prior summary/context: prior compacted content: Archived 16 response topic(s): review triage; queue materialization repair; controller recyc...
-<!-- agent:boundary:b9061f96 -->
+<!-- agent:boundary:7f5ec919 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~[ ] [#lzrevisionbarrier] Add a Lazily standard-library `RevisionBarrier` /~~
+  effect-receipt abstraction on top of the existing reactive, revision, and
+  synchronization primitives (do not add it to the graph kernel). The barrier
+  must wait for `after_revision`, support a derived predicate, use wake-on-change
+  rather than polling, accept deadline and cancellation inputs, and return a
+  typed terminal outcome (satisfied / timed out / cancelled / disposed or
+  otherwise unavailable). Specify optional keyed effect receipts so callers can
+  prove that a named side effect for the qualifying revision was applied, while
+  keeping receipt storage and transport policy outside the primitive. Cover
+  lost-wakeup, already-satisfied, revision-race, cancellation, deadline, disposal,
+  and keyed-receipt tests; document how the stdlib timer supplies the deadline
+  budget.
 - [#lazilyrenameinverted]: I accept a breaking native-class rename.
 - complete [#lzinteropcs]
 <!-- /agent:queue -->
@@ -41,6 +53,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzrevisionbarrier] Add a Lazily standard-library RevisionBarrier/effect-receipt abstraction over existing reactive, revision, and synchronization primitives, outside the graph kernel. Wait for after_revision plus a derived predicate using wake-on-change; accept deadline and cancellation inputs; return typed satisfied/timed-out/cancelled/disposed-or-unavailable outcomes; optionally prove keyed side-effect receipts while leaving receipt storage and transport policy outside the primitive. Test lost wakeups, already-satisfied state, revision races, cancellation, deadlines, disposal, and keyed receipts; document using the stdlib Timer as the deadline budget.
 <!-- /agent:backlog -->
 
 ## Review

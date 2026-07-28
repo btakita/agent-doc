@@ -440,13 +440,32 @@ Commits:
 - root pointer: `71a4c63ee` (`agent-doc: batch editor op capture`)
 
 The commits remain local because the root branch also contains concurrent unrelated commits; I did not push those other owners' work implicitly.
-<!-- agent:boundary:ead3685c -->
+
+### Re: `#cdtcutover` — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 do [#cdtcutover]
+
+
+Implemented and released the live document cell-tree cutover.
+
+- Published `lazily` `0.53.0` with generic `ThreadSafeSourceTree` / `ThreadSafeSemTree` primitives and incremental reconciliation (`5b47756`, release `b232f85`, tag `v0.53.0`).
+- Added Agent Doc's `ThreadSafeDocumentCellTree` and cut `RelayHub` over to one shared, incremental live semantic projection. The gate is default-off and requires an explicit truthy `AGENT_DOC_CELL_DOC_TREE_CUTOVER` value.
+- Synchronized the projection at reconnect, relay capture/update, editor adoption, durable op delta, controller replace, commit barrier, disk reconcile, baseline rebuild, compaction, and recovery-reset boundaries; removed the old one-shot whole-tree allocation path.
+- Exposed semantic facts through current-text IPC. Idle-watch, orphan drain, and preflight queue maintenance now use semantic-zero fast paths when authoritative, with exact-parser fallback when the gate is off or content changed.
+- Added coverage for `Send + Sync`, ordered identity, cache/value isolation, ancestor recomputation, structural growth, default-off behavior, opted-in delta tracking, and IPC round-tripping.
+- Focused tests, full `make check`, privacy scan, and `git diff --check` passed. One timing-sensitive controller test failed once and passed immediately in isolation; the final full verification passed.
+- Released Agent Doc `0.35.41` and JetBrains plugin `0.2.302` (`ccaaf864f`, release `3bbefa823`, tag `v0.35.41`), pushed `main`, installed the binary/plugin, and pushed the superproject pointer as `9e75fae09`.
+- Live proof: controller generation 37 is running binary `0.35.41` with the opt-in environment present, and the warm targeted relay projection proof passed in `0.00s`. The single required CI lookups for both release repositories were in progress; they were not polled.
+- The separate `job-offers.md` pane blocker is cleared: the UI draft was submitted, that Agent Doc cycle finalized successfully, and the composer is now empty, so no duplicate reroute was injected.
+<!-- agent:boundary:d7c3b7e5 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~📌 do [#2y8j]~~
-- 📌 do [#cdtcutover]
+- ~~📌 do [#cdtcutover]~~
 - 📌 do [#coredecomp]
 - 📌 do [#orchdecomp]
 - 📌 do [#skillharnessplugin]
@@ -493,7 +512,6 @@ The commits remain local because the root branch also contains concurrent unrela
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
-- [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#coredecomp] [focused-cycle] Keep the former `agent-doc-core` God-crate surface decomposed into owned pure crates. Audit `pending.rs`, `queue_item_lifecycle.rs`, `template.rs`, `crdt_sync.rs`, `component.rs`, and related modules; move element-local semantics into `agent-doc-element-*`, document composition into `agent-doc-document`, merge/CRDT merge policy into `agent-doc-merge`, and FFI ABI into `agent-doc-ffi`. Do not recreate `agent-doc-core` as a compatibility facade or migration alias, and do not move runtime IO, snapshots, commits, IPC, tmux, or controller effects into pure crates.
 - [ ] [#orchdecomp] [focused-cycle] Decompose the `agent-doc-orchestration` God crate along effect boundaries. Audit turn lifecycle, document realtime scheduling, queue/exchange lifecycle, closeout/commit, editor IPC, supervisor/controller state, tmux integration, recovery/repair, and session routing; move stable responsibilities into `agent-doc-turn`, `agent-doc-document`/document-realtime, `agent-doc-supervisor`/controller-state crates, `agent-doc-editor`, `agent-doc-tmux`, and narrow closeout/recovery crates as appropriate. Leave `agent-doc-orchestration` as a shrinking effect adapter only, not a deprecated compatibility facade; callers should move directly to the owning focused crate and pure merge/document code should stay out of orchestration.
 - [ ] [#skillharnessplugin] [focused-cycle] Create the agent-doc integration plugin for `skill-harness`: implement an agent-doc-owned `SkillHarnessPlugin` adapter, define its detection and skill-path contract without depending on `agent-doc-core`, register/document the integration path, and add tests proving `skill-harness` can resolve agent-doc through the plugin boundary after `agent-doc-core` removal.

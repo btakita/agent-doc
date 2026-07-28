@@ -522,15 +522,18 @@ Grant the production credential at `passage:btak/equityfundingsource/production/
 The unrelated `#tmo-sandbox-purge-apply` item remains open. Its auto-mirrored queue directive is not operator approval for permanent TMO deletion, so no loans were deleted.
 
 **Confidence:** High for the source correction and test coverage; production activation is blocked solely by Cloudflare zone-write authority.
-<!-- agent:boundary:e4529e8f -->
+❯ Please use the api configure the efs.equityfundingsource.com email subdomain.
+### Re: Response
+
+Retry still failed after controller recycle. The response remains safely retained, but CRDT acknowledgment/commit is stranded under the foreground-finalizer lease.
+
+No duplicate response or Cloudflare change occurred. Reply **“authorize force-disk”** if you want the retained target applied directly.
+<!-- agent:boundary:d0408193 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#efs-deploy-hibernation]~~
 - do [#tmo-sandbox-purge-apply]
 - do [#efs-prod-route-token]
-- ~~efs@equityfundingsource.com does not exist. All outbound emails should use reply@efs.equityfundingsource.com. Should we use reply@reply.equityfundingsource.com instead or something different? These automated emails need to be distinct from Google Workspaces.~~
-- ~~`reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

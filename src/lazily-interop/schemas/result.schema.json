@@ -43,12 +43,13 @@
     },
     "coverage": {
       "type": "object",
-      "required": ["peers_started", "frames_emitted", "frames_delivered", "channels_run", "transport_cells"],
+      "required": ["peers_started", "frames_emitted", "frames_delivered", "feature_steps_run", "channels_run", "transport_cells"],
       "additionalProperties": false,
       "properties": {
         "peers_started": {"type": "integer", "minimum": 0},
         "frames_emitted": {"type": "integer", "minimum": 0},
         "frames_delivered": {"type": "integer", "minimum": 0},
+        "feature_steps_run": {"type": "integer", "minimum": 0},
         "channels_run": {"type": "integer", "minimum": 0},
         "transport_cells": {
           "type": "array",

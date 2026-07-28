@@ -56,6 +56,13 @@ bindings that advertise the feature. A binding that does not implement the
 feature yet is reported as **staged** and receives no green credit for that
 scenario.
 
+The scenario language sends `feature_reset`, then one or more `feature_step`
+commands carrying canonical fixture steps, and may finish with
+`feature_observe` to prove terminal latching. The orchestrator broadcasts each
+control to every eligible peer and compares each returned `observation` with the
+fixture oracle. `coverage.feature_steps_run` counts those peer observations, so
+a stdlib scenario cannot pass without executing production-backed controls.
+
 `codecs` and `channels` declare which wire codecs and transports the peer
 implements. `channel_variants` names concrete implementations of each advertised
 channel. **Declaring fewer is always safe; declaring one you do not implement is

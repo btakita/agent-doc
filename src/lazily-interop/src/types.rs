@@ -121,6 +121,7 @@ pub struct Coverage {
     pub peers_started: usize,
     pub frames_emitted: usize,
     pub frames_delivered: usize,
+    pub feature_steps_run: usize,
     pub channels_run: usize,
     pub transport_cells: Vec<TransportCell>,
 }
@@ -282,6 +283,18 @@ pub enum ScenarioStep {
         frame_set: String,
         #[serde(default)]
         fault: Option<String>,
+    },
+    FeatureReset {
+        feature: String,
+    },
+    FeatureStep {
+        feature: String,
+        step: Value,
+        expected: Value,
+    },
+    FeatureObserve {
+        feature: String,
+        expected: Value,
     },
     AssertConverged,
 }

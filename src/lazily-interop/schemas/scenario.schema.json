@@ -170,9 +170,57 @@
               "expect_applied": {"type": "integer", "minimum": 0}
             }
           },
-          {
-            "type": "object",
-            "required": ["op"],
+        {
+          "type": "object",
+          "required": ["op", "feature"],
+          "additionalProperties": false,
+          "properties": {
+            "op": {"const": "feature_reset"},
+            "feature": {
+              "enum": [
+                "stdlib_timer_v1",
+                "stdlib_timeout_v1",
+                "stdlib_revision_barrier_v1"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["op", "feature", "step", "expected"],
+          "additionalProperties": false,
+          "properties": {
+            "op": {"const": "feature_step"},
+            "feature": {
+              "enum": [
+                "stdlib_timer_v1",
+                "stdlib_timeout_v1",
+                "stdlib_revision_barrier_v1"
+              ]
+            },
+            "step": {"type": "object"},
+            "expected": {"type": "object"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["op", "feature", "expected"],
+          "additionalProperties": false,
+          "properties": {
+            "op": {"const": "feature_observe"},
+            "feature": {
+              "enum": [
+                "stdlib_timer_v1",
+                "stdlib_timeout_v1",
+                "stdlib_revision_barrier_v1"
+              ]
+            },
+            "expected": {"type": "object"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["op"],
             "additionalProperties": false,
             "properties": {"op": {"const": "assert_converged"}}
           }

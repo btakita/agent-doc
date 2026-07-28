@@ -34,6 +34,15 @@ network-suite: prepare-network-peers
 	cargo run --quiet -- run --scenario scenarios/channel-matrix.json \
 		--seed $(NETWORK_SEED) --timeout-ms 10000 --require-channels \
 		--format json --output $(REPORT_DIR)/$(NETWORK_TIER)-channels.json
+	cargo run --quiet -- run --scenario scenarios/stdlib-timer-three-way.json \
+		--seed $(NETWORK_SEED) --timeout-ms 10000 \
+		--format json --output $(REPORT_DIR)/$(NETWORK_TIER)-stdlib-timer.json
+	cargo run --quiet -- run --scenario scenarios/stdlib-timeout-three-way.json \
+		--seed $(NETWORK_SEED) --timeout-ms 10000 \
+		--format json --output $(REPORT_DIR)/$(NETWORK_TIER)-stdlib-timeout.json
+	cargo run --quiet -- run --scenario scenarios/stdlib-revision-barrier-three-way.json \
+		--seed $(NETWORK_SEED) --timeout-ms 10000 \
+		--format json --output $(REPORT_DIR)/$(NETWORK_TIER)-stdlib-revision-barrier.json
 	@echo "lazily-interop: $(NETWORK_TIER) network suite OK (seed $(NETWORK_SEED))"
 
 network-suite-pr:

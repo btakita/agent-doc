@@ -23,6 +23,14 @@ that advertise that production feature. Unsupported implementations remain
 visible in `staged_peers` but receive no pass credit. Feature-only scenarios may
 leave `required_codecs` and `required_channels` empty; codec and channel
 scenarios name those requirements and select the narrower supporting peer group.
+
+The portable stdlib group is exercised by three canonical-oracle scenarios:
+`stdlib-timer-three-way.json`, `stdlib-timeout-three-way.json`, and
+`stdlib-revision-barrier-three-way.json`. Each broadcasts reset/step/observe
+controls to the eligible Zig, Go, and C++ peers, checks every observation against
+the `lazily-spec` fixture oracle, and therefore covers both every pair in the
+group and the three-way agreement. These scenarios are part of `network-suite`,
+alongside the semantic and channel matrices.
 The C# peer now joins semantic convergence through its production CRDT runtime
 and JSON IPC codec while leaving transport links unadvertised.
 

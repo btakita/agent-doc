@@ -379,6 +379,75 @@ fn execute_steps(
                     }
                 }
             }
+            ScenarioStep::FeatureReset { feature } => {
+                for (name, process) in peers.iter_mut() {
+                    let reply = process.request_ok(
+                        &json!({"cmd": "feature_reset", "feature": feature}),
+                        schemas,
+                    )?;
+                    if reply.get("feature").and_then(Value::as_str) != Some(feature) {
+                        return Err(Failure::new(
+                            ErrorCategory::PeerProtocol,
+                            Plane::Semantic,
+                            name,
+                            "feature_reset response names the wrong feature",
+                        ));
+                    }
+                }
+            }
+            ScenarioStep::FeatureStep {
+                feature,
+                step,
+                expected,
+            } => {
+                for (name, process) in peers.iter_mut() {
+                    let reply = process.request_ok(
+                        &json!({
+                            "cmd": "feature_step",
+                            "feature": feature,
+                            "step": step
+                        }),
+                        schemas,
+                    )?;
+                    let observation = reply.get("observation").ok_or_else(|| {
+                        Failure::new(
+                            ErrorCategory::PeerProtocol,
+                            Plane::Semantic,
+                            name,
+                            "feature_step response has no observation",
+                        )
+                    })?;
+                    if observation != expected {
+                        return Err(Failure::new(
+                            ErrorCategory::Convergence,
+                            Plane::Semantic,
+                            name,
+                            format!(
+                                "{feature} observation differs from canonical oracle: \
+                                 got {observation}, expected {expected}"
+                            ),
+                        ));
+                    }
+                    coverage.feature_steps_run += 1;
+                }
+            }
+            ScenarioStep::FeatureObserve { feature, expected } => {
+                for (name, process) in peers.iter_mut() {
+                    let reply = process.request_ok(
+                        &json!({"cmd": "feature_observe", "feature": feature}),
+                        schemas,
+                    )?;
+                    if reply.get("observation") != Some(expected) {
+                        return Err(Failure::new(
+                            ErrorCategory::Convergence,
+                            Plane::Semantic,
+                            name,
+                            format!("{feature} terminal observation is not latched"),
+                        ));
+                    }
+                    coverage.feature_steps_run += 1;
+                }
+            }
             ScenarioStep::AssertConverged => {
                 for (name, process) in peers.iter_mut() {
                     let reply = process.request_ok(&json!({"cmd": "snapshot"}), schemas)?;

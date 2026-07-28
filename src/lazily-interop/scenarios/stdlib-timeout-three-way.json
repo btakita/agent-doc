@@ -1,0 +1,50 @@
+{
+  "name": "stdlib-timeout-native-three-way",
+  "seed": 1102,
+  "peers": [
+    {"name": "lazily-zig", "peer_id": 1},
+    {"name": "lazily-go", "peer_id": 2},
+    {"name": "lazily-cpp", "peer_id": 3}
+  ],
+  "required_features": ["stdlib_timeout_v1"],
+  "required_codecs": [],
+  "required_channels": [],
+  "frame_sets": {},
+  "steps": [
+    {"op": "feature_reset", "feature": "stdlib_timeout_v1"},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "start", "now": 0, "duration": 10}, "expected": {"outcome": "pending", "deadline": 10}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 4, "operation": "completed", "value": "ok", "cancellation": "pending"}, "expected": {"outcome": "completed", "value": "ok", "operation_calls": 1, "cancellation_calls": 1}},
+
+    {"op": "feature_reset", "feature": "stdlib_timeout_v1"},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "start", "now": 2, "duration": 8}, "expected": {"outcome": "pending", "deadline": 10}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 10, "operation": "pending", "cancellation": "pending"}, "expected": {"outcome": "timed_out", "operation_calls": 0, "cancellation_calls": 0}},
+
+    {"op": "feature_reset", "feature": "stdlib_timeout_v1"},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "start", "now": 0, "duration": 10}, "expected": {"outcome": "pending", "deadline": 10}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 9, "operation": "completed", "value": "winner", "cancellation": "cancelled"}, "expected": {"outcome": "completed", "value": "winner", "operation_calls": 1, "cancellation_calls": 1}},
+
+    {"op": "feature_reset", "feature": "stdlib_timeout_v1"},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "start", "now": 0, "duration": 10}, "expected": {"outcome": "pending", "deadline": 10}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 3, "operation": "pending", "cancellation": "cancelled"}, "expected": {"outcome": "cancelled", "operation_calls": 1, "cancellation_calls": 1}},
+
+    {"op": "feature_reset", "feature": "stdlib_timeout_v1"},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "start", "now": 5, "duration": 0}, "expected": {"outcome": "pending", "deadline": 5}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 5, "operation": "completed", "value": "too-late", "cancellation": "cancelled"}, "expected": {"outcome": "timed_out", "operation_calls": 0, "cancellation_calls": 0}},
+
+    {"op": "feature_reset", "feature": "stdlib_timeout_v1"},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "start", "now": 0, "duration": 10}, "expected": {"outcome": "pending", "deadline": 10}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 1, "operation": "unavailable", "cancellation": "pending"}, "expected": {"outcome": "unavailable", "reason": "operation_unavailable", "operation_calls": 1, "cancellation_calls": 1}},
+
+    {"op": "feature_reset", "feature": "stdlib_timeout_v1"},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "start", "now": 0, "duration": 10}, "expected": {"outcome": "pending", "deadline": 10}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 2, "operation": "completed", "value": "latched", "cancellation": "pending"}, "expected": {"outcome": "completed", "value": "latched", "operation_calls": 1, "cancellation_calls": 1}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 9, "operation": "unavailable", "cancellation": "cancelled"}, "expected": {"outcome": "completed", "value": "latched", "operation_calls": 0, "cancellation_calls": 0}},
+    {"op": "feature_observe", "feature": "stdlib_timeout_v1", "expected": {"outcome": "completed", "value": "latched", "operation_calls": 0, "cancellation_calls": 0}},
+
+    {"op": "feature_reset", "feature": "stdlib_timeout_v1"},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "start", "now": 0, "duration": 10}, "expected": {"outcome": "pending", "deadline": 10}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 3, "operation": "pending", "cancellation": "pending"}, "expected": {"outcome": "pending", "deadline": 10, "operation_calls": 1, "cancellation_calls": 1}},
+    {"op": "feature_step", "feature": "stdlib_timeout_v1", "step": {"op": "poll", "now": 4, "operation": "completed", "value": "driven", "cancellation": "pending"}, "expected": {"outcome": "completed", "value": "driven", "operation_calls": 1, "cancellation_calls": 1}}
+  ],
+  "expected_snapshot": []
+}

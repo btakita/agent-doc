@@ -4,7 +4,7 @@ use crate::types::{MutationProof, RunReport, RunStatus};
 
 pub fn console_report(report: &RunReport) -> String {
     let mut output = format!(
-        "{} {} seed={} peers={} emitted={} delivered={} staged={}",
+        "{} {} seed={} peers={} emitted={} delivered={} feature_steps={} staged={}",
         match report.status {
             RunStatus::Pass => "PASS",
             RunStatus::Fail => "FAIL",
@@ -14,6 +14,7 @@ pub fn console_report(report: &RunReport) -> String {
         report.peers.join(","),
         report.coverage.frames_emitted,
         report.coverage.frames_delivered,
+        report.coverage.feature_steps_run,
         report.staged_peers.len()
     );
     for failure in &report.failures {

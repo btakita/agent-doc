@@ -44,6 +44,11 @@ interface FfiJsonResult {
     error: any;
 }
 
+export interface ResolvedProjectPath {
+    projectRoot: string;
+    relativePath: string;
+}
+
 export interface VisualToken {
     kind: string;
     start: number;
@@ -211,7 +216,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
-export const EDITOR_PLUGIN_VERSION = '0.2.60';
+export const EDITOR_PLUGIN_VERSION = '0.2.61';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 // #ctrlkillreregister Tier 3: this extension calls agent_doc_peer_replicas_missing
@@ -411,8 +416,8 @@ function bindFunctions(): void {
     });
 
     const FfiProjectPathType = koffi.struct('FfiProjectPath', {
-        project_root: 'char*',
-        relative_path: 'char*',
+        project_root: OWNED_C_STRING_POINTER,
+        relative_path: OWNED_C_STRING_POINTER,
     });
 
     _reposition_boundary_to_end = lib.func('agent_doc_reposition_boundary_to_end', FfiPatchResultType, ['str']);
@@ -1892,6 +1897,38 @@ export function documentIdForPath(filePath: string, projectRoot?: string): strin
 }
 
 /**
+ * Resolve a document to the nearest agent-doc project root.
+ *
+ * Workspace folders are only a native-library loading hint. The Rust resolver
+ * owns nested project/submodule selection so liveness, CRDT registration, and
+ * Compact Exchange all address the same Project Controller.
+ */
+export function resolveProjectPath(
+    filePath: string,
+    projectRoot?: string,
+): ResolvedProjectPath | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_resolve_project_path) return null;
+    const result = _resolve_project_path(filePath);
+    const rootPtr = result?.project_root;
+    const relativePtr = result?.relative_path;
+    try {
+        if (!rootPtr || !relativePtr) return null;
+        const resolvedRoot = koffi.decode(rootPtr, 'char', -1);
+        const relativePath = koffi.decode(relativePtr, 'char', -1);
+        if (!resolvedRoot || !relativePath) return null;
+        return { projectRoot: resolvedRoot, relativePath };
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] resolve_project_path error: ${err.message}`);
+        return null;
+    } finally {
+        if (rootPtr) _free_string(rootPtr);
+        if (relativePtr) _free_string(relativePtr);
+    }
+}
+
+/**
  * Whether `filePath` is an agent-doc session document (frontmatter/opt-in
  * classified). Reliable-sync liveness must only report session documents so the
  * plane open-set matches the sidecar `open_agent_docs` scope. Returns false for a
@@ -2060,30 +2097,6 @@ export function deferredWriteReconnectPropagated(
     bindFunctions();
     if (!_deferred_write_reconnect_propagated) return false;
     return _deferred_write_reconnect_propagated(filePath, editorContent) === 1;
-}
-
-/**
- * Resolve the agent-doc project root for a file path.
- * Walks up from the file looking for the nearest `.agent-doc/` ancestor.
- * Returns { projectRoot, relativePath } or null if FFI unavailable or no ancestor found.
- */
-export function resolveProjectPath(
-    filePath: string,
-    projectRoot?: string,
-): { projectRoot: string; relativePath: string } | null {
-    if (!ensureLoaded(projectRoot)) return null;
-    bindFunctions();
-
-    const result = _resolve_project_path(filePath);
-    try {
-        if (!result.project_root || !result.relative_path) return null;
-        const root = koffi.decode(result.project_root, 'char', -1);
-        const rel = koffi.decode(result.relative_path, 'char', -1);
-        return { projectRoot: root, relativePath: rel };
-    } finally {
-        if (result.project_root) _free_string(result.project_root);
-        if (result.relative_path) _free_string(result.relative_path);
-    }
 }
 
 /**

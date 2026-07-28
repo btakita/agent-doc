@@ -5,6 +5,7 @@ import {
     CrdtReplicaManager,
     parsePullResponse,
     parseRegisterResponse,
+    matchingRemoteTargetGeneration,
     replicaBaselineDecision,
     remoteAckReplayPlan,
     remoteTemplateProjectionDecision,
@@ -502,15 +503,44 @@ it('applies peer remote updates but suppresses self echoes', () => {
             'retry-fail-closed',
         );
         assert.strictEqual(
-            replicaBaselineDecision('exact', true, false, false, false),
-            'adopt-exact-editor',
+            replicaBaselineDecision('exact', true, false, false, false, true, false),
+            'replay-remote-target',
         );
         assert.strictEqual(
-            replicaBaselineDecision('exact', false, false, true, false),
+            matchingRemoteTargetGeneration([
+                {
+                    patchId: 'one',
+                    origin: 1,
+                    target: 2,
+                    generation: 1,
+                    expectedContentHash: 'first',
+                    update: Buffer.from([1]),
+                },
+                {
+                    patchId: 'two',
+                    origin: 1,
+                    target: 2,
+                    generation: 2,
+                    expectedContentHash: 'target',
+                    update: Buffer.from([2]),
+                },
+            ], 'target'),
+            2,
+        );
+        assert.strictEqual(
+            replicaBaselineDecision('exact', false, false, true, true, true, false),
+            'acknowledge-remote-target',
+        );
+        assert.strictEqual(
+            replicaBaselineDecision('exact', false, false, true, false, false, false),
             'realign-shadow',
         );
         assert.strictEqual(
-            replicaBaselineDecision('repair-required', true, false, false, false),
+            replicaBaselineDecision('repair-required', true, false, false, false, false, false),
+            'apply-remote-repair',
+        );
+        assert.strictEqual(
+            replicaBaselineDecision('invalid', false, false, false, false, false, false),
             'retry-fail-closed',
         );
         assert.strictEqual(shouldForwardLocalDelta('before', 'before'), true);
@@ -560,8 +590,50 @@ it('applies peer remote updates but suppresses self echoes', () => {
     generation: 8,
     contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
   }]);
-  manager.dispose();
-});
+        manager.dispose();
+    });
+
+    it('projects an already-applied native target without decoding the retained delta twice', async () => {
+        const node = new FakeNode('base');
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        let editorText = 'base';
+        transport.pending = [{
+            patchId: 'crdt:1:42:9',
+            origin: 1,
+            target: 42,
+            generation: 9,
+            expectedContentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+            update: Buffer.from([9]),
+        }];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => node,
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async (_file, text, expectedText) => {
+                if (editorText !== expectedText) return false;
+                editorText = text;
+                return true;
+            },
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, editorText), true);
+        assert.strictEqual(node.applyUpdate(42, Buffer.from([99])), true);
+        node.updates = [];
+        await manager.drainRemoteUpdates();
+
+        assert.strictEqual(editorText, 'remote text');
+        assert.deepStrictEqual(node.updates, []);
+        assert.deepStrictEqual(transport.acked, [{
+            patchId: 'crdt:1:42:9',
+            generation: 9,
+            contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+        }]);
+        manager.dispose();
+    });
 
     it('ACKs self-echo remote updates without applying text', async () => {
         const node = new FakeNode('base');

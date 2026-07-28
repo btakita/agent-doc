@@ -194,9 +194,12 @@ describe('editor UI thread budget', () => {
     it('VS Code reliable-sync liveness seeds restored tabs exactly once', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'reliableSyncLiveness.ts'), 'utf-8');
         assert.ok(source.includes('for (const document of vscode.workspace.textDocuments) reportOpen(document);'));
-assert.ok(source.includes('if (this.docs.get(documentHash)?.orSet.present() === true) return null;'));
-assert.ok(source.includes('if (!opsJson) return;'));
-assert.ok(source.includes('Register: {'));
-assert.ok(source.includes('editor_id: editorId'));
-});
+        assert.ok(source.includes('if (this.docs.get(documentHash)?.orSet.present() === true) return null;'));
+        assert.ok(source.includes('if (!opsJson) return;'));
+        assert.ok(source.includes('Register: {'));
+        assert.ok(source.includes('editor_id: editorId'));
+        assert.ok(source.includes('resolveProjectPath(filePath, workspaceRoot)?.projectRoot ?? workspaceRoot'));
+        assert.ok(source.includes('projectRoots.set(documentHash, root)'));
+        assert.ok(source.includes('projectRoots.get(documentHash)'));
+    });
 });

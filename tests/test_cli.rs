@@ -31768,8 +31768,10 @@ fn retained_write_boundary_flags_are_typed_at_development_call_sites() {
         .expect("finalize runtime entrypoint");
     let run_body = &finalize[run_start..];
     let guard = run_body
-        .find("guard_historical_retained_write_before_new_capture(file, commit_mode)?;")
-        .expect("historical retained-write guard");
+            .find(
+                "guard_historical_retained_write_before_new_capture(file, commit_mode, closeout_role)?;",
+            )
+            .expect("historical retained-write guard");
     let capture_boundary = run_body
         .find("let write_result = if options.is_ipc")
         .expect("response capture/write boundary");

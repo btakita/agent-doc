@@ -161,19 +161,41 @@ export function remoteTemplateProjectionDecision(
 
 export type ReplicaBaselineDecision =
     | 'apply-remote'
+    | 'apply-remote-repair'
+    | 'acknowledge-remote-target'
+    | 'replay-remote-target'
     | 'realign-shadow'
     | 'adopt-exact-editor'
     | 'retry-fail-closed';
+
+export function matchingRemoteTargetGeneration(
+    updates: readonly ReplicaRemoteUpdate[],
+    contentHash: string | null,
+): number | null {
+    if (contentHash == null) return null;
+    const generations = updates
+        .filter((update) => update.expectedContentHash === contentHash)
+        .map((update) => update.generation);
+    return generations.length === 0 ? null : Math.max(...generations);
+}
 
 export function replicaBaselineDecision(
     editorState: TemplateStructureProjectionState | null,
     editorMatchesExpected: boolean,
     replicaMatchesExpected: boolean,
     replicaMatchesEditor: boolean,
+    editorMatchesRemoteTarget: boolean,
+    replicaMatchesRemoteTarget: boolean,
     recoveryInFlight: boolean,
 ): ReplicaBaselineDecision {
-    if (recoveryInFlight || editorState !== 'exact') return 'retry-fail-closed';
-    if (editorMatchesExpected && replicaMatchesExpected) return 'apply-remote';
+    if (recoveryInFlight) return 'retry-fail-closed';
+    if (editorState === 'exact' && editorMatchesRemoteTarget && replicaMatchesEditor) {
+        return 'acknowledge-remote-target';
+    }
+    if (editorMatchesExpected && replicaMatchesRemoteTarget) return 'replay-remote-target';
+    if (editorState !== 'exact' && editorMatchesExpected) return 'apply-remote-repair';
+    if (editorState !== 'exact') return 'retry-fail-closed';
+  if (editorMatchesExpected && replicaMatchesExpected) return 'apply-remote';
     if (replicaMatchesEditor) return 'realign-shadow';
     return 'adopt-exact-editor';
 }
@@ -1075,7 +1097,7 @@ export class CrdtReplicaManager {
             if (this.hasPendingLocal(filePath)) continue;
             const expectedText = this.shadows.get(filePath);
             if (expectedText === undefined) continue;
-            if (!(await this.editorReplicaBaselineMatches(filePath, forwarder, expectedText))) continue;
+            if (!(await this.editorReplicaBaselineMatches(filePath, forwarder, expectedText, updates))) continue;
             const peerUpdates: ReplicaRemoteUpdate[] = [];
             let converged: string | null = null;
             for (const update of updates) {
@@ -1093,39 +1115,55 @@ export class CrdtReplicaManager {
             }
             if (converged == null || peerUpdates.length === 0 || this.hasPendingLocal(filePath)) continue;
 
-            const remoteState = this.templateStructureState(converged);
-            if (remoteState !== 'exact') {
-                await this.recoverRejectedRemoteCanonical(
-                    filePath,
-                    expectedText,
-                    converged,
-                    forwarder,
-                    remoteState,
-                );
-                continue;
-            }
+            await this.projectConvergedRemoteUpdates(
+                filePath,
+                expectedText,
+                converged,
+                forwarder,
+                peerUpdates,
+            );
+        }
+    }
 
-            this.advanceNonOperatorProjectionEpoch(filePath);
-            this.applyingRemote.add(filePath);
-            try {
-                let projected = await this.options.applyText(filePath, converged, expectedText);
-                if (!projected) {
-                    const current = this.currentEditorText(filePath);
-                    if (current != null) {
-                        projected = await this.applyCanonicalProjection(filePath, converged, current);
-                    }
+    private async projectConvergedRemoteUpdates(
+        filePath: string,
+        expectedText: string,
+        converged: string,
+        forwarder: CrdtReplicaForwarder,
+        updates: readonly ReplicaRemoteUpdate[],
+    ): Promise<boolean> {
+        const remoteState = this.templateStructureState(converged);
+        if (remoteState !== 'exact') {
+            await this.recoverRejectedRemoteCanonical(
+                filePath,
+                expectedText,
+                converged,
+                forwarder,
+                remoteState,
+            );
+            return false;
+        }
+
+        this.advanceNonOperatorProjectionEpoch(filePath);
+        this.applyingRemote.add(filePath);
+        try {
+            let projected = await this.options.applyText(filePath, converged, expectedText);
+            if (!projected) {
+                const current = this.currentEditorText(filePath);
+                if (current != null) {
+                    projected = await this.applyCanonicalProjection(filePath, converged, current);
                 }
-                const visibleText = this.currentEditorText(filePath);
-                if (projected && visibleText === converged) {
-                    this.shadows.set(filePath, converged);
-                    for (const update of peerUpdates) {
-                        this.rememberPendingRemoteAck(filePath, { forwarder, update });
-                    }
-                    await this.replayPendingRemoteAcks(filePath, forwarder, converged);
-                }
-            } finally {
-                this.applyingRemote.delete(filePath);
             }
+            const visibleText = this.currentEditorText(filePath);
+            if (!projected || visibleText !== converged) return false;
+            this.shadows.set(filePath, converged);
+            for (const update of updates) {
+                this.rememberPendingRemoteAck(filePath, { forwarder, update });
+            }
+            await this.replayPendingRemoteAcks(filePath, forwarder, converged);
+            return true;
+        } finally {
+            this.applyingRemote.delete(filePath);
         }
     }
 
@@ -1416,6 +1454,7 @@ export class CrdtReplicaManager {
         filePath: string,
         forwarder: CrdtReplicaForwarder,
         expectedText: string,
+        updates: readonly ReplicaRemoteUpdate[],
     ): Promise<boolean> {
         const editorText = this.currentEditorText(filePath);
         if (editorText == null) {
@@ -1427,19 +1466,69 @@ export class CrdtReplicaManager {
         }
         const replicaText = forwarder.replicaText();
         const editorState = this.templateStructureState(editorText);
+        const editorHash = sha256(editorText);
+        const replicaHash = replicaText == null ? null : sha256(replicaText);
+        const editorRemoteGeneration = matchingRemoteTargetGeneration(updates, editorHash);
+        const replicaRemoteGeneration = matchingRemoteTargetGeneration(updates, replicaHash);
         const decision = replicaBaselineDecision(
             editorState,
             editorText === expectedText,
             replicaText === expectedText,
             replicaText === editorText,
+            editorRemoteGeneration != null,
+            replicaRemoteGeneration != null,
             this.templateGuardRecovering.has(filePath),
         );
-        if (decision === 'apply-remote') return true;
+        if (decision === 'apply-remote' || decision === 'apply-remote-repair') {
+            if (decision === 'apply-remote-repair') {
+                this.logger.warn(
+                    `[crdt-replica] applying a structurally exact remote correction over the exact expected editor baseline for ${filePath}: ` +
+                    `editor_state=${editorState} editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)}`,
+                );
+            }
+            return true;
+        }
+        if (decision === 'acknowledge-remote-target' && editorRemoteGeneration != null) {
+            const acknowledgedUpdates = updates.filter(
+                (update) => update.generation <= editorRemoteGeneration,
+            );
+            this.shadows.set(filePath, editorText);
+            for (const update of acknowledgedUpdates) {
+                this.rememberPendingRemoteAck(filePath, { forwarder, update });
+            }
+            const acknowledged = await this.replayPendingRemoteAcks(filePath, forwarder, editorText);
+            this.logger.debug(
+                `[crdt-replica] acknowledged an already-visible remote target for ${filePath}: ` +
+                `editor_hash=${editorHash} generation=${editorRemoteGeneration} acked=${acknowledged}`,
+            );
+            return false;
+        }
+        if (
+            decision === 'replay-remote-target'
+            && replicaText != null
+            && replicaRemoteGeneration != null
+        ) {
+            const replayedUpdates = updates.filter(
+                (update) => update.generation <= replicaRemoteGeneration,
+            );
+            this.logger.debug(
+                `[crdt-replica] replaying a native remote target over its exact editor baseline for ${filePath}: ` +
+                `editor_hash=${editorHash} replica_hash=${replicaHash} generation=${replicaRemoteGeneration}`,
+            );
+            await this.projectConvergedRemoteUpdates(
+                filePath,
+                expectedText,
+                replicaText,
+                forwarder,
+                replayedUpdates,
+            );
+            return false;
+        }
         if (decision === 'realign-shadow') {
             this.logger.warn(
                 `[crdt-replica] incoming update deferred after shadow realignment for ${filePath}: ` +
-                `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} ` +
-                `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)}`,
+                `editor_hash=${editorHash} expected_hash=${sha256(expectedText)} ` +
+                `replica_hash=${replicaHash ?? 'missing'}`,
             );
             this.shadows.set(filePath, editorText);
             this.requestRemoteDrain(filePath);
@@ -1448,8 +1537,8 @@ export class CrdtReplicaManager {
         if (decision === 'adopt-exact-editor') {
             this.logger.warn(
                 `[crdt-replica] incoming update deferred while the exact editor baseline replaces a stale native replica for ${filePath}: ` +
-                `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} ` +
-                `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)}`,
+                `editor_hash=${editorHash} expected_hash=${sha256(expectedText)} ` +
+                `replica_hash=${replicaHash ?? 'missing'}`,
             );
             await this.adoptExactEditorBaseline(
                 filePath,
@@ -1462,8 +1551,8 @@ export class CrdtReplicaManager {
         }
         this.logger.warn(
             `[crdt-replica] incoming update deferred because editor adoption lacks a stable exact proof for ${filePath}: ` +
-            `editor_state=${editorState} editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} ` +
-            `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)}`,
+            `editor_state=${editorState} editor_hash=${editorHash} expected_hash=${sha256(expectedText)} ` +
+            `replica_hash=${replicaHash ?? 'missing'}`,
         );
         this.scheduleReplicaRetry(filePath, 'editor-baseline-proof-missing');
         return false;

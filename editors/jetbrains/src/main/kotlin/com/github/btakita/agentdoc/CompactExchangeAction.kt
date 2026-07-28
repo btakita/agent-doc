@@ -27,9 +27,10 @@ class CompactExchangeAction : AnAction() {
                 // other file's error. The live target document/CRDT remains
                 // authoritative even if IntelliJ's best-effort save fails.
                 val fdm = FileDocumentManager.getInstance()
-                fdm.getDocument(file)?.let { document ->
+                val document = fdm.getDocument(file)
+                document?.let {
                     try {
-                        fdm.saveDocument(document)
+                        fdm.saveDocument(it)
                     } catch (t: Throwable) {
                         log.warn(
                             "[compact] active document save failed; continuing with editor authority: ${t.message}",
@@ -37,8 +38,47 @@ class CompactExchangeAction : AnAction() {
                         )
                     }
                 }
-                TerminalUtil.compactExchange(project, file) {
-                    refresher.clearTransientStatus(file.path, statusToken)
+                if (document == null) {
+                    TerminalUtil.compactExchange(project, file) {
+                        refresher.clearTransientStatus(file.path, statusToken)
+                    }
+                    return@invokeLater
+                }
+
+                // Compact Exchange must never race ahead of this open
+                // document's controller registration. Capture the exact editor
+                // cut on the EDT, then perform the bounded native/controller
+                // registration wait on a pooled thread. If attachment cannot be
+                // proven, fail before launching the command; the binary must not
+                // infer detached disk authority behind an open IntelliJ buffer.
+                val editorText = document.text
+                ApplicationManager.getApplication().executeOnPooledThread {
+                    val attached =
+                        CrdtReplicaManager.ensureReplicaForOpenDocument(
+                            file.path,
+                            document,
+                            editorText = editorText,
+                            await = true,
+                        )
+                    ApplicationManager.getApplication().invokeLater {
+                        if (project.isDisposed) {
+                            refresher.clearTransientStatus(file.path, statusToken)
+                            return@invokeLater
+                        }
+                        if (!attached) {
+                            refresher.clearTransientStatus(file.path, statusToken)
+                            TerminalUtil.notifyError(
+                                project,
+                                "Compact Exchange was not started because the open editor replica " +
+                                    "could not be attached to its owning project controller. " +
+                                    "The editor buffer and disk were left unchanged.",
+                            )
+                            return@invokeLater
+                        }
+                        TerminalUtil.compactExchange(project, file) {
+                            refresher.clearTransientStatus(file.path, statusToken)
+                        }
+                    }
                 }
             } catch (t: Throwable) {
                 refresher.clearTransientStatus(file.path, statusToken)

@@ -273,17 +273,30 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
-    fun `stale native replica adopts exact editor instead of overwriting it`() {
+    fun `already applied native target replays without applying the delta twice`() {
         assertEquals(
-            ReplicaBaselineDecision.AdoptExactEditor,
+            ReplicaBaselineDecision.ReplayRemoteTarget,
             replicaBaselineDecisionUtil(
                 editorState = TemplateStructureProjectionState.Exact,
                 editorMatchesExpected = true,
                 replicaMatchesExpected = false,
                 replicaMatchesEditor = false,
+                editorMatchesRemoteTarget = false,
+                replicaMatchesRemoteTarget = true,
                 recoveryInFlight = false,
             ),
         )
+        assertEquals(
+            2L,
+            matchingRemoteTargetGenerationUtil(
+                listOf(update(1, "first"), update(2, "target"), update(3, "later")),
+                "target",
+            ),
+        )
+    }
+
+    @Test
+    fun `stale native replica adopts an unrelated exact editor`() {
         assertEquals(
             ReplicaBaselineDecision.AdoptExactEditor,
             replicaBaselineDecisionUtil(
@@ -291,13 +304,27 @@ class CrdtReplicaAckFrontierTest {
                 editorMatchesExpected = false,
                 replicaMatchesExpected = true,
                 replicaMatchesEditor = false,
+                editorMatchesRemoteTarget = false,
+                replicaMatchesRemoteTarget = false,
                 recoveryInFlight = false,
             ),
         )
     }
 
     @Test
-    fun `save echo realigns an equal replica and invalid editor fails closed`() {
+    fun `already visible target acknowledges and save echo realigns an equal replica`() {
+        assertEquals(
+            ReplicaBaselineDecision.AcknowledgeRemoteTarget,
+            replicaBaselineDecisionUtil(
+                editorState = TemplateStructureProjectionState.Exact,
+                editorMatchesExpected = false,
+                replicaMatchesExpected = false,
+                replicaMatchesEditor = true,
+                editorMatchesRemoteTarget = true,
+                replicaMatchesRemoteTarget = true,
+                recoveryInFlight = false,
+            ),
+        )
         assertEquals(
             ReplicaBaselineDecision.RealignShadow,
             replicaBaselineDecisionUtil(
@@ -305,16 +332,36 @@ class CrdtReplicaAckFrontierTest {
                 editorMatchesExpected = false,
                 replicaMatchesExpected = false,
                 replicaMatchesEditor = true,
+                editorMatchesRemoteTarget = false,
+                replicaMatchesRemoteTarget = false,
+                recoveryInFlight = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `invalid editor requires an exact baseline`() {
+        assertEquals(
+            ReplicaBaselineDecision.ApplyRemoteRepair,
+            replicaBaselineDecisionUtil(
+                editorState = TemplateStructureProjectionState.RepairRequired,
+                editorMatchesExpected = true,
+                replicaMatchesExpected = false,
+                replicaMatchesEditor = false,
+                editorMatchesRemoteTarget = false,
+                replicaMatchesRemoteTarget = false,
                 recoveryInFlight = false,
             ),
         )
         assertEquals(
             ReplicaBaselineDecision.RetryFailClosed,
             replicaBaselineDecisionUtil(
-                editorState = TemplateStructureProjectionState.RepairRequired,
-                editorMatchesExpected = true,
+                editorState = TemplateStructureProjectionState.Invalid,
+                editorMatchesExpected = false,
                 replicaMatchesExpected = false,
                 replicaMatchesEditor = false,
+                editorMatchesRemoteTarget = false,
+                replicaMatchesRemoteTarget = false,
                 recoveryInFlight = false,
             ),
         )

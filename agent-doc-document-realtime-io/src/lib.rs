@@ -2639,6 +2639,50 @@ pub fn apply_canonical_replace_if_attached(
                             }
                             continue;
                         } else if delivery_converged {
+                            // A controller handoff can overlap the editor's application of
+                            // the valid CP target. A replacement replica may then publish
+                            // one transient, structurally incomplete buffer generation
+                            // (observed on equityfundingsource.md as an exchange close
+                            // without its open marker). That cut is not a new target and
+                            // must never be fed through the semantic rebase below: doing so
+                            // mislabels the malformed editor generation as a malformed
+                            // compact target even though the exact valid target is already
+                            // retained in Lazily state.
+                            //
+                            // Preserve the original receipt/intent and ask the replica
+                            // reconciler to refill from the retained canonical frontier.
+                            // Returning the still-unconverged receipt makes the outer write
+                            // boundary stop before snapshot, disk, or commit effects.
+                            if let Some(reason) = structurally_invalid_post_apply_editor_cut(
+                                applied_target,
+                                &relay_text,
+                            ) {
+                                if let Err(err) = reconcile_stalled_replicas(file, source) {
+                                    agent_doc_ops_log_io::log_op(
+                                        file,
+                                        &format!(
+                                            "{source}_post_apply_structural_cut_reconcile_failed file={} retained_hash={} observed_hash={} error={err:#}",
+                                            file.display(),
+                                            agent_doc_hash::content_hash(applied_target),
+                                            agent_doc_hash::content_hash(&relay_text),
+                                        ),
+                                    );
+                                }
+                                let relay_write = pending_write
+                                    .take()
+                                    .expect("pending CRDT target must retain its write receipt");
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_post_apply_structural_cut_retained file={} retained_hash={} observed_hash={} reason={} action=await_replica_rebootstrap_no_rebase_no_disk_write",
+                                        file.display(),
+                                        relay_write.content_hash,
+                                        agent_doc_hash::content_hash(&relay_text),
+                                        reason,
+                                    ),
+                                );
+                                return Ok(Some(relay_write));
+                            }
                             // The editor may publish queue consumption, a new prompt,
                             // or other operator-owned bytes while ACKing our retained
                             // response. If semantic rebasing says that converged cut
@@ -3341,6 +3385,22 @@ fn validate_canonical_document_target(file: &Path, content: &str, source: &str) 
         file.display(),
     );
     Ok(())
+}
+
+/// Classify a structurally incomplete editor generation observed after a valid
+/// CP target has already crossed the relay.
+///
+/// The retained target is validated before relay mutation. Therefore a
+/// different malformed cut at this stage belongs to the editor/re-registration
+/// side of the handoff and is not eligible for semantic response rebasing.
+fn structurally_invalid_post_apply_editor_cut(
+    retained_target: &str,
+    observed_editor_cut: &str,
+) -> Option<String> {
+    if retained_target == observed_editor_cut {
+        return None;
+    }
+    agent_doc_element::element::structural_corruption_reason(observed_editor_cut)
 }
 
 /// Resolve the operator-authored editor cut independently from agent projection
@@ -7675,6 +7735,48 @@ mod tests {
                 .contains("structurally invalid canonical target")
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+    }
+
+    #[test]
+    fn malformed_post_apply_editor_cut_is_not_rebased_over_valid_retained_target() {
+        let baseline = concat!(
+            "<!-- agent:exchange -->\n",
+            "Question.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let retained_target = concat!(
+            "<!-- agent:exchange -->\n",
+            "Question.\n\n",
+            "*Compacted.*\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let transient_editor_cut = concat!(
+            "Question.\n\n",
+            "*Compacted.*\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        validate_canonical_document_target(
+            Path::new("session.md"),
+            retained_target,
+            "test_valid_retained_target",
+        )
+        .expect("the retained compact target is valid");
+        let reason =
+            structurally_invalid_post_apply_editor_cut(retained_target, transient_editor_cut)
+                .expect("the replacement replica cut must be classified as transient corruption");
+
+        assert!(reason.contains("component 'exchange'"));
+        assert!(reason.contains("without matching open"));
+        assert_eq!(
+            structurally_invalid_post_apply_editor_cut(retained_target, retained_target),
+            None,
+        );
+        assert_eq!(
+            structurally_invalid_post_apply_editor_cut(baseline, retained_target),
+            None,
+            "a different but structurally valid editor cut remains eligible for semantic rebase",
+        );
     }
 
     fn push_test_liveness(

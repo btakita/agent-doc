@@ -5,6 +5,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Reports this editor's open-set to the reliable-sync liveness plane
@@ -25,6 +26,7 @@ import com.intellij.openapi.vfs.VirtualFile
 class ReliableSyncLivenessListener(private val project: Project) : FileEditorManagerListener {
     private val pid: Long = ProcessHandle.current().pid()
     private val graph = ReliableSyncLivenessGraph(pid)
+    private val projectRoots = ConcurrentHashMap<String, String>()
 
     init {
         // Project listeners can be created after the IDE restored its editor tabs;
@@ -41,7 +43,7 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
     }
 
     private fun reportOpen(file: VirtualFile) {
-        val root = project.basePath ?: return
+        val fallbackRoot = project.basePath ?: return
         val filePath = file.path
         ApplicationManager.getApplication().executeOnPooledThread {
             val lib = AgentDocLib.get() ?: return@executeOnPooledThread
@@ -52,24 +54,36 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
             // start tracking a possibly-random `.md` tab at all.
             if (lib.agent_doc_is_session_document(filePath) != 1) return@executeOnPooledThread
             val documentHash = resolveDocumentHash(lib, filePath) ?: return@executeOnPooledThread
-        val opsJson = graph.open(
-            documentHash,
-            filePath,
-            EditorIdentity.id,
-            "jetbrains",
-            pluginVersion(),
-            EDITOR_CAPABILITIES,
-        ) ?: return@executeOnPooledThread
+            // The owning controller is the nearest agent-doc root, not
+            // necessarily the IntelliJ project base. A nested submodule has its
+            // own controller; publishing `Open` to the outer project while CRDT
+            // registration goes to the nested root leaves the nested controller
+            // at detached authority and lets Compact Exchange write behind the
+            // open editor.
+            val root = NativePatching.resolveProjectPath(filePath)?.first ?: fallbackRoot
+            projectRoots[documentHash] = root
+            val opsJson = graph.open(
+                documentHash,
+                filePath,
+                EditorIdentity.id,
+                "jetbrains",
+                pluginVersion(),
+                EDITOR_CAPABILITIES,
+            ) ?: return@executeOnPooledThread
             push(lib, root, documentHash, opsJson)
         }
     }
 
     override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
-        val root = project.basePath ?: return
+        val fallbackRoot = project.basePath ?: return
         val filePath = file.path
         ApplicationManager.getApplication().executeOnPooledThread {
             val lib = AgentDocLib.get() ?: return@executeOnPooledThread
             val documentHash = resolveDocumentHash(lib, filePath) ?: return@executeOnPooledThread
+            val root =
+                projectRoots.remove(documentHash)
+                    ?: NativePatching.resolveProjectPath(filePath)?.first
+                    ?: fallbackRoot
             // `#lzsync-close-no-disk-regate`: do NOT re-check `agent_doc_is_session_document`
             // here — it reads the file from disk, and a file can legitimately become
             // unreadable at close time (deleted, renamed, mid-git-checkout, or a

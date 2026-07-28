@@ -266,11 +266,8 @@ pub fn normalize_template_structure_or_fail_preserving(
     match agent_doc_template::guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
         Err(err)
-            if err.chain().any(|cause| {
-                cause
-                    .to_string()
-                    .contains("closing marker <!-- /agent:exchange --> without matching open")
-            }) =>
+            if agent_doc_element::element::unmatched_component_close_name(&err)
+                == Some("exchange") =>
         {
             if let Some(repaired) =
                 agent_doc_template::repair_duplicate_exchange_close_scaffold(&normalized)?

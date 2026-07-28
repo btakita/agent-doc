@@ -18,13 +18,14 @@ import { randomUUID } from 'crypto';
 // the monorepo (same resolution the state-graph-mirror import uses).
 import { OrSet } from '@lazily-hub/lazily-js';
 import {
-documentIdForPath,
-EDITOR_CAPABILITY_LIST,
-EDITOR_PLUGIN_KIND,
-EDITOR_PLUGIN_VERSION,
-isSessionDocument,
+    documentIdForPath,
+    EDITOR_CAPABILITY_LIST,
+    EDITOR_PLUGIN_KIND,
+    EDITOR_PLUGIN_VERSION,
+    isSessionDocument,
     reliableSyncLivenessEnqueue,
     reliableSyncLivenessFlush,
+    resolveProjectPath,
 } from './native.js';
 
 /** This editor's open-set as lazily-js `OrSet`s, one per `document_hash`. */
@@ -34,7 +35,7 @@ class LivenessGraph {
     constructor(private readonly pid: number) {}
 
     /** Mark `documentHash` opened once; returns null for a duplicate IDE event. */
-open(documentHash: string, path: string, editorId: string): string | null {
+    open(documentHash: string, path: string, editorId: string): string | null {
         if (this.docs.get(documentHash)?.orSet.present() === true) return null;
         const tag = randomUUID();
         let state = this.docs.get(documentHash);
@@ -44,21 +45,21 @@ open(documentHash: string, path: string, editorId: string): string | null {
         }
         state.orSet.add(tag);
         state.tags.push(tag);
-return JSON.stringify([
-{ Open: { document_hash: documentHash, pid: this.pid, tag } },
-{
-Register: {
-document_hash: documentHash,
-pid: this.pid,
-path,
-editor_id: editorId,
-editor_kind: EDITOR_PLUGIN_KIND,
-editor_version: EDITOR_PLUGIN_VERSION,
-capabilities: [...EDITOR_CAPABILITY_LIST].sort(),
-timestamp_ms: Date.now(),
-},
-},
-]);
+        return JSON.stringify([
+            { Open: { document_hash: documentHash, pid: this.pid, tag } },
+            {
+                Register: {
+                    document_hash: documentHash,
+                    pid: this.pid,
+                    path,
+                    editor_id: editorId,
+                    editor_kind: EDITOR_PLUGIN_KIND,
+                    editor_version: EDITOR_PLUGIN_VERSION,
+                    capabilities: [...EDITOR_CAPABILITY_LIST].sort(),
+                    timestamp_ms: Date.now(),
+                },
+            },
+        ]);
     }
 
     /** Mark `documentHash` closed; returns the `Close` op batch JSON, or null. */
@@ -84,10 +85,11 @@ timestamp_ms: Date.now(),
  * disposable that unregisters the listeners.
  */
 export function registerReliableSyncLiveness(
-context: vscode.ExtensionContext,
-editorId: string,
+    context: vscode.ExtensionContext,
+    editorId: string,
 ): void {
     const graph = new LivenessGraph(process.pid);
+    const projectRoots = new Map<string, string>();
 
     const workspaceRootFor = (document: vscode.TextDocument): string | undefined =>
         vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath
@@ -100,11 +102,12 @@ editorId: string,
     };
 
     const reportOpen = (document: vscode.TextDocument) => {
-        const root = workspaceRootFor(document);
-        if (!root) return;
+        const workspaceRoot = workspaceRootFor(document);
+        if (!workspaceRoot) return;
         const filePath = document.uri.fsPath;
         // Off the event loop's critical path — the flush may do a controller RPC.
         setImmediate(() => {
+            const root = resolveProjectPath(filePath, workspaceRoot)?.projectRoot ?? workspaceRoot;
             // Scope liveness to agent-doc session documents only: a plain source
             // file opened as a tab must not enter the plane (it would over-count the
             // session-document scope). This disk read
@@ -113,19 +116,24 @@ editorId: string,
             if (!isSessionDocument(filePath, root)) return;
             const documentHash = documentIdForPath(filePath, root);
             if (!documentHash) return;
-const opsJson = graph.open(documentHash, filePath, editorId);
+            projectRoots.set(documentHash, root);
+            const opsJson = graph.open(documentHash, filePath, editorId);
             if (!opsJson) return;
             push(root, documentHash, opsJson);
         });
     };
 
     const reportClose = (document: vscode.TextDocument) => {
-        const root = workspaceRootFor(document);
-        if (!root) return;
+        const workspaceRoot = workspaceRootFor(document);
+        if (!workspaceRoot) return;
         const filePath = document.uri.fsPath;
         setImmediate(() => {
-            const documentHash = documentIdForPath(filePath, root);
+            const documentHash = documentIdForPath(filePath, workspaceRoot);
             if (!documentHash) return;
+            const root = projectRoots.get(documentHash)
+                ?? resolveProjectPath(filePath, workspaceRoot)?.projectRoot
+                ?? workspaceRoot;
+            projectRoots.delete(documentHash);
             // `#lzsync-close-no-disk-regate`: do not re-check `isSessionDocument` here
             // (see the JB `ReliableSyncLivenessListener` for the rationale) — a file
             // can legitimately become unreadable at close time even though this

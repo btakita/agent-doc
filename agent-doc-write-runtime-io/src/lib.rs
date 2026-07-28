@@ -528,7 +528,40 @@ fn current_epoch_secs() -> u64 {
         .as_secs()
 }
 
-fn claim_foreground_closeout_owner(file: &Path) -> Result<Option<CloseoutOwnerGuard>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WriteCloseoutOwnerRole {
+    ForegroundFinalize,
+    CapturedFinalizeResume,
+}
+
+impl WriteCloseoutOwnerRole {
+    fn from_origin(origin: Option<&str>) -> Self {
+        if origin == Some("captured_finalize_resume") {
+            Self::CapturedFinalizeResume
+        } else {
+            Self::ForegroundFinalize
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ForegroundFinalize => "foreground_finalize",
+            Self::CapturedFinalizeResume => "captured_finalize_resume",
+        }
+    }
+
+    fn owner_id_prefix(self) -> &'static str {
+        match self {
+            Self::ForegroundFinalize => "foreground-finalize",
+            Self::CapturedFinalizeResume => "captured-finalize-resume",
+        }
+    }
+}
+
+fn claim_foreground_closeout_owner(
+    file: &Path,
+    role: WriteCloseoutOwnerRole,
+) -> Result<Option<CloseoutOwnerGuard>> {
     use agent_doc_controller_io::project_controller as controller;
 
     // Ignored/untracked and standalone documents have no project actor. Their
@@ -544,16 +577,16 @@ fn claim_foreground_closeout_owner(file: &Path) -> Result<Option<CloseoutOwnerGu
         return Ok(None);
     }
 
-    let owner_id = controller::new_closeout_owner_id("foreground-finalize");
+    let owner_id = controller::new_closeout_owner_id(role.owner_id_prefix());
     let owner_pid = std::process::id();
-    let role = "foreground_finalize";
+    let role_name = role.as_str();
     let cycle_id = match controller::claim_closeout_owner_for_file(
         file,
         controller::CloseoutOwnerClaimRequest {
             expected_cycle_id: None,
             owner_id: owner_id.clone(),
             owner_pid,
-            role: role.to_string(),
+            role: role_name.to_string(),
             now_secs: current_epoch_secs(),
             lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
             allow_dead_owner_takeover: true,
@@ -591,7 +624,7 @@ fn claim_foreground_closeout_owner(file: &Path) -> Result<Option<CloseoutOwnerGu
                     expected_cycle_id: Some(heartbeat_cycle.clone()),
                     owner_id: heartbeat_owner.clone(),
                     owner_pid,
-                    role: role.to_string(),
+                    role: role_name.to_string(),
                     now_secs: current_epoch_secs(),
                     lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
                     allow_dead_owner_takeover: false,
@@ -1392,7 +1425,8 @@ fn run_command_inner(
     empty_response_recovery: Option<EmptyResponseRecovery>,
 ) -> Result<()> {
     let file = options.file.as_path();
-    let _closeout_owner = claim_foreground_closeout_owner(file)?;
+    let closeout_role = WriteCloseoutOwnerRole::from_origin(options.origin.as_deref());
+    let _closeout_owner = claim_foreground_closeout_owner(file, closeout_role)?;
     let _force_disk_authority_scope = if options.force_disk {
         Some(
             agent_doc_document_realtime_io::begin_force_disk_authority_scope(
@@ -1556,7 +1590,7 @@ fn run_command_inner(
         );
     }
 
-    guard_historical_retained_write_before_new_capture(file, commit_mode)?;
+    guard_historical_retained_write_before_new_capture(file, commit_mode, closeout_role)?;
 
     if options.pending_only {
         apply_pending_and_status_mutations(
@@ -2114,6 +2148,7 @@ fn run_command_inner(
 fn guard_historical_retained_write_before_new_capture(
     file: &Path,
     commit_mode: CommitMode,
+    closeout_role: WriteCloseoutOwnerRole,
 ) -> Result<()> {
     if commit_mode != CommitMode::Required {
         return Ok(());
@@ -2142,7 +2177,23 @@ fn guard_historical_retained_write_before_new_capture(
     } else {
         false
     };
-    if retrying_same_capture {
+    if historical_retained_write_guard_may_bypass(
+        open_capture,
+        retrying_same_capture,
+        closeout_role,
+    ) {
+        if open_capture
+            && !retrying_same_capture
+            && closeout_role == WriteCloseoutOwnerRole::CapturedFinalizeResume
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "captured_finalize_resume_supersedes_unrelated_retained_target file={} action=continue_exact_captured_replay_without_prior_delivery_wait",
+                    file.display()
+                ),
+            );
+        }
         return Ok(());
     }
 
@@ -2166,6 +2217,15 @@ fn guard_historical_retained_write_before_new_capture(
         );
     }
     Ok(())
+}
+
+fn historical_retained_write_guard_may_bypass(
+    open_capture: bool,
+    retrying_same_capture: bool,
+    closeout_role: WriteCloseoutOwnerRole,
+) -> bool {
+    retrying_same_capture
+        || (open_capture && closeout_role == WriteCloseoutOwnerRole::CapturedFinalizeResume)
 }
 
 fn retained_target_contains_capture_response(response: &str, retained_target: &str) -> bool {
@@ -2820,6 +2880,20 @@ mod tests {
         assert!(
             !retained_target_contains_capture_response(current_response, historical_target),
             "an unrelated historical retained effect must not authorize a fresh capture retry",
+        );
+        assert!(!historical_retained_write_guard_may_bypass(
+            true,
+            false,
+            WriteCloseoutOwnerRole::ForegroundFinalize,
+        ));
+        assert!(historical_retained_write_guard_may_bypass(
+            true,
+            false,
+            WriteCloseoutOwnerRole::CapturedFinalizeResume,
+        ));
+        assert_eq!(
+            WriteCloseoutOwnerRole::from_origin(Some("captured_finalize_resume")),
+            WriteCloseoutOwnerRole::CapturedFinalizeResume,
         );
     }
 

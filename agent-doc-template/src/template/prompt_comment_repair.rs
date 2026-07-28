@@ -286,11 +286,7 @@ pub(crate) fn normalize_duplicate_exchange_prompt_line(line: &str) -> Option<Str
 pub fn guard_no_duplicate_prompt_residue_outside_exchange(doc: &str) -> Result<()> {
     let components = match element::parse(doc) {
         Ok(components) => components,
-        Err(err)
-            if err
-                .chain()
-                .any(|cause| cause.to_string().contains("without matching open")) =>
-        {
+        Err(err) if element::unmatched_component_close_name(&err).is_some() => {
             return Ok(());
         }
         Err(err) => return Err(err).context("failed to parse components"),

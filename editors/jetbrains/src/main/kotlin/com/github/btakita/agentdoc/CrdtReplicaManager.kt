@@ -211,10 +211,24 @@ internal fun remoteTemplateProjectionDecisionUtil(
 
 internal enum class ReplicaBaselineDecision {
     ApplyRemote,
+    ApplyRemoteRepair,
+    AcknowledgeRemoteTarget,
+    ReplayRemoteTarget,
     RealignShadow,
     AdoptExactEditor,
     RetryFailClosed,
 }
+
+internal fun matchingRemoteTargetGenerationUtil(
+    updates: List<ReplicaRemoteUpdate>,
+    contentHash: String?,
+): Long? =
+    contentHash?.let { targetHash ->
+        updates
+            .asSequence()
+            .filter { it.expectedContentHash == targetHash }
+            .maxOfOrNull { it.generation }
+    }
 
 /**
  * The visible editor is the operator-authoritative plane. A save or a stale
@@ -226,9 +240,21 @@ internal fun replicaBaselineDecisionUtil(
     editorMatchesExpected: Boolean,
     replicaMatchesExpected: Boolean,
     replicaMatchesEditor: Boolean,
+    editorMatchesRemoteTarget: Boolean,
+    replicaMatchesRemoteTarget: Boolean,
     recoveryInFlight: Boolean,
 ): ReplicaBaselineDecision = when {
-    recoveryInFlight || editorState != TemplateStructureProjectionState.Exact ->
+    recoveryInFlight ->
+        ReplicaBaselineDecision.RetryFailClosed
+    editorState == TemplateStructureProjectionState.Exact &&
+        editorMatchesRemoteTarget &&
+        replicaMatchesEditor ->
+        ReplicaBaselineDecision.AcknowledgeRemoteTarget
+    editorMatchesExpected && replicaMatchesRemoteTarget ->
+        ReplicaBaselineDecision.ReplayRemoteTarget
+    editorState != TemplateStructureProjectionState.Exact && editorMatchesExpected ->
+        ReplicaBaselineDecision.ApplyRemoteRepair
+    editorState != TemplateStructureProjectionState.Exact ->
         ReplicaBaselineDecision.RetryFailClosed
     editorMatchesExpected && replicaMatchesExpected -> ReplicaBaselineDecision.ApplyRemote
     replicaMatchesEditor -> ReplicaBaselineDecision.RealignShadow
@@ -999,7 +1025,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             usefulWork = updateCount
             if (updates.isEmpty()) return usefulWork
 
-            if (!editorReplicaBaselineMatches(filePath, forwarder, expectedText)) return usefulWork
+        if (!editorReplicaBaselineMatches(filePath, forwarder, expectedText, updates)) {
+            return usefulWork
+        }
             val appliedRemoteUpdates = mutableListOf<ReplicaRemoteUpdate>()
             var converged: String? = null
             for (update in updates) {
@@ -1676,25 +1704,80 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         filePath: String,
         forwarder: CrdtReplicaForwarder,
         expectedText: String,
+        updates: List<ReplicaRemoteUpdate>,
     ): Boolean {
         val editorText = editorBufferText(filePath) ?: return false
         val replicaText = forwarder.replicaText()
         val editorState = templateStructureState(filePath, editorText, "editor-baseline")
+        val editorHash = contentHash(editorText)
+        val replicaHash = replicaText?.let(::contentHash)
+        val editorRemoteGeneration = matchingRemoteTargetGenerationUtil(updates, editorHash)
+        val replicaRemoteGeneration = matchingRemoteTargetGenerationUtil(updates, replicaHash)
         val decision = replicaBaselineDecisionUtil(
             editorState = editorState,
             editorMatchesExpected = editorText == expectedText,
             replicaMatchesExpected = replicaText == expectedText,
             replicaMatchesEditor = replicaText == editorText,
+            editorMatchesRemoteTarget = editorRemoteGeneration != null,
+            replicaMatchesRemoteTarget = replicaRemoteGeneration != null,
             recoveryInFlight = templateGuardRecoveryPaths.contains(filePath),
         )
-        if (decision == ReplicaBaselineDecision.ApplyRemote) return true
-        val editorHash = contentHash(editorText)
+        if (
+            decision == ReplicaBaselineDecision.ApplyRemote ||
+            decision == ReplicaBaselineDecision.ApplyRemoteRepair
+        ) {
+            if (decision == ReplicaBaselineDecision.ApplyRemoteRepair) {
+                log.warn(
+                    "[crdt-replica] applying a structurally exact remote correction over the exact expected editor baseline for $filePath: " +
+                        "editor_state=$editorState editor_hash=${contentHash(editorText)} expected_hash=${contentHash(expectedText)}",
+                )
+            }
+            return true
+        }
         val expectedHash = contentHash(expectedText)
-        val replicaHash = replicaText?.let(::contentHash) ?: "missing"
+        val visibleReplicaHash = replicaHash ?: "missing"
+        if (
+            decision == ReplicaBaselineDecision.AcknowledgeRemoteTarget &&
+            editorRemoteGeneration != null
+        ) {
+            val acknowledgedUpdates =
+                updates.filter { it.generation <= editorRemoteGeneration }
+            shadows[filePath] = editorText
+            rememberPendingRemoteAcks(
+                filePath,
+                acknowledgedUpdates.map { PendingRemoteAck(forwarder, it) },
+            )
+            val acknowledged = replayPendingRemoteAcks(filePath, forwarder, editorText)
+            log.info(
+                "[crdt-replica] acknowledged an already-visible remote target for $filePath: " +
+                    "editor_hash=$editorHash generation=$editorRemoteGeneration acked=$acknowledged",
+            )
+            return false
+        }
+        if (
+            decision == ReplicaBaselineDecision.ReplayRemoteTarget &&
+            replicaText != null &&
+            replicaRemoteGeneration != null
+        ) {
+            val replayedUpdates =
+                updates.filter { it.generation <= replicaRemoteGeneration }
+            log.info(
+                "[crdt-replica] replaying a native remote target over its exact editor baseline for $filePath: " +
+                    "editor_hash=$editorHash replica_hash=$visibleReplicaHash generation=$replicaRemoteGeneration",
+            )
+            queueRemoteTextApply(
+                filePath,
+                expectedText,
+                replicaText,
+                forwarder,
+                replayedUpdates,
+            )
+            return false
+        }
         if (decision == ReplicaBaselineDecision.RealignShadow) {
             log.warn(
                 "[crdt-replica] incoming update deferred after shadow realignment for $filePath: " +
-                    "editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$replicaHash"
+                    "editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$visibleReplicaHash"
             )
             shadows[filePath] = editorText
             requestRemoteDrain(filePath, "shadow-realigned")
@@ -1703,7 +1786,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (decision == ReplicaBaselineDecision.AdoptExactEditor) {
             log.warn(
                 "[crdt-replica] incoming update deferred while the exact editor baseline replaces a stale native replica for $filePath: " +
-                    "editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$replicaHash",
+                    "editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$visibleReplicaHash",
             )
             adoptExactEditorBaseline(
                 filePath = filePath,
@@ -1716,7 +1799,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         log.warn(
             "[crdt-replica] incoming update deferred because editor adoption lacks a stable exact proof for $filePath: " +
-                "editor_state=$editorState editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$replicaHash",
+                "editor_state=$editorState editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$visibleReplicaHash",
         )
         scheduleTemplateGuardRecoveryRetry(filePath, "editor-baseline-proof-missing")
         return false

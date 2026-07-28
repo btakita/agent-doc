@@ -4,6 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.67
+
+_JetBrains plugin 0.2.310; VS Code extension 0.2.61; Zed extension 0.1.0._
+
+- **Nested project editor replicas now attach to the same controller as the document.** JetBrains and VS Code resolve each session file through the native nearest-project resolver instead of assuming the outer IDE workspace root, retain that root through close, and atomically bootstrap detached authority only for a live registering editor PID. JetBrains Compact Exchange also proves the open document's replica attachment before launching the CLI. This closes the MonsterRodholders file-cache-conflict path that supervisor recycle alone could not repair.
+- **A valid retained Compact Exchange target survives transient malformed editor cuts.** After a valid canonical target is retained, the realtime convergence loop no longer rebases a structurally invalid post-apply editor snapshot over it; it keeps the original intent and asks replica reconciliation to finish delivery. Component parse failures are typed, so duplicate-scaffold recovery no longer depends on diagnostic wording; unmatched-close diagnostics name the component without embedding a literal HTML marker that IDE notifications hide.
+- **Editor plugins can finish a proven retained target without an ACK retry storm.** JetBrains and VS Code accept a structurally exact remote target over an invalid or repair-required editor baseline only when the live buffer exactly matches the delivery's expected baseline. If a prior attempt already applied the delivery to the native replica, the plugins compare its text to the delivery's target hash and project that exact result without decoding the CRDT delta twice; if the target is already visible, they emit the missing ACK directly. Novel editor text still fails closed. This lets the retained EquityFundingSource response repair or resume its known baseline, ACK once, and persist normally instead of replacing the native replica, broadcasting a megabyte-scale bootstrap, and pulling the same delta again.
+- **Supervisor-owned captured finalize replay no longer waits behind the stale target it supersedes.** Recovery uses a typed `captured_finalize_resume` closeout-owner role instead of impersonating a foreground finalize. When the exact response is already captured, its semantic replay may supersede an unrelated older retained delivery rather than holding the lease inside the fresh-capture guard until an operator is asked to force disk. Fresh response admission remains fail-closed behind historical retained writes.
+- **Already-current commit closeout persists its stronger terminal observation.** Re-entering a committed cycle with a verified no-op commit now checkpoints `commit_already_current` even when the prior event was `commit_success`, so the durable projection cannot recreate an obsolete missing-response guard and interrupt every later session-check.
+- **Captured-response diagnostics no longer prescribe an impossible commit.** When authority and disk agree on bytes that still lack the captured response, `session-check` now classifies that state separately from a converged non-capture projection. It keeps the exact replay and its editor ACK pending instead of claiming the working tree already contains the response and directing `commit` into the staged-snapshot rejection.
+
 ## 0.35.66
 
 _JetBrains plugin 0.2.309; VS Code extension 0.2.60; Zed extension 0.1.0._

@@ -1736,11 +1736,23 @@ Body\n\
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
+            "commit_success",
+            Some(&current),
+            Some(&current),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
             "commit_already_current",
             Some(&current),
             Some(&current),
         )
         .unwrap();
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state");
+        assert_eq!(state.last_event, "commit_already_current");
 
         assert!(matches!(
             check_committed_without_response_body_guard(&doc).unwrap(),

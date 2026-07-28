@@ -65,9 +65,10 @@
 //! - append_with_boundary_no_code_block: boundary found → content inserted, old ID consumed, new boundary present
 //! - append_with_boundary_skips_code_block: boundary inside code block skipped, real boundary used
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
+use std::fmt;
 
 /// Canonical component name for the backlog/pending component.
 pub const BACKLOG_COMPONENT: &str = "backlog";
@@ -196,6 +197,64 @@ pub struct Component {
     pub close_start: usize,
     /// Byte offset past `>` in closing marker (includes trailing newline if present).
     pub close_end: usize,
+}
+
+/// Structural failures emitted while parsing document components.
+///
+/// Callers that implement narrowly scoped repairs should branch on these
+/// variants instead of coupling recovery behavior to the rendered diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentParseError {
+    InvalidName {
+        name: String,
+    },
+    Mismatched {
+        open_name: String,
+        close_name: String,
+    },
+    UnmatchedClose {
+        name: String,
+    },
+    Unclosed {
+        name: String,
+    },
+}
+
+impl fmt::Display for ComponentParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidName { name } => write!(f, "invalid component name: '{name}'"),
+            Self::Mismatched {
+                open_name,
+                close_name,
+            } => write!(
+                f,
+                "mismatched component: opened '{open_name}' but closed '{close_name}'"
+            ),
+            Self::UnmatchedClose { name } => write!(
+                f,
+                "closing marker for component '{name}' without matching open marker"
+            ),
+            Self::Unclosed { name } => write!(
+                f,
+                "unclosed component: <!-- agent:{name} --> without matching close"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ComponentParseError {}
+
+/// Return the component name when an error chain contains an unmatched close.
+pub fn unmatched_component_close_name(error: &anyhow::Error) -> Option<&str> {
+    error.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<ComponentParseError>()
+            .and_then(|parse_error| match parse_error {
+                ComponentParseError::UnmatchedClose { name } => Some(name.as_str()),
+                _ => None,
+            })
+    })
 }
 
 impl Component {
@@ -990,16 +1049,19 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
         if let Some(name) = trimmed.strip_prefix("/agent:") {
             // Closing marker
             if !is_valid_name(name) {
-                bail!("invalid component name: '{}'", name);
+                return Err(ComponentParseError::InvalidName {
+                    name: name.to_string(),
+                }
+                .into());
             }
             match stack.pop() {
                 Some((open_name, open_attrs, open_start, open_end)) => {
                     if open_name != name {
-                        bail!(
-                            "mismatched component: opened '{}' but closed '{}'",
+                        return Err(ComponentParseError::Mismatched {
                             open_name,
-                            name
-                        );
+                            close_name: name.to_string(),
+                        }
+                        .into());
                     }
                     templates.push(Component {
                         name: name.to_string(),
@@ -1010,10 +1072,12 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                         close_end: marker_end,
                     });
                 }
-                None => bail!(
-                    "closing marker <!-- /agent:{} --> without matching open",
-                    name
-                ),
+                None => {
+                    return Err(ComponentParseError::UnmatchedClose {
+                        name: name.to_string(),
+                    }
+                    .into());
+                }
             }
         } else if let Some(rest) = trimmed.strip_prefix("agent:") {
             // Skip boundary markers — these are not component markers
@@ -1026,7 +1090,10 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
             let name = parts.next().unwrap_or("");
             let attr_text = parts.next().unwrap_or("");
             if !is_valid_name(name) {
-                bail!("invalid component name: '{}'", name);
+                return Err(ComponentParseError::InvalidName {
+                    name: name.to_string(),
+                }
+                .into());
             }
             let attrs = parse_attrs(attr_text);
             stack.push((name.to_string(), attrs, marker_start, marker_end));
@@ -1036,10 +1103,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
     }
 
     if let Some((name, _, _, _)) = stack.last() {
-        bail!(
-            "unclosed component: <!-- agent:{} --> without matching close",
-            name
-        );
+        return Err(ComponentParseError::Unclosed { name: name.clone() }.into());
     }
 
     templates.sort_by_key(|t| t.open_start);
@@ -1804,6 +1868,7 @@ beta
         let doc = "Content\n<!-- /agent:orphan -->\n";
         let err = parse(doc).unwrap_err();
         assert!(err.to_string().contains("without matching open"));
+        assert_eq!(unmatched_component_close_name(&err), Some("orphan"));
     }
 
     #[test]

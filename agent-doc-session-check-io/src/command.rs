@@ -1570,23 +1570,8 @@ fn retained_pending_write_message(
     // in the working tree). Name the command that actually resolves it.
     let converged_but_unsettleable =
         agent_doc_document_realtime_io::retained_write_is_stranded(file, "session_check_guidance");
-    let convergence_detail = if !editor_live {
-        " NOTE: zero live editor replicas are registered for this document, so \
-         there is currently nothing for the delivery to converge WITH — it will \
-         stay retained rather than drain on its own. Reopen the document in the \
-         editor so its replica re-registers; the retained capture then drains \
-         automatically. The capture is durable in CRDT/Lazily state, so it is not \
-         at risk while you do that."
-    } else if converged_but_unsettleable {
-        " NOTE: authority and disk have ALREADY converged and still do not \
-         satisfy this intent, so no delivery is in flight and retrying will not \
-         change the answer. This is a stranded target, not a slow one. Run \
-         `agent-doc commit <FILE>` to commit the content that is already \
-         present; do NOT force disk (the working tree already holds it, and a \
-         force-disk during an editor reconnect duplicates the response)."
-    } else {
-        ""
-    };
+    let convergence_detail =
+        retained_pending_guidance(editor_live, converged_but_unsettleable, captured_closeout);
     if captured_closeout {
         format!(
             "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same capture will resume automatically after editor/controller delivery converges.{}{} Do not issue another closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
@@ -1611,6 +1596,56 @@ fn retained_pending_write_message(
             convergence_detail,
             file.display(),
         )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetainedPendingGuidance {
+    ReopenEditor,
+    AwaitCapturedReplayAck,
+    CommitConvergedProjection,
+    AwaitDelivery,
+}
+
+fn retained_pending_guidance(
+    editor_live: bool,
+    converged_but_unsettleable: bool,
+    captured_closeout: bool,
+) -> &'static str {
+    let guidance = if !editor_live {
+        RetainedPendingGuidance::ReopenEditor
+    } else if converged_but_unsettleable && captured_closeout {
+        RetainedPendingGuidance::AwaitCapturedReplayAck
+    } else if converged_but_unsettleable {
+        RetainedPendingGuidance::CommitConvergedProjection
+    } else {
+        RetainedPendingGuidance::AwaitDelivery
+    };
+    match guidance {
+        RetainedPendingGuidance::ReopenEditor => {
+            " NOTE: zero live editor replicas are registered for this document, so \
+             there is currently nothing for the delivery to converge WITH — it will \
+             stay retained rather than drain on its own. Reopen the document in the \
+             editor so its replica re-registers; the retained capture then drains \
+             automatically. The capture is durable in CRDT/Lazily state, so it is not \
+             at risk while you do that."
+        }
+        RetainedPendingGuidance::AwaitCapturedReplayAck => {
+            " NOTE: authority and disk currently agree on bytes that do NOT contain \
+             the captured response, while the exact captured replay remains retained \
+             for editor delivery. `agent-doc commit` cannot succeed from this state \
+             because there is no response body in its staged snapshot. Do not run \
+             `commit`, submit another replay/closeout payload, or force disk; the \
+             existing replay must become visible and receive its editor ACK first."
+        }
+        RetainedPendingGuidance::CommitConvergedProjection => {
+            " NOTE: authority and disk have ALREADY converged and still do not \
+             satisfy this non-capture intent, so no delivery is in flight and \
+             retrying will not change the answer. Run `agent-doc commit <FILE>` to \
+             adopt the content that is already present; do NOT force disk during an \
+             editor reconnect."
+        }
+        RetainedPendingGuidance::AwaitDelivery => "",
     }
 }
 
@@ -2778,5 +2813,21 @@ mod terminal_convergence_tests {
         assert!(message.contains("Do not issue a closeout payload"));
         assert!(!message.contains("binary-owned response delivery"));
         assert!(!message.contains("same capture will resume"));
+    }
+
+    #[test]
+    fn captured_stranded_guidance_never_prescribes_an_impossible_commit() {
+        let message = retained_pending_guidance(true, true, true);
+        assert!(message.contains("do NOT contain the captured response"));
+        assert!(message.contains("`agent-doc commit` cannot succeed"));
+        assert!(message.contains("existing replay"));
+        assert!(!message.contains("Run `agent-doc commit <FILE>`"));
+    }
+
+    #[test]
+    fn non_capture_stranded_guidance_can_adopt_converged_projection() {
+        let message = retained_pending_guidance(true, true, false);
+        assert!(message.contains("non-capture intent"));
+        assert!(message.contains("Run `agent-doc commit <FILE>`"));
     }
 }

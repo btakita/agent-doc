@@ -365,11 +365,8 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
             Ok(normalized)
         }
         Err(err)
-            if err.chain().any(|cause| {
-                cause
-                    .to_string()
-                    .contains("closing marker <!-- /agent:exchange --> without matching open")
-            }) =>
+            if agent_doc_element::element::unmatched_component_close_name(&err)
+                == Some("exchange") =>
         {
             if let Some(repaired) = repair_duplicate_exchange_close_scaffold(&normalized)? {
                 guard_no_duplicate_prompt_residue_outside_exchange(&repaired)

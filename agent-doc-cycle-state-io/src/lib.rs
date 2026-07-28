@@ -50,7 +50,8 @@
 use agent_doc_document::transient_markers::replay_content_hash;
 use agent_doc_element_backlog::backlog::normalize_pending_id;
 use agent_doc_turn::cycle_policy::{
-    is_stable_commit_event, normalize_checkpoint_task_id, normalize_checkpoint_text_list,
+    is_noop_commit_event, is_stable_commit_event, normalize_checkpoint_task_id,
+    normalize_checkpoint_text_list,
 };
 use agent_doc_turn::{CycleEvent, CyclePhase, CyclePhaseMachine};
 use anyhow::{Context, Result};
@@ -2112,6 +2113,15 @@ pub fn decide_committed(
         && (state.last_event == event || is_stable_commit_event(&state.last_event))
     {
         let mut refreshed = false;
+        // A verified already-current commit is stronger terminal evidence than
+        // the earlier commit transition: it proves the present projection was
+        // reviewed without a new binary-owned response write. Persist that
+        // observation so session-check cannot reconstruct the older
+        // `commit_success` label and repeatedly fire the missing-response guard.
+        if state.last_event != event && is_noop_commit_event(event) {
+            state.last_event = event.to_string();
+            refreshed = true;
+        }
         if let Some(snapshot) = snapshot_content {
             let hash = agent_doc_hash::content_hash(snapshot);
             let normalized_hash = replay_content_hash(snapshot);
@@ -4190,6 +4200,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
         start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
         mark_committed(&doc, "commit_already_current", Some("body"), Some("body")).unwrap();
 
         let projected = load_with_closeout_projection(&doc)

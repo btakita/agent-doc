@@ -1568,6 +1568,7 @@ pub fn register_replica_for_file_incremental(
         file,
         identity,
         retained_state_vector,
+        None,
         agent_doc_reliable_sync_io::process_pid_is_live,
     )
 }
@@ -1587,8 +1588,19 @@ pub fn register_editor_replica_for_file_incremental(
     let doc = file.display().to_string();
     agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_open(&doc, true);
     agent_doc_document_realtime::editor_attach::editor_attach().attach(&doc, editor_pid);
-    match register_replica_for_file_incremental(file, identity, retained_state_vector) {
-        Ok(registration) => Ok(registration),
+    match register_replica_for_file_incremental_with_liveness(
+        file,
+        identity,
+        retained_state_vector,
+        Some(editor_pid),
+        agent_doc_reliable_sync_io::process_pid_is_live,
+    ) {
+        Ok(Some(registration)) => Ok(Some(registration)),
+        Ok(None) => {
+            agent_doc_document_realtime::editor_attach::editor_attach()
+                .detach_pid(&doc, editor_pid);
+            Ok(None)
+        }
         Err(error) => {
             agent_doc_document_realtime::editor_attach::editor_attach()
                 .detach_pid(&doc, editor_pid);
@@ -1603,23 +1615,39 @@ fn register_replica_for_file_with_liveness(
     identity: &str,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<Option<(u64, Vec<u8>)>> {
-    register_replica_for_file_incremental_with_liveness(file, identity, None, is_pid_live).map(
-        |registration| {
+    register_replica_for_file_incremental_with_liveness(file, identity, None, None, is_pid_live)
+        .map(|registration| {
             registration.map(|registration| (registration.client_id, registration.bootstrap))
-        },
-    )
+        })
 }
 
 fn register_replica_for_file_incremental_with_liveness(
     file: &Path,
     identity: &str,
     retained_state_vector: Option<&[u8]>,
+    registering_editor_pid: Option<u32>,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<Option<ReplicaRegistration>> {
     let authority = authority_for_file(&file.display().to_string());
-    if !authority.editor_attached() {
+    // `replica_register` is itself a process-scoped proof that an editor has
+    // this document open. Do not require the separately-pushed reliable-sync
+    // `Open` fact to win a scheduling race first: JetBrains/VS Code can publish
+    // that fact and the CRDT registration on different pooled workers, and a
+    // nested project used to route the two messages to different controllers.
+    //
+    // Generic/headless replicas retain the old fail-closed authority gate.
+    // An editor registration may allocate the initial hub only while its
+    // claimed PID is live; after allocation, the routed hub itself keeps
+    // authority MultiReplica until normal deregistration.
+    let live_registering_editor = registering_editor_pid.is_some_and(&is_pid_live);
+    if !authority.editor_attached() && !live_registering_editor {
         return Ok(None);
     }
+    // Registration is the routed controller command that makes this process the
+    // document's relay owner. Publish that route before allocating the hub so
+    // authority readers cannot observe a live editor member in an unrouted hub
+    // and fall back to disk between these two steps.
+    register_embedded_relay_route_for_file(file)?;
     let document_hash = agent_doc_fs::document_state_hash(file)?;
     let registration_lock = replica_registration_lock(&document_hash)?;
     let _registration_guard = registration_lock.lock();
@@ -1627,7 +1655,7 @@ fn register_replica_for_file_incremental_with_liveness(
     // Gather under the metadata lock, then release it before taking the hub
     // lock. This lock order is deliberate: registration and deregistration can
     // never deadlock each other by holding both registries at once.
-    let dead_client_ids = dead_editor_replica_ids(&document_hash, is_pid_live)?;
+    let dead_client_ids = dead_editor_replica_ids(&document_hash, &is_pid_live)?;
     let superseded_client_ids =
         superseded_logical_replica_ids(&document_hash, identity, client_id)?;
     let mut retired_client_ids = dead_client_ids.clone();
@@ -4116,6 +4144,62 @@ mod tests {
             assert_eq!(hub.member_text(client_id).unwrap(), on_disk);
         })
         .unwrap();
+    }
+
+    #[test]
+    fn live_editor_registration_bootstraps_detached_authority_without_open_fact_race() {
+        let (_dir, doc) = temp_doc("editor-register-first.md");
+        let editor_pid = 424_242;
+
+        let generic = register_replica_for_file_incremental_with_liveness(
+            &doc,
+            "generic:must-remain-detached",
+            None,
+            None,
+            |_| true,
+        )
+        .unwrap();
+        assert!(
+            generic.is_none(),
+            "a generic replica must not allocate a hub for detached authority"
+        );
+        assert!(!hub_is_allocated(
+            &agent_doc_fs::document_state_hash(&doc).unwrap()
+        ));
+
+        let editor = register_replica_for_file_incremental_with_liveness(
+            &doc,
+            "intellij-424242:/tmp/editor-register-first.md",
+            None,
+            Some(editor_pid),
+            |pid| pid == editor_pid,
+        )
+        .unwrap()
+        .expect("the live process-scoped editor claim should bootstrap its document model");
+
+        assert_ne!(editor.client_id, 0);
+        assert!(
+            crdt_authority_for_file(&doc).editor_attached(),
+            "the allocated routed hub must keep subsequent compact/write authority editor-owned"
+        );
+    }
+
+    #[test]
+    fn dead_editor_registration_cannot_bootstrap_detached_authority() {
+        let (_dir, doc) = temp_doc("dead-editor-register.md");
+        let registration = register_replica_for_file_incremental_with_liveness(
+            &doc,
+            "intellij-999999:/tmp/dead-editor-register.md",
+            None,
+            Some(999_999),
+            |_| false,
+        )
+        .unwrap();
+
+        assert!(registration.is_none());
+        assert!(!hub_is_allocated(
+            &agent_doc_fs::document_state_hash(&doc).unwrap()
+        ));
     }
 
     #[test]

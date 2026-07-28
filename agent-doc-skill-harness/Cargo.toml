@@ -1,13 +1,11 @@
 [package]
-name = "agent-doc-topic"
+name = "agent-doc-skill-harness"
 version = "0.35.44"
 edition = "2024"
-description = "Pure exchange topic-section parsing for agent-doc documents"
+description = "skill-harness integration adapter for agent-doc"
 license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 
-[lib]
-name = "agent_doc_topic"
-
 [dependencies]
+skill-harness = "0.1.3"

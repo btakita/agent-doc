@@ -43,11 +43,10 @@ private const val LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = "lazily_transport_recei
 private const val LOSSLESS_TREE_CRDT_CAPABILITY = "lossless_tree_crdt_v1"
 private const val NATIVE_HOT_RELOAD_CAPABILITY = "native_hot_reload_generation_v1"
 // #ctrlkillreregister Tier 3: this plugin calls agent_doc_peer_replicas_missing about
-// itself on startup and on controller-transport recovery, so the controller's Tier 1
-// restart fan-out must stop pushing rebuild requests at it. The token is the
-// retirement condition and travels on the registration, which is part of the same
-// replicated liveness plane — so the push retires per peer with no flag day. Kept in
-// sync with agent_doc_document_realtime::editor_contract::PEER_REPLICA_PULL_CAPABILITY.
+// itself on startup and on detected controller-transport recovery. This is
+// complementary to the controller's targeted restart push: a transparent controller
+// restart does not trip the transport-recovery hook. Kept in sync with
+// agent_doc_document_realtime::editor_contract::PEER_REPLICA_PULL_CAPABILITY.
 private const val PEER_REPLICA_PULL_CAPABILITY = "peer_replica_pull_v1"
 internal val EDITOR_CAPABILITIES = buildList {
     add(OPERATOR_TEXT_AUTHORITY_CAPABILITY)

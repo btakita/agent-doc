@@ -39,6 +39,12 @@ const CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX: Duration = Duration::from_secs(
 /// closeout publishes a terminal fact. This ceiling bounds the exceptional
 /// crashed-owner path before recovery retries its liveness-aware claim.
 const CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX: Duration = Duration::from_secs(30);
+/// A closeout-owner CAS writes one durable state fact. Under brief SQLite or
+/// controller pressure that fact can land just after the generic 5s deadline;
+/// timing out then is especially harmful because the caller never constructs
+/// the guard for the owner that was actually acquired. Give coordination RPCs
+/// enough room to return their authority result and avoid an orphaned lease.
+const CONTROLLER_CLOSEOUT_COORDINATION_TIMEOUT: Duration = Duration::from_secs(15);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
 /// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
@@ -3149,9 +3155,10 @@ pub fn claim_closeout_owner_for_file(
         },
     )?;
     let submit_json = serde_json::to_string(&submit)?;
-    request_controller(
+    request_controller_with_timeout(
         &project_root,
         ControllerRequest::command_plane_submit(submit_json),
+        CONTROLLER_CLOSEOUT_COORDINATION_TIMEOUT,
     )
 }
 
@@ -3185,9 +3192,10 @@ pub fn release_closeout_owner_for_file(
         },
     )?;
     let submit_json = serde_json::to_string(&submit)?;
-    request_controller(
+    request_controller_with_timeout(
         &project_root,
         ControllerRequest::command_plane_submit(submit_json),
+        CONTROLLER_CLOSEOUT_COORDINATION_TIMEOUT,
     )
 }
 
@@ -10430,7 +10438,9 @@ fn editor_replica_rebuild_plane(project_root: &Path) -> &'static EditorReplicaRe
 /// registration set.
 fn publish_editor_replica_rebuild_targets(project_root: &Path) {
     // The hub is process-local, so anything the plane says is registered but this
-    // process cannot serve is stranded.
+    // process cannot serve is stranded. Peer pull is a complementary recovery
+    // path, not a reason to suppress this targeted push: a controller restart can
+    // be transport-transparent to the editor, so no peer pull is triggered.
     let held: BTreeSet<String> = BTreeSet::new();
     let targets: Vec<(String, u64, String)> = controller_liveness_plane()
         .lock()
@@ -10438,36 +10448,52 @@ fn publish_editor_replica_rebuild_targets(project_root: &Path) {
         .registrations_missing_replica(&held)
         .into_iter()
         .filter(|registration| !controller_serves_replica(&registration.path))
-        .filter(|registration| !peer_repairs_itself(registration))
         .map(|registration| (registration.path, registration.pid, registration.editor_id))
         .collect();
     let plane = editor_replica_rebuild_plane(project_root);
     plane.scope.ctx().set(&plane.targets, targets);
 }
 
-/// Whether this registration's editor advertises the Tier 3 pull and therefore
-/// repairs itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorReplicaRepairStrategy {
+    ControllerPush,
+    ControllerPushWithPeerPull,
+}
+
+impl EditorReplicaRepairStrategy {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ControllerPush => "controller_push",
+            Self::ControllerPushWithPeerPull => "controller_push_with_peer_pull",
+        }
+    }
+}
+
+/// Select the restart repair strategy for this peer.
 ///
-/// The capability travels on the registration, which is part of the same replicated
-/// liveness plane the desired set is derived from — so the fan-out retires **per
-/// peer**, from converged state, with no version handshake and no flag day. An old
-/// plugin in one IDE keeps getting the compatibility push while a current one in the
-/// next IDE does not.
-fn peer_repairs_itself(
+/// A peer-pull-capable editor still requires the targeted controller push. The
+/// controller socket may restart without a transport error at the editor, in which
+/// case startup/reconnect pull hooks do not run. Peer pull remains useful for plugin
+/// startup and detected transport recovery, but it complements rather than retires
+/// the controller-owned missing-replica signal.
+fn editor_replica_repair_strategy(
     registration: &agent_doc_reliable_sync_io::liveness::EditorRegistration,
-) -> bool {
-    agent_doc_document_realtime::editor_contract::has_capability(
+) -> EditorReplicaRepairStrategy {
+    if agent_doc_document_realtime::editor_contract::has_capability(
         &registration.capabilities,
         agent_doc_document_realtime::editor_contract::PEER_REPLICA_PULL_CAPABILITY,
-    )
+    ) {
+        EditorReplicaRepairStrategy::ControllerPushWithPeerPull
+    } else {
+        EditorReplicaRepairStrategy::ControllerPush
+    }
 }
 
 fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
-    // Tier 3: ask the REPLICATED plane which registrations lack a replica here,
+    // Ask the REPLICATED plane which registrations lack a replica here,
     // rather than re-deriving "everyone" and pushing at all of them. `held` is what
     // this process actually has — the hub is process-local, so after a restart it is
-    // empty and the derivation names exactly the stranded set. The same derivation
-    // run on the editor side lets it repair itself without being told.
+    // empty and the derivation names exactly the stranded set.
     let held: BTreeSet<String> = BTreeSet::new();
     let registrations = controller_liveness_plane()
         .lock()
@@ -10475,19 +10501,7 @@ fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
         .registrations_missing_replica(&held);
     let mut requested: BTreeSet<String> = BTreeSet::new();
     for registration in registrations {
-        // The retirement condition (`#ctrlkillreregister`): a peer that pulls
-        // `peer_replicas_missing` about itself repairs without being pushed at, so
-        // pushing anyway is a delivery that can only fail, never help.
-        if peer_repairs_itself(&registration) {
-            agent_doc_ops_log_io::log_op(
-                project_root,
-                &format!(
-                    "controller_restart_editor_replica_rebuild_skipped file={} pid={} editor_id={} reason=peer_replica_pull",
-                    registration.path, registration.pid, registration.editor_id
-                ),
-            );
-            continue;
-        }
+        let strategy = editor_replica_repair_strategy(&registration);
         if !requested.insert(registration.path.clone()) {
             continue;
         }
@@ -10500,8 +10514,11 @@ fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
             Ok(()) => agent_doc_ops_log_io::log_op(
                 project_root,
                 &format!(
-                    "controller_restart_editor_replica_rebuild_requested file={} pid={} editor_id={}",
-                    registration.path, registration.pid, registration.editor_id
+                    "controller_restart_editor_replica_rebuild_requested file={} pid={} editor_id={} strategy={}",
+                    registration.path,
+                    registration.pid,
+                    registration.editor_id,
+                    strategy.label()
                 ),
             ),
             // Never swallow: an editor we could not reach is exactly the one an
@@ -10584,36 +10601,14 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
         CONTROLLER_CRDT_REVISION_READ_TIMEOUT,
         stream,
     ) {
-        Ok(status) => {
-            let live = reliable_sync_status_reports_file_live(&status, &document_hash);
-            if live {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "reliable_sync_liveness_reconciled file={} authority=controller document_hash={}",
-                        file.display(),
-                        document_hash
-                    ),
-                );
-            }
-            live
-        }
-        Err(error) => {
+        Ok(status) => reliable_sync_status_reports_file_live(&status, &document_hash),
+        Err(_) => {
             // A connected controller whose authority cannot be observed is
             // unknown, not proof that the editor closed. Fail closed so a
-            // transient recycle/skew cannot authorize a direct disk replace.
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "reliable_sync_liveness_uncertain file={} authority=controller recovery=defer_disk_write error={}",
-                    file.display(),
-                    format!("{error:#}")
-                        .replace('\n', " | ")
-                        .chars()
-                        .take(160)
-                        .collect::<String>()
-                ),
-            );
+            // transient recycle/skew cannot authorize a direct disk replace. This
+            // predicate is called by high-frequency authority probes (often from
+            // short-lived processes), so it deliberately does not append a
+            // success/error line to ops.log on every reconciliation.
             true
         }
     }
@@ -11315,8 +11310,12 @@ pub(crate) fn handle_closeout_owner_claim(
 ) -> Result<agent_doc_state_backbone::CloseoutOwnerClaimOutcome> {
     let file = request_file(&request)?;
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
-    let claim: agent_doc_state_backbone::CloseoutOwnerClaimRequest =
+    let mut claim: agent_doc_state_backbone::CloseoutOwnerClaimRequest =
         serde_json::from_str(&payload_json).context("parse closeout owner claim")?;
+    // The controller owns the serialized CAS and therefore its lease clock.
+    // A client timestamp can be several seconds old after socket/SQLite
+    // contention, shortening (or immediately expiring) the acquired lease.
+    claim.now_secs = timestamp_secs();
     run_closeout_owner_claim(bootstrap, runtime, &file, claim)
 }
 
@@ -11330,8 +11329,9 @@ fn service_closeout_owner_claim(
     submit: &lazily::CommandSubmit,
 ) -> Result<agent_doc_state_backbone::CloseoutOwnerClaimOutcome> {
     use super::command_plane::decode_closeout_owner_claim_payload;
-    let payload = decode_closeout_owner_claim_payload(submit)?;
+    let mut payload = decode_closeout_owner_claim_payload(submit)?;
     let file = std::path::PathBuf::from(&payload.document_path);
+    payload.request.now_secs = timestamp_secs();
     run_closeout_owner_claim(bootstrap, runtime, &file, payload.request)
 }
 
@@ -16102,14 +16102,11 @@ mod tests {
         );
     }
 
-    /// `#ctrlkillreregister` — the Tier 1 fan-out retires **per peer**, off the same
-    /// replicated registration set the desired set is derived from.
-    ///
-    /// The point of asserting it here is that there is no flag day and no version
-    /// handshake: a current plugin stops being pushed at the moment its registration
-    /// converges, while an old plugin in another IDE keeps the compatibility push.
+    /// `#ctrlkillreregister` regression: peer pull complements the targeted
+    /// controller restart push. A restart can be transparent to the editor's
+    /// transport, so relying on startup/reconnect hooks alone strands its replica.
     #[test]
-    fn restart_fan_out_skips_peers_that_pull_their_own_missing_replicas() {
+    fn restart_fan_out_keeps_targeted_push_for_peer_pull_capable_editors() {
         let registration =
             |capabilities: Vec<String>| agent_doc_reliable_sync_io::liveness::EditorRegistration {
                 document_hash: "doc".into(),
@@ -16122,23 +16119,26 @@ mod tests {
                 timestamp_ms: 1,
             };
 
-        assert!(
-            !peer_repairs_itself(&registration(vec![])),
-            "a plugin predating the pull still needs the compatibility push"
+        assert_eq!(
+            editor_replica_repair_strategy(&registration(vec![])),
+            EditorReplicaRepairStrategy::ControllerPush,
+            "a plugin predating peer pull needs the targeted push"
         );
-        assert!(
-            !peer_repairs_itself(&registration(vec![
+        assert_eq!(
+            editor_replica_repair_strategy(&registration(vec![
                 "operator_text_authority_v1".to_string()
             ])),
-            "an unrelated capability must not retire the push"
+            EditorReplicaRepairStrategy::ControllerPush,
+            "an unrelated capability must not alter restart repair"
         );
-        assert!(
-            peer_repairs_itself(&registration(vec![
+        assert_eq!(
+            editor_replica_repair_strategy(&registration(vec![
                 "operator_text_authority_v1".to_string(),
                 agent_doc_document_realtime::editor_contract::PEER_REPLICA_PULL_CAPABILITY
                     .to_string(),
             ])),
-            "a peer that asks about itself must not also be pushed at"
+            EditorReplicaRepairStrategy::ControllerPushWithPeerPull,
+            "peer pull must remain an additional repair path, never replace the push"
         );
     }
 
@@ -17729,8 +17729,17 @@ mod tests {
             ),
         };
 
+        let before_claim = timestamp_secs();
         let first =
             handle_closeout_owner_claim(&bootstrap, &runtime, claim_request("owner-1")).unwrap();
+        assert!(
+            matches!(
+                &first,
+                CloseoutOwnerClaimOutcome::Acquired(owner)
+                    if owner.claimed_secs >= before_claim && owner.expires_secs > before_claim
+            ),
+            "the controller must stamp a fresh lease instead of trusting the client's stale now_secs"
+        );
         assert!(matches!(
             first,
             CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
@@ -17852,6 +17861,55 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(5),
             "projection release must wake the waiter, not its deadline ({elapsed:?})"
+        );
+    }
+
+    /// `#closeoutwaitchurn` — lease expiry is a real stopgap boundary even
+    /// though no state fact is appended until the next claimant reconciles it.
+    /// The waiter must schedule that clock edge itself instead of sleeping for
+    /// its full 30-second request deadline.
+    #[test]
+    fn closeout_cycle_await_wakes_at_owner_lease_expiry_without_a_state_event() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
+            .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let now = timestamp_secs();
+        let claim = run_closeout_owner_claim(
+            &bootstrap,
+            &runtime,
+            &doc,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle.cycle_id.clone()),
+                owner_id: "short-recovery".to_string(),
+                owner_pid: std::process::id(),
+                role: CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY.to_string(),
+                now_secs: now,
+                lease_secs: 1,
+                allow_dead_owner_takeover: true,
+            },
+        )
+        .unwrap();
+        assert!(matches!(claim, CloseoutOwnerClaimOutcome::Acquired(_)));
+
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let started = Instant::now();
+        let outcome = runtime.wait_for_closeout_cycle_progress(
+            &document_hash,
+            &cycle.cycle_id,
+            Duration::from_secs(30),
+        );
+        let elapsed = started.elapsed();
+
+        assert_eq!(outcome, CloseoutCycleWaitOutcome::OwnerReleased);
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "lease expiry must wake the waiter, not its request deadline ({elapsed:?})"
         );
     }
 

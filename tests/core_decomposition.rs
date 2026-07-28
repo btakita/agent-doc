@@ -73,6 +73,10 @@ fn core_policy_owners_are_focused_and_legacy_paths_stay_deleted() {
             "pub unsafe extern \"C\" fn agent_doc_lossless_tree_project",
         ),
         ("agent-doc-sync/src/lib.rs", "pub enum SyncLockDecision"),
+        (
+            "agent-doc-skill-harness/src/lib.rs",
+            "pub struct AgentDocSkillHarnessPlugin",
+        ),
     ];
     for (path, symbol) in focused_owners {
         assert!(
@@ -93,6 +97,7 @@ fn pure_owner_crates_do_not_depend_on_effect_layers() {
         "agent-doc-merge",
         "agent-doc-sync",
         "agent-doc-ffi",
+        "agent-doc-skill-harness",
     ] {
         let manifest = read(&format!("{crate_name}/Cargo.toml"));
         for dependency in dependency_names(&manifest) {

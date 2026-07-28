@@ -561,6 +561,19 @@ struct ControllerDocumentGraphs {
         String,
         Option<agent_doc_state_backbone::DocumentStateProjection>,
     >,
+    /// `#closeoutterminalreactive`: the durable closeout facts and observed
+    /// clock edge are keyed controller sources. The timer may wake a waiter,
+    /// but only the Computed gate decides whether the incumbent still blocks.
+    closeout_cycle_id: lazily::ThreadSafeSourceMap<String, Option<String>>,
+    closeout_owner: lazily::ThreadSafeSourceMap<
+        String,
+        Option<agent_doc_state_backbone::CloseoutOwnerProjection>,
+    >,
+    closeout_now_secs: lazily::ThreadSafeSourceMap<String, u64>,
+    closeout_gate: lazily::ThreadSafeComputedMap<
+        String,
+        agent_doc_state_backbone::closeout_gate::CloseoutGate,
+    >,
     /// Derived from [`Self::projection`] — **not** pushed.
     ///
     /// This was a cell map that `apply_state_event` computed and wrote into. A
@@ -667,6 +680,10 @@ impl ControllerDocumentGraphs {
         let ctx = scope.ctx().clone();
         Self {
             projection: lazily::ThreadSafeSourceMap::new(&ctx),
+            closeout_cycle_id: lazily::ThreadSafeSourceMap::new(&ctx),
+            closeout_owner: lazily::ThreadSafeSourceMap::new(&ctx),
+            closeout_now_secs: lazily::ThreadSafeSourceMap::new(&ctx),
+            closeout_gate: lazily::ThreadSafeComputedMap::new(&ctx),
             pending: lazily::ThreadSafeComputedMap::new(&ctx),
             authority: lazily::ThreadSafeSourceMap::new(&ctx),
             disk: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -704,12 +721,64 @@ impl ControllerDocumentGraphs {
         document_hash: &str,
         projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
     ) {
+        let closeout_cycle_id = projection
+            .as_ref()
+            .and_then(|document| document.closeout.cycle_id.clone());
+        let closeout_owner = projection
+            .as_ref()
+            .and_then(|document| document.closeout.owner.clone());
         self.ctx.batch(|ctx| {
             self.authority.set(ctx, document_hash.to_string(), None);
             self.disk.set(ctx, document_hash.to_string(), None);
+            self.closeout_cycle_id
+                .set(ctx, document_hash.to_string(), closeout_cycle_id);
+            self.closeout_owner
+                .set(ctx, document_hash.to_string(), closeout_owner);
             self.projection
                 .set(ctx, document_hash.to_string(), projection);
         });
+    }
+
+    /// Observe one clock edge beside the current durable closeout facts and
+    /// return the shared derived gate.
+    ///
+    /// `timestamp_secs()` deliberately stays outside this graph. Reading the
+    /// wall clock is an effect; publishing the reading is a Source update.
+    /// Expiry is therefore a Computed state transition, not an imperative
+    /// branch hidden inside the wait loop.
+    fn closeout_gate(
+        &self,
+        document_hash: &str,
+        closeout: &agent_doc_state_backbone::CloseoutProjection,
+        now_secs: u64,
+    ) -> agent_doc_state_backbone::closeout_gate::CloseoutGate {
+        self.ctx.batch(|ctx| {
+            self.closeout_cycle_id
+                .set(ctx, document_hash.to_string(), closeout.cycle_id.clone());
+            self.closeout_owner
+                .set(ctx, document_hash.to_string(), closeout.owner.clone());
+            self.closeout_now_secs
+                .set(ctx, document_hash.to_string(), now_secs);
+        });
+
+        let cycle_id = self.closeout_cycle_id.clone();
+        let owner = self.closeout_owner.clone();
+        let observed_now_secs = self.closeout_now_secs.clone();
+        self.closeout_gate.get_or_insert_with(
+            &self.ctx,
+            document_hash.to_string(),
+            move |ctx, key| {
+                let cycle_id = cycle_id.observe(ctx, key).flatten();
+                let owner = owner.observe(ctx, key).flatten();
+                agent_doc_state_backbone::closeout_gate::closeout_gate(
+                    cycle_id.as_deref(),
+                    owner.as_ref(),
+                    observed_now_secs.observe(ctx, key).unwrap_or_default(),
+                    None,
+                    false,
+                )
+            },
+        )
     }
 
     /// Mint (or read) the derived retained-intent slot for `document_hash`.
@@ -1155,7 +1224,8 @@ impl ControllerRuntime {
                 return rpc::CloseoutCycleWaitOutcome::Terminal;
             }
 
-            let current_owner_id = closeout.owner.as_ref().map(|owner| owner.owner_id.as_str());
+            let current_owner = closeout.owner.as_ref();
+            let current_owner_id = current_owner.map(|owner| owner.owner_id.as_str());
             match observed_owner_id.as_deref() {
                 Some(observed) if current_owner_id != Some(observed) => {
                     return rpc::CloseoutCycleWaitOutcome::OwnerReleased;
@@ -1169,12 +1239,28 @@ impl ControllerRuntime {
                 _ => {}
             }
 
+            // No durable fact is appended until the next claimant reconciles an
+            // expired stopgap, so schedule a wake at the lease boundary and
+            // observe that clock edge into the controller's Lazily graph. The
+            // timer is only an effect: the Computed closeout gate below owns the
+            // decision that the incumbent no longer blocks.
+            let now_secs = timestamp_secs();
+            let gate = self
+                .document_graphs
+                .closeout_gate(document_hash, closeout, now_secs);
+            if !gate.blocks_claim() {
+                return rpc::CloseoutCycleWaitOutcome::OwnerReleased;
+            }
+            let lease_wait = current_owner
+                .map(|owner| Duration::from_secs(owner.expires_secs.saturating_sub(now_secs)));
+
             let elapsed = started.elapsed();
             if elapsed >= timeout {
                 return rpc::CloseoutCycleWaitOutcome::TimedOut;
             }
-            self.state_projection_waiters
-                .wait_for(&mut memory, timeout.saturating_sub(elapsed));
+            let remaining = timeout.saturating_sub(elapsed);
+            let wait = lease_wait.map_or(remaining, |lease| remaining.min(lease));
+            self.state_projection_waiters.wait_for(&mut memory, wait);
         }
     }
 

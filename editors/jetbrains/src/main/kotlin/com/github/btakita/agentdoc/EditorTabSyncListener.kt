@@ -31,6 +31,12 @@ import java.util.concurrent.atomic.AtomicReference
  * reports only its final state, and an off-EDT executor so the derived command
  * never blocks the UI thread.
  *
+ * Focus is latency-sensitive and takes a separate zero-debounce lane. The
+ * selected document is sent through the controller's project-scoped latest-wins
+ * focus command before layout detection/reconciliation begins. The debounced
+ * surface observation still owns safe passive layout sync; the fast lane only
+ * makes an already-visible target pane react immediately.
+ *
  * Registered from [PluginLifecycleListener] via [install] so it survives
  * hot-reload.
  */
@@ -49,9 +55,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * supersede another project's pending observation.
      */
     private val generation = AtomicLong(0)
+    private val focusGeneration = AtomicLong(0)
 
     private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-editor-tab-sync").apply { isDaemon = true }
+    }
+    private val focusExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "agent-doc-editor-focus-sync").apply { isDaemon = true }
     }
 
     companion object {
@@ -206,6 +216,26 @@ class EditorTabSyncListener : FileEditorManagerListener {
         }
     }
 
+    private fun requestImmediateFocus(project: Project, file: VirtualFile) {
+        val documentPath = file.path
+        val requested = focusGeneration.incrementAndGet()
+        TmuxPaneFocusSync.recordEditorFocusIntent(project, documentPath)
+        focusExecutor.execute focus@{
+            if (focusGeneration.get() != requested) {
+                log("focus: superseded gen=$requested")
+                return@focus
+            }
+            // Project-root discovery crosses native/path services. Keep it off
+            // the IntelliJ event thread along with the controller round trip.
+            val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
+            val receipt = NativeAdminControls.focusDocumentPane(
+                projectRoot = projectRoot,
+                documentPath = documentPath,
+            )
+            log("focus: file=$documentPath receipt=$receipt")
+        }
+    }
+
     private fun captureSurface(
         project: Project,
         preferredFile: VirtualFile? = null,
@@ -261,6 +291,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
     private fun shutdown() {
         executor.shutdownNow()
+        focusExecutor.shutdownNow()
         for (root in observedRoots) {
             NativeAdminControls.editorSurfaceForget(root)
         }
@@ -273,12 +304,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
         if (!file.name.endsWith(".md")) return
 
         val project = event.manager.project
+        requestImmediateFocus(project, file)
         val manager = FileEditorManager.getInstance(project)
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
         log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
         if (visibleMdFiles.isEmpty()) return
 
-        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
         // A real selection event is the operator asking for this document, so it
         // skips the unchanged-observation shortcut: a missing actor/supervisor
         // can still be cold-started when nothing about the surface changed.
@@ -302,11 +333,11 @@ class EditorTabSyncListener : FileEditorManagerListener {
      */
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
+        requestImmediateFocus(project, file)
         val manager = FileEditorManager.getInstance(project)
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
         if (visibleMdFiles.isEmpty()) return
         log("focusGained: file=${file.name} mdFiles=$visibleMdFiles")
-        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
         val pending = captureSurface(project, file, forceReconcile = false) ?: return
         requestObservation(pending)
     }

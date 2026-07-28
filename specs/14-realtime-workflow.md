@@ -70,6 +70,14 @@ replicas. Re-registration publishes the exact current editor buffer as the new
 replica baseline. It never installs or saves a Lazily-retained whole-document
 target first. Retained agent intents replay afterward through the ordered
 document-cell/CRDT delivery path over that published operator cut.
+At controller startup, the replicated missing-replica set emits one targeted
+rebuild request for every stranded registration, including editors that
+advertise peer pull. Peer pull remains a complementary startup and detected
+transport-recovery path; it cannot replace the controller push because a
+controller restart may be transport-transparent to the editor. If the idle
+supervisor later observes an explicit attached-missing-replica or sync-pending
+state, it requests one targeted current observation and then backs off for 30
+seconds rather than polling.
 If a hot-path read observes an editor owner but no usable CRDT relay model, the
 binary must first attempt a bounded document-model ensure through read-only
 editor publish/re-registration before returning an error. A failed ensure is a
@@ -1100,7 +1108,7 @@ Implementations must keep tests for these cases:
 hash-only `already_applied` receipt is upgraded by one bounded CRDT current-text
 publication without file-IPC fallback;
 - an editor-owned write with zero registered replicas in either pre-delivery
-  timing window retains its full target
+timing window retains its full target
 as a Lazily deferred-write intent, returns promptly, and does not project to
 disk; the central stale-recycle operation emits an
 `ack_recovery_force_refresh` event for every turn-stage caller, every
@@ -1109,6 +1117,9 @@ backoff for a targeted pull on the existing replica, editor
 reload/controller-replacement handlers rebuild
 cached open-document forwarders, and later replica bootstrap/publication
 restores and proves that target;
+- a peer-pull-capable editor still receives the controller's targeted
+missing-replica rebuild after restart, and an idle explicit missing/sync-pending
+observation schedules one bounded repair before the zero-replica backoff;
 - stale-replica ACK recovery first publishes the targeted editor re-registration
   event without recycling a healthy supervisor. JetBrains coalesces repeated
   re-registration requests for the same open document within one bounded

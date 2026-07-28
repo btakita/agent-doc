@@ -23532,10 +23532,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
         "orchestration must not keep an op_capture sidecar facade"
     );
 
-    for relative in [
-        "src",
-        "agent-doc-debounce/src",
-    ] {
+    for relative in ["src", "agent-doc-debounce/src"] {
         let mut files = Vec::new();
         collect_rs_files(&manifest_dir.join(relative), &mut files);
         for file in files {

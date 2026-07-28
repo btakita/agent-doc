@@ -4,6 +4,15 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.44
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.57._
+
+- **Controller and idle-watch recovery now close transparent-restart replica gaps.** The controller sends its targeted missing-replica rebuild to peer-pull-capable editors instead of assuming their transport-recovery hook observed the restart. JetBrains peer pull remains a complementary startup/reconnect repair, and an explicit attached-missing-replica or sync-pending idle observation requests one bounded current publication before the existing 30-second backoff. High-frequency controller liveness reconciliation also stops appending a success/error event for every probe, removing a major `ops.log` and IDE background-work multiplier.
+- **JetBrains editor selections focus tmux on an immediate background lane.** Selection and editor-focus events submit a project-scoped latest-wins focus command before the 100 ms surface debounce and full layout reconciliation. Native project-root discovery and the controller round trip stay off the IntelliJ event thread, while the debounced exact-visible sync remains authoritative for pane creation and replacement.
+- **Closeout followers wake at the incumbent lease boundary instead of their 30-second ceiling.** The controller wait now schedules the otherwise eventless lease-expiry edge, observes the fired clock into keyed controller-owned Lazily state, and lets the shared Computed closeout gate derive whether the owner still blocks. A retained `session-check` recovery therefore cannot make a concurrent finalize sleep past the advertised stopgap and then retry into another stale polling cycle. Explicit owner release and terminal-cycle facts still wake immediately. Owner coordination gets a 15-second response budget instead of the generic 5-second read budget, and the controller stamps the lease at execution time, preventing a just-landed claim from becoming an unguarded stale owner when brief state-store pressure delays its reply.
+- **`agent-doc-skill-harness` owns the optional skill-harness adapter (`#skillharnessplugin`).** The focused integration crate activates only for an `AGENT_DOC_SESSION`, registers the project-local `.agent-doc/plugins/agent-doc/SKILL.md` at a stable priority, and keeps both Agent Doc and generic `skill-harness` free of reverse dependencies. Architecture and adapter tests pin the one-way package boundary.
+
 ## 0.35.43
 
 _JetBrains plugin 0.2.304; VS Code extension 0.2.57._

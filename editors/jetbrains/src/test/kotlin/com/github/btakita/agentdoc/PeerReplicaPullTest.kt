@@ -129,12 +129,12 @@ class PeerReplicaPullTest {
     }
 
     /**
-     * The capability token is the controller's retirement condition for the Tier 1
-     * fan-out. Advertising it without calling the pull would silence the push while
-     * nothing repaired — strictly worse than either tier alone.
+     * The capability token advertises a complementary repair path. The controller
+     * still owns its targeted restart push because a transparent restart need not
+     * trigger this plugin's transport-recovery hook.
      */
     @Test
-    fun `the advertised pull capability matches the code that actually pulls`() {
+    fun `the advertised pull capability matches the complementary pull path`() {
         val capabilities = Files.readString(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt")
                 .takeIf { Files.exists(it) }

@@ -7,6 +7,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
+import java.nio.file.Paths
 
 /**
  * The plugin no longer plans (`#jbsurfaceswap`) — focus-vs-sync, dedup, and the
@@ -188,6 +190,36 @@ class EditorTabSyncListenerTest {
 
         assertFalse(surface.has("layout_synced"))
         assertFalse(surface.has("layoutSynced"))
+    }
+
+    @Test
+    fun `document selection sends latest wins focus before layout reconciliation`() {
+        val source = Files.readString(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                .takeIf { Files.exists(it) }
+                ?: Paths.get(
+                    "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                ),
+        )
+        val selection = source.substringAfter(
+            "override fun selectionChanged(event: FileEditorManagerEvent)",
+        ).substringBefore("fun onEditorFocusGained")
+        assertTrue(selection.contains("requestImmediateFocus(project, file)"))
+        assertTrue(
+            "focus must be submitted before layout detection and the debounced surface sync",
+            selection.indexOf("requestImmediateFocus(project, file)") <
+                selection.indexOf("captureSurface(project, file"),
+        )
+
+        val fastFocus = source.substringAfter(
+            "private fun requestImmediateFocus(project: Project, file: VirtualFile)",
+        ).substringBefore("private fun captureSurface")
+        assertTrue(fastFocus.contains("focusGeneration.incrementAndGet()"))
+        assertTrue(fastFocus.contains("NativeAdminControls.focusDocumentPane("))
+        assertTrue(
+            "the fast lane must not sleep or inherit the 100ms layout debounce",
+            !fastFocus.contains("DEBOUNCE_MS") && !fastFocus.contains("schedule("),
+        )
     }
 
     @Test

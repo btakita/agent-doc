@@ -75,7 +75,58 @@ The offer’s entire-agreement clause is especially important: it says the final
 > I’m excited about the role and would like to move forward. Before I sign, I need the documents revised—or a countersigned side letter—to confirm that the option grant is for an exact number of shares equal to 1.00% of fully diluted capitalization immediately after grant, with the numerator, denominator, convertible-security treatment, Board-approval deadline, and July 29 vesting commencement stated in writing. I also need the Section 11 outside-compensation assignment narrowed, my existing open-source and side projects acknowledged on Exhibit A, the noncompete paragraph removed from Exhibit C, the pre-cliff vesting protection made explicit, and the conflicting Wyoming/Washington forum provisions reconciled for a Massachusetts employee. Please also send the equity plan and proposed option agreement. Because these materials are part of the deal, please extend the acceptance deadline until one business day after I receive the revised documents.
 
 This is issue-spotting, not legal advice. Given the three-state conflict and the value of a genuine 1% grant, a one-hour review by a Massachusetts startup/employment lawyer would be money well spent.
-<!-- agent:boundary:6ec7ff51 -->
+❯ I'm working in a Connecticut home office. Acadian, my other contract, is in Massachusetts. Does that change anything?
+### Re: Connecticut work location and Acadian — gpt-5
+
+Yes—it changes the **state-law and payroll analysis**, but not the main conclusion about the equity or the problematic clauses.
+
+The key fact for Haiven is where you physically perform the Haiven work. If that is your Connecticut home office, Connecticut—not Massachusetts—is the principal employee-location state. Acadian’s Massachusetts location does not, by itself, make you a Massachusetts employee of Haiven.
+
+#### Corrections to my prior review
+
+- Replace my recommendation for **Massachusetts law/venue** with **Connecticut law and a Connecticut or remote forum**. The Wyoming-versus-Washington conflict still needs to be fixed. Do not rely on the Massachusetts noncompete statute I cited earlier unless you actually perform Haiven work in Massachusetts or counsel identifies another Massachusetts nexus. The stray two-year noncompete in Exhibit C remains internally contradictory and should still be deleted.
+
+- Replace the Massachusetts payroll, leave, vacation, and CORI checklist with a **Connecticut employment-compliance checklist**. Have the offer show your actual Connecticut work address instead of “Greater Boston, MA.” Confirm that Haiven—or its PEO/employer-of-record—is registered for Connecticut withholding, unemployment, workers’ compensation, and Connecticut Paid Leave. Connecticut requires employers with Connecticut workers to register for withholding, and Connecticut residents are taxed on all wages. [Connecticut DRS employer registration guidance](https://portal.ct.gov/drs/businesses/new-business-resource-center/registering-with-drs)
+
+- The offer’s twice-monthly “15th and 31st” payroll is now a specific issue. Connecticut generally requires weekly or biweekly pay; an employer needs a Labor Commissioner waiver to use a less-frequent regular schedule. Ask Haiven to change this to biweekly or confirm that it has the required waiver. [Conn. Gen. Stat. §§ 31-71b and 31-71i](https://www.cga.ct.gov/current/pub/chap_558.htm)
+
+- The federal concern about replacing salary with a purportedly “pre-tax” home-office rent payment is unchanged. Connecticut residency does not cure that accountable-plan issue.
+
+#### Acadian makes the outside-work conflict more concrete
+
+The Acadian engagement should be disclosed and approved **by name, in writing, before you sign**. Merely telling a manager is not enough because:
+
+- the offer permits limited disclosed contracting;
+- Section 4 of the second agreement prohibits consulting related to Haiven’s present or future business; and
+- Section 11 purports to give Haiven *all compensation* from third-party services unless its Board unanimously approves otherwise.
+
+As written, Section 11 could be asserted against your Acadian fees or equity even though Acadian is in another state. Its wording is not geographically limited. You need Section 11 deleted or an express contractual carve-out—not an informal assurance that they would never enforce it.
+
+Suggested side-letter language:
+
+> Notwithstanding Sections 3, 4, 8, and 11 of the At-Will Employee and Contracting Agreement, the Company acknowledges Employee’s pre-existing engagement with Acadian under the agreement dated [date], approves its continuation, and disclaims any right to compensation, equity, work product, inventions, or confidential information arising from that engagement, provided Employee performs it on separate time, equipment, systems, and accounts; does not use or disclose Haiven Confidential Information; and it does not materially interfere with Employee’s Haiven duties. This approval may not be revoked retroactively.
+
+Also have Haiven acknowledge that:
+
+- Acadian’s confidential information and work product are not Haiven property;
+- Haiven will not require you to disclose Acadian material;
+- your Acadian work and all pre-existing tools/projects used in it are listed or cross-referenced in Exhibit A; and
+- any future claim of conflict will be handled prospectively, rather than forfeiting compensation already earned.
+
+You should separately review the Acadian agreement for IP assignment, confidentiality, availability, and outside-employment provisions. Two broad invention-assignment agreements can create competing ownership claims even when the businesses are unrelated. Keep separate devices, accounts, repositories, credentials, calendars, and working hours, and never move code, prompts, data, or architecture between them.
+
+#### Tax distinction
+
+If you are a Connecticut resident and physically perform all Acadian services from Connecticut, Acadian’s Massachusetts address alone does not necessarily make the compensation Massachusetts-source. Massachusetts generally sources personal-service compensation to services actually performed in Massachusetts; days physically worked there may require allocation. [Massachusetts nonresident-income guidance](https://www.mass.gov/info-details/ma-gross-adjusted-gross-and-taxable-income-for-nonresidents)
+
+The answer can differ if you travel to Massachusetts, maintain a business location there, work through an entity, receive partnership/pass-through income, or Acadian treats you as an employee rather than an independent contractor. Connecticut taxes residents on all income and generally provides a credit mechanism for qualifying tax paid to another state. [Connecticut 2026 withholding guidance](https://portal.ct.gov/DRS/Withholding-Taxes/Tax-Information) Have a CT/MA tax preparer confirm the classification and sourcing rather than letting either payer guess.
+
+#### What does not change
+
+Still insist on the fully diluted 1% in signed writing with the exact option count, denominator, measurement date, Board-approval deadline, and vesting commencement date. Still fix the pre-cliff vesting language, Section 11, Exhibit A/IP scope, the noncompete paragraph, signing-bonus definitions, arbitration costs, and the missing stock-plan documents.
+
+For counsel, the best fit is now a **Connecticut employment/startup lawyer comfortable with multistate remote work**, with the Acadian agreement included in the review. The most urgent practical request to Haiven is: correct the work location to Connecticut, confirm CT payroll compliance, and countersign the Acadian carve-out alongside the fully diluted equity confirmation.
+<!-- agent:boundary:18f5eefa -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -86,7 +137,7 @@ This is issue-spotting, not legal advice. Given the three-state conflict and the
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#haiven-paper] Obtain and review revised Haiven offer, equity grant terms, and employment/IP agreement before signing; confirm the fully diluted 1% numerator/denominator and Board approval in writing.
+- [ ] [#haiven-paper] Obtain and review revised Haiven offer, equity grant terms, and employment/IP agreement before signing; correct the work location to Connecticut, confirm the fully diluted 1% numerator/denominator and Board approval, and obtain an express Acadian compensation/IP/outside-work carve-out.
 <!-- /agent:backlog -->
 
 ## Icebox

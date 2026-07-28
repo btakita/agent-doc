@@ -233,7 +233,32 @@ Created [haiven-offer-revision-email-draft.md](../professional/haiven/haiven-off
 I left the date, recipient addresses, and signature as explicit placeholders for revision. The draft is committed as `e3cf6c0ae` (`docs: draft Haiven offer revision email`).
 
 Verification: the new file has no uncommitted changes; the document and agent-doc test suites passed. The repository-wide `make check` later encountered four Corky loopback tests competing for a local port, and all four passed on a serial targeted rerun. This repository has no GitHub Actions workflow named `CI`, so no matching run was available to inspect.
-<!-- agent:boundary:02ff0257 -->
+
+### Re: Where the disclosure requirement appears — gpt-5
+
+The direct disclosure requirement is in the offer letter under **“External Contracting”**:
+
+> “Limited external contracting is permissible, provided that such activities do not interfere with your responsibilities at Haiven and are disclosed to the Company.”
+
+See [haiven-offer-letter-brian-takita-jul-2026.md, lines 82–83](../professional/haiven/haiven-offer-letter-brian-takita-jul-2026.md#L82-L83).
+
+Two provisions in the separate At-Will Employee and Contracting Agreement make a specific written disclosure and approval especially important:
+
+- **Section 4, “No Conflicting Employment”** prohibits other employment, consulting, or business activity directly related to Haiven’s current or future business, plus any activity that conflicts with your Haiven obligations. See [lines 142–147](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L142-L147).
+- **Section 11, “Compensation”** says all compensation for third-party services during your Haiven employment—including equity and consulting or advisory fees—must be paid to Haiven unless Haiven’s Board unanimously approves otherwise in writing. See [lines 191–195](../professional/haiven/haiven-at-will-employee-contractor-agreement.md#L191-L195).
+
+So, strictly speaking, **the documents do not say that you must list every “other party” by name**. The offer says the *external contracting activities* must be disclosed. I recommended naming Apollo Solutions, identifying Acadian Financial Services as its end client, and describing MonsterRodHolders.com and Equity Funding Source so that:
+
+1. Haiven cannot later argue that the disclosure was too vague;
+2. the Section 11 written Board approval unmistakably covers the income and IP associated with each activity; and
+3. you have a clear written record that Haiven knew about the engagements before you signed.
+
+The draft’s wording can be softened for precision. Instead of saying, “To comply with the offer’s disclosure requirement, I am formally disclosing the following pre-existing activities,” it could say:
+
+> “The offer requires external contracting activities to be disclosed to Haiven. To satisfy that requirement and obtain the written approval contemplated by Section 11, I am disclosing the following pre-existing activities.”
+
+That accurately separates the offer’s express disclosure requirement from our recommendation to identify the parties sufficiently for a reliable carve-out. This is contract issue-spotting, not a legal conclusion about the minimum disclosure a court would require.
+<!-- agent:boundary:f53d85d5 -->
 <!-- /agent:exchange -->
 
 ## Queue

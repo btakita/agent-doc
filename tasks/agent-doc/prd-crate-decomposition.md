@@ -514,7 +514,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `heuristics.rs`, response text normalization, closeout response/done-signal parsing | `agent-doc-turn` | Extracted. Pending-capture recommendation detection, explicit no-follow-up response detection, future-work response signals, append response heading normalization, imperative response contract classification, closeout response text normalization, closeout prompt/response text matching, exchange-tail unresolved/prompt-only/response-heading policy, direct patchback heading classification, response/done-signal parsing, reaped queue-directive response-loss detection, free-text queue response-proof/residue detection, partial-closeout shipped/remaining-work detection, blocked follow-up closeout detection, gated-phase split body detection, and queue-audit partial-completion collapse detection are turn closeout policy; orchestration only applies the resulting signal to guards and file/cycle adapters. |
 | `syntax.rs` | `agent-doc-syntax` | Extracted. Editor-facing visual tokenization is pure document syntax; FFI/editor integrations stay as adapters. |
 | `topic.rs` | `agent-doc-topic` | Extracted. Exchange topic section parsing is pure text segmentation shared by compaction/archive flows. |
-| `ffi.rs` | `agent-doc-ffi` | Extracted. C/JNA ABI exports depend on focused crates directly. |
+| `ffi.rs` | `agent-doc-ffi` | Extracted. C/JNA ABI exports depend on focused crates directly. The final core audit moved lossless-tree projection and node-keyed patch ABI ownership out of the root cdylib module; the root now only force-links those focused exports. Pure sync-lock acquisition policy moved to `agent-doc-sync`, leaving the FFI host with atomics, clocks, and editor effects only. |
 
 `agent-doc-core` itself is deleted. Focused crates are the only Rust API
 surface for extracted policy.
@@ -548,7 +548,9 @@ surface for extracted policy.
   extraction unless a user-visible CLI/document compatibility path explicitly
   requires a deprecation window.
 - Each extracted crate has at least one meaningful unit test or compile-time
-  dependency-boundary test.
+dependency-boundary test.
+- `tests/core_decomposition.rs` pins the deleted legacy paths, focused owners,
+  pure-crate dependency direction, and root-cdylib ABI-adapter boundary.
 - The workspace builds and the focused extraction tests pass.
 
 ## Deprecating `agent-doc-orchestration`

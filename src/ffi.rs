@@ -50,6 +50,9 @@
 //! - crdt_merge_no_base: identical `ours`/`theirs` with null base → merged text equals input
 
 use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact};
+use agent_doc_sync::{
+    DEFAULT_SYNC_LOCK_STALE_BOUND_MS, SyncLockDecision, sync_lock_acquire_decision,
+};
 use agent_doc_turn::op_log::OpsLogEvent;
 use anyhow::Context as _;
 use serde::Serialize;
@@ -84,40 +87,6 @@ static IPC_LISTENER_GENERATIONS: std::sync::LazyLock<
 /// Reject new listeners while the currently-loaded cdylib is crossing its
 /// quiesce boundary. A freshly loaded generation starts with this flag clear.
 static NATIVE_GENERATION_QUIESCING: AtomicBool = AtomicBool::new(false);
-
-/// Default stale bound for the cross-editor sync guard. Sized above the JetBrains
-/// plugin's `SYNC_PROCESS_TIMEOUT_MS` (30s) plus margin so a legitimately in-flight sync
-/// is never superseded — only a guard held past this bound (a wedged/dead holder) is.
-pub const DEFAULT_SYNC_LOCK_STALE_BOUND_MS: u64 = 45_000;
-
-/// `#recyclerestart` Q2 — pure decision for acquiring the cross-editor sync guard, split
-/// out so the self-heal is unit-testable without real threads/clocks. A free guard is
-/// acquired; a guard held past `stale_bound_ms` by a known-age holder is superseded
-/// (the prior holder wedged and never released); an unknown-age (`acquired_at_ms == 0`)
-/// or still-fresh holder is deferred so a legitimately in-flight sync keeps the guard.
-#[derive(Debug, PartialEq, Eq)]
-pub enum SyncLockDecision {
-    Acquire,
-    SupersedeStaleHolder { held_ms: u64 },
-    Defer,
-}
-
-pub fn sync_lock_acquire_decision(
-    currently_locked: bool,
-    acquired_at_ms: u64,
-    now_ms: u64,
-    stale_bound_ms: u64,
-) -> SyncLockDecision {
-    if !currently_locked {
-        return SyncLockDecision::Acquire;
-    }
-    let held_ms = now_ms.saturating_sub(acquired_at_ms);
-    if acquired_at_ms != 0 && held_ms >= stale_bound_ms {
-        SyncLockDecision::SupersedeStaleHolder { held_ms }
-    } else {
-        SyncLockDecision::Defer
-    }
-}
 
 fn sync_lock_now_epoch_ms() -> u64 {
     std::time::SystemTime::now()
@@ -3028,92 +2997,6 @@ pub unsafe extern "C" fn agent_doc_resolve_project_path(
 // prevent the static linker from stripping them out of the main cdylib.
 pub use agent_doc_ffi::*;
 
-#[derive(Debug, serde::Deserialize)]
-struct IpcNodePatchJson {
-    component: String,
-    node_key: String,
-    op: String,
-    content: Option<String>,
-    expected_content: Option<String>,
-    before: Option<String>,
-    after: Option<String>,
-    #[serde(default)]
-    order: Vec<String>,
-}
-
-fn parse_node_patch_op(
-    op: &str,
-) -> Result<agent_doc_markdown_ast::mutations::MutationNodePatchOp, String> {
-    use agent_doc_markdown_ast::mutations::MutationNodePatchOp;
-    match op {
-        "insert" => Ok(MutationNodePatchOp::Insert),
-        "remove" => Ok(MutationNodePatchOp::Remove),
-        "replace" => Ok(MutationNodePatchOp::Replace),
-        "move" => Ok(MutationNodePatchOp::Move),
-        "strike" => Ok(MutationNodePatchOp::Strike),
-        "unstrike" => Ok(MutationNodePatchOp::Unstrike),
-        other => Err(format!("unsupported node patch op `{other}`")),
-    }
-}
-
-fn parse_node_patches_json(
-    raw: &str,
-) -> Result<Vec<agent_doc_markdown_ast::mutations::MutationNodePatch>, String> {
-    serde_json::from_str::<Vec<IpcNodePatchJson>>(raw)
-        .map_err(|err| format!("invalid node_patches JSON: {err}"))?
-        .into_iter()
-        .map(|patch| {
-            Ok(agent_doc_markdown_ast::mutations::MutationNodePatch {
-                component: patch.component,
-                node_key: patch.node_key,
-                op: parse_node_patch_op(&patch.op)?,
-                content: patch.content,
-                expected_content: patch.expected_content,
-                before: patch.before,
-                after: patch.after,
-                order: patch.order,
-            })
-        })
-        .collect()
-}
-
-/// Apply node-keyed IPC patches to a live editor document snapshot.
-///
-/// # Safety
-///
-/// `doc` and `node_patches_json` must be non-null, NUL-terminated UTF-8 strings.
-/// The returned pointers must be freed with [`agent_doc_free_string`].
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_apply_node_patches(
-    doc: *const c_char,
-    node_patches_json: *const c_char,
-) -> FfiPatchResult {
-    if doc.is_null() {
-        return ffi_patch_err("doc pointer is null");
-    }
-    if node_patches_json.is_null() {
-        return ffi_patch_err("node_patches_json pointer is null");
-    }
-    let doc = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(value) => value,
-        Err(err) => return ffi_patch_err(&format!("doc is not valid UTF-8: {err}")),
-    };
-    let raw_patches = match unsafe { CStr::from_ptr(node_patches_json) }.to_str() {
-        Ok(value) => value,
-        Err(err) => {
-            return ffi_patch_err(&format!("node_patches_json is not valid UTF-8: {err}"));
-        }
-    };
-    let patches = match parse_node_patches_json(raw_patches) {
-        Ok(value) => value,
-        Err(err) => return ffi_patch_err(&err),
-    };
-    match agent_doc_markdown_ast::mutations::apply_node_patches(doc, &patches) {
-        Ok(updated) => ffi_patch_ok(updated),
-        Err(err) => ffi_patch_err(&err.to_string()),
-    }
-}
-
 /// Prevent the static linker from stripping the `agent_doc_ffi`
 /// symbols out of `libagent_doc.{so,dylib,dll}`. Called from `lib.rs`
 /// via a constructor-style reference path so editor plugins
@@ -3125,10 +3008,12 @@ pub unsafe extern "C" fn agent_doc_apply_node_patches(
 #[allow(dead_code)]
 fn force_link_core_ffi_symbols() {
     use agent_doc_ffi::{
-        FfiComponentList, FfiMergeResult, FfiPatchResult, agent_doc_apply_patch,
-        agent_doc_apply_patch_with_boundary, agent_doc_apply_patch_with_caret,
-        agent_doc_converge_queue_auto, agent_doc_crdt_merge, agent_doc_free_state,
-        agent_doc_free_string, agent_doc_merge_crdt, agent_doc_merge_frontmatter,
+        FfiComponentList, FfiMergeResult, FfiPatchResult, agent_doc_apply_node_patches,
+        agent_doc_apply_patch, agent_doc_apply_patch_with_boundary,
+        agent_doc_apply_patch_with_caret, agent_doc_converge_queue_auto, agent_doc_crdt_merge,
+        agent_doc_free_state, agent_doc_free_string, agent_doc_lossless_tree_capability,
+        agent_doc_lossless_tree_project, agent_doc_lossless_tree_projection_current,
+        agent_doc_lossless_tree_render, agent_doc_merge_crdt, agent_doc_merge_frontmatter,
         agent_doc_normalize_template_structure, agent_doc_parse_components,
         agent_doc_reposition_boundary_to_end, agent_doc_reposition_boundary_to_end_preserve_head,
         agent_doc_reposition_boundary_to_end_preserve_head_with_id,
@@ -3156,6 +3041,13 @@ fn force_link_core_ffi_symbols() {
     ) -> FfiPatchResult = agent_doc_apply_patch_with_boundary;
     let _: unsafe extern "C" fn(*mut c_char) = agent_doc_free_string;
     let _: unsafe extern "C" fn(*mut u8, usize) = agent_doc_free_state;
+    let _: unsafe extern "C" fn(*const c_char, *const c_char) -> FfiPatchResult =
+        agent_doc_apply_node_patches;
+    let _: extern "C" fn() -> *const c_char = agent_doc_lossless_tree_capability;
+    let _: unsafe extern "C" fn(*const c_char) -> *mut c_char = agent_doc_lossless_tree_project;
+    let _: unsafe extern "C" fn(*const c_char) -> *mut c_char = agent_doc_lossless_tree_render;
+    let _: unsafe extern "C" fn(*const c_char, *const c_char) -> i32 =
+        agent_doc_lossless_tree_projection_current;
     let _: unsafe extern "C" fn(*const c_char) -> FfiComponentList = agent_doc_parse_components;
     let _: unsafe extern "C" fn(*const c_char) -> *mut c_char = agent_doc_visual_tokens_json;
     let _: unsafe extern "C" fn(*const c_char, *const c_char) -> FfiPatchResult =
@@ -3933,37 +3825,6 @@ mod tests {
     }
 
     #[test]
-    fn sync_lock_acquire_decision_self_heals_wedged_holder() {
-        use super::{SyncLockDecision, sync_lock_acquire_decision};
-        let bound = DEFAULT_SYNC_LOCK_STALE_BOUND_MS;
-        // Free guard → acquire.
-        assert_eq!(
-            sync_lock_acquire_decision(false, 0, 1_000, bound),
-            SyncLockDecision::Acquire
-        );
-        // Held by a legitimately in-flight sync (5s < 45s bound) → defer, do NOT supersede.
-        assert_eq!(
-            sync_lock_acquire_decision(true, 1_000, 6_000, bound),
-            SyncLockDecision::Defer
-        );
-        // Held just under the bound → still defer (boundary).
-        assert_eq!(
-            sync_lock_acquire_decision(true, 1_000, 1_000 + bound - 1, bound),
-            SyncLockDecision::Defer
-        );
-        // Held past the bound by a wedged/dead holder → supersede with the held duration.
-        assert_eq!(
-            sync_lock_acquire_decision(true, 1_000, 1_000 + bound, bound),
-            SyncLockDecision::SupersedeStaleHolder { held_ms: bound }
-        );
-        // Locked but holder age unknown (0) → defer; never supersede an unknown-age holder.
-        assert_eq!(
-            sync_lock_acquire_decision(true, 0, 999_999, bound),
-            SyncLockDecision::Defer
-        );
-    }
-
-    #[test]
     fn sync_try_lock_supersedes_a_guard_wedged_past_the_bound() {
         // Acquire, then simulate a holder that wedged ~1 minute ago by back-dating the
         // recorded acquisition time. A 45s-bound acquire must self-heal (supersede), and
@@ -4041,55 +3902,6 @@ mod tests {
         assert_eq!(parsed[0]["name"], "status");
         assert_eq!(parsed[0]["content"], "hello\n");
         unsafe { agent_doc_free_string(result.json) };
-    }
-
-    #[test]
-    fn apply_node_patches_ffi_preserves_live_buffer_drift() {
-        let doc = CString::new(
-            "\
-operator note
-<!-- agent:queue -->
-- do [#alpha]
-- do [#beta]
-- live buffer addition
-<!-- /agent:queue -->
-",
-        )
-        .unwrap();
-        let patches = CString::new(
-            r#"[
-{"component":"queue","node_key":"queue:0:beta:0","op":"strike"},
-{"component":"queue","node_key":"queue:0:gamma:0","op":"insert","content":"- do [#gamma]\n","after":"queue:0:beta:0"}
-]"#,
-        )
-        .unwrap();
-
-        let result = unsafe { agent_doc_apply_node_patches(doc.as_ptr(), patches.as_ptr()) };
-
-        assert!(result.error.is_null());
-        assert!(!result.text.is_null());
-        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
-        assert!(text.contains("operator note\n"));
-        assert!(text.contains("- live buffer addition\n"));
-        assert!(text.contains("- ~~do [#beta]~~\n- do [#gamma]\n"));
-        unsafe { agent_doc_free_string(result.text) };
-    }
-
-    #[test]
-    fn apply_node_patches_ffi_rejects_unknown_op() {
-        let doc =
-            CString::new("<!-- agent:queue -->\n- do [#alpha]\n<!-- /agent:queue -->\n").unwrap();
-        let patches =
-            CString::new(r#"[{"component":"queue","node_key":"queue:0:alpha:0","op":"unknown"}]"#)
-                .unwrap();
-
-        let result = unsafe { agent_doc_apply_node_patches(doc.as_ptr(), patches.as_ptr()) };
-
-        assert!(result.text.is_null());
-        assert!(!result.error.is_null());
-        let error = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
-        assert!(error.contains("unsupported node patch op"));
-        unsafe { agent_doc_free_string(result.error) };
     }
 
     #[test]

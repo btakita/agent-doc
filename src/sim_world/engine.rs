@@ -674,14 +674,14 @@ impl SimWorld {
     }
 
     pub(crate) fn sync_layout_click(&mut self) {
-        let decision = agent_doc::ffi::sync_lock_acquire_decision(
+        let decision = agent_doc_sync::sync_lock_acquire_decision(
             self.sync_guard.locked,
             self.sync_guard.acquired_at_ms,
             self.sync_guard.now_ms,
             self.sync_guard.stale_bound_ms,
         );
         match decision {
-            agent_doc::ffi::SyncLockDecision::Acquire => {
+            agent_doc_sync::SyncLockDecision::Acquire => {
                 self.sync_guard.locked = true;
                 self.sync_guard.acquired_at_ms = self.sync_guard.now_ms;
                 self.record_ops_proof(format!(
@@ -689,7 +689,7 @@ impl SimWorld {
                     self.sync_guard.now_ms
                 ));
             }
-            agent_doc::ffi::SyncLockDecision::SupersedeStaleHolder { held_ms } => {
+            agent_doc_sync::SyncLockDecision::SupersedeStaleHolder { held_ms } => {
                 self.sync_guard.locked = true;
                 self.sync_guard.acquired_at_ms = self.sync_guard.now_ms;
                 self.coverage.sync_guard_stale_releases += 1;
@@ -698,7 +698,7 @@ impl SimWorld {
                     self.sync_guard.stale_bound_ms
                 ));
             }
-            agent_doc::ffi::SyncLockDecision::Defer => {
+            agent_doc_sync::SyncLockDecision::Defer => {
                 self.coverage.sync_guard_defers += 1;
                 self.record_ops_proof(format!(
                     "sync_guard_deferred reason=fresh_holder held_ms={}",

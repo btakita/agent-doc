@@ -1,13 +1,8 @@
 //! C-ABI exports for FFI consumers (editor plugins, Python bindings).
 //!
-//! Pure subset of the FFI surface: functions that depend only on focused
-//! data/merge crates and need no orchestration-layer state. The full
-//! editor-plugin FFI lives in `agent_doc::ffi` (main crate), which force-links
-//! these symbols into the single shipped cdylib.
-//!
-//! Wave 5 / `#k9e1` of `#adcr` — proof-of-concept relocation. Adding more
-//! pure functions to this module is tracked under follow-up sub-tasks of
-//! `#k9e1`. See `tasks/agent-doc/prd-crate-decomposition.md`.
+//! Pure FFI owner: functions here depend only on focused data/merge crates and
+//! no orchestration-layer state. The root cdylib force-links these symbols but
+//! does not re-own their policy.
 //!
 //! `#k9e1-ffi-simple` (`#epv5`) relocated the four simplest pure FFI
 //! functions (`agent_doc_parse_components`, `agent_doc_visual_tokens_json`,
@@ -29,6 +24,15 @@ use agent_doc_merge::crdt;
 use agent_doc_merge::crdt_sync::ReplicaState;
 use agent_doc_syntax as syntax;
 use agent_doc_template as template;
+
+mod lossless_tree;
+mod node_patch;
+
+pub use lossless_tree::{
+    agent_doc_lossless_tree_capability, agent_doc_lossless_tree_project,
+    agent_doc_lossless_tree_projection_current, agent_doc_lossless_tree_render,
+};
+pub use node_patch::agent_doc_apply_node_patches;
 
 /// Free a string returned by an `agent_doc_*` function.
 ///

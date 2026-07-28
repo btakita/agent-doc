@@ -25,6 +25,36 @@ pub const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000
 pub const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
 pub const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub const STALE_SYNC_LOCK_OWNER_AGE: Duration = Duration::from_secs(300);
+/// Default stale bound for the cross-editor native sync guard.
+pub const DEFAULT_SYNC_LOCK_STALE_BOUND_MS: u64 = 45_000;
+
+/// Pure policy for acquiring the cross-editor native sync guard.
+///
+/// The FFI layer owns the atomics and clock reads; this focused sync crate owns
+/// the state transition so the editor ABI remains an effect adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncLockDecision {
+    Acquire,
+    SupersedeStaleHolder { held_ms: u64 },
+    Defer,
+}
+
+pub fn sync_lock_acquire_decision(
+    currently_locked: bool,
+    acquired_at_ms: u64,
+    now_ms: u64,
+    stale_bound_ms: u64,
+) -> SyncLockDecision {
+    if !currently_locked {
+        return SyncLockDecision::Acquire;
+    }
+    let held_ms = now_ms.saturating_sub(acquired_at_ms);
+    if acquired_at_ms != 0 && held_ms >= stale_bound_ms {
+        SyncLockDecision::SupersedeStaleHolder { held_ms }
+    } else {
+        SyncLockDecision::Defer
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyncLockProcess {
@@ -617,6 +647,31 @@ fn resolve_absolute_file_path(file: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_lock_acquire_decision_self_heals_wedged_holder() {
+        let bound = DEFAULT_SYNC_LOCK_STALE_BOUND_MS;
+        assert_eq!(
+            sync_lock_acquire_decision(false, 0, 1_000, bound),
+            SyncLockDecision::Acquire
+        );
+        assert_eq!(
+            sync_lock_acquire_decision(true, 1_000, 6_000, bound),
+            SyncLockDecision::Defer
+        );
+        assert_eq!(
+            sync_lock_acquire_decision(true, 1_000, 1_000 + bound - 1, bound),
+            SyncLockDecision::Defer
+        );
+        assert_eq!(
+            sync_lock_acquire_decision(true, 1_000, 1_000 + bound, bound),
+            SyncLockDecision::SupersedeStaleHolder { held_ms: bound }
+        );
+        assert_eq!(
+            sync_lock_acquire_decision(true, 0, 999_999, bound),
+            SyncLockDecision::Defer
+        );
+    }
 
     #[test]
     fn auto_start_mode_reports_stable_log_labels() {

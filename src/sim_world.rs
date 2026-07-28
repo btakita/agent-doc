@@ -3360,7 +3360,7 @@ impl Default for SyncGuardModel {
             locked: false,
             acquired_at_ms: 0,
             now_ms: 1,
-            stale_bound_ms: agent_doc::ffi::DEFAULT_SYNC_LOCK_STALE_BOUND_MS,
+            stale_bound_ms: agent_doc_sync::DEFAULT_SYNC_LOCK_STALE_BOUND_MS,
             killed_pane_path: false,
         }
     }

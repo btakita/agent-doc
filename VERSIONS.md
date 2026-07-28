@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.42
+
+_JetBrains plugin 0.2.303; VS Code extension 0.2.57._
+
+- **The former `agent-doc-core` surface is now guarded as a permanent focused-crate decomposition (`#coredecomp`).** Lossless-tree projection and node-keyed patch C ABI ownership moved from the root cdylib module into `agent-doc-ffi`; the root only force-links those exports. Pure native sync-lock acquisition policy moved from the FFI host into `agent-doc-sync`, leaving atomics, clocks, editor callbacks, and other effects at the ABI boundary. A workspace architecture test pins the deleted core paths, the element/backlog/queue/template/merge/FFI owners, effect-free dependency direction, and the absence of duplicate root policy.
+
 ## 0.35.41
 
 _JetBrains plugin 0.2.302; VS Code extension 0.2.57._

@@ -818,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn observed_recovery_evidence_loads_from_projection_without_capture_sidecar() {
+fn observed_recovery_evidence_loads_from_projection_without_capture_sidecar() {
         let base = concat!(
             "---\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -858,11 +858,35 @@ mod tests {
                 assert!(proof.contains("repeated prompt"));
             }
             other => panic!("expected projected supersession proof, got {other:?}"),
-        }
     }
+}
 
-    #[test]
-    fn classify_recovery_missing_response_body_uses_observed_projection_without_capture_sidecar() {
+#[test]
+fn observed_recovery_evidence_ignores_stale_snapshot_when_visible_hash_matches() {
+    let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+    let (_dir, doc) = setup_git_project_with_doc(base);
+    agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+
+    let recorded = observe_closeout_recovery_evidence(&doc).unwrap();
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        "obsolete snapshot sidecar baseline",
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+
+    let loaded = load_current_observed_closeout_recovery_evidence(&doc)
+        .unwrap()
+        .expect("snapshot sidecar drift must not veto current typed recovery evidence");
+    assert_eq!(loaded.visible_markdown_hash, recorded.visible_markdown_hash);
+    assert_eq!(
+        loaded.snapshot_hash, recorded.snapshot_hash,
+        "the typed observation retains its recorded snapshot as advisory evidence"
+    );
+}
+
+#[test]
+fn classify_recovery_missing_response_body_uses_observed_projection_without_capture_sidecar() {
         let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
         let response = "### Re: hello — gpt-5\n\nCaptured but never committed.\n";
         let (_dir, doc) = setup_git_project_with_doc(base);

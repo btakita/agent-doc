@@ -1006,17 +1006,11 @@ pub fn load_current_observed_closeout_recovery_evidence(
     let visible_doc =
         effects.resolve_current_document(file, "observed_closeout_recovery_evidence")?;
     let visible_markdown_hash = agent_doc_capture_io::replay_file_hash(visible_doc.content());
-    let current_snapshot_hash = agent_doc_snapshot_io::load_document_baseline(file)?
-        .as_deref()
-        .map(agent_doc_hash::content_hash);
     let Some(projection) = agent_doc_cycle_state_io::load_latest_closeout_recovery_evidence(file)?
     else {
         return Ok(None);
     };
     if projection.visible_markdown_hash != visible_markdown_hash {
-        return Ok(None);
-    }
-    if current_snapshot_hash.is_some() && projection.snapshot_hash != current_snapshot_hash {
         return Ok(None);
     }
     Ok(projected_closeout_recovery_evidence(projection))

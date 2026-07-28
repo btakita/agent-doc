@@ -691,7 +691,37 @@ Verification:
 - `make install`: passed; local binary reports `agent-doc 0.35.50`.
 
 Release proof: agent-doc commit `d3e121b77` pushed to `main`, tag `v0.35.50` pushed, and superproject gitlink commit `97467e770` pushed. Confidence is high; no escalation or remaining follow-up is required. The pre-existing untracked `editors/zed/extension.wasm` and unrelated workspace changes were left untouched.
-<!-- agent:boundary:f2b54828 -->
+
+### Re: do [#30p6] — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> 📌 do [#30p6]
+
+
+Implemented and released the Go-mode idle-queue dispatch fix as agent-doc `0.35.51`.
+
+The earlier `!later_has_prompt` theory is now ruled out by the real wrapped Codex-draft regression. The remaining failure was a two-part state-boundary bug: an unavailable/negative pane recognition could fall through to a fresh dispatch, while a stale matching `PromptDispatchProjection` made that fallback return `Sent` as a duplicate without touching tmux. The watcher then recorded the queue head as dispatched even though the composer had never been submitted.
+
+The corrected contract is fail-closed:
+
+- Payload recognition and dispatch readiness now come from one typed live-pane observation.
+- An unavailable capture defers without writing or recording the head.
+- A non-ready composer without the queue payload is treated as operator-owned and defers.
+- A proven queue draft receives at most one bare Enter resubmit.
+- A proven empty, dispatch-ready composer may clear only the matching stale dispatch projection before a real text+Enter retry.
+- Prompt-dispatch deduplication is no longer accepted as queue delivery proof.
+- Each changed observation persists a redacted pane snapshot together with the computed pending/ready/action values, deduped by head and capture hash. A future live stall therefore retains the capture and its recognition result atomically instead of requiring race-prone separate probes.
+
+Proof:
+
+- Changed paths: `agent-doc-supervisor-io/src/detection.rs`, `agent-doc-start-runtime-io/src/{idle_watch.rs,lib.rs}`, `specs/supervisor.md`, release metadata/manifests, and bundled skill version headers.
+- Focused verification: new fail-closed action-matrix tests pass; the one-shot Enter regression passes; the real wrapped Codex draft recognition regression passes; all 62 `agent-doc-supervisor-io` library tests pass; all 101 `agent-doc-start-runtime-io` library tests pass.
+- Repository verification: `make check` passed all 8,268 tests (241 skipped), clippy/format checks, and all TLA+ models.
+- Release verification: full release install succeeded; `agent-doc --version` reports `0.35.51`; active project controller marked for idle-boundary recycle.
+- Delivery: agent-doc commit `272d1cc27` and parent gitlink commit `7d881a288` are pushed; tag `v0.35.51`, PyPI manylinux wheel, and GitHub release are published. The required single CI observation was `in_progress`, not red; it was not polled.
+- Confidence: high. Escalation: none.
+<!-- agent:boundary:7654179d -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -700,7 +730,7 @@ Release proof: agent-doc commit `d3e121b77` pushed to `main`, tag `v0.35.50` pus
 - ~~📌 do [#suprestassoc-live]~~
 - ~~📌 do [#jbedtledgerverify]~~
 - ~~📌 do [#0dsr]~~
-- 📌 do [#30p6]
+- ~~📌 do [#30p6]~~
 - 📌 do [#opcapturelazily]
 - 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#sidecarstate]
@@ -723,7 +753,6 @@ Release proof: agent-doc commit `d3e121b77` pushed to `main`, tag `v0.35.50` pus
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
-- [ ] [#30p6] [focused-cycle] Go-mode idle-queue dispatch adds the run to the composer but never submits it — SUSPECT WEAKENED 2026-07-19 by evidence. Gate chain confirmed: idle_queue_pending_payload_needs_enter_resubmit = pending_draft_enter_resubmit() (true unconditionally, NOT the filter) && drain_dispatch_dedup_skip(payload_already_pending) && !already_resubmitted, with drain_dispatch_dedup_skip = matches!(x, Some(true)) — so the resubmit fires only on positive recognition, and None (pane uncapturable) or Some(false) (recognition failed) both strand the draft. My earlier prime suspect was the trailing !later_has_prompt condition in route_trigger_visible_in_current_draft (dispatch.rs:412). The #64we capture ARGUES AGAINST it: a real stranded codex draft shows NO is_prompt_line after the trigger (codex patterns are ❯ > ›; the footer line starts 'gpt-5.5'), so that condition would have returned true and the resubmit would have fired. Remaining candidates: payload_already_pending == None (live_pane_content unavailable at the decision point), or recognition failing earlier in the chain. CONFIRM BY capturing the pane AND the computed payload_already_pending together at a live stall — the pane capture alone is not sufficient, which is what this pass established.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 - [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md
 - [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.

@@ -172,9 +172,11 @@ employment relationship.
 
 ## 7. Scheduling note
 
-I expect to start later than usual on Monday, August 10, and may miss or join
-the 10:00 a.m. PT weekly standup and iteration-planning meeting late. I may also
-have an occasional conflict with that recurring meeting. When a conflict
+I will be unavailable for the Monday, August 10, 10:00 a.m. PT weekly standup
+and iteration-planning meeting and will miss it entirely. I may need to take the
+full day off and will confirm that as soon as possible. I plan to make up the
+hours elsewhere during that week, subject to Haiven’s time-off policy. I may
+also have an occasional conflict with that recurring meeting. When a conflict
 arises, I will give advance notice when possible, provide written planning
 notes, and make up the time and planning coordination before or after the
 meeting.

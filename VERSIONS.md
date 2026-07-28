@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.48
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._
+
+- **Codex authentication screens no longer impersonate a dispatch-ready composer (`#nsfz`).** The first-run sign-in selector reuses Codex's normal `>` glyph, so the supervisor previously injected the agent-doc reopen into the login UI instead of reaching its bounded startup-miss path. Harness readiness now classifies sign-in selection plus browser/device-code waits as explicit blockers until a genuine composer appears after the latest authentication marker. A real isolated unauthenticated Codex restart remained `prompt_ready=false`, emitted the 60-second fail-closed diagnostic, and recorded `startup_miss` with `reason=no_prompt`.
+
 ## 0.35.47
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.58; Zed extension 0.1.0._

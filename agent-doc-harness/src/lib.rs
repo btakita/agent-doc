@@ -16,6 +16,8 @@
 //! - `from_context` never fails — falls back to Claude defaults for unknown agents.
 //! - `restart_args` returns the full arg list for a restart iteration.
 //! - `trigger_command` substitutes the file path into the template.
+//! - Codex authentication selectors and browser/device-code waits are blockers, not
+//!   dispatch-ready prompts, even when the selector uses the normal `>` prompt glyph.
 
 use agent_doc_config::Config;
 use agent_doc_frontmatter::frontmatter::Frontmatter;
@@ -772,6 +774,15 @@ impl HarnessConfig {
     /// Return true when a captured child transcript shows an idle harness
     /// prompt or prompt-equivalent idle chrome.
     pub fn output_prompt_visible(&self, output: &str) -> bool {
+        // Codex's first-run authentication selector uses the same leading `>`
+        // glyph as its normal composer. Treating that selector as ready submits
+        // the agent-doc reopen into the login UI and defeats the bounded
+        // startup-miss path. The blocker stays active until a genuine composer
+        // is rendered *after* the latest authentication marker, so completed
+        // login scrollback cannot permanently suppress readiness.
+        if self.codex_auth_screen_active(output) {
+            return false;
+        }
         // #opencode-idle-detection-post-turn: for OpenCode, check only the bottom
         // N lines for idle chrome instead of requiring the entire scrollback to be
         // ignorable chrome. After a turn completes the pane keeps completed-turn
@@ -874,6 +885,10 @@ impl HarnessConfig {
     /// Return a short reason when recent pane output shows that route should
     /// not inject a new trigger yet.
     pub fn dispatch_blocker_reason(&self, output: &str) -> Option<String> {
+        if self.codex_auth_screen_active(output) {
+            return Some("codex authentication screen".to_string());
+        }
+
         if agent_doc_turn_executor_tmux::prompt::parse_prompt(output).active {
             return Some("active permission prompt".to_string());
         }
@@ -1010,6 +1025,34 @@ impl HarnessConfig {
                 None
             }
         })
+    }
+
+    fn codex_auth_screen_active(&self, output: &str) -> bool {
+        if self.binary != "codex" {
+            return false;
+        }
+
+        let mut latest_auth_marker = None;
+        let mut latest_ready_prompt = None;
+        for (index, raw_line) in output.lines().enumerate() {
+            let line = agent_doc_turn_executor_tmux::prompt::strip_ansi(raw_line);
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.contains("sign in with chatgpt")
+                || lower.contains("provide your own api key")
+                || lower.contains("finish signing in via your browser")
+                || lower.contains("auth.openai.com/oauth")
+                || lower.contains("sign in with device code")
+            {
+                latest_auth_marker = Some(index);
+            }
+            if self.is_dispatch_ready_prompt_line(trimmed) {
+                latest_ready_prompt = Some(index);
+            }
+        }
+
+        latest_auth_marker
+            .is_some_and(|auth_index| latest_ready_prompt.is_none_or(|prompt| prompt <= auth_index))
     }
 
     /// Return a reason when the latest pane output shows live user input or
@@ -2928,6 +2971,58 @@ resumed child ready
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 ";
         assert!(h.output_prompt_visible(output));
+    }
+
+    #[test]
+    fn codex_auth_selector_is_not_a_dispatch_ready_prompt() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Welcome to Codex, OpenAI's command-line coding agent
+Sign in with ChatGPT to use Codex
+> 1. Sign in with ChatGPT
+2. Sign in with Device Code
+3. Provide your own API key
+Press enter to continue
+";
+        assert!(!h.output_prompt_visible(output));
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("codex authentication screen")
+        );
+        assert_eq!(ready_prompt_candidate(output, &h), None);
+    }
+
+    #[test]
+    fn codex_browser_auth_wait_is_not_a_dispatch_ready_prompt() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Welcome to Codex, OpenAI's command-line coding agent
+Finish signing in via your browser
+https://auth.openai.com/oauth/authorize?client_id=example
+On a remote or headless machine? Press esc and choose Sign in with Device Code.
+Press esc to cancel
+";
+        assert!(!h.output_prompt_visible(output));
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("codex authentication screen")
+        );
+        assert_eq!(ready_prompt_candidate(output, &h), None);
+    }
+
+    #[test]
+    fn codex_prompt_after_auth_scrollback_is_dispatch_ready() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Welcome to Codex, OpenAI's command-line coding agent
+Finish signing in via your browser
+https://auth.openai.com/oauth/authorize?client_id=example
+›
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert!(h.output_prompt_visible(output));
+        assert_eq!(h.dispatch_blocker_reason(output), None);
+        assert_eq!(ready_prompt_candidate(output, &h), Some("›".to_string()));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-lease"
-version = "0.35.47"
+version = "0.35.48"
 edition = "2024"
 description = "TTL freshness primitives for agent-doc leases and sidecars"
 license = "MIT"

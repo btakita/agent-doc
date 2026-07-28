@@ -225,14 +225,33 @@ Published commits:
 - superproject pointers `41e31891e` (`feat: pin portable stdlib conformance phase`)
 
 Confidence: high. Escalation: none. No new follow-up is needed beyond the already-queued Phase 1 Rust corpus/peer adapter work.
-<!-- agent:boundary:be284dc9 -->
+
+### Re: #lzstdlibrsfixtures — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzstdlibrsfixtures]
+
+
+Completed Phase 1 for Rust without making Rust the oracle.
+
+- `lazily-rs` now replays all three canonical stdlib fixtures through production `Timer`, caller-driven `Timeout`, and `RevisionBarrier` APIs. The runner also compares the corpus with an independent pure interpreter and proves every declared mutation is observed.
+- Production seams now expose typed timer overflow/clock-regression results, typed timeout cancellation unavailability and deterministic adapter precedence, deadline dominance, terminal latching, and revision-only barrier generations.
+- The Rust interop peer advertises `stdlib_timer_v1`, `stdlib_timeout_v1`, and `stdlib_revision_barrier_v1`; `feature_reset`, `feature_step`, and `feature_observe` call the public production APIs. Its self-check exercises all three controls.
+- `lazily-interop` accepts the new feature/control vocabulary and proves that one eligible implementation remains red as `insufficient_eligible_peers`, with unsupported peers staged.
+- Rust coverage is green for the three stdlib rows; other bindings remain staged. Coverage READMEs were synchronized across all bindings.
+
+Verification: `make check` passed in `lazily-rs`, `lazily-interop`, `lazily-spec`, and every binding/formal repo. Rust's full gate included Clippy, all feature matrices, Loom, canonical fixture replay, mutations, and the peer self-check. The superproject `make check` remains red only in seven unrelated `src/agent-doc` controller-socket integration tests; the lazily-specific gates are green. One-time CI inspection found spec/kt/js/dart/zig/go/cs green, Rust and C++ in progress, and no workflow named `CI` in root/py/formal.
+
+Pushed commits include Rust `f9b28d6`, spec `1201842`, interop/superproject `701532f24`, plus generated coverage commits in the remaining binding/formal repositories.
+<!-- agent:boundary:b700c6cc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzstdlibspec]~~
-- do [#lzstdlibrsfixtures]
+- ~~do [#lzstdlibrsfixtures]~~
 - do [#lzstdlibportsnative]
 - do [#lzstdlibportsmanaged]
 - do [#lzstdlibcspromote]
@@ -243,7 +262,6 @@ Confidence: high. Escalation: none. No new follow-up is needed beyond the alread
 
 <!-- agent:backlog priority queue -->
 - [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
-- [ ] [#lzstdlibrsfixtures] Implement Phase 1 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: replay the canonical stdlib corpus against lazily-rs production APIs and add production-backed Rust peer feature controls without treating Rust as the oracle.
 - [ ] [#lzstdlibportsnative] Implement Phase 2 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Zig, Go, and C++, including race/sanitizer and peer feature scenarios.
 - [ ] [#lzstdlibportsmanaged] Implement Phase 3 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Python, Kotlin, JavaScript, and Dart, with deterministic clock/wait seams and honest runtime/channel carve-outs.
 - [ ] [#lzstdlibcspromote] Implement Phase 4 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: add .NET stdlib production surfaces and corpus runners, then promote C# per feature and per executable channel only when evidence is green.

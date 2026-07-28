@@ -225,6 +225,57 @@ fn repair_atomic_write_if_current(
 
 pub struct RuntimeSessionCheckEffects;
 
+/// Closed transition identities emitted while resuming one durable captured
+/// response.
+///
+/// These values select authority observations and durable effects; they are not
+/// prose log labels. Keep the string encoding at the existing cross-crate
+/// boundary, while making the policy owner choose from a finite set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapturedFinalizeSource {
+    FalseStaleRetirementSettlement,
+    CommittedEffectSinkCurrent,
+    CommittedEffectSinkSettlement,
+    RetainedProjectionSettlement,
+    ReconciliationCurrent,
+    ReconciliationDisk,
+    NativeSaveWithoutRetainedIntent,
+    NativeSaveWithoutRetainedIntentSettled,
+    RetainedWriteAppliedCurrent,
+    RetainedWriteAppliedDisk,
+}
+
+impl CapturedFinalizeSource {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::FalseStaleRetirementSettlement => {
+                "session_check_false_stale_capture_retirement_settlement"
+            }
+            Self::CommittedEffectSinkCurrent => {
+                "session_check_committed_capture_effect_sink_current"
+            }
+            Self::CommittedEffectSinkSettlement => {
+                "session_check_committed_capture_effect_sink_settlement"
+            }
+            Self::RetainedProjectionSettlement => {
+                "session_check_retained_captured_projection_settlement"
+            }
+            Self::ReconciliationCurrent => {
+                "session_check_write_applied_capture_reconciliation_current"
+            }
+            Self::ReconciliationDisk => "session_check_write_applied_capture_reconciliation_disk",
+            Self::NativeSaveWithoutRetainedIntent => {
+                "session_check_capture_without_retained_intent_native_save"
+            }
+            Self::NativeSaveWithoutRetainedIntentSettled => {
+                "session_check_capture_without_retained_intent_native_save_settled"
+            }
+            Self::RetainedWriteAppliedCurrent => "session_check_retained_capture_write_applied",
+            Self::RetainedWriteAppliedDisk => "session_check_retained_capture_disk",
+        }
+    }
+}
+
 fn cycle_event_is(state_event: &str, expected: &str) -> bool {
     state_event == expected
         || state_event
@@ -328,7 +379,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             && agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                         file,
                         &capture.response_body,
-                        "session_check_false_stale_capture_retirement_settlement",
+                        CapturedFinalizeSource::FalseStaleRetirementSettlement.as_str(),
                     )?
             {
                 let cycle_reactivated =
@@ -389,7 +440,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             }
             let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
                 file,
-                "session_check_committed_capture_effect_sink_current",
+                CapturedFinalizeSource::CommittedEffectSinkCurrent.as_str(),
             )?;
             if !agent_doc_turn::response_replay::response_materialized_in_content(
                 &capture.response_body,
@@ -400,7 +451,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             return match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                 file,
                 &capture.response_body,
-                "session_check_committed_capture_effect_sink_settlement",
+                CapturedFinalizeSource::CommittedEffectSinkSettlement.as_str(),
             ) {
                 Ok(true) => Ok(Outcome::Committed),
                 Ok(false) => Ok(Outcome::Retained {
@@ -446,7 +497,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             let settled = match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                 file,
                 &capture.response_body,
-                "session_check_retained_captured_projection_settlement",
+                CapturedFinalizeSource::RetainedProjectionSettlement.as_str(),
             ) {
                 Ok(settled) => settled,
                 Err(err) => {
@@ -462,14 +513,45 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                 });
             }
         } else if !reactivated_false_stale_capture {
-            let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            let mut current = agent_doc_document_realtime_io::try_resolve_current_document_content(
                 file,
-                "session_check_write_applied_capture_reconciliation_current",
+                CapturedFinalizeSource::ReconciliationCurrent.as_str(),
             )?;
-            let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            let mut disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
                 file,
-                "session_check_write_applied_capture_reconciliation_disk",
+                CapturedFinalizeSource::ReconciliationDisk.as_str(),
             )?;
+            let response_materialized =
+                agent_doc_turn::response_replay::response_materialized_in_content(
+                    &capture.response_body,
+                    &current,
+                );
+            if current != disk && response_materialized {
+                match agent_doc_document_realtime_io::
+                    settle_acknowledged_captured_projection_through_authority(
+                        file,
+                        &capture.response_body,
+                        CapturedFinalizeSource::NativeSaveWithoutRetainedIntent.as_str(),
+                    ) {
+                    Ok(Some(projected)) => {
+                        current = projected;
+                        disk =
+                            agent_doc_document_realtime_io::resolve_disk_current_document_content(
+                                file,
+                                CapturedFinalizeSource::NativeSaveWithoutRetainedIntentSettled
+                                    .as_str(),
+                            )?;
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        return Ok(Outcome::Retained {
+                            reason: format!(
+                                "response_captured: safe native editor-save recovery remains pending; no forced disk write was attempted: {error:#}"
+                            ),
+                        });
+                    }
+                }
+            }
             let decision = agent_doc_turn::closeout_recovery::reconcile_write_applied_evidence(
                 agent_doc_turn::closeout_recovery::WriteAppliedReconciliationEvidence {
                     cycle_phase: state.phase,
@@ -499,11 +581,16 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                         });
                     };
                     state = reconciled;
-                }
+                    }
                     agent_doc_turn::closeout_recovery::WriteAppliedReconciliationDecision::RetainUntilVisible => {
                         return Ok(Outcome::Retained {
-                            reason: "response_captured: captured response is waiting for exact authority/disk convergence before write-applied"
-                                .to_string(),
+                            reason: if response_materialized && current != disk {
+                                "response_captured: the exact captured response is current in editor authority, but safe native-save/reload recovery has not yet produced the same disk projection. No forced disk write was attempted. If the editor listener cannot hot-reload, reload the IDE host, then rerun session-check only"
+                                    .to_string()
+                            } else {
+                                "response_captured: captured response is waiting for exact authority/disk convergence before write-applied"
+                                    .to_string()
+                            },
                         });
                     }
                 agent_doc_turn::closeout_recovery::WriteAppliedReconciliationDecision::NotApplicable => {
@@ -530,7 +617,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         }
         let current = match agent_doc_document_realtime_io::try_resolve_current_document_content(
             file,
-            "session_check_retained_capture_write_applied",
+            CapturedFinalizeSource::RetainedWriteAppliedCurrent.as_str(),
         ) {
             Ok(current) => current,
             Err(err) => {
@@ -541,7 +628,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         };
         let disk = match agent_doc_document_realtime_io::resolve_disk_current_document_content(
             file,
-            "session_check_retained_capture_disk",
+            CapturedFinalizeSource::RetainedWriteAppliedDisk.as_str(),
         ) {
             Ok(disk) => disk,
             Err(err) => {
@@ -767,6 +854,33 @@ mod tests {
         assert!(
             hint.contains("No response body is pending"),
             "the hint must say why `write --commit` is not the path: {hint}"
+        );
+    }
+
+    #[test]
+    fn captured_response_without_retained_intent_uses_safe_native_save_recovery() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("fn resume_captured_finalize(")
+            .expect("captured finalize recovery must exist");
+        let body = &source[start..];
+        let end = body
+            .find("\n}\n\npub struct RuntimeCloseoutEffects")
+            .expect("resume handler must have a bounded source span");
+        let body = &body[..end];
+
+        assert_eq!(
+            CapturedFinalizeSource::NativeSaveWithoutRetainedIntent.as_str(),
+            "session_check_capture_without_retained_intent_native_save"
+        );
+        assert!(
+            body.contains("CapturedFinalizeSource::NativeSaveWithoutRetainedIntent")
+                && body.contains("settle_acknowledged_captured_projection_through_authority",),
+            "authority/disk divergence after intent retirement must reach the native-save effect"
+        );
+        assert!(
+            !body.contains("atomic_write_force_disk_through_authority"),
+            "captured closeout recovery must never replace the editor-owned buffer via disk"
         );
     }
 

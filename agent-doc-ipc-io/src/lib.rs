@@ -1372,6 +1372,10 @@ mod tests {
             format!("{error:#}").contains("IPC build mismatch"),
             "unexpected skew error: {error:#}"
         );
+        assert!(
+            is_ipc_build_mismatch_error(&error),
+            "rolling-upgrade callers must receive the typed mismatch, not parse display text"
+        );
         assert!(!mutation_reached.load(Ordering::SeqCst));
 
         assert!(

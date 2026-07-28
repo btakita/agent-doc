@@ -196,6 +196,10 @@ const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 1_800;
 #[cfg(not(test))]
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 8_000;
 const _: () = assert!(CRDT_ACK_RECOVERY_TIMEOUT_MS > CRDT_ACK_FALLBACK_BACKOFF_MAX_MS);
+#[cfg(test)]
+const NATIVE_EDITOR_SAVE_BUILD_RECOVERY_TIMEOUT_MS: u64 = 500;
+#[cfg(not(test))]
+const NATIVE_EDITOR_SAVE_BUILD_RECOVERY_TIMEOUT_MS: u64 = 8_000;
 
 #[derive(Debug)]
 struct AwaitEditorReplicaNoDiskWrite(String);
@@ -551,6 +555,10 @@ struct DeliveryChangeWait<'a> {
     live_editors: usize,
     delivery_version: u64,
     signal_immediately: bool,
+    /// Optional caller deadline. The ACK recovery state still owns its global
+    /// eight-second ceiling, but a smaller outer barrier must never be
+    /// lengthened by entering the subscription.
+    max_wait_ms: Option<u64>,
 }
 
 fn exclusive_controller_elapsed_ms(total_elapsed_ms: u64, delivery_wait_elapsed_ms: u64) -> u64 {
@@ -674,6 +682,7 @@ impl AckRecoveryState {
             live_editors,
             delivery_version,
             signal_immediately,
+            max_wait_ms,
         } = request;
         if signal_immediately {
             if self.wait(file, source, live_editors)? == AckRecoveryWait::ForegroundDeadline {
@@ -688,7 +697,9 @@ impl AckRecoveryState {
 
         let elapsed_ms = self.elapsed_ms();
         let recovery_remaining_ms = CRDT_ACK_RECOVERY_TIMEOUT_MS.saturating_sub(elapsed_ms);
-        let wait_ms = recovery_remaining_ms;
+        let wait_ms = max_wait_ms
+            .map(|max_wait_ms| recovery_remaining_ms.min(max_wait_ms))
+            .unwrap_or(recovery_remaining_ms);
         if wait_ms == 0 {
             return Ok(AckRecoveryWait::ForegroundDeadline);
         }
@@ -1235,39 +1246,138 @@ fn request_native_editor_save_for_canonical_projection(
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical_path);
     let path_str = canonical_path.to_string_lossy().to_string();
     let patch_id = format!("canonical-save-{}", uuid::Uuid::new_v4());
-    let registration =
-        agent_doc_controller_io::project_controller::live_editor_registration_for_file(path)
-            .ok()
-            .flatten();
-    let socket_active = registration.as_ref().is_some_and(|registration| {
-        agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid)
-    });
-    let requested = match registration {
-        Some(registration) if socket_active => agent_doc_ipc_io::send_save_document_to_editor(
-            &project_root,
-            registration.pid,
-            &registration.editor_id,
-            &path_str,
-            &patch_id,
-        ),
-        _ => Ok(false),
-    };
-    if !matches!(requested, Ok(true)) {
-        agent_doc_ops_log_io::log_op(
-            path,
-            &format!(
-                "native_editor_save_pending file={} source={} patch_id={} transport={} reason=request_failed",
-                path.display(),
-                source,
-                patch_id,
-                if socket_active {
-                    "socket"
-                } else {
-                    "unavailable"
-                },
+    let build_recovery_deadline = std::time::Instant::now()
+        + std::time::Duration::from_millis(NATIVE_EDITOR_SAVE_BUILD_RECOVERY_TIMEOUT_MS);
+    let mut build_recovery_requested = false;
+    loop {
+        let registration =
+            agent_doc_controller_io::project_controller::live_editor_registration_for_file(path)
+                .ok()
+                .flatten();
+        let socket_active = registration.as_ref().is_some_and(|registration| {
+            agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid)
+        });
+        let requested = match registration.as_ref() {
+            Some(registration) if socket_active => agent_doc_ipc_io::send_save_document_to_editor(
+                &project_root,
+                registration.pid,
+                &registration.editor_id,
+                &path_str,
+                &patch_id,
             ),
-        );
-        return Ok(false);
+            _ => Ok(false),
+        };
+        match requested {
+            Ok(true) => break,
+            Err(error) if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) => {
+                let Some(registration) = registration else {
+                    return Ok(false);
+                };
+                if !build_recovery_requested {
+                    match agent_doc_controller_io::project_controller::
+                        recover_editor_ipc_build_mismatch_for_file(
+                            path,
+                            registration.pid,
+                            &registration.editor_id,
+                            source,
+                        )
+                    {
+                        Ok(agent_doc_controller_io::project_controller::
+                            IpcBuildMismatchRecovery::EditorReloadRequested) =>
+                        {
+                            build_recovery_requested = true;
+                        }
+                        Ok(agent_doc_controller_io::project_controller::
+                            IpcBuildMismatchRecovery::ControllerRecycleRequested) =>
+                        {
+                            agent_doc_ops_log_io::log_op(
+                                path,
+                                &format!(
+                                    "native_editor_save_pending file={} source={} patch_id={} transport=socket reason=stale_controller_recycle_requested disk_write=false",
+                                    path.display(),
+                                    source,
+                                    patch_id,
+                                ),
+                            );
+                            return Ok(false);
+                        }
+                        Ok(agent_doc_controller_io::project_controller::
+                            IpcBuildMismatchRecovery::Deferred) =>
+                        {
+                            return Ok(false);
+                        }
+                        Err(recovery_error) => {
+                            agent_doc_ops_log_io::log_op(
+                                path,
+                                &format!(
+                                    "native_editor_save_pending file={} source={} patch_id={} transport=socket reason=build_recovery_failed error={recovery_error:#} disk_write=false",
+                                    path.display(),
+                                    source,
+                                    patch_id,
+                                ),
+                            );
+                            return Ok(false);
+                        }
+                    }
+                }
+                if std::time::Instant::now() >= build_recovery_deadline {
+                    agent_doc_ops_log_io::log_op(
+                        path,
+                        &format!(
+                            "native_editor_save_pending file={} source={} patch_id={} transport=socket reason=editor_reload_not_observed timeout_ms={} recovery=reload_ide_host disk_write=false",
+                            path.display(),
+                            source,
+                            patch_id,
+                            NATIVE_EDITOR_SAVE_BUILD_RECOVERY_TIMEOUT_MS,
+                        ),
+                    );
+                    return Ok(false);
+                }
+                // The reload-only compatibility receipt means the old listener
+                // accepted the transition, not that the replacement listener
+                // is already serving. Re-negotiate the mutation against a
+                // freshly looked-up registration until the bounded deadline.
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            _ if build_recovery_requested
+                && std::time::Instant::now() < build_recovery_deadline =>
+            {
+                // Listener teardown/rebind is expected between the compatible
+                // reload receipt and the replacement handshake.
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            requested => {
+                agent_doc_ops_log_io::log_op(
+                    path,
+                    &format!(
+                        "native_editor_save_pending file={} source={} patch_id={} transport={} reason={} detail={} disk_write=false",
+                        path.display(),
+                        source,
+                        patch_id,
+                        if socket_active {
+                            "socket"
+                        } else {
+                            "unavailable"
+                        },
+                        if build_recovery_requested {
+                            "editor_reload_not_observed"
+                        } else {
+                            "request_failed"
+                        },
+                        match requested {
+                            Ok(false) => "no_active_listener".to_string(),
+                            Ok(true) => unreachable!("successful save request handled above"),
+                            Err(error) => format!("{error:#}")
+                                .replace('\n', " | ")
+                                .chars()
+                                .take(160)
+                                .collect(),
+                        },
+                    ),
+                );
+                return Ok(false);
+            }
+        }
     }
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_000);
@@ -2277,7 +2387,7 @@ pub fn apply_canonical_replace_if_attached(
             )
             .with_context(|| {
                 format!(
-                    "{source}: waiting for editor typing to settle before CRDT write for {}",
+                    "{source}: waiting for the pre-write editor delivery barrier for {}",
                     file.display()
                 )
             })?;
@@ -2374,6 +2484,7 @@ pub fn apply_canonical_replace_if_attached(
                                     // editor ACK can settle it without an
                                     // unnecessary recovery broadcast.
                                     signal_immediately: false,
+                                    max_wait_ms: None,
                                 },
                                 &mut delivery_wait_elapsed,
                             )? == AckRecoveryWait::ForegroundDeadline
@@ -2635,6 +2746,7 @@ pub fn apply_canonical_replace_if_attached(
                                     live_editors,
                                     delivery_version,
                                     signal_immediately: true,
+                                    max_wait_ms: None,
                                 },
                                 &mut delivery_wait_elapsed,
                             )? == AckRecoveryWait::ForegroundDeadline
@@ -2835,6 +2947,7 @@ pub fn apply_canonical_replace_if_attached(
                     live_editors,
                     delivery_version,
                     signal_immediately: false,
+                    max_wait_ms: None,
                 },
                 &mut delivery_wait_elapsed,
             )?;
@@ -4820,7 +4933,58 @@ pub fn guard_visible_write_current_transition_with_budget(
     _debounce_ms: u64,
     timeout_ms: u64,
 ) -> Result<()> {
+    guard_visible_write_current_transition_with_policy(file, source, timeout_ms, true)
+}
+
+/// Require the post-write editor delivery frontier to be ACKed before a caller
+/// creates snapshots, CRDT recovery sidecars, or commits.
+///
+/// Detached documents have no editor delivery quorum and are ready. An attached
+/// document with a missing replica is *not* ready here: the mutation path may
+/// retain such a write, but secondary compact/closeout effects must not run
+/// behind it.
+pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<()> {
+    guard_visible_write_current_transition_with_policy(
+        file,
+        source,
+        CRDT_ACK_RECOVERY_TIMEOUT_MS,
+        false,
+    )
+}
+
+fn defer_visible_delivery_ack(
+    file: &Path,
+    source: &str,
+    delivery_version: u64,
+    live_editors: usize,
+) -> Result<()> {
+    reconcile_stalled_replicas(file, source)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "visible_write_delivery_ack_deferred file={} source={} delivery_version={} live_editors={} timeout_ms={} recovery=bounded_ack_replay_force_refresh_and_build_upgrade",
+            file.display(),
+            source,
+            delivery_version,
+            live_editors,
+            CRDT_ACK_RECOVERY_TIMEOUT_MS,
+        ),
+    );
+    Err(await_editor_replica_no_disk_write(format!(
+        "visible document write for {} deferred: editor delivery remained unacknowledged after the {}ms recovery barrier; the exact write remains retained, no secondary snapshot/commit or forced disk write was attempted. ACK replay, force-refresh, and build-skew recovery were requested automatically; if the editor listener cannot hot-reload, reload the IDE host and retry the existing operation",
+        file.display(),
+        CRDT_ACK_RECOVERY_TIMEOUT_MS,
+    )))
+}
+
+fn guard_visible_write_current_transition_with_policy(
+    file: &Path,
+    source: &str,
+    timeout_ms: u64,
+    allow_missing_replica_defer: bool,
+) -> Result<()> {
     let start = std::time::Instant::now();
+    let mut ack_recovery = AckRecoveryState::default();
     loop {
         // An evicted hub is already a first-class missing-model state. Let the
         // CP write layer attempt durable-projection recovery (or retain/defer
@@ -4830,7 +4994,7 @@ pub fn guard_visible_write_current_transition_with_budget(
             query_live_editor_authority(file, source),
             Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
         );
-        let (ready, state, delivery_version) = if missing_model {
+        let (ready, state, delivery_cursor) = if missing_model && allow_missing_replica_defer {
             (true, "missing_replica_defer", None)
         } else {
             match query_live_editor_authority_after_model_ensure(file, source) {
@@ -4840,8 +5004,14 @@ pub fn guard_visible_write_current_transition_with_budget(
                     ..
                 }) => (true, "lazily_current", None),
                 Ok(agent_doc_crdt_relay_io::CurrentText::Current {
-                    delivery_version, ..
-                }) => (false, "delivery_pending", Some(delivery_version)),
+                    delivery_version,
+                    live_editors,
+                    ..
+                }) => (
+                    false,
+                    "delivery_pending",
+                    Some((delivery_version, live_editors)),
+                ),
                 Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
                     (false, "missing_replica", None)
                 }
@@ -4864,6 +5034,9 @@ pub fn guard_visible_write_current_transition_with_budget(
             return Ok(());
         }
         if start.elapsed() >= std::time::Duration::from_millis(timeout_ms) {
+            if let Some((delivery_version, live_editors)) = delivery_cursor {
+                return defer_visible_delivery_ack(file, source, delivery_version, live_editors);
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -4874,17 +5047,11 @@ pub fn guard_visible_write_current_transition_with_budget(
                     timeout_ms
                 ),
             );
-            // `delivery_pending` means a LIVE editor member still has unACKed
-            // fan-out. When that member is a zombie — registered and reported
-            // live, but no longer ACKing (typically a stale editor plugin) —
-            // nothing will ever advance it, so "retry after it settles" is
-            // advice that never comes true and every later operation burns the
-            // full timeout. Name the unwedge instead of implying patience.
             let recovery = if state == "delivery_pending" {
-                "\nIf this repeats, a live editor replica is registered but no longer ACKing. \
-                 `agent-doc admin reload-lib` refreshes the editor library and clears that \
-                 wedge without touching the document; if the plugin's own version is stale, \
-                 reinstall it and reload the IDE host."
+                "\nThe bounded ACK recovery barrier already replayed delivery and requested \
+                 replacement of any build-skewed endpoint. No disk write was attempted. If the \
+                 editor host cannot hot-reload its listener, reload the IDE host and retry the \
+                 existing operation."
             } else {
                 ""
             };
@@ -4896,17 +5063,28 @@ pub fn guard_visible_write_current_transition_with_budget(
                 recovery
             );
         }
-        if let Some(delivery_version) = delivery_version {
-            let remaining =
-                std::time::Duration::from_millis(timeout_ms).saturating_sub(start.elapsed());
-            match await_delivery_change(file, delivery_version, remaining, None) {
-                Ok(Some(_)) => continue,
-                Ok(None) | Err(_) => {
-                    // An older or unavailable controller cannot host the
-                    // subscription. Preserve the bounded compatibility
-                    // fallback without weakening the write deadline.
-                }
+        if let Some((delivery_version, live_editors)) = delivery_cursor {
+            let remaining_ms = u64::try_from(
+                std::time::Duration::from_millis(timeout_ms)
+                    .saturating_sub(start.elapsed())
+                    .as_millis(),
+            )
+            .unwrap_or(u64::MAX);
+            if ack_recovery.wait_for_delivery_change(DeliveryChangeWait {
+                file,
+                source,
+                live_editors,
+                delivery_version,
+                // Give an ordinary in-flight editor pull/ACK the subscription
+                // fast path first. The controller-owned recovery timers still
+                // replay and force-refresh within the same bounded barrier.
+                signal_immediately: false,
+                max_wait_ms: Some(remaining_ms),
+            })? == AckRecoveryWait::ForegroundDeadline
+            {
+                return defer_visible_delivery_ack(file, source, delivery_version, live_editors);
             }
+            continue;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
@@ -7546,6 +7724,20 @@ mod tests {
             "compact must report retained asynchronous recovery as success:\n{log}"
         );
         assert!(!log.contains("did not settle within"), "{log}");
+
+        let barrier_error =
+            guard_visible_delivery_convergence(&file, "compact_secondary_effect_test")
+                .expect_err("secondary effects must stop behind the retained unACKed target");
+        assert!(
+            barrier_error
+                .downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "the barrier must preserve the typed no-disk-write failure: {barrier_error:#}"
+        );
+        assert!(
+            format!("{barrier_error:#}").contains("no secondary snapshot/commit"),
+            "the operator-facing error must name the effects that were withheld: {barrier_error:#}"
+        );
     }
 
     /// `#deliveryackcut`: a stalled ACK reconciles the replica cache against

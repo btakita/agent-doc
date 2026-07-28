@@ -4,6 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.61
+
+_JetBrains plugin 0.2.307; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **Visible writes now treat an unacknowledged editor delivery as ACK backpressure, never as sixty seconds of “typing.”** The shared bounded recovery barrier replays delivery, requests a force-refresh, invokes rolling-upgrade recovery for typed build mismatches, reconciles dead/live-unACKed replicas, and returns a typed retained/no-disk-write outcome after eight seconds. Embedded relay waits now retain a weak reference to their policy-owning controller runtime, closing the path that previously detected build skew but could not reload either side.
+- **Compact Exchange cannot start secondary durability work behind a retained editor delivery.** Matching canonical text is no longer mistaken for convergence when `delivery_converged=false`; post-write snapshot, CRDT recovery-sidecar, and commit work all require the shared ACK barrier. This prevents a retained compact target from being followed by a second raw sixty-second write guard during commit cleanup.
+- **Captured closeout now repairs JetBrains authority/disk divergence through the editor’s native save path even after the retained-write record is gone.** Native-save build mismatches route to the controller, which decides whether to recycle itself or reload the editor listener; standalone `session-check` reaches that same policy over controller RPC and retries until a replacement listener is observable. The captured-finalize provenance tags are a closed Rust enum, and no forced disk projection is introduced.
+
 ## 0.35.60
 
 _JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._

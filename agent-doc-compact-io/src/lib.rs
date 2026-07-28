@@ -951,6 +951,11 @@ fn commit_compacted_authoritative(
     authoritative_snapshot: &str,
     live_target: &str,
 ) -> Result<()> {
+    // The commit boundary may not create or reassert secondary durability
+    // projections while the editor still owes an ACK for the live target.
+    // Matching canonical text is necessary but not sufficient: it can be a
+    // retained asynchronous delivery whose listener is build-skewed.
+    ensure_compact_live_relay_target(file, live_target)?;
     // Re-assert the authoritative snapshot so a replay/lag between
     // `apply_compacted_document` and here cannot leave a pre-compact snapshot for
     // the selective commit to stage.
@@ -977,7 +982,6 @@ fn commit_compacted_authoritative(
     // `Ok(None)` (headless / missing relay model) leaves the disk+snapshot write
     // authoritative, and `verify_compact_head_landed` still fails closed if HEAD
     // does not land the compacted content.
-    ensure_compact_live_relay_target(file, live_target)?;
     closeout_compact_with_commit(file)?;
     verify_compact_head_landed(file, authoritative_snapshot)
 }
@@ -991,7 +995,29 @@ fn commit_compacted_authoritative(
 /// closed rather than overwriting concurrent operator input.
 fn ensure_compact_live_relay_target(file: &Path, live_target: &str) -> Result<()> {
     match agent_doc_crdt_relay_io::current_text_for_file(file)? {
-        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } if text == live_target => {
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            delivery_converged,
+            ..
+        } if text == live_target => {
+            if !delivery_converged {
+                agent_doc_document_realtime_io::guard_visible_delivery_convergence(
+                    file,
+                    "compact_live_relay_delivery_barrier",
+                )?;
+                anyhow::ensure!(
+                    matches!(
+                        agent_doc_crdt_relay_io::current_text_for_file(file)?,
+                        agent_doc_crdt_relay_io::CurrentText::Current {
+                            text,
+                            delivery_converged: true,
+                            ..
+                        } if text == live_target
+                    ),
+                    "compact: editor delivery changed while crossing the ACK barrier for {}; refusing secondary snapshot/commit effects",
+                    file.display(),
+                );
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -1563,6 +1589,16 @@ fn apply_compacted_document(
         // raw CP error (the reported JB `Compact Exchange` exit-1). The zero-live
         // editor case is already resolved to disk authority by #stale-lease-cp-authority.
         converge_compacted_with_retry(runtime_effects()?, file, compacted, write_base_content)?;
+        agent_doc_document_realtime_io::guard_visible_delivery_convergence(
+            file,
+            "compact_post_write_delivery_barrier",
+        )
+        .with_context(|| {
+            format!(
+                "compact: refusing snapshot/CRDT-sidecar work before editor delivery ACK for {}",
+                file.display()
+            )
+        })?;
 
         // #compact-independent-cells: editor/CRDT convergence may legitimately
         // carry a concurrent edit from a sibling component cell (for example,
@@ -4325,6 +4361,46 @@ mod tests {
             current,
             agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
             "compact's fail-open missing-model path and the stale delivery poll must not recreate a disk-seeded phantom hub"
+        );
+    }
+
+    #[test]
+    fn compact_matching_text_still_requires_delivery_ack_before_commit_effects() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let file = root.join("session.md");
+        fs::write(&file, PRECOMPACT_DOC).unwrap();
+        let _editor = CompactTestEditorBuffer::attach_with_delivery_pump(
+            &file,
+            "compact-unacked-target",
+            PRECOMPACT_DOC,
+            false,
+        )
+        .unwrap();
+
+        let write = agent_doc_crdt_relay_io::apply_cp_write_for_file(
+            &file,
+            PRECOMPACT_DOC,
+            COMPACTED_DOC,
+            "compact_unacked_target_test",
+        )
+        .unwrap()
+        .expect("attached editor should receive a CRDT target");
+        assert!(!write.delivery_converged);
+
+        let error = ensure_compact_live_relay_target(&file, COMPACTED_DOC)
+            .expect_err("matching canonical bytes without the editor ACK must fail closed");
+        assert!(
+            format!("{error:#}").contains("remained unacknowledged"),
+            "compact must report ACK backpressure, not claim matching text converged: {error:#}"
+        );
+        let ops = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            !ops.contains("action=already_converged"),
+            "matching text must not publish a converged compact fact before delivery ACK: {ops}"
         );
     }
 

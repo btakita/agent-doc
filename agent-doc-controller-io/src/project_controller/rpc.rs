@@ -53,6 +53,20 @@ const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_dea
 const CONTROLLER_COMMIT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(120);
 const CONTROLLER_COMPACT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(300);
 static EMBEDDED_NATIVE_HOST: AtomicBool = AtomicBool::new(false);
+thread_local! {
+    /// Controller runtime installed on the thread that owns the process-local
+    /// relay hub.
+    ///
+    /// The embedded delivery-await path used to pass `None` into the rolling
+    /// upgrade policy even though it was executing inside the controller. That
+    /// made build-skewed editor listeners receive ACK replay forever without
+    /// either side of the skew being replaced. Keep this weak and thread-local:
+    /// the runtime owns the relay and must not be kept alive by a recovery
+    /// callback, while test actors may replace it between threads.
+    static LOCAL_CONTROLLER_RUNTIME:
+        std::cell::RefCell<Option<std::sync::Weak<ControllerRuntime>>> =
+        const { std::cell::RefCell::new(None) };
+}
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT: Duration = Duration::from_secs(35);
 
@@ -3947,12 +3961,146 @@ pub fn await_local_delivery_convergence_change_for_file(
     wait: std::time::Duration,
     recovery: Option<DeliveryConvergenceRecovery>,
 ) -> Result<Option<DeliveryConvergenceStatus>> {
+    let runtime = local_controller_runtime();
     await_local_delivery_convergence_change_for_file_inner(
         file,
         after_version,
         wait,
         recovery,
-        None,
+        runtime.as_deref(),
+    )
+}
+
+fn local_controller_runtime() -> Option<Arc<ControllerRuntime>> {
+    LOCAL_CONTROLLER_RUNTIME.with(|slot| slot.borrow().as_ref().and_then(std::sync::Weak::upgrade))
+}
+
+/// Ask the policy-owning controller to repair a build-skewed editor route.
+///
+/// A caller that merely sees an IPC handshake mismatch cannot safely decide
+/// which side is stale. The controller can: its bootstrap identity proves
+/// whether it should recycle itself; otherwise the editor listener is asked to
+/// hot-reload. This is shared by ACK recovery and the native-save closeout
+/// effect, so neither invents a second rolling-upgrade policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IpcBuildMismatchRecovery {
+    ControllerRecycleRequested,
+    EditorReloadRequested,
+    Deferred,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IpcBuildMismatchRecoveryPayload {
+    editor_pid: u64,
+    editor_id: String,
+    source: String,
+}
+
+pub fn recover_editor_ipc_build_mismatch_for_file(
+    file: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    source: &str,
+) -> Result<IpcBuildMismatchRecovery> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if let Some(runtime) = local_controller_runtime() {
+        return recover_editor_ipc_build_mismatch_with_runtime(
+            &canonical, &runtime, editor_pid, editor_id, source,
+        );
+    }
+
+    // Standalone `session-check` runs in a short-lived CLI process, while the
+    // relay and rolling-upgrade facts belong to the project controller. Route
+    // the decision to that owner instead of assuming the editor is stale from
+    // the caller's handshake error.
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let payload = IpcBuildMismatchRecoveryPayload {
+        editor_pid,
+        editor_id: editor_id.to_string(),
+        source: source.to_string(),
+    };
+    request_controller_with_timeout(
+        &project_root,
+        ControllerRequest {
+            command: "ipc_build_mismatch_recover".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("document_realtime_native_save".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+        CONTROLLER_RPC_TIMEOUT,
+    )
+}
+
+fn recover_editor_ipc_build_mismatch_with_runtime(
+    canonical: &Path,
+    runtime: &ControllerRuntime,
+    editor_pid: u64,
+    editor_id: &str,
+    source: &str,
+) -> Result<IpcBuildMismatchRecovery> {
+    if controller_binary_is_stale(runtime) {
+        runtime.request_recycle_urgent();
+        agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "controller_ipc_build_mismatch_recovery file={} source={} action=urgent_idle_recycle editor_pid={editor_pid}",
+                canonical.display(),
+                source,
+            ),
+        );
+        return Ok(IpcBuildMismatchRecovery::ControllerRecycleRequested);
+    }
+
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(canonical);
+    let requested = agent_doc_ipc_io::send_reload_library_to_editor(
+        &project_root,
+        editor_pid,
+        editor_id,
+        env!("CARGO_PKG_VERSION"),
+    )?;
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "controller_ipc_build_mismatch_recovery file={} source={} action=editor_reload requested={} editor_pid={editor_pid}",
+            canonical.display(),
+            source,
+            requested,
+        ),
+    );
+    Ok(if requested {
+        IpcBuildMismatchRecovery::EditorReloadRequested
+    } else {
+        IpcBuildMismatchRecovery::Deferred
+    })
+}
+
+fn handle_ipc_build_mismatch_recover(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<IpcBuildMismatchRecovery> {
+    let file = request_file(&request)?;
+    let payload: IpcBuildMismatchRecoveryPayload = serde_json::from_str(
+        request
+            .diagnostic_payload
+            .as_deref()
+            .context("ipc_build_mismatch_recover requires diagnostic payload")?,
+    )
+    .context("decode ipc_build_mismatch_recover payload")?;
+    recover_editor_ipc_build_mismatch_with_runtime(
+        &file,
+        runtime,
+        payload.editor_pid,
+        &payload.editor_id,
+        &payload.source,
     )
 }
 
@@ -4040,61 +4188,52 @@ fn await_local_delivery_convergence_change_for_file_inner(
                 if !outcome.build_mismatches.is_empty()
                     && let Some(runtime) = runtime
                 {
-                    if controller_binary_is_stale(runtime) {
-                        runtime.request_recycle_urgent();
-                        agent_doc_ops_log_io::log_op(
+                    let mut upgrade_requested = false;
+                    for route in &outcome.build_mismatches {
+                        match recover_editor_ipc_build_mismatch_with_runtime(
                             &canonical,
-                            &format!(
-                                "controller_crdt_ack_recovery_upgrade file={} action=urgent_idle_recycle mismatched_routes={}",
-                                canonical.display(),
-                                outcome.build_mismatches.len(),
-                            ),
-                        );
-                    } else {
-                        let project_root =
-                            agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-                        let mut reloads = 0usize;
-                        for route in &outcome.build_mismatches {
-                            match agent_doc_ipc_io::send_reload_library_to_editor(
-                                &project_root,
-                                route.editor_pid,
-                                &route.editor_id,
-                                env!("CARGO_PKG_VERSION"),
-                            ) {
-                                Ok(true) => reloads += 1,
-                                Ok(false) => {}
-                                Err(error) => agent_doc_ops_log_io::log_op(
-                                    &canonical,
-                                    &format!(
-                                        "controller_crdt_ack_recovery_upgrade file={} action=editor_reload_deferred editor_pid={} error={error:#}",
-                                        canonical.display(),
-                                        route.editor_pid,
-                                    ),
-                                ),
+                            runtime,
+                            route.editor_pid,
+                            &route.editor_id,
+                            "crdt_ack_recovery",
+                        ) {
+                            Ok(IpcBuildMismatchRecovery::ControllerRecycleRequested)
+                            | Ok(IpcBuildMismatchRecovery::EditorReloadRequested) => {
+                                upgrade_requested = true;
                             }
+                            Ok(IpcBuildMismatchRecovery::Deferred) => {}
+                            Err(error) => agent_doc_ops_log_io::log_op(
+                                &canonical,
+                                &format!(
+                                    "controller_crdt_ack_recovery_upgrade file={} action=deferred editor_pid={} error={error:#}",
+                                    canonical.display(),
+                                    route.editor_pid,
+                                ),
+                            ),
                         }
-                        recovery_signal_observed |= reloads > 0;
+                    }
+                    recovery_signal_observed |= upgrade_requested;
+                    if upgrade_requested {
                         agent_doc_ops_log_io::log_op(
                             &canonical,
                             &format!(
-                                "controller_crdt_ack_recovery_upgrade file={} action=editor_reload requested={} mismatched_routes={}",
+                                "controller_crdt_ack_recovery_upgrade file={} action=rolling_upgrade_requested mismatched_routes={}",
                                 canonical.display(),
-                                reloads,
                                 outcome.build_mismatches.len(),
                             ),
                         );
+                        // Close this long-poll connection immediately. A stale
+                        // controller needs an exact zero-client cut to recycle;
+                        // a reloading editor needs the next request to negotiate
+                        // against its replacement listener.
+                        return Ok(Some(DeliveryConvergenceStatus {
+                            observed: true,
+                            converged: witness.converged,
+                            version: witness.version,
+                            recovery_signal_observed,
+                            force_refresh_sent,
+                        }));
                     }
-                    // Close this long-poll connection immediately. A stale
-                    // controller needs an exact zero-client cut to recycle;
-                    // a reloading editor needs the next request to negotiate
-                    // against its replacement listener.
-                    return Ok(Some(DeliveryConvergenceStatus {
-                        observed: true,
-                        converged: witness.converged,
-                        version: witness.version,
-                        recovery_signal_observed,
-                        force_refresh_sent,
-                    }));
                 }
             }
             next_signal = Some(now + Duration::from_millis(recovery.signal_interval_ms.max(1)));
@@ -8109,6 +8248,9 @@ impl Drop for StateActorTestHandle {
 }
 
 fn install_local_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
+    LOCAL_CONTROLLER_RUNTIME.with(|slot| {
+        *slot.borrow_mut() = Some(Arc::downgrade(runtime));
+    });
     let runtime = Arc::downgrade(runtime);
     agent_doc_state_wire::set_local_document_projection_reader(move |document_hash| {
         runtime.upgrade().and_then(|runtime| {
@@ -9762,6 +9904,9 @@ pub(crate) fn handle_request_locked(
         "closeout_cycle_progress_await" => controller_envelope(
             handle_closeout_cycle_progress_await(runtime.as_ref(), request),
         ),
+        "ipc_build_mismatch_recover" => {
+            controller_envelope(handle_ipc_build_mismatch_recover(runtime.as_ref(), request))
+        }
         "command_plane_submit" => {
             // #af88 B enforcement: a command-plane submit persists facts (the
             // durable sink), so refuse it when the caller proves this controller
@@ -21693,6 +21838,52 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "an absent hub is known immediately; it must not wait out the deadline"
+        );
+    }
+
+    #[test]
+    fn embedded_delivery_recovery_has_the_policy_owning_controller_runtime() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+
+        install_local_document_projection_reader(&runtime);
+
+        let installed =
+            local_controller_runtime().expect("embedded ACK recovery must see its controller");
+        assert!(
+            Arc::ptr_eq(&installed, &runtime),
+            "the embedded relay must not drop rolling-upgrade recovery to runtime=None"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "test-support")]
+    fn standalone_build_mismatch_recovery_routes_to_the_controller_policy_owner() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "# session\n").unwrap();
+        let _actor = start_state_actor_for_tests(dir.path()).unwrap();
+        LOCAL_CONTROLLER_RUNTIME.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+
+        let error = recover_editor_ipc_build_mismatch_for_file(
+            &file,
+            u64::from(std::process::id()),
+            "missing-test-listener",
+            "standalone_native_save_test",
+        )
+        .expect_err("the controller should reach the absent editor listener");
+        let detail = format!("{error:#}");
+        assert!(
+            !detail.contains("unknown controller command")
+                && !detail.contains("controller_runtime_unavailable"),
+            "standalone recovery must cross controller RPC before the expected listener failure: {detail}"
+        );
+        assert!(
+            detail.contains("IPC") || detail.contains("socket") || detail.contains("connect"),
+            "the terminal failure should come from the absent editor endpoint: {detail}"
         );
     }
 

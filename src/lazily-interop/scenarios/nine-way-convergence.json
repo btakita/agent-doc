@@ -1,6 +1,6 @@
 {
-  "name": "eight-way-convergence",
-  "seed": 8,
+  "name": "nine-way-convergence",
+  "seed": 9,
   "peers": [
     {"name": "lazily-rs", "peer_id": 1},
     {"name": "lazily-zig", "peer_id": 2},
@@ -9,7 +9,8 @@
     {"name": "lazily-js", "peer_id": 5},
     {"name": "lazily-dart", "peer_id": 6},
     {"name": "lazily-go", "peer_id": 7},
-    {"name": "lazily-cpp", "peer_id": 8}
+    {"name": "lazily-cpp", "peer_id": 8},
+    {"name": "lazily-cs", "peer_id": 9}
   ],
   "required_features": ["distributed_crdt"],
   "required_codecs": [],
@@ -23,14 +24,15 @@
     {"op": "local_set", "peer": "lazily-dart", "node": 7, "key": null, "state": {"Inline": [70]}, "at": 30, "save_as": "dart-write"},
     {"op": "local_set", "peer": "lazily-go", "node": 7, "key": null, "state": {"Inline": [71]}, "at": 40, "save_as": "go-write"},
     {"op": "local_set", "peer": "lazily-cpp", "node": 7, "key": null, "state": {"Inline": [72]}, "at": 50, "save_as": "cpp-write"},
-    {"op": "deliver", "frame": "cpp-write", "to": ["lazily-rs", "lazily-zig", "lazily-py", "lazily-kt", "lazily-js", "lazily-dart", "lazily-go"], "at": 51, "expect_applied": 1},
-    {"op": "deliver", "frame": "rs-write", "to": ["lazily-cpp"], "at": 51, "expect_applied": 1},
-    {"op": "deliver", "frame": "zig-write", "to": ["lazily-cpp"], "at": 51, "expect_applied": 1},
-    {"op": "deliver", "frame": "go-write", "to": ["lazily-cpp"], "at": 51, "expect_applied": 1},
-    {"op": "deliver", "frame": "cpp-write", "to": ["lazily-rs"], "at": 52, "expect_applied": 0},
+    {"op": "local_set", "peer": "lazily-cs", "node": 7, "key": null, "state": {"Inline": [73]}, "at": 60, "save_as": "cs-write"},
+    {"op": "deliver", "frame": "cs-write", "to": ["lazily-rs", "lazily-zig", "lazily-py", "lazily-kt", "lazily-js", "lazily-dart", "lazily-go", "lazily-cpp"], "at": 61, "expect_applied": 1},
+    {"op": "deliver", "frame": "rs-write", "to": ["lazily-cs"], "at": 61, "expect_applied": 1},
+    {"op": "deliver", "frame": "zig-write", "to": ["lazily-cs"], "at": 61, "expect_applied": 1},
+    {"op": "deliver", "frame": "go-write", "to": ["lazily-cs"], "at": 61, "expect_applied": 1},
+    {"op": "deliver", "frame": "cs-write", "to": ["lazily-rs"], "at": 62, "expect_applied": 0},
     {"op": "assert_converged"}
   ],
   "expected_snapshot": [
-    {"node": 7, "key": null, "state": {"Inline": [72]}}
+    {"node": 7, "key": null, "state": {"Inline": [73]}}
   ]
 }

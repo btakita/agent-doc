@@ -206,6 +206,11 @@ passes all semantic scenarios and every applicable required channel profile.
 
 ### Phase 4 — C# joins without a paper adapter
 
+Status: complete for the applicable semantic plane. C# is a real
+`CrdtPlaneRuntime`/`IpcWire` peer in nine-way convergence. It advertises no
+transport channels, so the capability matrix continues to exclude it from
+channel cells until executable adapters ship.
+
 C# joins only after `#lzcsipc` and `#lzcssync` ship the real wire and runtime
 surfaces. The peer MUST wrap Lazily library code; it may not reimplement the
 protocol inside the test executable.

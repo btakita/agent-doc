@@ -36,8 +36,6 @@ cwd = "../lazily-go"
 command = ["./build/lazily_interop_peer"]
 cwd = "../lazily-cpp"
 
-# C# is visible to reports but is not eligible for any peer group until its
-# production IPC and CRDT surfaces exist.
 [peers.lazily-cs]
-command = []
-staged = true
+command = ["dotnet", "run", "--project", "src/Lazily.InteropPeer/Lazily.InteropPeer.csproj", "--configuration", "Release", "--"]
+cwd = "../lazily-cs"

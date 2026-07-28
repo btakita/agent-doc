@@ -7,7 +7,7 @@ fn binary() -> &'static str {
 }
 
 #[test]
-fn feature_group_runs_supported_peers_and_reports_staged_csharp() {
+fn feature_group_runs_only_scenario_peers_without_false_staging() {
     let output = Command::new(binary())
         .args(["run", "--format", "json", "--require-channels"])
         .output()
@@ -20,7 +20,7 @@ fn feature_group_runs_supported_peers_and_reports_staged_csharp() {
     let report: Value = serde_json::from_slice(&output.stdout).expect("JSON result");
     assert_eq!(report["status"], "pass");
     assert_eq!(report["peers"], serde_json::json!(["left", "right"]));
-    assert_eq!(report["staged_peers"][0]["peer"], "lazily-cs");
+    assert_eq!(report["staged_peers"], serde_json::json!([]));
     assert_eq!(report["coverage"]["peers_started"], 2);
     assert_eq!(report["coverage"]["frames_emitted"], 2);
 }

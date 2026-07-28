@@ -101,6 +101,11 @@ artifacts attached to failures.
 
 ### Batch D — C#
 
+Status: complete. The C# peer wraps `CrdtPlaneRuntime` and `IpcWire`, advertises
+only `distributed_crdt` plus JSON, and participates in nine-way semantic
+convergence. Executable transport links remain unadvertised and therefore stay
+out of inapplicable channel cells.
+
 Dependency order:
 
 1. `#lzcsipc`: real Snapshot/Delta/CrdtSync types and schema-validated codecs;

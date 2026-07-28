@@ -28,7 +28,7 @@ prepare-network-peers:
 
 network-suite: prepare-network-peers
 	mkdir -p $(REPORT_DIR)
-	cargo run --quiet -- run --scenario scenarios/eight-way-convergence.json \
+	cargo run --quiet -- run --scenario scenarios/nine-way-convergence.json \
 		--seed $(NETWORK_SEED) --timeout-ms 10000 --require-channels \
 		--format json --output $(REPORT_DIR)/$(NETWORK_TIER)-semantic.json
 	cargo run --quiet -- run --scenario scenarios/channel-matrix.json \

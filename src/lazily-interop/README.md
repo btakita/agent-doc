@@ -20,13 +20,14 @@ binding-neutral.
 
 Peer groups are capability-driven. A feature scenario runs only implementations
 that advertise that production feature. Unsupported implementations remain
-visible in `staged_peers` but receive no pass credit. The checked-in C# entry is
-staged until Lazily C# ships real IPC and CRDT surfaces. Feature-only scenarios
-may leave `required_codecs` and `required_channels` empty; codec and channel
+visible in `staged_peers` but receive no pass credit. Feature-only scenarios may
+leave `required_codecs` and `required_channels` empty; codec and channel
 scenarios name those requirements and select the narrower supporting peer group.
+The C# peer now joins semantic convergence through its production CRDT runtime
+and JSON IPC codec while leaving transport links unadvertised.
 
 `make network-suite` is the single local entrypoint for the implemented network
-matrix. It runs the eight-binding semantic cohort, then the five direct-link
+matrix. It runs the nine-binding semantic cohort, then the five direct-link
 profiles over every ordered pair of eligible peers. A peer joins those cells
 automatically after advertising the required production feature, codec, channels,
 and variants; otherwise it remains visible as staged and receives no pass credit.

@@ -85,22 +85,21 @@ Published lazily-cs commit `c35ca1a` (`feat: add production interop peer`) to `o
 Changed paths are confined to the C# peer project/solution/Makefile/README and the supervisor registry, nine-way scenario, README, CLI test, rollout plans, and lazily-cs submodule pointer. The pre-existing lazily-cs `AGENTS.md` edit, generated `build/` tree, and unrelated untracked supervisor Python artifact were not staged.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:df10144f -->
+<!-- agent:boundary:b8766f08 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~[ ] [#lzrevisionbarrier] Add a Lazily standard-library `RevisionBarrier` /~~
-- ~~[#lazilyrenameinverted]: I accept a breaking native-class rename.~~
-- ~~complete [#lzinteropcs]~~
 - do [#lzstdlibbarrier]: Should we also add other concurrency "primitives" to the lazily library?
+- do [#lzstdlibtimeout]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzstdlibbarrier] Add a Lazily standard-library RevisionBarrier/effect-receipt abstraction over existing reactive, revision, and synchronization primitives, outside the graph kernel. Wait for after_revision plus a derived predicate using wake-on-change; accept deadline and cancellation inputs; return typed satisfied/timed-out/cancelled/disposed-or-unavailable outcomes; optionally prove keyed side-effect receipts while leaving receipt storage and transport policy outside the primitive. Test lost wakeups, already-satisfied state, revision races, cancellation, deadlines, disposal, and keyed receipts; document using the stdlib Timer as the deadline budget.
+- [ ] [#lzstdlibtimeout] Add a Lazily standard-library Timeout adapter composed from stdlib Timer, outside the graph kernel. Accept a caller-supplied operation/future/wait primitive instead of owning an executor; use a monotone deadline; return typed Completed/TimedOut/Cancelled/Unavailable outcomes; require no mandatory async runtime or hidden thread; expose a deterministic clock/wait seam. Test completion-before-deadline, timeout, cancellation-versus-completion races, zero duration, and repeated terminal reads.
 <!-- /agent:backlog -->
 
 ## Review

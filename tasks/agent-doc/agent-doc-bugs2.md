@@ -922,7 +922,30 @@ Proof:
 - `release`: source commit `5033157f0`, parent gitlink commit `8dfdc6887`, tag `v0.35.54`, installed CLI `agent-doc 0.35.54`; both `main` branches and the tag are pushed. The active document controller is marked to recycle at its next idle boundary.
 - `confidence`: high.
 - `escalation`: none.
-<!-- agent:boundary:2402cf3c -->
+
+### Re: #adstatechartkt — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 do [#adstatechartkt]
+
+
+Implemented and shipped the JetBrains merge-ownership chart integration.
+
+The backlog’s lazily-kt `0.9.0` premise had been superseded: the plugin was already on `0.36.1`, while the released local/API-compatible generation is `0.39.0`. I advanced the dependency to `0.39.0` and replaced `CrdtReplicaForwarder`’s independently mutated volatile `attached` Boolean with a `ChartBuilder`-defined `ThreadSafeStateChart`. All document charts join one project-lifetime `ThreadSafeContext`; registration now traverses `Detached → Attached → EditorOwnsBuffer`, retirement traverses back to `Detached`, and reads take one atomic active-configuration snapshot. The Kotlin transition matrix exactly pins all six phases and seven events from `agent_doc_merge::ownership`; invalid edges remain fail-closed. Rust/controller state remains authoritative for disk-write permission.
+
+Shipped versions: agent-doc `0.35.55`, JetBrains plugin `0.2.306`. The plugin was installed to all four detected JetBrains IDE installations. Because this adds a Kotlin class, a running IDE loads it on its next restart; I added a non-blocking operator verification item for that live smoke test.
+
+Proof:
+
+- changed_paths: `editors/jetbrains/build.gradle.kts`, `editors/jetbrains/gradle.properties`, `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/{MergeOwnershipStateChart,CrdtReplicaForwarder,CrdtReplicaManager}.kt`, `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/{MergeOwnershipStateChartTest,CrdtReplicaForwarderTest}.kt`, release/version manifests, `VERSIONS.md`
+- commands: focused Gradle tests; `./gradlew test buildPlugin signPlugin`; dependency insight; `make check`; `make install`; `agent-doc skill install --all`; `cargo run --quiet -- audit-docs`; source/parent commits and pushes; `agent-doc admin recycle`; tag/push `v0.35.55`; one CI and Release status inspection
+- verification: complete JetBrains test/build/sign pipeline passed; dependency resolves `io.github.lazily:lazily:0.39.0 -> project :lazily-kt`; full agent-doc gate passed `8275/8275` tests (241 skipped), Clippy, simulator, version sync, Lean gate, and all six TLA+ models; post-install docs audit passed with no blocking issues; installed CLI reports `agent-doc 0.35.55`; controller recycle returned `recycled=true`
+- commits: source `acca0715f` (`feat: use typed JetBrains merge ownership chart`), parent gitlink `da4a8e2db`; both pushed; tag `v0.35.55` pushed
+- CI: CI run `30353866230` and Release run `30353884483` were both `in_progress` for `acca0715f` at the single required inspection; no polling performed
+- confidence: high
+- escalation: none; a JetBrains restart/live smoke test is intentionally operator-owned and non-blocking
+<!-- agent:boundary:7b0cf50f -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -938,7 +961,7 @@ Proof:
 - ~~📌 do [#sidecarstate]~~
 - ~~📌 do [#adstatechart2]~~
 - ~~📌 do [#adstatechart3]~~
-- 📌 do [#adstatechartkt]
+- ~~📌 do [#adstatechartkt]~~
 - 📌 do [#adstatechartjs]
 - 📌 do [#ipcauthority]
 - 📌 do [#ipcliveness]
@@ -957,11 +980,11 @@ Proof:
 - [ ] [#compactreactiveprojectionlivefail] [focused-cycle] #agent-doc-bug Fresh-restart live regression on IDEA 2026.1 + JetBrains plugin 0.2.305: a 305-event burst logged editor_ops_recorded count=305 transaction=batch, but CrdtReplicaForwarder drained sequential native.applyLocal insert_chars=1 operations roughly every 10–16 seconds while controller authority stayed delivery_converged=false; neither coalesced_exact_editor_adopt_after_quiet nor exact_editor_adopt_then_atomic_reregister appeared. Fix the editor-op drain so one burst becomes one revision-scoped update or at most one quiet recovery, add deterministic latency/conformance coverage, preserve the bounded native-call timeout/fail-closed behavior, and repeat #compactreactiveprojectionverify.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Phase 3 progress shipped in agent-doc 0.35.53: current observed closeout-recovery evidence now validates the typed projection against live visible-document authority only, so stale compatibility snapshot-baseline drift cannot veto a current typed observation; the recorded snapshot hash remains advisory recovery evidence. Remaining: complete the other detailed guard/recovery payload cutovers and later state-vector barrier work in tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md.
-- [ ] [#adstatechartkt] [focused-cycle] lazily-kt 0.9.0 SHIPPED (ChartBuilder + ThreadSafeStateChart + shared fromStates + context-free engine; GitHub Packages via release.yml, tag v0.9.0; full test suite green). REMAINING: bump the JetBrains plugin's lazily-kt dependency to 0.9.0 and consume ChartBuilder/ThreadSafeStateChart for the merge-ownership state machine (#mergestatemachine3 fold-in).
 - [ ] [#adstatechartjs] [focused-cycle] lazily-js 1.1.0 SHIPPED (ChartBuilder + statechart.d.ts builder types + shared fromStates; tag v1.1.0; 169/169 tests green). No thread-safe/async chart in js (no reactive Context, no threads). REMAINING: npm publish is operator-2FA-gated (#lzjsnpmpub: npm login then npm publish --access public), then bump the VS Code plugin @lazily/js dep to 1.1.0 and consume ChartBuilder.
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
+- [ ] [#adstatechartktlive] [operator-verify] After restarting a JetBrains IDE onto plugin 0.2.306, open/edit/close an agent-doc markdown document and verify the CRDT replica reaches editor_owns_buffer then detached with no classloader or File Cache Conflict error.
 <!-- /agent:backlog -->
 
 ## Review

@@ -182,13 +182,56 @@ The broad all-binding stdlib release remains correctly gated behind `#lzstdlibsp
 The required one-time Rust CI inspection saw prior run `30386744754` red only because its signaling-worker job did not check out the sibling lazily-spec signaling fixtures; the Rust stdlib/release change itself passed the complete local repository gate.
 
 Confidence: high for Rust and NuGet publication; npm is explicitly gated on operator authentication. Escalation: physical npm security-key confirmation.
-<!-- agent:boundary:5c8aa0ba -->
+
+### Re: #lzstdlibspec — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzstdlibspec]
+
+Completed Phase 0 of the portable stdlib conformance rollout and published every scoped repository change.
+
+Specification and fixtures:
+
+- Added the language-neutral `Timer`, caller-driven `Timeout<T>`, and `RevisionBarrier` contract in `lazily-spec/docs/stdlib.md`, explicitly separating `Timeout<T>` from reactive `resilience::TimeoutCell`.
+- Added Draft 2020-12 `schemas/stdlib-fixture.schema.json` and canonical `timer.json`, `timeout.json`, and `revision_barrier.json` fixture families.
+- Added executable fixture validation with positive scenario/assertion floors and mutation gates for inclusive deadlines, completion-before-cancellation precedence, terminal latching, barrier post-registration recheck, receipt non-authority, and fixture-bookkeeping substitution.
+- Added separate `stdlib_timer_v1`, `stdlib_timeout_v1`, and `stdlib_revision_barrier_v1` coverage rows. Rust is `~` because production APIs exist but the canonical Rust runner is Phase 1; all other bindings remain `—` and staged.
+
+Formal model:
+
+- Added `LazilyFormal/Stdlib.lean` with pure Timer, Timeout, and RevisionBarrier state machines.
+- Proved terminal monotonicity/idempotence, no early Timer firing, inclusive deadline firing, Timeout deadline dominance, pre-deadline completion precedence, monotone barrier revisions, register/recheck lost-wakeup closure, terminal disposal/cancellation latching, and effect-receipt non-authority.
+
+Staged binding behavior:
+
+- Regenerated the coverage table in all nine binding READMEs and `lazily-formal`.
+- Updated each strict runtime-manifest guard that encountered the new corpus so unsupported stdlib fixtures are explicitly known-staged instead of falsely required or silently counted as passes. Rust's guard records that its production runner lands in Phase 1.
+- Preserved unrelated `AGENTS.md`, generated build trees, and the existing Python worktree entry.
+
+Verification:
+
+- `lazily-spec make check`: passed, including schema validation, fixture floors, every declared mutation, coverage sync, fixture-copy checks, and embedded Lean checks.
+- `lazily-formal make check`: passed.
+- `make check` passed in Rust, Python, Kotlin, JavaScript, Dart, Zig, Go, C++, and C# after the explicit staging entries landed.
+- Superproject `make check`: passed on the confirming run. An initial unrelated `corky-core` run had four OAuth loopback tests collide on one local port; all four passed serially, and the complete aggregate rerun passed.
+- One-time CI inspection: lazily-spec, Rust, Kotlin, and JavaScript were in progress; Dart, Zig, Go, C++, and C# were queued. `lazily-formal`, `lazily-py`, and the private superproject have no workflow named `CI`.
+
+Published commits:
+
+- lazily-spec `7ff4049` (`feat: specify portable stdlib conformance`)
+- lazily-formal `a89f6ea` (`feat: model portable stdlib`)
+- binding staging/coverage commits: Rust `2769222`, Python `ee37d1a`, Kotlin `ad215d2`, JavaScript `8fedfd0`, Dart `e5b2a72`, Zig `bd3e8fa`, Go `e62cd81`, C++ `eed4ef3`, C# `f087962`
+- superproject pointers `41e31891e` (`feat: pin portable stdlib conformance phase`)
+
+Confidence: high. Escalation: none. No new follow-up is needed beyond the already-queued Phase 1 Rust corpus/peer adapter work.
+<!-- agent:boundary:be284dc9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lzstdlibspec]
+- ~~do [#lzstdlibspec]~~
 - do [#lzstdlibrsfixtures]
 - do [#lzstdlibportsnative]
 - do [#lzstdlibportsmanaged]
@@ -200,7 +243,6 @@ Confidence: high for Rust and NuGet publication; npm is explicitly gated on oper
 
 <!-- agent:backlog priority queue -->
 - [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
-- [ ] [#lzstdlibspec] Implement Phase 0 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: land lazily-spec stdlib docs/schema/fixtures/coverage rows and lazily-formal Timer/Timeout/RevisionBarrier models and laws, with fixture-count, assertion-floor, and mutation gates.
 - [ ] [#lzstdlibrsfixtures] Implement Phase 1 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: replay the canonical stdlib corpus against lazily-rs production APIs and add production-backed Rust peer feature controls without treating Rust as the oracle.
 - [ ] [#lzstdlibportsnative] Implement Phase 2 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Zig, Go, and C++, including race/sanitizer and peer feature scenarios.
 - [ ] [#lzstdlibportsmanaged] Implement Phase 3 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Python, Kotlin, JavaScript, and Dart, with deterministic clock/wait seams and honest runtime/channel carve-outs.

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -399,10 +399,10 @@ I also checked public mail routing: `equityfundingsource.com` currently uses Goo
 **Confidence:** High for application-generated notifications and the deployed Worker configuration; limited for the Google Workspace mailbox/alias itself because that admin configuration is not available here.
 
 **Escalation:** None. This was a read-only audit; no routing was changed.
-<!-- agent:boundary:fbf73ba7 -->
+<!-- agent:boundary:5e83598a -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority start -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

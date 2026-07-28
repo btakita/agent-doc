@@ -15,7 +15,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-active
+completed
 <!-- /agent:status -->
 
 ## Exchange
@@ -319,7 +319,19 @@ Completed and shipped the C# reliable-sync phase.
 - Published C# commits `1f8a7ac` / `25d4ebd`, spec coverage commit `02e9f65`, synchronized every sibling README, and advanced the root pointers in `679a7ee5a`. One-shot CI: spec is green; C#, Rust, Kotlin, JS, Dart, Go, and C++ are in progress; Zig is queued; root/Python/formal have no workflow named `CI`. Per the runbook, I did not poll.
 
 The remaining implementation phase is `#lzcsplane`, followed by the full parity audit.
-<!-- agent:boundary:5da0f490 -->
+
+### Re: Response
+
+Completed `#lzcsplane` and the final `#lazilyconformancecoverag` audit.
+
+lazily-cs now ships the production state projection/mirror, typed `command-plane-v1` codec/reducer/RPC path with causal-receipt terminal authority, default-deny `PeerPermissions`/`RemoteOp`, strict `SessionHandshake` negotiation, production-path instrumentation and benchmark probes, and an eight-export NativeAOT C ABI with a public header and linked C11 smoke consumer. Graph-state projection rejects queue deltas that require a collection adapter, so it cannot silently claim to have applied state it does not model.
+
+The runtime manifest is now 124/124 canonical fixture files opened with an empty known-uncovered ledger. The C# matrix admits 52/58 feature groups. The six not-yet-implemented thread-safe/async QueueCell, TopicCell, and WorkQueueCell flavors remain explicitly `—` and therefore staged out of those peer groups, exactly as requested; their synchronous peers are admitted.
+
+Verification: 191/191 C# tests; `dotnet format --verify-no-changes`; all three target-framework builds and package checks; mutation checks that independently killed delta-gap and terminal-conflict guards; NativeAOT publish/export/link/runtime smoke; lazily-spec 151/151 schema tests, Lean build, coverage sync, and fixture-copy checks; every generated sibling binding gate passed. C# and spec CI are successful; the other inspected binding runs were successful or still in progress. The root aggregate still has an unrelated pre-existing `agent-doc` decomposition failure about a retired nested Cargo project.
+
+Commits: lazily-cs `3098717`, lazily-spec `dd0f62f`, generated sibling README commits, and root pointers `1b6ced396`; all pushed to `main`.
+<!-- agent:boundary:2924ba01 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -330,8 +342,6 @@ The remaining implementation phase is `#lzcsplane`, followed by the full parity 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsplane] lazily-cs: PARTIAL/STAGED — CausalReceipt/CausalReceipts schema/projection shipped at 967c44e; all 17 typed signaling frames, strict exact codec, authoritative SignalingRoom, anti-spoof server-stamped sender, sorted self-excluding rosters, unknown-target handling, and leave semantics shipped at d663074 with canonical signaling client/server fixture replay. Runtime coverage is now 61/124 with 63 known-uncovered. Admit C# only to the exact causal-receipts and signaling-wire/open-room peer groups. Still implement general state projection/mirror, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay service, agent-doc, and remaining message-passing corpora. Plan rows 33-39. (stays open: state mirror, command plane, FFI, permissions, handshake, instrumentation/benchmarks, and remaining corpora.)
-- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Reverified 2026-07-27 at lazily-cs 935996d: 106/124 canonical fixtures are runtime-opened and 18 are explicitly known-uncovered; 165/165 tests, all three target frameworks, package checks, and the conformance guard pass. All three IPC rows are now admitted (Snapshot/Delta/CrdtSync wire, exact ShmBlobArena, and executable BlobBackend transport for shm, Arrow, and in-process backends), alongside the previously shipped exact slices. (stays open: close only after #lzcssync and #lzcsplane ship their remaining production surfaces and canonical replays; until then admit C# only to exact feature groups whose implementation and fixture replay are present.)
 <!-- /agent:backlog -->
 
 ## Review

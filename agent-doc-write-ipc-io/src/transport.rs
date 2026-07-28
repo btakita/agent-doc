@@ -630,7 +630,7 @@ fn try_ipc_inner(
                     agent_doc_write_converge_io::repair_ipc_decision_visible_state(
                         effects,
                         file,
-                        &repair_decision,
+                        &mut repair_decision,
                         Some(&patch_id),
                         |file, repaired_content, expected_bad_state| {
                             agent_doc_write_converge_io::try_ipc_full_content_response_fallback_from_source(
@@ -641,6 +641,30 @@ fn try_ipc_inner(
                             )
                         },
                     )?;
+                    let closeout_authority =
+                        agent_doc_write_converge_io::decide_ipc_closeout_checkpoint(
+                            repair_decision.snap_source,
+                        );
+                    if closeout_authority.action
+                        != agent_doc_document_realtime::write_policy::WholeBufferDeliveryAction::Apply
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "ipc_closeout_authority_rejected file={} patch_id={} snap_source={} action={} reason={} recovery=retain_response_cell_for_cp_retry disk_write=false",
+                                file.display(),
+                                patch_id,
+                                repair_decision.snap_source.label(),
+                                closeout_authority.action.as_str(),
+                                closeout_authority.reason,
+                            ),
+                        );
+                        return Ok(IpcResult {
+                            success: false,
+                            patch_id,
+                            skipped_committed_cycle: false,
+                        });
+                    }
                     if repair_decision.snap_source.is_visible_write_proven() {
                         // Fold the content-bearing editor ACK into the canonical relay
                         // before asking whether disk materialization is safe. A controller

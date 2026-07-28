@@ -2196,7 +2196,7 @@ mod late_fallback_patch_guard_tests {
     }
 
     #[test]
-    fn template_ipc_dedupe_repair_requires_editor_delivery() {
+    fn template_ipc_dedupe_audit_candidate_never_reaches_editor_delivery() {
         let tmp = TempDir::new().unwrap();
         let bad_state = concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -2240,12 +2240,12 @@ mod late_fallback_patch_guard_tests {
             "fake socket listener did not start"
         );
 
-        let decision = IpcRepairDecision::file_read(bad_state.to_string())
+        let mut decision = IpcRepairDecision::file_read(bad_state.to_string())
             .apply_ipc_dedupe(repaired.to_string(), bad_state.to_string());
         let err = agent_doc_write_converge_io::repair_ipc_decision_visible_state(
             &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
-            &decision,
+            &mut decision,
             Some("source-patch"),
             |file, repaired_content, expected_bad_state| {
                 try_ipc_full_content_response_fallback_from_source(
@@ -2273,10 +2273,15 @@ mod late_fallback_patch_guard_tests {
         );
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("full_content_ipc_scope_rejected")
-                && ops_log.contains("scope=template_frontmatter")
+            ops_log.contains("ipc_whole_buffer_repair_authority_rejected")
+                && ops_log.contains("snap_source=file_read")
+                && ops_log.contains("recovery=component_replay_only")
                 && ops_log.contains("ipc_visible_repair_retry_required_no_disk_write"),
-            "template fullContent rejection and retry should be logged:\n{ops_log}"
+            "audit-only template repair rejection and retry should be logged:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("full_content_ipc_"),
+            "audit-only candidates must be rejected before a fullContent adapter call:\n{ops_log}"
         );
 
         let _ = fs::remove_file(agent_doc_ipc_io::socket_path(tmp.path()));
@@ -2917,6 +2922,11 @@ Implemented.
             agent_doc_ipc_io::is_listener_active(tmp.path()),
             "fake socket listener did not start"
         );
+        agent_doc_test_support::seed_reliable_sync_editor_registration(
+            &doc,
+            "live-drift-test-editor",
+            &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+        );
 
         // The finalize path records the adoption block before repair; the
         // in-cycle auto-recovery is gated on that flag, so mirror it here (a
@@ -2924,7 +2934,7 @@ Implemented.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(repaired), Some(disk_lag)).unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
-        let decision = IpcRepairDecision {
+        let mut decision = IpcRepairDecision {
             snapshot_content: repaired.to_string(),
             snap_source: IpcSnapshotSource::ContentOurs,
             disk_repair_reason: Some(IpcDiskRepairReason::LivePromptDrift),
@@ -2938,7 +2948,7 @@ Implemented.
         agent_doc_write_converge_io::repair_ipc_decision_visible_state(
             &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
-            &decision,
+            &mut decision,
             Some("live-drift-1"),
             |file, repaired_content, expected_bad_state| {
                 try_ipc_full_content_response_fallback_from_source(
@@ -2949,6 +2959,11 @@ Implemented.
             },
         )
         .expect("in-cycle editor-IPC convergence should prove visible state and succeed");
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::LazilyVisibleWriteEvent,
+            "component replay must upgrade the audit candidate with its fresh visible-write receipt"
+        );
 
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
@@ -2995,7 +3010,7 @@ Implemented.
 
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
-        let decision = IpcRepairDecision {
+        let mut decision = IpcRepairDecision {
             snapshot_content: repaired.to_string(),
             snap_source: IpcSnapshotSource::ContentOurs,
             disk_repair_reason: Some(IpcDiskRepairReason::LivePromptDrift),
@@ -3009,7 +3024,7 @@ Implemented.
         let err = agent_doc_write_converge_io::repair_ipc_decision_visible_state(
             &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
-            &decision,
+            &mut decision,
             Some("live-drift-2"),
             |file, repaired_content, expected_bad_state| {
                 try_ipc_full_content_response_fallback_from_source(

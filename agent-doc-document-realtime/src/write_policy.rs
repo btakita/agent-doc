@@ -1626,6 +1626,7 @@ pub enum WholeBufferDelivery {
     FullContentEditorIpc,
     VisibleWriteDiskWriteThrough,
     EditorRepairRedelivery,
+    CloseoutCheckpoint,
 }
 
 impl WholeBufferDelivery {
@@ -1635,6 +1636,7 @@ impl WholeBufferDelivery {
             Self::FullContentEditorIpc
                 | Self::VisibleWriteDiskWriteThrough
                 | Self::EditorRepairRedelivery
+                | Self::CloseoutCheckpoint
         )
     }
 
@@ -1643,24 +1645,26 @@ impl WholeBufferDelivery {
             Self::FullContentEditorIpc => "full_content_editor_ipc",
             Self::VisibleWriteDiskWriteThrough => "visible_write_disk_write_through",
             Self::EditorRepairRedelivery => "editor_repair_redelivery",
+            Self::CloseoutCheckpoint => "closeout_checkpoint",
         }
     }
 }
 
+/// Provenance allowed to select a whole-document value.
+///
+/// File reads, snapshots, and `content_ours` are deliberately absent: they are
+/// audit evidence, not live document authority. Only the current
+/// reliable-sync/CRDT operator buffer can authorize a whole-buffer effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WholeBufferAuthority {
-    OperatorTextAuthority,
-    FileRead,
-    ContentOurs,
+    ReliableSyncOperatorText,
     None,
 }
 
 impl WholeBufferAuthority {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::OperatorTextAuthority => "operator_text_authority",
-            Self::FileRead => "file_read",
-            Self::ContentOurs => "content_ours",
+            Self::ReliableSyncOperatorText => "reliable_sync_operator_text",
             Self::None => "none",
         }
     }
@@ -1709,21 +1713,27 @@ struct WholeBufferAuthorityRule {
 const WHOLE_BUFFER_AUTHORITY_TABLE: &[WholeBufferAuthorityRule] = &[
     WholeBufferAuthorityRule {
         delivery: WholeBufferDelivery::FullContentEditorIpc,
-        authority: WholeBufferAuthority::OperatorTextAuthority,
+        authority: WholeBufferAuthority::ReliableSyncOperatorText,
         action: WholeBufferDeliveryAction::Apply,
         reason: "operator_text_authority_source_buffer",
     },
     WholeBufferAuthorityRule {
         delivery: WholeBufferDelivery::VisibleWriteDiskWriteThrough,
-        authority: WholeBufferAuthority::OperatorTextAuthority,
+        authority: WholeBufferAuthority::ReliableSyncOperatorText,
         action: WholeBufferDeliveryAction::Apply,
         reason: "operator_text_authority",
     },
     WholeBufferAuthorityRule {
         delivery: WholeBufferDelivery::EditorRepairRedelivery,
-        authority: WholeBufferAuthority::OperatorTextAuthority,
+        authority: WholeBufferAuthority::ReliableSyncOperatorText,
         action: WholeBufferDeliveryAction::Apply,
         reason: "operator_text_authority_source_buffer",
+    },
+    WholeBufferAuthorityRule {
+        delivery: WholeBufferDelivery::CloseoutCheckpoint,
+        authority: WholeBufferAuthority::ReliableSyncOperatorText,
+        action: WholeBufferDeliveryAction::Apply,
+        reason: "reliable_sync_operator_text",
     },
 ];
 
@@ -3595,7 +3605,7 @@ Working.
     fn whole_buffer_table_observes_disabled_full_content() {
         let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
             delivery: WholeBufferDelivery::FullContentEditorIpc,
-            authority: WholeBufferAuthority::OperatorTextAuthority,
+            authority: WholeBufferAuthority::ReliableSyncOperatorText,
             source_buffer_matches: true,
             scope_rejection: None,
             enabled: false,
@@ -3609,7 +3619,7 @@ Working.
     fn whole_buffer_table_rejects_stale_source_before_authority() {
         let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
             delivery: WholeBufferDelivery::FullContentEditorIpc,
-            authority: WholeBufferAuthority::OperatorTextAuthority,
+            authority: WholeBufferAuthority::ReliableSyncOperatorText,
             source_buffer_matches: false,
             scope_rejection: None,
             enabled: false,
@@ -3623,7 +3633,7 @@ Working.
     fn whole_buffer_table_allows_visible_write_through_only_with_operator_authority() {
         let allowed = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
             delivery: WholeBufferDelivery::VisibleWriteDiskWriteThrough,
-            authority: WholeBufferAuthority::OperatorTextAuthority,
+            authority: WholeBufferAuthority::ReliableSyncOperatorText,
             source_buffer_matches: true,
             scope_rejection: None,
             enabled: true,
@@ -3645,7 +3655,7 @@ Working.
     fn whole_buffer_table_rejects_visible_write_through_stale_source() {
         let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
             delivery: WholeBufferDelivery::VisibleWriteDiskWriteThrough,
-            authority: WholeBufferAuthority::OperatorTextAuthority,
+            authority: WholeBufferAuthority::ReliableSyncOperatorText,
             source_buffer_matches: false,
             scope_rejection: None,
             enabled: true,
@@ -3653,6 +3663,62 @@ Working.
 
         assert_eq!(decision.action, WholeBufferDeliveryAction::Reject);
         assert_eq!(decision.reason, "stale_source_buffer");
+    }
+
+    #[test]
+    fn whole_buffer_authority_table_is_exhaustive_and_fail_closed() {
+        let deliveries = [
+            WholeBufferDelivery::FullContentEditorIpc,
+            WholeBufferDelivery::VisibleWriteDiskWriteThrough,
+            WholeBufferDelivery::EditorRepairRedelivery,
+            WholeBufferDelivery::CloseoutCheckpoint,
+        ];
+        let authorities = [
+            WholeBufferAuthority::ReliableSyncOperatorText,
+            WholeBufferAuthority::None,
+        ];
+        let scope_rejections = [None, Some(FullContentScopeRejection::AgentComponentMarkers)];
+
+        for delivery in deliveries {
+            for authority in authorities {
+                for source_buffer_matches in [false, true] {
+                    for enabled in [false, true] {
+                        for scope_rejection in scope_rejections {
+                            let decision =
+                                decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+                                    delivery,
+                                    authority,
+                                    source_buffer_matches,
+                                    scope_rejection,
+                                    enabled,
+                                });
+                            let expected = if scope_rejection.is_some() || !source_buffer_matches {
+                                WholeBufferDeliveryAction::Reject
+                            } else if delivery == WholeBufferDelivery::FullContentEditorIpc
+                                && !enabled
+                            {
+                                WholeBufferDeliveryAction::ObserveOnly
+                            } else if authority == WholeBufferAuthority::None {
+                                WholeBufferDeliveryAction::Reject
+                            } else {
+                                WholeBufferDeliveryAction::Apply
+                            };
+
+                            assert_eq!(
+                                decision.action,
+                                expected,
+                                "delivery={} authority={} source_buffer_matches={} enabled={} scope_rejection={:?}",
+                                delivery.as_str(),
+                                authority.as_str(),
+                                source_buffer_matches,
+                                enabled,
+                                scope_rejection,
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

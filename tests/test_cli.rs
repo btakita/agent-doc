@@ -24604,7 +24604,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             && write_converge_source.contains("is_socket_receipt_timeout_error")
             && write_converge_source
                 .contains("use agent_doc_ipc_io::editor_target::target_payload_to_editor;")
-            && write_converge_source.contains("lazily_editor_has_operator_authority")
+            && write_converge_source.contains("reliable_sync_editor_has_operator_text_authority")
             && write_converge_source.contains("target_payload_to_registered_editor")
             && write_converge_source.contains("live_editor_registration_for_file(file)"),
         "write convergence IO should use socket classifiers plus Lazily registration-based editor targeting"

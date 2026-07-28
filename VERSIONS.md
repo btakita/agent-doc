@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.57
+
+_JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **Closeout now has one whole-document authority (`#ipcauthority`).** The typed realtime policy can represent only current reliable-sync/CRDT operator text as whole-buffer authority; file reads, snapshots, and `content_ours` remain audit provenance. IPC repair rejects audit candidates before full-buffer editor delivery, disk fallback, baseline checkpointing, or success. Component-scoped replay may still preserve a response over live operator edits, but it must return a fresh visible-write receipt that upgrades the candidate before closeout continues. An exhaustive transition matrix plus runtime adapter regressions keep the boundary fail-closed.
+
 ## 0.35.56
 
 _JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._

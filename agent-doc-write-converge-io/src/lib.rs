@@ -11,14 +11,14 @@ use agent_doc_document::write_normalization::{
 };
 use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, FullContentSourceProof, OperatorReconcileStep, WholeBufferAuthority,
-    WholeBufferAuthorityFacts, WholeBufferDelivery, WholeBufferDeliveryAction,
-    classify_socket_receipt_mismatch_recovery, decide_whole_buffer_delivery,
-    dropped_prompt_lines_after_content_ours, editor_authority_blocks_disk_write,
-    first_response_heading, ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
-    live_prompt_drift_recovery_target, new_agent_response_headings,
-    normalize_visible_recovery_compare, operator_reconcile_step, response_already_in_current,
-    response_converged_in_visible_target, response_target_disjoint_from_user_edit,
-    snapshot_contains_dropped_prompt,
+    WholeBufferAuthorityDecision, WholeBufferAuthorityFacts, WholeBufferDelivery,
+    WholeBufferDeliveryAction, classify_socket_receipt_mismatch_recovery,
+    decide_whole_buffer_delivery, dropped_prompt_lines_after_content_ours,
+    editor_authority_blocks_disk_write, first_response_heading,
+    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, live_prompt_drift_recovery_target,
+    new_agent_response_headings, normalize_visible_recovery_compare, operator_reconcile_step,
+    response_already_in_current, response_converged_in_visible_target,
+    response_target_disjoint_from_user_edit, snapshot_contains_dropped_prompt,
 };
 use agent_doc_element_exchange::{
     duplicate_prompt_line_count, normalization_prefix_observation_counts,
@@ -51,7 +51,7 @@ fn live_editor_registration(
         .flatten()
 }
 
-fn lazily_editor_has_operator_authority(file: &Path) -> bool {
+fn reliable_sync_editor_has_operator_text_authority(file: &Path) -> bool {
     agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)
 }
 
@@ -531,7 +531,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "finalize_typing_during_write file={} patch_id={} typed_delta_bytes={} response_present={} resolution=content_ours_adopted",
+                    "finalize_typing_during_write file={} patch_id={} typed_delta_bytes={} response_present={} resolution=reliable_sync_visible_content_retained",
                     file.display(),
                     patch_id,
                     current.len() as i64 - ours.len() as i64,
@@ -706,7 +706,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
     repair_ipc_decision_visible_state(
         effects,
         file,
-        &repair_decision,
+        &mut repair_decision,
         Some(patch_id),
         |file, repaired_content, expected_bad_state| {
             try_ipc_full_content_response_fallback_from_source(
@@ -717,6 +717,24 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             )
         },
     )?;
+    let closeout_authority = decide_ipc_closeout_checkpoint(repair_decision.snap_source);
+    if closeout_authority.action != WholeBufferDeliveryAction::Apply {
+        log_ipc_proof_failure_with_recycle(
+            file,
+            "socket_already_applied",
+            Some(patch_id),
+            closeout_authority.reason,
+            "retain_response_cell_for_cp_retry_without_disk_write",
+            &format!(
+                "snap_source={} action={} snapshot_len={} snapshot_hash={}",
+                repair_decision.snap_source.label(),
+                closeout_authority.action.as_str(),
+                repair_decision.snapshot_content.len(),
+                agent_doc_hash::content_hash(&repair_decision.snapshot_content),
+            ),
+        );
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry);
+    }
     if repair_decision.snap_source.is_visible_write_proven() {
         let proof = visible_write_disk_proof(file, editor_id, &repair_decision.snapshot_content);
         let disk_synced = write_visible_write_through_to_disk(
@@ -1834,6 +1852,26 @@ impl VisibleWriteDiskProof {
     }
 }
 
+/// Convert IPC provenance into the one policy-owned closeout authority.
+///
+/// `ContentOurs` and `FileRead` remain useful forensic labels, but cannot be
+/// represented as whole-buffer authority. A component replay may later replace
+/// them with a fresh Lazily visible-write receipt before this decision is made.
+pub fn decide_ipc_closeout_checkpoint(source: IpcSnapshotSource) -> WholeBufferAuthorityDecision {
+    let authority = if source.is_visible_write_proven() {
+        WholeBufferAuthority::ReliableSyncOperatorText
+    } else {
+        WholeBufferAuthority::None
+    };
+    decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+        delivery: WholeBufferDelivery::CloseoutCheckpoint,
+        authority,
+        source_buffer_matches: true,
+        scope_rejection: None,
+        enabled: true,
+    })
+}
+
 pub fn visible_write_disk_proof(
     file: &Path,
     editor_id: Option<&str>,
@@ -1863,7 +1901,7 @@ pub fn visible_write_disk_proof(
                 );
             }
             VisibleWriteDiskProof {
-                authority: WholeBufferAuthority::OperatorTextAuthority,
+                authority: WholeBufferAuthority::ReliableSyncOperatorText,
                 source_buffer_matches,
             }
         }
@@ -1933,10 +1971,11 @@ pub fn reconcile_visible_write_snapshot_to_newer_operator_buffer(
         };
         match operator_reconcile_step(&decision.snapshot_content, prev.as_deref(), &curr) {
             OperatorReconcileStep::Accept(content) => {
-                if content == decision.snapshot_content {
+                if agent_doc_element::element::structural_corruption_reason(&content).is_some() {
                     return false;
                 }
-                if agent_doc_element::element::structural_corruption_reason(&content).is_some() {
+                decision.snap_source = IpcSnapshotSource::LazilyVisibleWriteEvent;
+                if content == decision.snapshot_content {
                     return false;
                 }
                 agent_doc_ops_log_io::log_op(
@@ -2031,7 +2070,8 @@ pub fn write_visible_write_through_to_disk(
                 agent_doc_hash::content_hash(content)
             ),
         );
-        let stale_operator_source = proof.authority == WholeBufferAuthority::OperatorTextAuthority
+        let stale_operator_source = proof.authority
+            == WholeBufferAuthority::ReliableSyncOperatorText
             && decision.reason == "stale_source_buffer";
         return Ok(!stale_operator_source);
     }
@@ -2084,7 +2124,8 @@ pub fn mark_visible_write_live_buffer_synced_after_write(
     content: &str,
 ) {
     let proof = visible_write_disk_proof(file, editor_id, content);
-    if proof.authority == WholeBufferAuthority::OperatorTextAuthority && proof.source_buffer_matches
+    if proof.authority == WholeBufferAuthority::ReliableSyncOperatorText
+        && proof.source_buffer_matches
     {
         mark_visible_write_live_buffer_synced(file, patch_id, editor_id, content);
         return;
@@ -2308,8 +2349,8 @@ pub fn try_ipc_full_content_with_mode(
             effective_source_content,
             before_content.as_deref(),
         ]);
-    let authority = if lazily_editor_has_operator_authority(file) {
-        WholeBufferAuthority::OperatorTextAuthority
+    let authority = if reliable_sync_editor_has_operator_text_authority(file) {
+        WholeBufferAuthority::ReliableSyncOperatorText
     } else {
         WholeBufferAuthority::None
     };
@@ -3378,7 +3419,7 @@ pub fn redeliver_full_content_repair_to_editor(
         ) {
         WholeBufferAuthority::None
     } else {
-        WholeBufferAuthority::OperatorTextAuthority
+        WholeBufferAuthority::ReliableSyncOperatorText
     };
     let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
         delivery: WholeBufferDelivery::EditorRepairRedelivery,
@@ -3545,13 +3586,14 @@ fn log_ipc_proof_failure_with_recycle(
 pub fn repair_ipc_decision_visible_state(
     effects: &dyn EditorConvergenceEffects,
     file: &Path,
-    decision: &IpcRepairDecision,
+    decision: &mut IpcRepairDecision,
     patch_id: Option<&str>,
     mut try_full_content_response_fallback: impl FnMut(&Path, &str, &str) -> Result<bool>,
 ) -> Result<()> {
     let Some(reason) = decision.disk_repair_reason else {
         return Ok(());
     };
+    let closeout_authority = decide_ipc_closeout_checkpoint(decision.snap_source);
     let bad_len = decision
         .editor_bad_state
         .as_ref()
@@ -3593,6 +3635,7 @@ pub fn repair_ipc_decision_visible_state(
     );
 
     if decision.redeliver_editor
+        && closeout_authority.action == WholeBufferDeliveryAction::Apply
         && let Some(expected_bad_state) = decision.editor_bad_state.as_ref()
         && match reason {
             IpcDiskRepairReason::PrefixDivergence => redeliver_normalization_fallback_to_editor(
@@ -3627,6 +3670,20 @@ pub fn repair_ipc_decision_visible_state(
         return Ok(());
     }
 
+    if decision.redeliver_editor && closeout_authority.action != WholeBufferDeliveryAction::Apply {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_whole_buffer_repair_authority_rejected file={} patch_id={} snap_source={} action={} reason={} recovery=component_replay_only",
+                file.display(),
+                patch_id.unwrap_or("-"),
+                decision.snap_source.label(),
+                closeout_authority.action.as_str(),
+                closeout_authority.reason,
+            ),
+        );
+    }
+
     if matches!(reason, IpcDiskRepairReason::LivePromptDrift) {
         let ipc_project_root = file
             .canonicalize()
@@ -3634,7 +3691,7 @@ pub fn repair_ipc_decision_visible_state(
             .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical));
         let listener_active = editor_ipc_listener_active(file);
 
-        let log_reconciled = |transport: &str| {
+        let log_reconciled = |transport: &str, snapshot_content: &str| {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -3645,8 +3702,8 @@ pub fn repair_ipc_decision_visible_state(
                     decision.redeliver_editor,
                     bad_len,
                     bad_hash,
-                    decision.snapshot_content.len(),
-                    agent_doc_hash::content_hash(&decision.snapshot_content),
+                    snapshot_content.len(),
+                    agent_doc_hash::content_hash(snapshot_content),
                     transport,
                 ),
             );
@@ -3655,14 +3712,16 @@ pub fn repair_ipc_decision_visible_state(
         if let Ok(file_content) = std::fs::read_to_string(file) {
             if let Some(project_root) = ipc_project_root.as_deref()
                 && listener_active
-                && let Ok(Some(_recovered)) = try_editor_converge_live_prompt_drift(
+                && let Ok(Some(recovered)) = try_editor_converge_live_prompt_drift(
                     file,
                     project_root,
                     &decision.snapshot_content,
                     &file_content,
                 )
             {
-                log_reconciled("editor_ipc");
+                decision.snapshot_content = recovered;
+                decision.snap_source = IpcSnapshotSource::LazilyVisibleWriteEvent;
+                log_reconciled("editor_ipc", &decision.snapshot_content);
                 return Ok(());
             }
 
@@ -3670,7 +3729,10 @@ pub fn repair_ipc_decision_visible_state(
                 .editor_bad_state
                 .as_ref()
                 .is_some_and(|state| state.content() == file_content);
-            if !live_editor_attached(file) && bad_state_matches {
+            if closeout_authority.action == WholeBufferDeliveryAction::Apply
+                && !live_editor_attached(file)
+                && bad_state_matches
+            {
                 effects
                     .atomic_write(file, &decision.snapshot_content)
                     .with_context(|| {
@@ -3680,7 +3742,7 @@ pub fn repair_ipc_decision_visible_state(
                         )
                     })?;
                 checkpoint_document_baseline(file, &decision.snapshot_content)?;
-                log_reconciled("disk_fallback");
+                log_reconciled("disk_fallback", &decision.snapshot_content);
                 log_flow_event(
                     file,
                     agent_doc_flow::types::FlowEvent::new(
@@ -3698,17 +3760,26 @@ pub fn repair_ipc_decision_visible_state(
                 return Ok(());
             }
 
-            if let Ok(Some(_recovered)) = try_auto_recover_live_prompt_drift(
-                effects,
-                file,
-                &decision.snapshot_content,
-                &file_content,
-            ) {
-                log_reconciled(if listener_active {
-                    "editor_ipc"
-                } else {
-                    "disk_fallback"
-                });
+            if (closeout_authority.action == WholeBufferDeliveryAction::Apply || listener_active)
+                && let Ok(Some(recovered)) = try_auto_recover_live_prompt_drift(
+                    effects,
+                    file,
+                    &decision.snapshot_content,
+                    &file_content,
+                )
+            {
+                decision.snapshot_content = recovered;
+                if listener_active {
+                    decision.snap_source = IpcSnapshotSource::LazilyVisibleWriteEvent;
+                }
+                log_reconciled(
+                    if listener_active {
+                        "editor_ipc"
+                    } else {
+                        "disk_fallback"
+                    },
+                    &decision.snapshot_content,
+                );
                 return Ok(());
             }
         }
@@ -4389,6 +4460,18 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn ipc_closeout_checkpoint_accepts_only_reliable_sync_provenance() {
+        let reliable = decide_ipc_closeout_checkpoint(IpcSnapshotSource::LazilyVisibleWriteEvent);
+        assert_eq!(reliable.action, WholeBufferDeliveryAction::Apply);
+
+        for audit_source in [IpcSnapshotSource::ContentOurs, IpcSnapshotSource::FileRead] {
+            let decision = decide_ipc_closeout_checkpoint(audit_source);
+            assert_eq!(decision.action, WholeBufferDeliveryAction::Reject);
+            assert_eq!(decision.reason, "missing_operator_text_authority");
+        }
+    }
 
     struct CrdtOnlyConvergenceEffects;
 

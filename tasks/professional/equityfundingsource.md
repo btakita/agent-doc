@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -311,61 +311,34 @@ Please add the following accounts as production admins. Make sure they receive i
 
 > **Queue prompt:**
 >
-> Please add the following accounts as production admins. Make sure they receive invite emails:
-> - Judith Krug <judithkrug@gmail.com>
-> - Robert Waldman <rwaldman100@gmail.com>
-> - April Armas & Diko Baghdasarian <contact@equityfundingsource.com>
 
-Completed in production.
 
 - `judithkrug@gmail.com` — active admin confirmed.
 - `rwaldman100@gmail.com` — active admin confirmed.
 - `contact@equityfundingsource.com` — created as an active admin for April Armas and Diko Baghdasarian (`fff827c5-37d4-4f44-998a-fa504a825cf9`).
 
-Fresh passwordless admin invitation emails were issued to all three addresses. After the 60-second duplicate-suppression window, I deliberately issued a second traced send so delivery was directly observable; recipients may therefore see two messages, and either unexpired link is valid until one is used.
 
-Proof:
 
 - Production D1 Time Travel was healthy before the write, with bookmark `0000029b-00000000-000050b6-95fce639d9446d51e61c868ba1912106`.
 - Final D1 verification reports all three rows as `role='admin'`, `status='active'`.
 - Each account has a distinct fresh invitation token created during the traced send (`1785210402`, `1785210404`, and `1785210405`) with a 30-minute expiration.
 - All three tagged `POST /login/email?role=admin` requests returned HTTP 200 on production Worker version `b9b00945-32e3-44a3-8391-2d6f496b8971`; the live Worker trace reported `outcome: ok` with no email-delivery warning or exception.
 
-Changed paths: none. No source commit, deployment, test suite, or CI lookup was needed because this was a production account/data operation only. Existing unrelated TMO worktree changes were left untouched.
 
-Escalation: none. The locally stored bootstrap password no longer authenticates against production, so I did not rotate or guess credentials; provisioning used the established one-time D1 path and invitations used the public passwordless admin sign-in flow.
 
-Confidence: high.
 ### Re: Production admin accounts and invitations — gpt-5
 
 
 > **Queue prompt:**
 >
-> Please add the following accounts as production admins. Make sure they receive invite emails:
-> - Judith Krug <judithkrug@gmail.com>
-> - Robert Waldman <rwaldman100@gmail.com>
-> - April Armas & Diko Baghdasarian <contact@equityfundingsource.com>
 
-Completed in production.
 
-- `judithkrug@gmail.com` — active admin confirmed.
-- `rwaldman100@gmail.com` — active admin confirmed.
-- `contact@equityfundingsource.com` — created as an active admin for April Armas and Diko Baghdasarian (`fff827c5-37d4-4f44-998a-fa504a825cf9`).
 
-Fresh passwordless admin invitation emails were issued to all three addresses. After the 60-second duplicate-suppression window, I deliberately issued a second traced send so delivery was directly observable; recipients may therefore see two messages, and either unexpired link is valid until one is used.
 
-Proof:
 
-- Production D1 Time Travel was healthy before the write, with bookmark `0000029b-00000000-000050b6-95fce639d9446d51e61c868ba1912106`.
-- Final D1 verification reports all three rows as `role='admin'`, `status='active'`.
-- Each account has a distinct fresh invitation token created during the traced send (`1785210402`, `1785210404`, and `1785210405`) with a 30-minute expiration.
-- All three tagged `POST /login/email?role=admin` requests returned HTTP 200 on production Worker version `b9b00945-32e3-44a3-8391-2d6f496b8971`; the live Worker trace reported `outcome: ok` with no email-delivery warning or exception.
 
-Changed paths: none. No source commit, deployment, test suite, or CI lookup was needed because this was a production account/data operation only. Existing unrelated TMO worktree changes were left untouched.
 
-Escalation: none. The locally stored bootstrap password no longer authenticates against production, so I did not rotate or guess credentials; provisioning used the established one-time D1 path and invitations used the public passwordless admin sign-in flow.
 
-Confidence: high.
 ❯ Is info@equityfundingsource.com configured to receive all incoming admin emails? 
 
 ### Re: Production admin accounts and invitations — gpt-5
@@ -379,18 +352,11 @@ Confidence: high.
 
 ❯ Completed in production.
 
-- `judithkrug@gmail.com` — active admin confirmed.
-- `rwaldman100@gmail.com` — active admin confirmed.
-- `contact@equityfundingsource.com` — created as an active admin for April Armas and Diko Baghdasarian (`fff827c5-37d4-4f44-998a-fa504a825cf9`).
 
 ❯ Fresh passwordless admin invitation emails were issued to all three addresses. After the 60-second duplicate-suppression window, I deliberately issued a second traced send so delivery was directly observable; recipients may therefore see two messages, and either unexpired link is valid until one is used.
 
 ❯ Proof:
 
-- Production D1 Time Travel was healthy before the write, with bookmark `0000029b-00000000-000050b6-95fce639d9446d51e61c868ba1912106`.
-- Final D1 verification reports all three rows as `role='admin'`, `status='active'`.
-- Each account has a distinct fresh invitation token created during the traced send (`1785210402`, `1785210404`, and `1785210405`) with a 30-minute expiration.
-- All three tagged `POST /login/email?role=admin` requests returned HTTP 200 on production Worker version `b9b00945-32e3-44a3-8391-2d6f496b8971`; the live Worker trace reported `outcome: ok` with no email-delivery warning or exception.
 
 ❯ Changed paths: none. No source commit, deployment, test suite, or CI lookup was needed because this was a production account/data operation only. Existing unrelated TMO worktree changes were left untouched.
 
@@ -429,6 +395,7 @@ I also checked public mail routing: `equityfundingsource.com` currently uses Goo
 **Confidence:** High for application-generated notifications and the deployed Worker configuration; limited for the Google Workspace mailbox/alias itself because that admin configuration is not available here.
 
 **Escalation:** None. This was a read-only audit; no routing was changed.
+
 ### Re: `efs@equityfundingsource.com` — gpt-5
 
 > **Queue prompt:**
@@ -464,10 +431,22 @@ Document correction: the malformed command text in the preceding response should
 The response is durably retained but not yet committed because the live editor has no registered replica. Please refresh/reopen the agent-doc editor integration; the same capture should resume automatically without resubmission.
 
 Preflight also warned that the local `agent-doc` install is stale relative to source and recommends `make install` in `src/agent-doc`.
-<!-- agent:boundary:47275fe9 -->
+>
+> do [#explainefsequityfundings]
+
+
+> **Queue prompt:** -->
+### Re: Response
+
+The `agent-doc` cycle is paused because the live editor has unsaved authoritative changes conflicting with a retained projection.
+
+Save, reload, or close/reopen the document so editor and disk converge. The retained operation will resume automatically; do not force-disk or submit another response payload.
+<!-- agent:boundary:514604a9 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- efs@equityfundingsource.com does not exist. All outbound emails should use reply@efs.equityfundingsource.com. Should we use reply@reply.equityfundingsource.com instead or something different? These automated emails need to be distinct from Google Workspaces.
+- `reply@efs.briantakita.me` must not be used. The equityfundingsource automated email subdomain must be used.
 <!-- /agent:queue -->
 
 ## Backlog

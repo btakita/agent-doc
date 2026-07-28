@@ -5,7 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -224,18 +224,29 @@ Before sending:
 - Use the registered entity names for MonsterRodHolders.com and Equity Funding Source, if they have them; otherwise describe whether each is an owned business, advisory role, or client engagement.
 - Attach a proposed Exhibit A or at least say it will follow before signature. A list of repository organizations, domains, products, and active projects is more useful than a vague reference to “all prior IP.”
 - Send the request to the authorized signer and ask that any approval required by Section 11 be reflected in Board consent or a countersigned amendment—not merely an email from a manager.
-<!-- agent:boundary:d822d2e6 -->
+It is Craig + Luke, not Eddie. Please write draft into a md file so we can revise.
+
+### Re: Revision-ready email draft — gpt-5
+
+Created [haiven-offer-revision-email-draft.md](../professional/haiven/haiven-offer-revision-email-draft.md), addressed to **Craig and Luke**. The draft consolidates the proposed equity clarification, Apollo Solutions/Acadian disclosure and approval, outside-project carve-outs, prior-IP protection, noncompete removal, vesting and bonus clarification, Connecticut employment terms, and remaining-document requests.
+
+I left the date, recipient addresses, and signature as explicit placeholders for revision. The draft is committed as `e3cf6c0ae` (`docs: draft Haiven offer revision email`).
+
+Verification: the new file has no uncommitted changes; the document and agent-doc test suites passed. The repository-wide `make check` later encountered four Corky loopback tests competing for a local port, and all four passed on a serial targeted rerun. This repository has no GitHub Actions workflow named `CI`, so no matching run was available to inspect.
+<!-- agent:boundary:02ff0257 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- Please let me know where they stated I need to disclose my other parties.
+- Please do not over-disclose. If Haiven is not asking for the number of hours worked for my other contracts, please don't include the number.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#haiven-paper] Send the Haiven revision/disclosure email and obtain revised, countersigned documents before signing: Connecticut work/payroll terms; fully diluted 1% numerator, denominator, and Board approval; and express compensation/IP/outside-work carve-outs for the Apollo Solutions engagement serving Acadian Financial Services, MonsterRodHolders.com, and Equity Funding Source.
+- [ ] [#haiven-paper] Revise and send tasks/professional/haiven/haiven-offer-revision-email-draft.md, then obtain revised, countersigned Haiven documents before signing: Connecticut work/payroll terms; fully diluted 1% numerator, denominator, and Board approval; and express compensation/IP/outside-work carve-outs for the Apollo Solutions engagement serving Acadian Financial Services, MonsterRodHolders.com, and Equity Funding Source.
 <!-- /agent:backlog -->
 
 ## Icebox

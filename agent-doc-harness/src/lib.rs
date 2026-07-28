@@ -628,7 +628,8 @@ impl HarnessConfig {
                     || (trimmed.starts_with("⏵⏵ ") && trimmed.contains("(shift+tab to cycle)"))
             }
             "codex" => {
-                matches!(trimmed, "❯" | ">" | "›") || is_codex_idle_placeholder_prompt(trimmed)
+                matches!(trimmed, "❯" | ">" | "›" | "› |")
+                    || is_codex_idle_placeholder_prompt(trimmed)
             }
             "opencode" => matches!(trimmed, ">" | "›"),
             _ => self.matches_prompt(trimmed),
@@ -2099,6 +2100,17 @@ mod tests {
                 &h,
                 "────────\n❯ describe a task for a new session\n⏵⏵ bypass permissions on · 1 shell\n"
             ),
+            None
+        );
+
+        // Codex 0.73 renders an empty composer as `› |`, where the bar is its
+        // cursor placeholder rather than operator input. This exact live shape
+        // must remain dispatch-ready; classifying it as a draft strands an
+        // otherwise idle pane behind `submit_or_clear_pane_draft`.
+        let codex = HarnessConfig::codex();
+        assert!(codex.is_dispatch_ready_prompt_line("› |"));
+        assert_eq!(
+            pane_composer_draft(&codex, "› |\n  gpt-5.6-sol xhigh · Context 7% used\n"),
             None
         );
     }

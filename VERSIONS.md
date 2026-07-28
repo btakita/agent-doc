@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.45
+
+_JetBrains plugin 0.2.305; VS Code extension 0.2.57._
+
+- **Codex's exact `› |` empty-composer rendering is dispatch-ready.** The trailing bar is Codex's cursor placeholder, not unsent operator input. Dispatch-only reroutes no longer strand an idle rescued pane behind the impossible `submit_or_clear_pane_draft` unblocker; real populated composer suffixes remain protected.
+
 ## 0.35.44
 
 _JetBrains plugin 0.2.305; VS Code extension 0.2.57._

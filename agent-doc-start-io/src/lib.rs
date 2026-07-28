@@ -164,41 +164,44 @@ fn current_text_label(current: &agent_doc_crdt_relay_io::CurrentText) -> &'stati
 fn start_admission_current_text_for_fallback(
     file: &Path,
 ) -> Option<agent_doc_crdt_relay_io::CurrentText> {
-    start_admission_local_current_text_for_fallback(file).or_else(|| {
-        match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
-            file,
-            "prepare_start_runtime",
-        ) {
-            Ok(Some(current)) => Some(current),
-            Ok(None) => Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica),
-            Err(controller_err) => match agent_doc_crdt_relay_io::current_text_for_file(file) {
-                Ok(current) => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "start_admission_current_text_controller_unavailable file={} fallback=local_relay current_state={} controller_error={}",
-                            file.display(),
-                            current_text_label(&current),
-                            format!("{controller_err:#}").replace('\n', "\\n"),
-                        ),
-                    );
-                    Some(current)
-                }
-                Err(local_err) => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "start_admission_current_text_unavailable file={} controller_error={} local_relay_error={}",
-                            file.display(),
-                            format!("{controller_err:#}").replace('\n', "\\n"),
-                            format!("{local_err:#}").replace('\n', "\\n"),
-                        ),
-                    );
-                    None
-                }
-            },
+    match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+        file,
+        "prepare_start_runtime",
+    ) {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
+            start_admission_local_current_text_for_fallback(file)
+                .or(Some(agent_doc_crdt_relay_io::CurrentText::Detached))
         }
-    })
+        Ok(Some(current)) => Some(current),
+        Ok(None) => start_admission_local_current_text_for_fallback(file)
+            .or(Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)),
+        Err(controller_err) => match agent_doc_crdt_relay_io::current_text_for_file(file) {
+            Ok(current) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "start_admission_current_text_controller_unavailable file={} fallback=local_relay current_state={} controller_error={}",
+                        file.display(),
+                        current_text_label(&current),
+                        format!("{controller_err:#}").replace('\n', "\\n"),
+                    ),
+                );
+                Some(current)
+            }
+            Err(local_err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "start_admission_current_text_unavailable file={} controller_error={} local_relay_error={}",
+                        file.display(),
+                        format!("{controller_err:#}").replace('\n', "\\n"),
+                        format!("{local_err:#}").replace('\n', "\\n"),
+                    ),
+                );
+                None
+            }
+        }
+    }
 }
 
 fn start_admission_local_current_text_for_fallback(
@@ -264,14 +267,6 @@ fn resolve_start_admission_disk_metadata_bootstrap(
 }
 
 fn resolve_start_admission_document(file: &Path) -> Result<StartAdmissionDocument> {
-    if let Some(current) = start_admission_local_current_text_for_fallback(file) {
-        return resolve_start_admission_disk_metadata_bootstrap(
-            file,
-            current,
-            "local relay reported editor model unavailable before controller-backed current document resolve",
-        );
-    }
-
     match agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "prepare_start_runtime",

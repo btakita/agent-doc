@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.63
+
+_JetBrains plugin 0.2.307; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **Supervisor recycle no longer lets a fresh process's empty embedded relay hide the long-lived controller replica.** Startup and current-document reads accept the embedded route directly only when it reports `Current`; with a live editor, `editor_attached_model_missing`, `editor_sync_pending`, and `detached` observations consult controller authority before the read path may use disk metadata. Start-admission fallback also checks the controller before its local rebuilding state, while preserving that local rebuilding evidence when the controller still reports a stale detach. This removes the transient Haiven reopen/disk-divergence loop without forcing a disk write or asking the operator to reload a healthy editor.
+
 ## 0.35.62
 
 _JetBrains plugin 0.2.307; VS Code extension 0.2.59; Zed extension 0.1.0._

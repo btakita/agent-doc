@@ -4618,9 +4618,10 @@ fn query_live_editor_authority(
     if controller_document_mutation_in_progress() {
         return agent_doc_crdt_relay_io::current_text_for_file(file);
     }
-    if let Some(current) = query_embedded_relay(file, source)? {
-        return Ok(current);
-    }
+    let embedded = match query_embedded_relay(file, source)? {
+        Some(current) if embedded_relay_observation_is_current(&current) => return Ok(current),
+        embedded => embedded,
+    };
     if !agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(file) {
         agent_doc_ops_log_io::log_op(
             file,
@@ -4630,47 +4631,87 @@ fn query_live_editor_authority(
                 source,
             ),
         );
-        return Ok(agent_doc_crdt_relay_io::CurrentText::Detached);
+        return Ok(embedded.unwrap_or(agent_doc_crdt_relay_io::CurrentText::Detached));
     }
     #[cfg(test)]
     {
-        agent_doc_crdt_relay_io::current_text_for_file(file)
+        Ok(embedded.unwrap_or_else(|| {
+            agent_doc_crdt_relay_io::current_text_for_file(file)
+                .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+        }))
     }
     #[cfg(not(test))]
     match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
         file, source,
     ) {
-        Ok(Some(current)) => Ok(current),
+        Ok(Some(current)) => {
+            if let Some(embedded) = embedded.as_ref() {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "document_model_embedded_relay_refreshed_from_controller file={} source={} embedded_status={} controller_status={} reason=transient_embedded_observation",
+                        file.display(),
+                        source,
+                        current_text_status(embedded),
+                        current_text_status(&current),
+                    ),
+                );
+            }
+            Ok(current)
+        }
         Ok(None) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_controller_lookup_unavailable file={} source={} fallback=none",
+                    "document_model_controller_lookup_unavailable file={} source={} fallback={}",
                     file.display(),
                     source,
+                    if embedded.is_some() {
+                        "embedded_relay"
+                    } else {
+                        "missing_replica"
+                    },
                 ),
             );
-            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+            Ok(embedded
+                .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica))
         }
         Err(e) => {
-            // Record controller degradation so hot polling paths (idle-queue
-            // watch) can back off and stop flooding a wedged controller.
-            record_controller_degraded();
-            #[cfg(not(test))]
-            {
+            if let Some(embedded) = embedded {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "document_model_controller_lookup_error file={} source={} error={} fallback=none",
+                        "document_model_controller_lookup_error file={} source={} error={} fallback=embedded_relay embedded_status={}",
                         file.display(),
                         source,
                         e,
+                        current_text_status(&embedded),
                     ),
                 );
-                Err(e)
+                return Ok(embedded);
             }
+            // Record controller degradation so hot polling paths (idle-queue
+            // watch) can back off and stop flooding a wedged controller.
+            record_controller_degraded();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_model_controller_lookup_error file={} source={} error={} fallback=none",
+                    file.display(),
+                    source,
+                    e,
+                ),
+            );
+            Err(e)
         }
     }
+}
+
+fn embedded_relay_observation_is_current(current: &agent_doc_crdt_relay_io::CurrentText) -> bool {
+    matches!(
+        current,
+        agent_doc_crdt_relay_io::CurrentText::Current { .. }
+    )
 }
 
 fn query_embedded_relay(
@@ -7088,6 +7129,28 @@ mod tests {
         assert!(!transient_convergence_backpressure_error(&anyhow::anyhow!(
             "malformed template patchback"
         )));
+    }
+
+    #[test]
+    fn transient_embedded_relay_observations_require_controller_refresh() {
+        assert!(!embedded_relay_observation_is_current(
+            &agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        ));
+        assert!(!embedded_relay_observation_is_current(
+            &agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
+        ));
+        assert!(!embedded_relay_observation_is_current(
+            &agent_doc_crdt_relay_io::CurrentText::Detached
+        ));
+        assert!(embedded_relay_observation_is_current(
+            &agent_doc_crdt_relay_io::CurrentText::Current {
+                text: "controller handoff".to_string(),
+                live_editors: 1,
+                delivery_converged: true,
+                delivery_version: 7,
+                semantics: None,
+            }
+        ));
     }
 
     // ── Rung 2 (`#rtwfeed`) CP-owned CRDT feed ──

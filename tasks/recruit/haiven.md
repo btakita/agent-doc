@@ -323,14 +323,12 @@ Using Chromium Bridge, I opened that exact Gmail conversation and replaced the p
 For clarity, the correct draft to review is the threaded **“Re: Haiven Offer Letter”** draft. An earlier standalone draft with subject **“Haiven offer documents -- requested clarifications and outside-engagement disclosure”** also remains in Gmail; it was not sent and can be discarded after you confirm the threaded reply looks right.
 
 The source changes are committed as `fc671c26e`; the private mail-source commit is `5da3f14`. I moved `#haiven-paper` to review: the remaining steps require your approval/send action and Haiven's revised, countersigned documents.
-<!-- agent:boundary:c60b21d1 -->
+<!-- agent:boundary:32f8f12a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~do [#haiven-paper]~~
-- ~~The email I'm replying to is at https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVXGNlfntxSpmgZRhHwWRslzp. Use chromium-bridge to draft the reply. Do not send. I will look it over.~~ — auto-struck: answered this cycle (#ftstrike)
 - My mailing address is PO Box 571, North Grosvenordale, CT 06255. My physical address (if needed) is 1 Park St, #2 - 571, North Grosvenordale, CT 06255.
 - Is "Please use Connecticut law and a Connecticut or remote forum. If arbitration remains, it should proceed remotely under the AAA Employment/Workplace Rules, preserve all statutory remedies and fee-shifting, and require Haiven to pay the arbitration and arbitrator costs other than a filing fee no greater than the fee for filing the same claim in court." something Haiven may contest? If we go to arbitration, I think a virtual hearing is a good idea. Why was AAA suggested?
 - Please mention that I will be coming in late on Monday Aug 10. The weekly standup/iteration planning is at 10 PT on Mondays. Mention that I may have the occasional conflict for the weekly standup/iteration planning and I can make up the time + planning either before or after the planning. I will also provide notes if I do have a schedule conflict.
@@ -341,6 +339,12 @@ The source changes are committed as `fc671c26e`; the private mail-source commit 
 
 <!-- agent:backlog queue -->
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#haiven-paper] [operator-action] Threaded Gmail reply to Craig Fryar and Luke Richey is drafted and unsent under “Re: Haiven Offer Letter”; Brian must review and send it, then provide Haiven’s revised countersigned documents for final verification before signing.
+<!-- /agent:review -->
 
 ## Icebox
 

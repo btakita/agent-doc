@@ -1030,7 +1030,47 @@ Verification:
 - Current source revision: `d839186f4`, tagged `v0.35.57`.
 
 Changed paths: none. This was an already-shipped verification closeout, so no version bump or duplicate implementation was appropriate. Confidence: high. Escalation: none.
-<!-- agent:boundary:28a802c7 -->
+
+### Re: 📌 do [#ipcverhandshake] — Codex
+
+> **Queue prompt:**
+>
+> 📌 do [#ipcverhandshake]
+
+
+Implemented and released the IPC version/build handshake as agent-doc **v0.35.58**.
+
+The wire invariant is now fail-closed: before any editor mutation reaches the plugin callback, each connection must complete a hello/ack exchange with an exact `{ protocol_version, build_id }` match. Protocol skew, build skew, malformed handshakes, and legacy clients are rejected with terminal, diagnosable receipts. `reload_library` is the sole pre-handshake control message; the client retains a raw reload-only fallback so a newly installed binary can ask an older listener to reload without allowing an unsafe mutation.
+
+Policy ownership and effect boundaries are explicit:
+
+- `agent-doc-ipc-protocol` owns the peer identity, hello/ack schema, validation, rejection receipts, protocol version, and reload classification.
+- `agent-doc-ipc-io` enforces negotiation per connection before dispatching editor intents and records handshake rejection diagnostics.
+- The CLI and cdylib inject the same build-scoped identity, `<package-version>+<build-timestamp>`, so same-semver rebuild skew is detectable rather than inferred from filesystem mtime/inode state.
+- The configuration specification documents the PID-scoped socket, mandatory negotiation, fail-closed behavior, and narrow reload exception.
+
+Regression and integration proof covers exact identity acceptance, protocol/build skew rejection, legacy mutation rejection before the callback, and preservation of the reload compatibility path. Verification completed successfully:
+
+- `cargo test -p agent-doc-ipc-protocol -p agent-doc-ipc-io`
+- `cargo check --workspace`
+- full `make check` (8,283-test suite plus simulator/formal gates)
+- changed-file rustfmt checks and `git diff --cached --check`
+- one release-parity `make install-full`
+- installed CLI reports `agent-doc 0.35.58`
+- managed Claude/Codex/OpenCode/Cursor skill surfaces were synchronized; the prior stale OpenCode mirror is fixed
+- `agent-doc admin recycle` marked the controller for the next idle boundary
+
+Release completed:
+
+- source commit `1b4e56ee7` pushed to `agent-doc/main`
+- tag `v0.35.58` pushed
+- manylinux wheel uploaded successfully to PyPI
+- GitHub release: https://github.com/btakita/agent-doc/releases/tag/v0.35.58
+- parent gitlink and refreshed OpenCode/Cursor surfaces committed as `0ad92cee1` and pushed to `agent-loop/main`
+- the latest CI run was `in_progress` at the required single check; it was not polled
+
+The repository-wide `agent-doc audit-docs` still reports 403 pre-existing findings across unrelated projects/worktrees, but the release-specific managed-version mismatch that prompted the audit is resolved. Confidence is high: the mutation gate is proven at both protocol and listener integration boundaries, and the full workspace/release gates passed. No escalation or operator follow-up is required.
+<!-- agent:boundary:10cd271a -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -1050,7 +1090,7 @@ Changed paths: none. This was an already-shipped verification closeout, so no ve
 - ~~📌 do [#adstatechartjs]~~
 - ~~📌 do [#ipcauthority]~~
 - ~~📌 do [#ipcliveness]~~
-- 📌 do [#ipcverhandshake]
+- ~~📌 do [#ipcverhandshake]~~
 - 📌 do [#5qjj]
 <!-- /agent:queue -->
 
@@ -1065,7 +1105,6 @@ Changed paths: none. This was an already-shipped verification closeout, so no ve
 - [ ] [#compactreactiveprojectionlivefail] [focused-cycle] #agent-doc-bug Fresh-restart live regression on IDEA 2026.1 + JetBrains plugin 0.2.305: a 305-event burst logged editor_ops_recorded count=305 transaction=batch, but CrdtReplicaForwarder drained sequential native.applyLocal insert_chars=1 operations roughly every 10–16 seconds while controller authority stayed delivery_converged=false; neither coalesced_exact_editor_adopt_after_quiet nor exact_editor_adopt_then_atomic_reregister appeared. Fix the editor-op drain so one burst becomes one revision-scoped update or at most one quiet recovery, add deterministic latency/conformance coverage, preserve the bounded native-call timeout/fail-closed behavior, and repeat #compactreactiveprojectionverify.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Phase 3 progress shipped in agent-doc 0.35.53: current observed closeout-recovery evidence now validates the typed projection against live visible-document authority only, so stale compatibility snapshot-baseline drift cannot veto a current typed observation; the recorded snapshot hash remains advisory recovery evidence. Remaining: complete the other detailed guard/recovery payload cutovers and later state-vector barrier work in tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md.
-- [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
 - [ ] [#adstatechartktlive] [operator-verify] After restarting a JetBrains IDE onto plugin 0.2.306, open/edit/close an agent-doc markdown document and verify the CRDT replica reaches editor_owns_buffer then detached with no classloader or File Cache Conflict error.
 - [ ] [#adstatechartjslive] [operator-verify] Reload or restart the VS Code/VSCodium Extension Host onto agent-doc 0.2.59, then open, edit, and close an agent-doc markdown document; verify registration reaches editor-owned buffer state, edits sync normally, close/deregister succeeds, and no merge-ownership rejection appears.
 <!-- /agent:backlog -->

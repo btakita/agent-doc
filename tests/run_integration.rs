@@ -305,7 +305,7 @@ fn assert_terminal_closeout_proof(_root: &Path, doc: &Path) {
     assert!(proof.did_commit);
     assert_eq!(proof.file_hash, proof.snapshot_hash);
     assert_eq!(proof.snapshot_hash, proof.head_hash);
-    assert_eq!(proof.agreement, "file_snapshot_head");
+    assert_eq!(proof.agreement.as_str(), "file_snapshot_head");
 }
 
 fn seed_snapshot(root: &Path, doc: &Path) {

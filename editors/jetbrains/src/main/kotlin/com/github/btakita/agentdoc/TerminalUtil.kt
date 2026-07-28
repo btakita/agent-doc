@@ -16,10 +16,12 @@ import com.intellij.openapi.vfs.VirtualFile
 import java.awt.datatransfer.StringSelection
 import java.io.File
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 object TerminalUtil {
     private val LOG = Logger.getInstance(TerminalUtil::class.java)
+    private val agentDocProjectRoots = ConcurrentHashMap<String, String>()
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
     private const val RESTART_TELEMETRY_OPS_LOG_MAX_LINES = 400
     internal const val RUN_ROUTE_WAIT_FOR_READY_SECONDS = 120L
@@ -272,10 +274,15 @@ object TerminalUtil {
      * Resolve the agent-doc project root for [file].
      *
      * Walks up from the file's parent looking for the nearest ancestor with
-     * `.agent-doc/` (via the shared FFI helper). If the file lives inside a
+     * `.agent-doc/`. If the file lives inside a
      * submodule that is itself an agent-doc project (e.g. `src/session-share/`),
      * the submodule root is returned. Otherwise falls back to the IDE project's
      * `basePath`.
+     *
+     * This path resolver is deliberately local and never crosses JNA. Selection
+     * and focus listeners run on IDEA's event-dispatch thread; resolving a path
+     * through the serialized native generation there made an unrelated CRDT
+     * socket call freeze the whole IDE until the native-call timeout.
      *
      * Returns `(projectRoot, relativePath)` where `relativePath` is `file.path`
      * relative to `projectRoot`, suitable for passing to `agent-doc` commands
@@ -283,23 +290,57 @@ object TerminalUtil {
      */
     fun resolveProject(project: Project, file: VirtualFile): Pair<String, String> {
         val basePath = project.basePath
-        val ffi = NativePatching.resolveProjectPath(file.path)
-        if (ffi != null) {
+        val resolved = resolveProjectPath(basePath, file.path)
+        if (basePath != null && resolved.first != basePath) {
             // Register resolved root with PatchWatcher on-demand. This handles submodule
             // roots that weren't present at startup (e.g. user opens a file in a freshly
             // cloned submodule). Idempotent — no-op if already registered.
-            if (basePath != null && ffi.first != basePath) {
-                try {
-                    PatchWatcher.getInstance(project).registerRoot(ffi.first)
-                } catch (_: Exception) { /* best-effort */ }
-            }
-            return ffi
+            try {
+                PatchWatcher.getInstance(project).registerRoot(resolved.first)
+            } catch (_: Exception) { /* best-effort */ }
         }
-        // FFI unavailable or no `.agent-doc/` ancestor — fall back to workspace basePath.
+        return resolved
+    }
+
+    internal fun resolveProjectPath(basePath: String?, filePath: String): Pair<String, String> {
+        val normalizedFile = File(filePath).toPath().toAbsolutePath().normalize()
+        val detectedRoot = nearestAgentDocProjectRoot(normalizedFile.toString())
+        if (detectedRoot != null) {
+            return detectedRoot to relativePathUnder(detectedRoot, normalizedFile.toString())
+        }
+
         if (basePath != null) {
-            return Pair(basePath, relativePath(project, file))
+            val root = File(basePath).toPath().toAbsolutePath().normalize().toString()
+            return root to relativePathUnder(root, normalizedFile.toString())
         }
-        return Pair(java.io.File(file.path).parent ?: "/", java.io.File(file.path).name)
+        val parent = normalizedFile.parent?.toString() ?: "/"
+        return parent to (normalizedFile.fileName?.toString() ?: normalizedFile.toString())
+    }
+
+    internal fun nearestAgentDocProjectRoot(filePath: String): String? {
+        val normalizedFile = File(filePath).toPath().toAbsolutePath().normalize()
+        val cacheKey = normalizedFile.toString()
+        agentDocProjectRoots[cacheKey]?.let { return it }
+        var current = normalizedFile.parent?.toFile()
+        while (current != null) {
+            if (File(current, ".agent-doc").isDirectory) {
+                val root = current.toPath().toAbsolutePath().normalize().toString()
+                agentDocProjectRoots[cacheKey] = root
+                return root
+            }
+            current = current.parentFile
+        }
+        return null
+    }
+
+    private fun relativePathUnder(root: String, filePath: String): String {
+        val rootPath = File(root).toPath().toAbsolutePath().normalize()
+        val normalizedFile = File(filePath).toPath().toAbsolutePath().normalize()
+        return if (normalizedFile.startsWith(rootPath)) {
+            rootPath.relativize(normalizedFile).toString().replace(File.separatorChar, '/')
+        } else {
+            normalizedFile.toString()
+        }
     }
 
     /**

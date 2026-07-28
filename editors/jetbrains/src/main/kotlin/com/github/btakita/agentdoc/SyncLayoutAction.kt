@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import java.io.File
@@ -149,7 +150,7 @@ class SyncLayoutAction : AnAction() {
             visibleMarkdownFiles: List<String>,
         ): String {
             val visibleRoots = visibleMarkdownFiles
-                .mapNotNull { NativePatching.resolveProjectPath(it)?.first }
+                .mapNotNull { TerminalUtil.nearestAgentDocProjectRoot(it) }
                 .distinct()
             if (visibleRoots.size <= 1) {
                 if (
@@ -285,6 +286,12 @@ class SyncLayoutAction : AnAction() {
             notify: Boolean = true,
             noAutostart: Boolean = false,
         ) {
+            if (!SwingUtilities.isEventDispatchThread()) {
+                ApplicationManager.getApplication().invokeLater {
+                    syncLayout(project, notify, noAutostart)
+                }
+                return
+            }
             val manager = FileEditorManager.getInstance(project)
             val focusedVFile = manager.selectedTextEditor?.virtualFile
                 ?.takeIf { it.name.endsWith(".md") }
@@ -292,29 +299,30 @@ class SyncLayoutAction : AnAction() {
                 ?: return
             val focusedFile = focusedVFile.path
             val visibleMdFiles = collectVisibleMarkdownFiles(manager.selectedFiles)
-            val (focusedProjectRoot, _) = TerminalUtil.resolveProject(project, focusedVFile)
-            val projectRoot = chooseSyncProjectRoot(
-                project.basePath,
-                focusedProjectRoot,
-                visibleMdFiles,
-            )
-
             if (visibleMdFiles.isEmpty()) {
                 if (notify) TerminalUtil.showHint(project, "No .md files open")
                 return
             }
+            val basePath = project.basePath
+            val (focusedProjectRoot, _) = TerminalUtil.resolveProject(project, focusedVFile)
+            val projectRoot = chooseSyncProjectRoot(
+                basePath,
+                focusedProjectRoot,
+                visibleMdFiles,
+            )
+            // IDEA component state is captured on the EDT exactly once. The
+            // controller/socket work below owns the background portion.
+            val editorLayout = absolutizeEditorLayout(
+                projectRoot,
+                normalizeEditorLayout(
+                    basePath,
+                    projectRoot,
+                    LayoutDetector.detectEditorLayout(project),
+                ),
+            )
 
             Thread {
                 try {
-                    val editorLayout =
-                        absolutizeEditorLayout(
-                            projectRoot,
-                            normalizeEditorLayout(
-                                project.basePath,
-                                projectRoot,
-                                LayoutDetector.detectEditorLayout(project),
-                            ),
-                        )
                     val columns = buildSyncColumns(
                         visibleMdFiles,
                         editorLayout,

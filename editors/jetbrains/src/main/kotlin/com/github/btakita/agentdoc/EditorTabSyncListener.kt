@@ -228,7 +228,11 @@ class EditorTabSyncListener : FileEditorManagerListener {
             // Project-root discovery crosses native/path services. Keep it off
             // the IntelliJ event thread along with the controller round trip.
             val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
-            val receipt = NativeAdminControls.focusDocumentPane(
+            if (focusGeneration.get() != requested) {
+                log("focus: superseded after root resolution gen=$requested")
+                return@focus
+            }
+            val receipt = CpRouteClient.submitFocusDocumentPane(
                 projectRoot = projectRoot,
                 documentPath = documentPath,
             )
@@ -292,11 +296,17 @@ class EditorTabSyncListener : FileEditorManagerListener {
     private fun shutdown() {
         executor.shutdownNow()
         focusExecutor.shutdownNow()
-        for (root in observedRoots) {
-            NativeAdminControls.editorSurfaceForget(root)
-        }
+        val roots = observedRoots.toList()
         observedRoots.clear()
         latestSurface.set(null)
+        Thread({
+            for (root in roots) {
+                NativeAdminControls.editorSurfaceForget(root)
+            }
+        }, "agent-doc-editor-surface-forget").apply {
+            isDaemon = true
+            start()
+        }
     }
 
     override fun selectionChanged(event: FileEditorManagerEvent) {
@@ -310,10 +320,10 @@ class EditorTabSyncListener : FileEditorManagerListener {
         log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
         if (visibleMdFiles.isEmpty()) return
 
-        // A real selection event is the operator asking for this document, so it
-        // skips the unchanged-observation shortcut: a missing actor/supervisor
-        // can still be cold-started when nothing about the surface changed.
-        val pending = captureSurface(project, file, forceReconcile = true) ?: return
+        // Focus owns targeted session recovery. Re-forcing a full surface
+        // reconcile on every tab switch made ordinary focus navigation contend
+        // with layout sync and briefly expose stale extra panes.
+        val pending = captureSurface(project, file, forceReconcile = false) ?: return
         requestObservation(pending)
     }
 
@@ -340,6 +350,16 @@ class EditorTabSyncListener : FileEditorManagerListener {
         log("focusGained: file=${file.name} mdFiles=$visibleMdFiles")
         val pending = captureSurface(project, file, forceReconcile = false) ?: return
         requestObservation(pending)
+    }
+
+    /**
+     * A structural split/container change occurred. [LayoutChangeDetector]
+     * reports it through the same surface graph as tab and focus events, keeping
+     * one layout planner and one debounce owner.
+     */
+    fun onEditorLayoutChanged(project: Project) {
+        val pending = captureSurface(project, forceReconcile = false) ?: return
+        requestObservation(pending, delayMs = 0L)
     }
 
     /**

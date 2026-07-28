@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.65
+
+_JetBrains plugin 0.2.308; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **JetBrains focus and layout sync no longer compete or block the IDEA event thread.** Editor selection, mouse focus, and structural split changes feed one latest-wins surface graph; the old second CLI layout planner is removed. UI snapshots remain on the event thread, while controller/native work and startup root discovery run on pooled executors, and the native bridge rejects future event-thread waits.
+- **Killed document sessions resume through a typed focus policy.** JetBrains and Rust share the closed-set `MissingFocusPanePolicy`; first-party focus uses `resume_latest`, so switching back to a document whose tmux actor pane died restarts the latest session before focus instead of leaving the editor and tmux panes out of sync.
+- **Replica PID registrations are generation-safe Lazily sources.** Deregistering an old JetBrains `refresh-N` identity no longer clears the same document/PID source while its replacement identity is live, eliminating re-registration/ACK churn and stale editor authority after reconnect.
+- **Operator `session-check` is status-only.** It no longer resumes captured finalize, settles retained writes, requests supervisor recovery, or mutates document projections. Finalize/write/preflight and the supervisor own recovery; only metadata repair of an exact already-committed historical snapshot remains permitted.
+- **A committed response can release an obsolete retained reposition target while preserving newer queue prompts.** Terminal proof now requires exact cycle/capture/response identity, response materialization in `HEAD`, and snapshot = `HEAD`; visible queue-only drift no longer falsely retains response ownership. Terminal hash agreement is a closed-set enum rather than a free-text tag.
+
 ## 0.35.64
 
 _JetBrains plugin 0.2.307; VS Code extension 0.2.59; Zed extension 0.1.0._

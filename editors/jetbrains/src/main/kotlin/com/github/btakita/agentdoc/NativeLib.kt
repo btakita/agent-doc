@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import javax.swing.SwingUtilities
 
 internal fun libMtimeChanged(path: String, storedMtime: Long): Boolean {
     val currentMtime = File(path).lastModified()
@@ -831,6 +832,9 @@ interface AgentDocLib : Library {
 
             private fun <T> callOnWorker(call: () -> T): T {
                 if (Thread.currentThread() === workerThread.get()) return call()
+                check(!SwingUtilities.isEventDispatchThread()) {
+                    "agent-doc native calls are forbidden on the IDEA event-dispatch thread"
+                }
                 val future = executor.submit<T> { call() }
                 return try {
                     future.get(NATIVE_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)

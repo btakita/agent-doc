@@ -12,6 +12,48 @@ import org.junit.Test
 class TerminalUtilTest {
 
     @Test
+    fun `project path resolution is local and finds the nearest agent-doc root`() {
+        val workspace = Files.createTempDirectory("agent-doc-jb-root")
+        val nestedRoot = workspace.resolve("src/sample")
+        Files.createDirectories(nestedRoot.resolve(".agent-doc"))
+        val document = nestedRoot.resolve("tasks/session.md")
+        Files.createDirectories(document.parent)
+        Files.writeString(document, "# session\n")
+
+        assertEquals(
+            nestedRoot.toAbsolutePath().normalize().toString() to "tasks/session.md",
+            TerminalUtil.resolveProjectPath(workspace.toString(), document.toString()),
+        )
+
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+        ).toFile().readText()
+        val resolver = source.substringAfter("fun resolveProject(project:")
+            .substringBefore("private fun rememberRunAfterClear")
+        assertFalse(
+            "path resolution on focus/action paths must not cross the serialized native worker",
+            resolver.contains("NativePatching.resolveProjectPath"),
+        )
+    }
+
+    @Test
+    fun `native generation fails fast instead of waiting on the IDEA event thread`() {
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt"
+        ).toFile().readText()
+        val callOnWorker = source.substringAfter("private fun <T> callOnWorker")
+            .substringBefore("companion object")
+
+        assertTrue(callOnWorker.contains("SwingUtilities.isEventDispatchThread()"))
+        assertTrue(callOnWorker.contains("native calls are forbidden on the IDEA event-dispatch thread"))
+        assertTrue(
+            "the EDT guard must run before submitting or waiting for native work",
+            callOnWorker.indexOf("SwingUtilities.isEventDispatchThread()") <
+                callOnWorker.indexOf("executor.submit"),
+        )
+    }
+
+    @Test
     fun `run route request command uses CP editor route`() {
         assertEquals(
             listOf(

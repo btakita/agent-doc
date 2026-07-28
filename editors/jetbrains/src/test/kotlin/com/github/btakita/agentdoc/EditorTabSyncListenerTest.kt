@@ -210,12 +210,21 @@ class EditorTabSyncListenerTest {
             selection.indexOf("requestImmediateFocus(project, file)") <
                 selection.indexOf("captureSurface(project, file"),
         )
+        assertTrue(selection.contains("forceReconcile = false"))
+        assertFalse(
+            "ordinary tab focus must not force a competing full layout reconcile",
+            selection.contains("forceReconcile = true"),
+        )
 
         val fastFocus = source.substringAfter(
             "private fun requestImmediateFocus(project: Project, file: VirtualFile)",
         ).substringBefore("private fun captureSurface")
         assertTrue(fastFocus.contains("focusGeneration.incrementAndGet()"))
-        assertTrue(fastFocus.contains("NativeAdminControls.focusDocumentPane("))
+        assertTrue(fastFocus.contains("CpRouteClient.submitFocusDocumentPane("))
+        assertFalse(
+            "focus must bypass the serialized JNA worker",
+            fastFocus.contains("NativeAdminControls.focusDocumentPane("),
+        )
         assertTrue(
             "the fast lane must not sleep or inherit the 100ms layout debounce",
             !fastFocus.contains("DEBOUNCE_MS") && !fastFocus.contains("schedule("),

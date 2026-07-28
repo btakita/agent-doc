@@ -200,6 +200,7 @@ class CpRouteClientCommandPlaneTest {
         assertEquals("/proj/tasks/one.md", payload.get("document_path").asString)
         assertEquals(true, payload.get("no_promotion").asBoolean)
         assertEquals(true, payload.get("active_window_guard").asBoolean)
+        assertEquals("resume_latest", payload.get("missing_pane_policy").asString)
     }
 
     @Test

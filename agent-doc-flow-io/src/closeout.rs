@@ -620,6 +620,21 @@ pub fn record_terminal_closeout_proof(
         ),
         agent_doc_snapshot_io::SnapshotCommitStatus::Committed
     );
+    let response_materialized_in_head = match state.capture_id.as_deref() {
+        Some(capture_id) => {
+            agent_doc_cycle_state_io::load_projected_captured_response(&canonical, capture_id)?
+                .filter(|capture| {
+                    state.response_sha256.as_deref() == Some(capture.response_sha256.as_str())
+                })
+                .is_some_and(|capture| {
+                    agent_doc_turn::response_replay::response_materialized_in_content(
+                        &capture.response_body,
+                        &head_content,
+                    )
+                })
+        }
+        None => false,
+    };
     if !snapshot_head_raw_match && !snapshot_head_transient_match {
         anyhow::bail!(
             "terminal proof mismatch for {}: file_hash={} snapshot_hash={} head_hash={}",
@@ -630,19 +645,19 @@ pub fn record_terminal_closeout_proof(
         );
     }
     let agreement = if file_hash == snapshot_hash && snapshot_head_raw_match {
-        "file_snapshot_head"
+        agent_doc_state_backbone::TerminalCloseoutAgreement::FileSnapshotHead
     } else if file_hash == snapshot_hash {
-        "file_snapshot_transient_head"
+        agent_doc_state_backbone::TerminalCloseoutAgreement::FileSnapshotTransientHead
     } else if snapshot_head_raw_match {
-        "snapshot_head_visible_drift"
+        agent_doc_state_backbone::TerminalCloseoutAgreement::SnapshotHeadVisibleDrift
     } else {
-        "snapshot_transient_head_visible_drift"
+        agent_doc_state_backbone::TerminalCloseoutAgreement::SnapshotTransientHeadVisibleDrift
     };
     let state_file_hash_matches = state.file_hash.as_deref() == Some(file_hash.as_str());
     let state_snapshot_hash_matches =
         state.snapshot_hash.as_deref() == Some(snapshot_hash.as_str());
     let content_hash = agent_doc_hash::content_hash(&format!(
-        "cycle_id={}\nphase={}\nlast_event={}\nfile_hash={}\nsnapshot_hash={}\nhead_hash={}\ndid_commit={}\nstate_file_hash_matches={}\nstate_snapshot_hash_matches={}\nagreement={}\n",
+        "cycle_id={}\nphase={}\nlast_event={}\nfile_hash={}\nsnapshot_hash={}\nhead_hash={}\ndid_commit={}\nstate_file_hash_matches={}\nstate_snapshot_hash_matches={}\nresponse_materialized_in_head={}\nagreement={}\n",
         state.cycle_id,
         state.phase.as_str(),
         state.last_event,
@@ -652,7 +667,8 @@ pub fn record_terminal_closeout_proof(
         did_commit,
         state_file_hash_matches,
         state_snapshot_hash_matches,
-        agreement
+        response_materialized_in_head,
+        agreement.as_str()
     ));
     let recorded_at_ms = now_millis();
     let record = agent_doc_workflow_io::proof_ledger::OperationProofRecord::new(
@@ -665,7 +681,7 @@ pub fn record_terminal_closeout_proof(
             proof_kind:
                 agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::TerminalStateObserved,
             proof: format!(
-                "phase={} last_event={} did_commit={} file_hash={} snapshot_hash={} head_hash={} state_file_hash_matches={} state_snapshot_hash_matches={} capture_id={} response_sha256={} session_check=ok actor_closeout=persisted agreement={}",
+                "phase={} last_event={} did_commit={} file_hash={} snapshot_hash={} head_hash={} state_file_hash_matches={} state_snapshot_hash_matches={} response_materialized_in_head={} capture_id={} response_sha256={} session_check=ok actor_closeout=persisted agreement={}",
                 state.phase.as_str(),
                 state.last_event,
                 did_commit,
@@ -674,9 +690,10 @@ pub fn record_terminal_closeout_proof(
                 head_hash,
                 state_file_hash_matches,
                 state_snapshot_hash_matches,
+                response_materialized_in_head,
                 state.capture_id.as_deref().unwrap_or("<none>"),
                 state.response_sha256.as_deref().unwrap_or("<none>"),
-                agreement
+                agreement.as_str()
             ),
             recorded_at_ms,
         },
@@ -698,6 +715,7 @@ pub fn record_terminal_closeout_proof(
             state_file_hash_matches,
             state_snapshot_hash_matches,
             agreement,
+            response_materialized_in_head,
             capture_id: state.capture_id.as_deref(),
             response_sha256: state.response_sha256.as_deref(),
             recorded_at_ms,

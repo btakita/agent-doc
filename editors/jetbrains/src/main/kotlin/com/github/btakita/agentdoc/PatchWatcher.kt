@@ -181,11 +181,17 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (running) return
         running = true
         val basePath = project.basePath ?: return
-        registerRoot(basePath)
-        // Scan for nested .agent-doc/ dirs under basePath (submodules, nested repos).
-        // Each discovered parent (the directory CONTAINING .agent-doc/) gets its own watcher.
-        for (nested in discoverNestedRoots(basePath)) {
-            registerRoot(nested)
+        ApplicationManager.getApplication().executeOnPooledThread {
+            if (!running || project.isDisposed) return@executeOnPooledThread
+            registerRoot(basePath)
+            // Recursive workspace discovery performs filesystem I/O and may
+            // traverse a large monorepo. ProjectManager invokes `projectOpened`
+            // on the EDT, so doing this inline contributed to startup freezes
+            // and amplified IDEA's inotify-exhaustion fallback scan.
+            for (nested in discoverNestedRoots(basePath)) {
+                if (!running || project.isDisposed) break
+                registerRoot(nested)
+            }
         }
     }
 
@@ -201,7 +207,16 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (rootStates.containsKey(root)) return
         val state = RootState(root)
         if (rootStates.putIfAbsent(root, state) != null) return // race: another caller won
-        startSocketListenerViaFfi(state)
+        val startListener = Runnable {
+            if (running && rootStates[root] === state) {
+                startSocketListenerViaFfi(state)
+            }
+        }
+        if (javax.swing.SwingUtilities.isEventDispatchThread()) {
+            ApplicationManager.getApplication().executeOnPooledThread(startListener)
+        } else {
+            startListener.run()
+        }
         LOG.info("[lazily-endpoint] registered root: $root")
     }
 

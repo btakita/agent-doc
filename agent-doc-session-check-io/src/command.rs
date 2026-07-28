@@ -102,6 +102,12 @@ pub enum CapturedFinalizeResumeOutcome {
 }
 
 pub trait SessionCheckEffects {
+    /// Whether this caller owns document/lifecycle recovery. The operator-facing
+    /// `session-check` command sets this false: it is an observer, while
+    /// finalize/write/preflight own mutations.
+    fn allows_recovery(&self) -> bool {
+        true
+    }
     fn closeout_recovery_hint(&self, file: &Path) -> String;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
     fn atomic_repair_write_if_current(
@@ -420,16 +426,105 @@ pub fn run_with_options(
     out
 }
 
+struct ReadOnlySessionCheckEffects<'a, E> {
+    inner: &'a E,
+}
+
+impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects<'_, E> {
+    fn allows_recovery(&self) -> bool {
+        false
+    }
+
+    fn closeout_recovery_hint(&self, file: &Path) -> String {
+        self.inner.closeout_recovery_hint(file)
+    }
+
+    fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+        anyhow::bail!("status-only session-check refused an atomic document write")
+    }
+
+    fn atomic_repair_write_if_current(
+        &self,
+        _file: &Path,
+        _content: &str,
+        _expected_current: &str,
+        _source: &str,
+    ) -> Result<String> {
+        anyhow::bail!("status-only session-check refused an atomic repair write")
+    }
+
+    fn settle_committed_projection(
+        &self,
+        _file: &Path,
+        _committed_content: &str,
+        _expected_current: &str,
+    ) -> Result<()> {
+        anyhow::bail!("status-only session-check refused projection settlement")
+    }
+
+    fn settle_retained_committed_projection(
+        &self,
+        _file: &Path,
+        _committed_content: &str,
+        _expected_disk: &str,
+    ) -> Result<bool> {
+        Ok(false)
+    }
+
+    fn repair_committed_historical_snapshot_drift(
+        &self,
+        file: &Path,
+    ) -> Result<Option<&'static str>> {
+        // The one established status-check self-heal is metadata-only: when
+        // HEAD already proves the bytes, repair its stale snapshot baseline.
+        self.inner.repair_committed_historical_snapshot_drift(file)
+    }
+
+    fn recover_missing_commit_boundary(
+        &self,
+        _file: &Path,
+        _event: &str,
+    ) -> Result<Option<&'static str>> {
+        Ok(None)
+    }
+
+    fn resume_captured_finalize(&self, _file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
+        Ok(CapturedFinalizeResumeOutcome::NotApplicable)
+    }
+
+    fn recover_retained_document_write(&self, _file: &Path) -> Result<bool> {
+        Ok(false)
+    }
+
+    fn retained_document_write_blocks(&self, file: &Path) -> bool {
+        self.inner.retained_document_write_blocks(file)
+    }
+}
+
+/// Operator-facing, strictly status-only session check. It may read live
+/// authority and write diagnostics/metadata logs, but it cannot project,
+/// repair, replay, or commit document content.
+pub fn run_read_only_with_options(
+    file: &Path,
+    codex_final_gate: bool,
+    effects: &impl SessionCheckEffects,
+) -> Result<()> {
+    let read_only = ReadOnlySessionCheckEffects { inner: effects };
+    run_with_options(file, codex_final_gate, &read_only)
+}
+
 fn run_with_options_inner(
     file: &Path,
     codex_final_gate: bool,
     effects: &impl SessionCheckEffects,
 ) -> Result<()> {
-    if let Some(message) =
-        agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
-            file,
-            "session_check_start",
-        )
+    let allows_recovery = effects.allows_recovery();
+    if allows_recovery
+        && let Some(message) =
+            agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+                file,
+                "session_check_start",
+            )
     {
         eprintln!("[session-check] WARNING: {message}");
     }
@@ -443,9 +538,13 @@ fn run_with_options_inner(
     // cost the next reader a fresh ~491ms authority resolve to observe a
     // document that had not changed. This is `#idlerevisionreactive` at the call
     // site: "might have changed" is not "changed".
-    let replay_healed = crate::profile::timed("self_heal_response_replay_duplication", || {
-        self_heal_response_replay_duplication(file, effects)
-    })?;
+    let replay_healed = if allows_recovery {
+        crate::profile::timed("self_heal_response_replay_duplication", || {
+            self_heal_response_replay_duplication(file, effects)
+        })?
+    } else {
+        false
+    };
     // Re-read only if it actually rewrote the document.
     if replay_healed {
         crate::invalidate_current_document_pass(file);
@@ -455,9 +554,13 @@ fn run_with_options_inner(
     // evidence-backed overapplication before the generic integrity gate;
     // otherwise the duplicate boundary marker prevents the recovery routine
     // that knows how to remove it from ever running.
-    let late_ipc_healed = crate::profile::timed("self_heal_late_ipc_overapplication", || {
-        self_heal_late_ipc_overapplication(file, effects)
-    })?;
+    let late_ipc_healed = if allows_recovery {
+        crate::profile::timed("self_heal_late_ipc_overapplication", || {
+            self_heal_late_ipc_overapplication(file, effects)
+        })?
+    } else {
+        false
+    };
     if late_ipc_healed {
         crate::invalidate_current_document_pass(file);
     }
@@ -478,11 +581,12 @@ fn run_with_options_inner(
         // idempotent resume before returning the generic integrity error. This
         // breaks the former cycle: integrity blocked the only recovery capable
         // of restoring integrity.
-        let resumed = resume_captured_finalize_for_recovery(
-            file,
-            effects,
-            "session_check_integrity_recovered_from_retained_capture",
-        )?;
+        let resumed = allows_recovery
+            && resume_captured_finalize_for_recovery(
+                file,
+                effects,
+                "session_check_integrity_recovered_from_retained_capture",
+            )?;
         // A resume rewrites the document; the pass must re-read (`#sccurrentpass`).
         crate::invalidate_current_document_pass(file);
         if !resumed {
@@ -503,7 +607,7 @@ fn run_with_options_inner(
     // the generic authority/disk divergence guard block the exact captured
     // response that owns the lossless replay recipe.
     let resumed_before_convergence =
-        resume_captured_finalize_before_terminal_convergence(file, effects)?;
+        allows_recovery && resume_captured_finalize_before_terminal_convergence(file, effects)?;
     if resumed_before_convergence {
         crate::invalidate_current_document_pass(file);
     }
@@ -518,9 +622,24 @@ fn run_with_options_inner(
             "session_check_terminal_convergence_after_captured_resume",
         )?;
     }
-    ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content, effects)?;
-    let stale_projection_healed =
-        crate::profile::timed("self_heal_transiently_stale_committed_projection", || {
+    if allows_recovery {
+        ensure_terminal_authority_disk_convergence(
+            file,
+            &authority_content,
+            &disk_content,
+            effects,
+        )?;
+    } else {
+        anyhow::ensure!(
+            authority_content == disk_content,
+            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); status-only check made no projection write, repair, replay, or commit",
+            file.display(),
+            agent_doc_hash::content_hash(&authority_content),
+            agent_doc_hash::content_hash(&disk_content),
+        );
+    }
+    let stale_projection_healed = allows_recovery
+        && crate::profile::timed("self_heal_transiently_stale_committed_projection", || {
             self_heal_transiently_stale_committed_projection(file, &authority_content, effects)
         })?;
     // Re-read only if a new document image was actually projected.
@@ -531,8 +650,8 @@ fn run_with_options_inner(
     // a causally replayable `ReplayStranded` transition. Session-check owns the
     // same recovery as preflight so it cannot report "ok" while the very next
     // preflight refuses the unchanged retained effect.
-    let retained_write_recovered =
-        crate::profile::timed("recover_retained_document_write", || {
+    let retained_write_recovered = allows_recovery
+        && crate::profile::timed("recover_retained_document_write", || {
             effects.recover_retained_document_write(file)
         })?;
     if retained_write_recovered {
@@ -870,6 +989,14 @@ fn resume_captured_finalize_before_terminal_convergence(
 
 pub fn inspect(file: &Path, effects: &impl SessionCheckEffects) -> Result<SessionCheckStatus> {
     Ok(inspect_with_warnings(file, effects)?.status)
+}
+
+pub fn inspect_read_only(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<SessionCheckStatus> {
+    let read_only = ReadOnlySessionCheckEffects { inner: effects };
+    inspect(file, &read_only)
 }
 
 pub fn inspect_with_warnings(
@@ -2199,6 +2326,37 @@ mod terminal_convergence_tests {
         fn resume_captured_finalize(&self, _file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
             Ok(CapturedFinalizeResumeOutcome::NotApplicable)
         }
+    }
+
+    #[test]
+    fn operator_session_check_effects_refuse_every_document_mutation() {
+        let effects = ReadOnlySessionCheckEffects {
+            inner: &TestEffects,
+        };
+        let file = Path::new("/tmp/status-only-session-check.md");
+
+        assert!(!effects.allows_recovery());
+        assert!(effects.atomic_write(file, "replacement").is_err());
+        assert!(
+            effects
+                .atomic_repair_write_if_current(file, "replacement", "current", "test")
+                .is_err()
+        );
+        assert!(
+            effects
+                .settle_committed_projection(file, "head", "current")
+                .is_err()
+        );
+        assert!(
+            !effects
+                .settle_retained_committed_projection(file, "head", "disk")
+                .unwrap()
+        );
+        assert_eq!(
+            effects.resume_captured_finalize(file).unwrap(),
+            CapturedFinalizeResumeOutcome::NotApplicable
+        );
+        assert!(!effects.recover_retained_document_write(file).unwrap());
     }
 
     struct RepairOnlyEffects;

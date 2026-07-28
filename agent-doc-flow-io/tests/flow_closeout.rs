@@ -321,7 +321,72 @@ mod tests {
         assert!(terminal.did_commit);
         assert_eq!(terminal.file_hash, terminal.snapshot_hash);
         assert_eq!(terminal.snapshot_hash, terminal.head_hash);
-        assert_eq!(terminal.agreement, "file_snapshot_head");
+        assert_eq!(terminal.agreement.as_str(), "file_snapshot_head");
+    }
+
+    #[test]
+    fn terminal_proof_preserves_newer_queue_prompts_after_committed_response() {
+        let committed = concat!(
+            "---\nagent_doc_format: template\nsession: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: draft complete — gpt-5\n\nDrafted and autosaved.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(committed);
+        let state =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed))
+                .unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: draft complete — gpt-5\n\nDrafted and autosaved.\n",
+            "<!-- /patch:exchange -->",
+        );
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        let visible = committed.replace(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->",
+            "<!-- agent:queue -->\n- remove unnecessary hours disclosure\n<!-- /agent:queue -->",
+        );
+        std::fs::write(&doc, &visible).unwrap();
+
+        agent_doc_flow_io::closeout::record_terminal_closeout_proof(
+            &doc,
+            true,
+            &agent_doc_closeout_runtime_io::closeout_effects(),
+            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions::default(),
+        )
+        .expect("newer queue-only visible state must not invalidate committed response proof");
+
+        let terminal = agent_doc_cycle_state_io::load_latest_terminal_closeout_proof(&doc)
+            .unwrap()
+            .expect("terminal proof");
+        assert_eq!(terminal.cycle_id, state.cycle_id);
+        assert_eq!(
+            terminal.capture_id.as_deref(),
+            Some(capture.capture_id.as_str())
+        );
+        assert_eq!(
+            terminal.response_sha256.as_deref(),
+            Some(capture.response_sha256.as_str())
+        );
+        assert_eq!(
+            terminal.agreement,
+            agent_doc_state_backbone::TerminalCloseoutAgreement::SnapshotHeadVisibleDrift
+        );
+        assert!(terminal.response_materialized_in_head);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), visible);
     }
 
     #[test]
@@ -375,7 +440,7 @@ mod tests {
             .unwrap()
             .expect("terminal proof should project for the new committed cycle");
         assert_eq!(terminal.cycle_id, state.cycle_id);
-        assert_eq!(terminal.agreement, "file_snapshot_head");
+        assert_eq!(terminal.agreement.as_str(), "file_snapshot_head");
     }
 
     #[test]

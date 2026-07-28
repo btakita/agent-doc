@@ -589,6 +589,15 @@ fn forget_replica_identity(document_hash: &str, client_id: u64) -> Result<()> {
     Ok(())
 }
 
+fn replica_identity_registry_has_editor_pid(document_hash: &str, editor_pid: u32) -> bool {
+    replica_identity_registry()
+        .lock()
+        .get(document_hash)
+        .into_iter()
+        .flat_map(|members| members.values())
+        .any(|identity| editor_process_id(identity) == Some(editor_pid))
+}
+
 /// Run `f` against the per-document [`RelayHub`] for `file`, creating an empty hub
 /// on first contact. This is the single entry point for the live relay layer:
 /// register/deregister editor replicas, deliver deltas, and drive the commit
@@ -1736,19 +1745,16 @@ fn register_replica_for_file_incremental_with_liveness(
 /// Authority-gated like
 /// [`register_replica_for_file`]: `Ok(false)` (no hub touched) under Detached;
 /// `Ok(true)` when a live-attached hub dropped the mirror.
-pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> {
-    let authority = authority_for_file(&file.display().to_string());
-    if !authority.editor_attached() {
-        return Ok(false);
-    }
-    let document_hash = agent_doc_fs::document_state_hash(file)?;
-    let registration_lock = replica_registration_lock(&document_hash)?;
-    let _registration_guard = registration_lock.lock();
+fn deregister_replica_for_file_locked(
+    file: &Path,
+    identity: &str,
+    document_hash: &str,
+) -> Result<bool> {
     let client_id = mint_client_id(identity);
     // A duplicate/late deregistration after eviction must not recreate the hub.
     let removed = with_existing_hub(file, |hub| hub.deregister(client_id))?.unwrap_or(false);
-    forget_replica_identity(&document_hash, client_id)?;
-    let hub_evicted = evict_hub_if_safe(file, &document_hash, "replica_deregister");
+    forget_replica_identity(document_hash, client_id)?;
+    let hub_evicted = evict_hub_if_safe(file, document_hash, "replica_deregister");
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1762,17 +1768,45 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
     Ok(removed)
 }
 
+pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(false);
+    }
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let registration_lock = replica_registration_lock(&document_hash)?;
+    let _registration_guard = registration_lock.lock();
+    deregister_replica_for_file_locked(file, identity, &document_hash)
+}
+
 /// Deregister one editor sidecar without clearing another editor process's
-/// attachment for the same document.
+/// attachment for the same document or a newer logical generation from the
+/// same process.
 pub fn deregister_editor_replica_for_file(
     file: &Path,
     identity: &str,
     editor_pid: u32,
 ) -> Result<bool> {
-    let removed = deregister_replica_for_file(file, identity)?;
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let registration_lock = replica_registration_lock(&document_hash)?;
+    let _registration_guard = registration_lock.lock();
+    let removed = if authority_for_file(&file.display().to_string()).editor_attached() {
+        deregister_replica_for_file_locked(file, identity, &document_hash)?
+    } else {
+        false
+    };
     let doc = file.display().to_string();
     let attach = agent_doc_document_realtime::editor_attach::editor_attach();
-    attach.detach_pid(&doc, editor_pid);
+    // JetBrains refreshes a document by registering `:refresh-N`, atomically
+    // swapping the forwarder, then deregistering the retired identity. Both
+    // generations share one editor PID. Detaching that PID merely because the
+    // old identity went away clears the freshly registered Lazily Source cell
+    // and starts an endless missing-replica/re-register loop. Keep the
+    // registration lock across this decision and Source mutation so a later
+    // generation either already protects the PID or attaches after this close.
+    if !replica_identity_registry_has_editor_pid(&document_hash, editor_pid) {
+        attach.detach_pid(&doc, editor_pid);
+    }
     if !attach.is_attached(&doc) {
         agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_closed(&doc);
     }
@@ -4348,6 +4382,49 @@ mod tests {
             assert_eq!(hub.live_count(), 1);
         })
         .unwrap();
+    }
+
+    #[test]
+    fn retired_refresh_deregister_preserves_same_pid_attachment_until_last_generation_closes() {
+        #[derive(Default)]
+        struct NoopWatcher;
+        impl agent_doc_document_realtime::editor_attach::ProcessExitWatcher for NoopWatcher {
+            fn watch(&self, _pid: u32) {}
+        }
+
+        let (_dir, doc) = temp_doc("logical-refresh-pid-attachment.md");
+        let file_str = doc.display().to_string();
+        let pid = std::process::id();
+        seed_live_reliable_sync_open(&file_str);
+        let attach = agent_doc_document_realtime::editor_attach::editor_attach();
+        attach.install_watcher(std::sync::Arc::new(NoopWatcher));
+        attach.attach(&file_str, pid);
+
+        let base_identity =
+            format!("jetbrains-{pid}-pid-refresh:/tmp/logical-refresh-pid-attachment.md");
+        register_replica_for_file(&doc, &base_identity)
+            .unwrap()
+            .expect("initial logical replica should attach");
+        let refresh_identity = format!("{base_identity}:refresh-1");
+        register_replica_for_file(&doc, &refresh_identity)
+            .unwrap()
+            .expect("replacement logical replica should attach");
+
+        assert!(
+            !deregister_editor_replica_for_file(&doc, &base_identity, pid).unwrap(),
+            "registration already retired the old logical generation"
+        );
+        assert!(
+            attach.is_attached(&file_str),
+            "retiring the old forwarder must preserve the replacement PID Source"
+        );
+        assert_eq!(crdt_authority_for_file(&doc), CrdtAuthority::MultiReplica);
+
+        assert!(deregister_editor_replica_for_file(&doc, &refresh_identity, pid).unwrap());
+        assert!(
+            !attach.is_attached(&file_str),
+            "the final identity for the PID closes its attachment"
+        );
     }
 
     #[test]

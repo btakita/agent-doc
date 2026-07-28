@@ -861,7 +861,8 @@ pub struct TerminalCloseoutProofInput<'a> {
     pub head_hash: &'a str,
     pub state_file_hash_matches: bool,
     pub state_snapshot_hash_matches: bool,
-    pub agreement: &'a str,
+    pub agreement: agent_doc_state_backbone::TerminalCloseoutAgreement,
+    pub response_materialized_in_head: bool,
     pub capture_id: Option<&'a str>,
     pub response_sha256: Option<&'a str>,
     pub recorded_at_ms: u64,
@@ -891,7 +892,8 @@ pub fn append_terminal_closeout_proof(
             head_hash: proof.head_hash.to_string(),
             state_file_hash_matches: proof.state_file_hash_matches,
             state_snapshot_hash_matches: proof.state_snapshot_hash_matches,
-            agreement: proof.agreement.to_string(),
+            agreement: proof.agreement,
+            response_materialized_in_head: proof.response_materialized_in_head,
             capture_id: proof.capture_id.map(str::to_string),
             response_sha256: proof.response_sha256.map(str::to_string),
             recorded_at_ms: proof.recorded_at_ms,
@@ -3991,7 +3993,9 @@ mod tests {
                 head_hash: "head-sha",
                 state_file_hash_matches: false,
                 state_snapshot_hash_matches: true,
-                agreement: "snapshot_head_visible_drift",
+                agreement:
+                    agent_doc_state_backbone::TerminalCloseoutAgreement::SnapshotHeadVisibleDrift,
+                response_materialized_in_head: true,
                 capture_id: Some("capture-1"),
                 response_sha256: Some("response-sha"),
                 recorded_at_ms: 42,
@@ -4006,7 +4010,11 @@ mod tests {
         assert_eq!(proof.file_hash, "file-sha");
         assert_eq!(proof.snapshot_hash, "head-sha");
         assert_eq!(proof.head_hash, "head-sha");
-        assert_eq!(proof.agreement, "snapshot_head_visible_drift");
+        assert_eq!(
+            proof.agreement,
+            agent_doc_state_backbone::TerminalCloseoutAgreement::SnapshotHeadVisibleDrift
+        );
+        assert!(proof.response_materialized_in_head);
         assert_eq!(proof.capture_id.as_deref(), Some("capture-1"));
         assert_eq!(proof.response_sha256.as_deref(), Some("response-sha"));
         assert_eq!(proof.recorded_at_ms, 42);

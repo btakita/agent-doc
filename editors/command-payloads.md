@@ -103,6 +103,7 @@ Idempotency key: `"<project-root>:<document-path>:focus"`.
 | `project_root` | string | Project root |
 | `no_promotion` | boolean | Do not promote the pane to controller |
 | `active_window_guard` | boolean | Only focus if the target window is active |
+| `missing_pane_policy` | enum string | `observe_only` (legacy/default) or `resume_latest`; first-party editor focus uses `resume_latest` so selecting a document whose actor pane died resumes that document before focusing it |
 
 ### `agent-doc.save_document.v1`
 

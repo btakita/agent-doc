@@ -1262,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn session_check_replays_captured_mutation_plan_without_route_supervisor() {
+    fn session_check_reports_captured_mutation_plan_without_replaying_it() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
         let content = concat!(
@@ -1301,24 +1301,30 @@ mod tests {
         )
         .unwrap();
 
-        agent_doc_repair_command_io::run_session_check(&doc, false)
-            .expect("session-check should synchronously replay and commit the durable capture");
+        let status = agent_doc_session_check_io::inspect_read_only(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .expect("status-only inspection");
+        let agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) = status else {
+            panic!("captured write must remain interrupted, got {status:?}");
+        };
+        assert!(
+            message.contains("response was captured but no write/commit followed"),
+            "unexpected status-only diagnostic: {message}"
+        );
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert_eq!(
-            result
-                .matches("Recovered response with mutation intent.")
-                .count(),
-            1
-        );
-        assert!(result.contains("[#fix1] narrowed recovery action"));
-        assert!(!result.contains("[#fix1] original next action"));
+        assert_eq!(result, content);
+        assert!(!result.contains("Recovered response with mutation intent."));
+        assert!(!result.contains("[#fix1] narrowed recovery action"));
+        assert!(result.contains("[#fix1] original next action"));
         assert!(matches!(
             agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
                 .unwrap()
                 .expect("cycle state")
                 .phase,
-            agent_doc_turn::CyclePhase::Committed
+            agent_doc_turn::CyclePhase::ResponseCaptured
         ));
     }
 

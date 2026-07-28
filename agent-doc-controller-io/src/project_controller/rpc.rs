@@ -1262,6 +1262,7 @@ pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<Controlle
                 document_path: file.display().to_string(),
                 no_promotion: true,
                 active_window_guard: true,
+                missing_pane_policy: MissingFocusPanePolicy::ResumeLatest,
             };
             return request_command_submit_payload(
                 project_root,
@@ -6851,6 +6852,14 @@ impl CommandSubmitDispatchResult {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MissingFocusPanePolicy {
+    #[default]
+    ObserveOnly,
+    ResumeLatest,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct FocusDocumentPaneCommandPayload {
     document_path: String,
@@ -6860,6 +6869,8 @@ struct FocusDocumentPaneCommandPayload {
     no_promotion: bool,
     #[serde(default)]
     active_window_guard: bool,
+    #[serde(default)]
+    missing_pane_policy: MissingFocusPanePolicy,
 }
 
 fn empty_controller_request(command: &str) -> ControllerRequest {
@@ -6965,7 +6976,11 @@ fn dispatch_command_submit_payload(
             );
             let mut focus_request = empty_controller_request("focus_document_pane");
             focus_request.file = Some(PathBuf::from(payload.document_path));
-            match handle_focus_document_pane(bootstrap, focus_request) {
+            match handle_focus_document_pane_with_policy(
+                bootstrap,
+                focus_request,
+                payload.missing_pane_policy,
+            ) {
                 Ok(receipt) => {
                     let output =
                         serde_json::to_string(&receipt).unwrap_or_else(|_| receipt.reason.clone());
@@ -14884,6 +14899,14 @@ pub(crate) fn handle_focus_document_pane(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
 ) -> Result<ControllerTmuxFocusReceipt> {
+    handle_focus_document_pane_with_policy(bootstrap, request, MissingFocusPanePolicy::ResumeLatest)
+}
+
+fn handle_focus_document_pane_with_policy(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+    missing_pane_policy: MissingFocusPanePolicy,
+) -> Result<ControllerTmuxFocusReceipt> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(
@@ -14913,7 +14936,7 @@ pub(crate) fn handle_focus_document_pane(
         registry_entry.as_ref().map(|entry| entry.pane.as_str()),
         proven_live_owner.as_deref(),
     );
-    let (pane_id, focused_reason, not_alive_reason) = match decision {
+    let (mut pane_id, mut focused_reason, not_alive_reason) = match decision {
         FocusPaneCandidateDecision::Candidate {
             pane_id,
             focused_reason,
@@ -14948,9 +14971,50 @@ pub(crate) fn handle_focus_document_pane(
         }
     };
     if pane_id.is_empty() || !tmux.pane_alive(&pane_id) {
+        if missing_pane_policy == MissingFocusPanePolicy::ResumeLatest
+            && let Some(session_id) = session_id.as_deref()
+        {
+            let file_arg = canonical.to_string_lossy().to_string();
+            let stale_pane = pane_id.clone();
+            pane_id = runtime_effects()?
+                .route_auto_start(
+                    &tmux,
+                    &canonical,
+                    session_id,
+                    &file_arg,
+                    None,
+                    Some(agent_doc_harness::ResumeRequest::Latest),
+                )
+                .with_context(|| {
+                    format!(
+                        "failed to resume killed selected-document session for {}",
+                        canonical.display()
+                    )
+                })?;
+            focused_reason = "resumed_missing_actor_pane";
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_focus_resumed_missing_actor document={} session={} stale_pane={} replacement_pane={}",
+                    document_id, session_id, stale_pane, pane_id,
+                ),
+            );
+        } else {
+            return Ok(tmux_focus_receipt(
+                false,
+                not_alive_reason,
+                Some(document_id),
+                Some(pane_id),
+                None,
+                None,
+                None,
+            ));
+        }
+    }
+    if pane_id.is_empty() || !tmux.pane_alive(&pane_id) {
         return Ok(tmux_focus_receipt(
             false,
-            not_alive_reason,
+            "resumed_pane_not_alive",
             Some(document_id),
             Some(pane_id),
             None,
@@ -16976,6 +17040,34 @@ mod tests {
         };
         let err = handle_editor_command_status_rpc(request).unwrap_err();
         assert!(format!("{err:#}").contains("unknown or expired async editor command"));
+    }
+
+    #[test]
+    fn focus_document_pane_missing_policy_is_a_closed_wire_enum() {
+        let legacy: FocusDocumentPaneCommandPayload =
+            serde_json::from_value(serde_json::json!({ "document_path": "/tmp/legacy.md" }))
+                .unwrap();
+        assert_eq!(
+            legacy.missing_pane_policy,
+            MissingFocusPanePolicy::ObserveOnly
+        );
+
+        let resume: FocusDocumentPaneCommandPayload = serde_json::from_value(serde_json::json!({
+            "document_path": "/tmp/resume.md",
+            "missing_pane_policy": "resume_latest"
+        }))
+        .unwrap();
+        assert_eq!(
+            resume.missing_pane_policy,
+            MissingFocusPanePolicy::ResumeLatest
+        );
+        assert!(
+            serde_json::from_value::<FocusDocumentPaneCommandPayload>(serde_json::json!({
+                "document_path": "/tmp/invalid.md",
+                "missing_pane_policy": "resume_if_missing"
+            }))
+            .is_err()
+        );
     }
 
     #[test]

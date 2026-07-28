@@ -119,9 +119,10 @@ class TmuxPaneFocusSync private constructor(
         // steal their selection. Record the tmux focus so a later same-root change
         // still mirrors, but do not move the editor now.
         if (!shouldMirrorTmuxFocusToEditor(
-                tmuxFocusedDocRoot = NativePatching.resolveProjectPath(documentPath)?.first,
+                tmuxFocusedDocRoot =
+                    TerminalUtil.resolveProjectPath(project.basePath, documentPath).first,
                 editorFocusedDocRoot = editorFocusedMdPath
-                    ?.let { NativePatching.resolveProjectPath(it)?.first },
+                    ?.let { TerminalUtil.resolveProjectPath(project.basePath, it).first },
             )
         ) {
             lastDocumentPath = documentPath
@@ -341,7 +342,7 @@ class TmuxPaneFocusSync private constructor(
                 )
             }
             visibleMdFiles
-                .mapNotNull { NativePatching.resolveProjectPath(it)?.first }
+                .map { TerminalUtil.resolveProjectPath(project.basePath, it).first }
                 .forEach { roots.add(it) }
             project.basePath?.let { roots.add(it) }
             return roots.toList()

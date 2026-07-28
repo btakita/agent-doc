@@ -743,7 +743,9 @@ pub enum StateFact {
         head_hash: String,
         state_file_hash_matches: bool,
         state_snapshot_hash_matches: bool,
-        agreement: String,
+        agreement: TerminalCloseoutAgreement,
+        #[serde(default)]
+        response_materialized_in_head: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capture_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1309,10 +1311,11 @@ impl DocumentStateProjection {
             .is_some_and(|proof| {
                 proof.capture_id.as_deref() == Some(capture.capture_id.as_str())
                     && proof.response_sha256.as_deref() == Some(capture.response_sha256.as_str())
-                    && proof.state_file_hash_matches
+                    && proof.did_commit
                     && proof.state_snapshot_hash_matches
-                    && proof.file_hash == proof.snapshot_hash
                     && proof.snapshot_hash == proof.head_hash
+                    && (proof.file_hash == proof.snapshot_hash
+                        || proof.response_materialized_in_head)
             })
     }
 
@@ -2614,6 +2617,7 @@ impl DocumentStateProjection {
                 state_file_hash_matches,
                 state_snapshot_hash_matches,
                 agreement,
+                response_materialized_in_head,
                 capture_id,
                 response_sha256,
                 recorded_at_ms,
@@ -2629,7 +2633,8 @@ impl DocumentStateProjection {
                         head_hash: head_hash.clone(),
                         state_file_hash_matches: *state_file_hash_matches,
                         state_snapshot_hash_matches: *state_snapshot_hash_matches,
-                        agreement: agreement.clone(),
+                        agreement: *agreement,
+                        response_materialized_in_head: *response_materialized_in_head,
                         capture_id: capture_id.clone(),
                         response_sha256: response_sha256.clone(),
                         recorded_at_ms: *recorded_at_ms,
@@ -4819,6 +4824,26 @@ pub struct ProofMarkerProjection {
     pub sources: BTreeSet<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalCloseoutAgreement {
+    FileSnapshotHead,
+    FileSnapshotTransientHead,
+    SnapshotHeadVisibleDrift,
+    SnapshotTransientHeadVisibleDrift,
+}
+
+impl TerminalCloseoutAgreement {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FileSnapshotHead => "file_snapshot_head",
+            Self::FileSnapshotTransientHead => "file_snapshot_transient_head",
+            Self::SnapshotHeadVisibleDrift => "snapshot_head_visible_drift",
+            Self::SnapshotTransientHeadVisibleDrift => "snapshot_transient_head_visible_drift",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalCloseoutProofProjection {
     pub cycle_id: String,
@@ -4829,7 +4854,9 @@ pub struct TerminalCloseoutProofProjection {
     pub head_hash: String,
     pub state_file_hash_matches: bool,
     pub state_snapshot_hash_matches: bool,
-    pub agreement: String,
+    pub agreement: TerminalCloseoutAgreement,
+    #[serde(default)]
+    pub response_materialized_in_head: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6516,7 +6543,8 @@ mod tests {
                 head_hash: "head-sha".into(),
                 state_file_hash_matches: false,
                 state_snapshot_hash_matches: true,
-                agreement: "snapshot_head_visible_drift".into(),
+                agreement: TerminalCloseoutAgreement::SnapshotHeadVisibleDrift,
+                response_materialized_in_head: true,
                 capture_id: Some("capture-1".into()),
                 response_sha256: Some("response-sha".into()),
                 recorded_at_ms: 42,
@@ -6539,7 +6567,11 @@ mod tests {
         assert_eq!(proof.file_hash, "file-sha");
         assert!(!proof.state_file_hash_matches);
         assert!(proof.state_snapshot_hash_matches);
-        assert_eq!(proof.agreement, "snapshot_head_visible_drift");
+        assert_eq!(
+            proof.agreement,
+            TerminalCloseoutAgreement::SnapshotHeadVisibleDrift
+        );
+        assert!(proof.response_materialized_in_head);
         assert_eq!(proof.capture_id.as_deref(), Some("capture-1"));
         assert_eq!(proof.response_sha256.as_deref(), Some("response-sha"));
         assert_eq!(proof.recorded_at_ms, 42);
@@ -7866,7 +7898,8 @@ mod tests {
                 head_hash: committed_hash.into(),
                 state_file_hash_matches: true,
                 state_snapshot_hash_matches: true,
-                agreement: "file_snapshot_head".into(),
+                agreement: TerminalCloseoutAgreement::FileSnapshotHead,
+                response_materialized_in_head: true,
                 capture_id: Some(capture_id.into()),
                 response_sha256: Some("different-response-sha".into()),
                 recorded_at_ms: 1,
@@ -7885,12 +7918,13 @@ mod tests {
                 cycle_id: cycle_1.into(),
                 last_event: "commit_success".into(),
                 did_commit: true,
-                file_hash: committed_hash.into(),
+                file_hash: "newer-queue-only-visible-hash".into(),
                 snapshot_hash: committed_hash.into(),
                 head_hash: committed_hash.into(),
-                state_file_hash_matches: true,
+                state_file_hash_matches: false,
                 state_snapshot_hash_matches: true,
-                agreement: "file_snapshot_head".into(),
+                agreement: TerminalCloseoutAgreement::SnapshotHeadVisibleDrift,
+                response_materialized_in_head: true,
                 capture_id: Some(capture_id.into()),
                 response_sha256: Some(response_sha256.into()),
                 recorded_at_ms: 2,

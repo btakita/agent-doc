@@ -224,6 +224,17 @@ class RefreshBeforeApplyConflictTest {
         assertFalse("PatchWatcher must block on WatchService events", patchWatcher.contains("watchService.poll("))
         assertFalse("reload broadcast must not use a polling interval", patchWatcher.contains("LIB_RELOAD_BROADCAST_POLL_MS"))
         assertFalse("PatchWatcher must not use CRDT event sidecars", patchWatcher.contains(".agent-doc/crdt-replica-events"))
+        val patchWatcherStart = patchWatcher.substringAfter("fun start()")
+            .substringBefore("/**\n     * Register a root directory")
+        assertTrue(
+            "nested project-root discovery must leave the projectOpened EDT",
+            patchWatcherStart.indexOf("executeOnPooledThread") <
+                patchWatcherStart.indexOf("discoverNestedRoots(basePath)"),
+        )
+        val registerRoot = patchWatcher.substringAfter("fun registerRoot(root: String)")
+            .substringBefore("internal fun quiesceNativeEndpointsForReload")
+        assertTrue(registerRoot.contains("SwingUtilities.isEventDispatchThread()"))
+        assertTrue(registerRoot.contains("executeOnPooledThread(startListener)"))
         assertTrue(
             "PatchWatcher must wake CRDT drains from the shared typed editor intent",
             patchWatcher.contains("EditorIntent.DeliverCrdtRemote.token"),
@@ -236,6 +247,16 @@ class RefreshBeforeApplyConflictTest {
         )
         assertFalse("layout detector must not run a fallback polling thread", layoutDetector.contains("startFallbackPoll"))
         assertFalse("layout detector must not define a polling interval", layoutDetector.contains("POLL_INTERVAL_MS"))
+        assertTrue(
+            "structural layout changes must use the same surface graph as focus changes",
+            layoutDetector.contains("EditorTabSyncListener.install(project).onEditorLayoutChanged(project)"),
+        )
+        assertFalse(
+            "layout detector must not run a second tmux sync planner",
+            layoutDetector.contains("runCommandWithTimeout") ||
+                layoutDetector.contains("agent_doc_sync_try_lock") ||
+                layoutDetector.contains("buildSyncCommand"),
+        )
         assertFalse("visual highlighter must not use a Swing timer", visualHighlighter.contains("Alarm("))
         assertFalse("visual highlighter must not tokenize the editor text on the UI apply path", visualHighlighter.contains("NativePatching.visualTokens(editor.document.text)"))
         assertTrue("visual highlighter tokenization must run on its event worker", visualHighlighter.contains("agent-doc-visual-highlighter-events"))

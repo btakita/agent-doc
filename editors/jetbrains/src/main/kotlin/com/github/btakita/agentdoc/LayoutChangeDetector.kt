@@ -7,7 +7,6 @@ import com.intellij.openapi.project.Project
 import java.awt.Container
 import java.awt.event.ContainerEvent
 import java.awt.event.ContainerListener
-import java.io.File
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
@@ -27,7 +26,6 @@ class LayoutChangeDetector(private val project: Project) {
 
     private val lastLayoutHash = AtomicReference<String?>(null)
     private val disposed = AtomicBoolean(false)
-    private val fallbackSyncing = AtomicBoolean(false)
     private val fallbackGeneration = AtomicLong(0)
     private val listenerCount = java.util.concurrent.atomic.AtomicInteger(0)
     private val containerEventCount = java.util.concurrent.atomic.AtomicLong(0)
@@ -113,7 +111,11 @@ class LayoutChangeDetector(private val project: Project) {
         if (disposed.get()) return
         // Read Swing component tree on EDT (thread-safe), then sync on background thread
         ApplicationManager.getApplication().invokeLater {
-            if (disposed.get() || project.isDisposed) return@invokeLater
+            if (
+                disposed.get() ||
+                project.isDisposed ||
+                !isCurrentGeneration(requestedGeneration)
+            ) return@invokeLater
             try {
                 val layout = LayoutDetector.detectEditorLayout(project)
                 // Hash on structural shape only (column count + window count), NOT file contents.
@@ -134,111 +136,18 @@ class LayoutChangeDetector(private val project: Project) {
                 if (hash == prev) return@invokeLater // No change
 
                 LOG.info("[layout] change detected via $source: $prev → $hash")
-
-                val selectedFiles = manager.selectedFiles
-                val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(selectedFiles)
-                val focusedVFile = manager.selectedTextEditor?.virtualFile
-                    ?.takeIf { it.name.endsWith(".md") }
-                    ?: selectedFiles.firstOrNull { it.name.endsWith(".md") }
-                if (visibleMdFiles.isEmpty() || focusedVFile == null) {
-                    return@invokeLater
-                }
-                val focusedFile = focusedVFile.path
-                val basePath = project.basePath
-                val layoutSnapshot = layout
-                executor.execute {
-                    syncDetectedLayout(
-                        source = source,
-                        requestedGeneration = requestedGeneration,
-                        basePath = basePath,
-                        visibleMdFiles = visibleMdFiles,
-                        focusedFile = focusedFile,
-                        layout = layoutSnapshot,
-                    )
-                }
+                // Structural changes and tab/focus changes are observations of
+                // one editor surface. Sending them through one graph prevents
+                // the legacy detector and the surface listener from racing two
+                // independent full tmux reconciliations.
+                EditorTabSyncListener.install(project).onEditorLayoutChanged(project)
             } catch (e: Exception) {
                 LOG.debug("[layout] check failed: ${e.message}")
             }
         }
     }
 
-    private fun syncDetectedLayout(
-        source: String,
-        requestedGeneration: Long,
-        basePath: String?,
-        visibleMdFiles: List<String>,
-        focusedFile: String,
-        layout: EditorLayout?,
-    ) {
-        if (disposed.get() || project.isDisposed || !isCurrentGeneration(requestedGeneration)) return
-
-        val focusedProjectRoot = resolveProjectRoot(basePath, focusedFile)
-        val projectRoot = SyncLayoutAction.chooseSyncProjectRoot(
-            basePath,
-            focusedProjectRoot,
-            visibleMdFiles,
-        )
-        val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
-        val syncLayout = SyncLayoutAction.absolutizeEditorLayout(
-            projectRoot,
-            SyncLayoutAction.normalizeEditorLayout(
-                basePath,
-                projectRoot,
-                layout,
-            ),
-        )
-        val cmd = SyncLayoutAction.buildSyncCommand(
-            agentDoc = agentDoc,
-            visibleMdFiles = visibleMdFiles,
-            editorLayout = syncLayout,
-            focusedFile = focusedFile,
-            noAutostart = true,
-            exactVisible = true,
-        )
-
-        val lib = AgentDocLib.get()
-        val locked = lib?.agent_doc_sync_try_lock()
-            ?: fallbackSyncing.compareAndSet(false, true)
-        if (!locked) return
-
-        var timedOut = false
-        try {
-            val result = SyncLayoutAction.runCommandWithTimeout(
-                cmd,
-                projectRoot,
-            )
-            timedOut = result.timedOut
-            LOG.info(
-                "[layout] sync exit=${result.exitCode} timedOut=${result.timedOut} cmd=${cmd.joinToString(" ")} output=${result.output.take(500)}"
-            )
-        } finally {
-            lib?.agent_doc_sync_unlock() ?: fallbackSyncing.set(false)
-            if (!isCurrentGeneration(requestedGeneration)) {
-                val delayMs = if (timedOut) SYNC_TIMEOUT_REPLAY_DELAY_MS else 0L
-                LOG.info("[layout] replaying latest structural sync request delayMs=$delayMs")
-                scheduleSync("replay-$source", delayMs)
-            }
-        }
-    }
-
-    private fun resolveProjectRoot(basePath: String?, focusedFile: String): String {
-        val ffi = NativePatching.resolveProjectPath(focusedFile)
-        if (ffi != null) {
-            if (basePath != null && ffi.first != basePath) {
-                try {
-                    PatchWatcher.getInstance(project).registerRoot(ffi.first)
-                } catch (_: Exception) {
-                    // Best-effort parity with TerminalUtil.resolveProject.
-                }
-            }
-            return ffi.first
-        }
-        if (basePath != null) return basePath
-        return File(focusedFile).parent ?: "/"
-    }
-
     companion object {
-        private const val SYNC_TIMEOUT_REPLAY_DELAY_MS = 5_000L
         private val LOG = Logger.getInstance(LayoutChangeDetector::class.java)
         private val instances = ConcurrentHashMap<Project, LayoutChangeDetector>()
 

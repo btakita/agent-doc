@@ -36,6 +36,11 @@ internal data class ProjectControllerStateSubscribeResult(
     val peerAckRecorded: Boolean,
 )
 
+internal enum class MissingFocusPanePolicy(val token: String) {
+    ObserveOnly("observe_only"),
+    ResumeLatest("resume_latest"),
+}
+
 /**
  * High-level editor route RPC over the Project Controller socket.
  */
@@ -419,6 +424,7 @@ internal fun editorCommandStatusRequest(filePath: String, commandId: String): Js
         payload.addProperty("document_path", documentPath)
         payload.addProperty("no_promotion", true)
         payload.addProperty("active_window_guard", true)
+        payload.addProperty("missing_pane_policy", MissingFocusPanePolicy.ResumeLatest.token)
         return commandSubmitRequest(
             filePath = documentPath,
             name = "focus_document_pane",

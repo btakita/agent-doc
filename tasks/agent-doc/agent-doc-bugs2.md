@@ -565,12 +565,32 @@ Completed and released in agent-doc v0.35.46. The extension registers a suppleme
 - **Verification:** 8,258 tests passed and 241 skipped; Zed extension host compilation passed; installed `agent-doc 0.35.46` exposes `zed-lsp`; commit `0e994624a` and tag `v0.35.46` are published.
 - **Confidence:** high.
 - **Escalation:** none. Install the development extension from `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed` using Zed's **Extensions → Install Dev Extension** action.
-<!-- agent:boundary:c8df656b -->
+
+### Re: CRDT authority live proof — gpt-5
+
+Completed `#crdtauth6` with live-editor proof and repaired the two defects that the proof exposed.
+
+- IntelliJ IDEA's live log showed the complete real path on this document: `DocumentListener -> native.applyLocal -> transport.broadcastUpdate -> forwardLocalDelta -> transport.pullDelivery -> native.applyUpdate -> applyRemoteUpdate -> remote-drain-file -> transport.ackUpdate`. The acknowledgment's expected and applied hashes matched.
+- The packaged VS Code ESM extension could not load `koffi` because `native.ts` used the unavailable CommonJS `require` global. It now uses Node's `createRequire(import.meta.url)` and has a regression test for packaged-module availability.
+- The VS Code FFI bindings declared Rust-owned C strings as `char*`; Koffi eagerly converted those pointers into JavaScript strings before the extension tried to decode and free them, which caused a live smoke-test crash. Owned returns and the free function now use an opaque `void*` ABI contract, with regression coverage.
+- A live installed-path VS Code seam smoke test loaded `libagent_doc.so` v0.35.47, registered `NativeReplicaNode`, `ControllerSocketReplicaTransport`, and `CrdtReplicaForwarder` against the running controller, bootstrapped this document, and produced an exact canonical/disk SHA-256 match. It deregistered without publishing a synthetic edit.
+- `npm test`, the production VS Code prepublish build, `git diff --check`, and the full `make check` passed. The full suite reported 8,258 passing tests across 166 binaries with all formal and build gates green.
+- Released and installed agent-doc v0.35.47. Commit `3c59da92a` and tag `v0.35.47` are pushed to `origin/main`.
+
+Confidence: high. No escalation remains. Operator-visible editor text remains authoritative throughout; CRDT transport proof never gates it. The running IntelliJ IDEA instance should be restarted once to load the newly installed native library generation.
+
+### Re: Installing the agent-doc Zed extension — gpt-5
+
+In Zed, open the command palette and choose **Extensions: Install Dev Extension**, then select:
+
+`/home/brian/work/btakita/agent-loop/src/agent-doc/editors/zed`
+
+The extension launches `agent-doc zed-lsp`; `/home/brian/.cargo/bin/agent-doc` is already installed at v0.35.47. If Zed was launched without that directory in `PATH`, configure the extension to use the absolute binary path or launch Zed from a shell that includes `/home/brian/.cargo/bin`.
+<!-- agent:boundary:77d9299b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~Please create a Zed editor plugin/language extension for agent-doc.~~
 - 📌 do [#crdtauth6]
 - 📌 do [#nsfz]
 - 📌 do [#suprestassoc-live]

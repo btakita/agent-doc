@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-supervisor"
-version = "0.35.59"
+version = "0.35.60"
 edition = "2024"
 description = "Pure supervisor realtime state model for agent-doc"
 license = "MIT"
@@ -11,17 +11,17 @@ publish = false
 name = "agent_doc_supervisor"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.59" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.59" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.59" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.59" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.59" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.59" }
-agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.59" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.59" }
-agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.59" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.59" }
-agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.59" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.60" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.60" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.60" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.60" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.60" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.60" }
+agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.60" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.60" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.60" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.60" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.60" }
 lazily = { version = "0.53.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

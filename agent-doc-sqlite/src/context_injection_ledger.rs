@@ -935,6 +935,69 @@ mod tests {
     }
 
     #[test]
+    fn legacy_context_manifest_without_harness_converges_for_compaction_lookup() -> Result<()> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch(
+            r#"
+            CREATE TABLE context_manifest (
+                document_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                cycle_id TEXT NOT NULL,
+                prompt_fingerprint TEXT NOT NULL,
+                pack_ids_json TEXT NOT NULL,
+                chunk_ids_json TEXT NOT NULL,
+                token_count INTEGER NOT NULL CHECK(token_count >= 0),
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (document_id, cycle_id)
+            );
+
+            INSERT INTO context_manifest (
+                document_id,
+                session_id,
+                cycle_id,
+                prompt_fingerprint,
+                pack_ids_json,
+                chunk_ids_json,
+                token_count,
+                created_at
+            )
+            VALUES (
+                'doc-a',
+                'session-a',
+                'cycle-legacy',
+                'prompt-legacy',
+                '[]',
+                '[]',
+                0,
+                1
+            );
+            "#,
+        )?;
+
+        initialize_state_db(&connection)?;
+
+        let legacy = latest_context_manifest_for_session(&connection, "doc-a", "session-a")?
+            .context("legacy manifest should remain readable after convergence")?;
+        assert_eq!(legacy.cycle_id, "cycle-legacy");
+        assert_eq!(legacy.harness, "unknown");
+
+        record_context_manifest(
+            &mut connection,
+            &manifest(
+                "session-a",
+                "cycle-current",
+                "prompt-current",
+                vec![injection("pack-a", "chunk-a", "hash-a")],
+            ),
+        )?;
+        let current = latest_context_manifest_for_session(&connection, "doc-a", "session-a")?
+            .context("current manifest should be readable after convergence")?;
+        assert_eq!(current.cycle_id, "cycle-current");
+        assert_eq!(current.harness, "codex");
+        Ok(())
+    }
+
+    #[test]
     fn manifest_cycle_and_injections_roll_back_together() -> Result<()> {
         let mut connection = connection()?;
         connection.execute_batch(

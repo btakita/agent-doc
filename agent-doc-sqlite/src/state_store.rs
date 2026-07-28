@@ -840,7 +840,7 @@ ON queue_document_state(state_kind);
             document_id TEXT NOT NULL,
             session_id TEXT NOT NULL,
             cycle_id TEXT NOT NULL,
-            harness TEXT NOT NULL,
+            harness TEXT NOT NULL DEFAULT 'unknown',
             prompt_fingerprint TEXT NOT NULL,
             pack_ids_json TEXT NOT NULL,
             chunk_ids_json TEXT NOT NULL,
@@ -2210,6 +2210,11 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
 /// scope: `state.db` is the authoritative ledger and must never be rewritten on
 /// the normal open path.
 const CANONICAL_ADDED_COLUMNS: &[(&str, &str, &str)] = &[
+    (
+        "context_manifest",
+        "harness",
+        "harness TEXT NOT NULL DEFAULT 'unknown'",
+    ),
     ("dispatch_attempts", "result_status", "result_status TEXT"),
     ("dispatch_attempts", "proof_scope", "proof_scope TEXT"),
     (

@@ -498,6 +498,22 @@ fn is_ipc_handshake_error(error: &anyhow::Error) -> bool {
         || error.to_string().starts_with("IPC handshake")
 }
 
+/// Whether an IPC failure proves that the sender and editor listener are
+/// running different builds.
+///
+/// Recovery policy lives above this transport crate: a stale editor can use
+/// the reload-only compatibility path, while a stale project controller must
+/// recycle itself. Exposing the typed distinction prevents callers from
+/// blindly reloading the wrong side of the connection.
+pub fn is_ipc_build_mismatch_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<IpcHandshakeError>(),
+            Some(IpcHandshakeError::BuildMismatch { .. })
+        )
+    })
+}
+
 fn send_legacy_reload_to_pid(
     project_root: &Path,
     pid: u64,

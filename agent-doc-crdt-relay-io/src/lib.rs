@@ -461,6 +461,33 @@ fn editor_process_id(identity: &str) -> Option<u32> {
     pid.parse().ok()
 }
 
+fn editor_route_from_replica_identity(identity: &str) -> Option<ReplicaSignalRoute> {
+    let pid = u64::from(editor_process_id(identity)?);
+    let editor_id = identity.split_once(':')?.0.trim();
+    if editor_id.is_empty() {
+        return None;
+    }
+    Some(ReplicaSignalRoute {
+        editor_id: editor_id.to_string(),
+        editor_pid: pid,
+    })
+}
+
+fn live_replica_signal_routes(document_hash: &str) -> Vec<ReplicaSignalRoute> {
+    let registry = replica_identity_registry().lock();
+    registry
+        .get(document_hash)
+        .into_iter()
+        .flat_map(|members| members.values())
+        .filter_map(|identity| editor_route_from_replica_identity(identity))
+        .filter(|route| {
+            u32::try_from(route.editor_pid)
+                .ok()
+                .is_some_and(agent_doc_reliable_sync_io::process_pid_is_live)
+        })
+        .collect()
+}
+
 /// Stable logical identity shared by successive native-replica incarnations of
 /// one editor document. JetBrains appends `:refresh-N` while swapping a fresh
 /// native replica into the same visible editor; that suffix is a generation,
@@ -3407,12 +3434,23 @@ pub fn signal_crdt_replica_event(
 /// are `0`. Those demand opposite responses, and conflating them sent this
 /// investigation after payload size and generation fencing when the plane
 /// already reported `live_editors=1`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ReplicaSignalRoute {
+    pub editor_id: String,
+    pub editor_pid: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicaSignalOutcome {
-    /// Live registrations the reliable-sync plane holds for the document.
+    /// Distinct live editor routes discovered from reliable-sync liveness and
+    /// the CRDT replica registry.
     pub found: usize,
     /// Registrations an IPC message was successfully delivered to.
     pub notified: usize,
+    /// Routes rejected specifically because sender and listener builds differ.
+    /// The controller uses these to choose the correct side of the rolling
+    /// upgrade boundary: recycle itself when stale, reload the editor when not.
+    pub build_mismatches: Vec<ReplicaSignalRoute>,
 }
 
 impl ReplicaSignalOutcome {
@@ -3462,35 +3500,56 @@ fn signal_crdt_replica_event_counting_inner(
         .projection()
         .live_registrations(&document_hash);
 
-    let found = registrations.len();
-    let mut notified = 0usize;
+    // The CRDT member itself owns the ACK frontier. Its recorded editor
+    // identity therefore remains a valid notification route even if the
+    // separately-journaled reliable-sync registration was missed or pruned.
+    // Union both planes and deduplicate by the process-scoped editor endpoint.
+    let mut routes = HashSet::new();
     for registration in registrations {
+        routes.insert(ReplicaSignalRoute {
+            editor_id: registration.editor_id,
+            editor_pid: registration.pid,
+        });
+    }
+    routes.extend(live_replica_signal_routes(&document_hash));
+
+    let found = routes.len();
+    let mut notified = 0usize;
+    let mut build_mismatches = Vec::new();
+    for route in routes {
         let payload = serde_json::json!({
             "type": agent_doc_ipc_protocol::EditorIntent::DeliverCrdtRemote.as_str(),
             "file": canonical.to_string_lossy(),
             "reason": reason.token(),
             "targets": targets,
-            "editor_id": registration.editor_id,
-            "editor_pid": registration.pid,
+            "editor_id": route.editor_id.clone(),
+            "editor_pid": route.editor_pid,
         });
         if let Err(error) = agent_doc_ipc_io::send_message_to_pid(
             &agent_doc_project_root_io::resolve_ipc_project_root(&canonical),
-            registration.pid,
+            route.editor_pid,
             &payload,
         ) {
+            if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) {
+                build_mismatches.push(route.clone());
+            }
             agent_doc_ops_log_io::log_op(
                 &canonical,
                 &format!(
                     "crdt_replica_notify_deferred reason={} editor_pid={} error={error:#}",
                     reason.token(),
-                    registration.pid,
+                    route.editor_pid,
                 ),
             );
         } else {
             notified += 1;
         }
     }
-    Ok(ReplicaSignalOutcome { found, notified })
+    Ok(ReplicaSignalOutcome {
+        found,
+        notified,
+        build_mismatches,
+    })
 }
 
 /// Controller-owned disk-change transition. The watcher already routes through
@@ -3609,7 +3668,8 @@ mod tests {
         assert_eq!(
             ReplicaSignalOutcome {
                 found: 0,
-                notified: 0
+                notified: 0,
+                build_mismatches: Vec::new(),
             }
             .diagnosis(),
             "no_live_registration",
@@ -3618,7 +3678,8 @@ mod tests {
         assert_eq!(
             ReplicaSignalOutcome {
                 found: 1,
-                notified: 0
+                notified: 0,
+                build_mismatches: Vec::new(),
             }
             .diagnosis(),
             "delivery_failed_to_all:1",
@@ -3627,7 +3688,8 @@ mod tests {
         assert_eq!(
             ReplicaSignalOutcome {
                 found: 3,
-                notified: 1
+                notified: 1,
+                build_mismatches: Vec::new(),
             }
             .diagnosis(),
             "requested:1/3",
@@ -3636,10 +3698,26 @@ mod tests {
         assert_eq!(
             ReplicaSignalOutcome {
                 found: 2,
-                notified: 2
+                notified: 2,
+                build_mismatches: Vec::new(),
             }
             .diagnosis(),
             "requested:2"
+        );
+    }
+
+    #[test]
+    fn replica_identity_preserves_a_routable_editor_endpoint_without_liveness_registration() {
+        let route = editor_route_from_replica_identity(
+            "vscode-4242-9e654d90:/tmp/project/tasks/session.md:refresh-2",
+        )
+        .expect("native replica identities carry their process-scoped editor route");
+
+        assert_eq!(route.editor_pid, 4242);
+        assert_eq!(route.editor_id, "vscode-4242-9e654d90");
+        assert!(
+            editor_route_from_replica_identity("anonymous-replica").is_none(),
+            "untyped identities must not invent a notification endpoint"
         );
     }
 

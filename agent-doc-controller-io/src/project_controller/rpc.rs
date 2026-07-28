@@ -1116,6 +1116,12 @@ pub(crate) fn handle_retained_write_settlement(
 ) -> Result<agent_doc_state_backbone::retained_write::SettlementVerdict> {
     let file = request_file(&request)?;
     let document_hash = agent_doc_hash::document_id_for_path(&file);
+    // Retained intents may be appended by the short-lived writer after this
+    // long-lived controller loaded its projection. Reconcile durable state at
+    // the query boundary before deriving the verdict; otherwise the controller
+    // can remain one intent behind forever and disagree with session-check's
+    // direct durable observation.
+    runtime.refresh_memory()?;
     let observations = request
         .diagnostic_payload
         .as_deref()
@@ -3941,6 +3947,22 @@ pub fn await_local_delivery_convergence_change_for_file(
     wait: std::time::Duration,
     recovery: Option<DeliveryConvergenceRecovery>,
 ) -> Result<Option<DeliveryConvergenceStatus>> {
+    await_local_delivery_convergence_change_for_file_inner(
+        file,
+        after_version,
+        wait,
+        recovery,
+        None,
+    )
+}
+
+fn await_local_delivery_convergence_change_for_file_inner(
+    file: &Path,
+    after_version: Option<u64>,
+    wait: std::time::Duration,
+    recovery: Option<DeliveryConvergenceRecovery>,
+    runtime: Option<&ControllerRuntime>,
+) -> Result<Option<DeliveryConvergenceStatus>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let wait = wait.min(CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX);
     let started = Instant::now();
@@ -4004,14 +4026,76 @@ pub fn await_local_delivery_convergence_change_for_file(
             } else {
                 agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckReplay
             };
-            if agent_doc_crdt_relay_io::signal_crdt_replica_event(
+            if let Ok(outcome) = agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
                 &canonical,
                 reason,
                 recovery.live_editors,
-            )
-            .is_ok()
-            {
-                recovery_signal_observed = true;
+            ) {
+                // A live route plus exact durable target retention is enough
+                // to continue delivery asynchronously. Successful IPC is not
+                // required here: build skew and a temporarily unreachable
+                // listener are precisely the recovery cases this loop owns.
+                // Keep zero-route recovery fail-closed.
+                recovery_signal_observed |= outcome.found > 0;
+                if !outcome.build_mismatches.is_empty()
+                    && let Some(runtime) = runtime
+                {
+                    if controller_binary_is_stale(runtime) {
+                        runtime.request_recycle_urgent();
+                        agent_doc_ops_log_io::log_op(
+                            &canonical,
+                            &format!(
+                                "controller_crdt_ack_recovery_upgrade file={} action=urgent_idle_recycle mismatched_routes={}",
+                                canonical.display(),
+                                outcome.build_mismatches.len(),
+                            ),
+                        );
+                    } else {
+                        let project_root =
+                            agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+                        let mut reloads = 0usize;
+                        for route in &outcome.build_mismatches {
+                            match agent_doc_ipc_io::send_reload_library_to_editor(
+                                &project_root,
+                                route.editor_pid,
+                                &route.editor_id,
+                                env!("CARGO_PKG_VERSION"),
+                            ) {
+                                Ok(true) => reloads += 1,
+                                Ok(false) => {}
+                                Err(error) => agent_doc_ops_log_io::log_op(
+                                    &canonical,
+                                    &format!(
+                                        "controller_crdt_ack_recovery_upgrade file={} action=editor_reload_deferred editor_pid={} error={error:#}",
+                                        canonical.display(),
+                                        route.editor_pid,
+                                    ),
+                                ),
+                            }
+                        }
+                        recovery_signal_observed |= reloads > 0;
+                        agent_doc_ops_log_io::log_op(
+                            &canonical,
+                            &format!(
+                                "controller_crdt_ack_recovery_upgrade file={} action=editor_reload requested={} mismatched_routes={}",
+                                canonical.display(),
+                                reloads,
+                                outcome.build_mismatches.len(),
+                            ),
+                        );
+                    }
+                    // Close this long-poll connection immediately. A stale
+                    // controller needs an exact zero-client cut to recycle;
+                    // a reloading editor needs the next request to negotiate
+                    // against its replacement listener.
+                    return Ok(Some(DeliveryConvergenceStatus {
+                        observed: true,
+                        converged: witness.converged,
+                        version: witness.version,
+                        recovery_signal_observed,
+                        force_refresh_sent,
+                    }));
+                }
             }
             next_signal = Some(now + Duration::from_millis(recovery.signal_interval_ms.max(1)));
         }
@@ -8347,17 +8431,30 @@ pub(crate) fn serve_with_options(
                 let wants_recycle_and_idle = controller_wants_recycle(&runtime)
                     && active_clients.load(Ordering::SeqCst) == 0
                     && controller_recycle_idle(&runtime);
-                let (do_recycle, next_since) =
+                // An IPC build mismatch on the ACK-recovery path proves
+                // that this binary cannot reach the editor that owns the
+                // delivery frontier. Once every request and durable
+                // dispatch is exactly idle, waiting another five seconds
+                // only lets the polling client reacquire the controller and
+                // starve its upgrade. Urgent recycle skips that debounce,
+                // but never the idle gates above.
+                let urgent_recycle = wants_recycle_and_idle && runtime.recycle_urgent();
+                let (do_recycle, next_since) = if urgent_recycle {
+                    (true, None)
+                } else {
                     agent_doc_controller::recycle::recycle_debounce_decision(
                         wants_recycle_and_idle,
                         recycle_stale_since,
                         Instant::now(),
                         recycle_grace,
-                    );
+                    )
+                };
                 recycle_stale_since = next_since;
                 if do_recycle {
                     let reason = if runtime.recycle_forced() {
                         "operator_force_request"
+                    } else if runtime.recycle_urgent() {
+                        "ipc_build_skew"
                     } else if runtime.recycle_requested() {
                         "operator_request"
                     } else {
@@ -9213,6 +9310,10 @@ pub(crate) fn controller_wants_recycle(runtime: &ControllerRuntime) -> bool {
     if runtime.recycle_requested() {
         return true;
     }
+    controller_binary_is_stale(runtime)
+}
+
+fn controller_binary_is_stale(runtime: &ControllerRuntime) -> bool {
     match runtime.bootstrap_snapshot() {
         Ok(bootstrap) => {
             let current_binary = current_binary_identity().ok();
@@ -12772,7 +12873,7 @@ fn controller_serves_replica(path: &str) -> bool {
 /// in one process, and it returns the instant convergence lands.
 pub(crate) fn handle_delivery_convergence_await(
     _bootstrap: &ControllerBootstrap,
-    _runtime: &ControllerRuntime,
+    runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<DeliveryConvergenceStatus> {
     let file = request_file(&request)?;
@@ -12798,21 +12899,20 @@ pub(crate) fn handle_delivery_convergence_await(
         .cloned()
         .filter(|value| !value.is_null())
         .and_then(|value| serde_json::from_value::<DeliveryConvergenceRecovery>(value).ok());
-    Ok(
-        await_local_delivery_convergence_change_for_file(
-            &canonical,
-            after_version,
-            wait,
-            recovery,
-        )?
-        .unwrap_or(DeliveryConvergenceStatus {
-            observed: false,
-            converged: false,
-            version: 0,
-            recovery_signal_observed: false,
-            force_refresh_sent: recovery.is_some_and(|recovery| recovery.force_refresh_sent),
-        }),
-    )
+    Ok(await_local_delivery_convergence_change_for_file_inner(
+        &canonical,
+        after_version,
+        wait,
+        recovery,
+        Some(runtime),
+    )?
+    .unwrap_or(DeliveryConvergenceStatus {
+        observed: false,
+        converged: false,
+        version: 0,
+        recovery_signal_observed: false,
+        force_refresh_sent: recovery.is_some_and(|recovery| recovery.force_refresh_sent),
+    }))
 }
 
 pub(crate) fn handle_visible_write_materialized_carry_forward_observed(

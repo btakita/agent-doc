@@ -511,6 +511,11 @@ pub(crate) struct ControllerRuntime {
     /// once no dispatch is in flight (debounced), the controller self-terminates and
     /// the next `connect_or_launch` relaunches the fresh binary.
     recycle_requested: AtomicBool,
+    /// A rolling-upgrade incompatibility observed by a read-only recovery RPC.
+    /// Unlike the normal five-second recycle debounce, this may recycle at the
+    /// first exact idle cut. It still never stops while a client or durable
+    /// dispatch is active.
+    recycle_urgent: AtomicBool,
     /// `#recycleforce` — set true by the `recycle_force` RPC (`agent-doc admin
     /// recycle --force`). An explicit operator override: the serve-loop idle poll
     /// recycles WITHOUT waiting on the in-flight-dispatch idle gate, so a forced
@@ -1014,6 +1019,10 @@ impl ControllerRuntime {
             memory.state_projection.project_supervisor_recycle(),
         );
         let coordination_graph = ControllerCoordinationGraph::new_in(&scope);
+        let document_graphs = ControllerDocumentGraphs::new_in(&scope);
+        for (document_hash, projection) in &memory.state_projection.documents {
+            document_graphs.set_projection(document_hash, Some(projection.clone()));
+        }
         Ok(Self {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
@@ -1022,8 +1031,9 @@ impl ControllerRuntime {
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(()),
             state_projection_waiters: Condvar::new(),
-            document_graphs: ControllerDocumentGraphs::new_in(&scope),
+            document_graphs,
             recycle_requested: AtomicBool::new(false),
+            recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
             _scope: scope,
         })
@@ -1048,6 +1058,15 @@ impl ControllerRuntime {
     /// `#ctlrecycle` R2 — mark this controller to recycle at the next idle boundary.
     fn request_recycle(&self) {
         self.recycle_requested.store(true, Ordering::SeqCst);
+    }
+
+    fn request_recycle_urgent(&self) {
+        self.recycle_urgent.store(true, Ordering::SeqCst);
+        self.recycle_requested.store(true, Ordering::SeqCst);
+    }
+
+    fn recycle_urgent(&self) -> bool {
+        self.recycle_urgent.load(Ordering::SeqCst)
     }
 
     fn recycle_requested(&self) -> bool {
@@ -1094,10 +1113,22 @@ impl ControllerRuntime {
         let project_root = self.bootstrap_snapshot()?.project_root;
         let next = ControllerMemoryState::load(&project_root)?;
         let recycle = next.state_projection.project_supervisor_recycle();
+        let next_documents = next.state_projection.documents.clone();
         let mut memory = self.memory.lock();
+        let previous_documents = memory.state_projection.documents.clone();
         *memory = next;
         drop(memory);
         self.supervisor_recycle_graph.set(recycle);
+        for document_hash in previous_documents
+            .keys()
+            .chain(next_documents.keys())
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            if previous_documents.get(document_hash) != next_documents.get(document_hash) {
+                self.document_graphs
+                    .set_projection(document_hash, next_documents.get(document_hash).cloned());
+            }
+        }
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
         Ok(())
@@ -7161,6 +7192,7 @@ agent:queue\n\
             state_projection_waiters: Condvar::new(),
             document_graphs: ControllerDocumentGraphs::new_in(&scope),
             recycle_requested: AtomicBool::new(false),
+            recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
             _scope: scope,
         }
@@ -7912,7 +7944,17 @@ agent:queue\n\
         intent_id: &str,
         target_hash: &str,
     ) {
-        let event = agent_doc_state_backbone::StateEvent::new(
+        let event = deferred_document_write_event(document_hash, intent_id, target_hash);
+        append_state_event(project_root, &event).unwrap();
+        runtime.apply_state_event(&event).unwrap();
+    }
+
+    fn deferred_document_write_event(
+        document_hash: &str,
+        intent_id: &str,
+        target_hash: &str,
+    ) -> agent_doc_state_backbone::StateEvent {
+        agent_doc_state_backbone::StateEvent::new(
             format!("document-write-deferred-{document_hash}-{intent_id}"),
             agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
                 document_hash: document_hash.to_string(),
@@ -7925,9 +7967,7 @@ agent:queue\n\
                 reason:
                     agent_doc_state_backbone::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
             },
-        );
-        append_state_event(project_root, &event).unwrap();
-        runtime.apply_state_event(&event).unwrap();
+        )
     }
 
     fn pending_intent_id(runtime: &Arc<ControllerRuntime>, document_hash: &str) -> Option<String> {
@@ -8082,5 +8122,54 @@ agent:queue\n\
             Some("intent-2"),
             "a stale observation must not be able to settle an intent that postdates it"
         );
+    }
+
+    #[test]
+    fn controller_document_graph_is_seeded_from_durable_projection_at_startup() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        let event = deferred_document_write_event(&document_hash, "intent-before-start", "target");
+        append_state_event(dir.path(), &event).unwrap();
+
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let verdict = runtime.document_retained_write_verdict(
+            &document_hash,
+            &file,
+            Some(observation("authority")),
+            Some(observation("disk")),
+        );
+
+        assert!(matches!(
+            verdict,
+            agent_doc_state_backbone::retained_write::SettlementVerdict::Unsettled {
+                intent_id,
+                ..
+            } if intent_id == "intent-before-start"
+        ));
+    }
+
+    #[test]
+    fn refresh_memory_publishes_an_externally_appended_retained_intent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        let event = deferred_document_write_event(&document_hash, "intent-after-start", "target");
+        append_state_event(dir.path(), &event).unwrap();
+
+        runtime.refresh_memory().unwrap();
+        let verdict = runtime.document_retained_write_verdict(
+            &document_hash,
+            &file,
+            Some(observation("authority")),
+            Some(observation("disk")),
+        );
+
+        assert!(matches!(
+            verdict,
+            agent_doc_state_backbone::retained_write::SettlementVerdict::Unsettled {
+                intent_id,
+                ..
+            } if intent_id == "intent-after-start"
+        ));
     }
 }

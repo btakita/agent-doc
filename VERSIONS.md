@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.60
+
+_JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._
+
+- **Retained CRDT delivery now recovers across missing liveness registrations and rolling binary upgrades.** ACK-owner routes are recovered from live CRDT replica identities as well as the reliable-sync liveness plane. Typed IPC build mismatches now choose the upgrade direction: a stale controller exits at the first exact idle cut without waiting through the normal recycle debounce, while a current controller requests reload of the stale editor listener. Delivery recovery keeps exact durable targets asynchronous when a live route exists, and controller document graphs are seeded and refreshed from durable projections so settlement cannot remain one intent behind.
+- **Compact Exchange now upgrades legacy dynamic-context ledgers that predate `context_manifest.harness`.** The canonical additive schema convergence adds the non-null column with an `unknown` default for existing rows, keeping old manifests readable while new records preserve their actual harness. A legacy-schema regression exercises the same latest-session manifest query that previously failed `compact_document`.
+
 ## 0.35.59
 
 _JetBrains plugin 0.2.306; VS Code extension 0.2.59; Zed extension 0.1.0._

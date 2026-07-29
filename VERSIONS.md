@@ -4,6 +4,19 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.72
+
+_JetBrains plugin 0.2.313; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Retained closeout now saves the editor-owned revision automatically.** When
+live editor authority differs from disk, preflight/finalize recovery sends the
+typed `save_document` intent to that editor and proves the exact revision on
+disk before it evaluates or replays a retained operation. Captured-finalize
+resume uses the same save barrier before superseding an older retained target.
+An unavailable, rejected, timed-out, or concurrently changed save remains
+retained and never falls back to a direct disk write. Operator `session-check`
+remains a read-only observer.
+
 ## 0.35.71
 
 _JetBrains plugin 0.2.313; VS Code extension 0.2.62; Zed extension 0.1.0._

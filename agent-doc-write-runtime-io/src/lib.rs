@@ -2186,11 +2186,16 @@ fn guard_historical_retained_write_before_new_capture(
             && !retrying_same_capture
             && closeout_role == WriteCloseoutOwnerRole::CapturedFinalizeResume
         {
+            let editor_save_settled =
+                agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
+                    file,
+                    "captured_finalize_resume_pre_capture_editor_save",
+                )?;
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "captured_finalize_resume_supersedes_unrelated_retained_target file={} action=continue_exact_captured_replay_without_prior_delivery_wait",
-                    file.display()
+                    "captured_finalize_resume_supersedes_unrelated_retained_target file={} action=continue_exact_captured_replay_without_prior_delivery_wait editor_native_save_settled={editor_save_settled}",
+                    file.display(),
                 ),
             );
         }

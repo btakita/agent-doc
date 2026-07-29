@@ -6798,14 +6798,49 @@ pub fn recover_retained_document_write_before_new_cycle(
     use agent_doc_state_backbone::retained_write::RecoveryAction;
 
     let source = boundary.recovery_source();
-    let action = retained_write_settlement(file, source).recovery_action();
+    let action = match retained_write_settlement(file, source).recovery_action() {
+        RecoveryAction::AwaitConvergence { intent_id } => {
+            if !settle_live_editor_projection_through_authority(file, source)? {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "retained_write_preflight_recovery_deferred file={} source={} intent_id={} reason=editor_native_save_pending",
+                        file.display(),
+                        source,
+                        intent_id,
+                    ),
+                );
+                return Ok(false);
+            }
+
+            match retained_write_settlement(file, source).recovery_action() {
+                RecoveryAction::Continue => {
+                    let canonical = try_resolve_current_document_content(file, source)?;
+                    clear_all_deferred_document_write_intents(file, source)?;
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "retained_write_preflight_recovered file={} source={} intent_id={} target_hash={} canonical_disk_exact=true recovery=editor_native_save operator_cut_preserved=true",
+                            file.display(),
+                            source,
+                            intent_id,
+                            agent_doc_hash::content_hash(&canonical),
+                        ),
+                    );
+                    return Ok(true);
+                }
+                action => action,
+            }
+        }
+        action => action,
+    };
     let intent_id = match action {
         RecoveryAction::Continue => return Ok(false),
         RecoveryAction::AwaitConvergence { intent_id } => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "retained_write_preflight_recovery_deferred file={} source={} intent_id={} reason=authority_disk_diverged",
+                    "retained_write_preflight_recovery_deferred file={} source={} intent_id={} reason=authority_disk_diverged_after_editor_native_save",
                     file.display(),
                     source,
                     intent_id,
@@ -10116,6 +10151,71 @@ mod tests {
         assert!(settled.contains("- recovered retained write"));
         assert!(settled.contains("Operator text written after the interruption."));
         assert!(pending_document_write(&file).is_none());
+    }
+
+    #[test]
+    fn retained_recovery_requests_editor_save_before_replaying_over_unsaved_authority() {
+        let editor_base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- existing work\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Investigate the retained operation.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let retained_target = editor_base.replace(
+            "- existing work\n",
+            "- existing work\n- retained operation\n",
+        );
+        let operator_cut = editor_base.replace(
+            "Investigate the retained operation.\n",
+            "Investigate the retained operation.\n\nUnsaved editor-owned text.\n",
+        );
+        let (dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-retained-recovery-editor-save";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        ensure_deferred_document_write_intent(
+            &file,
+            editor_base,
+            &retained_target,
+            "serialized_atomic_write",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            let current = hub.canonical_text();
+            hub.apply_local(client_id, 0, current.chars().count() as u32, &operator_cut)
+                .unwrap();
+        })
+        .unwrap();
+
+        assert!(
+            !recover_retained_document_write_before_new_cycle(
+                &file,
+                RetainedWriteCycleBoundary::RegressionTest,
+            )
+            .unwrap(),
+            "without a native editor listener, recovery must stay retained",
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            editor_base,
+            "recovery must not write around the editor",
+        );
+        assert!(pending_document_write(&file).is_some());
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("native_editor_save_pending")
+                && ops.contains("source=preflight_retained_write_recovery_test")
+                && ops.contains("reason=editor_native_save_pending"),
+            "recovery must ask the editor to save its authority before replaying: {ops}",
+        );
     }
 
     #[test]

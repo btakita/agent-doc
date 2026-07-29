@@ -30,6 +30,13 @@
   through `didChange`. The LSP PID is registered with the controller's
   process-exit watcher so a crash cannot strand editor authority.
 - The document write state machine is `IntentCaptured -> CanonicalApplied -> ReplicaAccepted -> ReplicaVisible -> DiskProjected -> Committed`. A transition may advance only one edge after its matching proof, duplicate/reordered events are idempotent, endpoint churn is a self-loop, and no recovery command may skip an edge or reconstruct intent from a projection. Queue deletion uses the same rule: the exact Lazily authority shape is the compare-and-swap base, so a missing historical queue item is deletion—not an input to union/replay.
+- When a retained operation observes live editor authority that differs from
+disk, its recovery owner must request the editor's typed `save_document`
+transition and prove that exact authority revision on disk before settlement or
+semantic replay continues. A changed revision retries from the new authority;
+an unavailable, rejected, or timed-out save remains retained. Recovery never
+projects those bytes directly to disk, and operator `session-check` remains a
+read-only observer rather than the save-effect owner.
 - A controller recycle invalidates relay membership even when an editor still holds a cached client. Forced editor refresh must retire that client and issue a fresh registration. Every deferred document write, including an explicitly authorized `--force-disk` projection, retains its full base and target in Lazily state so reconnect restores or component-merges the editor buffer without consulting Git HEAD. Compact Exchange must compose active captured/deferred response lineage before archiving.
 
 - Captured-response recovery must persist both the response and its complete editor-visible baseline in Lazily `ResponseCaptured` state; hashes alone are not replay authority. A partially materialized response may be reconciled only from added nonblank lines whose multiplicities are proven by the captured baseline and response, with at least two matching lines. The reconciled target must pass through document/editor authority, retain any unrelated operator text, and then replay and commit the complete response once. A legacy hash-only capture may consult a byte-hash-matching Git `HEAD` only as a historical baseline anchor and must fortify Lazily state with the recovered content; it must never restore the working tree to `HEAD`. Template-mode raw captures must become explicit exchange patches before strict replay. An open captured cycle may cross a recovered commit boundary only when the captured response is materially present in `HEAD`.

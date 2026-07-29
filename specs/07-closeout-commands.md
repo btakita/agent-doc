@@ -57,6 +57,15 @@ retain the complete response capture for automatic binary retry, but it must
 not leave a response fragment for operator repair or substitute an unproven
 full response in the document, snapshot, or commit.
 
+When retained closeout recovery observes that live editor authority and disk
+diverge, the closeout recovery owner sends the editor a typed `save_document`
+request for that exact authority revision before settlement or replay. Only an
+exact post-save authority/disk match advances recovery. If the editor changes
+again, is unavailable, rejects the request, or does not save within the bounded
+deadline, the operation remains retained without a direct disk write. The
+operator-facing `session-check` command reports this state but does not execute
+the save effect.
+
 After a response is committed, an editor/CRDT replica may not regress authority
 to that capture's pre-response baseline. When the current authority is proven
 equal to the capture baseline, the captured response is absent there, and the

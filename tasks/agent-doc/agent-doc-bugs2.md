@@ -242,7 +242,19 @@ The restarted IDEA host is running JetBrains plugin `0.2.322` and native agent-d
 The retained Lazily write replayed successfully and appears exactly once as `#designimplementtransport`. Its plan specifies keyed lifecycle-scoped event Sources; generation, sequence, freshness, and receipt envelopes; event-channel-first adapters with reconnect/replay, stale rejection, merge, and backpressure; RPC-triggered or bounded-polling fallback only where event delivery is unavailable; Computed/Effect extraction for readiness, validation, authority, and retry; and cross-language conformance schedules before binding projection. No duplicate backlog add or operator save was performed.
 
 The agent-doc repair is therefore live-verified as well as test-verified and released. `make check` and `make install-full` passed; agent-doc `0.35.93` and JetBrains `0.2.322` are installed; commit `0ccb82449`, tag `v0.35.93`, PyPI package `0.35.93`, and the GitHub release are published. The root reactive-ingress harness policy and submodule pointer are pushed in `f64f481da`. The required one-shot CI observation was `in_progress` and was not polled. The user-owned untracked Zed WASM remains untouched.
-<!-- agent:boundary:418e228a -->
+
+### Re: Compact Exchange, Run Agent Doc, and tmux sync queue resolution — gpt-5
+
+> **Queue prompt:** Compact Exchange retained-write delivery timed out; Run Agent Doc did nothing; tmux pane auto-sync did not converge.
+
+Resolved and released in agent-doc `0.35.93` / JetBrains `0.2.322`.
+
+Compact Exchange no longer gates exact editor-visible delivery ACK on template validity. Template validation is lifecycle-scoped reactive state and gates semantic mutation only. Unsaved editor text remains authoritative; reset, session-check, and build-skew recovery converge through the editor save receipt without asking the operator to save, reload, or retry.
+
+Run Agent Doc closeout now evaluates ownership through the routed document actor pane instead of ambient `TMUX_PANE`. Ordinary native document, projection, editor-surface, and tmux calls are isolated from the poisonable native-generation lifecycle lease, so one blocked call cannot disable unrelated reactive ingress or pane synchronization.
+
+Live proof after restart: plugin `0.2.322` registered both affected documents, the retained Lazily plan replayed exactly once, the main closeout committed successfully, and no new generation-poison event appeared. Tests, full check, full install, PyPI publication, GitHub release, and repository integration all completed. No forced disk write, duplicate operation, operator save, or user-owned Zed WASM mutation occurred.
+<!-- agent:boundary:48fbeda4 -->
 <!-- /agent:exchange -->
 ## Queue
 

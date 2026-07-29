@@ -701,7 +701,46 @@ Verification completed: Pandoc/WeasyPrint generated the PDF successfully; `pdfin
 No email, attachment, or other external message was sent.
 
 Workflow note: preflight reported that the installed `agent-doc` binary is one committed change behind local source. I attempted the requested `make install`, but unrelated concurrent edits in `agent-doc-controller-io/src/project_controller/rpc.rs` currently fail compilation with `E0277` and `E0507`; I left that other-session work untouched. The large session exchange was not compacted because the active queue contract requires continuing unless auto-compact is explicitly enabled.
-<!-- agent:boundary:60d552ad -->
+
+### Re: Employment addendum review — gpt-5
+
+> **Queue prompt:**
+>
+> Please read tasks/professional/haiven/employment-addendum-brian-takita-v1.0.md. How does th
+
+
+❯ > **Queue prompt:** Please read `tasks/professional/haiven/employment-addendum-brian-takita-v1.0.md`. How does this look?
+
+❯ The addendum is a strong substantive improvement, but I would **not sign this exact PDF yet**. I reviewed the [Markdown extraction](../professional/haiven/employment-addendum-brian-takita-v1.0.md), visually inspected all four pages of the [company-signed PDF](<../professional/haiven/Employment Addendum - Brian Takita v1.0.pdf>), and compared it with the original offer, Agreement, requested revisions, and completed Exhibit A.
+
+❯ The following should be corrected first:
+
+1. **The signed PDF is visibly malformed on page 1.** The opening definition reads `Haiven, Inc. (“Comp`, then inserts a standalone **“Employee will attach”**, then resumes with `any”)`. It needs to read `Haiven, Inc. (“Company”)`; the stray phrase likely belongs with Section 3. Ask Haiven for a clean regenerated and re-signed PDF.
+
+2. **Exhibit A must be attached and affirmatively accepted by Haiven.** Luke signed the addendum before the completed schedule was physically attached. Send the [completed Exhibit A](../professional/haiven/haiven-exhibit-a-proposed.pdf) back as part of one combined document and have Haiven initial/sign its acknowledgment, or add: “The completed Exhibit A attached to this Addendum, including its Effect of Listing and Incorporation and Priority provisions, is approved and incorporated.” Do not rely on unilaterally appending it after Haiven’s signature.
+
+3. **The equity language still has an internal risk.** It promises both **16,053 shares** and **1.00% immediately after grant**, but does not state the actual fully diluted denominator. Those can diverge if the capitalization changes before the grant. The clean formulation is the greater of 16,053 shares or the number required to equal 1.00%, or a certified denominator showing that 16,053 is exactly 1.00% on the measurement date. Also, “the Board will consider and, if approved” preserves a path where no option is granted. If 1% is part of the deal, the document needs a remedy or equivalent protection if approval is not obtained. The equity plan and option form referenced in Section 1 are not present in the Haiven folder and should be reviewed before signing.
+
+4. **The signing-bonus details remain incomplete.** The addendum gives only an outside deadline for the second $10,000. It still does not provide the exact remittance date for either installment or say whether each is paid through payroll or separately. It should also clarify whether any repayment is gross or net of withholding and how payroll tax adjustments will be handled.
+
+5. **“Good Reason” is not actually defined.** The phrase “as that term may be defined in any subsequent agreement” creates no current protection. Define it now—typically covering a material pay reduction, material diminution of duties/title, required relocation, material breach, or failure to issue the promised equity—together with notice, cure, and resignation windows. The Cause definition is much better than before, but “crime involving moral turpitude” is broad and the curable-breach provisions should have a definite cure period.
+
+6. **The three existing outside engagements are protected well, but future work is not fully solved.** Section 2 preserves their compensation and IP and bars retroactive revocation. However, new general-purpose open-source or personal research is not expressly pre-approved, and future approval has no response deadline, no “not unreasonably withheld, conditioned, or delayed” standard, and no statement that CEO/company approval replaces unanimous Board approval. I would add those points. “Strict logical and physical separation” should also be clarified so it does not unexpectedly require separate physical devices if reasonable access-control, credential, and repository separation is what the parties mean.
+
+7. **The promised supporting information is still missing or can arrive too late.** The addendum allows the handbook, vacation policy, equity plan, and option form to arrive “prior to or concurrent with” execution, and allows health-cost information to arrive during onboarding. That does not give you time to review it before acceptance. Require delivery before your signature and before the acceptance clock expires.
+
+8. **The semimonthly-pay waiver should be confirmed, not left conditional.** Current Connecticut law requires weekly or biweekly payment; a less-frequent schedule requires Labor Commissioner permission. The addendum’s “if necessary” language should say Haiven will obtain and confirm the waiver before using its 15th/last-day schedule. See [Conn. Gen. Stat. §§ 31-71b and 31-71i](https://www.cga.ct.gov/current/pub/chap_558.htm) and the [Connecticut DOL waiver form listing](https://portal.ct.gov/dol/Divisions/Wage-and-Workplace-Standards/forms).
+
+❯ The strongest completed provisions are the specific approval and IP protection for Apollo/Acadian, MonsterRodHolders.com, and Equity Funding Source; deletion of the stray noncompete; actual 1/48-per-month pre-cliff vesting after termination without Cause; Connecticut work/payroll treatment; removal of the proposed salary-to-rent conversion; and the Washington/AAA arbitration framework. The AAA fee allocation is consistent with the current [AAA Employment/Workplace rules and fee structure](https://adr.org/rules-forms-and-fees/employment/). The Washington invention-language reference is accurate, but that statute itself retains exceptions for inventions related directly to the employer’s business or anticipated R&D, so the signed Exhibit A and contractual outside-work protections remain essential. See [RCW 49.44.140](https://app.leg.wa.gov/RCW/default.aspx?cite=49.44.140).
+
+❯ One timing point: if you received this already-countersigned addendum on July 28, Section 8 appears to make the deadline **July 29 at 5:00 p.m. Pacific**, the same date as the stated start date. Ask them to extend it until at least one business day after you receive the clean corrected PDF, the integrated Exhibit A, and all promised supporting documents.
+
+❯ No email, attachment, signature, or other external action was taken. This is contract issue-spotting, not legal advice; given the equity and IP value, employment counsel should review the final clean package before you sign. No repository files were changed during this review. Confidence is high on the textual and visual defects; legal enforceability and the appropriate redline should be confirmed by counsel.
+
+❯ No additional backlog item is needed because every remaining condition is external/approval-gated and is captured in the updated `#haiven-paper` review item.
+
+❯ Workflow note: the exchange remains large, but the active queue contract says to continue rather than compact without explicit auto-compact authorization. The installed `agent-doc` build also remains stale because the earlier requested reinstall is blocked by unrelated concurrent Rust compile errors.
+<!-- agent:boundary:2d0f2ccc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -717,7 +756,7 @@ Workflow note: preflight reported that the installed `agent-doc` binary is one c
 ## Review
 
 <!-- agent:review -->
-- [/] [#haiven-paper] Craig replied on July 28, 2026 that Haiven will revise and incorporate the requested provisions and send new documents later that day; he also accepted the August 10 and occasional-standup scheduling points. Do not send any correction, follow-up, attachment, or other external message without Brian’s explicit instruction containing “send.” Review the locompleted Exhibit A at tasks/professional/haiven/haiven-exhibit-a-proposed.md and tasks/professional/haiven/haiven-exhibit-a-proposed.pdf, especially Haiven’s written acknowledgment of the haiven-websocket-hub take-home row, the Effect of Listing, and Exhibit A’s priority over Agreement §3.4. The prospective future-outside-work clause is intentionally separate from Exhibit A; verify that Haiven’s revised Agreement or countersigned addendum contains itWhen the revised documents arrive, verify the exact remittance date and payment method for each $10,000 signing-bonus installment, a narrow definition of Cause, and every other requested revision. Then obtain Haiven’s acknowledged Exhibit A and countersigned documents and complete final verification before signing.
+- [/] [#haiven-paper] Haiven returned a company-signed July 28, 2026 v1.0 employment addendum. Do not sign it yet and do not send any correction, follow-up, attachment, or external message without Brian’s explicit instruction containing “send.” Obtain a clean re-signed PDF correcting the visibly malformed page-1 “Comp / Employee will attach / any” text. Attach tasks/professional/haiven/haiven-exhibit-a-proposed.pdf as part of one integrated document and obtain Haiven’s explicit acknowledgment of its Effect of Listing and priority terms. Resolve the 16,053-shares-versus-1.00%-denominator ambiguity and Board-nonapproval risk; obtain and review the equity plan, option form, handbook, vacation policy, health effective date, and tier contribution rates before signing. Add exact remittance dates and payment methods for both $10,000 signing-bonus installments; define Good Reason now; narrow moral-turpitude/cure language; clarify gross/net bonus repayment tax treatment; expressly protect ongoing general-purpose OSS/personal research and make future approvals timely, conflict-based, not unreasonably withheld, and not dependent on unanimous Board approval; clarify that reasonable separation does not require separate physical devices unless intended; confirm Connecticut semimonthly-pay waiver before payroll; and extend acceptance until after the complete corrected package arrives. Then complete final verification with counsel before signing.
 <!-- /agent:review -->
 
 ## Icebox

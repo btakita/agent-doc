@@ -130,7 +130,26 @@ Harper is LSP4IJ's local Markdown grammar/style language server and is unrelated
 ### Re: editor-authoritative recovery and focus sync — gpt-5
 
 Fixed and released.
-<!-- agent:boundary:c90e44d1 -->
+
+### Re: Response
+
+Yes. Continue in the original Haiven Codex session in tmux pane `%62`; agent-doc did not send input to, focus, terminate, or restart that pane while applying this fix.
+
+Implemented and committed `5183f104b` (`fix: preserve live sessions and editor convergence`) in `src/agent-doc`:
+
+- Accepted non-forced supervisor replacement requests now remain in-place through timeout and drain only at an idle boundary. A stale timeout is observational and can no longer kill a live mid-turn harness or start a fresh Codex thread.
+- Continue/restart recovery preserves the live document-owned harness and exact session binding. Cold recovery uses only the exact editor-authoritative `resume:` ID and fails closed when it is absent; it never falls back to a global latest session. Explicit Fresh remains the only route allowed to start a new thread.
+- The controller-owned agent session ID is authoritative before, during, and after an in-place restart. Frontmatter `agent_doc_session`/`resume` is now specified as a durable projection and cold-recovery seed, not authority that may replace the live binding.
+- Pane ownership recognizes an exact document-owned Codex wrapper even when tmux reports its current command as `node`, while unrelated Node panes remain protected.
+- Committed cycles may now settle an exact live-editor projection through native editor save. Save operation IDs are stable per content hash, so retries converge instead of producing fresh operations and save churn.
+- Added unit and SimWorld regression coverage for accepted stale replacement timeouts, exact session recovery, owned wrapper panes, committed editor settlement, and stable native-save identities.
+
+Verification passed: the focused controller/session/realtime suites, the SimWorld regression, both affected `cargo check` targets, and full `make check`. Version `0.35.82` was installed, the native editor library hot-reloaded, and only the controller was recycled.
+
+For `haiven.md`, editor authority and disk now converge to the same SHA-256 (`21073485d8efb05caddba4317893d6f3778e4946e24e1bc60a1dc6d97b00cddb`), so the prior false “please save the buffer” loop is resolved. The original actor remains generation `293` on pane `%62`. Its latest status projection is stale because no live supervisor socket is attached, but the authoritative actor binding remains intact; conversation can continue in that original pane.
+
+A stale answered free-text queue row remains in `haiven.md`. It does not require or justify restarting the Codex session, but should be auto-struck during a later closeout so a future agent-doc admission is not blocked.
+<!-- agent:boundary:bee376cb -->
 <!-- /agent:exchange -->
 ## Queue
 

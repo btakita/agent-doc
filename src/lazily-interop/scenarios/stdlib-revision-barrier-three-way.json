@@ -1,10 +1,16 @@
 {
-  "name": "stdlib-revision-barrier-native-three-way",
+  "name": "stdlib-revision-barrier-all-bindings",
   "seed": 1103,
   "peers": [
-    {"name": "lazily-zig", "peer_id": 1},
-    {"name": "lazily-go", "peer_id": 2},
-    {"name": "lazily-cpp", "peer_id": 3}
+    {"name": "lazily-rs", "peer_id": 1},
+    {"name": "lazily-py", "peer_id": 2},
+    {"name": "lazily-kt", "peer_id": 3},
+    {"name": "lazily-js", "peer_id": 4},
+    {"name": "lazily-dart", "peer_id": 5},
+    {"name": "lazily-zig", "peer_id": 6},
+    {"name": "lazily-go", "peer_id": 7},
+    {"name": "lazily-cpp", "peer_id": 8},
+    {"name": "lazily-cs", "peer_id": 9}
   ],
   "required_features": ["stdlib_revision_barrier_v1"],
   "required_codecs": [],
@@ -41,6 +47,13 @@
     {"op": "feature_reset", "feature": "stdlib_revision_barrier_v1"},
     {"op": "feature_step", "feature": "stdlib_revision_barrier_v1", "step": {"op": "start", "revision": 0, "required_revision": 1, "deadline": null}, "expected": {"outcome": "pending", "revision": 0, "generation": 0}},
     {"op": "feature_step", "feature": "stdlib_revision_barrier_v1", "step": {"op": "observe", "now": 1, "predicate": false, "cancellation": "unavailable"}, "expected": {"outcome": "unavailable", "reason": "cancellation_unavailable", "revision": 0, "generation": 0, "cancellation_calls": 1}},
+
+    {"op": "feature_reset", "feature": "stdlib_revision_barrier_v1"},
+    {"op": "feature_step", "feature": "stdlib_revision_barrier_v1", "step": {"op": "start", "revision": 0, "required_revision": 1, "deadline": null}, "expected": {"outcome": "pending", "revision": 0, "generation": 0}},
+    {"op": "feature_step", "feature": "stdlib_revision_barrier_v1", "step": {"op": "observe", "now": 5, "predicate": false, "cancellation": "pending"}, "expected": {"outcome": "pending", "revision": 0, "generation": 0, "cancellation_calls": 1}},
+    {"op": "feature_step", "feature": "stdlib_revision_barrier_v1", "step": {"op": "observe", "now": 4, "predicate": false, "cancellation": "cancelled"}, "expected": {"outcome": "unavailable", "reason": "clock_regression", "revision": 0, "generation": 0, "cancellation_calls": 0}},
+    {"op": "feature_step", "feature": "stdlib_revision_barrier_v1", "step": {"op": "observe", "now": 6, "predicate": true, "cancellation": "cancelled"}, "expected": {"outcome": "unavailable", "reason": "clock_regression", "revision": 0, "generation": 0, "cancellation_calls": 0}},
+    {"op": "feature_observe", "feature": "stdlib_revision_barrier_v1", "expected": {"outcome": "unavailable", "reason": "clock_regression", "revision": 0, "generation": 0, "cancellation_calls": 0}},
 
     {"op": "feature_reset", "feature": "stdlib_revision_barrier_v1"},
     {"op": "feature_step", "feature": "stdlib_revision_barrier_v1", "step": {"op": "start", "revision": 0, "required_revision": 1, "deadline": null}, "expected": {"outcome": "pending", "revision": 0, "generation": 0}},

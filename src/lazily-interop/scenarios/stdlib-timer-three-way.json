@@ -1,10 +1,16 @@
 {
-  "name": "stdlib-timer-native-three-way",
+  "name": "stdlib-timer-all-bindings",
   "seed": 1101,
   "peers": [
-    {"name": "lazily-zig", "peer_id": 1},
-    {"name": "lazily-go", "peer_id": 2},
-    {"name": "lazily-cpp", "peer_id": 3}
+    {"name": "lazily-rs", "peer_id": 1},
+    {"name": "lazily-py", "peer_id": 2},
+    {"name": "lazily-kt", "peer_id": 3},
+    {"name": "lazily-js", "peer_id": 4},
+    {"name": "lazily-dart", "peer_id": 5},
+    {"name": "lazily-zig", "peer_id": 6},
+    {"name": "lazily-go", "peer_id": 7},
+    {"name": "lazily-cpp", "peer_id": 8},
+    {"name": "lazily-cs", "peer_id": 9}
   ],
   "required_features": ["stdlib_timer_v1"],
   "required_codecs": [],
@@ -37,7 +43,7 @@
     {"op": "feature_step", "feature": "stdlib_timer_v1", "step": {"op": "observe", "now": 10}, "expected": {"outcome": "fired", "fired_at": 10}},
 
     {"op": "feature_reset", "feature": "stdlib_timer_v1"},
-    {"op": "feature_step", "feature": "stdlib_timer_v1", "step": {"op": "start", "now": 18446744073709551614, "duration": 2}, "expected": {"outcome": "unavailable", "reason": "deadline_overflow"}},
+    {"op": "feature_step", "feature": "stdlib_timer_v1", "step": {"op": "start", "now": "18446744073709551614", "duration": 2}, "expected": {"outcome": "unavailable", "reason": "deadline_overflow"}},
     {"op": "feature_observe", "feature": "stdlib_timer_v1", "expected": {"outcome": "unavailable", "reason": "deadline_overflow"}}
   ],
   "expected_snapshot": []

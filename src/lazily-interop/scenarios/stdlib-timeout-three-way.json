@@ -1,10 +1,16 @@
 {
-  "name": "stdlib-timeout-native-three-way",
+  "name": "stdlib-timeout-all-bindings",
   "seed": 1102,
   "peers": [
-    {"name": "lazily-zig", "peer_id": 1},
-    {"name": "lazily-go", "peer_id": 2},
-    {"name": "lazily-cpp", "peer_id": 3}
+    {"name": "lazily-rs", "peer_id": 1},
+    {"name": "lazily-py", "peer_id": 2},
+    {"name": "lazily-kt", "peer_id": 3},
+    {"name": "lazily-js", "peer_id": 4},
+    {"name": "lazily-dart", "peer_id": 5},
+    {"name": "lazily-zig", "peer_id": 6},
+    {"name": "lazily-go", "peer_id": 7},
+    {"name": "lazily-cpp", "peer_id": 8},
+    {"name": "lazily-cs", "peer_id": 9}
   ],
   "required_features": ["stdlib_timeout_v1"],
   "required_codecs": [],

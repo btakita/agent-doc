@@ -930,13 +930,32 @@ It retains the material nexus to your duties or demonstrable material harm to Ha
 Changed path: `tasks/professional/haiven/haiven-addendum-response-draft.md`. The file was staged alone and committed as `0125022b6` (`draft Haiven addendum response`); all unrelated workspace changes were left untouched. Verification: `git diff --check` passed, the staged path set contained only the email draft, the staged diff digest showed one added file, and the final targeted text check confirmed the enumerated wording without “intentional dishonesty.” Confidence is high.
 
 The existing `#haiven-paper` review item already tracks the unresolved Cause-language negotiation, so no new backlog item is needed. No email, Gmail draft, attachment, signature, or other external action was taken.
-<!-- agent:boundary:f7db5817 -->
+
+### Re: Portrait-layout Exhibit A — gpt-5
+
+> **Queue prompt:**
+>
+> do [#exhibitportraitlayout]
+
+
+Yes. I converted Exhibit A from landscape to **US Letter portrait** and regenerated [haiven-exhibit-a-proposed.pdf](../professional/haiven/haiven-exhibit-a-proposed.pdf).
+
+Changed paths:
+
+- `tasks/professional/haiven/haiven-exhibit-a.css` — changed the page rule from `letter landscape` to `letter portrait`.
+- `tasks/professional/haiven/haiven-exhibit-a-proposed.pdf` — regenerated from the existing Markdown source with Pandoc and WeasyPrint.
+
+The result is three portrait pages at 612 × 792 points. I rendered and visually inspected all three pages: the table fits within the margins, rows and headings remain intact, text is legible, the Effect of Listing and Incorporation and Priority provisions are complete, and the signature fields and `Page N of 3` footers are not clipped. `pdftotext` confirmed the key sections and entries, `pdfinfo` confirmed portrait letter dimensions, and `git diff --check` passed for the stylesheet. Pandoc/WeasyPrint emitted two non-blocking compatibility warnings for default HTML properties, but neither appears in the custom print stylesheet or caused visible overflow.
+
+The two intended files were staged alone and committed as `0d63396e6` (`render Haiven Exhibit A in portrait`); unrelated workspace changes were left untouched. Confidence is high.
+
+No email, Gmail draft, attachment upload, signature, or other external action was taken.
+<!-- agent:boundary:4c78a46c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-- Remove "and intentional dishonesty" since it is subjective and can occur without breaking the law.
+<!-- agent:queue go priority -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -958,4 +977,6 @@ The existing `#haiven-paper` review item already tracks the unresolved Cause-lan
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/recruit/haiven.done.md -->
+
+<!-- completed work archived in tasks/recruit/haiven.done.md -->
 <!-- /agent:done -->

@@ -66,6 +66,17 @@ deadline, the operation remains retained without a direct disk write. The
 operator-facing `session-check` command reports this state but does not execute
 the save effect.
 
+If the editor endpoint remains live while its controller replica or native
+content-projection callback is missing, current-document resolution may send a
+save-only `save_document` request without `patch_id`. A terminal applied receipt
+proves the editor's save API completed and authorizes one structurally validated
+read of that editor-written disk cut. This is not general disk fallback: no
+receipt, a rejected request, a missing endpoint, or invalid saved bytes preserves
+the original missing-replica failure. Because the save-only payload is stable
+across builds, this one request may retry the same protocol version using the
+listener's reported build ID; all projection-bearing mutations remain strictly
+build-fenced.
+
 After a response is committed, an editor/CRDT replica may not regress authority
 to that capture's pre-response baseline. When the current authority is proven
 equal to the capture baseline, the captured response is absent there, and the

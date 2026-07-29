@@ -5651,8 +5651,86 @@ fn try_resolve_current_document_uncached_with_source(
     file: &std::path::Path,
     source: &str,
 ) -> Result<CurrentDocument> {
-    try_resolve_current_doc_from_file_with_source(file, source)
-        .map(|reconciliation| CurrentDocument::new(file.to_path_buf(), reconciliation))
+    match try_resolve_current_doc_from_file_with_source(file, source) {
+        Ok(reconciliation) => Ok(CurrentDocument::new(file.to_path_buf(), reconciliation)),
+        Err(authority_error) => match recover_current_document_from_editor_save(file, source) {
+            Ok(Some(document)) => Ok(document),
+            Ok(None) => Err(authority_error),
+            Err(save_error) => Err(authority_error).with_context(|| {
+                format!(
+                    "{source}: editor-save recovery also failed for {}: {save_error:#}",
+                    file.display()
+                )
+            }),
+        },
+    }
+}
+
+/// Recover a current-document snapshot through the editor's own save API when
+/// the live controller replica is missing.
+///
+/// This is not a disk fallback. The disk read is admitted only after the exact
+/// registered editor endpoint returns a terminal `applied` receipt for a typed
+/// save-only request. The saved cut is structurally validated before it becomes
+/// the pass-scoped current document; a missing listener, rejected receipt, or
+/// invalid document leaves the original authority failure intact.
+fn recover_current_document_from_editor_save(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<Option<CurrentDocument>> {
+    let canonical_path = file.canonicalize().with_context(|| {
+        format!(
+            "{source}: failed to canonicalize {} for editor-save recovery",
+            file.display()
+        )
+    })?;
+    let Some(registration) =
+        agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)?
+    else {
+        return Ok(None);
+    };
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical_path);
+    if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid) {
+        return Ok(None);
+    }
+
+    let path_str = canonical_path.to_string_lossy().to_string();
+    let save_request_id = format!("current-document-save-{}", uuid::Uuid::new_v4());
+    if !agent_doc_ipc_io::send_save_document_without_projection_to_editor(
+        &project_root,
+        registration.pid,
+        &registration.editor_id,
+        &path_str,
+        &save_request_id,
+    )? {
+        return Ok(None);
+    }
+
+    let saved = std::fs::read_to_string(&canonical_path).with_context(|| {
+        format!(
+            "{source}: editor save was applied but its disk projection could not be read for {}",
+            canonical_path.display()
+        )
+    })?;
+    validate_canonical_document_target(&canonical_path, &saved, source)?;
+    let saved_buffer = BufferState::new(saved.clone(), false, 0);
+    let document = CurrentDocument::new(
+        canonical_path.clone(),
+        reconcile_current_doc(&saved, Some(&saved_buffer)),
+    );
+    agent_doc_ops_log_io::log_op(
+        &canonical_path,
+        &format!(
+            "current_document_recovered_from_editor_save file={} source={} save_request_id={} editor_id={} editor_pid={} content_hash={} editor_save_receipt=true disk_version_editor_saved=true",
+            canonical_path.display(),
+            source,
+            save_request_id,
+            registration.editor_id,
+            registration.pid,
+            agent_doc_hash::content_hash(&saved),
+        ),
+    );
+    Ok(Some(document))
 }
 
 /// Resolve the current document from disk while preserving the typed document

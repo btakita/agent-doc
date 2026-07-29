@@ -107,12 +107,14 @@ Idempotency key: `"<project-root>:<document-path>:focus"`.
 
 ### `agent-doc.save_document.v1`
 
-Idempotency key: `"<document-path>:save:<patch_id>"`.
+Idempotency key: `"<document-path>:save:<patch_id>"` for projection-bearing
+saves, or `"<document-path>:save-only:<save_request_id>"` for recovery saves.
 
 | Field | Type | Notes |
 |---|---|---|
 | `document_path` | string | Document to save |
-| `patch_id` | string | Patch id being persisted |
+| `patch_id` | string (optional) | Patch id being persisted. When absent, the editor saves its open buffer without publishing a native content projection; an applied receipt authorizes reading only the editor-written disk cut. |
+| `save_request_id` | string (optional) | Unique request identity for a save-only recovery request |
 | `expected_generation` | integer ≥ 0 | Generation the caller expects on disk |
 | `expected_hash` | string \| null | Expected content hash before write (fail-closed guard) |
 

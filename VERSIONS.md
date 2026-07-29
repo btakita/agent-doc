@@ -4,6 +4,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.74
+
+_JetBrains plugin 0.2.314; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **An attached editor with a missing CRDT replica now repairs itself through
+  editor authority.** Current-document resolution asks the registered editor to
+  save its exact buffer without applying a projection, requires the typed
+  applied receipt, and only then reads that editor-written disk cut to rebuild
+  the controller model. This removes the close/reopen or IDE-reload requirement
+  for already-open documents such as `haiven.md`, while continuing to refuse an
+  unproved disk fallback.
+- **Save-only recovery crosses a same-protocol build fence safely.** When a
+  freshly installed CLI reaches an older live editor listener, it retries only
+  the non-projecting save request with the listener's reported build identity.
+  All document-mutating editor intents remain strict build-matched operations.
+
 ## 0.35.73
 
 _JetBrains plugin 0.2.314; VS Code extension 0.2.62; Zed extension 0.1.0._

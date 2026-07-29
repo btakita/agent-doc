@@ -878,6 +878,25 @@ pub fn save_document_message(file: &str, patch_id: &str) -> serde_json::Value {
     })
 }
 
+/// Build an editor-owned save request that deliberately does not publish a
+/// patch/content projection.
+///
+/// This narrow form recovers the current document when an editor listener is
+/// alive but its native CRDT projection bridge is temporarily unavailable.
+/// First-party editors treat an absent `patch_id` as a save-only operation: an
+/// applied receipt proves their document save API completed, after which the
+/// caller may read the exact editor-written disk cut.
+pub fn save_document_without_projection_message(
+    file: &str,
+    save_request_id: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": EditorIntent::SaveDocument.as_str(),
+        "file": file,
+        "save_request_id": save_request_id,
+    })
+}
+
 /// Build a full content refresh payload.
 pub fn refresh_content_message(
     file: &str,
@@ -1180,8 +1199,8 @@ mod tests {
         message_requests_early_receipt, normalization_repair_patch_message,
         observe_lazily_current_message, patch_message, pending_callback_from_request,
         queue_convergence_message, refresh_content_message, reload_lib_message, reposition_message,
-        save_document_message, validate_ipc_hello, validate_ipc_hello_ack, vcs_refresh_message,
-        vcs_refresh_probe_message,
+        save_document_message, save_document_without_projection_message, validate_ipc_hello,
+        validate_ipc_hello_ack, vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]
@@ -1528,6 +1547,17 @@ mod tests {
         assert_eq!(message["patch_id"], "save-123");
         assert!(message.get("content").is_none());
         assert!(message.get("patches").is_none());
+    }
+
+    #[test]
+    fn save_document_without_projection_omits_patch_id() {
+        let message = save_document_without_projection_message("/tmp/plan.md", "save-only-123");
+
+        assert_eq!(message["type"], "save_document");
+        assert_eq!(message["file"], "/tmp/plan.md");
+        assert_eq!(message["save_request_id"], "save-only-123");
+        assert!(message.get("patch_id").is_none());
+        assert!(message.get("content").is_none());
     }
 
     #[test]

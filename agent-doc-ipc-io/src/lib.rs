@@ -42,8 +42,8 @@ use agent_doc_ipc_protocol::{
     early_receipt_tagged_message, ipc_accept_thread_ops_marker, ipc_handshake_rejection,
     ipc_hello_ack_message, ipc_hello_message, message_is_reload_library,
     message_requests_early_receipt, observe_lazily_current_message, refresh_content_message,
-    reload_lib_message, save_document_message, validate_ipc_hello, validate_ipc_hello_ack,
-    vcs_refresh_message,
+    reload_lib_message, save_document_message, save_document_without_projection_message,
+    validate_ipc_hello, validate_ipc_hello_ack, vcs_refresh_message,
 };
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
@@ -710,6 +710,72 @@ pub fn send_save_document_to_editor(
             Ok(true)
         }
         Err(e) => Err(e),
+    }
+}
+
+/// Ask the editor to save its current buffer without requiring its native
+/// content-projection callback.
+///
+/// The normal save intent carries a `patch_id`, so first-party editors publish
+/// the saved content into Lazily before acknowledging it. During native-library
+/// reload failure that callback may be unavailable even though the editor's
+/// typed save API and socket listener are still healthy. This save-only form
+/// omits `patch_id` and accepts only a terminal `applied` receipt. A build-ID
+/// mismatch may be retried against the listener's reported build only for this
+/// protocol-stable, mutation-narrow message; ordinary intents remain strictly
+/// build-fenced.
+pub fn send_save_document_without_projection_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    file: &str,
+    save_request_id: &str,
+) -> Result<bool> {
+    let mut message = save_document_without_projection_message(file, save_request_id);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
+
+    let send = |identity: &IpcPeerIdentity| {
+        send_message_with_timeout_inner_with_identity(
+            project_root,
+            Some(editor_pid),
+            &message,
+            Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
+            PendingReceiptMode::WaitForTerminal,
+            identity,
+        )
+    };
+
+    let receipt = match send(&local_ipc_identity()) {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            let Some(IpcHandshakeError::BuildMismatch { received, .. }) =
+                error.downcast_ref::<IpcHandshakeError>()
+            else {
+                return Err(error);
+            };
+            eprintln!(
+                "[ipc-socket] save-only build compatibility retry: listener_build={received}"
+            );
+            send(&IpcPeerIdentity::new(
+                IPC_PROTOCOL_VERSION,
+                received.clone(),
+            ))
+            .with_context(|| {
+                format!("save-only IPC compatibility retry failed after build mismatch: {error:#}")
+            })?
+        }
+    };
+
+    match receipt {
+        Some(receipt) => {
+            eprintln!("[ipc-socket] save_document without projection applied, receipt: {receipt}");
+            Ok(true)
+        }
+        None => {
+            eprintln!("[ipc-socket] save_document without projection had no terminal receipt");
+            Ok(false)
+        }
     }
 }
 
@@ -1759,6 +1825,94 @@ mod tests {
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
+    }
+
+    #[test]
+    fn send_save_document_without_projection_omits_patch_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let captured = std::sync::Arc::new(Mutex::new(None::<serde_json::Value>));
+        let captured_clone = captured.clone();
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, move |msg| {
+                let value: serde_json::Value = serde_json::from_str(msg).ok()?;
+                *captured_clone.lock() = Some(value);
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
+            })
+            .ok();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let ok = send_save_document_without_projection_to_editor(
+            &root,
+            u64::from(std::process::id()),
+            "test-editor",
+            "/tmp/plan.md",
+            "save-only-123",
+        )
+        .unwrap();
+        assert!(ok, "save-only request needs a terminal applied receipt");
+
+        let msg = captured.lock().clone().expect("listener saw a message");
+        assert_eq!(msg["type"], "save_document");
+        assert_eq!(msg["file"], "/tmp/plan.md");
+        assert_eq!(msg["save_request_id"], "save-only-123");
+        assert!(msg.get("patch_id").is_none());
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn save_only_request_retries_a_same_protocol_older_build_listener() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let captured = std::sync::Arc::new(Mutex::new(None::<serde_json::Value>));
+        let captured_clone = captured.clone();
+        let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener_with_logger_and_read_timeout(
+                &root_clone,
+                move |msg| {
+                    let value: serde_json::Value = serde_json::from_str(msg).ok()?;
+                    *captured_clone.lock() = Some(value);
+                    Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
+                },
+                noop_ops_logger,
+                Duration::from_secs(1),
+                Some(server_shutdown),
+                IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "older-compatible-build"),
+            )
+            .unwrap();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let ok = send_save_document_without_projection_to_editor(
+            &root,
+            u64::from(std::process::id()),
+            "test-editor",
+            "/tmp/plan.md",
+            "save-only-compatible-123",
+        )
+        .unwrap();
+        assert!(ok);
+        assert_eq!(
+            captured.lock().as_ref().and_then(|msg| msg.get("type")),
+            Some(&serde_json::Value::String("save_document".to_string()))
+        );
+
+        shutdown.store(true, Ordering::SeqCst);
+        wake_listener(&root).unwrap();
+        server.join().unwrap();
     }
 
     #[test]

@@ -1082,7 +1082,11 @@ The committed revision:
 - shortened the email's submodule safe harbor while identifying the employee-controlled superproject as private.
 
 Verification already completed: `git diff --check` passed, PDF text extraction found all added identifiers, visual inspection found no clipping, and the relevant files are clean after commit. No external message or attachment was sent.
-<!-- agent:boundary:ad4a3778 -->
+
+### Re: Response
+
+`#recommendedadditionsexhi` was already completed and committed; the stale queue head is being reaped without duplicating its response.
+<!-- agent:boundary:cb64fa37 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1090,14 +1094,12 @@ Verification already completed: `git diff --check` passed, PDF text extraction f
 <!-- agent:queue priority -->
 - 🚧 do [#recommendedadditionsexhi]
 - do [#unpaidoutsideactivity]
-- ~~"Separate Git repositories—including repositories referenced solely as Git submodules of an employee-controlled superproject—should satisfy the repository-separation requirement, provided the superproject stores only ordinary submodule metadata and commit pointers and does not store or expose Haiven source code, credentials, Confidential Information, or work product outside the dedicated Haiven repository.": Is this too much detail? Does the previous sentence already cover? They will see it if I screenshare. If we should include it, mention the superproject is private.~~
-- ~~Should I also draft a second addendum or have Luke and/or Craig draft it? If we draft it, the process maybe faster.~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] 🚧 [#recommendedadditionsexhi] Add the recommended additions to Exhibit A.
+- [x] 🚧 [#recommendedadditionsexhi] Add the recommended additions to Exhibit A.
 - [ ] [#unpaidoutsideactivity] Does unpaid "outside activity" need approval as well?
 <!-- /agent:backlog -->
 

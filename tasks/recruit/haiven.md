@@ -1127,7 +1127,7 @@ Changed paths: none. Verification: I compared the returned addendum's Section 2 
 Answered and committed in [haiven.md](/home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md).
 
 Bottom line: unpaid activity does not automatically require approval, but conflict-related or materially interfering activity may. The proposed language now includes a safe harbor for ordinary personal, volunteer, and open-source activity. No external message was sent.
-<!-- agent:boundary:b0cb50c6 -->
+<!-- agent:boundary:1b74c99a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1142,7 +1142,6 @@ Bottom line: unpaid activity does not automatically require approval, but confli
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [x] [#unpaidoutsideactivity] Does unpaid "outside activity" need approval as well?
 <!-- /agent:backlog -->
 
 ## Review

@@ -52,6 +52,16 @@ class CrdtReplicaForwarder(
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaForwarder::class.java)
     private var pushedVersion: ByteArray? = null
     private var lineage: String? = null
+    /**
+     * Exact visible text of [node] after the last successful mutation.
+     *
+     * Every call that can mutate the native node is serialized by the
+     * per-document worker. Keeping that actor-owned projection avoids
+     * materializing the entire CRDT document through FFI before every
+     * keystroke. A native text read is still performed once at registration and
+     * after remote updates, where the resulting editor text is required anyway.
+     */
+    private var knownReplicaText: String? = null
     private val ownership = MergeOwnershipStateChart(ownershipContext)
 
     /** True once [register] succeeded and the replica is bound. */
@@ -130,6 +140,13 @@ class CrdtReplicaForwarder(
                 transport.deregister(filePath, identity)
                 return false
             }
+            val textStarted = System.nanoTime()
+            knownReplicaText = node.text()
+            logSlow(
+                "native.text",
+                textStarted,
+                details = "reason=register chars=${knownReplicaText?.length ?: -1}",
+            )
             check(ownership.send(MergeOwnershipEvent.EditorAttached)) {
                 "merge-ownership chart rejected editor attach from ${ownership.phase}"
             }
@@ -156,11 +173,20 @@ class CrdtReplicaForwarder(
      * document model. Offsets/lengths are yrs char units (the caller converts the
      * IntelliJ UTF-16 offsets first). A no-op when not [attached].
      */
-    fun forwardLocalDelta(offset: Int, deleteLen: Int, insert: String) {
+    fun forwardLocalDelta(
+        offset: Int,
+        deleteLen: Int,
+        insert: String,
+        resultingText: String? = null,
+    ) {
         if (!attached) return
         val started = System.nanoTime()
         val applyStarted = System.nanoTime()
         if (!node.applyLocal(clientId, offset, deleteLen, insert)) return
+        // Production supplies the manager's already-computed next shadow. Tests
+        // and compatibility callers may omit it; in that case the cache becomes
+        // unknown and the next explicit baseline check performs one native read.
+        knownReplicaText = resultingText
         logSlow("native.applyLocal", applyStarted, details = "offset=$offset delete_cp=$deleteLen insert_chars=${insert.length}")
         val updateBytes = publishIncremental("local-delta")
         logSlow("forwardLocalDelta", started, warnMs = 100, details = "update_bytes=$updateBytes")
@@ -175,13 +201,26 @@ class CrdtReplicaForwarder(
     fun ensureEditorText(editorText: String) {
         if (!attached) return
         val started = System.nanoTime()
-        val textStarted = System.nanoTime()
-        val current = node.text() ?: return
-        logSlow("native.text", textStarted, details = "reason=ensureEditorText chars=${editorText.length}")
-        if (current == editorText) return
+        val current = knownReplicaText ?: run {
+            val textStarted = System.nanoTime()
+            node.text().also { currentText ->
+                logSlow(
+                    "native.text",
+                    textStarted,
+                    details = "reason=ensureEditorText chars=${currentText?.length ?: -1}",
+                )
+            }
+        } ?: return
+        if (current == editorText) {
+            // Canonicalize on the editor's String instance. The manager shadow
+            // then compares by identity on the ordinary next-keystroke path.
+            knownReplicaText = editorText
+            return
+        }
         val deleteLen = current.codePointCount(0, current.length)
         val applyStarted = System.nanoTime()
         if (!node.applyLocal(clientId, 0, deleteLen, editorText)) return
+        knownReplicaText = editorText
         logSlow("native.applyLocal", applyStarted, details = "reason=ensureEditorText delete_cp=$deleteLen insert_chars=${editorText.length}")
         // Incremental from the bootstrap frontier. The incident-causing full-state
         // adopt remains disabled; bounded text adopt is triggered only by an explicit
@@ -221,21 +260,23 @@ class CrdtReplicaForwarder(
         logSlow("native.applyUpdate", applyStarted, details = "update_bytes=${update.size}")
         val textStarted = System.nanoTime()
         val text = node.text()
+        knownReplicaText = text
         logSlow("native.text", textStarted, details = "reason=applyRemoteUpdate chars=${text?.length ?: -1}")
         logSlow("applyRemoteUpdate", started, warnMs = 100, details = "update_bytes=${update.size} chars=${text?.length ?: -1}")
         return text
     }
 
-    /** Current local replica text, used only as a precondition check before
-     * applying CP-delivered updates. The editor buffer remains authoritative;
-     * a mismatch makes the manager publish the editor buffer before mutating
-     * this replica further. */
+    /**
+     * Current actor-owned local-replica projection.
+     *
+     * The editor buffer remains authoritative; a mismatch makes the manager
+     * publish the editor buffer before mutating this replica further. This does
+     * not cross FFI on each keystroke: all native mutations are serialized and
+     * update [knownReplicaText] at their boundary.
+     */
     fun replicaText(): String? {
         if (!attached) return null
-        val started = System.nanoTime()
-        return node.text().also { text ->
-            logSlow("native.text", started, details = "reason=replicaText chars=${text?.length ?: -1}")
-        }
+        return knownReplicaText
     }
 
     /** Capture a local replica handoff before replacement/native unload. */
@@ -324,6 +365,7 @@ class CrdtReplicaForwarder(
         node.close(clientId)
         pushedVersion = null
         lineage = null
+        knownReplicaText = null
         logSlow("native.close", closeStarted)
         check(ownership.send(MergeOwnershipEvent.EditorDetached)) {
             "merge-ownership chart rejected editor detach from ${ownership.phase}"
@@ -589,12 +631,38 @@ class CpSocketReplicaTransport(
 
     override fun pushTextAdopt(filePath: String, text: String): Boolean {
         val lib = AgentDocLib.get() ?: return false
-        return try {
+        val retained = try {
             lib.agent_doc_reliable_sync_text_adopt_push(projectRoot, filePath, text) == 0
         } catch (e: Throwable) {
             log.warn("[reattach-adopt] bounded text adopt failed for ${File(filePath).name}: ${e.message}")
             false
         }
+        if (!retained) return false
+
+        // The reliable-sync call makes the intent durable, but a retained frame
+        // can sit behind an older unsettled suffix. Re-registering before this
+        // exact editor cut is visible in the controller projection recreates
+        // the stale native baseline and turns every following keystroke into a
+        // full-document recovery. Require a synchronous projection ACK here.
+        // The retained frame may replay later; text-adopt is self-echo guarded.
+        val payload = JsonObject().apply {
+            addProperty("text", text)
+            addProperty("source", "jetbrains_stale_baseline_recovery")
+        }
+        val request = JsonObject().apply {
+            addProperty("command", "crdt_text_adopt")
+            addProperty("file", filePath)
+            addProperty("diagnostic_payload", payload.toString())
+        }
+        val response = send(request)
+        if (response?.ok != true) {
+            log.warn(
+                "[reattach-adopt] controller projection did not acknowledge ${File(filePath).name}; " +
+                    "reason=${response?.error ?: lastSendError ?: "unknown"}",
+            )
+            return false
+        }
+        return true
     }
 
     override fun flushDocumentOps(filePath: String) {

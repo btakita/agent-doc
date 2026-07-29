@@ -514,6 +514,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         await: Boolean = false,
         forceRefresh: Boolean = false,
     ): Boolean {
+        // TypingTracker reports the Lazily current-document projection after
+        // each coalesced edit burst. Once this document already owns a live
+        // replica, that observation must not enqueue another attach, normalize
+        // the whole markdown document, or overwrite the incremental shadow with
+        // a future editor cut. The latter used to advance the shadow past queued
+        // DocumentEvents and manufacture the stale-baseline recovery loop.
+        if (!forceRefresh && forwarders[filePath]?.attached == true) {
+            return true
+        }
         val attach = attach@{
             val started = System.nanoTime()
             var chars = -1
@@ -761,7 +770,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             } else {
                 val replicaText = forwarder.replicaText()
                 if (shouldForwardLocalDeltaUtil(replicaText, beforeText)) {
-                    forwarder.forwardLocalDelta(offset, deleteLen, newFragment)
+                    forwarder.forwardLocalDelta(
+                        offset = offset,
+                        deleteLen = deleteLen,
+                        insert = newFragment,
+                        resultingText = nextText,
+                    )
                 } else {
                     log.warn(
                         "[crdt-replica] local delta found a stale native baseline for ${File(filePath).name}; " +

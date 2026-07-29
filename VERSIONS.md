@@ -4,6 +4,26 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.71
+
+_JetBrains plugin 0.2.313; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Large-document typing no longer manufactures stale CRDT baselines.** A
+  routine Lazily current-document observation returns immediately when the
+  document replica is already attached; it cannot normalize the whole Markdown
+  file or advance the incremental shadow past queued `DocumentEvent`s. The
+  per-document actor retains and updates the exact native-text projection,
+  removing the full FFI text materialization previously paid per keystroke.
+- **Exact-editor recovery waits for its controller projection.** The bounded
+  text-adopt intent is retained first, then receives a synchronous
+  `crdt_text_adopt` acknowledgment before atomic replica replacement. A frame
+  waiting behind an older suffix can no longer authorize a stale re-register
+  and another multi-megabyte `ensureEditorText` publication.
+- **Op capture has no legacy authority fallback.** Runtime reads consume only
+  typed `EditorOpCaptureCheckpointed` / `EditorOpCaptureCleared` state. A live
+  actor timeout fails closed, and obsolete bespoke-table rows are not read,
+  imported, cleared, or counted by normal GC.
+
 ## 0.35.70
 
 _JetBrains plugin 0.2.312; VS Code extension 0.2.62; Zed extension 0.1.0._

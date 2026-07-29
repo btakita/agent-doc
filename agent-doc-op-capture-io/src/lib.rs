@@ -9,7 +9,7 @@
 //!
 //! - **Persistence** — `EditorOpCaptureCheckpointed` is a complete, typed state
 //!   fact containing the ordered ops and exact `base_hash`. The former
-//!   `editor_op_captures` table is read only as one-way migration input.
+//!   `editor_op_captures` table is inert legacy data, never migration input.
 //! - **Append discipline** — recording an op against a *different* base than
 //!   the projected base starts a fresh monotonic epoch. A live controller
 //!   serializes read/derive/append; cold startup performs the same transition in
@@ -178,9 +178,12 @@ fn load_projected_capture(
                 return capture_from_document_projection(envelope.data.as_ref());
             }
             Err(agent_doc_state_wire::ActorRequestError::Connect(_))
-            | Err(agent_doc_state_wire::ActorRequestError::Timeout(_)) => {
-                // Read-only evidence may fall back to the durable projection
-                // while the controller is momentarily unavailable.
+            | Err(agent_doc_state_wire::ActorRequestError::Timeout(_))
+                if !controller_socket.exists() =>
+            {
+                // The actor disappeared between discovery and connect. With no
+                // live owner, cold hydration from the typed event ledger below
+                // is the single state-backbone path.
             }
             Err(err) => return Err(err).context("read Lazily editor-op projection"),
         }
@@ -200,42 +203,12 @@ fn load_projected_capture(
     capture_from_document_projection(projection.document(document_hash))
 }
 
-fn clear_legacy_capture(project_root: &Path, document_hash: &str) {
-    if let Ok(conn) = agent_doc_sqlite::state_store::open_state_db(project_root) {
-        let _ = agent_doc_sqlite::state_store::clear_editor_op_capture_in_db(&conn, document_hash);
-    }
-}
-
 /// Load the operation epoch for `doc`, if present.
 ///
-/// The typed Lazily projection is authoritative. A pre-migration table row is
-/// imported exactly once only when the projection has never observed an
-/// editor-op epoch or clear marker.
+/// The typed Lazily projection is authoritative. Missing typed state remains
+/// missing; the former bespoke table is never read or imported.
 pub fn load_op_capture(doc: &Path) -> Result<Option<OpCaptureState>> {
     let (project_root, document_hash, _) = state_db_identity(doc)?;
-    let (generation, projected) = load_projected_capture(doc, &project_root, &document_hash)?;
-    if projected.is_some() || generation > 0 {
-        return Ok(projected);
-    }
-
-    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    let Some(legacy) =
-        agent_doc_sqlite::state_store::load_editor_op_capture_from_db(&conn, &document_hash)?
-    else {
-        return Ok(None);
-    };
-    drop(conn);
-    let ops = match serde_json::from_str::<Vec<EditorOp>>(&legacy.ops_json) {
-        Ok(ops) => ops,
-        Err(err) => {
-            eprintln!(
-                "[op-capture] ignoring malformed legacy capture document_hash={document_hash} ({err}); falling back to diff-guess"
-            );
-            return Ok(None);
-        }
-    };
-    record_editor_ops(doc, &legacy.base_hash, ops)?;
-    clear_legacy_capture(&project_root, &document_hash);
     load_projected_capture(doc, &project_root, &document_hash).map(|(_, capture)| capture)
 }
 
@@ -314,7 +287,6 @@ pub fn record_editor_ops(doc: &Path, base_hash: &str, ops: Vec<EditorOp>) -> Res
                         envelope.error.as_deref().unwrap_or("unknown error")
                     );
                 }
-                clear_legacy_capture(&project_root, &document_hash);
                 return Ok(());
             }
             Err(agent_doc_state_wire::ActorRequestError::Connect(_))
@@ -373,7 +345,6 @@ pub fn record_editor_ops(doc: &Path, base_hash: &str, ops: Vec<EditorOp>) -> Res
             payload_json: &payload_json,
         },
     )?;
-    agent_doc_sqlite::state_store::clear_editor_op_capture_in_db(&tx, &document_hash)?;
     tx.commit()?;
     agent_doc_state_wire::mark_local_state_db_dirty();
     Ok(())
@@ -473,7 +444,6 @@ pub fn clear_op_capture(doc: &Path) -> Result<()> {
                         envelope.error.as_deref().unwrap_or("unknown error")
                     );
                 }
-                clear_legacy_capture(&project_root, &document_hash);
                 return Ok(());
             }
             Err(agent_doc_state_wire::ActorRequestError::Connect(_))
@@ -528,14 +498,13 @@ pub fn clear_op_capture(doc: &Path) -> Result<()> {
             payload_json: &payload_json,
         },
     )?;
-    agent_doc_sqlite::state_store::clear_editor_op_capture_in_db(&tx, &document_hash)?;
     tx.commit()?;
     agent_doc_state_wire::mark_local_state_db_dirty();
     Ok(())
 }
 
 /// Garbage-collect projected epochs whose `updated_ms` is older than
-/// `max_age_secs`, plus any unmigrated legacy rows.
+/// `max_age_secs`.
 pub fn gc_op_captures(project_root: &Path, max_age_secs: u64) -> Result<usize> {
     let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
     let cutoff_ms = now_millis().saturating_sub(max_age_secs.saturating_mul(1000));
@@ -552,8 +521,6 @@ pub fn gc_op_captures(project_root: &Path, max_age_secs: u64) -> Result<usize> {
         .filter(|capture| capture.updated_ms == 0 || capture.updated_ms < cutoff_ms)
         .map(|capture| PathBuf::from(&capture.canonical_path))
         .collect::<Vec<_>>();
-    let legacy_removed =
-        agent_doc_sqlite::state_store::gc_editor_op_captures_in_db(&conn, cutoff_ms)?;
     drop(conn);
     let mut cleared = 0;
     for path in stale_paths {
@@ -565,7 +532,7 @@ pub fn gc_op_captures(project_root: &Path, max_age_secs: u64) -> Result<usize> {
             ),
         }
     }
-    Ok(legacy_removed + cleared)
+    Ok(cleared)
 }
 
 fn now_millis() -> u64 {
@@ -859,14 +826,14 @@ mod tests {
     }
 
     #[test]
-    fn malformed_state_row_treated_as_absent() {
+    fn legacy_state_row_is_never_runtime_authority() {
         let (_dir, doc) = setup_doc();
         let (project_root, document_hash, canonical_path) = state_db_identity(&doc).unwrap();
         let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).unwrap();
         agent_doc_sqlite::state_store::upsert_editor_op_capture_in_db(
             &conn,
             &agent_doc_sqlite::state_store::EditorOpCaptureRecord {
-                document_hash,
+                document_hash: document_hash.clone(),
                 canonical_path,
                 base_hash: "base".to_string(),
                 ops_json: "{not valid json".to_string(),
@@ -875,52 +842,11 @@ mod tests {
         )
         .unwrap();
         assert!(load_op_capture(&doc).unwrap().is_none());
-    }
-
-    #[test]
-    fn legacy_row_migrates_once_into_lazily_epoch() {
-        let (_dir, doc) = setup_doc();
-        let (project_root, document_hash, canonical_path) = state_db_identity(&doc).unwrap();
-        let base_hash = content_hash("legacy base\n");
-        let legacy_ops = vec![EditorOp::Insert {
-            offset: 0,
-            text: "migrated".into(),
-        }];
-        let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).unwrap();
-        agent_doc_sqlite::state_store::upsert_editor_op_capture_in_db(
-            &conn,
-            &agent_doc_sqlite::state_store::EditorOpCaptureRecord {
-                document_hash: document_hash.clone(),
-                canonical_path,
-                base_hash: base_hash.clone(),
-                ops_json: serde_json::to_string(&legacy_ops).unwrap(),
-                updated_at_ms: now_millis(),
-            },
-        )
-        .unwrap();
-        drop(conn);
-
-        let migrated = load_op_capture(&doc).unwrap().expect("migrated epoch");
-        assert_eq!(migrated.epoch, 1);
-        assert_eq!(migrated.base_hash, base_hash);
-        assert_eq!(migrated.ops, legacy_ops);
-        let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).unwrap();
         assert!(
             agent_doc_sqlite::state_store::load_editor_op_capture_from_db(&conn, &document_hash)
                 .unwrap()
-                .is_none(),
-            "legacy authority must be consumed after the typed fact lands"
-        );
-        assert_eq!(
-            agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
-                &conn,
-                &document_hash,
-                "editor_op_capture_checkpointed",
-                1,
-            )
-            .unwrap()
-            .len(),
-            1,
+                .is_some(),
+            "ordinary reads must neither import nor delete inert legacy data",
         );
     }
 

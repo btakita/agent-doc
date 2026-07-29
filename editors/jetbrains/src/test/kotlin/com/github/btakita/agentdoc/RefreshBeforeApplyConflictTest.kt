@@ -333,6 +333,22 @@ class RefreshBeforeApplyConflictTest {
         assertTrue("CRDT transport must target the Project Controller socket", forwarder.contains(".agent-doc/controller.sock"))
         assertTrue("CRDT transport must use the controller crdt_replica envelope", forwarder.contains("\"crdt_replica\""))
         assertFalse("CRDT transport must not connect to per-session supervisor sockets", forwarder.contains(".agent-doc/supervisor"))
+
+        val cpTransport = forwarder.substringAfter("class CpSocketReplicaTransport(")
+        val textAdopt = functionBody(
+            cpTransport,
+            "override fun pushTextAdopt(filePath: String, text: String)",
+        )
+        assertTrue(
+            "text adopt must be retained before its synchronous controller projection",
+            textAdopt.indexOf("agent_doc_reliable_sync_text_adopt_push") <
+                textAdopt.indexOf("addProperty(\"command\", \"crdt_text_adopt\")"),
+        )
+        assertTrue(
+            "a retained-but-unprojected text adopt must not authorize immediate re-registration",
+            textAdopt.contains("if (response?.ok != true)") &&
+                textAdopt.contains("return false"),
+        )
     }
 
     private fun assertEveryRefreshGated(source: String, refreshToken: String, gateToken: String) {

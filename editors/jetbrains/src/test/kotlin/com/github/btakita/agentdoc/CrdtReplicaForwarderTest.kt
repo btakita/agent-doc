@@ -32,6 +32,7 @@ class CrdtReplicaForwarderTest {
         var openedWith: ByteArray? = null
         val buffer = StringBuilder()
         var closed = false
+        var textReads = 0
 
         override fun open(clientId: Long, initState: ByteArray?): Boolean {
             opened = true
@@ -56,7 +57,10 @@ class CrdtReplicaForwarderTest {
 
         override fun stateVector(): ByteArray? = "sv:${buffer}".toByteArray()
 
-        override fun text(): String? = buffer.toString()
+        override fun text(): String? {
+            textReads++
+            return buffer.toString()
+        }
 
         override fun close(clientId: Long) {
             closed = true
@@ -239,6 +243,41 @@ class CrdtReplicaForwarderTest {
         assertEquals("BUFFER", node.text())
         assertEquals(1, transport.sentUpdates.size)
         assertEquals("BUFFER", String(transport.sentUpdates[0]))
+    }
+
+    @Test
+    fun `large document typing uses the actor projection instead of reading native text per delta`() {
+        val base = "x".repeat(100_000)
+        val node = FakeNode()
+        val transport = CapturingTransport(bootstrap = base.toByteArray())
+        val fwd = CrdtReplicaForwarder("large.md", "intellij:1", node, transport)
+
+        assertTrue(fwd.register())
+        assertEquals("registration establishes the one native text observation", 1, node.textReads)
+
+        // Aligning an already-equal editor cut canonicalizes the manager's
+        // String instance without another FFI materialization.
+        fwd.ensureEditorText(base)
+        assertEquals(1, node.textReads)
+
+        var current = base
+        repeat(8) {
+            val next = "$current!"
+            fwd.forwardLocalDelta(
+                offset = current.length,
+                deleteLen = 0,
+                insert = "!",
+                resultingText = next,
+            )
+            assertTrue(shouldForwardLocalDeltaUtil(fwd.replicaText(), next))
+            current = next
+        }
+
+        assertEquals(
+            "ordinary keystrokes must not materialize the 100K native document",
+            1,
+            node.textReads,
+        )
     }
 
     @Test

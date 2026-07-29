@@ -490,6 +490,18 @@ class TypingTrackerEdtBudgetTest {
                 localDeltaBody.contains("scheduleStaleBaselineRecovery(filePath, document)") &&
                 source.contains("reason = \"coalesced-local-delta-baseline-diverged\""),
         )
+        val openReplicaBody = source.substringAfter("fun ensureOpenDocumentReplica(")
+            .substringBefore("/**\n     * Publish the exact closing editor cut")
+        assertTrue(
+            "a routine Lazily content observation must not enqueue a full attach or advance the CRDT shadow",
+            openReplicaBody.contains("if (!forceRefresh && forwarders[filePath]?.attached == true)") &&
+                openReplicaBody.indexOf("if (!forceRefresh && forwarders[filePath]?.attached == true)") <
+                openReplicaBody.indexOf("val attach = attach@{"),
+        )
+        assertTrue(
+            "the serialized local delta must install its exact resulting shadow in the forwarder projection",
+            localDeltaBody.contains("resultingText = nextText"),
+        )
         assertTrue(
             "forced refresh must register and atomically swap before retiring the cached client",
             source.contains("if (bypassRegisterBackoff)") &&

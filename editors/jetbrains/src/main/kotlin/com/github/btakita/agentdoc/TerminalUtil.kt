@@ -281,7 +281,7 @@ object TerminalUtil {
      *
      * This path resolver is deliberately local and never crosses JNA. Selection
      * and focus listeners run on IDEA's event-dispatch thread; resolving a path
-     * through the serialized native generation there made an unrelated CRDT
+     * through the native generation bridge there made an unrelated CRDT
      * socket call freeze the whole IDE until the native-call timeout.
      *
      * Returns `(projectRoot, relativePath)` where `relativePath` is `file.path`

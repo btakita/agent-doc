@@ -212,9 +212,11 @@ class TypingTrackerEdtBudgetTest {
                 native.contains("nativeGenerationIsUnmapped"),
         )
         assertTrue(
-            "a wedged native call must time out and poison its generation instead of blocking callers forever",
-            native.contains("future.get(NATIVE_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
+            "only a running wedged native call may poison its generation; queued work retains it",
+            native.contains("future.get(timeoutMs, TimeUnit.MILLISECONDS)") &&
                 native.contains("catch (_: TimeoutException)") &&
+                native.contains("NativeCallQueueTimeoutException") &&
+                native.contains("generation retained") &&
                 native.contains("poisonGeneration(this, reason)") &&
                 native.contains("disabled the wedged generation to keep the IDE responsive"),
         )
@@ -389,8 +391,8 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("private fun scheduleRemoteEditorApply")
 
         assertTrue(
-            "CRDT documentChanged should enqueue local CRDT forwarding onto the replica worker",
-            listenerBody.contains("executor.execute"),
+            "CRDT documentChanged should enqueue local CRDT forwarding onto its document worker",
+            listenerBody.contains("documentWorkers.forDocument(filePath).execute"),
         )
         assertTrue(
             "CRDT documentChanged should defer full-buffer seeding to a background worker",
@@ -419,10 +421,10 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("bypassRegisterBackoff = forceRefresh") &&
                 source.contains("replaceCached = forceRefresh") &&
                 source.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null") &&
-                source.contains("executor.submit<Boolean> { attach() }") &&
+                source.contains("documentWorkers.forDocument(filePath).submit<Boolean> { attach() }") &&
                 source.contains(".get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
                 source.contains("private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L") &&
-                source.contains("executor.execute { attach() }") &&
+                source.contains("documentWorkers.forDocument(filePath).execute { attach() }") &&
                 source.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
         val forceRefreshAttachBody = source.substringAfter("fun ensureOpenDocumentReplica(")

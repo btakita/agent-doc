@@ -12,9 +12,13 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 ## Implementation Details
 
 An installed-library mtime change or typed `reload_library` intent enters one
-application-wide handoff. On Linux, JetBrains marshals every JNA call onto one
-generation-owned thread, stops and joins every CRDT/listener worker, drains
-calls, asks the old cdylib to quiesce replicas, terminates the owner thread so
+application-wide handoff. On Linux, JetBrains marshals JNA calls onto a bounded
+generation-owned worker pool. Calls for distinct document replicas may run in
+parallel, while each replica remains serialized by its document worker and its
+Rust per-replica lock. A call that times out before it starts is cancelled
+without poisoning the generation; only a call that actually ran beyond the
+lease disables it. Reload stops and joins every CRDT/listener worker, drains
+calls, asks the old cdylib to quiesce replicas, terminates all owner threads so
 Rust TLS destructors run, closes the old handle, and verifies `/proc/self/maps`
 no longer contains it before loading the replacement. Controller launch from
 the cdylib uses a short-lived external helper, so no child-reaper thread pins
@@ -133,7 +137,7 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - JetBrains CRDT replica IPC uses the Project Controller socket (`.agent-doc/controller.sock`) with the controller `crdt_replica` envelope. It must not connect to per-session supervisor sockets for replica register/update/pull/ack/deregister/current-text work.
 - A forced CRDT replica refresh must capture and validate the exact current IntelliJ `Document`, then register/seed/swap the replacement replica from those same bytes under an expected-editor-text generation fence. It must never fetch, install, or save a deferred whole-document target before registration. Pending local work or editor drift rejects the swap without replacing the cached member. Durable agent intents remain in Lazily and replay through the ordinary CRDT/document-cell path after the editor cut is published; a refresh can therefore neither erase a new prompt nor resurrect a queue deletion.
 - JetBrains drains remote CRDT deliveries from targeted `EditorIntent` events and the Lazily-backed controller subscription. It must not watch a filesystem event directory or run a fixed interval remote-update pull loop.
-- Remote CRDT delivery into the editor is backpressured by one keyed RelayCell hot head per document. The merge retains the oldest guarded editor baseline, the newest converged text, and the union of acknowledgements represented by that text. A single `invokeLater` mutation is admitted per EDT turn; the replica worker must never wait on `invokeAndWait`, and it must not pull or realign the same document while its coalesced EDT mutation is pending. No-op drain backoff schedules one coalesced delayed retry instead of sleeping on the single replica executor, so a 30-second idle backoff cannot hold local delta forwarding behind it.
+- Remote CRDT delivery into the editor is backpressured by one keyed RelayCell hot head per document. The merge retains the oldest guarded editor baseline, the newest converged text, and the union of acknowledgements represented by that text. Every document has one FIFO replica worker (with idle thread timeout), so attach, normalization, local deltas, remote drain, replay, and ACK work stay ordered within that document without blocking another open document. The project-wide control executor only snapshots/fans out drain requests and owns shared backoff. A single `invokeLater` mutation is admitted per EDT turn; a document replica worker must never wait on `invokeAndWait`, and it must not pull or realign the same document while its coalesced EDT mutation is pending. No-op drain backoff schedules one coalesced delayed retry instead of sleeping on a document lane, so a 30-second idle backoff cannot hold local delta forwarding behind it.
 - Retained delivery acknowledgement replay is a cumulative frontier operation:
   each drain sends at most one oldest pending ACK with the newest visible
   content hash. A successful receipt retires every represented generation

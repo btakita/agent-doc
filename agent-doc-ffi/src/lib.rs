@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use agent_doc_element::element;
 
@@ -435,10 +435,19 @@ pub unsafe extern "C" fn agent_doc_crdt_merge(
 // ---------------------------------------------------------------------------
 
 /// Process-wide registry of cdylib-hosted CRDT replicas, keyed by `replica_id`.
-static REPLICA_REGISTRY: OnceLock<Mutex<HashMap<u64, ReplicaState>>> = OnceLock::new();
+///
+/// The map lock protects membership only. Each replica has its own lock so an
+/// expensive operation for one document never serializes unrelated document
+/// replicas behind the process-wide registry.
+type SharedReplica = Arc<Mutex<ReplicaState>>;
+static REPLICA_REGISTRY: OnceLock<Mutex<HashMap<u64, SharedReplica>>> = OnceLock::new();
 
-fn replica_registry() -> &'static Mutex<HashMap<u64, ReplicaState>> {
+fn replica_registry() -> &'static Mutex<HashMap<u64, SharedReplica>> {
     REPLICA_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn replica_for(replica_id: u64) -> Option<SharedReplica> {
+    replica_registry().lock().get(&replica_id).cloned()
 }
 
 /// Drop every cdylib-hosted replica before a native generation is unloaded.
@@ -449,7 +458,16 @@ fn replica_registry() -> &'static Mutex<HashMap<u64, ReplicaState>> {
 pub fn close_all_replicas_for_reload() -> usize {
     let mut registry = replica_registry().lock();
     let count = registry.len();
-    registry.clear();
+    let replicas = registry
+        .drain()
+        .map(|(_, replica)| replica)
+        .collect::<Vec<_>>();
+    drop(registry);
+    // Quiesce any operation which already cloned an entry before returning to
+    // the native-generation handoff.
+    for replica in replicas {
+        drop(replica.lock());
+    }
     count
 }
 
@@ -530,11 +548,10 @@ pub unsafe extern "C" fn agent_doc_replica_open(
             }
         };
         {
-            let mut reg = replica_registry().lock();
-            {
-                reg.insert(replica_id, replica);
-                0
-            }
+            replica_registry()
+                .lock()
+                .insert(replica_id, Arc::new(Mutex::new(replica)));
+            0
         }
     })
 }
@@ -562,10 +579,11 @@ pub unsafe extern "C" fn agent_doc_replica_apply_local(
             }
         };
         {
-            let reg = replica_registry().lock();
-            match reg.get(&replica_id) {
+            match replica_for(replica_id) {
                 Some(replica) => {
-                    replica.apply_local_edit(offset, delete_len, insert_str);
+                    replica
+                        .lock()
+                        .apply_local_edit(offset, delete_len, insert_str);
                     0
                 }
                 None => -3,
@@ -584,9 +602,10 @@ pub unsafe extern "C" fn agent_doc_replica_apply_local(
 pub unsafe extern "C" fn agent_doc_replica_text(replica_id: u64) -> *mut c_char {
     ffi_guard!(ptr::null_mut(), {
         {
-            let reg = replica_registry().lock();
-            match reg.get(&replica_id) {
-                Some(replica) => CString::new(replica.text()).unwrap_or_default().into_raw(),
+            match replica_for(replica_id) {
+                Some(replica) => CString::new(replica.lock().text())
+                    .unwrap_or_default()
+                    .into_raw(),
                 None => ptr::null_mut(),
             }
         }
@@ -606,9 +625,8 @@ pub unsafe extern "C" fn agent_doc_replica_state_vector(
 ) -> *mut u8 {
     ffi_guard!(null_state(out_len), {
         {
-            let reg = replica_registry().lock();
-            match reg.get(&replica_id) {
-                Some(replica) => leak_state(replica.state_vector(), out_len),
+            match replica_for(replica_id) {
+                Some(replica) => leak_state(replica.lock().state_vector(), out_len),
                 None => null_state(out_len),
             }
         }
@@ -635,9 +653,8 @@ pub unsafe extern "C" fn agent_doc_replica_diff(
         }
         let sv = unsafe { std::slice::from_raw_parts(their_sv, their_sv_len) };
         {
-            let reg = replica_registry().lock();
-            match reg.get(&replica_id) {
-                Some(replica) => match replica.diff(sv) {
+            match replica_for(replica_id) {
+                Some(replica) => match replica.lock().diff(sv) {
                     Ok(update) => leak_state(update, out_len),
                     Err(_) => null_state(out_len),
                 },
@@ -665,9 +682,8 @@ pub unsafe extern "C" fn agent_doc_replica_apply_update(
         }
         let bytes = unsafe { std::slice::from_raw_parts(update, update_len) };
         {
-            let reg = replica_registry().lock();
-            match reg.get(&replica_id) {
-                Some(replica) => match replica.apply_update(bytes) {
+            match replica_for(replica_id) {
+                Some(replica) => match replica.lock().apply_update(bytes) {
                     Ok(()) => 0,
                     Err(_) => -2,
                 },
@@ -690,9 +706,8 @@ pub unsafe extern "C" fn agent_doc_replica_encode_state(
 ) -> *mut u8 {
     ffi_guard!(null_state(out_len), {
         {
-            let reg = replica_registry().lock();
-            match reg.get(&replica_id) {
-                Some(replica) => leak_state(replica.encode_state(), out_len),
+            match replica_for(replica_id) {
+                Some(replica) => leak_state(replica.lock().encode_state(), out_len),
                 None => null_state(out_len),
             }
         }
@@ -708,13 +723,14 @@ pub unsafe extern "C" fn agent_doc_replica_encode_state(
 pub unsafe extern "C" fn agent_doc_replica_close(replica_id: u64) -> i32 {
     ffi_guard!(ERR_FFI_PANIC, {
         {
-            let mut reg = replica_registry().lock();
-            {
-                if reg.remove(&replica_id).is_some() {
-                    0
-                } else {
-                    -3
-                }
+            let removed = replica_registry().lock().remove(&replica_id);
+            if let Some(replica) = removed {
+                // An operation which resolved membership immediately before the
+                // close must finish before close reports success.
+                drop(replica.lock());
+                0
+            } else {
+                -3
             }
         }
     })
@@ -745,9 +761,8 @@ pub unsafe extern "C" fn agent_doc_replica_persist(replica_id: u64, path: *const
             Err(_) => return -2,
         };
         let state = {
-            let reg = replica_registry().lock();
-            match reg.get(&replica_id) {
-                Some(replica) => replica.encode_state(),
+            match replica_for(replica_id) {
+                Some(replica) => replica.lock().encode_state(),
                 None => return -3,
             }
         };
@@ -787,11 +802,10 @@ pub unsafe extern "C" fn agent_doc_replica_recover(replica_id: u64, path: *const
             Err(_) => return -2,
         };
         {
-            let mut reg = replica_registry().lock();
-            {
-                reg.insert(replica_id, replica);
-                0
-            }
+            replica_registry()
+                .lock()
+                .insert(replica_id, Arc::new(Mutex::new(replica)));
+            0
         }
     })
 }
@@ -1289,6 +1303,42 @@ mod tests {
         assert!(unsafe { agent_doc_replica_state_vector(id, &mut len) }.is_null());
         assert_eq!(len, 0, "null byte result sets out_len to 0");
         assert_eq!(unsafe { agent_doc_replica_close(id) }, -3);
+    }
+
+    #[test]
+    fn distinct_replica_locks_do_not_share_a_process_wide_critical_section() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let blocked_id: u64 = 0xD0C0_0001;
+        let independent_id: u64 = 0xD0C0_0002;
+        assert_eq!(
+            unsafe { agent_doc_replica_open(blocked_id, std::ptr::null(), 0) },
+            0
+        );
+        assert_eq!(
+            unsafe { agent_doc_replica_open(independent_id, std::ptr::null(), 0) },
+            0
+        );
+
+        let blocked = replica_for(blocked_id).expect("blocked replica exists");
+        let blocked_guard = blocked.lock();
+        let (sent, received) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let independent = replica_for(independent_id).expect("independent replica exists");
+            let text = independent.lock().text();
+            sent.send(text).expect("test receiver remains alive");
+        });
+
+        assert_eq!(
+            received.recv_timeout(Duration::from_millis(250)).unwrap(),
+            "",
+            "locking one document replica must not block another replica",
+        );
+        drop(blocked_guard);
+        worker.join().unwrap();
+        assert_eq!(unsafe { agent_doc_replica_close(blocked_id) }, 0);
+        assert_eq!(unsafe { agent_doc_replica_close(independent_id) }, 0);
     }
 
     #[test]

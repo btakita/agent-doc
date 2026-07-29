@@ -31,7 +31,7 @@ class TerminalUtilTest {
         val resolver = source.substringAfter("fun resolveProject(project:")
             .substringBefore("private fun rememberRunAfterClear")
         assertFalse(
-            "path resolution on focus/action paths must not cross the serialized native worker",
+            "path resolution on focus/action paths must not cross the native worker pool",
             resolver.contains("NativePatching.resolveProjectPath"),
         )
     }
@@ -49,7 +49,7 @@ class TerminalUtilTest {
         assertTrue(
             "the EDT guard must run before submitting or waiting for native work",
             callOnWorker.indexOf("SwingUtilities.isEventDispatchThread()") <
-                callOnWorker.indexOf("executor.submit"),
+                callOnWorker.indexOf("callOnNativeWorker("),
         )
     }
 

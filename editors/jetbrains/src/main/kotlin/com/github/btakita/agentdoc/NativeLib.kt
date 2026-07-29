@@ -9,6 +9,8 @@ import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.CancellationException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -51,6 +53,84 @@ internal fun nativeReloadTransition(
     targetMtime == 0L || targetMtime == loadedMtime -> NativeReloadTransition.KeepCurrent
     !nativeQuiesced || !callsDrained || !replacementReady -> NativeReloadTransition.RetainOldGeneration
     else -> NativeReloadTransition.PublishReplacement
+}
+
+internal class NativeCallQueueTimeoutException(message: String) : IllegalStateException(message)
+
+private enum class NativeCallExecutionState {
+    Queued,
+    Running,
+    Finished,
+    Cancelled,
+}
+
+/**
+ * Run one call on a generation-owned worker without confusing queue delay with
+ * a wedged native invocation. A queued timeout drops only that invocation; a
+ * call which actually started and exceeded its lease invokes
+ * [onRunningTimeout], which poisons the generation.
+ */
+internal fun <T> callOnNativeWorker(
+    executor: ExecutorService,
+    workerThreads: Set<Thread>,
+    timeoutMs: Long,
+    onRunningTimeout: () -> Nothing,
+    call: () -> T,
+): T {
+    if (workerThreads.contains(Thread.currentThread())) return call()
+    val state = AtomicReference(NativeCallExecutionState.Queued)
+    val future = executor.submit<T> {
+        if (!state.compareAndSet(NativeCallExecutionState.Queued, NativeCallExecutionState.Running)) {
+            throw CancellationException("native call cancelled before execution")
+        }
+        try {
+            call()
+        } finally {
+            state.set(NativeCallExecutionState.Finished)
+        }
+    }
+    return try {
+        future.get(timeoutMs, TimeUnit.MILLISECONDS)
+    } catch (error: ExecutionException) {
+        throw error.cause ?: error
+    } catch (_: TimeoutException) {
+        if (state.compareAndSet(NativeCallExecutionState.Queued, NativeCallExecutionState.Cancelled)) {
+            future.cancel(false)
+            throw NativeCallQueueTimeoutException(
+                "native call waited ${timeoutMs}ms behind other operations; generation retained",
+            )
+        }
+        if (state.get() == NativeCallExecutionState.Finished) {
+            try {
+                future.get()
+            } catch (error: ExecutionException) {
+                throw error.cause ?: error
+            }
+        } else {
+            future.cancel(true)
+            onRunningTimeout()
+        }
+    } catch (error: InterruptedException) {
+        future.cancel(true)
+        Thread.currentThread().interrupt()
+        throw IllegalStateException("interrupted while waiting for the native generation", error)
+    }
+}
+
+internal fun newNativeGenerationExecutor(
+    workerThreads: MutableSet<Thread>,
+    workerCount: Int,
+): ExecutorService {
+    val threadSequence = AtomicInteger(0)
+    return Executors.newFixedThreadPool(workerCount) { runnable ->
+        Thread(
+            runnable,
+            "agent-doc-native-generation-${threadSequence.incrementAndGet()}",
+        ).also { thread ->
+            thread.isDaemon = true
+            workerThreads.add(thread)
+        }
+    }
 }
 
 internal sealed interface NativeReloadOutcome {
@@ -764,7 +844,7 @@ interface AgentDocLib : Library {
             private val delegate: AgentDocLib,
             private val handler: Library.Handler,
             private val executor: ExecutorService,
-            private val workerThread: AtomicReference<Thread?>,
+            private val workerThreads: Set<Thread>,
             val loadTarget: String,
         ) {
             private val callMonitor = java.lang.Object()
@@ -831,32 +911,28 @@ interface AgentDocLib : Library {
             }
 
             private fun <T> callOnWorker(call: () -> T): T {
-                if (Thread.currentThread() === workerThread.get()) return call()
+                if (workerThreads.contains(Thread.currentThread())) return call()
                 check(!SwingUtilities.isEventDispatchThread()) {
                     "agent-doc native calls are forbidden on the IDEA event-dispatch thread"
                 }
-                val future = executor.submit<T> { call() }
-                return try {
-                    future.get(NATIVE_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                } catch (error: ExecutionException) {
-                    throw error.cause ?: error
-                } catch (_: TimeoutException) {
-                    future.cancel(true)
-                    synchronized(callMonitor) {
-                        acceptingCalls = false
-                        callMonitor.notifyAll()
-                    }
-                    executor.shutdownNow()
-                    val reason =
-                        "native call exceeded ${NATIVE_CALL_TIMEOUT_MS}ms; " +
-                            "disabled the wedged generation to keep the IDE responsive"
-                    poisonGeneration(this, reason)
-                    throw IllegalStateException(reason)
-                } catch (error: InterruptedException) {
-                    future.cancel(true)
-                    Thread.currentThread().interrupt()
-                    throw IllegalStateException("interrupted while waiting for the native generation", error)
-                }
+                return callOnNativeWorker(
+                    executor = executor,
+                    workerThreads = workerThreads,
+                    timeoutMs = NATIVE_CALL_TIMEOUT_MS,
+                    onRunningTimeout = {
+                        synchronized(callMonitor) {
+                            acceptingCalls = false
+                            callMonitor.notifyAll()
+                        }
+                        executor.shutdownNow()
+                        val reason =
+                            "native call ran longer than ${NATIVE_CALL_TIMEOUT_MS}ms; " +
+                                "disabled the wedged generation to keep the IDE responsive"
+                        poisonGeneration(this, reason)
+                        throw IllegalStateException(reason)
+                    },
+                    call = call,
+                )
             }
 
             companion object {
@@ -867,13 +943,9 @@ interface AgentDocLib : Library {
                         arrayOf(AgentDocLib::class.java),
                         handler,
                     ) as AgentDocLib
-                    val workerThread = AtomicReference<Thread?>()
-                    val executor = Executors.newSingleThreadExecutor { runnable ->
-                        Thread(runnable, "agent-doc-native-generation").also { thread ->
-                            thread.isDaemon = true
-                            workerThread.set(thread)
-                        }
-                    }
+                    val workerThreads = ConcurrentHashMap.newKeySet<Thread>()
+                    val executor =
+                        newNativeGenerationExecutor(workerThreads, NATIVE_GENERATION_WORKER_COUNT)
                     lateinit var generation: LoadedGeneration
                     val guarded = Proxy.newProxyInstance(
                         AgentDocLib::class.java.classLoader,
@@ -908,7 +980,7 @@ interface AgentDocLib : Library {
                         delegate,
                         handler,
                         executor,
-                        workerThread,
+                        workerThreads,
                         path,
                     )
                     return generation
@@ -926,6 +998,7 @@ interface AgentDocLib : Library {
         private var shutdownHookRegistered = false
         private const val NATIVE_QUIESCE_TIMEOUT_MS = 7_000L
         private const val NATIVE_CALL_TIMEOUT_MS = 10_000L
+        private const val NATIVE_GENERATION_WORKER_COUNT = 4
 
         @Synchronized
         fun get(): AgentDocLib? {

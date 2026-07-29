@@ -314,9 +314,12 @@ private val REMOTE_EDITOR_APPLY_MERGE = MergePolicy(
  */
 class CrdtReplicaManager(private val project: Project) : Disposable, DocumentListener {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java)
+    // Project-wide scheduling owns fan-out/backoff only. Every operation that
+    // reads or mutates one replica runs on that document's serialized lane.
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "agent-doc-crdt-replica-delivery").apply { isDaemon = true }
+        Thread(r, "agent-doc-crdt-replica-control").apply { isDaemon = true }
     }
+    private val documentWorkers = DocumentReplicaWorkers()
     private val forwarders = ConcurrentHashMap<String, CrdtReplicaForwarder>()
     // Every document ownership chart joins the manager's project-lifetime graph.
     // This keeps cross-thread projections composable instead of creating a
@@ -363,6 +366,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     override fun dispose() {
         disposed.set(true)
         executor.shutdownNow()
+        documentWorkers.shutdownNow()
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
         pendingRemoteAckReplays.clear()
@@ -379,11 +383,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         shadows.clear()
     }
 
-    private fun awaitWorkerTermination(timeoutMs: Long): Boolean = try {
-        executor.awaitTermination(timeoutMs, TimeUnit.MILLISECONDS)
-    } catch (_: InterruptedException) {
-        Thread.currentThread().interrupt()
-        false
+    private fun awaitWorkerTermination(timeoutMs: Long): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        val controlStopped = try {
+            executor.awaitTermination(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
+        if (!controlStopped) return false
+        val remaining = deadline - System.nanoTime()
+        return remaining > 0L &&
+            documentWorkers.awaitTermination(TimeUnit.NANOSECONDS.toMillis(remaining).coerceAtLeast(1L))
     }
 
     /**
@@ -453,7 +464,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 return
             }
             markLocalPending(filePath)
-            executor.execute {
+            documentWorkers.forDocument(filePath).execute {
                 val workerStarted = System.nanoTime()
                 try {
                     forwardLocalDeltaFromShadow(
@@ -477,7 +488,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     private fun seedAndAttachFromDocument(filePath: String, document: Document) {
         markLocalPending(filePath)
-        executor.execute {
+        documentWorkers.forDocument(filePath).execute {
             val started = System.nanoTime()
             var chars = -1
             try {
@@ -568,7 +579,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         if (await) {
             return try {
-                executor.submit<Boolean> { attach() }
+                documentWorkers.forDocument(filePath).submit<Boolean> { attach() }
                     .get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             } catch (e: TimeoutException) {
                 log.warn("[crdt-replica] open-document attach timed out for $filePath after ${CRDT_AWAIT_ATTACH_TIMEOUT_MS}ms")
@@ -578,7 +589,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 false
             }
         }
-        executor.execute { attach() }
+        documentWorkers.forDocument(filePath).execute { attach() }
         return true
     }
 
@@ -592,7 +603,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun publishClosingDocumentCut(filePath: String, document: Document): Boolean {
         val closingText = tryReadDocumentText(document) ?: return false
         return try {
-            executor.submit<Boolean> {
+            documentWorkers.forDocument(filePath).submit<Boolean> {
                 val forwarder = forwarderFor(filePath, closingText) ?: return@submit false
                 forwarder.ensureEditorText(closingText)
                 shadows[filePath] = closingText
@@ -779,7 +790,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      */
     private fun scheduleStaleBaselineRecovery(filePath: String, document: Document) {
         lateinit var scheduled: java.util.concurrent.ScheduledFuture<*>
-        scheduled = executor.schedule(
+        scheduled = documentWorkers.forDocument(filePath).schedule(
             Runnable {
                 try {
                     if (disposed.get() || staleBaselineRecoveryTasks[filePath] !== scheduled) {
@@ -872,7 +883,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * the controller write before the editor had a chance to apply it.
      */
     fun requestUrgentRemoteDrain(filePath: String, reason: String) {
-        executor.execute {
+        documentWorkers.forDocument(filePath).execute {
             val forwarder = forwarders[filePath] ?: return@execute
             var applied = 0
             try {
@@ -904,7 +915,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * canonical before another incremental op can be emitted.
      */
     fun requestTextAdopt(filePath: String) {
-        executor.execute {
+        documentWorkers.forDocument(filePath).execute {
             if (!TypingTracker.hasUnsyncedOperatorEdits(filePath)) {
                 log.info(
                     "[reattach-adopt] refused full editor text adopt for ${File(filePath).name}; " +
@@ -969,10 +980,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         if (paths.isEmpty()) return 0
         log.debug("[crdt-replica] draining ${paths.size} replica(s) via $reason")
+        val drains = paths.mapNotNull { filePath ->
+            val forwarder = forwarders[filePath] ?: return@mapNotNull null
+            filePath to documentWorkers.forDocument(filePath).submit<Int> {
+                if (forwarders[filePath] !== forwarder) {
+                    0
+                } else {
+                    drainRemoteUpdatesFor(filePath, forwarder)
+                }
+            }
+        }
         var appliedTotal = 0
-        for (filePath in paths) {
-            val forwarder = forwarders[filePath] ?: continue
-            appliedTotal += drainRemoteUpdatesFor(filePath, forwarder)
+        for ((filePath, drain) in drains) {
+            try {
+                appliedTotal += drain.get()
+            } catch (e: Exception) {
+                log.debug("[crdt-replica] document drain skipped for $filePath: ${e.message}")
+            }
         }
         logSlow(
             "remote-drain",
@@ -1456,7 +1480,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             "[crdt-replica] template-guard recovery retry scheduled for ${File(filePath).name}; " +
                 "reason=$reason delay_ms=$delayMs failures=$failureCount",
         )
-        executor.schedule(
+        documentWorkers.forDocument(filePath).schedule(
             {
                 templateGuardRecoveryRetryPaths.remove(filePath)
                 if (!disposed.get()) requestRemoteDrain(filePath, "template-guard-retry")
@@ -1677,7 +1701,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             rememberPendingRemoteAcks(pending.filePath, pending.acknowledgements)
         }
         try {
-            executor.execute {
+            documentWorkers.forDocument(pending.filePath).execute {
                 try {
                     var acked = 0
                     if (projectionVisible) {
@@ -2139,11 +2163,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val managers = instances.entries.mapNotNull { (project, manager) ->
                 if (instances.remove(project, manager)) project to manager else null
             }
-            // Stop the single owner worker first, but keep native replicas open
-            // long enough to copy their encoded state into JVM-owned memory.
+            // Stop the control worker and every document lane first, but keep
+            // native replicas open long enough to copy their encoded state into
+            // JVM-owned memory.
             managers.forEach { (_, manager) ->
                 manager.disposed.set(true)
                 manager.executor.shutdownNow()
+                manager.documentWorkers.shutdownNow()
             }
             val quiesced = managers.map { (_, manager) ->
                 manager.awaitWorkerTermination(NATIVE_RELOAD_WORKER_TIMEOUT_MS)

@@ -4,6 +4,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.70
+
+_JetBrains plugin 0.2.312; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Document replicas no longer share one blocking execution lane.** JetBrains
+  runs attach, normalization, local edits, delivery, and ACK work on one lazy
+  FIFO worker per document; the native generation uses a bounded owned worker
+  pool, and Rust locks each CRDT replica independently. A large `haiven.md`
+  startup attach therefore cannot block `monsterrodholders.md` registration or
+  reliable-sync liveness for every other open document.
+- **Native call watchdogs distinguish queue delay from a wedged invocation.** A
+  call that times out before starting is cancelled while the generation stays
+  live and usable. Only a call which actually ran beyond its lease disables the
+  native generation. Regression tests block one document/native lane and prove
+  another document still completes while same-document work remains FIFO.
+
 ## 0.35.69
 
 _JetBrains plugin 0.2.311; VS Code extension 0.2.62; Zed extension 0.1.0._

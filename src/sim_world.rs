@@ -79,6 +79,118 @@ mod pane_layout_projection_model {
     }
 }
 
+/// Cross-root pane identity reference model. The sync effect owns exact
+/// file-to-pane evidence for one desired generation; the observer must use
+/// that evidence instead of re-inferring a nested document from a partial
+/// project actor store.
+mod pane_layout_effect_assignment_model {
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct Assignment {
+        generation: u64,
+        file_panes: Vec<(&'static str, &'static str)>,
+    }
+
+    #[derive(Default)]
+    struct World {
+        desired_generation: u64,
+        receipt: Option<Assignment>,
+        visible_panes: Vec<&'static str>,
+        selected_pane: Option<&'static str>,
+    }
+
+    impl World {
+        fn publish(&mut self, generation: u64) {
+            self.desired_generation = generation;
+        }
+
+        fn apply(
+            &mut self,
+            generation: u64,
+            file_panes: Vec<(&'static str, &'static str)>,
+            visible_panes: Vec<&'static str>,
+        ) {
+            self.receipt = Some(Assignment {
+                generation,
+                file_panes,
+            });
+            self.visible_panes = visible_panes;
+        }
+
+        fn observe(&self, documents: &[&str]) -> bool {
+            let Some(receipt) = self
+                .receipt
+                .as_ref()
+                .filter(|receipt| receipt.generation == self.desired_generation)
+            else {
+                return false;
+            };
+            let actual = self
+                .visible_panes
+                .iter()
+                .map(|pane| {
+                    receipt
+                        .file_panes
+                        .iter()
+                        .find_map(|(file, assigned)| (assigned == pane).then_some(*file))
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>();
+            actual == documents
+        }
+
+        fn focus(&mut self, file: &str) -> bool {
+            let Some(receipt) = self
+                .receipt
+                .as_ref()
+                .filter(|receipt| receipt.generation == self.desired_generation)
+            else {
+                return false;
+            };
+            let Some((_, pane)) = receipt
+                .file_panes
+                .iter()
+                .find(|(assigned_file, _)| *assigned_file == file)
+            else {
+                return false;
+            };
+            if !self.visible_panes.contains(pane) {
+                return false;
+            }
+            self.selected_pane = Some(*pane);
+            true
+        }
+    }
+
+    #[test]
+    fn nested_actor_omission_does_not_stall_navigation_or_reuse_stale_assignment() {
+        let mut world = World::default();
+        world.publish(11);
+        // Opening the nested document may briefly expose a provisioning pane,
+        // but the effect's terminal assignment is the two-pane desired layout.
+        world.apply(
+            11,
+            vec![
+                ("tasks/primary.md", "%1"),
+                ("nested/tasks/secondary.md", "%2"),
+            ],
+            vec!["%1", "%2"],
+        );
+        assert!(world.observe(&["tasks/primary.md", "nested/tasks/secondary.md"]));
+
+        // A newer editor navigation invalidates the old assignment immediately.
+        world.publish(12);
+        assert!(!world.focus("tasks/next.md"));
+        world.apply(
+            12,
+            vec![("tasks/primary.md", "%1"), ("tasks/next.md", "%3")],
+            vec!["%1", "%3"],
+        );
+        assert!(world.observe(&["tasks/primary.md", "tasks/next.md"]));
+        assert!(world.focus("tasks/next.md"));
+        assert_eq!(world.selected_pane, Some("%3"));
+    }
+}
+
 /// Installed-build handoff reference model. The controller process is the
 /// lifetime of the reactive actor: a replacement rebuilds its Sources from the
 /// durable projection, while write ordinals prevent observations from an older

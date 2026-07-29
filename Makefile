@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-version test sim-medium cross-editor-simworld tmux-ci clippy check precommit timings install install-full install-editor-plugins install-hooks clean init-python wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-version test sim-medium cross-editor-simworld tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -200,6 +200,7 @@ install-full:
 	@cargo build --release --lib
 	@agent-doc lib-install
 	@$(MAKE) install-editor-plugins
+	@$(MAKE) cleanup-build-artifacts
 
 # Keep every existing JetBrains agent-doc package on the source generation.
 # The native cdylib and editor package are separate install surfaces: updating
@@ -211,6 +212,13 @@ install-editor-plugins:
 	else \
 		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \
 	fi
+
+# A full release install leaves the executable, native library, and plugins in
+# their installed destinations, so repo-owned compilation outputs are no longer
+# required. Preserve Cargo's global dependency caches; opt out when another
+# incremental build is imminent with AGENT_DOC_CLEAN_BUILD_ARTIFACTS=0.
+cleanup-build-artifacts:
+	@scripts/cleanup-build-artifacts.sh
 
 
 # Remove the legacy full-suite pre-commit hook (works for both standalone repos and submodules)

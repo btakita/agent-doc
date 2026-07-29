@@ -33,6 +33,16 @@ SKILL_FILES = (
     Path("SKILL.md"),
     Path(".claude/skills/agent-doc/SKILL.md"),
 )
+REACTIVE_HARNESS_MARKER = "#lazily-reactive-first"
+REACTIVE_HARNESS_TERMS = (
+    "`Source`",
+    "`Computed`",
+    "`Effect`",
+    "DocumentScope",
+    "TurnScope",
+    "ProcessScope",
+    "Imperative commands live inside an `Effect` whenever",
+)
 
 
 class HarnessError(RuntimeError):
@@ -199,6 +209,32 @@ def root_version(root: Path) -> str:
     return version
 
 
+def verify_dev_harness_contract(root: Path) -> list[str]:
+    path = root / "AGENTS.md"
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        return [f"cannot read development harness {path}: {exc}"]
+    marker = text.find(REACTIVE_HARNESS_MARKER)
+    if marker < 0:
+        return [
+            "AGENTS.md lacks the Lazily reactive-first development harness marker "
+            f"{REACTIVE_HARNESS_MARKER}"
+        ]
+    block = " ".join(text[marker : marker + 2_500].split())
+    missing = [
+        term
+        for term in REACTIVE_HARNESS_TERMS
+        if " ".join(term.split()) not in block
+    ]
+    if missing:
+        return [
+            "AGENTS.md reactive-first development harness is incomplete; missing "
+            + ", ".join(missing)
+        ]
+    return []
+
+
 def verify_release_version(root: Path) -> tuple[str, int, int]:
     manifests, packages = workspace_packages(root)
     expected = root_version(root)
@@ -244,6 +280,7 @@ def verify_release_version(root: Path) -> tuple[str, int, int]:
     errors.extend(
         verify_lock(root / "Cargo.lock", set(packages.values()), expected)
     )
+    errors.extend(verify_dev_harness_contract(root))
     if errors:
         raise HarnessError("release version projection drift:\n- " + "\n- ".join(errors))
     return expected, len(manifests), dependency_count
@@ -308,6 +345,15 @@ version = "1.2.3"
     skill = '---\nagent-doc-version: "1.2.3"\n---\n'
     (root / "SKILL.md").write_text(skill)
     (root / ".claude/skills/agent-doc/SKILL.md").write_text(skill)
+    (root / "AGENTS.md").write_text(
+        """# agent-doc
+
+- Prefer Lazily graphs (`#lazily-reactive-first`): external facts are `Source`,
+  derived state is `Computed`, and I/O is an `Effect`. Imperative commands live
+  inside an `Effect` whenever possible. Join DocumentScope, TurnScope, or
+  ProcessScope before imperative coordination.
+"""
+    )
     (root / "Cargo.lock").write_text(
         """version = 4
 
@@ -336,6 +382,19 @@ def self_test() -> None:
             )
         if 'version = "2.4.6"' not in (root / "Cargo.lock").read_text():
             raise HarnessError("fixture lockfile was not projected")
+        agents = root / "AGENTS.md"
+        reactive_contract = agents.read_text()
+        agents.write_text("# agent-doc\n")
+        try:
+            verify_release_version(root)
+        except HarnessError as exc:
+            if REACTIVE_HARNESS_MARKER not in str(exc):
+                raise HarnessError(
+                    "fixture harness drift did not identify the reactive-first marker"
+                ) from exc
+        else:
+            raise HarnessError("fixture reactive harness drift was not detected")
+        agents.write_text(reactive_contract)
         skill = root / ".claude/skills/agent-doc/SKILL.md"
         skill.write_text(skill.read_text().replace("2.4.6", "1.2.3"))
         try:

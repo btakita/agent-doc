@@ -239,6 +239,7 @@ pub(crate) use pane_repair::*;
 pub struct SyncRunReport {
     pub applied: bool,
     pub reason: String,
+    pub file_panes: Vec<(PathBuf, String)>,
 }
 
 impl Default for SyncRunReport {
@@ -246,6 +247,7 @@ impl Default for SyncRunReport {
         Self {
             applied: true,
             reason: "applied".to_string(),
+            file_panes: Vec::new(),
         }
     }
 }
@@ -266,6 +268,7 @@ fn mark_sync_layout_preserved(reason: &str) {
         *report.borrow_mut() = SyncRunReport {
             applied: false,
             reason: reason.to_string(),
+            file_panes: Vec::new(),
         };
     });
 }
@@ -3711,6 +3714,9 @@ fn run_with_options_internal_at_root(
         &resolve_file,
         &tmux_router_options,
     )?;
+    LAST_SYNC_RUN_REPORT.with(|report| {
+        report.borrow_mut().file_panes = result.file_panes.clone();
+    });
     log_sync_latency(
         focus,
         "tmux_router",

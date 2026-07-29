@@ -15284,8 +15284,15 @@ fn layout_sync_state_actual_document_for_pane(
     project_root: &Path,
     tmux: &tmux_router::Tmux,
     actor_store: &BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
+    effect_file_panes: &[(String, String)],
     pane_id: &str,
 ) -> String {
+    if let Some((file, _)) = effect_file_panes
+        .iter()
+        .find(|(_, assigned_pane)| assigned_pane == pane_id)
+    {
+        return canonical_layout_document_id(project_root, file);
+    }
     if let Some(record) = actor_store
         .values()
         .find(|record| record.pane_id == pane_id)
@@ -15352,6 +15359,25 @@ fn tmux_layout_sync_state_for_invocation(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     invocation: &ControllerTmuxLayoutSyncStateInvocation,
+) -> Result<ControllerTmuxLayoutSyncStateReport> {
+    let effect_file_panes = runtime
+        .pane_layout_desired()
+        .filter(|desired| pane_layout_state_invocation(desired) == *invocation)
+        .map(|desired| runtime.pane_layout_effect_file_panes(desired.generation))
+        .unwrap_or_default();
+    tmux_layout_sync_state_for_invocation_with_effect_assignment(
+        bootstrap,
+        runtime,
+        invocation,
+        &effect_file_panes,
+    )
+}
+
+fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: &ControllerTmuxLayoutSyncStateInvocation,
+    effect_file_panes: &[(String, String)],
 ) -> Result<ControllerTmuxLayoutSyncStateReport> {
     let expected_documents =
         layout_sync_state_expected_documents(&bootstrap.project_root, invocation);
@@ -15452,6 +15478,7 @@ fn tmux_layout_sync_state_for_invocation(
                 &bootstrap.project_root,
                 &tmux,
                 &actor_store,
+                effect_file_panes,
                 pane_id,
             )
         })
@@ -15972,6 +15999,7 @@ fn pane_layout_effect_worker(
             attempt,
             phase: PaneLayoutEffectPhase::InFlight,
             reason: "tmux_effect_in_flight".to_string(),
+            file_panes: Vec::new(),
         });
         publish_pane_layout_status(&runtime);
 
@@ -15999,10 +16027,15 @@ fn pane_layout_effect_worker(
             Ok(effects) => effects.sync_tmux_layout(&bootstrap.project_root, guarded_invocation),
             Err(error) => Err(error),
         };
-        let report = tmux_layout_sync_state_for_invocation(
+        let effect_file_panes = effect_result
+            .as_ref()
+            .map(|receipt| receipt.file_panes.clone())
+            .unwrap_or_default();
+        let report = tmux_layout_sync_state_for_invocation_with_effect_assignment(
             &bootstrap,
             &runtime,
             &pane_layout_state_invocation(&desired),
+            &effect_file_panes,
         );
         let (report, effect_reason) = match (report, effect_result) {
             (Ok(report), Ok(receipt)) => (report, receipt.reason),
@@ -16042,6 +16075,9 @@ fn pane_layout_effect_worker(
         };
         let synced = report.synced;
         let observation_reason = report.reason.clone();
+        let logged_expected_documents = report.expected_documents.clone();
+        let logged_actual_documents = report.actual_documents.clone();
+        let logged_panes = report.panes.clone();
         runtime.record_pane_layout_observation(PaneLayoutObservation {
             generation: desired.generation,
             report,
@@ -16059,17 +16095,21 @@ fn pane_layout_effect_worker(
             } else {
                 format!("{observation_reason}; {effect_reason}")
             },
+            file_panes: effect_file_panes,
         });
         publish_pane_layout_status(&runtime);
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={}",
+                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} expected={:?} actual={:?} panes={:?}",
                 desired.generation,
                 attempt,
                 if synced { "converged" } else { "retry_pending" },
                 observation_reason,
                 effect_reason,
+                logged_expected_documents,
+                logged_actual_documents,
+                logged_panes,
             ),
         );
         if synced {
@@ -16785,6 +16825,7 @@ pub(crate) fn handle_sync_tmux_layout(
                 no_autostart: invocation.no_autostart,
                 exact_visible: invocation.exact_visible,
                 routes_created_panes,
+                file_panes: Vec::new(),
             });
         }
         let projection =
@@ -16815,6 +16856,7 @@ pub(crate) fn handle_sync_tmux_layout(
             no_autostart: invocation.no_autostart,
             exact_visible: invocation.exact_visible,
             routes_created_panes,
+            file_panes: runtime.pane_layout_effect_file_panes(desired.generation),
         })
     }
 }
@@ -19286,6 +19328,31 @@ mod tests {
         assert_eq!(
             layout_sync_state_result(&expected, &actual),
             (false, "pane_order_mismatch")
+        );
+    }
+
+    #[test]
+    fn tmux_layout_observation_prefers_effect_assignment_over_partial_actor_store() {
+        let project_root = Path::new("/repo");
+        let tmux = tmux_router::Tmux::default_server();
+        let actor_store = BTreeMap::new();
+        let effect_file_panes = vec![
+            ("/repo/tasks/primary.md".to_string(), "%1".to_string()),
+            (
+                "/repo/nested/tasks/secondary.md".to_string(),
+                "%2".to_string(),
+            ),
+        ];
+
+        assert_eq!(
+            layout_sync_state_actual_document_for_pane(
+                project_root,
+                &tmux,
+                &actor_store,
+                &effect_file_panes,
+                "%2",
+            ),
+            "/repo/nested/tasks/secondary.md"
         );
     }
 

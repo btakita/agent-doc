@@ -4,6 +4,31 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.92
+
+_JetBrains plugin 0.2.321; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Editor navigation now converges from exact pane assignments.** The tmux
+  effect returns its file-to-pane mapping as a generation-scoped receipt, and a
+  Lazily `Computed` joins that receipt to the current desired layout. Observation
+  therefore recognizes panes owned by nested project roots without repeatedly
+  misclassifying the already-correct physical layout as `pane_order_mismatch`.
+- **Superseded layout evidence cannot select or validate a newer request.** A
+  late receipt remains fenced to its original desired generation. Diagnostics
+  log expected documents, actual documents, and panes from one coherent
+  observation snapshot, while unit and anonymized SimWorld schedules cover the
+  partial-actor-store navigation failure.
+- **Full installs clean repository build outputs after successful installation.**
+  `install-full` removes `target`, the JetBrains build directory, and validated
+  local `.agent-doc-build-*` scratch directories while preserving Cargo's
+  dependency caches. Set `AGENT_DOC_CLEAN_BUILD_ARTIFACTS=0` to retain
+  incremental outputs intentionally.
+- **The development harness now audits for reactive-first design.** Agent
+  instructions require external facts and receipts as lifecycle-scoped
+  `Source`s, derived decisions as `Computed`s, and imperative commands inside a
+  Lazily `Effect` whenever a suitable graph exists. The release harness
+  self-test fails if that guidance disappears or loses its scope/effect terms.
+
 ## 0.35.91
 
 _JetBrains plugin 0.2.321; VS Code extension 0.2.62; Zed extension 0.1.0._

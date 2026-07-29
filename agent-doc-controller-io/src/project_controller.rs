@@ -225,6 +225,13 @@ pub struct ControllerTmuxLayoutSyncReceipt {
     pub no_autostart: bool,
     pub exact_visible: bool,
     pub routes_created_panes: bool,
+    /// Exact file-to-pane assignments observed by the tmux sync effect.
+    ///
+    /// The controller retains these as generation-scoped reactive evidence so
+    /// observation never has to infer nested-project pane identity from a
+    /// partial actor store.
+    #[serde(default)]
+    pub file_panes: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -341,6 +348,7 @@ pub(crate) struct PaneLayoutEffectReceipt {
     pub attempt: u64,
     pub phase: PaneLayoutEffectPhase,
     pub reason: String,
+    pub file_panes: Vec<(String, String)>,
 }
 
 impl Default for PaneLayoutEffectReceipt {
@@ -350,6 +358,7 @@ impl Default for PaneLayoutEffectReceipt {
             attempt: 0,
             phase: PaneLayoutEffectPhase::Idle,
             reason: "idle".to_string(),
+            file_panes: Vec::new(),
         }
     }
 }
@@ -450,6 +459,7 @@ struct ControllerPaneLayoutGraph {
     desired: Source<Option<PaneLayoutDesired>>,
     observed: Source<Option<PaneLayoutObservation>>,
     receipt: Source<PaneLayoutEffectReceipt>,
+    applicable_receipt: Computed<Option<PaneLayoutEffectReceipt>>,
     projection: Computed<PaneLayoutProjection>,
     effect: Mutex<Option<lazily::Effect>>,
     sink: Arc<OnceLock<Arc<dyn PaneLayoutProjectionSink>>>,
@@ -476,6 +486,11 @@ impl ControllerPaneLayoutGraph {
         let desired = ctx.source(initial_desired);
         let observed = ctx.source(None);
         let receipt = ctx.source(PaneLayoutEffectReceipt::default());
+        let applicable_receipt = ctx.computed(move |ctx| {
+            let desired = ctx.get(&desired)?;
+            let receipt = ctx.get(&receipt);
+            (receipt.generation == desired.generation).then_some(receipt)
+        });
         let desired_for_projection = desired;
         let observed_for_projection = observed;
         let receipt_for_projection = receipt;
@@ -502,6 +517,7 @@ impl ControllerPaneLayoutGraph {
             desired,
             observed,
             receipt,
+            applicable_receipt,
             projection,
             effect: Mutex::new(Some(effect)),
             sink,
@@ -635,6 +651,14 @@ impl ControllerPaneLayoutGraph {
     fn record_receipt(&self, receipt: PaneLayoutEffectReceipt) {
         self.ctx.set(&self.receipt, receipt);
         self.waiters.notify_all();
+    }
+
+    fn effect_file_panes(&self, generation: u64) -> Vec<(String, String)> {
+        self.ctx
+            .get(&self.applicable_receipt)
+            .filter(|receipt| receipt.generation == generation)
+            .map(|receipt| receipt.file_panes)
+            .unwrap_or_default()
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -1040,6 +1064,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
             no_autostart: invocation.no_autostart,
             exact_visible: invocation.exact_visible,
             routes_created_panes,
+            file_panes: Vec::new(),
         })
     }
 }
@@ -1869,6 +1894,10 @@ impl ControllerRuntime {
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     fn record_pane_layout_effect_receipt(&self, receipt: PaneLayoutEffectReceipt) {
         self.pane_layout_graph.record_receipt(receipt);
+    }
+
+    fn pane_layout_effect_file_panes(&self, generation: u64) -> Vec<(String, String)> {
+        self.pane_layout_graph.effect_file_panes(generation)
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -4357,6 +4386,7 @@ mod tests {
                     attempt: 1,
                     phase: PaneLayoutEffectPhase::InFlight,
                     reason: "applying".to_string(),
+                    file_panes: Vec::new(),
                 },
             ),
             PaneLayoutProjection::Applying(desired.clone())
@@ -4385,6 +4415,7 @@ mod tests {
                     attempt: 1,
                     phase: PaneLayoutEffectPhase::RetryPending,
                     reason: "retry_scheduled".to_string(),
+                    file_panes: Vec::new(),
                 },
             ),
             PaneLayoutProjection::RetryPending(desired.clone())
@@ -4424,6 +4455,36 @@ mod tests {
         let status = graph.state_projection().unwrap();
         assert_eq!(status.source_plane_version, Some(73));
         assert_eq!(status.phase, ControllerPaneLayoutPhase::NeedsEffect);
+    }
+
+    #[test]
+    fn pane_layout_effect_assignment_is_fenced_by_desired_generation() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, Vec::new());
+        let first = graph.set_desired(pane_layout_desired_for_test(1).invocation, Some(81));
+        let first_assignment = vec![("tasks/primary.md".to_string(), "%1".to_string())];
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: first.generation,
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::Converged,
+            reason: "observed_convergence".to_string(),
+            file_panes: first_assignment.clone(),
+        });
+        assert_eq!(graph.effect_file_panes(first.generation), first_assignment);
+
+        let second = graph.set_desired(pane_layout_desired_for_test(2).invocation, Some(82));
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: first.generation,
+            attempt: 2,
+            phase: PaneLayoutEffectPhase::Converged,
+            reason: "late_prior_generation".to_string(),
+            file_panes: vec![("tasks/primary.md".to_string(), "%1".to_string())],
+        });
+
+        assert!(
+            graph.effect_file_panes(second.generation).is_empty(),
+            "a late receipt from the prior desired generation cannot identify panes for the new layout"
+        );
     }
 
     #[test]

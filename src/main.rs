@@ -294,6 +294,11 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                 no_autostart: invocation.no_autostart,
                 exact_visible: invocation.exact_visible,
                 routes_created_panes,
+                file_panes: sync_report
+                    .file_panes
+                    .into_iter()
+                    .map(|(file, pane)| (file.to_string_lossy().to_string(), pane))
+                    .collect(),
             },
         )
     }

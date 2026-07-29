@@ -1090,7 +1090,38 @@ Verification already completed: `git diff --check` passed, PDF text extraction f
 ### Re: Response
 
 The orphaned completed queue head was safely removed. The next queued item is `#unpaidoutsideactivity`.
-<!-- agent:boundary:1de87a0b -->
+
+### Re: Unpaid outside-activity approval — gpt-5
+
+> **Queue prompt:**
+>
+> Does unpaid "outside activity" need approval as well?
+
+**Not automatically—but under the current documents, some unpaid activities still need written approval, and the boundary should be clarified.**
+
+The documents create three different rules:
+
+- **Section 11 is compensation-specific.** It assigns compensation for third-party services to Haiven unless the Board approves otherwise. A genuinely unpaid activity does not trigger that compensation clause.
+- **Section 4 is broader and does not depend on payment.** It restricts other employment, occupations, consulting, or business activity directly related to Haiven and any activity that conflicts with Brian's obligations to Haiven.
+- **Exhibit B is broader still.** It covers activities that conflict—or appear to conflict—with Haiven's interests and says exceptions require disclosure to the President and written approval.
+
+The addendum says Brian “may submit additional outside activities for written approval under the same conflict-based standard.” The word **“may”** does not clearly require approval for every hobby or volunteer activity. But only activities approved under Section 2 receive its explicit compensation, IP, confidentiality, and non-retroactivity protections. That ambiguity is worth removing.
+
+A practical dividing line is:
+
+- **Get written approval even if unpaid** for an ongoing role or project that is related to Haiven's business, involves a client/vendor/customer/competitor, includes officer/director/adviser responsibilities, could use or expose confidential information, creates a material actual or apparent conflict, or could materially interfere with Haiven duties.
+- **No approval should be required** for ordinary noncommercial hobbies, personal writing, charitable/civic/educational activity, casual volunteering, and personal open-source or portfolio maintenance, provided the activity occurs outside Haiven time, uses no Haiven equipment or confidential information, does not materially interfere with duties, and creates no material conflict.
+
+I would add this sentence to the consolidated addendum or item 5 of the email:
+
+> For clarity, prior approval is not required for noncompensated personal, charitable, civic, educational, professional-association, writing, speaking, open-source, or portfolio activities, provided they are conducted outside Company working time, do not use Company equipment or Confidential Information, do not materially interfere with Employee's duties, and are not reasonably likely to create a material actual conflict of interest. Prior written approval is required only for outside employment or compensated consulting or advisory services; service as an officer or director; or another activity reasonably likely to create such a material conflict. Approval may not be unreasonably withheld, conditioned, or delayed.
+
+For material ongoing unpaid work on a named site or project, the safest course is to list it as an approved activity or include it under an express umbrella category. **Exhibit A protects ownership of pre-existing IP; it does not by itself approve continued work on that IP during employment.** If an unpaid activity later begins producing fees, equity, sponsorship revenue, or paid client work, disclose that change before accepting compensation.
+
+The carveout should also state that it does not restrict legally protected activity. Connecticut protects certain employee speech, assembly, and related constitutional activity when it does not substantially or materially interfere with job performance or the employment relationship, and federal law separately protects covered employees' concerted activity concerning working conditions. These are activity-specific protections, not a blanket exemption for all off-duty projects. [Conn. Gen. Stat. § 31-51q](https://www.cga.ct.gov/current/pub/chap_557.htm#sec_31-51q); [NLRB employee-rights guidance](https://www.nlrb.gov/about-nlrb/rights-we-protect/your-rights/employee-rights).
+
+Changed paths: none. Verification: I compared the returned addendum's Section 2 against Agreement Sections 4, 8, and 11, Exhibit B, and the current email draft, and checked the current official Connecticut and NLRB materials. Confidence is high on the textual interpretation and recommended clarification; final negotiated language should still be reviewed by employment counsel.
+<!-- agent:boundary:3b3346e3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1098,6 +1129,8 @@ The orphaned completed queue head was safely removed. The next queued item is `#
 <!-- agent:queue priority -->
 - ~~🚧 do [#recommendedadditionsexhi]~~
 - do [#unpaidoutsideactivity]
+- "Supporting materials, payroll, and timing": In the interest of starting my first day, is this necessary, or can I ask for this to be provided by today or tomorrow?
+- Should I ask if this is sufficient for me to get started while we finalize the agreement?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -5,7 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -672,14 +672,41 @@ Yes. The revised documents should confirm the **exact remittance date and paymen
 The already-sent request covered the second installment’s date-certain issue, but it did not explicitly ask whether either installment would be remitted through payroll or a separate payment. Because Craig says revised documents are coming later today, I would inspect those first rather than send another immediate email. If the documents do not answer this, use the quoted question before signing.
 
 I added this verification point to `#haiven-paper`. No email was sent.
-<!-- agent:boundary:71aa0de4 -->
+
+### Re: Completed Exhibit A — gpt-5
+
+> **Queue prompt:** Please complete Exhibit A. The Dreamable agreements, specifically the end of engagement agreement, have an Exhibit A that you can reference.
+
+Exhibit A is complete and committed as `751acf828`. I used the Dreamable addendum's broad prior-inventions schedule and the signed end-of-engagement agreement's ownership/published-open-source-license treatment as the drafting precedent, while aligning the result to Haiven's actual three-column Exhibit A form and defined term `Prior Inventions`.
+
+Completed artifacts:
+
+- [haiven-exhibit-a-proposed.md](../professional/haiven/haiven-exhibit-a-proposed.md) — the editable source
+- [haiven-exhibit-a-proposed.pdf](../professional/haiven/haiven-exhibit-a-proposed.pdf) — a four-page, letter-landscape attachment ready for review
+- [haiven-exhibit-a.css](../professional/haiven/haiven-exhibit-a.css) — reproducible print styling
+
+The completed schedule now:
+
+- uses blanket personal-account, private-repository, and controlled-organization coverage instead of a brittle repository count;
+- preserves the named core software, Lazily/reactive, agent/context, consulting, business, private-project, creative-work, and professional-know-how categories;
+- lists `haiven-websocket-hub` expressly as an uncompensated pre-employment take-home submission, limited to your rights and excluding Haiven specifications, confidential information, trademarks, and already-owned material;
+- states that Haiven has no ownership claim merely from listing, disclosure, evaluation, discussion, or continued development;
+- limits any license for an incorporated Prior Invention to its published open-source terms or a separately signed license; and
+- makes the acknowledged Exhibit A control over conflicting language in Agreement §3.4.
+
+I intentionally removed the prospective Future Outside Activities clause from the Exhibit A itself because future work is not a prior invention. It remains a separate provision that must appear in Haiven's revised Agreement or countersigned addendum, and the `#haiven-paper` review gate now says so explicitly.
+
+Verification completed: Pandoc/WeasyPrint generated the PDF successfully; `pdfinfo` confirmed four unencrypted letter-landscape pages; extracted text preserved every row and signature block; all four rendered pages were visually inspected; and `git diff --check` passed. Confidence is high that the artifact is complete and printable. Haiven still needs to acknowledge it in writing, and counsel should review the final ownership/license language before signature.
+
+No email, attachment, or other external message was sent.
+
+Workflow note: preflight reported that the installed `agent-doc` binary is one committed change behind local source. I attempted the requested `make install`, but unrelated concurrent edits in `agent-doc-controller-io/src/project_controller/rpc.rs` currently fail compilation with `E0277` and `E0507`; I left that other-session work untouched. The large session exchange was not compacted because the active queue contract requires continuing unless auto-compact is explicitly enabled.
+<!-- agent:boundary:60d552ad -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~Also, ask when the signing bonus will be remitted?~~
-- Please complete Exhibit A. The Dreamable agreements, specifically the end of engagement agreement, have an Exhibit A that you can reference.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -690,7 +717,7 @@ I added this verification point to `#haiven-paper`. No email was sent.
 ## Review
 
 <!-- agent:review -->
-- [/] [#haiven-paper] Craig replied on July 28, 2026 that Haiven will revise and incorporate the requested provisions and send new documents later that day; he also accepted the August 10 and occasional-standup scheduling points. Do not send any correction, follow-up, attachment, or other external message without Brian’s explicit instruction containing “send.” Review the locally drafted proposed Exhibit A at tasks/professional/haiven/haiven-exhibit-a-proposed.md, especially ownership of Haiven-specific pre-employment material and the prospective future-outside-work clause. When the revised documents arrive, verify the exact remittance date and payment method for each $10,000 signing-bonus installment, a narrow definition of Cause, and every other requested revision. Then obtain Haiven’s acknowledged Exhibit A and countersigned documents and complete final verification before signing.
+- [/] [#haiven-paper] Craig replied on July 28, 2026 that Haiven will revise and incorporate the requested provisions and send new documents later that day; he also accepted the August 10 and occasional-standup scheduling points. Do not send any correction, follow-up, attachment, or other external message without Brian’s explicit instruction containing “send.” Review the locompleted Exhibit A at tasks/professional/haiven/haiven-exhibit-a-proposed.md and tasks/professional/haiven/haiven-exhibit-a-proposed.pdf, especially Haiven’s written acknowledgment of the haiven-websocket-hub take-home row, the Effect of Listing, and Exhibit A’s priority over Agreement §3.4. The prospective future-outside-work clause is intentionally separate from Exhibit A; verify that Haiven’s revised Agreement or countersigned addendum contains itWhen the revised documents arrive, verify the exact remittance date and payment method for each $10,000 signing-bonus installment, a narrow definition of Cause, and every other requested revision. Then obtain Haiven’s acknowledged Exhibit A and countersigned documents and complete final verification before signing.
 <!-- /agent:review -->
 
 ## Icebox

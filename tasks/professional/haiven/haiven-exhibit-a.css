@@ -1,0 +1,134 @@
+@page {
+  size: letter landscape;
+  margin: 0.52in 0.58in 0.58in;
+
+  @bottom-left {
+    content: "Haiven, Inc. — Exhibit A";
+    color: #59636e;
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 7.5pt;
+  }
+
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    color: #59636e;
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 7.5pt;
+  }
+}
+
+html {
+  color: #17202a;
+  font-family: "DejaVu Sans", sans-serif;
+  font-size: 9.2pt;
+  line-height: 1.32;
+}
+
+body {
+  margin: 0;
+}
+
+h1,
+h2 {
+  break-after: avoid;
+  color: #111827;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  page-break-after: avoid;
+}
+
+h1 {
+  border-bottom: 2px solid #243b53;
+  font-size: 18pt;
+  margin: 0 0 0.08in;
+  padding-bottom: 0.06in;
+}
+
+h2 {
+  border-bottom: 1px solid #aab4bf;
+  font-size: 11.5pt;
+  margin: 0.17in 0 0.08in;
+  padding-bottom: 0.035in;
+}
+
+p {
+  margin: 0 0 0.075in;
+}
+
+table {
+  border-collapse: collapse;
+  font-size: 7.7pt;
+  line-height: 1.25;
+  margin: 0.12in 0 0.16in;
+  table-layout: fixed;
+  width: 100%;
+}
+
+thead {
+  display: table-header-group;
+}
+
+tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+th,
+td {
+  border: 0.65px solid #87929d;
+  padding: 0.055in 0.065in;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+th {
+  background: #e8edf2;
+  color: #111827;
+  font-weight: 700;
+}
+
+th:nth-child(1),
+td:nth-child(1) {
+  width: 21%;
+}
+
+th:nth-child(2),
+td:nth-child(2) {
+  width: 18%;
+}
+
+th:nth-child(3),
+td:nth-child(3) {
+  width: 61%;
+}
+
+col:nth-child(1) {
+  width: 21%;
+}
+
+col:nth-child(2) {
+  width: 18%;
+}
+
+col:nth-child(3) {
+  width: 61%;
+}
+
+ol {
+  margin: 0.04in 0 0.12in 0.25in;
+  padding-left: 0.15in;
+}
+
+li {
+  margin-bottom: 0.045in;
+}
+
+strong {
+  color: #111827;
+}
+
+.page-break {
+  break-before: page;
+  page-break-before: always;
+}

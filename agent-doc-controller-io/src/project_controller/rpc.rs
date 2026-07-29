@@ -65,7 +65,10 @@ const PANE_LAYOUT_COMMAND_AWAIT: Duration = Duration::from_secs(30);
 const STATE_PLANE_SUBSCRIBE_MAX: Duration = Duration::from_secs(120);
 const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
 const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
+pub const CAPTURED_FINALIZE_WAKE_STATE_CHANNEL: &str = "agent-doc/captured-finalize/wake/v1";
+const CAPTURED_FINALIZE_WAKE_TYPE_TAG: &str = "agent-doc.captured-finalize.wake.v1";
 static PANE_LAYOUT_STATUS_EPOCH: AtomicU64 = AtomicU64::new(1);
+static CAPTURED_FINALIZE_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
 /// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
 /// gets a generous ceiling.
@@ -353,6 +356,85 @@ pub(crate) fn request_controller<T: DeserializeOwned>(
     request: ControllerRequest,
 ) -> Result<T> {
     request_controller_with_timeout(project_root, request, CONTROLLER_RPC_TIMEOUT)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapturedFinalizeWakeProjection {
+    pub document_hash: String,
+    pub cycle_id: String,
+    pub capture_id: String,
+    pub response_sha256: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+struct CapturedFinalizeWakeSnapshot {
+    wakes: BTreeMap<String, CapturedFinalizeWakeProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapturedFinalizeWakeSubscription {
+    pub latest_version: u64,
+    pub timed_out: bool,
+    pub wakes: Vec<CapturedFinalizeWakeProjection>,
+}
+
+/// Await controller-published captured-finalize state edges. The RPC is only a
+/// long-poll byte transport for the Lazily state plane; callers do not
+/// manufacture convergence by repeatedly invoking finalize/session-check.
+pub fn subscribe_captured_finalize_wakes_for_file(
+    file: &Path,
+    after_version: u64,
+    timeout: Duration,
+) -> Result<CapturedFinalizeWakeSubscription> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let timeout = timeout.min(STATE_PLANE_SUBSCRIBE_MAX);
+    let invocation = ControllerStatePlaneSubscribeInvocation {
+        channel: CAPTURED_FINALIZE_WAKE_STATE_CHANNEL.to_string(),
+        after_version,
+        timeout_ms: timeout.as_millis().min(u64::MAX as u128) as u64,
+    };
+    let request = ControllerRequest {
+        command: "state_plane_subscribe".to_string(),
+        file: Some(file.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("captured_finalize_resume_subscription".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(&invocation)?),
+    };
+    let subscription: ControllerStatePlaneSubscription = request_controller_with_timeout(
+        &project_root,
+        request,
+        timeout.saturating_add(Duration::from_secs(2)),
+    )?;
+    let wakes = subscription
+        .frames
+        .iter()
+        .filter_map(|frame| {
+            let message: lazily::IpcMessage = serde_json::from_str(&frame.message_json).ok()?;
+            let payload = state_plane_snapshot_payload(
+                &message,
+                CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+                CAPTURED_FINALIZE_WAKE_TYPE_TAG,
+            )
+            .ok()?;
+            serde_json::from_slice::<CapturedFinalizeWakeSnapshot>(&payload).ok()
+        })
+        .flat_map(|snapshot| snapshot.wakes.into_values())
+        .collect();
+    Ok(CapturedFinalizeWakeSubscription {
+        latest_version: subscription.latest_version,
+        timed_out: subscription.timed_out,
+        wakes,
+    })
 }
 
 /// Send one editor-replica request through the project controller.
@@ -3816,13 +3898,34 @@ pub fn record_visible_write_commit_candidate_for_project_file(
         commit_candidate_content: candidate_content.to_string(),
         source: source.to_string(),
     };
-    record_visible_write_commit_candidate_direct(
+    let request = ControllerRequest {
+        command: "visible_write_commit_candidate_observed".to_string(),
+        file: Some(canonical.clone()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("editor_visible_write_source_projection".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(&payload)?),
+    };
+    match request_controller::<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection>(
         project_root,
-        &canonical,
-        &document_hash,
-        &payload,
-        &anyhow::anyhow!("durable_lazily_receipt_primary"),
-    )
+        request,
+    ) {
+        Ok(proof) => Ok(proof),
+        Err(controller_err) => record_visible_write_commit_candidate_direct(
+            project_root,
+            &canonical,
+            &document_hash,
+            &payload,
+            &controller_err,
+        ),
+    }
 }
 
 pub fn visible_write_commit_candidate_applied_for_file(
@@ -6457,6 +6560,21 @@ fn handle_crdt_replica_rpc(
         None
     };
     let data = controller_crdt_replica_data(&canonical, method_name, identity, &payload)?;
+    if method_name == "replica_update"
+        && let Some(runtime) = runtime
+        && let Err(error) = observe_retained_write_authority_from_live_model(runtime, &canonical)
+    {
+        // The editor mutation is already accepted. Settlement observation is
+        // derived maintenance and will be refreshed by the next replica/save
+        // state edge; never reject operator typing because the observer failed.
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "retained_write_plane_observation_deferred file={} source=replica_update reason={error:#}",
+                canonical.display(),
+            ),
+        );
+    }
     if method_name == "replica_update"
         && let Some(runtime) = runtime
         && let Err(error) = observe_realtime_steering_after_replica_update(
@@ -13360,6 +13478,134 @@ pub(crate) fn handle_supervisor_recycle_settled(
     Ok(projection)
 }
 
+struct RetainedWriteObservationBasis {
+    document_hash: String,
+    captured_payload: Option<String>,
+    intent_added_lines: Vec<String>,
+}
+
+fn retained_write_observation_basis(
+    runtime: &ControllerRuntime,
+    canonical: &Path,
+) -> Result<Option<RetainedWriteObservationBasis>> {
+    let document_hash = agent_doc_hash::document_id_for_path(canonical);
+    let Some(projection) = runtime.document_state_projection(&document_hash)? else {
+        return Ok(None);
+    };
+    let Some(pending) = projection.document.pending_write.as_ref() else {
+        return Ok(None);
+    };
+    let captured_payload = projection
+        .closeout
+        .captured_response
+        .as_ref()
+        .map(|capture| capture.response_body.clone())
+        .filter(|payload| {
+            agent_doc_turn::response_replay::response_materialized_in_content(
+                payload,
+                &pending.target_content,
+            )
+        });
+    let added_lines = agent_doc_state_backbone::retained_write::intent_added_lines(
+        pending.expected_content.as_deref(),
+        &pending.target_content,
+    )
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    Ok(Some(RetainedWriteObservationBasis {
+        document_hash,
+        captured_payload,
+        intent_added_lines: added_lines,
+    }))
+}
+
+fn retained_write_content_observation(
+    basis: &RetainedWriteObservationBasis,
+    content: &str,
+) -> agent_doc_state_backbone::retained_write::ContentObservation {
+    let intent_added_lines = basis
+        .intent_added_lines
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    agent_doc_state_backbone::retained_write::ContentObservation {
+        content_hash: agent_doc_hash::content_hash(content),
+        payload_materialized: basis.captured_payload.as_deref().is_some_and(|payload| {
+            agent_doc_turn::response_replay::response_materialized_in_content(payload, content)
+        }),
+        intent_delta_materialized:
+            agent_doc_state_backbone::retained_write::added_lines_materialized_in(
+                &intent_added_lines,
+                content,
+            ),
+    }
+}
+
+/// Feed a CRDT replica edge into the authority Source without touching disk.
+fn observe_retained_write_authority_from_live_model(
+    runtime: &ControllerRuntime,
+    canonical: &Path,
+) -> Result<()> {
+    let Some(basis) = retained_write_observation_basis(runtime, canonical)? else {
+        return Ok(());
+    };
+    let authority = match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(canonical)? {
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+        agent_doc_crdt_relay_io::CurrentText::Detached
+        | agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => return Ok(()),
+    };
+    runtime.document_retained_write_observe_authority(
+        &basis.document_hash,
+        canonical,
+        retained_write_content_observation(&basis, &authority),
+    );
+    Ok(())
+}
+
+/// Feed the editor's native-save receipt directly into the disk Source. The
+/// current CRDT cell supplies authority; no filesystem or status RPC is read on
+/// this live transition seam.
+fn observe_retained_write_native_save(
+    runtime: &ControllerRuntime,
+    canonical: &Path,
+    saved_content: &str,
+) -> Result<()> {
+    let Some(basis) = retained_write_observation_basis(runtime, canonical)? else {
+        return Ok(());
+    };
+    let authority = match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(canonical) {
+        Ok(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+        Ok(
+            agent_doc_crdt_relay_io::CurrentText::Detached
+            | agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+        ) => saved_content.to_string(),
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "retained_write_authority_observation_fallback file={} source=native_save_receipt reason={error:#}",
+                    canonical.display(),
+                ),
+            );
+            saved_content.to_string()
+        }
+    };
+    runtime.document_retained_write_observe_authority(
+        &basis.document_hash,
+        canonical,
+        retained_write_content_observation(&basis, &authority),
+    );
+    runtime.document_retained_write_observe_disk(
+        &basis.document_hash,
+        canonical,
+        retained_write_content_observation(&basis, saved_content),
+    );
+    Ok(())
+}
+
 pub(crate) fn handle_visible_write_commit_candidate_observed(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -13376,6 +13622,7 @@ pub(crate) fn handle_visible_write_commit_candidate_observed(
     append_apply_state_event(bootstrap, runtime, generation_event)?;
     append_apply_state_event(bootstrap, runtime, applied_event)?;
     append_apply_state_event(bootstrap, runtime, proof_event)?;
+    observe_retained_write_native_save(runtime, &canonical, &payload.commit_candidate_content)?;
     let projection = runtime
         .document_state_projection(&document_hash)?
         .and_then(|document| {
@@ -15252,6 +15499,67 @@ fn state_plane_snapshot_message_json<T: Serialize>(
         roots: vec![lazily::NodeId(1)],
     });
     serde_json::to_string(&message).context("encode Lazily state-plane Snapshot")
+}
+
+pub(super) fn publish_captured_finalize_wake(
+    runtime: &ControllerRuntime,
+    projection: &agent_doc_state_backbone::DocumentStateProjection,
+    reason: &str,
+) {
+    let Some(capture) = projection.closeout.captured_response.as_ref() else {
+        return;
+    };
+    let Some(cycle_id) = projection.closeout.cycle_id.as_deref() else {
+        return;
+    };
+    let payload = CapturedFinalizeWakeProjection {
+        document_hash: projection.document_hash.clone(),
+        cycle_id: cycle_id.to_string(),
+        capture_id: capture.capture_id.clone(),
+        response_sha256: capture.response_sha256.clone(),
+        reason: reason.to_string(),
+    };
+    let snapshot = {
+        let mut wakes = runtime.captured_finalize_wakes.lock();
+        wakes.insert(projection.document_hash.clone(), payload);
+        CapturedFinalizeWakeSnapshot {
+            wakes: wakes.clone(),
+        }
+    };
+    let epoch = CAPTURED_FINALIZE_WAKE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    let producer_id = match runtime.bootstrap_snapshot() {
+        Ok(bootstrap) => format!(
+            "agent-doc-controller:{}:{}",
+            std::process::id(),
+            bootstrap.controller_generation
+        ),
+        Err(_) => format!("agent-doc-controller:{}", std::process::id()),
+    };
+    let result = state_plane_snapshot_message_json(
+        epoch,
+        CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+        CAPTURED_FINALIZE_WAKE_TYPE_TAG,
+        &snapshot,
+    )
+    .and_then(|message_json| {
+        runtime.publish_state_plane_frame(
+            CAPTURED_FINALIZE_WAKE_STATE_CHANNEL.to_string(),
+            producer_id,
+            message_json,
+            epoch,
+            None,
+        )
+    });
+    if let Err(error) = result {
+        eprintln!(
+            "[controller] captured-finalize wake projection failed for {}: {error:#}",
+            projection.document_hash
+        );
+    }
+}
+
+pub(super) fn clear_captured_finalize_wake(runtime: &ControllerRuntime, document_hash: &str) {
+    runtime.captured_finalize_wakes.lock().remove(document_hash);
 }
 
 fn publish_pane_layout_status(runtime: &ControllerRuntime) {
@@ -17943,6 +18251,38 @@ mod tests {
         assert_eq!(
             pane_layout_invocation_from_state_frame(&frame).unwrap(),
             desired
+        );
+    }
+
+    #[test]
+    fn captured_finalize_wake_roundtrips_through_the_lazily_state_plane() {
+        let wake = CapturedFinalizeWakeProjection {
+            document_hash: "generic-document".to_string(),
+            cycle_id: "cycle-1".to_string(),
+            capture_id: "capture-1".to_string(),
+            response_sha256: "response-hash".to_string(),
+            reason: "document_write_converged".to_string(),
+        };
+        let snapshot = CapturedFinalizeWakeSnapshot {
+            wakes: BTreeMap::from([(wake.document_hash.clone(), wake.clone())]),
+        };
+        let message_json = state_plane_snapshot_message_json(
+            43,
+            CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+            CAPTURED_FINALIZE_WAKE_TYPE_TAG,
+            &snapshot,
+        )
+        .unwrap();
+        let message: lazily::IpcMessage = serde_json::from_str(&message_json).unwrap();
+        let payload = state_plane_snapshot_payload(
+            &message,
+            CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+            CAPTURED_FINALIZE_WAKE_TYPE_TAG,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<CapturedFinalizeWakeSnapshot>(&payload).unwrap(),
+            snapshot
         );
     }
 

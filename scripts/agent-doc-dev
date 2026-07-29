@@ -1,0 +1,409 @@
+#!/usr/bin/env python3
+"""Deterministic development harness for agent-doc release projections."""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+from typing import Any
+
+
+SEMVER_RE = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+)
+PACKAGE_VERSION_RE = re.compile(
+    r'(?ms)(^\[package\]\s.*?^version\s*=\s*")([^"]+)(")'
+)
+PROJECT_VERSION_RE = re.compile(
+    r'(?ms)(^\[project\]\s.*?^version\s*=\s*")([^"]+)(")'
+)
+SKILL_VERSION_RE = re.compile(
+    r'(?m)^(agent-doc-version:\s*")([^"]+)(")\s*$'
+)
+INLINE_PATH_RE = re.compile(r'path\s*=\s*"([^"]+)"')
+INLINE_VERSION_RE = re.compile(r'(version\s*=\s*")([^"]+)(")')
+LOCK_NAME_RE = re.compile(r'(?m)^name = "([^"]+)"$')
+LOCK_VERSION_RE = re.compile(r'(?m)^(version = ")([^"]+)(")$')
+SKILL_FILES = (
+    Path("SKILL.md"),
+    Path(".claude/skills/agent-doc/SKILL.md"),
+)
+
+
+class HarnessError(RuntimeError):
+    pass
+
+
+def read_toml(path: Path) -> dict[str, Any]:
+    try:
+        return tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise HarnessError(f"cannot read TOML {path}: {exc}") from exc
+
+
+def workspace_manifests(root: Path) -> list[Path]:
+    root_manifest = root / "Cargo.toml"
+    root_toml = read_toml(root_manifest)
+    members = root_toml.get("workspace", {}).get("members")
+    if not isinstance(members, list) or not members:
+        raise HarnessError(f"{root_manifest} has no explicit workspace members")
+
+    manifests = [root_manifest]
+    for member in members:
+        if not isinstance(member, str) or any(char in member for char in "*?["):
+            raise HarnessError(
+                "release projection requires explicit, non-glob workspace members; "
+                f"found {member!r}"
+            )
+        manifest = root / member / "Cargo.toml"
+        if not manifest.is_file():
+            raise HarnessError(f"workspace manifest is missing: {manifest}")
+        manifests.append(manifest)
+    return manifests
+
+
+def workspace_packages(root: Path) -> tuple[list[Path], dict[Path, str]]:
+    manifests = workspace_manifests(root)
+    packages: dict[Path, str] = {}
+    names: set[str] = set()
+    for manifest in manifests:
+        package = read_toml(manifest).get("package")
+        if not isinstance(package, dict):
+            raise HarnessError(f"{manifest} has no [package] table")
+        name = package.get("name")
+        if not isinstance(name, str) or not name:
+            raise HarnessError(f"{manifest} has no package name")
+        if name in names:
+            raise HarnessError(f"duplicate workspace package name: {name}")
+        if package.get("publish") is not False:
+            raise HarnessError(
+                f"agent-doc workspace package must remain private: {manifest}"
+            )
+        names.add(name)
+        packages[manifest.parent.resolve()] = name
+    return manifests, packages
+
+
+def replace_one(
+    path: Path, pattern: re.Pattern[str], replacement: str, label: str
+) -> None:
+    text = path.read_text()
+    changed, count = pattern.subn(rf"\g<1>{replacement}\g<3>", text, count=1)
+    if count != 1:
+        raise HarnessError(f"{path} has no unique {label}")
+    if changed != text:
+        path.write_text(changed)
+
+
+def project_manifest(
+    manifest: Path, workspace_dirs: set[Path], version: str
+) -> None:
+    text = manifest.read_text()
+    projected, count = PACKAGE_VERSION_RE.subn(
+        rf"\g<1>{version}\g<3>", text, count=1
+    )
+    if count != 1:
+        raise HarnessError(f"{manifest} has no unique package version")
+
+    lines: list[str] = []
+    for line in projected.splitlines(keepends=True):
+        path_match = INLINE_PATH_RE.search(line)
+        if path_match is not None:
+            dependency_dir = (manifest.parent / path_match.group(1)).resolve()
+            if dependency_dir in workspace_dirs:
+                line, version_count = INLINE_VERSION_RE.subn(
+                    rf"\g<1>{version}\g<3>", line, count=1
+                )
+                if version_count != 1:
+                    raise HarnessError(
+                        f"{manifest} internal path dependency lacks a version: "
+                        f"{line.rstrip()}"
+                    )
+        lines.append(line)
+
+    changed = "".join(lines)
+    if changed != text:
+        manifest.write_text(changed)
+
+
+def lock_blocks(text: str) -> list[str]:
+    return re.split(r"(?=^\[\[package\]\]\s*$)", text, flags=re.MULTILINE)
+
+
+def project_lock(lock_path: Path, package_names: set[str], version: str) -> None:
+    blocks = lock_blocks(lock_path.read_text())
+    seen: set[str] = set()
+    for index, block in enumerate(blocks):
+        name_match = LOCK_NAME_RE.search(block)
+        if name_match is None or name_match.group(1) not in package_names:
+            continue
+        name = name_match.group(1)
+        block, count = LOCK_VERSION_RE.subn(
+            rf"\g<1>{version}\g<3>", block, count=1
+        )
+        if count != 1:
+            raise HarnessError(f"Cargo.lock package {name} lacks a version")
+        blocks[index] = block
+        seen.add(name)
+    missing = package_names - seen
+    if missing:
+        raise HarnessError(
+            "Cargo.lock lacks workspace package(s): " + ", ".join(sorted(missing))
+        )
+    lock_path.write_text("".join(blocks))
+
+
+def iter_path_dependencies(value: Any):
+    if isinstance(value, dict):
+        if "path" in value:
+            yield value
+        for child in value.values():
+            yield from iter_path_dependencies(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from iter_path_dependencies(child)
+
+
+def verify_lock(
+    lock_path: Path, package_names: set[str], expected_version: str
+) -> list[str]:
+    errors: list[str] = []
+    seen: set[str] = set()
+    for block in lock_blocks(lock_path.read_text()):
+        name_match = LOCK_NAME_RE.search(block)
+        if name_match is None or name_match.group(1) not in package_names:
+            continue
+        name = name_match.group(1)
+        version_match = LOCK_VERSION_RE.search(block)
+        actual = version_match.group(2) if version_match is not None else "<missing>"
+        if actual != expected_version:
+            errors.append(
+                f"Cargo.lock package {name}={actual}, expected {expected_version}"
+            )
+        seen.add(name)
+    for name in sorted(package_names - seen):
+        errors.append(f"Cargo.lock lacks workspace package {name}")
+    return errors
+
+
+def root_version(root: Path) -> str:
+    package = read_toml(root / "Cargo.toml").get("package", {})
+    version = package.get("version")
+    if not isinstance(version, str):
+        raise HarnessError("root Cargo.toml has no package version")
+    return version
+
+
+def verify_release_version(root: Path) -> tuple[str, int, int]:
+    manifests, packages = workspace_packages(root)
+    expected = root_version(root)
+    errors: list[str] = []
+    dependency_count = 0
+
+    for manifest in manifests:
+        data = read_toml(manifest)
+        package = data["package"]
+        actual = package.get("version")
+        if actual != expected:
+            errors.append(f"{manifest}: package version {actual}, expected {expected}")
+
+        for dependency in iter_path_dependencies(data):
+            path = dependency.get("path")
+            if not isinstance(path, str):
+                continue
+            dependency_dir = (manifest.parent / path).resolve()
+            if dependency_dir not in packages:
+                continue
+            dependency_count += 1
+            constraint = dependency.get("version")
+            if constraint != expected:
+                errors.append(
+                    f"{manifest}: internal path dependency "
+                    f"{packages[dependency_dir]}={constraint}, expected {expected}"
+                )
+
+    pyproject = read_toml(root / "pyproject.toml")
+    pypi_version = pyproject.get("project", {}).get("version")
+    if pypi_version != expected:
+        errors.append(
+            f"pyproject.toml project version {pypi_version}, expected {expected}"
+        )
+
+    for relative in SKILL_FILES:
+        path = root / relative
+        match = SKILL_VERSION_RE.search(path.read_text())
+        actual = match.group(2) if match is not None else "<missing>"
+        if actual != expected:
+            errors.append(f"{relative} marker {actual}, expected {expected}")
+
+    errors.extend(
+        verify_lock(root / "Cargo.lock", set(packages.values()), expected)
+    )
+    if errors:
+        raise HarnessError("release version projection drift:\n- " + "\n- ".join(errors))
+    return expected, len(manifests), dependency_count
+
+
+def release_version(root: Path, version: str) -> tuple[int, int]:
+    if SEMVER_RE.fullmatch(version) is None:
+        raise HarnessError(f"invalid semantic version: {version!r}")
+
+    manifests, packages = workspace_packages(root)
+    workspace_dirs = set(packages)
+    for manifest in manifests:
+        project_manifest(manifest, workspace_dirs, version)
+
+    replace_one(
+        root / "pyproject.toml",
+        PROJECT_VERSION_RE,
+        version,
+        "[project] version",
+    )
+    for relative in SKILL_FILES:
+        replace_one(
+            root / relative,
+            SKILL_VERSION_RE,
+            version,
+            "agent-doc-version marker",
+        )
+    project_lock(root / "Cargo.lock", set(packages.values()), version)
+    _, manifest_count, dependency_count = verify_release_version(root)
+    return manifest_count, dependency_count
+
+
+def write_fixture(root: Path) -> None:
+    (root / "agent-doc-part").mkdir(parents=True)
+    (root / ".claude/skills/agent-doc").mkdir(parents=True)
+    (root / "Cargo.toml").write_text(
+        """[workspace]
+members = ["agent-doc-part"]
+
+[package]
+name = "agent-doc"
+version = "1.2.3"
+publish = false
+
+[dependencies]
+agent-doc-part = { path = "agent-doc-part", version = "1.2.3" }
+"""
+    )
+    (root / "agent-doc-part/Cargo.toml").write_text(
+        """[package]
+name = "agent-doc-part"
+version = "1.2.3"
+publish = false
+"""
+    )
+    (root / "pyproject.toml").write_text(
+        """[project]
+name = "agent-doc"
+version = "1.2.3"
+"""
+    )
+    skill = '---\nagent-doc-version: "1.2.3"\n---\n'
+    (root / "SKILL.md").write_text(skill)
+    (root / ".claude/skills/agent-doc/SKILL.md").write_text(skill)
+    (root / "Cargo.lock").write_text(
+        """version = 4
+
+[[package]]
+name = "agent-doc"
+version = "1.2.3"
+dependencies = [
+ "agent-doc-part",
+]
+
+[[package]]
+name = "agent-doc-part"
+version = "1.2.3"
+"""
+    )
+
+
+def self_test() -> None:
+    with tempfile.TemporaryDirectory(prefix="agent-doc-dev-") as temp:
+        root = Path(temp)
+        write_fixture(root)
+        manifests, dependencies = release_version(root, "2.4.6")
+        if manifests != 2 or dependencies != 1:
+            raise HarnessError(
+                "fixture projection reported incorrect manifest/dependency counts"
+            )
+        if 'version = "2.4.6"' not in (root / "Cargo.lock").read_text():
+            raise HarnessError("fixture lockfile was not projected")
+        skill = root / ".claude/skills/agent-doc/SKILL.md"
+        skill.write_text(skill.read_text().replace("2.4.6", "1.2.3"))
+        try:
+            verify_release_version(root)
+        except HarnessError as exc:
+            if ".claude/skills/agent-doc/SKILL.md" not in str(exc):
+                raise HarnessError(
+                    "fixture drift did not identify the development skill"
+                ) from exc
+        else:
+            raise HarnessError("fixture skill drift was not detected")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="agent-doc-dev")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    release = subparsers.add_parser(
+        "release-version",
+        help="project one version across every release-owned surface",
+    )
+    release.add_argument("version")
+    release.add_argument("--root", type=Path)
+
+    verify = subparsers.add_parser(
+        "verify-release-version",
+        help="fail if any release-owned version projection has drifted",
+    )
+    verify.add_argument("--root", type=Path)
+
+    subparsers.add_parser(
+        "self-test", help="exercise projection and drift detection on a fixture"
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    root = (
+        args.root.resolve()
+        if getattr(args, "root", None) is not None
+        else Path(__file__).resolve().parent.parent
+    )
+    try:
+        if args.command == "release-version":
+            manifests, dependencies = release_version(root, args.version)
+            print(
+                f"projected agent-doc {args.version} across {manifests} manifests, "
+                f"{dependencies} internal constraints, Cargo.lock, pyproject.toml, "
+                f"and {len(SKILL_FILES)} skill copies"
+            )
+        elif args.command == "verify-release-version":
+            version, manifests, dependencies = verify_release_version(root)
+            print(
+                f"agent-doc {version} release projection is synchronized "
+                f"({manifests} manifests, {dependencies} internal constraints, "
+                f"{len(SKILL_FILES)} skill copies)"
+            )
+        elif args.command == "self-test":
+            self_test()
+            print("agent-doc-dev release projection self-test passed")
+        else:
+            raise AssertionError(f"unknown command: {args.command}")
+    except (HarnessError, OSError) as exc:
+        print(f"agent-doc-dev: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

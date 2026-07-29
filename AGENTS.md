@@ -321,7 +321,10 @@ editors/
 
 ## Release Process
 
-1. Bump version in `Cargo.toml` + `pyproject.toml` (keep in sync)
+1. Run `make release-version VERSION=<version>` to project the version across
+   every workspace package, internal path constraint, `Cargo.lock`,
+   `pyproject.toml`, and both `SKILL.md` copies. Do not bump these surfaces
+   manually.
 2. Update `VERSIONS.md` with a new version entry summarizing the changes
 3. `make check` (clippy + test)
 4. `make install-full` — install a full release-profile local build and verify the changed behavior end-to-end (the agent runs `make check` + automated checks as the verification; do not wait on a human).

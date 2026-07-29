@@ -1124,6 +1124,7 @@ pub(crate) struct ControllerRuntime {
     coordination_graph: ControllerCoordinationGraph,
     supervisor_recycle_graph: ControllerSupervisorRecycleGraph,
     state_plane_graph: ControllerStatePlaneGraph,
+    captured_finalize_wakes: Mutex<BTreeMap<String, rpc::CapturedFinalizeWakeProjection>>,
     pane_layout_graph: ControllerPaneLayoutGraph,
     supervisor_recycle_waiters: Condvar,
     /// Serialize editor-op epoch read/derive/append transitions. The checkpoint
@@ -1455,6 +1456,38 @@ impl ControllerDocumentGraphs {
             self.disk.set(ctx, document_hash.to_string(), disk);
         });
 
+        self.current_verdict(document_hash, file)
+    }
+
+    /// Publish one live-authority edge without erasing the last disk edge.
+    fn observe_authority(
+        &self,
+        document_hash: &str,
+        file: &Path,
+        authority: agent_doc_state_backbone::retained_write::ContentObservation,
+    ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
+        self.authority
+            .set(&self.ctx, document_hash.to_string(), Some(authority));
+        self.current_verdict(document_hash, file)
+    }
+
+    /// Publish one editor-save edge without erasing the last authority edge.
+    fn observe_disk(
+        &self,
+        document_hash: &str,
+        file: &Path,
+        disk: agent_doc_state_backbone::retained_write::ContentObservation,
+    ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
+        self.disk
+            .set(&self.ctx, document_hash.to_string(), Some(disk));
+        self.current_verdict(document_hash, file)
+    }
+
+    fn current_verdict(
+        &self,
+        document_hash: &str,
+        file: &Path,
+    ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         // As of lazily 0.50 the slot factory receives the entry's own tracking
         // view (`Fn(&ThreadSafeContext, &K) -> V`), so reads through it register
         // dependency edges *on this entry* directly. Before that the only way to
@@ -1661,6 +1694,7 @@ impl ControllerRuntime {
             coordination_graph,
             supervisor_recycle_graph,
             state_plane_graph,
+            captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(()),
@@ -1849,6 +1883,22 @@ impl ControllerRuntime {
                 document_projection,
             )
         };
+        let captured_finalize_wake_reason = match &event.fact {
+            agent_doc_state_backbone::StateFact::ResponseCaptured { .. } => {
+                Some("response_captured")
+            }
+            agent_doc_state_backbone::StateFact::WriteApplied { .. } => Some("write_applied"),
+            agent_doc_state_backbone::StateFact::DocumentWriteConverged { .. } => {
+                Some("document_write_converged")
+            }
+            _ => None,
+        };
+        let captured_finalize_committed = matches!(
+            &event.fact,
+            agent_doc_state_backbone::StateFact::CommitObserved { .. }
+        );
+        let captured_finalize_wake_projection =
+            captured_finalize_wake_reason.and_then(|_| document_projection.as_ref().cloned());
         self.supervisor_recycle_graph.set(recycle);
         // `#retainedsettlereactive`: publish the applied *projection* as the fact
         // lands; the retained-intent facts and the settlement verdict are derived
@@ -1858,6 +1908,15 @@ impl ControllerRuntime {
         // cell recomputes dependents, which must not re-enter the projection.
         self.document_graphs
             .set_projection(&document_hash, document_projection);
+        if let (Some(reason), Some(projection)) = (
+            captured_finalize_wake_reason,
+            captured_finalize_wake_projection.as_ref(),
+        ) {
+            rpc::publish_captured_finalize_wake(self, projection, reason);
+        }
+        if captured_finalize_committed {
+            rpc::clear_captured_finalize_wake(self, &document_hash);
+        }
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
         Ok(())
@@ -1884,6 +1943,25 @@ impl ControllerRuntime {
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         self.document_graphs
             .verdict(document_hash, file, authority, disk)
+    }
+
+    pub(crate) fn document_retained_write_observe_authority(
+        &self,
+        document_hash: &str,
+        file: &Path,
+        authority: agent_doc_state_backbone::retained_write::ContentObservation,
+    ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
+        self.document_graphs
+            .observe_authority(document_hash, file, authority)
+    }
+
+    pub(crate) fn document_retained_write_observe_disk(
+        &self,
+        document_hash: &str,
+        file: &Path,
+        disk: agent_doc_state_backbone::retained_write::ContentObservation,
+    ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
+        self.document_graphs.observe_disk(document_hash, file, disk)
     }
 
     pub(crate) fn document_preflight_projection(
@@ -8079,6 +8157,7 @@ agent:queue\n\
             state_projection_waiters: Condvar::new(),
             document_graphs: ControllerDocumentGraphs::new_in(&scope),
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
+            captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph: ControllerPaneLayoutGraph::new_in(&scope, Vec::new()),
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
@@ -8978,6 +9057,33 @@ agent:queue\n\
         assert_eq!(
             pending_intent_id(&runtime, &document_hash).as_deref(),
             Some("intent-1"),
+        );
+    }
+
+    #[test]
+    fn authority_edge_preserves_the_last_disk_source_observation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        defer_document_write(&runtime, dir.path(), &document_hash, "intent-1", "target");
+
+        let initial = runtime.document_retained_write_verdict(
+            &document_hash,
+            &file,
+            Some(observation("authority-before-save")),
+            Some(observation("target")),
+        );
+        assert!(initial.blocks_new_cycle());
+
+        runtime.document_retained_write_observe_authority(
+            &document_hash,
+            &file,
+            observation("target"),
+        );
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash),
+            None,
+            "a new authority edge must combine with the retained disk Source instead of erasing it"
         );
     }
 

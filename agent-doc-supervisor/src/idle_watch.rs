@@ -7,6 +7,9 @@
 use std::path::Path;
 use std::time::Duration;
 
+use agent_doc_state_scope::LocalProcessScope;
+use lazily::{Computed, Source};
+
 /// Scalar gate for a supervisor-owned captured-finalize resume. The effectful
 /// idle watch supplies these facts. A durable captured operation already owns
 /// the closeout lease, so recovery must remain live even while the harness turn
@@ -33,6 +36,110 @@ pub fn captured_finalize_resume_should_start(facts: CapturedFinalizeResumeFacts)
         && facts.retry_cooldown_elapsed
         && !facts.controller_pressure_cooldown
         && !facts.urgent_supervisor_maintenance
+}
+
+/// Reactive trigger for one captured-finalize attempt.
+///
+/// State convergence is an input edge, not an error to retry. After an attempt
+/// consumes the current edge, the graph remains quiet until either the
+/// controller publishes a newer document-state edge or a genuinely failed
+/// effect's backoff expires.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct CapturedFinalizeResumeTriggerProjection {
+    operation_key: Option<String>,
+    state_epoch: u64,
+    consumed_state_epoch: u64,
+    effect_retry_epoch: u64,
+    consumed_effect_retry_epoch: u64,
+    needs_operator: bool,
+}
+
+impl CapturedFinalizeResumeTriggerProjection {
+    fn ready(&self) -> bool {
+        self.operation_key.is_some()
+            && !self.needs_operator
+            && (self.state_epoch > self.consumed_state_epoch
+                || self.effect_retry_epoch > self.consumed_effect_retry_epoch)
+    }
+}
+
+/// Process-scoped Lazily graph separating document-state wakeups from effect
+/// retries for captured finalize.
+pub struct CapturedFinalizeResumeTriggers {
+    scope: LocalProcessScope,
+    projection: Source<CapturedFinalizeResumeTriggerProjection>,
+    ready: Computed<bool>,
+}
+
+impl Default for CapturedFinalizeResumeTriggers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CapturedFinalizeResumeTriggers {
+    pub fn new() -> Self {
+        let scope = LocalProcessScope::new();
+        let projection = scope
+            .ctx()
+            .source(CapturedFinalizeResumeTriggerProjection::default());
+        let projection_for_ready = projection;
+        let ready = scope
+            .ctx()
+            .computed(move |ctx| ctx.get(&projection_for_ready).ready());
+        Self {
+            scope,
+            projection,
+            ready,
+        }
+    }
+
+    /// Observe the durable identity currently eligible for recovery. A newly
+    /// observed operation carries its own initial state edge.
+    pub fn observe_operation(&self, operation_key: Option<String>) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        if projection.operation_key == operation_key {
+            return;
+        }
+        projection.operation_key = operation_key;
+        projection.needs_operator = false;
+        projection.state_epoch = projection.state_epoch.saturating_add(1);
+        projection.consumed_state_epoch = projection.state_epoch.saturating_sub(1);
+        projection.consumed_effect_retry_epoch = projection.effect_retry_epoch;
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
+    /// Publish a controller-owned document-state edge.
+    pub fn observe_state_edge(&self) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.state_epoch = projection.state_epoch.saturating_add(1);
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
+    /// Publish expiry of a backoff for a failed effect. This is intentionally a
+    /// different Source edge from document convergence.
+    pub fn observe_effect_retry_due(&self) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.effect_retry_epoch = projection.effect_retry_epoch.saturating_add(1);
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
+    pub fn consume_attempt(&self) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.consumed_state_epoch = projection.state_epoch;
+        projection.consumed_effect_retry_epoch = projection.effect_retry_epoch;
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
+    pub fn require_operator(&self) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.needs_operator = true;
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
+    pub fn ready(&self) -> bool {
+        self.scope.ctx().get(&self.ready)
+    }
 }
 
 /// Exponential retry capped at one attempt per 30 seconds. Transient editor or
@@ -184,6 +291,29 @@ mod tests {
         assert_eq!(
             captured_finalize_resume_retry_delay(99),
             Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn captured_finalize_resume_waits_for_a_new_state_edge_instead_of_retrying() {
+        let triggers = CapturedFinalizeResumeTriggers::new();
+        triggers.observe_operation(Some("cycle:capture:response".to_string()));
+        assert!(triggers.ready());
+        triggers.consume_attempt();
+        assert!(!triggers.ready(), "a consumed state edge must stay quiet");
+
+        triggers.observe_state_edge();
+        assert!(
+            triggers.ready(),
+            "a new controller state edge rearms recovery"
+        );
+        triggers.consume_attempt();
+        assert!(!triggers.ready());
+
+        triggers.observe_effect_retry_due();
+        assert!(
+            triggers.ready(),
+            "effect failure backoff is an explicit, separate trigger"
         );
     }
 

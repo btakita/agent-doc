@@ -4,6 +4,28 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.88
+
+_JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Retained closeout convergence is now event-driven instead of retried.**
+CRDT replica changes feed the controller's live-authority Source and editor
+native-save receipts feed its disk Source directly; the shared Computed verdict
+and settlement Effect advance the exact retained capture without requiring a
+status RPC, repeated `session-check`, or a controller-side disk read.
+- **Captured finalize resumes only from an explicit graph edge.** The controller
+publishes a per-document Lazily state-plane snapshot, and the supervisor
+consumes each state or failed-effect edge once. Idle timer ticks cannot produce
+another finalize attempt. Only transient effect failures such as disconnect,
+timeout, or backpressure receive bounded backoff. Focused graph tests and an
+exhaustive anonymized SimWorld schedule prove that native save rearms once while
+arbitrary timer ticks leave the attempt count unchanged.
+- **Release version projection now belongs to the agent-doc development
+harness.** `make release-version VERSION=<version>` updates every workspace
+package, internal path constraint, lockfile entry, Python package version, and
+both skill copies from one input. The full check verifies the projection and
+exercises drift detection on an isolated fixture.
+
 ## 0.35.87
 
 _JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._

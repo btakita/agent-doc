@@ -15,10 +15,23 @@ pub struct CapturedFinalizeResumeKey {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CapturedFinalizeResumeOutcome {
-    Committed { repair_outcome: String },
+    Committed {
+        repair_outcome: String,
+    },
     Superseded,
-    Retryable { reason: String },
-    NeedsOperator { reason: String },
+    /// The effect completed successfully enough to observe that a newer
+    /// document-state edge is required. Do not put this on a timer.
+    WaitingForSignal {
+        reason: String,
+    },
+    /// The effect itself failed transiently; controller reconnect/backoff may
+    /// retry this exact capture without inventing a new response operation.
+    RetryableEffect {
+        reason: String,
+    },
+    NeedsOperator {
+        reason: String,
+    },
 }
 
 pub fn run_write_command_with_empty_response_recovery(
@@ -107,7 +120,7 @@ pub fn captured_finalize_resume_key(file: &Path) -> Result<Option<CapturedFinali
 /// Resume one exact captured finalize operation through the existing strict
 /// repair/write/commit path. Disk fallback is explicitly disabled: a live or
 /// reconnecting editor remains authoritative, and convergence failures retain
-/// the same durable capture for a later retry.
+/// the same durable capture until a later controller state edge.
 pub fn resume_captured_finalize(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
@@ -139,7 +152,7 @@ pub fn resume_captured_finalize(
             } else if captured_finalize_resume_key(file).ok().flatten().as_ref() != Some(expected) {
                 CapturedFinalizeResumeOutcome::Superseded
             } else {
-                CapturedFinalizeResumeOutcome::Retryable {
+                CapturedFinalizeResumeOutcome::WaitingForSignal {
                     reason: format!(
                         "strict repair returned {outcome:?} but the captured cycle is still open"
                     ),
@@ -218,30 +231,40 @@ fn resume_captured_finalize_intent(
 
 fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResumeOutcome {
     let lower = reason.to_ascii_lowercase();
-    let retryable = [
+    let waiting_for_signal = [
         "retry_without_disk_write",
         "editor_convergence_required",
-        "controller_model_backpressure",
         "compare_and_swap_raced",
-        "timed out",
-        "timeout",
         "await_editor_replica",
         "no relay replica is registered",
         "editor authority stayed",
         "active recovery attempt",
         "operation is already in progress",
-        "resource temporarily unavailable",
     ]
     .iter()
     .any(|needle| lower.contains(needle));
-    if retryable {
-        CapturedFinalizeResumeOutcome::Retryable {
+    if waiting_for_signal {
+        return CapturedFinalizeResumeOutcome::WaitingForSignal {
             reason: reason.to_string(),
-        }
-    } else {
-        CapturedFinalizeResumeOutcome::NeedsOperator {
+        };
+    }
+    let retryable_effect = [
+        "controller_model_backpressure",
+        "timed out",
+        "timeout",
+        "resource temporarily unavailable",
+        "connection reset",
+        "broken pipe",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    if retryable_effect {
+        return CapturedFinalizeResumeOutcome::RetryableEffect {
             reason: reason.to_string(),
-        }
+        };
+    }
+    CapturedFinalizeResumeOutcome::NeedsOperator {
+        reason: reason.to_string(),
     }
 }
 
@@ -250,17 +273,29 @@ mod captured_finalize_resume_tests {
     use super::*;
 
     #[test]
-    fn convergence_and_backpressure_failures_are_retryable() {
+    fn convergence_failures_wait_for_a_state_edge() {
         for reason in [
             "recovery=retry_without_disk_write",
             "closeout blocked by editor_convergence_required",
-            "controller_model_backpressure",
             "compare_and_swap_raced",
-            "controller lookup timed out",
         ] {
             assert!(matches!(
                 classify_captured_finalize_resume_error(reason),
-                CapturedFinalizeResumeOutcome::Retryable { .. }
+                CapturedFinalizeResumeOutcome::WaitingForSignal { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn transport_and_backpressure_failures_retry_the_effect() {
+        for reason in [
+            "controller_model_backpressure",
+            "controller lookup timed out",
+            "connection reset by peer",
+        ] {
+            assert!(matches!(
+                classify_captured_finalize_resume_error(reason),
+                CapturedFinalizeResumeOutcome::RetryableEffect { .. }
             ));
         }
     }

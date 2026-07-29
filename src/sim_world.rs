@@ -1411,6 +1411,152 @@ mod retained_closeout_recovery_model {
     }
 }
 
+/// SimWorld regression for retained closeout churn. Document convergence emits
+/// a state edge; passage of time alone cannot re-run finalize. A separate
+/// effect-retry receipt covers transient transport/process failures.
+mod reactive_retained_finalize_model {
+    use std::collections::BTreeSet;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        Capture,
+        Resume,
+        OperatorEdit,
+        NativeSave,
+        TimerTick,
+        FailNextEffect,
+        EffectRetryDue,
+    }
+
+    const ACTIONS: [Action; 7] = [
+        Action::Capture,
+        Action::Resume,
+        Action::OperatorEdit,
+        Action::NativeSave,
+        Action::TimerTick,
+        Action::FailNextEffect,
+        Action::EffectRetryDue,
+    ];
+
+    #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+    struct World {
+        captured: bool,
+        authority_revision: u8,
+        disk_revision: u8,
+        state_epoch: u8,
+        consumed_state_epoch: u8,
+        effect_retry_epoch: u8,
+        consumed_effect_retry_epoch: u8,
+        fail_next_effect: bool,
+        effect_retry_pending: bool,
+        attempts: u8,
+        committed: bool,
+    }
+
+    impl World {
+        fn ready(&self) -> bool {
+            self.captured
+                && !self.committed
+                && (self.state_epoch > self.consumed_state_epoch
+                    || self.effect_retry_epoch > self.consumed_effect_retry_epoch)
+        }
+
+        fn step(&mut self, action: Action) {
+            let attempts_before = self.attempts;
+            match action {
+                Action::Capture if !self.captured => {
+                    self.captured = true;
+                    self.authority_revision = 1;
+                    self.state_epoch = self.state_epoch.saturating_add(1);
+                }
+                Action::Resume if self.ready() => {
+                    self.attempts = self.attempts.saturating_add(1);
+                    self.consumed_state_epoch = self.state_epoch;
+                    self.consumed_effect_retry_epoch = self.effect_retry_epoch;
+                    if self.fail_next_effect {
+                        self.fail_next_effect = false;
+                        self.effect_retry_pending = true;
+                    } else if self.authority_revision == self.disk_revision {
+                        self.committed = true;
+                    }
+                }
+                Action::OperatorEdit if self.captured && !self.committed => {
+                    self.authority_revision = self.authority_revision.saturating_add(1);
+                }
+                Action::NativeSave if self.captured && !self.committed => {
+                    self.disk_revision = self.authority_revision;
+                    // Production's retained-write Computed emits
+                    // DocumentWriteConverged, which is the controller wake edge.
+                    self.state_epoch = self.state_epoch.saturating_add(1);
+                }
+                Action::FailNextEffect if self.captured && !self.committed => {
+                    self.fail_next_effect = true;
+                }
+                Action::EffectRetryDue if self.effect_retry_pending => {
+                    self.effect_retry_pending = false;
+                    self.effect_retry_epoch = self.effect_retry_epoch.saturating_add(1);
+                }
+                Action::TimerTick
+                | Action::Capture
+                | Action::Resume
+                | Action::OperatorEdit
+                | Action::NativeSave
+                | Action::FailNextEffect
+                | Action::EffectRetryDue => {}
+            }
+            if action == Action::TimerTick {
+                assert_eq!(
+                    self.attempts, attempts_before,
+                    "time passage retried finalize without a Source edge: {self:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_save_state_edge_rearms_once_without_timer_retry() {
+        let mut world = World::default();
+        for action in [
+            Action::Capture,
+            Action::Resume,
+            Action::TimerTick,
+            Action::TimerTick,
+            Action::OperatorEdit,
+            Action::TimerTick,
+        ] {
+            world.step(action);
+        }
+        assert_eq!(world.attempts, 1);
+        assert!(!world.committed);
+
+        world.step(Action::NativeSave);
+        world.step(Action::Resume);
+        assert_eq!(world.attempts, 2);
+        assert!(world.committed);
+    }
+
+    #[test]
+    fn exhaustive_schedules_never_turn_timer_ticks_into_finalize_attempts() {
+        let mut frontier = BTreeSet::from([World::default()]);
+        let mut seen = frontier.clone();
+        for _ in 0..9 {
+            let mut next_frontier = BTreeSet::new();
+            for world in frontier {
+                for action in ACTIONS {
+                    let mut next = world.clone();
+                    next.step(action);
+                    if seen.insert(next.clone()) {
+                        next_frontier.insert(next);
+                    }
+                }
+            }
+            frontier = next_frontier;
+        }
+        assert!(seen.iter().any(|world| world.committed));
+        assert!(seen.iter().any(|world| world.effect_retry_epoch > 0));
+    }
+}
+
 /// Deterministic model for the queue-strike loss seen when the live editor and
 /// disk differed only in route-owned queue state. Delivery ACK, native editor
 /// save, and Git commit are distinct transitions.

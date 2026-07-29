@@ -26,7 +26,7 @@ use agent_doc_supervisor::{
     },
     idle_revision::{ControllerProbeHealth, IdleRevisionState, RevisionObservation},
     idle_watch::{
-        CapturedFinalizeResumeFacts, SupervisorAutoInstallPhase,
+        CapturedFinalizeResumeFacts, CapturedFinalizeResumeTriggers, SupervisorAutoInstallPhase,
         captured_finalize_resume_retry_delay, captured_finalize_resume_should_start,
         idle_queue_context_reset_ops_log_message, paused_idle_watch_should_skip,
         supervisor_auto_install_pane_message,
@@ -159,6 +159,52 @@ struct CapturedFinalizeResumeRetry {
     attempts: u32,
     retry_at: std::time::Instant,
     needs_operator: bool,
+    trigger_published: bool,
+}
+
+struct CapturedFinalizeResumeSignalWatch {
+    result: std::sync::mpsc::Receiver<()>,
+}
+
+fn spawn_captured_finalize_resume_signal_watch(
+    file: PathBuf,
+    stop: Arc<AtomicBool>,
+) -> std::io::Result<CapturedFinalizeResumeSignalWatch> {
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let (send, result) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("captured-finalize-signal".into())
+        .spawn(move || {
+            let mut after_version = 0;
+            while !stop.load(Ordering::Relaxed) {
+                match agent_doc_controller_io::project_controller::subscribe_captured_finalize_wakes_for_file(
+                    &file,
+                    after_version,
+                    std::time::Duration::from_secs(30),
+                ) {
+                    Ok(subscription) => {
+                        after_version = subscription.latest_version;
+                        if subscription
+                            .wakes
+                            .iter()
+                            .any(|wake| wake.document_hash == document_hash)
+                            && send.send(()).is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(_) => {
+                        // Reconnect is an effect failure, not document-state
+                        // convergence. Back off the transport without invoking
+                        // finalize/session-check.
+                        if !sleep_with_stop(&stop, std::time::Duration::from_secs(2)) {
+                            return;
+                        }
+                    }
+                }
+            }
+        })?;
+    Ok(CapturedFinalizeResumeSignalWatch { result })
 }
 
 fn spawn_captured_finalize_resume_worker(
@@ -1235,14 +1281,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
             });
             let mut last_full_reconcile: Option<std::time::Instant> = None;
             let mut last_zombie_reap: Option<std::time::Instant> = None;
-            // `#binaryownedfinalize`: once finalize has durably captured a
-            // response, this supervisor owns retrying that exact operation.
-            // A dedicated worker keeps repair/commit latency off the queue-watch
-            // thread; `resume_worker` is the local keyed-single-flight latch.
-            let mut resume_worker: Option<CapturedFinalizeResumeWorker> = None;
-            let mut resume_retry: Option<CapturedFinalizeResumeRetry> = None;
-            let mut last_resume_key_error_hash: Option<String> = None;
-            loop {
+        // `#binaryownedfinalize`: once finalize has durably captured a
+        // response, this supervisor owns event-driven resumption of that exact
+        // operation. A dedicated worker keeps repair/commit latency off the
+        // queue-watch thread; `resume_worker` is the local keyed-single-flight
+        // latch. Only a failed effect receives a timed retry edge.
+    let mut resume_worker: Option<CapturedFinalizeResumeWorker> = None;
+    let mut resume_retry: Option<CapturedFinalizeResumeRetry> = None;
+    let resume_triggers = CapturedFinalizeResumeTriggers::new();
+    let resume_signal_watch =
+        spawn_captured_finalize_resume_signal_watch(path.clone(), Arc::clone(&stop)).ok();
+    // Cold-start inspection is the covering snapshot for a capture that
+    // predates this supervisor. Afterwards, only controller state edges or an
+    // effect-retry receipt re-arm inspection.
+    let mut resume_key_refresh_pending = true;
+    let mut last_resume_key_error_hash: Option<String> = None;
+    loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
                 }
@@ -1264,17 +1318,28 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // must remain prompt at every stage of a turn. Keep it ahead of
                 // every quiescent fast-path gate; it is a local inode/stat probe
                 // and does not touch the controller or editor.
-                let supervisor_stale_fast = shared.refresh_binary_stale();
-                let now = std::time::Instant::now();
-                let finished_resume = resume_worker.as_ref().and_then(|worker| {
+        let supervisor_stale_fast = shared.refresh_binary_stale();
+        let now = std::time::Instant::now();
+        if resume_signal_watch.as_ref().is_some_and(|watch| {
+            let mut observed = false;
+            while watch.result.try_recv().is_ok() {
+                observed = true;
+            }
+            observed
+        }) {
+            resume_triggers.observe_state_edge();
+            resume_key_refresh_pending = true;
+            last_quiescent_maintenance = None;
+        }
+        let finished_resume = resume_worker.as_ref().and_then(|worker| {
                     match worker.result.try_recv() {
                         Ok(outcome) => Some((worker.key.clone(), outcome)),
                         Err(std::sync::mpsc::TryRecvError::Empty) => None,
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => Some((
                             worker.key.clone(),
-                            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Retryable {
-                                reason: "captured finalize resume worker disconnected".to_string(),
-                            },
+                    agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryableEffect {
+                        reason: "captured finalize resume worker disconnected".to_string(),
+                    },
                         )),
                     }
                 });
@@ -1284,9 +1349,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     match outcome {
                         agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed {
                             repair_outcome,
-                        } => {
-                            resume_retry = None;
-                            let event = format!(
+                } => {
+                    resume_retry = None;
+                    resume_triggers.observe_operation(None);
+                    let event = format!(
                                 "captured_finalize_resume_committed file={} cycle_id={} capture_id={} response_sha256={} repair_outcome={} authority=editor_crdt",
                                 path.display(),
                                 key.cycle_id,
@@ -1297,8 +1363,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             log_event(&mut session_log, &event);
                             agent_doc_ops_log_io::log_op(&path, &event);
                         }
-                        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
-                            resume_retry = None;
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
+                    resume_retry = None;
+                    resume_triggers.observe_operation(None);
                             let event = format!(
                                 "captured_finalize_resume_superseded file={} cycle_id={} capture_id={} response_sha256={}",
                                 path.display(),
@@ -1309,9 +1376,25 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             log_event(&mut session_log, &event);
                             agent_doc_ops_log_io::log_op(&path, &event);
                         }
-                        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Retryable {
-                            reason,
-                        } => {
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::WaitingForSignal {
+                    reason,
+                } => {
+                    resume_retry = None;
+                    let event = format!(
+                        "captured_finalize_resume_waiting_for_state file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=await_controller_state_edge",
+                        path.display(),
+                        key.cycle_id,
+                        key.capture_id,
+                        key.response_sha256,
+                        reason.len(),
+                        agent_doc_hash::content_hash(&reason),
+                    );
+                    log_event(&mut session_log, &event);
+                    agent_doc_ops_log_io::log_op(&path, &event);
+                }
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryableEffect {
+                    reason,
+                } => {
                             let attempts = resume_retry
                                 .as_ref()
                                 .filter(|retry| retry.key == key)
@@ -1320,8 +1403,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             resume_retry = Some(CapturedFinalizeResumeRetry {
                                 key: key.clone(),
                                 attempts,
-                                retry_at: now + delay,
-                                needs_operator: false,
+                        retry_at: now + delay,
+                        needs_operator: false,
+                        trigger_published: false,
                             });
                             let event = format!(
                                 "captured_finalize_resume_retry_scheduled file={} cycle_id={} capture_id={} response_sha256={} attempt={} delay_ms={} reason_bytes={} reason_sha256={} authority=editor_crdt no_force_disk=true",
@@ -1340,12 +1424,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::NeedsOperator {
                             reason,
                         } => {
-                            resume_retry = Some(CapturedFinalizeResumeRetry {
-                                key: key.clone(),
-                                attempts: 1,
-                                retry_at: now,
-                                needs_operator: true,
-                            });
+                    resume_retry = Some(CapturedFinalizeResumeRetry {
+                        key: key.clone(),
+                        attempts: 1,
+                        retry_at: now,
+                        needs_operator: true,
+                        trigger_published: true,
+                    });
+                    resume_triggers.require_operator();
                             let event = format!(
                                 "captured_finalize_resume_needs_operator file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=retain_without_mutation",
                                 path.display(),
@@ -1381,16 +1467,31 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     || context_reset_in_flight
                     || awaiting_clear_settle
                     || shared.restart_reexec.load(Ordering::Relaxed);
-                let maintenance_due = last_quiescent_maintenance.is_none_or(|last| {
-                    last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
-                });
-                if maintenance_due {
-                    match agent_doc_repair_command_io::captured_finalize_resume_key(&path) {
-                        Ok(Some(key)) => {
-                            last_resume_key_error_hash = None;
-                            if resume_retry
-                                .as_ref()
-                                .is_some_and(|retry| retry.key != key)
+        let maintenance_due = last_quiescent_maintenance.is_none_or(|last| {
+            last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
+        });
+        if let Some(retry) = resume_retry.as_mut()
+            && !retry.needs_operator
+            && !retry.trigger_published
+            && now >= retry.retry_at
+        {
+            retry.trigger_published = true;
+            resume_triggers.observe_effect_retry_due();
+            resume_key_refresh_pending = true;
+            last_quiescent_maintenance = None;
+        }
+        if maintenance_due && (resume_key_refresh_pending || resume_triggers.ready()) {
+            match agent_doc_repair_command_io::captured_finalize_resume_key(&path) {
+                Ok(Some(key)) => {
+                    resume_key_refresh_pending = false;
+                    last_resume_key_error_hash = None;
+                    resume_triggers.observe_operation(Some(format!(
+                        "{}:{}:{}",
+                        key.cycle_id, key.capture_id, key.response_sha256
+                    )));
+                    if resume_retry
+                        .as_ref()
+                        .is_some_and(|retry| retry.key != key)
                             {
                                 resume_retry = None;
                             }
@@ -1414,12 +1515,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 retry_cooldown_elapsed: retry_cooldown_elapsed
                                     && !needs_operator,
                                 controller_pressure_cooldown: agent_doc_controller_io::project_controller::controller_model_pressure_cooldown_active_for_doc(&path),
-                                urgent_supervisor_maintenance: urgent_maintenance,
-                            };
-                            if captured_finalize_resume_should_start(facts) {
-                                match spawn_captured_finalize_resume_worker(
-                                    path.clone(),
-                                    key.clone(),
+                        urgent_supervisor_maintenance: urgent_maintenance,
+                    };
+                    if resume_triggers.ready() && captured_finalize_resume_should_start(facts) {
+                        match spawn_captured_finalize_resume_worker(
+                            path.clone(),
+                            key.clone(),
                                 ) {
                                     Ok(worker) => {
                                         let attempt = resume_retry
@@ -1434,10 +1535,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             key.response_sha256,
                                             attempt,
                                         );
-                                        log_event(&mut session_log, &event);
-                                        agent_doc_ops_log_io::log_op(&path, &event);
-                                        resume_worker = Some(worker);
-                                    }
+                                log_event(&mut session_log, &event);
+                                agent_doc_ops_log_io::log_op(&path, &event);
+                                resume_triggers.consume_attempt();
+                                resume_worker = Some(worker);
+                            }
                                     Err(err) => {
                                         let attempts = resume_retry
                                             .as_ref()
@@ -1445,26 +1547,30 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             .map_or(1, |retry| retry.attempts.saturating_add(1));
                                         resume_retry = Some(CapturedFinalizeResumeRetry {
                                             key,
-                                            attempts,
-                                            retry_at: now
-                                                + captured_finalize_resume_retry_delay(attempts),
-                                            needs_operator: false,
-                                        });
+                                    attempts,
+                                    retry_at: now
+                                        + captured_finalize_resume_retry_delay(attempts),
+                                    needs_operator: false,
+                                    trigger_published: false,
+                                });
                                         eprintln!(
                                             "[agent-doc] warning: failed to spawn captured finalize resume worker: {err}"
                                         );
                                     }
                                 }
                             }
-                        }
-                        Ok(None) => {
-                            last_resume_key_error_hash = None;
-                            if resume_worker.is_none() {
-                                resume_retry = None;
-                            }
-                        }
-                        Err(err) => {
-                            let reason = format!("{err:#}");
+                }
+                Ok(None) => {
+                    resume_key_refresh_pending = false;
+                    last_resume_key_error_hash = None;
+                    if resume_worker.is_none() {
+                        resume_retry = None;
+                        resume_triggers.observe_operation(None);
+                    }
+                }
+                Err(err) => {
+                    resume_key_refresh_pending = false;
+                    let reason = format!("{err:#}");
                             let reason_hash = agent_doc_hash::content_hash(&reason);
                             if last_resume_key_error_hash.as_deref() != Some(&reason_hash) {
                                 last_resume_key_error_hash = Some(reason_hash.clone());

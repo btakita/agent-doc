@@ -35,5 +35,9 @@ Ensure both `cargo test --lib` and `cargo test --bin agent-doc` pass before rele
 
 ## Version sync
 
-`pyproject.toml` version must match `Cargo.toml`. Maturin reads `Cargo.toml` as
-authoritative but PyPI upload will conflict if `pyproject.toml` drifts.
+Run `make release-version VERSION=<version>` before updating `VERSIONS.md`.
+The `agent-doc-dev` harness projects that one value into all workspace package
+versions, internal path-dependency constraints, `Cargo.lock`, `pyproject.toml`,
+and both shipped/development `SKILL.md` markers. `make check` runs the matching
+projection guard and an isolated harness self-test, so release preparation
+cannot defer another skill-marker repair until late in the test suite.

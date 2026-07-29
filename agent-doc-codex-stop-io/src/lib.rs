@@ -301,7 +301,25 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                     )
                 });
             }
-            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Retryable { reason } => {
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::WaitingForSignal {
+                reason,
+            } => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_captured_finalize_resume_waiting_for_state cycle_id={} capture_id={} response_sha256={} attempt={} reason_bytes={} action=await_controller_state_edge",
+                        key.cycle_id,
+                        key.capture_id,
+                        key.response_sha256,
+                        attempt,
+                        reason.len(),
+                    ),
+                );
+                return false;
+            }
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryableEffect {
+                reason,
+            } => {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(

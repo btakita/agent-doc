@@ -1,4 +1,4 @@
-.PHONY: build build-release release test sim-medium cross-editor-simworld tmux-ci clippy check precommit timings install install-full install-editor-plugins install-hooks clean init-python wheel publish publish-pypi bump-plugin lean tla
+.PHONY: build build-release release release-version test sim-medium cross-editor-simworld tmux-ci clippy check precommit timings install install-full install-editor-plugins install-hooks clean init-python wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -33,6 +33,12 @@ release: check
 	git tag "v$$version" && git push origin main "v$$version" && \
 	echo "Tag v$$version pushed. CI handles GitHub Release + PyPI."; \
 	$(MAKE) install-full
+
+# Project one release version across packages, internal dependency constraints,
+# lockfile entries, Python metadata, and both shipped/development skill copies.
+release-version:
+	@test -n "$(VERSION)" || (echo "ERROR: VERSION is required (for example, make release-version VERSION=0.35.89)" && exit 1)
+	@python3 scripts/agent-doc-dev release-version "$(VERSION)"
 
 # Run tests (unset git hook env vars so temp-repo tests are not confused by GIT_DIR).
 # Prefer cargo-nextest when installed; it runs test binaries concurrently while
@@ -97,27 +103,12 @@ tmux-ci:
 clippy:
 	@cargo clippy --quiet --all-targets --all-features -- -D warnings
 
-# Verify package versions match and every agent-doc crate stays private.
+# Verify the complete release projection and every agent-doc crate's privacy.
 version-sync:
-	@cargo_ver=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
-	pypi_ver=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
-	if [ "$$cargo_ver" != "$$pypi_ver" ]; then \
-		echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver pyproject.toml=$$pypi_ver"; \
-		exit 1; \
-	fi; \
-	for manifest in */Cargo.toml; do \
-		crate_ver=$$(grep '^version' "$$manifest" | head -1 | sed 's/.*"\(.*\)"/\1/'); \
-		if [ "$$cargo_ver" != "$$crate_ver" ]; then \
-			echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver $$manifest=$$crate_ver"; \
-			exit 1; \
-		fi; \
-	done; \
-	for manifest in Cargo.toml */Cargo.toml; do \
-		if ! grep -qx 'publish = false' "$$manifest"; then \
-			echo "ERROR: agent-doc package must be private — $$manifest lacks 'publish = false'"; \
-			exit 1; \
-		fi; \
-	done
+	@python3 scripts/agent-doc-dev verify-release-version
+
+dev-harness-test:
+	@python3 scripts/agent-doc-dev self-test
 
 # Bump JB plugin patch version and build both zips
 bump-plugin:
@@ -164,8 +155,8 @@ lean:
 		echo "[lean] lake not found on PATH — skipping formal proof build (install elan/lean to verify formal/ proofs)"; \
 	fi
 
-# clippy + tests + deterministic simulator corpus + version sync + formal checks
-check: clippy test sim-medium version-sync lean tla
+# clippy + tests + deterministic simulator corpus + release harness + formal checks
+check: clippy test sim-medium version-sync dev-harness-test lean tla
 
 # Translate the PlusCal concurrency model and check its TLA+ safety/liveness properties.
 tla:

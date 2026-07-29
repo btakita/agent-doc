@@ -4,6 +4,11 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.Logger
+import io.github.lazily.IpcMessage
+import io.github.lazily.NodeKey
+import io.github.lazily.NodeSnapshot
+import io.github.lazily.NodeState
+import io.github.lazily.Snapshot
 import java.io.File
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.Channels
@@ -29,6 +34,34 @@ internal data class CpTmuxLayoutSyncState(
     val reason: String,
 )
 
+internal enum class PaneLayoutPhase(val token: String) {
+    NeedsEffect("needs_effect"),
+    Applying("applying"),
+    RetryPending("retry_pending"),
+    Converged("converged");
+
+    companion object {
+        fun fromToken(token: String?): PaneLayoutPhase? = entries.firstOrNull { it.token == token }
+    }
+}
+
+internal enum class PaneLayoutReasonCode(val token: String) {
+    Unobserved("unobserved"),
+    EffectInFlight("effect_in_flight"),
+    ObservedConvergence("observed_convergence"),
+    PaneCountMismatch("pane_count_mismatch"),
+    PaneOrderMismatch("pane_order_mismatch"),
+    TmuxUnavailable("tmux_unavailable"),
+    EffectFailed("effect_failed"),
+    ObservationFailed("observation_failed"),
+    RetryScheduled("retry_scheduled");
+
+    companion object {
+        fun fromToken(token: String?): PaneLayoutReasonCode? =
+            entries.firstOrNull { it.token == token }
+    }
+}
+
 internal data class ProjectControllerStateSubscribeResult(
     val documentHash: String,
     val messageJson: String,
@@ -46,6 +79,12 @@ internal enum class MissingFocusPanePolicy(val token: String) {
  */
 internal object CpRouteClient {
     private val log = Logger.getInstance(CpRouteClient::class.java)
+    private const val PANE_LAYOUT_DESIRED_STATE_CHANNEL = "agent-doc/pane-layout/desired/v1"
+    private const val PANE_LAYOUT_STATUS_STATE_CHANNEL = "agent-doc/pane-layout/status/v1"
+    private const val PANE_LAYOUT_DESIRED_TYPE_TAG = "agent-doc.pane-layout.desired.v1"
+    private const val PANE_LAYOUT_STATUS_TYPE_TAG = "agent-doc.pane-layout.status.v1"
+    private val statePlaneProducerId = "jetbrains-" + java.util.UUID.randomUUID().toString()
+    private val statePlaneEpoch = java.util.concurrent.atomic.AtomicLong(0)
 
     fun runEditorRoute(
         projectRoot: String,
@@ -125,39 +164,124 @@ internal object CpRouteClient {
         callerKind: String,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
-        val commandId = "cmd-" + java.util.UUID.randomUUID().toString()
-        val request = syncTmuxLayoutCommandSubmitRequest(
+        val request = paneLayoutDesiredStatePublishRequest(
             projectRoot = projectRoot,
             columnsJson = columnsJson,
             window = window,
             focus = focus,
             noAutostart = noAutostart,
             exactVisible = exactVisible,
-            commandId = commandId,
             callerKind = callerKind,
-            controllerCommand = "editor_command_submit_async",
         )
         return try {
-            val accepted =
-                sendAcceptedCommandSubmitToSocket(socket, request, commandId, "sync_tmux_layout")
+            val data = sendRequestDataToSocket(socket, request)
+            val publishedPlaneVersion = data.get("plane_version")?.asLong
+            val accepted = if (
+                data.get("accepted")?.asBoolean == true &&
+                publishedPlaneVersion != null &&
+                publishedPlaneVersion > 0
+            ) {
+                CpEditorRouteResult(
+                    exitCode = 0,
+                    output = "pane layout projection published " +
+                        "plane_version=$publishedPlaneVersion",
+                )
+            } else {
+                CpEditorRouteResult(
+                    exitCode = 1,
+                    output = data.get("reason")?.asString
+                        ?: "pane layout projection was not accepted with a valid plane version",
+                )
+            }
             if (accepted.exitCode != 0 || !shouldAwaitSyncCompletion(callerKind, noAutostart)) {
                 accepted
             } else {
-                awaitCommandSubmitTerminal(
+                val expectedPlaneVersion = publishedPlaneVersion
+                    ?: return CpEditorRouteResult(
+                        exitCode = 1,
+                        output = "pane layout projection receipt omitted plane_version",
+                    )
+                awaitPaneLayoutStateProjection(
                     socket = socket,
-                    filePath = focus ?: projectRoot,
-                    commandId = commandId,
+                    expectedSourcePlaneVersion = expectedPlaneVersion,
                     timeoutMs = SYNC_COMMAND_COMPLETION_TIMEOUT_MS,
-                    commandName = "sync_tmux_layout",
                 )
             }
         } catch (e: Exception) {
-            log.warn("[sync] command-plane sync_tmux_layout submit failed via ${socket.path}: ${e.message}")
+            log.warn("[sync] pane-layout state projection publish failed via ${socket.path}: ${e.message}")
             CpEditorRouteResult(
                 exitCode = 1,
-                output = "command-plane sync_tmux_layout submit failed via ${socket.path}: ${e.message}",
+                output = "pane-layout state projection publish failed via ${socket.path}: ${e.message}",
             )
         }
+    }
+
+    private fun awaitPaneLayoutStateProjection(
+        socket: File,
+        expectedSourcePlaneVersion: Long,
+        timeoutMs: Long,
+    ): CpEditorRouteResult {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        var cursor = 0L
+        var latestPhase: PaneLayoutPhase? = null
+        var latestReasonCode: PaneLayoutReasonCode? = null
+        var latestReasonDetail = "projection_published"
+        while (System.nanoTime() < deadline) {
+            val remainingMs =
+                TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()).coerceAtLeast(1L)
+            val request = statePlaneSubscribeRequest(
+                channel = PANE_LAYOUT_STATUS_STATE_CHANNEL,
+                afterVersion = cursor,
+                timeoutMs = minOf(remainingMs, 5_000L),
+            )
+            val data = sendRequestDataToSocket(socket, request)
+            cursor = maxOf(cursor, data.get("latest_version")?.asLong ?: cursor)
+            val frames = data.getAsJsonArray("frames") ?: continue
+            for (frame in frames) {
+                val messageJson =
+                    frame.asJsonObject.get("message_json")?.asString ?: continue
+                val message = IpcMessage.decodeJson(messageJson)
+                val snapshot = (message as? IpcMessage.SnapshotMessage)?.snapshot ?: continue
+                val node = snapshot.nodes.firstOrNull {
+                    it.typeTag == PANE_LAYOUT_STATUS_TYPE_TAG &&
+                        it.key?.path == PANE_LAYOUT_STATUS_STATE_CHANNEL
+                } ?: continue
+                val payload = (node.state as? NodeState.Payload)?.toByteArray() ?: continue
+                val status = JsonParser.parseString(payload.decodeToString()).asJsonObject
+                val sourcePlaneVersion =
+                    status.get("source_plane_version")?.asLong ?: continue
+                if (sourcePlaneVersion < expectedSourcePlaneVersion) continue
+                if (sourcePlaneVersion > expectedSourcePlaneVersion) {
+                    return CpEditorRouteResult(
+                        exitCode = 1,
+                        output = "pane layout projection superseded by desired " +
+                            "plane_version=$sourcePlaneVersion",
+                    )
+                }
+                latestPhase = PaneLayoutPhase.fromToken(status.get("phase")?.asString)
+                    ?: latestPhase
+                latestReasonCode =
+                    PaneLayoutReasonCode.fromToken(status.get("reason_code")?.asString)
+                        ?: latestReasonCode
+                latestReasonDetail =
+                    status.get("reason_detail")?.asString ?: latestReasonDetail
+                if (latestPhase == PaneLayoutPhase.Converged) {
+                    return CpEditorRouteResult(
+                        exitCode = 0,
+                        output = "pane layout converged: " +
+                            "${latestReasonCode?.token ?: "unknown"} ($latestReasonDetail)",
+                    )
+                }
+            }
+        }
+        return CpEditorRouteResult(
+            exitCode = 1,
+            output = "pane layout projection did not converge within ${timeoutMs}ms " +
+                "(phase=${latestPhase?.token ?: "unobserved"} " +
+                "reason=${latestReasonCode?.token ?: "unknown"} " +
+                "detail=$latestReasonDetail); " +
+                "controller reconciliation remains active",
+        )
     }
 
     internal fun shouldAwaitSyncCompletion(callerKind: String, noAutostart: Boolean): Boolean =
@@ -380,6 +504,62 @@ internal fun editorCommandStatusRequest(filePath: String, commandId: String): Js
     )
     return request
 }
+
+    internal fun paneLayoutDesiredStatePublishRequest(
+        projectRoot: String,
+        columnsJson: String,
+        window: String?,
+        focus: String?,
+        noAutostart: Boolean,
+        exactVisible: Boolean,
+        callerKind: String = "manual",
+        producerId: String = statePlaneProducerId,
+        epoch: Long = statePlaneEpoch.incrementAndGet(),
+    ): JsonObject {
+        val desired = JsonObject()
+        desired.addProperty("project_root", projectRoot)
+        desired.add("columns", JsonParser.parseString(columnsJson).asJsonArray)
+        window?.let { desired.addProperty("window", it) }
+        focus?.let { desired.addProperty("focus", it) }
+        desired.addProperty("no_autostart", noAutostart)
+        desired.addProperty("exact_visible", exactVisible)
+        desired.addProperty("caller_kind", callerKind)
+        val node = NodeSnapshot.payload(
+            node = 1L,
+            typeTag = PANE_LAYOUT_DESIRED_TYPE_TAG,
+            bytes = desired.toString().encodeToByteArray(),
+        ).withKey(NodeKey.from(PANE_LAYOUT_DESIRED_STATE_CHANNEL))
+        val messageJson = IpcMessage.ofSnapshot(
+            Snapshot(
+                epoch = epoch,
+                nodes = listOf(node),
+                roots = listOf(1L),
+            ),
+        ).encodeJson().decodeToString()
+        val publication = JsonObject()
+        publication.addProperty("channel", PANE_LAYOUT_DESIRED_STATE_CHANNEL)
+        publication.addProperty("producer_id", producerId)
+        publication.addProperty("message_json", messageJson)
+        return JsonObject().also {
+            it.addProperty("command", "state_plane_publish")
+            it.addProperty("diagnostic_payload", publication.toString())
+        }
+    }
+
+    internal fun statePlaneSubscribeRequest(
+        channel: String,
+        afterVersion: Long,
+        timeoutMs: Long,
+    ): JsonObject {
+        val subscription = JsonObject()
+        subscription.addProperty("channel", channel)
+        subscription.addProperty("after_version", afterVersion)
+        subscription.addProperty("timeout_ms", timeoutMs)
+        return JsonObject().also {
+            it.addProperty("command", "state_plane_subscribe")
+            it.addProperty("diagnostic_payload", subscription.toString())
+        }
+    }
 
     internal fun syncTmuxLayoutCommandSubmitRequest(
         projectRoot: String,

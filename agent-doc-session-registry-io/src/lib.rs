@@ -79,6 +79,14 @@ pub fn lookup_entry(session_id: &str) -> Result<Option<RegistryEntry>> {
     ))
 }
 
+/// Look up a full registry entry in a specific base directory.
+pub fn lookup_entry_in(base_dir: &Path, session_id: &str) -> Result<Option<RegistryEntry>> {
+    let registry = load_in(base_dir)?;
+    Ok(agent_doc_session_registry::session_entry(
+        &registry, session_id,
+    ))
+}
+
 /// Look up the registry entry bound to `file` under `base_dir`.
 pub fn lookup_file_entry_in(base_dir: &Path, file: &Path) -> Result<Option<RegistryEntry>> {
     let registry = load_in(base_dir)?;
@@ -193,6 +201,24 @@ mod tests {
             lookup_in(dir.path(), "lookup-session").unwrap().as_deref(),
             Some("%77")
         );
+    }
+
+    #[test]
+    fn lookup_entry_in_returns_the_registered_document_path() {
+        let dir = TempDir::new().unwrap();
+        let mut registry = Registry::new();
+        registry.insert(
+            "legacy-key".to_string(),
+            entry("lookup-entry-session", "%78", "old-name.md"),
+        );
+        save_in(dir.path(), &registry).unwrap();
+
+        let entry = lookup_entry_in(dir.path(), "lookup-entry-session")
+            .unwrap()
+            .expect("registered session entry");
+
+        assert_eq!(entry.file, "old-name.md");
+        assert_eq!(entry.pane, "%78");
     }
 
     #[test]

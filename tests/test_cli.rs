@@ -4887,6 +4887,29 @@ fn test_agent_doc_queue_owns_queue_control_binding_policy() {
 }
 
 #[test]
+fn realtime_replica_observation_cannot_rewrite_the_editor_cut() {
+    let source = fs::read_to_string("agent-doc-controller-io/src/project_controller/rpc.rs")
+        .expect("read project controller RPC source");
+    let body = source
+        .split("fn observe_realtime_steering_after_replica_update(")
+        .nth(1)
+        .expect("realtime steering observer")
+        .split("fn realtime_steering_event_for_text(")
+        .next()
+        .expect("observer body");
+
+    assert!(
+        !body.contains("apply_cp_write_for_file"),
+        "transport-level replica updates must not project a prior full-document cut over live typing",
+    );
+    assert!(
+        body.contains("realtime_queue_control_binding_deferred")
+            && body.contains("replica_update_unsettled"),
+        "pending queue normalization should remain observable for the settled convergence path",
+    );
+}
+
+#[test]
 fn test_agent_doc_harness_owns_opencode_goal_extension_detection() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let harness = fs::read_to_string(manifest_dir.join("agent-doc-harness/src/lib.rs")).unwrap();
@@ -10230,7 +10253,6 @@ fn test_agent_doc_run_context_io_owns_lazily_document_context_graph() {
         "the CLI should call the focused run-context IO crate directly"
     );
     for relative in [
-        "src/notify.rs",
         "src/orchestrate.rs",
         "src/patch.rs",
         "agent-doc-run-io/src/lib.rs",
@@ -22302,6 +22324,45 @@ fn test_agent_doc_tmux_owns_editor_column_split_policy() {
 }
 
 #[test]
+fn test_cross_root_sync_uses_owning_controller_effect_and_ephemeral_router_binding() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let sync_lib = fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/lib.rs")).unwrap();
+    let sync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let router_source = fs::read_to_string(
+        manifest_dir
+            .parent()
+            .unwrap()
+            .join("tmux-router/src/sync.rs"),
+    )
+    .unwrap();
+
+    for required in [
+        "fn ensure_cross_root_document_pane(",
+        "focus_document_pane(project_root, file)?",
+        "cross_root_controller_pane_resolved",
+        "pre_resolved_panes: Some(&pre_resolved_panes)",
+    ] {
+        assert!(
+            sync_lib.contains(required)
+                || sync_source.contains(required)
+                || main_source.contains(required),
+            "cross-root sync must delegate to the owning controller and carry only an ephemeral pane binding: {required}"
+        );
+    }
+    assert!(
+        router_source.contains("pub pre_resolved_panes:")
+            && router_source.contains(".and_then(|panes| panes.get(*file))"),
+        "tmux-router must prefer caller-proven cross-root pane bindings over spare geometry"
+    );
+    assert!(
+        !sync_source.contains("cross_root_autostart_skipped"),
+        "cross-root sync must not report success after skipping owning-controller provisioning"
+    );
+}
+
+#[test]
 fn test_agent_doc_tmux_owns_destructive_repair_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();
@@ -25063,7 +25124,7 @@ fn test_legacy_overlay_merge_base_policy_is_not_on_the_hot_path() {
 }
 
 #[test]
-fn test_agent_doc_snapshot_io_owns_durable_baselines_and_cold_recovery() {
+fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     assert!(
@@ -25074,18 +25135,17 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_and_cold_recovery() {
     let snapshot_io =
         fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
     for required in [
-        "pub struct SnapshotStateMigrationReport",
-        "pub enum SnapshotStateMigrationEvent",
         "pub fn load_document_baseline(",
         "pub fn checkpoint_document_baseline(",
+        "pub trait CrashStateEffects",
+        "pub fn checkpoint_document_baseline_with_effects(",
+        "effects.write_markdown_crash_state(doc, content)?;",
         "pub fn resolve(",
         "pub struct DiffBaselineStore",
         "impl agent_doc_diff_io::DocumentBaselineStore for DiffBaselineStore",
         "pub fn delete_recovery_projection_and_clear_baseline(",
         "pub fn ensure_initial_snapshot(",
         "pub fn try_migrate_renamed(",
-        "pub fn migrate_state_files_for_hash(",
-        "pub fn find_snapshot_hash_for_session(",
         "pub fn checkpoint_undo_content(",
         "pub fn load_undo_content(",
         "pub fn clear_undo_content(",
@@ -25096,16 +25156,56 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_and_cold_recovery() {
         "StateFact::UndoCheckpointed",
         "StateFact::CrdtRecoveryProjectionCheckpointed",
         "StateFact::CrdtRecoveryProjectionCleared",
-        "const MIGRATE_DIRS",
-        "std::fs::rename(&old_file, &new_file)?",
-        "SnapshotStateMigrationEvent::Migrated",
-        "session_id_from_content(&snapshot_content)",
         "agent_doc_project_root_io::project_root_containing(",
+        "agent_doc_session_registry_io::lookup_entry_in(",
+        "agent_doc_sqlite::state_store::rekey_document_state_in_db(",
         "agent_doc_session_registry_io::update_session_file_in(",
     ] {
         assert!(
             snapshot_io.contains(required),
             "agent-doc-snapshot-io must own model-baseline snapshot IO: {required}"
+        );
+    }
+    for forbidden in [
+        "std::fs::read_dir(snap_dir)",
+        "find_snapshot_hash_for_session",
+        "migrate_state_files_for_hash",
+        "session_id_from_content(&snapshot_content)",
+    ] {
+        assert!(
+            !snapshot_io.contains(forbidden),
+            "snapshot IO must never recover authority from sidecars: {forbidden}"
+        );
+    }
+    for relative in [
+        "src/notify.rs",
+        "src/patch.rs",
+        "agent-doc-run-context-io/src/lib.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in [
+            "rc.snapshot_path_for()",
+            "fn snapshot_path_for(&self)",
+            "std::fs::write(&snap_abs",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must checkpoint typed baseline state, not write a normal sidecar: {forbidden}"
+            );
+        }
+    }
+
+    let sqlite_store =
+        fs::read_to_string(manifest_dir.join("agent-doc-sqlite/src/state_store.rs")).unwrap();
+    for required in [
+        "pub struct DocumentStateRekeyReport",
+        "pub fn rekey_document_state_in_db(",
+        ".pointer_mut(\"/fact/document_hash\")",
+        "DELETE FROM state_event_peer_acks WHERE document_hash = ?1",
+    ] {
+        assert!(
+            sqlite_store.contains(required),
+            "typed state rekey must be owned by the durable ledger: {required}"
         );
     }
 

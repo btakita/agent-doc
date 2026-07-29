@@ -113,12 +113,11 @@ across every node. `MultiNodeState` makes the base durable *per node*:
   base from *its own* persisted state and returns a fresh `MultiNodeState` where only changed
   nodes advanced. Structural divergence / component-less docs fall back to the whole-doc `merge`,
   same safety net as the component rung.
-- **Migration & GC.** `snapshot::multinode_crdt_state` reads the `.nodes.yrs` sidecar, lazily
-  migrating a legacy whole-doc `<hash>.yrs` (decode → split) when the sidecar is absent.
-  `save_document_crdt` rebuilds and rewrites the sidecar every cycle (so compaction, which routes
-  through it, GCs per node), `delete_crdt` removes it, and the rename migration carries it with
-  the document. The legacy `<hash>.yrs` and `<hash>.overlay.yrs` are still written for
-  back-compat.
+- **Persistence & migration.** Production merge state is checkpointed as typed
+  ledger facts. The historic `.nodes.yrs`, `<hash>.yrs`, and
+  `<hash>.overlay.yrs` files are not compatibility inputs: filesystem sidecars
+  are write-only crash-state sidecars driven as effects from typed state. Rename
+  migration rekeys typed events and never reads or moves these files.
 
 ## Recursive reconciliation — `reconcile_component` (`#qnodemerge3`)
 

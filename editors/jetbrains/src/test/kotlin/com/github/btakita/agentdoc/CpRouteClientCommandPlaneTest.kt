@@ -1,8 +1,11 @@
 package com.github.btakita.agentdoc
 
 import com.google.gson.JsonParser
+import io.github.lazily.IpcMessage
+import io.github.lazily.NodeState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -131,6 +134,73 @@ class CpRouteClientCommandPlaneTest {
         assertEquals(false, payload.get("no_autostart").asBoolean)
         assertEquals(true, payload.get("exact_visible").asBoolean)
         assertEquals("manual", payload.get("caller_kind").asString)
+    }
+
+    @Test
+    fun `pane layout desired publication is a keyed Lazily snapshot`() {
+        val request = CpRouteClient.paneLayoutDesiredStatePublishRequest(
+            projectRoot = "/proj",
+            columnsJson = """["/proj/tasks/one.md","/proj/tasks/two.md"]""",
+            window = "agent-doc",
+            focus = "/proj/tasks/two.md",
+            noAutostart = false,
+            exactVisible = true,
+            producerId = "jetbrains-test",
+            epoch = 42,
+        )
+
+        assertEquals("state_plane_publish", request.get("command").asString)
+        val publication =
+            JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        assertEquals(
+            "agent-doc/pane-layout/desired/v1",
+            publication.get("channel").asString,
+        )
+        assertEquals("jetbrains-test", publication.get("producer_id").asString)
+
+        val message = IpcMessage.decodeJson(publication.get("message_json").asString)
+        val snapshot = (message as IpcMessage.SnapshotMessage).snapshot
+        assertEquals(42, snapshot.epoch)
+        val node = snapshot.nodes.single()
+        assertEquals("agent-doc.pane-layout.desired.v1", node.typeTag)
+        assertEquals("agent-doc/pane-layout/desired/v1", node.key?.path)
+        val desired =
+            JsonParser.parseString(
+                String((node.state as NodeState.Payload).toByteArray(), Charsets.UTF_8),
+            ).asJsonObject
+        assertEquals("/proj/tasks/one.md", desired.getAsJsonArray("columns")[0].asString)
+        assertEquals("/proj/tasks/two.md", desired.get("focus").asString)
+        assertEquals("manual", desired.get("caller_kind").asString)
+    }
+
+    @Test
+    fun `state plane subscription carries a monotonic resume cursor`() {
+        val request = CpRouteClient.statePlaneSubscribeRequest(
+            channel = "agent-doc/pane-layout/status/v1",
+            afterVersion = 17,
+            timeoutMs = 2_000,
+        )
+
+        assertEquals("state_plane_subscribe", request.get("command").asString)
+        val subscription =
+            JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        assertEquals(
+            "agent-doc/pane-layout/status/v1",
+            subscription.get("channel").asString,
+        )
+        assertEquals(17, subscription.get("after_version").asLong)
+        assertEquals(2_000, subscription.get("timeout_ms").asLong)
+    }
+
+    @Test
+    fun `pane layout phase and reason tokens are typed and forward compatible`() {
+        assertEquals(PaneLayoutPhase.Converged, PaneLayoutPhase.fromToken("converged"))
+        assertEquals(
+            PaneLayoutReasonCode.PaneOrderMismatch,
+            PaneLayoutReasonCode.fromToken("pane_order_mismatch"),
+        )
+        assertNull(PaneLayoutPhase.fromToken("future_phase"))
+        assertNull(PaneLayoutReasonCode.fromToken("future_reason"))
     }
 
     @Test

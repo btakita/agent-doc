@@ -300,6 +300,15 @@ pub trait SyncRuntimeEffects: Send + Sync + 'static {
 
     fn session_check_inspect(&self, file: &Path) -> Result<SyncSessionCheckStatus>;
 
+    /// Ask the controller that owns `project_root` to ensure `file` has an actor
+    /// pane, returning the controller-proven pane binding. This is an effect:
+    /// callers must not copy the foreign binding into their durable registry.
+    fn ensure_cross_root_document_pane(
+        &self,
+        project_root: &Path,
+        file: &Path,
+    ) -> Result<Option<String>>;
+
     #[allow(clippy::too_many_arguments)]
     fn provision_pane(
         &self,
@@ -558,6 +567,17 @@ impl SyncRuntimeEffects for TestSyncRuntimeEffects {
             ));
         }
         Ok(SyncSessionCheckStatus::Ok("clean".to_string()))
+    }
+
+    fn ensure_cross_root_document_pane(
+        &self,
+        project_root: &Path,
+        file: &Path,
+    ) -> Result<Option<String>> {
+        Ok(
+            agent_doc_session_registry_io::lookup_file_entry_in(project_root, file)?
+                .map(|entry| entry.pane),
+        )
     }
 
     fn provision_pane(

@@ -205,7 +205,7 @@ pub struct ControllerTmuxLayoutSyncInvocation {
 
 impl ControllerTmuxLayoutSyncInvocation {
     pub fn routes_created_panes(&self) -> bool {
-        !self.no_autostart && self.caller_kind == "manual"
+        !self.no_autostart && matches!(self.caller_kind.as_str(), "manual" | "projection")
     }
 }
 
@@ -247,6 +247,623 @@ pub struct ControllerTmuxLayoutSyncStateReport {
     pub window_name: Option<String>,
     #[serde(default)]
     pub focus: Option<String>,
+}
+
+/// First cross-process state-plane channel: the editor's desired pane layout.
+///
+/// The payload node uses `agent-doc.pane-layout.desired.v1`; the channel name is
+/// intentionally transport/domain neutral so other Lazily peers can subscribe
+/// without knowing which editor published it.
+pub const PANE_LAYOUT_DESIRED_STATE_CHANNEL: &str = "agent-doc/pane-layout/desired/v1";
+/// Controller-published desired/observed/effect projection for pane layout.
+pub const PANE_LAYOUT_STATUS_STATE_CHANNEL: &str = "agent-doc/pane-layout/status/v1";
+const STATE_PLANE_MAX_CHANNELS: usize = 256;
+const STATE_PLANE_MAX_RETAINED_FRAMES_PER_CHANNEL: usize = 1_024;
+const STATE_PLANE_MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerStatePlanePublishInvocation {
+    pub channel: String,
+    pub producer_id: String,
+    /// Canonical Lazily `IpcMessage` JSON (`Snapshot` or `Delta`).
+    pub message_json: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerStatePlaneFrame {
+    pub channel: String,
+    pub producer_id: String,
+    pub epoch: u64,
+    #[serde(default)]
+    pub base_epoch: Option<u64>,
+    pub plane_version: u64,
+    pub message_json: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerStatePlanePublishReceipt {
+    pub accepted: bool,
+    pub reason: String,
+    pub channel: String,
+    pub producer_id: String,
+    pub epoch: u64,
+    pub plane_version: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerStatePlaneSubscribeInvocation {
+    pub channel: String,
+    #[serde(default)]
+    pub after_version: u64,
+    #[serde(default)]
+    pub timeout_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerStatePlaneSubscription {
+    pub channel: String,
+    pub latest_version: u64,
+    pub timed_out: bool,
+    /// A covering Snapshot followed by any causally-applicable Deltas, or only
+    /// frames newer than `after_version` when that cursor is still retained.
+    pub frames: Vec<ControllerStatePlaneFrame>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PaneLayoutDesired {
+    pub generation: u64,
+    pub source_plane_version: Option<u64>,
+    pub invocation: ControllerTmuxLayoutSyncInvocation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PaneLayoutObservation {
+    pub generation: u64,
+    pub report: ControllerTmuxLayoutSyncStateReport,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+pub(crate) enum PaneLayoutEffectPhase {
+    Idle,
+    InFlight,
+    RetryPending,
+    Converged,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PaneLayoutEffectReceipt {
+    pub generation: u64,
+    pub attempt: u64,
+    pub phase: PaneLayoutEffectPhase,
+    pub reason: String,
+}
+
+impl Default for PaneLayoutEffectReceipt {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            attempt: 0,
+            phase: PaneLayoutEffectPhase::Idle,
+            reason: "idle".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PaneLayoutProjection {
+    Absent,
+    NeedsEffect(PaneLayoutDesired),
+    Applying(PaneLayoutDesired),
+    RetryPending(PaneLayoutDesired),
+    Converged(PaneLayoutDesired),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerPaneLayoutPhase {
+    NeedsEffect,
+    Applying,
+    RetryPending,
+    Converged,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerPaneLayoutReasonCode {
+    Unobserved,
+    EffectInFlight,
+    ObservedConvergence,
+    PaneCountMismatch,
+    PaneOrderMismatch,
+    TmuxUnavailable,
+    EffectFailed,
+    ObservationFailed,
+    RetryScheduled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerPaneLayoutStateProjection {
+    pub generation: u64,
+    #[serde(default)]
+    pub source_plane_version: Option<u64>,
+    pub phase: ControllerPaneLayoutPhase,
+    pub reason_code: ControllerPaneLayoutReasonCode,
+    #[serde(default)]
+    pub reason_detail: Option<String>,
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub window: Option<String>,
+    #[serde(default)]
+    pub focus: Option<String>,
+    #[serde(default)]
+    pub observation: Option<ControllerTmuxLayoutSyncStateReport>,
+    pub attempt: u64,
+}
+
+fn derive_pane_layout_projection(
+    desired: Option<PaneLayoutDesired>,
+    observed: Option<PaneLayoutObservation>,
+    receipt: PaneLayoutEffectReceipt,
+) -> PaneLayoutProjection {
+    let Some(desired) = desired else {
+        return PaneLayoutProjection::Absent;
+    };
+    if observed
+        .as_ref()
+        .is_some_and(|observed| observed.generation == desired.generation && observed.report.synced)
+    {
+        return PaneLayoutProjection::Converged(desired);
+    }
+    if receipt.generation == desired.generation {
+        match receipt.phase {
+            PaneLayoutEffectPhase::InFlight => {
+                return PaneLayoutProjection::Applying(desired);
+            }
+            PaneLayoutEffectPhase::RetryPending => {
+                return PaneLayoutProjection::RetryPending(desired);
+            }
+            PaneLayoutEffectPhase::Idle | PaneLayoutEffectPhase::Converged => {}
+        }
+    }
+    PaneLayoutProjection::NeedsEffect(desired)
+}
+
+pub(crate) trait PaneLayoutProjectionSink: Send + Sync + 'static {
+    fn reconcile(&self, desired: PaneLayoutDesired);
+}
+
+/// Controller-lifetime Lazily graph for the pane layout projection.
+///
+/// IDE observations set `desired`; tmux observations set `observed`; the
+/// `projection` Computed derives whether an effect is needed; and the retained
+/// Lazily Effect invokes the single tmux adapter sink. SQLite persists only the
+/// desired columns so a controller restart can rebuild this graph without
+/// treating tmux or a sidecar as authority.
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+struct ControllerPaneLayoutGraph {
+    ctx: ThreadSafeContext,
+    desired: Source<Option<PaneLayoutDesired>>,
+    observed: Source<Option<PaneLayoutObservation>>,
+    receipt: Source<PaneLayoutEffectReceipt>,
+    projection: Computed<PaneLayoutProjection>,
+    effect: Mutex<Option<lazily::Effect>>,
+    sink: Arc<OnceLock<Arc<dyn PaneLayoutProjectionSink>>>,
+    next_generation: AtomicU64,
+    waiters: Condvar,
+    wait_lock: Mutex<()>,
+}
+
+impl ControllerPaneLayoutGraph {
+    fn new_in(scope: &agent_doc_state_scope::ProcessScope, persisted_columns: Vec<String>) -> Self {
+        let ctx = scope.ctx().clone();
+        let initial_desired = (!persisted_columns.is_empty()).then(|| PaneLayoutDesired {
+            generation: 1,
+            source_plane_version: None,
+            invocation: ControllerTmuxLayoutSyncInvocation {
+                columns: persisted_columns,
+                window: None,
+                focus: None,
+                no_autostart: false,
+                exact_visible: true,
+                caller_kind: "projection".to_string(),
+            },
+        });
+        let desired = ctx.source(initial_desired);
+        let observed = ctx.source(None);
+        let receipt = ctx.source(PaneLayoutEffectReceipt::default());
+        let desired_for_projection = desired;
+        let observed_for_projection = observed;
+        let receipt_for_projection = receipt;
+        let projection = ctx.computed(move |ctx| {
+            derive_pane_layout_projection(
+                ctx.get(&desired_for_projection),
+                ctx.get(&observed_for_projection),
+                ctx.get(&receipt_for_projection),
+            )
+        });
+        let sink: Arc<OnceLock<Arc<dyn PaneLayoutProjectionSink>>> = Arc::new(OnceLock::new());
+        let projection_for_effect = projection;
+        let sink_for_effect = Arc::clone(&sink);
+        let effect = ctx.effect(move |ctx| {
+            let PaneLayoutProjection::NeedsEffect(desired) = ctx.get(&projection_for_effect) else {
+                return;
+            };
+            if let Some(sink) = sink_for_effect.get() {
+                sink.reconcile(desired);
+            }
+        });
+        Self {
+            ctx,
+            desired,
+            observed,
+            receipt,
+            projection,
+            effect: Mutex::new(Some(effect)),
+            sink,
+            next_generation: AtomicU64::new(2),
+            waiters: Condvar::new(),
+            wait_lock: Mutex::new(()),
+        }
+    }
+
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn install_sink(&self, sink: Arc<dyn PaneLayoutProjectionSink>) {
+        if self.sink.set(sink).is_ok()
+            && let Some(desired) = self.ctx.get(&self.desired)
+        {
+            // The effect ran once before its late-bound sink existed. Publishing
+            // the reconstructed desired fact again invalidates the Computed and
+            // lets the retained Effect drive restart recovery.
+            self.ctx.set(&self.desired, Some(desired));
+        }
+    }
+
+    fn set_desired(
+        &self,
+        mut invocation: ControllerTmuxLayoutSyncInvocation,
+        source_plane_version: Option<u64>,
+    ) -> PaneLayoutDesired {
+        let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
+        if invocation.caller_kind.is_empty() {
+            invocation.caller_kind = "projection".to_string();
+        }
+        let desired = PaneLayoutDesired {
+            generation,
+            source_plane_version,
+            invocation,
+        };
+        self.ctx.batch(|ctx| {
+            ctx.set(&self.observed, None);
+            ctx.set(
+                &self.receipt,
+                PaneLayoutEffectReceipt {
+                    generation,
+                    ..PaneLayoutEffectReceipt::default()
+                },
+            );
+            ctx.set(&self.desired, Some(desired.clone()));
+        });
+        self.waiters.notify_all();
+        desired
+    }
+
+    fn desired(&self) -> Option<PaneLayoutDesired> {
+        self.ctx.get(&self.desired)
+    }
+
+    fn projection(&self) -> PaneLayoutProjection {
+        self.ctx.get(&self.projection)
+    }
+
+    fn state_projection(&self) -> Option<ControllerPaneLayoutStateProjection> {
+        let desired = self.desired()?;
+        let phase = match self.projection() {
+            PaneLayoutProjection::Absent => return None,
+            PaneLayoutProjection::NeedsEffect(_) => ControllerPaneLayoutPhase::NeedsEffect,
+            PaneLayoutProjection::Applying(_) => ControllerPaneLayoutPhase::Applying,
+            PaneLayoutProjection::RetryPending(_) => ControllerPaneLayoutPhase::RetryPending,
+            PaneLayoutProjection::Converged(_) => ControllerPaneLayoutPhase::Converged,
+        };
+        let observation = self
+            .ctx
+            .get(&self.observed)
+            .filter(|observation| observation.generation == desired.generation)
+            .map(|observation| observation.report);
+        let receipt = self.ctx.get(&self.receipt);
+        let (attempt, reason_detail) = if receipt.generation == desired.generation {
+            (receipt.attempt, Some(receipt.reason))
+        } else {
+            (0, None)
+        };
+        let reason_code = match phase {
+            ControllerPaneLayoutPhase::Converged => {
+                ControllerPaneLayoutReasonCode::ObservedConvergence
+            }
+            ControllerPaneLayoutPhase::Applying => ControllerPaneLayoutReasonCode::EffectInFlight,
+            ControllerPaneLayoutPhase::NeedsEffect => ControllerPaneLayoutReasonCode::Unobserved,
+            ControllerPaneLayoutPhase::RetryPending => {
+                let observation_reason = observation
+                    .as_ref()
+                    .map(|report| report.reason.as_str())
+                    .unwrap_or_default();
+                if observation_reason == "pane_count_mismatch" {
+                    ControllerPaneLayoutReasonCode::PaneCountMismatch
+                } else if observation_reason == "pane_order_mismatch" {
+                    ControllerPaneLayoutReasonCode::PaneOrderMismatch
+                } else if matches!(
+                    observation_reason,
+                    "missing_tmux_session" | "tmux_session_not_alive" | "missing_agent_doc_window"
+                ) {
+                    ControllerPaneLayoutReasonCode::TmuxUnavailable
+                } else if reason_detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains("tmux_effect_failed"))
+                {
+                    ControllerPaneLayoutReasonCode::EffectFailed
+                } else if observation_reason.contains("observation_failed") {
+                    ControllerPaneLayoutReasonCode::ObservationFailed
+                } else {
+                    ControllerPaneLayoutReasonCode::RetryScheduled
+                }
+            }
+        };
+        Some(ControllerPaneLayoutStateProjection {
+            generation: desired.generation,
+            source_plane_version: desired.source_plane_version,
+            phase,
+            reason_code,
+            reason_detail,
+            columns: desired.invocation.columns,
+            window: desired.invocation.window,
+            focus: desired.invocation.focus,
+            observation,
+            attempt,
+        })
+    }
+
+    fn record_observation(&self, observation: PaneLayoutObservation) {
+        self.ctx.set(&self.observed, Some(observation));
+        self.waiters.notify_all();
+    }
+
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn record_receipt(&self, receipt: PaneLayoutEffectReceipt) {
+        self.ctx.set(&self.receipt, receipt);
+        self.waiters.notify_all();
+    }
+
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn await_generation(&self, generation: u64, timeout: Duration) -> PaneLayoutProjection {
+        let deadline = Instant::now() + timeout;
+        let mut guard = self.wait_lock.lock();
+        loop {
+            let projection = self.projection();
+            let terminal = match &projection {
+                PaneLayoutProjection::Converged(desired) => desired.generation == generation,
+                PaneLayoutProjection::NeedsEffect(desired)
+                | PaneLayoutProjection::Applying(desired)
+                | PaneLayoutProjection::RetryPending(desired) => desired.generation != generation,
+                PaneLayoutProjection::Absent => true,
+            };
+            if terminal || Instant::now() >= deadline {
+                return projection;
+            }
+            self.waiters.wait_for(
+                &mut guard,
+                deadline.saturating_duration_since(Instant::now()),
+            );
+        }
+    }
+}
+
+impl Drop for ControllerPaneLayoutGraph {
+    fn drop(&mut self) {
+        if let Some(effect) = self.effect.get_mut().take() {
+            self.ctx.dispose_effect(&effect);
+        }
+    }
+}
+
+pub(crate) trait ControllerStatePlaneSink: Send + Sync + 'static {
+    /// Projection delivery is at-least-once. Consumers fence on
+    /// `frame.plane_version`, then publish their own observed/effect state.
+    fn project(&self, frame: ControllerStatePlaneFrame);
+}
+
+/// Generic controller-lifetime cross-process Lazily state plane.
+///
+/// RPC is only the byte transport. Accepted Lazily graph messages become a
+/// Source; a retained Effect projects the latest frame into registered domain
+/// adapters. A covering Snapshot replaces prior history, while subsequent
+/// Deltas are retained until the next Snapshot. This gives cold subscribers a
+/// valid replay base and lets warm subscribers resume from `plane_version`.
+struct ControllerStatePlaneGraph {
+    ctx: ThreadSafeContext,
+    histories: Source<BTreeMap<String, Vec<ControllerStatePlaneFrame>>>,
+    sink_kick: Source<u64>,
+    effect: Mutex<Option<lazily::Effect>>,
+    sinks: Arc<Mutex<BTreeMap<String, Arc<dyn ControllerStatePlaneSink>>>>,
+    next_plane_version: AtomicU64,
+    waiters: Condvar,
+    wait_lock: Mutex<()>,
+}
+
+impl ControllerStatePlaneGraph {
+    fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
+        let ctx = scope.ctx().clone();
+        let histories = ctx.source(BTreeMap::<String, Vec<ControllerStatePlaneFrame>>::new());
+        let sink_kick = ctx.source(0_u64);
+        let histories_for_effect = histories;
+        let sink_kick_for_effect = sink_kick;
+        let sinks: Arc<Mutex<BTreeMap<String, Arc<dyn ControllerStatePlaneSink>>>> =
+            Arc::new(Mutex::new(BTreeMap::new()));
+        let sinks_for_effect = Arc::clone(&sinks);
+        let effect = ctx.effect(move |ctx| {
+            let _ = ctx.get(&sink_kick_for_effect);
+            let histories = ctx.get(&histories_for_effect);
+            for (channel, frames) in histories {
+                let Some(frame) = frames.last().cloned() else {
+                    continue;
+                };
+                let sink = sinks_for_effect.lock().get(&channel).cloned();
+                if let Some(sink) = sink {
+                    sink.project(frame);
+                }
+            }
+        });
+        Self {
+            ctx,
+            histories,
+            sink_kick,
+            effect: Mutex::new(Some(effect)),
+            sinks,
+            next_plane_version: AtomicU64::new(1),
+            waiters: Condvar::new(),
+            wait_lock: Mutex::new(()),
+        }
+    }
+
+    fn install_sink(&self, channel: &str, sink: Arc<dyn ControllerStatePlaneSink>) {
+        self.sinks.lock().insert(channel.to_string(), sink);
+        let next = self.ctx.get(&self.sink_kick).saturating_add(1);
+        self.ctx.set(&self.sink_kick, next);
+    }
+
+    fn publish(
+        &self,
+        channel: String,
+        producer_id: String,
+        message_json: String,
+        epoch: u64,
+        base_epoch: Option<u64>,
+    ) -> Result<(ControllerStatePlaneFrame, bool)> {
+        anyhow::ensure!(!channel.trim().is_empty(), "state-plane channel is empty");
+        anyhow::ensure!(
+            !producer_id.trim().is_empty(),
+            "state-plane producer_id is empty"
+        );
+        anyhow::ensure!(epoch > 0, "state-plane epoch must be positive");
+        anyhow::ensure!(
+            message_json.len() <= STATE_PLANE_MAX_MESSAGE_BYTES,
+            "state-plane message exceeds {} bytes",
+            STATE_PLANE_MAX_MESSAGE_BYTES
+        );
+
+        let mut histories = self.ctx.get(&self.histories);
+        anyhow::ensure!(
+            histories.contains_key(&channel) || histories.len() < STATE_PLANE_MAX_CHANNELS,
+            "state-plane channel capacity reached; reuse or retire an existing channel"
+        );
+        let history = histories.entry(channel.clone()).or_default();
+        anyhow::ensure!(
+            base_epoch.is_none() || history.len() < STATE_PLANE_MAX_RETAINED_FRAMES_PER_CHANNEL,
+            "state-plane delta retention capacity reached; publish a covering Snapshot"
+        );
+        let latest = history.last();
+        if let Some(latest) = latest
+            && latest.producer_id == producer_id
+            && latest.epoch == epoch
+            && latest.message_json == message_json
+        {
+            return Ok((latest.clone(), true));
+        }
+
+        match (latest, base_epoch) {
+            (Some(latest), Some(base)) => {
+                anyhow::ensure!(
+                    latest.producer_id == producer_id,
+                    "state-plane Delta producer changed without a covering Snapshot"
+                );
+                anyhow::ensure!(
+                    base == latest.epoch,
+                    "state-plane Delta base_epoch mismatch: expected {}, got {base}",
+                    latest.epoch
+                );
+                anyhow::ensure!(
+                    epoch > latest.epoch,
+                    "state-plane epoch did not advance: current={}, incoming={epoch}",
+                    latest.epoch
+                );
+            }
+            (Some(latest), None) if latest.producer_id == producer_id => {
+                anyhow::ensure!(
+                    epoch > latest.epoch,
+                    "state-plane epoch did not advance: current={}, incoming={epoch}",
+                    latest.epoch
+                );
+            }
+            (_, None) => {
+                // A Snapshot is a covering state cut. A new producer may claim
+                // the channel by publishing one; no stale producer epoch leaks
+                // across process restarts.
+                history.clear();
+            }
+            (None, Some(_)) => {
+                anyhow::bail!("state-plane Delta has no covering Snapshot");
+            }
+        }
+
+        if base_epoch.is_none() {
+            history.clear();
+        }
+        let plane_version = self.next_plane_version.fetch_add(1, Ordering::SeqCst);
+        let frame = ControllerStatePlaneFrame {
+            channel: channel.clone(),
+            producer_id,
+            epoch,
+            base_epoch,
+            plane_version,
+            message_json,
+        };
+        history.push(frame.clone());
+        self.ctx.set(&self.histories, histories);
+        self.waiters.notify_all();
+        Ok((frame, false))
+    }
+
+    fn subscribe(
+        &self,
+        channel: &str,
+        after_version: u64,
+        timeout: Duration,
+    ) -> ControllerStatePlaneSubscription {
+        let deadline = Instant::now() + timeout;
+        let mut guard = self.wait_lock.lock();
+        loop {
+            let histories = self.ctx.get(&self.histories);
+            let history = histories.get(channel).cloned().unwrap_or_default();
+            let latest_version = history.last().map(|frame| frame.plane_version).unwrap_or(0);
+            if latest_version > after_version || Instant::now() >= deadline {
+                let frames = if after_version == 0 {
+                    history
+                } else {
+                    history
+                        .into_iter()
+                        .filter(|frame| frame.plane_version > after_version)
+                        .collect()
+                };
+                return ControllerStatePlaneSubscription {
+                    channel: channel.to_string(),
+                    latest_version,
+                    timed_out: latest_version <= after_version,
+                    frames,
+                };
+            }
+            self.waiters.wait_for(
+                &mut guard,
+                deadline.saturating_duration_since(Instant::now()),
+            );
+        }
+    }
+}
+
+impl Drop for ControllerStatePlaneGraph {
+    fn drop(&mut self) {
+        if let Some(effect) = self.effect.get_mut().take() {
+            self.ctx.dispose_effect(&effect);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -502,6 +1119,8 @@ pub(crate) struct ControllerRuntime {
     memory: Mutex<ControllerMemoryState>,
     coordination_graph: ControllerCoordinationGraph,
     supervisor_recycle_graph: ControllerSupervisorRecycleGraph,
+    state_plane_graph: ControllerStatePlaneGraph,
+    pane_layout_graph: ControllerPaneLayoutGraph,
     supervisor_recycle_waiters: Condvar,
     /// Serialize editor-op epoch read/derive/append transitions. The checkpoint
     /// fact contains the complete epoch, so two concurrent IDE callbacks must
@@ -1020,12 +1639,15 @@ impl ControllerRuntime {
         }
         let memory = ControllerMemoryState::load(&bootstrap.project_root)?;
         let scope = agent_doc_state_scope::ProcessScope::new();
+        let persisted_layout = load_layout_state(&bootstrap.project_root).unwrap_or_default();
         let supervisor_recycle_graph = ControllerSupervisorRecycleGraph::new_in(
             &scope,
             memory.state_projection.project_supervisor_recycle(),
         );
         let coordination_graph = ControllerCoordinationGraph::new_in(&scope);
         let document_graphs = ControllerDocumentGraphs::new_in(&scope);
+        let state_plane_graph = ControllerStatePlaneGraph::new_in(&scope);
+        let pane_layout_graph = ControllerPaneLayoutGraph::new_in(&scope, persisted_layout);
         for (document_hash, projection) in &memory.state_projection.documents {
             document_graphs.set_projection(document_hash, Some(projection.clone()));
         }
@@ -1034,6 +1656,8 @@ impl ControllerRuntime {
             memory: Mutex::new(memory),
             coordination_graph,
             supervisor_recycle_graph,
+            state_plane_graph,
+            pane_layout_graph,
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(()),
             state_projection_waiters: Condvar::new(),
@@ -1058,6 +1682,9 @@ impl ControllerRuntime {
         runtime
             .document_graphs
             .install_settle_sink(project_root, &runtime);
+        rpc::install_state_plane_projection_sinks(&runtime);
+        #[cfg(not(any(test, feature = "test-support")))]
+        rpc::install_pane_layout_projection_sink(&runtime);
         Ok(runtime)
     }
 
@@ -1104,6 +1731,72 @@ impl ControllerRuntime {
 
     fn actor_store_snapshot(&self) -> BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> {
         self.memory.lock().actor_store.clone()
+    }
+
+    fn install_state_plane_sink(&self, channel: &str, sink: Arc<dyn ControllerStatePlaneSink>) {
+        self.state_plane_graph.install_sink(channel, sink);
+    }
+
+    fn publish_state_plane_frame(
+        &self,
+        channel: String,
+        producer_id: String,
+        message_json: String,
+        epoch: u64,
+        base_epoch: Option<u64>,
+    ) -> Result<(ControllerStatePlaneFrame, bool)> {
+        self.state_plane_graph
+            .publish(channel, producer_id, message_json, epoch, base_epoch)
+    }
+
+    fn subscribe_state_plane(
+        &self,
+        channel: &str,
+        after_version: u64,
+        timeout: Duration,
+    ) -> ControllerStatePlaneSubscription {
+        self.state_plane_graph
+            .subscribe(channel, after_version, timeout)
+    }
+
+    fn set_pane_layout_desired(
+        &self,
+        invocation: ControllerTmuxLayoutSyncInvocation,
+        source_plane_version: Option<u64>,
+    ) -> PaneLayoutDesired {
+        self.pane_layout_graph
+            .set_desired(invocation, source_plane_version)
+    }
+
+    fn pane_layout_desired(&self) -> Option<PaneLayoutDesired> {
+        self.pane_layout_graph.desired()
+    }
+
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn pane_layout_projection(&self) -> PaneLayoutProjection {
+        self.pane_layout_graph.projection()
+    }
+
+    fn pane_layout_state_projection(&self) -> Option<ControllerPaneLayoutStateProjection> {
+        self.pane_layout_graph.state_projection()
+    }
+
+    fn record_pane_layout_observation(&self, observation: PaneLayoutObservation) {
+        self.pane_layout_graph.record_observation(observation);
+    }
+
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn record_pane_layout_effect_receipt(&self, receipt: PaneLayoutEffectReceipt) {
+        self.pane_layout_graph.record_receipt(receipt);
+    }
+
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn await_pane_layout_generation(
+        &self,
+        generation: u64,
+        timeout: Duration,
+    ) -> PaneLayoutProjection {
+        self.pane_layout_graph.await_generation(generation, timeout)
     }
 
     fn try_claim_coordination(&self, scopes: &[String], owner_token: &str, owner_pid: u32) -> bool {
@@ -3483,7 +4176,7 @@ mod tests {
     }
 
     #[test]
-    fn only_manual_autostart_sync_routes_created_panes() {
+    fn manual_and_projection_autostart_sync_route_created_panes() {
         let invocation =
             |caller_kind: &str, no_autostart: bool| ControllerTmuxLayoutSyncInvocation {
                 columns: vec!["tasks/one.md".to_string()],
@@ -3495,8 +4188,192 @@ mod tests {
             };
 
         assert!(invocation("manual", false).routes_created_panes());
+        assert!(invocation("projection", false).routes_created_panes());
         assert!(!invocation("automatic", false).routes_created_panes());
         assert!(!invocation("manual", true).routes_created_panes());
+    }
+
+    fn pane_layout_desired_for_test(generation: u64) -> PaneLayoutDesired {
+        PaneLayoutDesired {
+            generation,
+            source_plane_version: Some(41),
+            invocation: ControllerTmuxLayoutSyncInvocation {
+                columns: vec!["tasks/one.md".to_string(), "tasks/two.md".to_string()],
+                window: Some("agent-doc".to_string()),
+                focus: Some("tasks/two.md".to_string()),
+                no_autostart: false,
+                exact_visible: true,
+                caller_kind: "projection".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn pane_layout_projection_is_derived_from_desired_observed_and_effect_state() {
+        let desired = pane_layout_desired_for_test(7);
+        assert_eq!(
+            derive_pane_layout_projection(None, None, PaneLayoutEffectReceipt::default()),
+            PaneLayoutProjection::Absent
+        );
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                None,
+                PaneLayoutEffectReceipt::default(),
+            ),
+            PaneLayoutProjection::NeedsEffect(desired.clone())
+        );
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                None,
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    attempt: 1,
+                    phase: PaneLayoutEffectPhase::InFlight,
+                    reason: "applying".to_string(),
+                },
+            ),
+            PaneLayoutProjection::Applying(desired.clone())
+        );
+
+        let mismatched = PaneLayoutObservation {
+            generation: 7,
+            report: ControllerTmuxLayoutSyncStateReport {
+                synced: false,
+                reason: "pane_order_mismatch".to_string(),
+                expected_documents: desired.invocation.columns.clone(),
+                actual_documents: vec!["tasks/two.md".to_string()],
+                panes: vec!["%1".to_string()],
+                session_name: Some("agent-doc".to_string()),
+                window_id: Some("@1".to_string()),
+                window_name: Some("agent-doc".to_string()),
+                focus: desired.invocation.focus.clone(),
+            },
+        };
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                Some(mismatched),
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    attempt: 1,
+                    phase: PaneLayoutEffectPhase::RetryPending,
+                    reason: "retry_scheduled".to_string(),
+                },
+            ),
+            PaneLayoutProjection::RetryPending(desired.clone())
+        );
+
+        let converged = PaneLayoutObservation {
+            generation: 7,
+            report: ControllerTmuxLayoutSyncStateReport {
+                synced: true,
+                reason: "synced".to_string(),
+                expected_documents: desired.invocation.columns.clone(),
+                actual_documents: desired.invocation.columns.clone(),
+                panes: vec!["%1".to_string(), "%2".to_string()],
+                session_name: Some("agent-doc".to_string()),
+                window_id: Some("@1".to_string()),
+                window_name: Some("agent-doc".to_string()),
+                focus: desired.invocation.focus.clone(),
+            },
+        };
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                Some(converged),
+                PaneLayoutEffectReceipt::default(),
+            ),
+            PaneLayoutProjection::Converged(desired)
+        );
+    }
+
+    #[test]
+    fn pane_layout_status_correlates_to_the_exact_desired_plane_version() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, Vec::new());
+        let desired = pane_layout_desired_for_test(1);
+        graph.set_desired(desired.invocation, Some(73));
+
+        let status = graph.state_projection().unwrap();
+        assert_eq!(status.source_plane_version, Some(73));
+        assert_eq!(status.phase, ControllerPaneLayoutPhase::NeedsEffect);
+    }
+
+    #[test]
+    fn state_plane_requires_causal_deltas_and_replays_from_covering_snapshot() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let plane = ControllerStatePlaneGraph::new_in(&scope);
+        let (snapshot, duplicate) = plane
+            .publish(
+                "test/layout".to_string(),
+                "editor-a".to_string(),
+                r#"{"Snapshot":{"epoch":1}}"#.to_string(),
+                1,
+                None,
+            )
+            .unwrap();
+        assert!(!duplicate);
+        assert_eq!(snapshot.plane_version, 1);
+
+        let (_, duplicate) = plane
+            .publish(
+                "test/layout".to_string(),
+                "editor-a".to_string(),
+                r#"{"Snapshot":{"epoch":1}}"#.to_string(),
+                1,
+                None,
+            )
+            .unwrap();
+        assert!(duplicate);
+
+        let (delta, duplicate) = plane
+            .publish(
+                "test/layout".to_string(),
+                "editor-a".to_string(),
+                r#"{"Delta":{"epoch":2,"base_epoch":1}}"#.to_string(),
+                2,
+                Some(1),
+            )
+            .unwrap();
+        assert!(!duplicate);
+        assert_eq!(delta.plane_version, 2);
+        let replay = plane.subscribe("test/layout", 0, Duration::ZERO);
+        assert_eq!(replay.frames, vec![snapshot, delta]);
+
+        let error = plane
+            .publish(
+                "test/layout".to_string(),
+                "editor-b".to_string(),
+                r#"{"Delta":{"epoch":2,"base_epoch":1}}"#.to_string(),
+                2,
+                Some(1),
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("producer changed without a covering Snapshot")
+        );
+
+        let (replacement, _) = plane
+            .publish(
+                "test/layout".to_string(),
+                "editor-b".to_string(),
+                r#"{"Snapshot":{"epoch":1}}"#.to_string(),
+                1,
+                None,
+            )
+            .unwrap();
+        let cold_replay = plane.subscribe("test/layout", 0, Duration::ZERO);
+        assert_eq!(cold_replay.frames, vec![replacement.clone()]);
+        assert_eq!(
+            plane
+                .subscribe("test/layout", replacement.plane_version, Duration::ZERO)
+                .timed_out,
+            true
+        );
     }
 
     #[test]
@@ -7197,6 +8074,8 @@ agent:queue\n\
             editor_op_capture_writes: Mutex::new(()),
             state_projection_waiters: Condvar::new(),
             document_graphs: ControllerDocumentGraphs::new_in(&scope),
+            state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
+            pane_layout_graph: ControllerPaneLayoutGraph::new_in(&scope, Vec::new()),
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-supervisor-process"
-version = "0.35.68"
+version = "0.35.69"
 edition = "2024"
 description = "Supervisor process effect boundary for agent-doc"
 license = "MIT"
@@ -16,14 +16,14 @@ name = "agent_doc_supervisor_process"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.68" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.68" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.68" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.68" }
-agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.68" }
-agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.68" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.68" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.68" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.69" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.69" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.69" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.69" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.69" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.69" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.69" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.69" }
 alacritty_terminal = "0.26"
 anyhow = "1"
 libc = "0.2"

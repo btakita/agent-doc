@@ -47,6 +47,15 @@ const CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX: Duration = Duration::from_secs(30);
 const CONTROLLER_CLOSEOUT_COORDINATION_TIMEOUT: Duration = Duration::from_secs(15);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
+const PANE_LAYOUT_OBSERVATION_INTERVAL: Duration = Duration::from_secs(1);
+const PANE_LAYOUT_RETRY_MIN: Duration = Duration::from_millis(250);
+const PANE_LAYOUT_RETRY_MAX: Duration = Duration::from_secs(5);
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+const PANE_LAYOUT_COMMAND_AWAIT: Duration = Duration::from_secs(30);
+const STATE_PLANE_SUBSCRIBE_MAX: Duration = Duration::from_secs(120);
+const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
+const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
+static PANE_LAYOUT_STATUS_EPOCH: AtomicU64 = AtomicU64::new(1);
 /// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
 /// gets a generous ceiling.
@@ -1315,8 +1324,10 @@ pub fn sync_tmux_layout(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone())?;
         handle_sync_tmux_layout(
             &bootstrap,
+            runtime.as_ref(),
             ControllerRequest {
                 command: "sync_tmux_layout".to_string(),
                 file: invocation.focus.as_ref().map(PathBuf::from),
@@ -6356,41 +6367,43 @@ fn observe_realtime_steering_after_replica_update(
         return Ok(false);
     };
 
-    let (converged, changed) =
+    let (_converged, normalization_pending) =
         agent_doc_queue::control_binding::converge_queue_control_binding_content(
             &text,
             previous_text,
         )?;
-    let current = if changed {
-        // The CRDT relay is the existing durable effect sink. Feed the pure
-        // convergence result into it; do not add a second journal or watcher.
-        agent_doc_crdt_relay_io::apply_cp_write_for_file(
+    if normalization_pending {
+        // A replica update is only a transport-level intermediate cut. Applying
+        // queue-control normalization here can race a forced editor re-register
+        // and project `previous_text` back over operator typing. Record the
+        // observation, but leave mutation to the settled preflight/convergence
+        // path where the complete editor cut is authoritative.
+        agent_doc_ops_log_io::log_op(
             canonical,
-            &text,
-            &converged,
-            "realtime_queue_control_binding",
-        )?;
-        converged.as_str()
-    } else {
-        text.as_str()
-    };
+            &format!(
+                "realtime_queue_control_binding_deferred file={} reason=replica_update_unsettled",
+                canonical.display(),
+            ),
+        );
+    }
+    let current = text.as_str();
 
     let Some(state) = state.as_ref() else {
-        return Ok(changed);
+        return Ok(false);
     };
     let (Some(cycle_id), Some(phase)) = (state.closeout.cycle_id.as_deref(), state.closeout.phase)
     else {
-        return Ok(changed);
+        return Ok(false);
     };
     if !phase.is_open() {
-        return Ok(changed);
+        return Ok(false);
     }
     let Some(baseline) = baseline else {
-        return Ok(changed);
+        return Ok(false);
     };
     let event = realtime_steering_event_for_text(&document_hash, cycle_id, baseline, current);
     let observed = append_apply_state_event(bootstrap, runtime, event)?;
-    Ok(changed || observed)
+    Ok(observed)
 }
 
 fn realtime_steering_event_for_text(
@@ -6505,11 +6518,12 @@ fn handle_editor_route_rpc(
 /// the returned projection, not transport errors.
 fn handle_editor_command_submit_rpc(
     bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
     let command_result =
-        dispatch_command_submit_payload(bootstrap, &request, &submit, payload_json);
+        dispatch_command_submit_payload(bootstrap, runtime, &request, &submit, payload_json);
     terminal_command_submit_response(&submit, command_result)
 }
 
@@ -6708,6 +6722,7 @@ fn handle_editor_command_status_rpc(request: ControllerRequest) -> Result<serde_
 /// final causal receipt before returning.
 fn handle_editor_command_submit_async_rpc(
     bootstrap: &ControllerBootstrap,
+    runtime: &Arc<ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
@@ -6735,12 +6750,14 @@ fn handle_editor_command_submit_async_rpc(
     let worker_bootstrap = bootstrap.clone();
     let worker_request = request.clone();
     let worker_submit = submit.clone();
+    let worker_runtime = Arc::clone(runtime);
     let worker_project_root = bootstrap.project_root.clone();
     let worker_command_id = command_id.clone();
     let worker_name = submit.name.clone();
     if let Err(err) = spawn_editor_command_async_worker(move || {
         let result = dispatch_command_submit_payload(
             &worker_bootstrap,
+            worker_runtime.as_ref(),
             &worker_request,
             &worker_submit,
             payload_json,
@@ -6893,6 +6910,7 @@ fn empty_controller_request(command: &str) -> ControllerRequest {
 
 fn dispatch_command_submit_payload(
     bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
     request: &ControllerRequest,
     submit: &lazily::CommandSubmit,
     payload_json: String,
@@ -6942,16 +6960,29 @@ fn dispatch_command_submit_payload(
                     );
                 }
             });
-            match handle_sync_tmux_layout(bootstrap, sync_request) {
+            match handle_sync_tmux_layout(bootstrap, runtime, sync_request) {
                 Ok(receipt) => {
                     let output =
                         serde_json::to_string(&receipt).unwrap_or_else(|_| receipt.reason.clone());
-                    CommandSubmitDispatchResult::applied(output, &receipt).unwrap_or_else(|err| {
-                        CommandSubmitDispatchResult::rejected(
-                            "sync_tmux_layout",
-                            format!("serialize sync_tmux_layout receipt: {err:#}"),
+                    if receipt.applied {
+                        CommandSubmitDispatchResult::applied(output, &receipt).unwrap_or_else(
+                            |err| {
+                                CommandSubmitDispatchResult::rejected(
+                                    "sync_tmux_layout",
+                                    format!("serialize sync_tmux_layout receipt: {err:#}"),
+                                )
+                            },
                         )
-                    })
+                    } else {
+                        CommandSubmitDispatchResult {
+                            exit_code: 1,
+                            output,
+                            payload: serde_json::to_value(&receipt)
+                                .unwrap_or(serde_json::Value::Null),
+                            terminal_applied: false,
+                            terminal_reason: Some(receipt.reason),
+                        }
+                    }
                 }
                 Err(err) => {
                     CommandSubmitDispatchResult::rejected("sync_tmux_layout", format!("{err:#}"))
@@ -8496,6 +8527,7 @@ pub(crate) fn serve_with_options(
     // budget-exhausted supervisor is reported once, not every tick.
     let supervisor_watchdog_interval = supervisor_watchdog_interval();
     let mut supervisor_watchdog_last_run: Option<Instant> = None;
+    let mut pane_layout_observation_last_run: Option<Instant> = None;
     let mut supervisor_watchdog_halt_notified: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     while !should_stop.load(Ordering::SeqCst) {
@@ -8637,6 +8669,21 @@ pub(crate) fn serve_with_options(
                     // `#orphandrain`: sweep the documents the supervisor watchdog
                     // cannot help — those with no supervisor to revive.
                     controller_orphan_drain_tick(&runtime);
+                }
+                let pane_layout_observation_now = Instant::now();
+                let pane_layout_observation_due = pane_layout_observation_last_run
+                    .map(|last| {
+                        pane_layout_observation_now.duration_since(last)
+                            >= PANE_LAYOUT_OBSERVATION_INTERVAL
+                    })
+                    .unwrap_or(true);
+                if pane_layout_observation_due {
+                    pane_layout_observation_last_run = Some(pane_layout_observation_now);
+                    // Observation is the only timer-driven step. It publishes a
+                    // tmux fact into the Lazily graph; the graph's Computed
+                    // delta and retained Effect decide whether reconciliation
+                    // is needed.
+                    observe_pane_layout_projection(&runtime);
                 }
                 std::thread::sleep(CONNECT_POLL);
             }
@@ -10123,6 +10170,12 @@ pub(crate) fn handle_request_locked(
             request,
         )),
         "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
+        "state_plane_publish" => {
+            controller_envelope(handle_state_plane_publish(runtime.as_ref(), request))
+        }
+        "state_plane_subscribe" => {
+            controller_envelope(handle_state_plane_subscribe(runtime.as_ref(), request))
+        }
         "retained_write_settlement" => {
             controller_envelope(handle_retained_write_settlement(runtime.as_ref(), request))
         }
@@ -10143,9 +10196,11 @@ pub(crate) fn handle_request_locked(
         "focus_document_pane" => {
             controller_envelope(handle_focus_document_pane(&bootstrap_snapshot, request))
         }
-        "sync_tmux_layout" => {
-            controller_envelope(handle_sync_tmux_layout(&bootstrap_snapshot, request))
-        }
+        "sync_tmux_layout" => controller_envelope(handle_sync_tmux_layout(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "queue_control" => controller_envelope(handle_queue_control(&bootstrap_snapshot, request)),
         "admin_control" => controller_envelope(handle_admin_control(&bootstrap_snapshot, request)),
         "projection_repair" => {
@@ -10176,10 +10231,11 @@ pub(crate) fn handle_request_locked(
         }
         "editor_command_submit" => controller_envelope(handle_editor_command_submit_rpc(
             &bootstrap_snapshot,
+            runtime.as_ref(),
             request,
         )),
         "editor_command_submit_async" => controller_envelope(
-            handle_editor_command_submit_async_rpc(&bootstrap_snapshot, request),
+            handle_editor_command_submit_async_rpc(&bootstrap_snapshot, runtime, request),
         ),
         "editor_command_status" => controller_envelope(handle_editor_command_status_rpc(request)),
         "crdt_current_text" => {
@@ -14524,8 +14580,16 @@ pub(crate) fn handle_tmux_layout_sync_state(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let invocation: ControllerTmuxLayoutSyncStateInvocation =
         serde_json::from_str(&payload_json).context("parse tmux layout sync state invocation")?;
+    tmux_layout_sync_state_for_invocation(bootstrap, runtime, &invocation)
+}
+
+fn tmux_layout_sync_state_for_invocation(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: &ControllerTmuxLayoutSyncStateInvocation,
+) -> Result<ControllerTmuxLayoutSyncStateReport> {
     let expected_documents =
-        layout_sync_state_expected_documents(&bootstrap.project_root, &invocation);
+        layout_sync_state_expected_documents(&bootstrap.project_root, invocation);
     let focus = invocation.focus.clone();
     if expected_documents.is_empty() {
         return Ok(layout_sync_state_report(
@@ -14535,7 +14599,7 @@ pub(crate) fn handle_tmux_layout_sync_state(
             Vec::new(),
             Vec::new(),
             LayoutSyncStateTarget {
-                window_id: invocation.window,
+                window_id: invocation.window.clone(),
                 focus,
                 ..LayoutSyncStateTarget::default()
             },
@@ -14551,7 +14615,7 @@ pub(crate) fn handle_tmux_layout_sync_state(
             Vec::new(),
             Vec::new(),
             LayoutSyncStateTarget {
-                window_id: invocation.window,
+                window_id: invocation.window.clone(),
                 focus,
                 ..LayoutSyncStateTarget::default()
             },
@@ -14567,7 +14631,7 @@ pub(crate) fn handle_tmux_layout_sync_state(
             Vec::new(),
             LayoutSyncStateTarget {
                 session_name: Some(configured_session),
-                window_id: invocation.window,
+                window_id: invocation.window.clone(),
                 focus,
                 ..LayoutSyncStateTarget::default()
             },
@@ -14641,6 +14705,539 @@ pub(crate) fn handle_tmux_layout_sync_state(
             focus,
         },
     ))
+}
+
+fn state_plane_message_metadata(message: &lazily::IpcMessage) -> Result<(u64, Option<u64>)> {
+    match message {
+        lazily::IpcMessage::Snapshot(snapshot) => Ok((snapshot.epoch, None)),
+        lazily::IpcMessage::Delta(delta) => Ok((delta.epoch, Some(delta.base_epoch))),
+        _ => anyhow::bail!(
+            "state plane accepts Lazily graph-state Snapshot/Delta messages, not control or CRDT frames"
+        ),
+    }
+}
+
+fn state_plane_snapshot_payload(
+    message: &lazily::IpcMessage,
+    channel: &str,
+    expected_type_tag: &str,
+) -> Result<Vec<u8>> {
+    let lazily::IpcMessage::Snapshot(snapshot) = message else {
+        anyhow::bail!("{channel} requires a covering Lazily Snapshot");
+    };
+    let node = snapshot
+        .nodes
+        .iter()
+        .find(|node| {
+            node.type_tag == expected_type_tag
+                && node.key.as_ref().is_some_and(|key| key.as_str() == channel)
+        })
+        .with_context(|| {
+            format!("{channel} Snapshot is missing keyed node with type_tag={expected_type_tag}")
+        })?;
+    match &node.state {
+        lazily::NodeState::Payload(payload) => Ok(payload.clone()),
+        lazily::NodeState::SharedBlob(_) => {
+            anyhow::bail!("{channel} does not accept process-local shared-blob payloads")
+        }
+        lazily::NodeState::Opaque => anyhow::bail!("{channel} payload is opaque"),
+    }
+}
+
+fn pane_layout_invocation_from_state_frame(
+    frame: &ControllerStatePlaneFrame,
+) -> Result<ControllerTmuxLayoutSyncInvocation> {
+    let message: lazily::IpcMessage = serde_json::from_str(&frame.message_json)
+        .context("decode pane-layout Lazily IpcMessage")?;
+    let payload = state_plane_snapshot_payload(
+        &message,
+        PANE_LAYOUT_DESIRED_STATE_CHANNEL,
+        PANE_LAYOUT_DESIRED_TYPE_TAG,
+    )?;
+    serde_json::from_slice(&payload).context("decode pane-layout desired projection")
+}
+
+fn state_plane_snapshot_message_json<T: Serialize>(
+    epoch: u64,
+    channel: &str,
+    type_tag: &str,
+    payload: &T,
+) -> Result<String> {
+    let node = lazily::NodeSnapshot::payload(
+        lazily::NodeId(1),
+        type_tag,
+        serde_json::to_vec(payload).context("encode state-plane node payload")?,
+    )
+    .with_key(lazily::NodeKey::new(channel).context("validate state-plane NodeKey")?);
+    let message = lazily::IpcMessage::Snapshot(lazily::Snapshot {
+        epoch,
+        nodes: vec![node],
+        edges: Vec::new(),
+        roots: vec![lazily::NodeId(1)],
+    });
+    serde_json::to_string(&message).context("encode Lazily state-plane Snapshot")
+}
+
+fn publish_pane_layout_status(runtime: &ControllerRuntime) {
+    let Some(status) = runtime.pane_layout_state_projection() else {
+        return;
+    };
+    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
+        return;
+    };
+    let epoch = PANE_LAYOUT_STATUS_EPOCH.fetch_add(1, Ordering::SeqCst);
+    let producer_id = format!(
+        "agent-doc-controller:{}:{}",
+        std::process::id(),
+        bootstrap.controller_generation
+    );
+    let result = state_plane_snapshot_message_json(
+        epoch,
+        PANE_LAYOUT_STATUS_STATE_CHANNEL,
+        PANE_LAYOUT_STATUS_TYPE_TAG,
+        &status,
+    )
+    .and_then(|message_json| {
+        runtime.publish_state_plane_frame(
+            PANE_LAYOUT_STATUS_STATE_CHANNEL.to_string(),
+            producer_id,
+            message_json,
+            epoch,
+            None,
+        )
+    });
+    if let Err(error) = result {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!("pane_layout_status_publish_deferred error={error:#}"),
+        );
+    }
+}
+
+pub(crate) fn handle_state_plane_publish(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<ControllerStatePlanePublishReceipt> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let invocation: ControllerStatePlanePublishInvocation =
+        serde_json::from_str(&payload_json).context("parse state-plane publish invocation")?;
+    let message: lazily::IpcMessage = serde_json::from_str(&invocation.message_json)
+        .context("decode state-plane Lazily IpcMessage")?;
+    let (epoch, base_epoch) = state_plane_message_metadata(&message)?;
+    if let lazily::IpcMessage::Snapshot(snapshot) = &message {
+        anyhow::ensure!(
+            snapshot.nodes.iter().any(|node| {
+                node.key
+                    .as_ref()
+                    .is_some_and(|key| key.as_str() == invocation.channel.as_str())
+            }),
+            "state-plane Snapshot is missing a node keyed to channel {}",
+            invocation.channel
+        );
+    }
+    if invocation.channel == PANE_LAYOUT_DESIRED_STATE_CHANNEL {
+        let payload = state_plane_snapshot_payload(
+            &message,
+            PANE_LAYOUT_DESIRED_STATE_CHANNEL,
+            PANE_LAYOUT_DESIRED_TYPE_TAG,
+        )?;
+        let _: ControllerTmuxLayoutSyncInvocation =
+            serde_json::from_slice(&payload).context("validate pane-layout desired projection")?;
+    }
+    let (frame, duplicate) = runtime.publish_state_plane_frame(
+        invocation.channel,
+        invocation.producer_id,
+        invocation.message_json,
+        epoch,
+        base_epoch,
+    )?;
+    Ok(ControllerStatePlanePublishReceipt {
+        accepted: true,
+        reason: if duplicate {
+            "duplicate_projection"
+        } else {
+            "projection_published"
+        }
+        .to_string(),
+        channel: frame.channel,
+        producer_id: frame.producer_id,
+        epoch: frame.epoch,
+        plane_version: frame.plane_version,
+    })
+}
+
+pub(crate) fn handle_state_plane_subscribe(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<ControllerStatePlaneSubscription> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let invocation: ControllerStatePlaneSubscribeInvocation =
+        serde_json::from_str(&payload_json).context("parse state-plane subscribe invocation")?;
+    anyhow::ensure!(
+        !invocation.channel.trim().is_empty(),
+        "state-plane subscribe channel is empty"
+    );
+    let timeout = Duration::from_millis(invocation.timeout_ms).min(STATE_PLANE_SUBSCRIBE_MAX);
+    Ok(runtime.subscribe_state_plane(&invocation.channel, invocation.after_version, timeout))
+}
+
+#[derive(Default)]
+struct PaneLayoutDesiredProjectionState {
+    pending_frame: Option<ControllerStatePlaneFrame>,
+    worker_active: bool,
+}
+
+struct PaneLayoutDesiredStatePlaneSink {
+    runtime: std::sync::Weak<ControllerRuntime>,
+    state: Arc<Mutex<PaneLayoutDesiredProjectionState>>,
+    last_applied_version: Arc<AtomicU64>,
+}
+
+impl ControllerStatePlaneSink for PaneLayoutDesiredStatePlaneSink {
+    fn project(&self, frame: ControllerStatePlaneFrame) {
+        if frame.plane_version <= self.last_applied_version.load(Ordering::SeqCst) {
+            return;
+        }
+        let should_spawn = {
+            let mut state = self.state.lock();
+            if state
+                .pending_frame
+                .as_ref()
+                .is_some_and(|current| current.plane_version >= frame.plane_version)
+            {
+                return;
+            }
+            state.pending_frame = Some(frame);
+            if state.worker_active {
+                false
+            } else {
+                state.worker_active = true;
+                true
+            }
+        };
+        if !should_spawn {
+            return;
+        }
+        let runtime = self.runtime.clone();
+        let state = Arc::clone(&self.state);
+        let last_applied_version = Arc::clone(&self.last_applied_version);
+        let spawn = std::thread::Builder::new()
+            .name("agent-doc-state-plane-projector".to_string())
+            .spawn(move || {
+                pane_layout_desired_projection_worker(runtime, state, last_applied_version);
+            });
+        if let Err(error) = spawn {
+            self.state.lock().worker_active = false;
+            eprintln!("[controller] failed to spawn state-plane projector: {error}");
+        }
+    }
+}
+
+fn pane_layout_desired_projection_worker(
+    runtime: std::sync::Weak<ControllerRuntime>,
+    state: Arc<Mutex<PaneLayoutDesiredProjectionState>>,
+    last_applied_version: Arc<AtomicU64>,
+) {
+    let mut attempt = 0_u64;
+    loop {
+        let Some(runtime) = runtime.upgrade() else {
+            state.lock().worker_active = false;
+            return;
+        };
+        let frame = {
+            let mut state = state.lock();
+            let Some(frame) = state.pending_frame.clone() else {
+                state.worker_active = false;
+                return;
+            };
+            frame
+        };
+        if frame.plane_version <= last_applied_version.load(Ordering::SeqCst) {
+            let mut state = state.lock();
+            if state
+                .pending_frame
+                .as_ref()
+                .is_some_and(|current| current.plane_version <= frame.plane_version)
+            {
+                state.pending_frame.take();
+            }
+            attempt = 0;
+            continue;
+        }
+
+        let result = pane_layout_invocation_from_state_frame(&frame).and_then(|invocation| {
+            let bootstrap = runtime.bootstrap_snapshot()?;
+            publish_pane_layout_desired_invocation(
+                &bootstrap,
+                &runtime,
+                invocation,
+                Some(frame.plane_version),
+            )?;
+            Ok(bootstrap)
+        });
+        match result {
+            Ok(bootstrap) => {
+                last_applied_version.store(frame.plane_version, Ordering::SeqCst);
+                let mut state = state.lock();
+                if state
+                    .pending_frame
+                    .as_ref()
+                    .is_some_and(|current| current.plane_version <= frame.plane_version)
+                {
+                    state.pending_frame.take();
+                }
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "pane_layout_desired_projected plane_version={} producer={} epoch={}",
+                        frame.plane_version, frame.producer_id, frame.epoch
+                    ),
+                );
+                attempt = 0;
+            }
+            Err(error) => {
+                attempt = attempt.saturating_add(1);
+                if let Ok(bootstrap) = runtime.bootstrap_snapshot() {
+                    agent_doc_ops_log_io::log_op(
+                        &bootstrap.project_root,
+                        &format!(
+                            "pane_layout_desired_projection_retry_scheduled plane_version={} attempt={} error={error:#}",
+                            frame.plane_version, attempt
+                        ),
+                    );
+                }
+                std::thread::sleep(pane_layout_retry_delay(attempt));
+            }
+        }
+    }
+}
+
+pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRuntime>) {
+    runtime.install_state_plane_sink(
+        PANE_LAYOUT_DESIRED_STATE_CHANNEL,
+        Arc::new(PaneLayoutDesiredStatePlaneSink {
+            runtime: Arc::downgrade(runtime),
+            state: Arc::new(Mutex::new(PaneLayoutDesiredProjectionState::default())),
+            last_applied_version: Arc::new(AtomicU64::new(0)),
+        }),
+    );
+}
+
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+struct ControllerPaneLayoutProjectionSink {
+    runtime: std::sync::Weak<ControllerRuntime>,
+    worker_active: Arc<AtomicBool>,
+}
+
+impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
+    fn reconcile(&self, _desired: PaneLayoutDesired) {
+        if self
+            .worker_active
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+        let runtime = self.runtime.clone();
+        let worker_active = Arc::clone(&self.worker_active);
+        let spawn = std::thread::Builder::new()
+            .name("agent-doc-pane-layout-effect".to_string())
+            .spawn(move || {
+                struct WorkerGuard(Arc<AtomicBool>);
+                impl Drop for WorkerGuard {
+                    fn drop(&mut self) {
+                        self.0.store(false, Ordering::SeqCst);
+                    }
+                }
+                let _guard = WorkerGuard(worker_active);
+                pane_layout_effect_worker(runtime);
+            });
+        if let Err(error) = spawn {
+            self.worker_active.store(false, Ordering::SeqCst);
+            eprintln!("[controller] failed to spawn pane-layout effect worker: {error}");
+        }
+    }
+}
+
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+pub(super) fn install_pane_layout_projection_sink(runtime: &Arc<ControllerRuntime>) {
+    runtime
+        .pane_layout_graph
+        .install_sink(Arc::new(ControllerPaneLayoutProjectionSink {
+            runtime: Arc::downgrade(runtime),
+            worker_active: Arc::new(AtomicBool::new(false)),
+        }));
+}
+
+fn pane_layout_state_invocation(
+    desired: &PaneLayoutDesired,
+) -> ControllerTmuxLayoutSyncStateInvocation {
+    ControllerTmuxLayoutSyncStateInvocation {
+        columns: desired.invocation.columns.clone(),
+        window: desired.invocation.window.clone(),
+        focus: desired.invocation.focus.clone(),
+    }
+}
+
+fn pane_layout_retry_delay(attempt: u64) -> Duration {
+    let shift = attempt.saturating_sub(1).min(5) as u32;
+    PANE_LAYOUT_RETRY_MIN
+        .saturating_mul(1_u32 << shift)
+        .min(PANE_LAYOUT_RETRY_MAX)
+}
+
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn pane_layout_effect_worker(runtime: std::sync::Weak<ControllerRuntime>) {
+    let mut attempt = 0_u64;
+    let mut active_generation = 0_u64;
+    loop {
+        let Some(runtime) = runtime.upgrade() else {
+            return;
+        };
+        let Some(desired) = runtime.pane_layout_desired() else {
+            return;
+        };
+        if desired.generation != active_generation {
+            active_generation = desired.generation;
+            attempt = 0;
+        }
+        if matches!(
+            runtime.pane_layout_projection(),
+            PaneLayoutProjection::Converged(ref converged)
+                if converged.generation == desired.generation
+        ) {
+            return;
+        }
+        attempt = attempt.saturating_add(1);
+        runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
+            generation: desired.generation,
+            attempt,
+            phase: PaneLayoutEffectPhase::InFlight,
+            reason: "tmux_effect_in_flight".to_string(),
+        });
+        publish_pane_layout_status(&runtime);
+
+        let bootstrap = match runtime.bootstrap_snapshot() {
+            Ok(bootstrap) => bootstrap,
+            Err(error) => {
+                eprintln!("[controller] pane-layout bootstrap observation failed: {error:#}");
+                return;
+            }
+        };
+        let effect_result = match runtime_effects() {
+            Ok(effects) => {
+                effects.sync_tmux_layout(&bootstrap.project_root, desired.invocation.clone())
+            }
+            Err(error) => Err(error),
+        };
+        let report = tmux_layout_sync_state_for_invocation(
+            &bootstrap,
+            &runtime,
+            &pane_layout_state_invocation(&desired),
+        );
+        let (report, effect_reason) = match (report, effect_result) {
+            (Ok(report), Ok(receipt)) => (report, receipt.reason),
+            (Ok(report), Err(error)) => (report, format!("tmux_effect_failed:{error:#}")),
+            (Err(error), Ok(receipt)) => (
+                layout_sync_state_report(
+                    false,
+                    "tmux_observation_failed",
+                    desired.invocation.columns.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    LayoutSyncStateTarget {
+                        window_id: desired.invocation.window.clone(),
+                        focus: desired.invocation.focus.clone(),
+                        ..LayoutSyncStateTarget::default()
+                    },
+                ),
+                format!("{}; observation_failed:{error:#}", receipt.reason),
+            ),
+            (Err(observation_error), Err(effect_error)) => (
+                layout_sync_state_report(
+                    false,
+                    "tmux_effect_and_observation_failed",
+                    desired.invocation.columns.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    LayoutSyncStateTarget {
+                        window_id: desired.invocation.window.clone(),
+                        focus: desired.invocation.focus.clone(),
+                        ..LayoutSyncStateTarget::default()
+                    },
+                ),
+                format!(
+                    "tmux_effect_failed:{effect_error:#}; observation_failed:{observation_error:#}"
+                ),
+            ),
+        };
+        let synced = report.synced;
+        let observation_reason = report.reason.clone();
+        runtime.record_pane_layout_observation(PaneLayoutObservation {
+            generation: desired.generation,
+            report,
+        });
+        runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
+            generation: desired.generation,
+            attempt,
+            phase: if synced {
+                PaneLayoutEffectPhase::Converged
+            } else {
+                PaneLayoutEffectPhase::RetryPending
+            },
+            reason: if synced {
+                "observed_convergence".to_string()
+            } else {
+                format!("{observation_reason}; {effect_reason}")
+            },
+        });
+        publish_pane_layout_status(&runtime);
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={}",
+                desired.generation,
+                attempt,
+                if synced { "converged" } else { "retry_pending" },
+                observation_reason,
+                effect_reason,
+            ),
+        );
+        if synced {
+            return;
+        }
+        drop(runtime);
+        std::thread::sleep(pane_layout_retry_delay(attempt));
+    }
+}
+
+fn observe_pane_layout_projection(runtime: &Arc<ControllerRuntime>) {
+    let Some(desired) = runtime.pane_layout_desired() else {
+        return;
+    };
+    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
+        return;
+    };
+    match tmux_layout_sync_state_for_invocation(
+        &bootstrap,
+        runtime,
+        &pane_layout_state_invocation(&desired),
+    ) {
+        Ok(report) => {
+            runtime.record_pane_layout_observation(PaneLayoutObservation {
+                generation: desired.generation,
+                report,
+            });
+            publish_pane_layout_status(runtime);
+        }
+        Err(error) => agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "pane_layout_observation_deferred generation={} error={error:#}",
+                desired.generation,
+            ),
+        ),
+    }
 }
 
 pub(crate) fn handle_tmux_focus_state(
@@ -15113,20 +15710,94 @@ fn handle_focus_document_pane_with_policy(
     ))
 }
 
-pub(crate) fn handle_sync_tmux_layout(
+fn publish_pane_layout_desired(
     bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
     request: ControllerRequest,
-) -> Result<ControllerTmuxLayoutSyncReceipt> {
-    if bootstrap.handoff_state != ControllerHandoffState::Stable {
-        anyhow::bail!(
-            "sync_tmux_layout refused: controller not authoritative (handoff_state={:?})",
-            bootstrap.handoff_state
-        );
-    }
+) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let invocation: ControllerTmuxLayoutSyncInvocation =
         serde_json::from_str(&payload_json).context("parse sync tmux layout invocation")?;
-    runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation)
+    publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None)
+}
+
+fn publish_pane_layout_desired_invocation(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    mut invocation: ControllerTmuxLayoutSyncInvocation,
+    source_plane_version: Option<u64>,
+) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
+    if bootstrap.handoff_state != ControllerHandoffState::Stable {
+        anyhow::bail!(
+            "pane layout observation refused: controller not authoritative (handoff_state={:?})",
+            bootstrap.handoff_state
+        );
+    }
+    let desired_columns = layout_sync_state_expected_documents(
+        &bootstrap.project_root,
+        &ControllerTmuxLayoutSyncStateInvocation {
+            columns: invocation.columns.clone(),
+            window: invocation.window.clone(),
+            focus: invocation.focus.clone(),
+        },
+    );
+    anyhow::ensure!(
+        !desired_columns.is_empty(),
+        "sync_tmux_layout refused: desired pane layout is empty"
+    );
+    // The desired Lazily fact is durable before the effect graph sees it.
+    // Tmux and crash-state sidecars are projections, never fallback inputs.
+    store_layout_state(&bootstrap.project_root, &desired_columns)?;
+    invocation.columns = desired_columns;
+
+    let desired = runtime.set_pane_layout_desired(invocation.clone(), source_plane_version);
+    publish_pane_layout_status(runtime);
+    Ok((desired, invocation))
+}
+
+pub(crate) fn handle_sync_tmux_layout(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<ControllerTmuxLayoutSyncReceipt> {
+    let (desired, invocation) = publish_pane_layout_desired(bootstrap, runtime, request)?;
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let _ = desired;
+        return runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation);
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        let projection =
+            runtime.await_pane_layout_generation(desired.generation, PANE_LAYOUT_COMMAND_AWAIT);
+        let (applied, reason) = match projection {
+            PaneLayoutProjection::Converged(current)
+                if current.generation == desired.generation =>
+            {
+                (true, "observed_convergence".to_string())
+            }
+            PaneLayoutProjection::NeedsEffect(current)
+            | PaneLayoutProjection::Applying(current)
+            | PaneLayoutProjection::RetryPending(current)
+                if current.generation != desired.generation =>
+            {
+                (false, "superseded_by_newer_layout_state".to_string())
+            }
+            PaneLayoutProjection::Absent => (false, "desired_layout_state_absent".to_string()),
+            _ => (false, "projection_retry_pending".to_string()),
+        };
+        let routes_created_panes = invocation.routes_created_panes();
+        Ok(ControllerTmuxLayoutSyncReceipt {
+            applied,
+            reason,
+            columns: invocation.columns,
+            window: invocation.window,
+            focus: invocation.focus,
+            no_autostart: invocation.no_autostart,
+            exact_visible: invocation.exact_visible,
+            routes_created_panes,
+        })
+    }
 }
 
 pub(crate) fn rejected_admin_receipt(
@@ -16547,6 +17218,63 @@ mod tests {
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
     use lazily::DurableOutbox;
 
+    fn test_controller_runtime(bootstrap: &ControllerBootstrap) -> Arc<ControllerRuntime> {
+        ControllerRuntime::new_arc(bootstrap.clone()).unwrap()
+    }
+
+    #[test]
+    fn pane_layout_state_plane_snapshot_roundtrips_through_lazily_json() {
+        let desired = ControllerTmuxLayoutSyncInvocation {
+            columns: vec![
+                "/proj/tasks/one.md".to_string(),
+                "/proj/tasks/two.md".to_string(),
+            ],
+            window: Some("agent-doc".to_string()),
+            focus: Some("/proj/tasks/two.md".to_string()),
+            no_autostart: false,
+            exact_visible: true,
+            caller_kind: "projection".to_string(),
+        };
+        let message_json = state_plane_snapshot_message_json(
+            42,
+            PANE_LAYOUT_DESIRED_STATE_CHANNEL,
+            PANE_LAYOUT_DESIRED_TYPE_TAG,
+            &desired,
+        )
+        .unwrap();
+        let message: lazily::IpcMessage = serde_json::from_str(&message_json).unwrap();
+        assert_eq!(state_plane_message_metadata(&message).unwrap(), (42, None));
+
+        let frame = ControllerStatePlaneFrame {
+            channel: PANE_LAYOUT_DESIRED_STATE_CHANNEL.to_string(),
+            producer_id: "rust-test".to_string(),
+            epoch: 42,
+            base_epoch: None,
+            plane_version: 7,
+            message_json,
+        };
+        assert_eq!(
+            pane_layout_invocation_from_state_frame(&frame).unwrap(),
+            desired
+        );
+    }
+
+    #[test]
+    fn pane_layout_status_phase_and_reason_are_wire_stable_enums() {
+        assert_eq!(
+            serde_json::to_string(&ControllerPaneLayoutPhase::RetryPending).unwrap(),
+            r#""retry_pending""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ControllerPaneLayoutReasonCode::PaneOrderMismatch).unwrap(),
+            r#""pane_order_mismatch""#
+        );
+        assert!(
+            serde_json::from_str::<ControllerPaneLayoutPhase>(r#""future_phase""#).is_err(),
+            "unknown protocol phases fail closed instead of becoming free-form control flow"
+        );
+    }
+
     #[test]
     fn current_text_controller_round_trip_preserves_live_semantics() {
         let current = agent_doc_crdt_relay_io::CurrentText::Current {
@@ -16910,7 +17638,14 @@ mod tests {
     fn command_submit_dispatches_sync_tmux_layout_payload() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        std::fs::write(
+            dir.path().join("tasks/one.md"),
+            "---\nagent_doc_session: one\nagent: codex\n---\n# one\n",
+        )
+        .unwrap();
         let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
         let request = command_submit_request_for_test(
             None,
             "sync_tmux_layout",
@@ -16926,12 +17661,13 @@ mod tests {
             "cmd-sync",
         );
 
-        let response = handle_editor_command_submit_rpc(&bootstrap, request).unwrap();
+        let response =
+            handle_editor_command_submit_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
         assert_eq!(response["exit_code"], 0);
         assert_eq!(response["payload"]["reason"], "test_runtime");
         assert_eq!(
             response["payload"]["columns"][0],
-            "tasks/one.md,tasks/two.md"
+            dir.path().join("tasks/one.md").display().to_string()
         );
         assert_eq!(response["payload"]["routes_created_panes"], true);
         assert_eq!(response["projection"]["commands"][0]["status"], "applied");
@@ -16945,6 +17681,7 @@ mod tests {
         let file = dir.path().join("plan.md");
         std::fs::write(&file, "# Plan\n").unwrap();
         let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
         let selected = "Preserve this\n  exact selection  ";
         let request = command_submit_request_for_test(
             Some(file),
@@ -16961,7 +17698,8 @@ mod tests {
             "cmd-steer",
         );
 
-        let response = handle_editor_command_submit_rpc(&bootstrap, request).unwrap();
+        let response =
+            handle_editor_command_submit_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
         assert_eq!(response["exit_code"], 0);
         assert!(
             response["payload"]["output"]
@@ -16977,7 +17715,14 @@ mod tests {
     fn async_command_submit_admits_sync_tmux_layout_without_terminal_wait() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        std::fs::write(
+            dir.path().join("tasks/one.md"),
+            "---\nagent_doc_session: one\nagent: codex\n---\n# one\n",
+        )
+        .unwrap();
         let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
         let request = command_submit_request_for_test(
             None,
             "sync_tmux_layout",
@@ -16993,7 +17738,8 @@ mod tests {
             "cmd-sync-async",
         );
 
-        let response = handle_editor_command_submit_async_rpc(&bootstrap, request).unwrap();
+        let response =
+            handle_editor_command_submit_async_rpc(&bootstrap, &runtime, request).unwrap();
         assert_eq!(response["exit_code"], 0);
         assert_eq!(response["payload"]["accepted"], true);
         assert_eq!(response["payload"]["command"], "sync_tmux_layout");
@@ -17021,7 +17767,7 @@ mod tests {
             ),
         })
         .unwrap();
-        assert_eq!(status["exit_code"], 0);
+        assert_eq!(status["exit_code"], 0, "unexpected status: {status}");
         assert_eq!(status["projection"]["commands"][0]["status"], "applied");
         assert_eq!(status["projection"]["commands"][0]["terminal"], true);
         assert_eq!(status["payload"]["routes_created_panes"], true);
@@ -17033,6 +17779,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
         let request = command_submit_request_for_test(
             None,
             "unknown_command",
@@ -17041,7 +17788,8 @@ mod tests {
             "cmd-unknown-async",
         );
 
-        let err = handle_editor_command_submit_async_rpc(&bootstrap, request).unwrap_err();
+        let err =
+            handle_editor_command_submit_async_rpc(&bootstrap, &runtime, request).unwrap_err();
         assert!(format!("{err:#}").contains("unsupported async editor command"));
     }
 
@@ -17129,6 +17877,7 @@ mod tests {
         )
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
         let request = command_submit_request_for_test(
             Some(doc.clone()),
             "focus_document_pane",
@@ -17142,7 +17891,8 @@ mod tests {
             "cmd-focus",
         );
 
-        let response = handle_editor_command_submit_rpc(&bootstrap, request).unwrap();
+        let response =
+            handle_editor_command_submit_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
         assert_eq!(response["exit_code"], 0);
         assert_eq!(response["payload"]["focused"], false);
         assert_eq!(response["payload"]["reason"], "missing_actor_record");
@@ -17367,6 +18117,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
         let request = command_submit_request_for_test(
             None,
             "unknown_command",
@@ -17375,7 +18126,8 @@ mod tests {
             "cmd-unknown",
         );
 
-        let response = handle_editor_command_submit_rpc(&bootstrap, request).unwrap();
+        let response =
+            handle_editor_command_submit_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
         assert_eq!(response["exit_code"], 1);
         assert!(
             response["output"]
@@ -17473,6 +18225,7 @@ mod tests {
         let mut bootstrap = test_bootstrap(&dir);
         bootstrap.handoff_state = ControllerHandoffState::Preparing;
         bootstrap.handoff_started_at = Some(timestamp_secs().saturating_sub(60));
+        let runtime = test_controller_runtime(&bootstrap);
         let request = ControllerRequest {
             command: "sync_tmux_layout".to_string(),
             file: None,
@@ -17499,7 +18252,7 @@ mod tests {
             ),
         };
 
-        let err = handle_sync_tmux_layout(&bootstrap, request).unwrap_err();
+        let err = handle_sync_tmux_layout(&bootstrap, runtime.as_ref(), request).unwrap_err();
         assert!(
             format!("{err:#}").contains("controller not authoritative"),
             "sync must fail closed on non-stable handoff state: {err:#}"

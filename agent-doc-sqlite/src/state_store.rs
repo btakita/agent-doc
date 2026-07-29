@@ -359,6 +359,17 @@ pub struct StateEventInsert<'a> {
     pub payload_json: &'a str,
 }
 
+/// Result of moving one document's typed event history to a new path identity.
+///
+/// Editor acknowledgement cursors are intentionally retired instead of moved:
+/// the renamed document is a new replica identity and must establish fresh
+/// acknowledgements against the rekeyed ledger.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DocumentStateRekeyReport {
+    pub state_events_rekeyed: usize,
+    pub peer_acknowledgements_retired: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Connection + schema.
 // ---------------------------------------------------------------------------
@@ -3464,6 +3475,100 @@ pub fn insert_state_event_in_db(conn: &Connection, event: &StateEventInsert<'_>)
     Ok(changed > 0)
 }
 
+/// Rekey one document's typed state history after a path rename.
+///
+/// This is a cold-start schema transaction, not a compatibility read path.
+/// Every serialized fact is rewritten together with its indexed
+/// `document_hash`; filesystem crash projections are deliberately outside this
+/// operation and are never consulted.
+pub fn rekey_document_state_in_db(
+    conn: &Connection,
+    old_document_hash: &str,
+    new_document_hash: &str,
+) -> Result<DocumentStateRekeyReport> {
+    if old_document_hash == new_document_hash {
+        return Ok(DocumentStateRekeyReport::default());
+    }
+
+    let tx = conn
+        .unchecked_transaction()
+        .context("begin document state rekey")?;
+    let destination_event_count: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM state_events WHERE document_hash = ?1",
+            [new_document_hash],
+            |row| row.get(0),
+        )
+        .context("probe destination document state")?;
+    anyhow::ensure!(
+        destination_event_count == 0,
+        "cannot rekey document state: destination hash already has {destination_event_count} event(s)"
+    );
+
+    let event_payloads = {
+        let mut statement = tx
+            .prepare(
+                "SELECT id, event_id, payload_json
+                 FROM state_events
+                 WHERE document_hash = ?1
+                 ORDER BY id",
+            )
+            .context("prepare document state rekey scan")?;
+        statement
+            .query_map([old_document_hash], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .context("scan document state for rekey")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("collect document state for rekey")?
+    };
+
+    for (row_id, event_id, payload_json) in &event_payloads {
+        let mut payload: serde_json::Value = serde_json::from_str(payload_json)
+            .with_context(|| format!("parse state event {event_id} during document rekey"))?;
+        let embedded_hash = payload
+            .pointer_mut("/fact/document_hash")
+            .with_context(|| {
+                format!("state event {event_id} has no fact.document_hash during document rekey")
+            })?;
+        anyhow::ensure!(
+            embedded_hash.as_str() == Some(old_document_hash),
+            "state event {event_id} indexed under {old_document_hash} embeds a different document hash"
+        );
+        *embedded_hash = serde_json::Value::String(new_document_hash.to_string());
+        let rewritten = serde_json::to_string(&payload)
+            .with_context(|| format!("serialize rekeyed state event {event_id}"))?;
+        let changed = tx
+            .execute(
+                "UPDATE state_events
+                 SET document_hash = ?1, payload_json = ?2
+                 WHERE id = ?3 AND document_hash = ?4",
+                params![new_document_hash, rewritten, row_id, old_document_hash],
+            )
+            .with_context(|| format!("rekey state event {event_id}"))?;
+        anyhow::ensure!(
+            changed == 1,
+            "state event {event_id} changed concurrently during document rekey"
+        );
+    }
+
+    let peer_acknowledgements_retired = tx
+        .execute(
+            "DELETE FROM state_event_peer_acks WHERE document_hash = ?1",
+            [old_document_hash],
+        )
+        .context("retire old-path state event acknowledgements")?;
+    tx.commit().context("commit document state rekey")?;
+    Ok(DocumentStateRekeyReport {
+        state_events_rekeyed: event_payloads.len(),
+        peer_acknowledgements_retired,
+    })
+}
+
 /// `#qflood`: is a dispatch already in flight (accepted, not yet consumed) for this
 /// document at `generation`? Mirrors the open-dispatch shape the restart reconciler
 /// keys on. An open dispatch means the current turn already has work queued/running,
@@ -4835,6 +4940,104 @@ mod tests {
             "intended_hash",
             "intended_hash TEXT",
         )
+    }
+
+    #[test]
+    fn document_state_rekey_updates_index_and_embedded_fact_atomically() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let payload = serde_json::json!({
+            "event_id": "baseline:old",
+            "fact": {
+                "type": "document_baseline_checkpointed",
+                "document_hash": "old-document-hash",
+                "generation": 1,
+                "content_hash": "content-hash",
+                "content": "baseline"
+            }
+        })
+        .to_string();
+        insert_state_event_in_db(
+            &conn,
+            &StateEventInsert {
+                event_id: "baseline:old",
+                document_hash: "old-document-hash",
+                domain: "document",
+                fact_type: "document_baseline_checkpointed",
+                payload_json: &payload,
+            },
+        )?;
+        conn.execute(
+            "INSERT INTO state_event_peer_acks (
+                document_hash, peer_key, registration_pid, editor_id,
+                acked_version, acknowledged_at_secs
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params!["old-document-hash", "peer", 42, "editor", 1, 10],
+        )?;
+
+        let report = rekey_document_state_in_db(&conn, "old-document-hash", "new-document-hash")?;
+
+        assert_eq!(
+            report,
+            DocumentStateRekeyReport {
+                state_events_rekeyed: 1,
+                peer_acknowledgements_retired: 1,
+            }
+        );
+        let row = load_state_events_from_db(&conn, Some("new-document-hash"))?
+            .pop()
+            .expect("rekeyed event");
+        let rewritten: serde_json::Value = serde_json::from_str(&row.payload_json)?;
+        assert_eq!(row.document_hash, "new-document-hash");
+        assert_eq!(
+            rewritten
+                .pointer("/fact/document_hash")
+                .and_then(|v| v.as_str()),
+            Some("new-document-hash")
+        );
+        assert!(load_state_events_from_db(&conn, Some("old-document-hash"))?.is_empty());
+        let old_peer_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM state_event_peer_acks WHERE document_hash = ?1",
+            ["old-document-hash"],
+            |row| row.get(0),
+        )?;
+        assert_eq!(old_peer_count, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn document_state_rekey_refuses_to_merge_split_histories() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        for (event_id, document_hash) in [("old-event", "old-hash"), ("new-event", "new-hash")] {
+            let payload = serde_json::json!({
+                "event_id": event_id,
+                "fact": {
+                    "type": "document_baseline_cleared",
+                    "document_hash": document_hash,
+                    "generation": 1
+                }
+            })
+            .to_string();
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id,
+                    document_hash,
+                    domain: "document",
+                    fact_type: "document_baseline_cleared",
+                    payload_json: &payload,
+                },
+            )?;
+        }
+
+        let error = rekey_document_state_in_db(&conn, "old-hash", "new-hash")
+            .expect_err("split histories must not merge");
+
+        assert!(error.to_string().contains("destination hash already has"));
+        assert_eq!(load_state_events_from_db(&conn, Some("old-hash"))?.len(), 1);
+        assert_eq!(load_state_events_from_db(&conn, Some("new-hash"))?.len(), 1);
+        Ok(())
     }
 
     #[test]

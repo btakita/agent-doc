@@ -467,7 +467,6 @@ pub trait AgentDocContextExt {
     fn is_components_cached(&self) -> bool;
     fn is_doc_hash_cached(&self) -> bool;
     fn invalidate_doc_content(&self);
-    fn snapshot_path_for(&self) -> Option<PathBuf>;
     fn lock_path_for(&self) -> Option<PathBuf>;
     fn on_file_change(&self, new_path: PathBuf);
     fn on_config_change(&self);
@@ -669,11 +668,6 @@ impl<Schema: 'static> AgentDocContextExt for TypedContext<Schema> {
 
     fn invalidate_doc_content(&self) {
         current_document_cell(self).clear_dependents(self);
-    }
-
-    fn snapshot_path_for(&self) -> Option<PathBuf> {
-        self.project_root()?;
-        agent_doc_fs::snapshot_path_for(&self.canonical_path()).ok()
     }
 
     fn lock_path_for(&self) -> Option<PathBuf> {
@@ -1150,21 +1144,6 @@ mod tests {
         let canonical = doc.canonicalize().unwrap();
         let snap_hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
         assert_eq!(graph_hash, snap_hash);
-    }
-
-    #[test]
-    fn snapshot_path_for_matches_agent_doc_fs() {
-        let dir = TempDir::new().unwrap();
-        setup_project(dir.path());
-        let doc = dir.path().join("file.md");
-        std::fs::write(&doc, "").unwrap();
-
-        let rc = cycle_context(doc.clone());
-
-        assert_eq!(
-            rc.snapshot_path_for(),
-            agent_doc_fs::snapshot_path_for(&doc).ok()
-        );
     }
 
     #[test]

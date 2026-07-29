@@ -44,8 +44,40 @@ projections, and tmux transcript inference.
   process state, PTY/stdin delivery, readiness evidence, restart/clear control,
   and heartbeat reporting for that child.
 - Projection workers emit cold recovery files and diagnostics from committed
-controller state. They never establish ownership and never block command
-admission.
+  controller state. They never establish ownership and never block command
+  admission.
+
+## Cross-process Lazily state plane
+
+- Editor plugins and other external peers publish Lazily `Snapshot`/`Delta`
+  messages through generic `state_plane_publish` transport RPC and consume them
+  through cursor-based `state_plane_subscribe`. RPC moves bytes; it does not
+  become the domain command model or directly invoke tmux/editor effects.
+- Every channel frame carries a producer id, producer epoch, optional delta base
+  epoch, and controller plane version. A new producer must claim a channel with a
+  covering keyed `Snapshot`; deltas must name the current producer and exact base
+  epoch. Duplicate frames are idempotent, delivery to projection sinks is
+  at-least-once, and cold subscribers receive the retained covering snapshot plus
+  applicable deltas.
+- The generic retained history is controller-lifetime state. A domain projection
+  that must survive controller replacement commits its desired state to
+  `.agent-doc/state.db` before running effects. An accepted durable projection
+  retries independently until it commits or a newer plane version supersedes it.
+- The first domain is pane layout:
+  `agent-doc/pane-layout/desired/v1` carries the editor's desired columns/window/
+  focus and `agent-doc/pane-layout/status/v1` carries the controller's derived
+  desired/observed/effect state. Tmux reconciliation is a retained Lazily effect:
+  drift or an effect failure derives `retry_pending`, schedules bounded backoff,
+  re-observes tmux, and continues until the observed layout converges or a newer
+  desired generation supersedes it.
+- Plugins publish desired pane state and subscribe to status; they do not retry
+  imperative tmux operations. Status `phase` is a closed enum. `reason_code` is a
+  stable enum and `reason_detail` is optional diagnostic text, so clients never
+  parse control flow from prose.
+- Version 1 uses Lazily's canonical JSON envelope and typed JSON node payloads,
+  pinned by Rust/Kotlin conformance tests. Protobuf is an optional future node
+  payload codec when generated bindings across enough independent runtimes
+  justify it; the state plane and Lazily graph are not coupled to protobuf.
 
 ## State authority
 

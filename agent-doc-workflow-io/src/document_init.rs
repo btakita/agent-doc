@@ -5,7 +5,7 @@ use std::path::Path;
 
 /// Perform initialization for a document entering the agent-doc lifecycle.
 ///
-/// This composes the focused sidecar/file adapters and leaves the concrete
+/// This composes the focused ledger/file adapters and leaves the concrete
 /// commit implementation injected by the caller.
 pub fn ensure_initialized(
     doc: &Path,
@@ -49,9 +49,10 @@ pub fn ensure_git_tracked_with_commit(
     doc: &Path,
     commit: impl FnOnce(&Path) -> Result<bool>,
 ) -> Result<()> {
-    if !agent_doc_git_io::status::is_tracked(doc).unwrap_or(false) {
+    if agent_doc_git_io::status::is_in_git_repo(doc) && !agent_doc_git_io::status::is_tracked(doc)?
+    {
         eprintln!("[init] file is untracked — staging with git add");
-        let _ = agent_doc_git_io::status::add(doc);
+        agent_doc_git_io::status::add(doc)?;
     }
 
     if let Err(e) = commit(doc) {

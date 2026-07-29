@@ -10,12 +10,12 @@
 //! - Optional `max_entries` in component config trims to the last N non-empty lines after append/prepend.
 //! - `pre_patch` shell hook: content piped to stdin, transformed stdout replaces the replacement string before writing. Receives `COMPONENT` and `FILE` env vars.
 //! - `post_patch` shell hook: fire-and-forget after write, receives same env vars. Non-zero exit is logged as a warning only.
-//! - After patching, the document is written through document authority and a snapshot is saved relative to the project root (`.agent-doc/snapshots/`). Falls back to CWD-relative snapshot if no project root is found.
+//! - After patching, the document is written through document authority and the typed ledger baseline is checkpointed.
 //! - `run` reads replacement content from the `content` argument or stdin when `None`.
 //!
 //! ## Agentic Contracts
 //! - `run(file, component_name, content)` — returns `Err` if the file is missing, the component is not found, or any hook fails.
-//! - Snapshot is always updated after a successful patch; callers can rely on snapshot consistency.
+//! - The typed baseline is always updated after a successful patch. Its filesystem snapshot sidecar is a downstream write-only crash effect.
 //! - `pre_patch` hook failure (non-zero exit) aborts the patch and returns `Err`; no partial write occurs.
 //! - `post_patch` hook failure never aborts the patch; stderr warning only.
 //! - `trim_entries(content, max)` trims to the last `max` non-empty lines; returns content unchanged when under the limit.
@@ -180,23 +180,12 @@ pub fn run(
     agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)
         .with_context(|| format!("failed to write {}", file.display()))?;
 
-    // Save snapshot relative to project root (not CWD) for thread safety
-    if let Some(snap_abs) = rc.snapshot_path_for() {
-        if let Some(parent) = snap_abs.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create snapshot dir for {}", file.display()))?;
-        }
-        std::fs::write(&snap_abs, &new_doc)
-            .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
-    } else {
-        // Fallback to CWD-relative (original behavior)
-        agent_doc_snapshot_io::checkpoint_document_baseline(
-            file,
-            &new_doc,
-            agent_doc_ops_log_io::log_op,
-        )
-        .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
-    }
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &new_doc,
+        agent_doc_ops_log_io::log_op,
+    )
+    .with_context(|| format!("failed to checkpoint baseline for {}", file.display()))?;
 
     // Run post_patch hook (fire-and-forget)
     if let Some(script) = config.and_then(|c| c.post_patch.as_ref()) {
@@ -363,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_updated_after_patch() {
+    fn typed_baseline_drives_crash_projection_after_patch() {
         let dir = setup_project();
         let doc = write_doc(
             dir.path(),
@@ -373,13 +362,14 @@ mod tests {
 
         run(&doc, "s", PatchMode::Replace, Some("new\n")).unwrap();
 
-        // Snapshot should be readable from the project's .agent-doc/snapshots/
-        let snap_path = dir
-            .path()
-            .join(agent_doc_fs::snapshot_path_for(&doc).unwrap());
-        let snap = std::fs::read_to_string(snap_path).unwrap();
-        assert!(snap.contains("new"));
-        assert!(!snap.contains("old"));
+        let baseline = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .expect("typed baseline");
+        assert!(baseline.contains("new"));
+        assert!(!baseline.contains("old"));
+        let crash_projection =
+            std::fs::read_to_string(agent_doc_fs::snapshot_path_for(&doc).unwrap()).unwrap();
+        assert_eq!(crash_projection, baseline);
     }
 
     #[test]

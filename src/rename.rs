@@ -2,16 +2,16 @@
 //!
 //! Migrate session state after a document file rename/move.
 //!
-//! When a document is renamed, all hash-keyed state files (snapshots, locks,
-//! pending, and cold CRDT projections) become orphaned because the hash is derived
-//! from the canonical path. This module migrates those files from the old hash
-//! to the new hash and updates the durable session registry.
+//! When a document is renamed, its typed state ledger is rekeyed because the
+//! document identity is derived from the canonical path. Crash sidecars remain
+//! immutable evidence under their crash-time identity and are never read or
+//! migrated by this command.
 //!
 //! ## Spec
 //!
-//! - `run(old_path, new_path)` migrates all `.agent-doc/` state keyed by the
-//!   old path's hash to the new path's hash. Updates registry entries whose
-//!   `file` field matches the old path.
+//! - `run(old_path, new_path)` transactionally rekeys typed state events from
+//!   the old path hash to the new path hash. It then updates registry entries
+//!   whose `file` field matches the old path.
 //! - The old path may no longer exist on disk (rename already happened). In
 //!   that case, `agent_doc_fs::document_state_hash_from_str` is used with the
 //!   absolute path string instead of `agent_doc_fs::document_state_hash` (which
@@ -22,23 +22,12 @@
 //!
 //! ## Agentic Contracts
 //!
-//! - All remaining cold state file types are migrated: snapshots, locks, pending,
-//!   and CRDT recovery projections.
-//! - Missing source files are silently skipped (idempotent).
-//! - Existing destination files cause an error (prevents accidental overwrite).
+//! - Filesystem sidecars are write-only crash evidence and are never inputs.
+//! - Existing destination ledger state causes an error (prevents split history).
 //! - Registry updates are performed under `RegistryLock`.
 
 use anyhow::{Context, Result};
 use std::path::Path;
-
-/// State file types to migrate, with their subdirectory and extension.
-const STATE_FILES: &[(&str, &str)] = &[
-    ("snapshots", "md"),
-    ("baselines", "md"),
-    ("locks", "lock"),
-    ("pending", "md"),
-    ("crdt", "yrs"),
-];
 
 /// Migrate session state after a document rename.
 pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
@@ -74,48 +63,9 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
     let project_root = agent_doc_fs::find_project_root(&canonical_new)
         .context("no .agent-doc/ directory found above new path")?;
 
-    // Migrate each state file type
-    let mut migrated = 0u32;
-    for &(subdir, ext) in STATE_FILES {
-        let dir = project_root.join(".agent-doc").join(subdir);
-        let old_file = dir.join(format!("{}.{}", old_hash, ext));
-        let new_file = dir.join(format!("{}.{}", new_hash, ext));
-
-        if !old_file.exists() {
-            continue;
-        }
-        if new_file.exists() {
-            anyhow::bail!(
-                "destination already exists: {} (would overwrite)",
-                new_file.display()
-            );
-        }
-        std::fs::rename(&old_file, &new_file).with_context(|| {
-            format!(
-                "failed to rename {} → {}",
-                old_file.display(),
-                new_file.display()
-            )
-        })?;
-        eprintln!(
-            "[rename] {}/{}.{} → {}.{}",
-            subdir,
-            &old_hash[..8],
-            ext,
-            &new_hash[..8],
-            ext
-        );
-        migrated += 1;
-    }
-
-    // Also migrate lock files with .md.lock suffix (snapshot locks)
-    let locks_dir = project_root.join(".agent-doc/locks");
-    let old_snap_lock = locks_dir.join(format!("{}.md.lock", old_hash));
-    let new_snap_lock = locks_dir.join(format!("{}.md.lock", new_hash));
-    if old_snap_lock.exists() && !new_snap_lock.exists() {
-        std::fs::rename(&old_snap_lock, &new_snap_lock)?;
-        migrated += 1;
-    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let state_report =
+        agent_doc_sqlite::state_store::rekey_document_state_in_db(&conn, &old_hash, &new_hash)?;
 
     // Update sessions registry
     let old_path_str = old_path.to_string_lossy().to_string();
@@ -123,9 +73,9 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
     let old_key = tmux_router::registry::canonical_registry_key_in(&project_root, &old_path_str);
     let new_key = tmux_router::registry::canonical_registry_key_in(&project_root, &new_path_str);
 
-    let _lock =
-        tmux_router::RegistryLock::acquire(&agent_doc_session_registry_io::registry_path())?;
-    let mut registry = agent_doc_session_registry_io::load()?;
+    let registry_path = agent_doc_session_registry_io::registry_path_in(&project_root);
+    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
+    let mut registry = agent_doc_session_registry_io::load_in(&project_root)?;
     let mut updated_sessions = 0u32;
     if let Some(mut entry) = registry.remove(&old_key) {
         entry.file = new_path_str.clone();
@@ -140,12 +90,13 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
         }
     }
     if updated_sessions > 0 {
-        agent_doc_session_registry_io::save(&registry)?;
+        agent_doc_session_registry_io::save_in(&project_root, &registry)?;
     }
 
     eprintln!(
-        "[rename] migrated {} state file(s), updated {} session(s): {} → {}",
-        migrated,
+        "[rename] rekeyed {} typed event(s), retired {} peer acknowledgement(s), updated {} session(s): {} → {}",
+        state_report.state_events_rekeyed,
+        state_report.peer_acknowledgements_retired,
         updated_sessions,
         old_path.display(),
         new_path.display()

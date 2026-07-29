@@ -2481,6 +2481,9 @@ fn run_with_options_internal_at_root(
     let blocked_unresolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
     let safe_passive_managed_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
     let safe_passive_resolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
+    // Cross-root pane ownership stays with the nested controller. The parent
+    // sync carries only controller-proven, in-memory bindings into tmux-router.
+    let mut pre_resolved_panes: HashMap<PathBuf, String> = HashMap::new();
 
     let resolve_file = |path: &Path| -> Option<FileResolution> {
         // Step 1: Auto-scaffold empty .md files BEFORE ensure_initialized().
@@ -2644,24 +2647,7 @@ fn run_with_options_internal_at_root(
             if !file_path.exists() {
                 continue;
             }
-            // Cross-root guard (`#sync-cross-root-autostart`): never provision a
-            // pane for a document owned by a different (nested/submodule) project
-            // root — its own controller manages it. Defense-in-depth for a
-            // cross-root path passed directly via col_args, in addition to the
-            // remembered-layout sanitization above.
-            if !document_belongs_to_sync_root(file_path, &sync_project_root) {
-                eprintln!(
-                    "[sync] skipping cross-root auto-start: {} is owned by another project root (sync root {}) — its own controller starts it (#sync-cross-root-autostart)",
-                    file_path.display(),
-                    sync_project_root.display()
-                );
-                sync_log(&format!(
-                    "cross_root_autostart_skipped file={} sync_root={}",
-                    file_path.display(),
-                    sync_project_root.display()
-                ));
-                continue;
-            }
+            let is_cross_root = !document_belongs_to_sync_root(file_path, &sync_project_root);
             let content = match std::fs::read_to_string(file_path) {
                 Ok(c) => c,
                 Err(_) => continue,
@@ -2714,6 +2700,88 @@ fn run_with_options_internal_at_root(
             let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);
             let registered_pane = authoritative_actor_pane
                 .or_else(|| registered_entry.as_ref().map(|entry| entry.pane.clone()));
+
+            if is_cross_root {
+                // The nested controller owns provisioning and durable registry
+                // state. Reuse a proven live owner when one exists; otherwise
+                // delegate the resume effect to that controller. The resulting
+                // pane binding is ephemeral input to tmux-router, never a parent
+                // registry write (`#sync-cross-root-autostart`).
+                let proven_live_pane = registered_pane.as_ref().filter(|pane| {
+                    tmux.pane_alive(pane)
+                        && registered_pane_proves_live_owner(
+                            tmux,
+                            file_path,
+                            &session_id,
+                            pane,
+                            &proof_cache,
+                        )
+                });
+                let delegated_pane = if let Some(pane) = proven_live_pane {
+                    Ok(Some((*pane).clone()))
+                } else if let Some(owner_root) =
+                    agent_doc_project_root_io::project_root_containing(file_path)
+                {
+                    crate::runtime_effects()?
+                        .ensure_cross_root_document_pane(&owner_root, file_path)
+                        .map(|pane| pane.filter(|pane| tmux.pane_alive(pane)))
+                } else {
+                    Ok(None)
+                };
+                match delegated_pane {
+                    Ok(Some(pane)) => {
+                        eprintln!(
+                            "[sync] using owning-controller pane {} for cross-root document {}",
+                            pane,
+                            file_path.display()
+                        );
+                        sync_log(&format!(
+                            "cross_root_controller_pane_resolved file={} pane={} sync_root={}",
+                            file_path.display(),
+                            pane,
+                            sync_project_root.display()
+                        ));
+                        pre_resolved_panes.insert(file_path.to_path_buf(), pane.clone());
+                        reserve_sync_pane(&claimed_sync_panes, &pane, file_path);
+                        if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+                            safe_passive_resolved_files
+                                .borrow_mut()
+                                .insert(file_path.to_path_buf());
+                        }
+                    }
+                    Ok(None) => {
+                        eprintln!(
+                            "[sync] owning controller did not provide a live pane for cross-root document {}",
+                            file_path.display()
+                        );
+                        sync_log(&format!(
+                            "cross_root_controller_pane_unresolved file={} sync_root={}",
+                            file_path.display(),
+                            sync_project_root.display()
+                        ));
+                        blocked_unresolved_files
+                            .borrow_mut()
+                            .insert(file_path.to_path_buf());
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[sync] owning-controller pane effect failed for cross-root document {}: {}",
+                            file_path.display(),
+                            error
+                        );
+                        sync_log(&format!(
+                            "cross_root_controller_pane_failed file={} sync_root={} error={}",
+                            file_path.display(),
+                            sync_project_root.display(),
+                            error
+                        ));
+                        blocked_unresolved_files
+                            .borrow_mut()
+                            .insert(file_path.to_path_buf());
+                    }
+                }
+                continue;
+            }
             if let Some((miss, supersession)) =
                 agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(
                     agent_doc_supervisor_io::startup_miss::session_registry_lookup(),
@@ -3625,6 +3693,7 @@ fn run_with_options_internal_at_root(
     let tmux_router_options = tmux_router::SyncOptions {
         protect_pane: Some(&allow_open_cycle_detach),
         allow_unresolved_pane_assignment: Some(&allow_unresolved_pane_assignment),
+        pre_resolved_panes: Some(&pre_resolved_panes),
         // SafePassive = editor-driven poll / tab-selection: reconcile layout but
         // don't steal the operator's active tmux pane (#panefocussteal).
         passive: matches!(auto_start_mode, AutoStartMode::SafePassive),

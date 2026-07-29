@@ -1946,6 +1946,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (retainedResumeState != null) {
             nativeReloadResumeStates.remove(filePath, retainedResumeState)
         }
+        if (
+            expectedEditorTextAtSwap != null &&
+            (editorBufferText(filePath) != expectedEditorTextAtSwap ||
+                (!allowPendingLocalAtSwap && hasPendingLocal(filePath)))
+        ) {
+            // Registration can block while the operator keeps typing. Reject
+            // the captured editor cut before ensureEditorText can publish it;
+            // the still-authoritative cached forwarder will drain those local
+            // deltas and a later refresh can retry from a fresh cut.
+            forwarder.deregister()
+            return null
+        }
         if (initialEditorText != null) {
             forwarder.ensureEditorText(initialEditorText)
         }
@@ -1954,9 +1966,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             (editorBufferText(filePath) != expectedEditorTextAtSwap ||
                 (!allowPendingLocalAtSwap && hasPendingLocal(filePath)))
         ) {
-            // Registration and native bootstrap can block. Fence both first
-            // registration and replacement registration at the actual swap so
-            // neither can publish a snapshot older than the visible editor.
+            // ensureEditorText can also block. Recheck at the actual swap so a
+            // raced local delta keeps the cached forwarder authoritative until
+            // the serialized local-delta worker has drained it.
             forwarder.deregister()
             return null
         }

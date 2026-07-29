@@ -402,6 +402,16 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         }
     }
 
+    fn ensure_cross_root_document_pane(
+        &self,
+        project_root: &Path,
+        file: &Path,
+    ) -> anyhow::Result<Option<String>> {
+        let receipt =
+            agent_doc_controller_io::project_controller::focus_document_pane(project_root, file)?;
+        Ok(receipt.pane_id)
+    }
+
     fn provision_pane(
         &self,
         tmux: &tmux_router::Tmux,

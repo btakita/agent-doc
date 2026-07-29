@@ -5,8 +5,8 @@
 //! - Notification format is a `> **[NOTIFY from <source>]** (<timestamp>)` blockquote.
 //! - Appends before the boundary marker if one exists, otherwise at the end of the
 //!   exchange component content.
-//! - After appending, writes the document through document authority, updates
-//!   the snapshot, and optionally commits.
+//! - After appending, writes the document through document authority,
+//!   checkpoints the typed baseline, and optionally commits.
 //! - `--backlog-add` / `--backlog-add-gated` adds items to the document's
 //!   `agent:backlog` component. Auto-creates the component if absent (after
 //!   exchange close tag). Legacy aliases: `--pending-add` /
@@ -21,8 +21,8 @@
 //! - `run(file, message, source, affects, commit, pending_add, pending_add_gated, no_create)`
 //!   — returns `Err` if the file is missing, message is required but absent, or the exchange
 //!   component is not found (when a message is provided).
-//! - Backlog-only mode (no message + backlog items): skips exchange, updates snapshot, commits.
-//! - Snapshot is always updated after a successful write.
+//! - Backlog-only mode (no message + backlog items): skips exchange, checkpoints the baseline, commits.
+//! - The typed baseline is always updated after a successful write.
 //! - When `commit` is true, calls `git::commit` after writing.
 //!
 //! ## Evals
@@ -38,7 +38,7 @@
 //! - backlog_add_gated_creates_gated_item: `--backlog-add-gated` → item with `[/]` state
 //! - no_create_backlog_skips_when_absent: `--no-create-backlog` + absent → no-op
 //! - backlog_add_with_message_writes_both: backlog + message → both written
-//! - backlog_only_updates_snapshot: backlog-only → snapshot updated
+//! - backlog_only_updates_baseline: backlog-only → typed baseline checkpointed
 //! - auto_create_inserts_after_exchange: component placed after exchange close tag
 //! - message_required_without_backlog: no message, no backlog → `Err`
 
@@ -48,7 +48,6 @@ use std::process::Command;
 
 use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_backlog::backlog;
-use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {
@@ -155,8 +154,6 @@ pub fn run(
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
-    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
-
     let has_pending_ops = !pending_add.is_empty() || !pending_add_gated.is_empty();
     let pending_only = has_pending_ops && message.is_none();
 
@@ -202,7 +199,7 @@ pub fn run(
             "notify_command_document",
         )
         .with_context(|| format!("failed to resolve {}", file.display()))?;
-        save_snapshot(file, &doc, &rc)?;
+        checkpoint_baseline(file, &doc)?;
 
         if commit {
             agent_doc_commit_io::commit(file)?;
@@ -263,7 +260,7 @@ pub fn run(
     agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)
         .with_context(|| format!("failed to write {}", file.display()))?;
 
-    save_snapshot(file, &new_doc, &rc)?;
+    checkpoint_baseline(file, &new_doc)?;
 
     eprintln!(
         "Notified exchange in {} (source: {})",
@@ -298,24 +295,13 @@ fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Resul
     Ok(id)
 }
 
-/// Save snapshot relative to project root for thread safety.
-fn save_snapshot(file: &Path, doc: &str, rc: &CycleContext) -> Result<()> {
-    if let Some(snap_abs) = rc.snapshot_path_for() {
-        if let Some(snap_parent) = snap_abs.parent() {
-            std::fs::create_dir_all(snap_parent)
-                .with_context(|| format!("failed to create snapshot dir for {}", file.display()))?;
-        }
-        std::fs::write(&snap_abs, doc)
-            .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
-    } else {
-        agent_doc_snapshot_io::checkpoint_document_baseline(
-            file,
-            doc,
-            agent_doc_ops_log_io::log_op,
-        )
-        .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
-    }
-    Ok(())
+/// Checkpoint normal baseline state in the typed ledger.
+///
+/// The checkpoint emits its write-only crash sidecar only as a downstream
+/// effect after the typed fact commits; the sidecar is never the baseline.
+fn checkpoint_baseline(file: &Path, doc: &str) -> Result<()> {
+    agent_doc_snapshot_io::checkpoint_document_baseline(file, doc, agent_doc_ops_log_io::log_op)
+        .with_context(|| format!("failed to checkpoint baseline for {}", file.display()))
 }
 
 /// Find the byte offset of a boundary marker within a content region.
@@ -520,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_updated_after_notify() {
+    fn typed_baseline_drives_crash_projection_after_notify() {
         let dir = setup_project();
         let doc = write_doc(
             dir.path(),
@@ -540,11 +526,13 @@ mod tests {
         )
         .unwrap();
 
-        let snap_path = dir
-            .path()
-            .join(agent_doc_fs::snapshot_path_for(&doc).unwrap());
-        let snap = std::fs::read_to_string(snap_path).unwrap();
-        assert!(snap.contains("> Snapshot test"));
+        let baseline = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .expect("typed baseline");
+        assert!(baseline.contains("> Snapshot test"));
+        let crash_projection =
+            std::fs::read_to_string(agent_doc_fs::snapshot_path_for(&doc).unwrap()).unwrap();
+        assert_eq!(crash_projection, baseline);
     }
 
     // --- Pending-add tests ---
@@ -705,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_only_updates_snapshot() {
+    fn pending_only_typed_baseline_drives_crash_projection() {
         let dir = setup_project();
         let doc = write_doc(
             dir.path(),
@@ -716,11 +704,13 @@ mod tests {
         let items = vec!["snapshot item".to_string()];
         run(&doc, None, None, None, false, &items, &[], false).unwrap();
 
-        let snap_path = dir
-            .path()
-            .join(agent_doc_fs::snapshot_path_for(&doc).unwrap());
-        let snap = std::fs::read_to_string(snap_path).unwrap();
-        assert!(snap.contains("snapshot item"));
+        let baseline = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .expect("typed baseline");
+        assert!(baseline.contains("snapshot item"));
+        let crash_projection =
+            std::fs::read_to_string(agent_doc_fs::snapshot_path_for(&doc).unwrap()).unwrap();
+        assert_eq!(crash_projection, baseline);
     }
 
     #[test]

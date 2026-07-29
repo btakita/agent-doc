@@ -1,4 +1,4 @@
-//! Durable document-baseline authority plus cold snapshot recovery projections.
+//! Durable document-baseline authority plus write-only crash-state sidecars.
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -8,47 +8,34 @@ use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers
 use agent_doc_frontmatter::frontmatter::session_id_from_content;
 use agent_doc_git_io::revision::HeadWorktreeFallback;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SnapshotStateMigrationReport {
-    pub migrated: u32,
-    pub events: Vec<SnapshotStateMigrationEvent>,
+/// Downstream filesystem effects projected from authoritative typed state.
+///
+/// Implementations may write or remove crash state, but they are never a
+/// read authority for document state.
+pub trait CrashStateEffects {
+    fn write_markdown_crash_state(&self, doc: &Path, content: &str) -> Result<()>;
+
+    fn clear_markdown_crash_state(&self, doc: &Path) -> Result<()>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SnapshotStateMigrationEvent {
-    SkippedDestinationExists {
-        subdir: String,
-        new_hash_prefix: String,
-        ext: String,
-    },
-    Migrated {
-        subdir: String,
-        old_hash_prefix: String,
-        new_hash_prefix: String,
-        ext: String,
-    },
-}
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FilesystemCrashStateEffects;
 
-impl SnapshotStateMigrationEvent {
-    pub fn log_message(&self) -> String {
-        match self {
-            SnapshotStateMigrationEvent::SkippedDestinationExists {
-                subdir,
-                new_hash_prefix,
-                ext,
-            } => format!(
-                "[init] skip migrate {}/{}.{} — destination exists",
-                subdir, new_hash_prefix, ext
-            ),
-            SnapshotStateMigrationEvent::Migrated {
-                subdir,
-                old_hash_prefix,
-                new_hash_prefix,
-                ext,
-            } => format!(
-                "[init] migrated {}/{}.{} → {}.{}",
-                subdir, old_hash_prefix, ext, new_hash_prefix, ext
-            ),
+impl CrashStateEffects for FilesystemCrashStateEffects {
+    fn write_markdown_crash_state(&self, doc: &Path, content: &str) -> Result<()> {
+        let path = agent_doc_fs::snapshot_path_for(doc)?;
+        agent_doc_fs::write_atomic(&path, content.as_bytes())
+            .with_context(|| format!("write crash-state sidecar {}", path.display()))
+    }
+
+    fn clear_markdown_crash_state(&self, doc: &Path) -> Result<()> {
+        let path = agent_doc_fs::snapshot_path_for(doc)?;
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => {
+                Err(error).with_context(|| format!("remove crash-state sidecar {}", path.display()))
+            }
         }
     }
 }
@@ -64,7 +51,20 @@ pub fn load_document_baseline(doc: &Path) -> Result<Option<String>> {
 pub fn checkpoint_document_baseline(
     doc: &Path,
     content: &str,
+    logger: impl FnMut(&Path, &str),
+) -> Result<()> {
+    checkpoint_document_baseline_with_effects(doc, content, logger, &FilesystemCrashStateEffects)
+}
+
+/// Append the typed baseline fact, then write the crash-state sidecar effect.
+///
+/// The ordering is intentional: the sidecar is an effect of committed typed
+/// state and can never become the input that creates or repairs that state.
+pub fn checkpoint_document_baseline_with_effects(
+    doc: &Path,
+    content: &str,
     mut logger: impl FnMut(&Path, &str),
+    effects: &dyn CrashStateEffects,
 ) -> Result<()> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
@@ -84,6 +84,7 @@ pub fn checkpoint_document_baseline(
         format!("document-baseline:{document_hash}:{generation}:{content_hash}"),
         fact,
     )?;
+    effects.write_markdown_crash_state(doc, content)?;
     logger(
         doc,
         &format!(
@@ -145,6 +146,14 @@ fn append_document_fact(
 
 /// Clear the normal merge baseline while retaining an auditable ledger fact.
 pub fn clear_document_baseline(doc: &Path) -> Result<()> {
+    clear_document_baseline_with_effects(doc, &FilesystemCrashStateEffects)
+}
+
+/// Append the typed clear fact, then remove its write-only crash-state sidecar.
+pub fn clear_document_baseline_with_effects(
+    doc: &Path,
+    effects: &dyn CrashStateEffects,
+) -> Result<()> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
     let generation = load_document_state_projection(doc)?
@@ -158,7 +167,8 @@ pub fn clear_document_baseline(doc: &Path) -> Result<()> {
             document_hash,
             generation,
         },
-    )
+    )?;
+    effects.clear_markdown_crash_state(doc)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,11 +249,11 @@ pub fn clear_crdt_recovery_projection(doc: &Path) -> Result<()> {
     )
 }
 
-/// Resolve the best markdown snapshot content for diff computation.
+/// Resolve the best durable baseline content for diff computation.
 ///
-/// The snapshot file is authoritative when present. Git is only used as a
-/// recovery fallback when no snapshot exists and HEAD differs from the current
-/// worktree file.
+/// Typed ledger state is authoritative. Git is only used as a first-submit
+/// fallback when no ledger baseline exists and HEAD differs from the current
+/// worktree file. Crash sidecars are never read.
 pub fn resolve(doc: &Path) -> Result<Option<String>> {
     if let Some(baseline) = load_document_baseline(doc)? {
         return Ok(Some(baseline));
@@ -253,18 +263,18 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
         HeadWorktreeFallback::NoHead => Ok(None),
         HeadWorktreeFallback::MatchesCurrent => {
             eprintln!(
-                "[snapshot] No snapshot file, git matches current — treating as first submit"
+                "[snapshot] No ledger baseline, git matches current — treating as first submit"
             );
             Ok(None)
         }
         HeadWorktreeFallback::DiffersFromCurrent(git_content) => {
-            eprintln!("[snapshot] No snapshot file, recovering from git");
+            eprintln!("[snapshot] No ledger baseline, recovering first-submit baseline from git");
             Ok(Some(git_content))
         }
     }
 }
 
-/// Diff-IO snapshot adapter backed by markdown snapshot sidecars.
+/// Diff-IO baseline adapter backed by typed ledger state.
 pub struct DiffBaselineStore {
     logger: fn(&Path, &str),
 }
@@ -287,13 +297,6 @@ impl agent_doc_diff_io::DocumentBaselineStore for DiffBaselineStore {
 
 /// Delete a cold markdown recovery projection and clear the ledger baseline.
 pub fn delete_recovery_projection_and_clear_baseline(doc: &Path) -> Result<()> {
-    let snap = agent_doc_fs::snapshot_path_for(doc)?;
-    if !snap.exists() {
-        return clear_document_baseline(doc);
-    }
-    if snap.exists() {
-        std::fs::remove_file(&snap)?;
-    }
     clear_document_baseline(doc)
 }
 
@@ -421,15 +424,14 @@ pub fn ensure_initial_snapshot(
     Ok(true)
 }
 
-/// Detect and migrate orphaned state files after a document rename.
+/// Detect a document rename from the durable session registry and rekey its
+/// typed state history.
 ///
-/// A document rename changes the path-derived state hash. This helper detects
-/// an orphaned markdown snapshot carrying the same `agent_doc_session`, moves
-/// all matching sidecars to the new hash, and updates the session registry
-/// entry for that session.
+/// A document rename changes the path-derived state hash. The session registry
+/// supplies the previous path identity; crash sidecars are never scanned,
+/// parsed, moved, or used as fallback state.
 pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
-    let snap = agent_doc_fs::snapshot_path_for(doc)?;
-    if snap.exists() {
+    if load_document_baseline(doc)?.is_some() {
         return Ok(false);
     }
 
@@ -446,27 +448,42 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         Some(root) => root,
         None => return Ok(false),
     };
-
-    let snap_dir = snap.parent().unwrap_or(Path::new(".")).to_path_buf();
-    if !snap_dir.is_dir() {
+    let Some(previous_entry) =
+        agent_doc_session_registry_io::lookup_entry_in(&project_root, &session_uuid)?
+    else {
+        return Ok(false);
+    };
+    let previous_path = Path::new(&previous_entry.file);
+    let previous_path = if previous_path.is_absolute() {
+        previous_path.to_path_buf()
+    } else {
+        project_root.join(previous_path)
+    };
+    if previous_path == canonical {
         return Ok(false);
     }
-    let new_hash = agent_doc_fs::document_state_hash(doc)?;
 
-    let old_hash = match find_snapshot_hash_for_session(&snap_dir, &new_hash, &session_uuid)? {
-        Some(h) => h,
-        None => return Ok(false),
+    let new_hash = agent_doc_fs::document_state_hash(doc)?;
+    let old_hash = if previous_path.exists() {
+        agent_doc_fs::document_state_hash(&previous_path)?
+    } else {
+        agent_doc_fs::document_state_hash_from_str(&previous_path.to_string_lossy())
     };
+    if old_hash == new_hash {
+        return Ok(false);
+    }
 
     eprintln!(
-        "[init] detected rename — migrating state files from {}.. to {}..",
+        "[init] detected rename — rekeying typed state from {}.. to {}..",
         &old_hash[..8.min(old_hash.len())],
         &new_hash[..8.min(new_hash.len())]
     );
 
-    let migration_report = migrate_state_files_for_hash(&project_root, &old_hash, &new_hash)?;
-    for event in &migration_report.events {
-        eprintln!("{}", event.log_message());
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let migration_report =
+        agent_doc_sqlite::state_store::rekey_document_state_in_db(&conn, &old_hash, &new_hash)?;
+    if migration_report.state_events_rekeyed == 0 {
+        return Ok(false);
     }
 
     let updated = agent_doc_session_registry_io::update_session_file_in(
@@ -480,102 +497,10 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
     }
 
     eprintln!(
-        "[init] rename migration complete — {} state file(s) migrated",
-        migration_report.migrated
+        "[init] rename migration complete — {} typed event(s) rekeyed, {} stale peer acknowledgement(s) retired",
+        migration_report.state_events_rekeyed, migration_report.peer_acknowledgements_retired,
     );
     Ok(true)
-}
-
-/// Migrate state sidecars from an old document hash to a new document hash.
-///
-/// The caller owns detecting the matching session and updating any session
-/// registry. This helper owns only the concrete sidecar file moves.
-pub fn migrate_state_files_for_hash(
-    project_root: &Path,
-    old_hash: &str,
-    new_hash: &str,
-) -> Result<SnapshotStateMigrationReport> {
-    const MIGRATE_DIRS: &[(&str, &str)] =
-        &[("snapshots", "md"), ("locks", "lock"), ("pending", "md")];
-
-    let mut report = SnapshotStateMigrationReport {
-        migrated: 0,
-        events: Vec::new(),
-    };
-
-    for &(subdir, ext) in MIGRATE_DIRS {
-        let dir = project_root.join(".agent-doc").join(subdir);
-        let old_file = dir.join(format!("{}.{}", old_hash, ext));
-        let new_file = dir.join(format!("{}.{}", new_hash, ext));
-        if !old_file.exists() {
-            continue;
-        }
-        if new_file.exists() {
-            report
-                .events
-                .push(SnapshotStateMigrationEvent::SkippedDestinationExists {
-                    subdir: subdir.to_string(),
-                    new_hash_prefix: hash_prefix(new_hash),
-                    ext: ext.to_string(),
-                });
-            continue;
-        }
-        std::fs::rename(&old_file, &new_file)?;
-        report.events.push(SnapshotStateMigrationEvent::Migrated {
-            subdir: subdir.to_string(),
-            old_hash_prefix: hash_prefix(old_hash),
-            new_hash_prefix: hash_prefix(new_hash),
-            ext: ext.to_string(),
-        });
-        report.migrated += 1;
-    }
-
-    // Migrate the cold snapshot lock with its projection.
-    let lock_dir = project_root.join(".agent-doc").join("locks");
-    let old_lock_name = format!("{}.md.lock", old_hash);
-    let old_lock = lock_dir.join(&old_lock_name);
-    let new_lock = lock_dir.join(old_lock_name.replace(old_hash, new_hash));
-    if old_lock.exists() && !new_lock.exists() {
-        std::fs::rename(&old_lock, &new_lock)?;
-        report.migrated += 1;
-    }
-
-    Ok(report)
-}
-
-/// Find an orphaned snapshot hash whose frontmatter carries `session_uuid`.
-///
-/// The caller owns deciding whether rename migration should run. This helper
-/// only scans snapshot sidecars and skips the current document hash.
-pub fn find_snapshot_hash_for_session(
-    snap_dir: &Path,
-    current_hash: &str,
-    session_uuid: &str,
-) -> Result<Option<String>> {
-    if !snap_dir.is_dir() {
-        return Ok(None);
-    }
-    for entry in std::fs::read_dir(snap_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let stem = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(stem) if stem != current_hash => stem.to_string(),
-            _ => continue,
-        };
-        if let Ok(snapshot_content) = std::fs::read_to_string(&path)
-            && session_id_from_content(&snapshot_content).as_deref() == Some(session_uuid)
-        {
-            return Ok(Some(stem));
-        }
-    }
-    Ok(None)
-}
-
-fn hash_prefix(hash: &str) -> String {
-    hash[..8.min(hash.len())].to_string()
 }
 
 /// Checkpoint the pre-write content used by undo/extract in the durable ledger.
@@ -628,6 +553,7 @@ pub fn clear_undo_content(doc: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::process::Command;
 
     fn setup() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -672,6 +598,12 @@ mod tests {
             load_document_baseline(&doc).unwrap().as_deref(),
             Some("snapshot body")
         );
+        let crash_projection = agent_doc_fs::snapshot_path_for(&doc).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&crash_projection).unwrap(),
+            "snapshot body",
+            "the typed checkpoint should drive the write-only crash-state sidecar"
+        );
         assert!(
             logs.iter()
                 .any(|message| message.contains("document_baseline_checkpoint"))
@@ -679,7 +611,41 @@ mod tests {
 
         delete_recovery_projection_and_clear_baseline(&doc).unwrap();
         assert!(load_document_baseline(&doc).unwrap().is_none());
+        assert!(!crash_projection.exists());
         delete_recovery_projection_and_clear_baseline(&doc).unwrap();
+    }
+
+    struct StateFirstCrashEffect {
+        saw_committed_typed_state: Cell<bool>,
+    }
+
+    impl CrashStateEffects for StateFirstCrashEffect {
+        fn write_markdown_crash_state(&self, doc: &Path, content: &str) -> Result<()> {
+            self.saw_committed_typed_state
+                .set(load_document_baseline(doc)?.as_deref() == Some(content));
+            Ok(())
+        }
+
+        fn clear_markdown_crash_state(&self, doc: &Path) -> Result<()> {
+            self.saw_committed_typed_state
+                .set(load_document_baseline(doc)?.is_none());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn crash_projection_effect_runs_after_typed_state_commit() {
+        let (_dir, doc) = setup();
+        let effect = StateFirstCrashEffect {
+            saw_committed_typed_state: Cell::new(false),
+        };
+
+        checkpoint_document_baseline_with_effects(&doc, "state first", |_, _| {}, &effect).unwrap();
+
+        assert!(
+            effect.saw_committed_typed_state.get(),
+            "crash-state effect must observe the authoritative typed checkpoint"
+        );
     }
 
     #[test]
@@ -811,106 +777,56 @@ mod tests {
     }
 
     #[test]
-    fn migrate_state_files_for_hash_moves_cold_snapshot_and_lock() {
+    fn renamed_document_rekeys_ledger_from_registry_without_reading_crash_sidecar() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let old_hash = "oldhash123456";
-        let new_hash = "newhashabcdef";
-        for (subdir, ext, bytes) in [("snapshots", "md", b"snapshot".as_slice())] {
-            let state_dir = root.join(".agent-doc").join(subdir);
-            std::fs::create_dir_all(&state_dir).unwrap();
-            std::fs::write(state_dir.join(format!("{old_hash}.{ext}")), bytes).unwrap();
-        }
-        std::fs::create_dir_all(root.join(".agent-doc/locks")).unwrap();
-        std::fs::write(
-            root.join(".agent-doc/locks")
-                .join(format!("{old_hash}.md.lock")),
-            b"lock",
-        )
-        .unwrap();
-
-        let report = migrate_state_files_for_hash(root, old_hash, new_hash).unwrap();
-
-        assert_eq!(report.migrated, 2);
-        assert!(root.join(".agent-doc/snapshots/newhashabcdef.md").exists());
-        assert!(root.join(".agent-doc/locks/newhashabcdef.md.lock").exists());
-        assert_eq!(report.events.len(), 1);
-        assert_eq!(
-            report.events[0].log_message(),
-            "[init] migrated snapshots/oldhash1.md → newhasha.md"
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let old_doc = root.join("old.md");
+        let new_doc = root.join("new.md");
+        let session_id = "rename-session";
+        let document = format!(
+            "---\nagent_doc_session: {session_id}\nagent_doc_format: template\n---\n\nBody\n"
         );
-    }
+        std::fs::write(&old_doc, &document).unwrap();
+        checkpoint_document_baseline(&old_doc, "ledger baseline", |_, _| {}).unwrap();
+        let old_hash = agent_doc_fs::document_state_hash(&old_doc).unwrap();
+        let old_crash_sidecar = root
+            .join(".agent-doc/snapshots")
+            .join(format!("{old_hash}.md"));
+        std::fs::write(&old_crash_sidecar, "not a valid session document").unwrap();
+        agent_doc_session_registry_io::registration::attach_projection_only_in(
+            root,
+            session_id,
+            "%1",
+            &old_doc.display().to_string(),
+            123,
+            "@1",
+            &root.display().to_string(),
+        )
+        .unwrap();
+        std::fs::rename(&old_doc, &new_doc).unwrap();
 
-    #[test]
-    fn migrate_state_files_for_hash_skips_existing_destination() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        let old_hash = "oldhash123456";
-        let new_hash = "newhashabcdef";
-        let state_dir = root.join(".agent-doc/snapshots");
-        std::fs::create_dir_all(&state_dir).unwrap();
-        std::fs::write(state_dir.join(format!("{old_hash}.md")), b"old").unwrap();
-        std::fs::write(state_dir.join(format!("{new_hash}.md")), b"new").unwrap();
+        assert!(try_migrate_renamed(&new_doc).unwrap());
 
-        let report = migrate_state_files_for_hash(root, old_hash, new_hash).unwrap();
-
-        assert_eq!(report.migrated, 0);
         assert_eq!(
-            std::fs::read(state_dir.join(format!("{old_hash}.md"))).unwrap(),
-            b"old"
+            load_document_baseline(&new_doc).unwrap().as_deref(),
+            Some("ledger baseline")
         );
-        assert_eq!(
-            report.events,
-            vec![SnapshotStateMigrationEvent::SkippedDestinationExists {
-                subdir: "snapshots".to_string(),
-                new_hash_prefix: "newhasha".to_string(),
-                ext: "md".to_string(),
-            }]
+        assert!(
+            old_crash_sidecar.exists(),
+            "write-only crash-state sidecar must remain untouched"
         );
-    }
-
-    #[test]
-    fn find_snapshot_hash_for_session_skips_current_and_matches_session() {
-        let dir = tempfile::tempdir().unwrap();
-        let snap_dir = dir.path().join(".agent-doc/snapshots");
-        std::fs::create_dir_all(&snap_dir).unwrap();
-        std::fs::write(
-            snap_dir.join("current.md"),
-            "---\nagent_doc_session: target\n---\ncurrent\n",
-        )
-        .unwrap();
-        std::fs::write(
-            snap_dir.join("oldhash.md"),
-            "---\nagent_doc_session: target\n---\nold\n",
-        )
-        .unwrap();
-        std::fs::write(
-            snap_dir.join("other.txt"),
-            "---\nagent_doc_session: target\n---\nignored\n",
-        )
-        .unwrap();
-
-        let found = find_snapshot_hash_for_session(&snap_dir, "current", "target").unwrap();
-
-        assert_eq!(found.as_deref(), Some("oldhash"));
-    }
-
-    #[test]
-    fn find_snapshot_hash_for_session_returns_none_without_match() {
-        let dir = tempfile::tempdir().unwrap();
-        let snap_dir = dir.path().join(".agent-doc/snapshots");
-        std::fs::create_dir_all(&snap_dir).unwrap();
-        std::fs::write(
-            snap_dir.join("oldhash.md"),
-            "---\nagent_doc_session: other\n---\nold\n",
-        )
-        .unwrap();
-
-        let found = find_snapshot_hash_for_session(&snap_dir, "current", "target").unwrap();
-        let missing_dir =
-            find_snapshot_hash_for_session(&snap_dir.join("missing"), "current", "target").unwrap();
-
-        assert!(found.is_none());
-        assert!(missing_dir.is_none());
+        let new_hash = agent_doc_fs::document_state_hash(&new_doc).unwrap();
+        assert!(
+            !root
+                .join(".agent-doc/snapshots")
+                .join(format!("{new_hash}.md"))
+                .exists(),
+            "rename recovery must not create or migrate a crash sidecar"
+        );
+        let entry = agent_doc_session_registry_io::lookup_entry_in(root, session_id)
+            .unwrap()
+            .expect("updated session registry entry");
+        assert_eq!(entry.file, new_doc.display().to_string());
     }
 }

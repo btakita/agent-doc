@@ -117,6 +117,12 @@ class RefreshBeforeApplyConflictTest {
         assertTrue(ensureOpenReplica.contains("replayDeferredWriteAfterRegistration("))
         assertTrue(ensureOpenReplica.contains("replaceCached = forceRefresh"))
         assertTrue(ensureOpenReplica.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null"))
+        val forwarderFor = functionBody(crdtReplica, "private fun forwarderFor(")
+        assertTrue(
+            "a raced editor cut must be rejected before whole-buffer CRDT publication",
+            forwarderFor.indexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") <
+                forwarderFor.indexOf("forwarder.ensureEditorText(initialEditorText)"),
+        )
         assertTrue(
             "semantic replay must begin only after exact editor registration succeeds",
             ensureOpenReplica.indexOf("val forwarder = forwarderFor(") <

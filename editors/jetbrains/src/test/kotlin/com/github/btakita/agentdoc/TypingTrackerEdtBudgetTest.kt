@@ -499,9 +499,13 @@ class TypingTrackerEdtBudgetTest {
         val forwarderForBody = source.substringAfter("private fun forwarderFor(")
             .substringBefore("private fun refreshReplicaAfterTransportLoss(")
         assertTrue(
-            "replica replacement must revalidate the exact editor at the swap boundary",
+            "replica replacement must fence the exact editor before publication and revalidate it at the swap boundary",
             forwarderForBody.contains("expectedEditorTextAtSwap") &&
                 forwarderForBody.contains("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
+                forwarderForBody.indexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") <
+                forwarderForBody.indexOf("forwarder.ensureEditorText(initialEditorText)") &&
+                forwarderForBody.lastIndexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") >
+                forwarderForBody.indexOf("forwarder.ensureEditorText(initialEditorText)") &&
                 forwarderForBody.indexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") <
                 forwarderForBody.indexOf("forwarders.replace(filePath, cached, forwarder)"),
         )

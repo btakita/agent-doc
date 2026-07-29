@@ -4,6 +4,23 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.69
+
+_JetBrains plugin 0.2.311; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Filesystem sidecars are one-way crash state, never fallback authority.**
+  Document baseline checkpoints commit typed `state.db` facts first and then
+  invoke `CrashStateEffects` to write the hashed markdown crash-state sidecar.
+  Baseline resolution, closeout, reset, and rename never read or scan those
+  files; rename transactionally rekeys typed history and durable registry
+  identity while leaving crash-time sidecars untouched.
+- **Mixed-root editor layouts surface the owning document actor.** Parent
+  workspace sync asks a nested project controller to resume a missing actor and
+  carries its controller-proven pane binding only as ephemeral tmux-router
+  input. The router prefers that binding over visible spare geometry, so
+  `src/boost-client/tasks/monsterrodholders.md` brings its real supervisor pane
+  out of stash instead of aliasing an unrelated pane while reporting success.
+
 ## 0.35.68
 
 _JetBrains plugin 0.2.311; VS Code extension 0.2.62; Zed extension 0.1.0._

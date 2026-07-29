@@ -210,8 +210,13 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 
 `agent-doc rename <OLD_PATH> <NEW_PATH>`
 
-- Migrates hash-keyed state files such as snapshots, baselines, locks, pending state, legacy CRDT state, overlay CRDT state, and pre-response artifacts to the new path hash.
-- Auto-migration through `ensure_initialized` still handles the common rename path; `rename` remains the explicit fallback.
+- Transactionally rekeys typed state events and their embedded document hashes,
+  retires old-path editor acknowledgement cursors, and updates the durable
+  session registry.
+- Filesystem sidecars remain untouched write-only crash state. Neither the
+  explicit command nor auto-migration scans or imports them.
+- Auto-migration through `ensure_initialized` handles the common rename path
+  from session-registry identity; `rename` is the explicit old/new-path form.
 
 ## watch
 

@@ -1127,22 +1127,22 @@ Changed paths: none. Verification: I compared the returned addendum's Section 2 
 Answered and committed in [haiven.md](/home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md).
 
 Bottom line: unpaid activity does not automatically require approval, but conflict-related or materially interfering activity may. The proposed language now includes a safe harbor for ordinary personal, volunteer, and open-source activity. No external message was sent.
-<!-- agent:boundary:65bb4e31 -->
+<!-- agent:boundary:b0cb50c6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority -->
-- ~~🚧 do [#recommendedadditionsexhi]~~
-- do [#unpaidoutsideactivity]
-- "Supporting materials, payroll, and timing": In the interest of starting my first day, is this necessary, or can I ask for this to be provided by today or tomorrow?
+<!-- agent:queue priority start -->
+- ~~do [#recommendedadditionsexhi]~~
+- ⏭️ do [#unpaidoutsideactivity]
+- 🚧 "Supporting materials, payroll, and timing": In the interest of starting my first day, is this necessary, or can I ask for this to be provided by today or tomorrow?
 - Should I ask if this is sufficient for me to get started while we finalize the agreement?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#unpaidoutsideactivity] Does unpaid "outside activity" need approval as well?
+- [x] [#unpaidoutsideactivity] Does unpaid "outside activity" need approval as well?
 <!-- /agent:backlog -->
 
 ## Review

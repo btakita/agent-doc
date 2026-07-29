@@ -26,7 +26,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-completed
+complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -39,26 +39,35 @@ completed
 Compacted content:
 - Archived 30 response topic(s): Live Sync Tmux Layout crash verification; #60ev and Compact Exchange latency; Compact Exchange performance; 27 more
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): Live Sync Tmux Layout crash verification; Live Sync Tmux Layou...
-<!-- agent:boundary:ed9346e7 -->
+
+### Re: Response
+
+Implemented and released.
+
+The short architectural answer is:
+
+- Sidecars are write-only recovery artifacts. Runtime reads do not fall back to them. Canonical state lives in the cross-process Lazily state plane, and effects materialize crash recovery snapshots from that state.
+- “Crash-state snapshots” is the clearest name for the persisted files. “Crash-state effects” names the writers. A projection is the computation that derives snapshot content, not the sidecar itself.
+- The entire pane-layout control loop belongs in Lazily state: desired layout, observed tmux layout, effect receipts, retry/backoff, and reconciliation status. The last hop remains an imperative effect because tmux is external.
+- Plugins should use RPC as transport to publish intent/observations into the state plane. RPC and projection are not alternatives: RPC crosses the process boundary; Lazily projection makes the result durable, idempotent, and reconcilable. Plugins should not own an imperative tmux retry loop.
+- Typed enums are appropriate for phase and reason, with an explicit unknown/forward-compatible case at wire boundaries. This alone is not a reason to adopt protobuf. Protobuf becomes attractive only when polyglot generated schemas and long-lived binary compatibility justify its operational cost.
+- The same plane helps CRDT convergence: desired revision/state vector, observed editor acknowledgment, retained effect identity, lease, attempt, and typed pending reason can all be projected. That lets observers report one retained exact-once operation without resending it.
+
+Document replicas now use one lazy serialized actor lane per document, not one project-wide lane and not an unbounded thread per operation. Same-document work remains FIFO; different documents proceed concurrently; idle lanes release their threads. Native calls use a bounded four-worker generation pool. A timeout while merely queued cancels only that invocation and does not poison the generation; only a call that actually runs past its lease does. Rust now locks replicas independently rather than holding the global registry mutex throughout an operation.
+
+This shipped as agent-doc 0.35.70 and JetBrains plugin 0.2.312. Focused tests, the full 389-test plugin suite, Rust FFI tests, and the mandatory full check passed. The release is published at https://github.com/btakita/agent-doc/releases/tag/v0.35.70 and the Python wheel was uploaded.
+
+The post-install IDEA restart provided the live proof: plugin 0.2.312 loaded native 0.35.70; `agent-doc-bugs2.md`, `haiven.md`, and `monsterrodholders.md` ran on distinct document lanes. Haiven’s expensive attach took about 10.4 seconds, while monsterrodholders attached concurrently in about 1.6 seconds. The native generation remained healthy and haiven subsequently acknowledged its retained CRDT update.
+
+Do not ask the haiven Codex to finalize again. I performed the single status-only check after recovery: its original retained cycle `cycle-1785289132562` is now committed successfully, with no queue continuation. A second finalize would create exactly the duplicate transaction the retention design prevents.
+
+The pane layout is also reconciled through the new state plane: `agent-doc-bugs2.md` is visible in pane `%63`, `monsterrodholders.md` in `%43`, and the unrelated haiven pane is stashed. The monsterrodholders controller record remains intentionally closed from its earlier Ctrl-D, while its editor replica now attaches normally; focusing/syncing the editor no longer depends on reading a sidecar or on another document’s replica worker.
+<!-- agent:boundary:24ad5dd5 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 📌 do [#nsfz]
-- 📌 do [#suprestassoc-live]
-- 📌 do [#jbedtledgerverify]
-- 📌 do [#0dsr]
-- 📌 do [#30p6]
-- 📌 do [#opcapturelazily]
-- 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#sidecarstate]
-- 📌 do [#adstatechart2]
-- 📌 do [#adstatechart3]
-- 📌 do [#adstatechartkt]
-- 📌 do [#adstatechartjs]
-- 📌 do [#ipcauthority]
-- 📌 do [#ipcliveness]
-- 📌 do [#ipcverhandshake]
 - 📌 do [#5qjj]
 <!-- /agent:queue -->
 

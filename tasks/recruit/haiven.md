@@ -1273,13 +1273,17 @@ Changed paths: none. External change: the attachment and one descriptive sentenc
 ### Re: Response
 
 The Gmail reply draft is ready. It reflects that everyone is excited to get started, does not push back on the termination definitions, uses your revised sentence exactly — “I am ready to sign and begin today, including substantive development work. If tomorrow is easier for scheduling, that works for me as well.” — and asks only for the page-one formatting correction plus one clean, integrated company-signed package containing your signed Exhibit A and Haiven’s completed acknowledgment. The only attachment is `haiven-exhibit-a-proposed-signed.pdf`, and the draft remains unsent.
-<!-- agent:boundary:eb60e339 -->
+
+### Re: Response
+
+The practical issue is resolved. Brian chose speed over waiting for a cosmetically consolidated package, signed the current documents, and sent the original agreement, the July 28 addendum, and his signed Exhibit A together. He also notified Craig that the signed package was sent and that he is ready to start. No further apology or immediate follow-up is needed. The remaining execution check is to obtain Haiven’s confirmation that it received all three documents, treats them together as the complete agreement, and accepts or completes its acknowledgment of Exhibit A.
+<!-- agent:boundary:d58341c7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority start -->
-- I need to get this email out. Please draft a reply in gmail to https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVhWChVfCmrxpKKxzwmJtNMxH. We are all excited to get started. I'm ok without pushing back on "Termination definitions".
+<!-- agent:queue priority -->
+- I have not yet heard back. What if they go back on their offer? Maybe I was giving off bad vibes? They may also be busy today.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -1290,7 +1294,7 @@ The Gmail reply draft is ready. It reflects that everyone is excited to get star
 ## Review
 
 <!-- agent:review -->
-- [/] [#haiven-paper] Haiven returned a company-signed July 28, 2026 v1.0 employment addendum. Do not sign it yet and do not send any correction, follow-up, attachment, or external message without Brian’s explicit instruction containing “send.” Obtain a clean re-signed PDF correcting the visibly malformed page-1 “Comp / Employee will attach / any” text. Before attaching Exhibit A, revise tasks/professional/haiven/haiven-exhibit-a-proposed.md and its PDF to explicitly identify material third-party-facing sites and repository families—including brookebrodack.net / brookebrodack-dev and the other factually confirmed site candidates—with ownership-neutral third-party exclusions; add missing organization families lazily-hub, signal-space, and freehold-hub; decide on a dated confidential repository/site manifest; narrow future successor-project language; and separately obtain written outside-activity approval for any site that will be maintained during employment. Attach the revised Exhibit A as part of one integrated document and obtain Haiven’s explicit acknowledgment of its Effect of Listing and priority terms. Resolve the 16,053-shares-versus-1.00%-denominator ambiguity and Board-nonapproval risk; obtain and review the equity plan, option form, handbook, vacation policy, health effective date, and tier contribution rates before signing. Add exact remittance dates and payment methods for both $10,000 signing-bonus installments; define Good Reason now; narrow moral-turpitude/cure language using an objective conviction-or-plea, serious-offense, material-nexus standard without the extended arrests/traffic/negligence/strict-liability sentence; clarify gross/net bonus repayment tax treatment; expressly protect ongoing general-purpose OSS/personal research and make future approvals timely, conflict-based, not unreasonably withheld, and not dependent on unanimous Board approval; clarify that reasonable separation does not require separate physical devices unless intended; confirm Connecticut semimonthly-pay waiver before payroll; and extend acceptance until after the complete corrected package arrives. Then complete final verification with counsel before signing.
+- [/] [#haiven-paper] Brian reports that he signed and sent the original agreement, the July 28 addendum, and his signed Exhibit A together, and notified Craig that the package was sent and he is ready to start. Await Haiven’s written confirmation that it received all three documents and treats them together as the complete agreement; obtain Haiven’s completed or explicit acknowledgment of Exhibit A. Retain the exact sent email and attachments as the execution record. Do not send another apology or immediate follow-up; review Craig’s response and onboarding/start instructions when received.
 <!-- /agent:review -->
 
 ## Icebox

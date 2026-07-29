@@ -2811,6 +2811,136 @@ mod realtime_ipc_cycle_model {
     }
 }
 
+/// `#implementlazilyintent` reference model: post-registration replay may
+/// project an intent and queue an editor effect, but retirement, supersession,
+/// or loss of the backing editor model must invalidate that effect before EDT
+/// mutation.
+mod post_registration_editor_effect_model {
+    #[derive(Clone, Copy, Debug)]
+    enum Action {
+        ProjectIntent,
+        QueueEditorEffect,
+        RetireIntent,
+        SupersedeIntent,
+        LoseEditorModel,
+        RunEdtEffect,
+    }
+
+    const ACTIONS: [Action; 6] = [
+        Action::ProjectIntent,
+        Action::QueueEditorEffect,
+        Action::RetireIntent,
+        Action::SupersedeIntent,
+        Action::LoseEditorModel,
+        Action::RunEdtEffect,
+    ];
+
+    #[derive(Clone, Copy, Debug)]
+    struct EffectToken {
+        intent_generation: u64,
+        endpoint_generation: u64,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    struct Model {
+        intent_generation: u64,
+        endpoint_generation: u64,
+        live_intent: Option<u64>,
+        editor_model_backed: bool,
+        queued_effect: Option<EffectToken>,
+        editor_mutations: usize,
+        refused_effects: usize,
+        stale_mutation: bool,
+    }
+
+    impl Model {
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::ProjectIntent => {
+                    self.intent_generation += 1;
+                    self.endpoint_generation += 1;
+                    self.live_intent = Some(self.intent_generation);
+                    self.editor_model_backed = true;
+                }
+                Action::QueueEditorEffect => {
+                    if let Some(intent_generation) = self.live_intent
+                        && self.editor_model_backed
+                    {
+                        self.queued_effect = Some(EffectToken {
+                            intent_generation,
+                            endpoint_generation: self.endpoint_generation,
+                        });
+                    }
+                }
+                Action::RetireIntent => {
+                    self.intent_generation += 1;
+                    self.live_intent = None;
+                }
+                Action::SupersedeIntent => {
+                    self.intent_generation += 1;
+                    self.live_intent = Some(self.intent_generation);
+                }
+                Action::LoseEditorModel => {
+                    self.endpoint_generation += 1;
+                    self.editor_model_backed = false;
+                }
+                Action::RunEdtEffect => {
+                    let Some(token) = self.queued_effect.take() else {
+                        return;
+                    };
+                    let current = self.live_intent == Some(token.intent_generation)
+                        && self.endpoint_generation == token.endpoint_generation
+                        && self.editor_model_backed;
+                    let mutations_before = self.editor_mutations;
+                    if current {
+                        self.editor_mutations += 1;
+                    } else {
+                        self.refused_effects += 1;
+                    }
+                    self.stale_mutation |= !current && self.editor_mutations > mutations_before;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn intent_retired_while_edt_effect_is_queued_is_refused() {
+        for retirement in [
+            Action::RetireIntent,
+            Action::SupersedeIntent,
+            Action::LoseEditorModel,
+        ] {
+            let mut model = Model::default();
+            model.step(Action::ProjectIntent);
+            model.step(Action::QueueEditorEffect);
+            model.step(retirement);
+            model.step(Action::RunEdtEffect);
+
+            assert_eq!(model.editor_mutations, 0, "{retirement:?}");
+            assert_eq!(model.refused_effects, 1, "{retirement:?}");
+            assert!(!model.stale_mutation, "{retirement:?}");
+        }
+    }
+
+    #[test]
+    fn generated_post_registration_effect_schedules_never_apply_a_stale_token() {
+        fn visit(depth: usize, model: Model) {
+            if depth == 0 {
+                assert!(!model.stale_mutation);
+                return;
+            }
+            for action in ACTIONS {
+                let mut next = model.clone();
+                next.step(action);
+                assert!(!next.stale_mutation, "action={action:?} model={next:?}");
+                visit(depth - 1, next);
+            }
+        }
+
+        visit(6, Model::default());
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum FaultPoint {
     SnapshotSave,

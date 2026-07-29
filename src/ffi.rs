@@ -2012,6 +2012,80 @@ pub unsafe extern "C" fn agent_doc_deferred_write_post_register_content(
         .unwrap_or(std::ptr::null_mut())
 }
 
+/// Reconstruct a retained post-registration write and project it through the
+/// controller-owned CRDT authority. The ABI returns status only: editor bytes
+/// must arrive through ordinary replica delivery so a queued EDT effect can be
+/// fenced against retired, superseded, or model-less endpoints.
+///
+/// # Safety
+///
+/// Both pointers must be non-null, NUL-terminated UTF-8 strings that remain
+/// valid for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_deferred_write_post_register_project(
+    file_path: *const c_char,
+    editor_content: *const c_char,
+) -> c_int {
+    let Ok(path) = (unsafe { CStr::from_ptr(file_path) }).to_str() else {
+        eprintln!(
+            "[deferred-write] post-register projection: non-UTF-8 file path; refusing projection"
+        );
+        return 0;
+    };
+    let Ok(editor_content) = (unsafe { CStr::from_ptr(editor_content) }).to_str() else {
+        eprintln!(
+            "[deferred-write] post-register projection: non-UTF-8 editor content; refusing projection"
+        );
+        return 0;
+    };
+    let file = std::path::Path::new(path);
+    let Some(recovered) = deferred_write_reconnect_candidate(file, editor_content) else {
+        return 1;
+    };
+    if recovered == editor_content {
+        return 1;
+    }
+    match agent_doc_document_realtime_io::apply_cp_write_through_relay_authority(
+        file,
+        editor_content,
+        &recovered,
+        "editor_post_register_projection",
+    ) {
+        Ok(Some(write)) if write.applied => {
+            eprintln!(
+                "[deferred-write] post-register intent projected for {}; target_hash={} targets={} live_editors={}",
+                file.display(),
+                write.content_hash,
+                write.targets,
+                write.live_editors,
+            );
+            1
+        }
+        Ok(Some(write)) => {
+            eprintln!(
+                "[deferred-write] post-register intent refused for {}; reason=projection_not_applied target_hash={}",
+                file.display(),
+                write.content_hash,
+            );
+            0
+        }
+        Ok(None) => {
+            eprintln!(
+                "[deferred-write] post-register intent refused for {}; reason=no_live_controller_model",
+                file.display(),
+            );
+            0
+        }
+        Err(err) => {
+            eprintln!(
+                "[deferred-write] post-register intent projection failed for {}: {err}",
+                file.display(),
+            );
+            0
+        }
+    }
+}
+
 fn deferred_write_reconnect_candidate(
     file: &std::path::Path,
     editor_content: &str,
@@ -3228,6 +3302,19 @@ mod tests {
             exact_editor_reregister_candidate(&file, &editor_cut, Some(recovered)),
             None,
             "the legacy reconnect entrypoint must remain fail-closed",
+        );
+
+        let projected = unsafe {
+            agent_doc_deferred_write_post_register_project(path.as_ptr(), editor.as_ptr())
+        };
+        assert_eq!(
+            projected, 0,
+            "a model-less endpoint must not admit an editor mutation",
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            baseline,
+            "post-registration FFI is transport-only and must not write disk",
         );
     }
 

@@ -67,6 +67,21 @@ private data class PendingRemoteAck(
     val update: ReplicaRemoteUpdate,
 )
 
+private data class RemoteEditorEffectToken(
+    val generation: Long,
+    val endpoint: CrdtReplicaForwarder,
+)
+
+internal fun remoteEditorEffectTokenCurrentUtil(
+    tokenGeneration: Long,
+    liveGeneration: Long?,
+    endpointMatches: Boolean,
+    endpointBacked: Boolean,
+): Boolean =
+    liveGeneration == tokenGeneration &&
+        endpointMatches &&
+        endpointBacked
+
 internal data class RemoteAckReplayPlan(
     val candidate: ReplicaRemoteUpdate,
     val acknowledgedThroughGeneration: Long,
@@ -358,6 +373,7 @@ private data class PendingRemoteEditorApply(
     val filePath: String,
     val expectedText: String,
     val targetText: String,
+    val effectToken: RemoteEditorEffectToken,
     val acknowledgements: List<PendingRemoteAck>,
 )
 
@@ -417,6 +433,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
     private val localEditorFlushVersions = ConcurrentHashMap<String, AtomicLong>()
     private val localEditorFlushTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
+    private val remoteEditorEffectGenerations = ConcurrentHashMap<String, AtomicLong>()
     private val localEditorFlushPendingPaths = ConcurrentHashMap.newKeySet<String>()
     private val drainQueued = AtomicBoolean(false)
     private val drainAllRequested = AtomicBoolean(false)
@@ -463,6 +480,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         pendingLocalEdits.clear()
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
+        remoteEditorEffectGenerations.clear()
         pendingRemoteAckReplays.clear()
         staleBaselineRecoveryTasks.clear()
         templateGuardRecoveryPaths.clear()
@@ -773,14 +791,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (disposed.get() || forwarders[filePath] !== forwarder) {
                     return@execute
                 }
-                replayDeferredWriteAfterRegistration(
-                    filePath,
-                    document,
-                    registrationText,
-                    forwarder,
-                )
-                requestRemoteDrain(filePath, "post-register-replay")
-            }
+            replayDeferredWriteAfterRegistration(
+                filePath,
+                document,
+                registrationText,
+                forwarder,
+            )
+        }
         } catch (error: RejectedExecutionException) {
             if (!disposed.get()) {
                 log.warn(
@@ -805,89 +822,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-replica-raced")
             return false
         }
-        val recovered =
-            NativePatching.deferredWritePostRegisterContent(filePath, registrationText)
-                ?: run {
-                    NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
-                    return true
-                }
-        if (recovered == registrationText) {
-            NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
-            return true
-        }
-        if (
-            templateStructureState(filePath, recovered, "post-register-replay") !=
-            TemplateStructureProjectionState.Exact
-        ) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-structure")
+        if (!NativePatching.projectDeferredWritePostRegister(filePath, registrationText)) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-projection-unavailable")
             return false
         }
-        if (forwarders[filePath] !== forwarder || hasPendingLocal(filePath)) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-replica-raced")
-            return false
-        }
-        if (!prepareNonOperatorEditorMutationOnWorker(filePath)) {
-            log.warn("[crdt-replica] post-register replay retained because native op-capture fencing failed for $filePath")
-            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-op-epoch")
-            return false
-        }
-
-        var applied = false
-        var persisted = false
-        ApplicationManager.getApplication().invokeAndWait {
-            if (
-                forwarders[filePath] !== forwarder ||
-                hasPendingLocal(filePath) ||
-                document.text != registrationText
-            ) {
-                return@invokeAndWait
-            }
-            if (
-                !remoteCrdtDiskCanPersistUtil(
-                    registrationText,
-                    recovered,
-                    readRawDiskText(filePath),
-                )
-            ) {
-                log.warn(
-                    "[crdt-replica] post-register replay retained because disk contains novel external text for $filePath; " +
-                        "editor_hash=${contentHash(registrationText)} recovered_hash=${contentHash(recovered)}",
-                )
-                return@invokeAndWait
-            }
-            advanceNonOperatorMutationEpoch(filePath)
-            applyingRemote.add(filePath)
-            try {
-                runUndoableRemoteUpdateCommand(document) {
-                    applyMinimalDocumentEditUtil(document, registrationText, recovered)
-                }
-                shadows[filePath] = recovered
-                applied = true
-                persisted =
-                    persistRemoteCrdtTextIfSafe(
-                        filePath,
-                        document,
-                        registrationText,
-                        recovered,
-                    )
-            } finally {
-                applyingRemote.remove(filePath)
-            }
-        }
-        if (!applied) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-editor-raced")
-            return false
-        }
-
-        // The editor mutation was suppressed from the ordinary document
-        // listener above, so publish this validated semantic replay explicitly.
-        forwarder.ensureEditorText(recovered)
-        if (persisted) {
-            NativePatching.deferredWriteReconnectPropagated(filePath, recovered)
-        }
+        // FFI only wakes/projects the retained semantic intent into the
+        // controller-owned CRDT authority. The ordinary remote-delivery path
+        // below is the sole owner of editor mutation and persistence.
+        requestUrgentRemoteDrain(filePath, "post-register-projected-intent")
         log.info(
-            "[crdt-replica] replayed deferred write after exact editor registration for $filePath; " +
-                "before_hash=${contentHash(registrationText)} recovered_hash=${contentHash(recovered)} persisted=$persisted",
+            "[crdt-replica] projected deferred write after exact editor registration for $filePath; " +
+                "baseline_hash=${contentHash(registrationText)} editor_mutation=remote_delivery_only",
         )
         return true
     }
@@ -1518,15 +1463,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return RemoteTextApplyDisposition.RetryFailClosed
         }
         remoteEditorApplyPaths.add(filePath)
+        val effectCounter =
+            remoteEditorEffectGenerations
+                .computeIfAbsent(filePath) { AtomicLong(0L) }
+        val effectGeneration = effectCounter.get() + 1L
         val outcome = remoteEditorApplies.ingress(
             filePath,
             PendingRemoteEditorApply(
                 filePath = filePath,
                 expectedText = expectedText,
                 targetText = converged,
+                effectToken =
+                    RemoteEditorEffectToken(
+                        generation = effectGeneration,
+                        endpoint = forwarder,
+                    ),
                 acknowledgements = updates.map { PendingRemoteAck(forwarder, it) },
             ),
         )
+        if (outcome != IngressOutcome.Blocked && outcome != IngressOutcome.Dropped) {
+            effectCounter.set(effectGeneration)
+        }
         log.debug(
             "[crdt-replica] remote editor apply ${outcome.name.lowercase()} for ${File(filePath).name}; " +
                 "pending_keys=${remoteEditorApplies.pendingKeyCount()} updates=${updates.size}",
@@ -1718,6 +1675,26 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     private fun applyRemoteTextOnEdt(pending: PendingRemoteEditorApply) {
         val started = System.nanoTime()
+        val liveEffectGeneration = remoteEditorEffectGenerations[pending.filePath]?.get()
+        if (
+            !remoteEditorEffectTokenCurrentUtil(
+                tokenGeneration = pending.effectToken.generation,
+                liveGeneration = liveEffectGeneration,
+                endpointMatches = forwarders[pending.filePath] === pending.effectToken.endpoint,
+                endpointBacked = pending.effectToken.endpoint.attached,
+            )
+        ) {
+            log.warn(
+                "[crdt-replica] remote editor effect refused for ${pending.filePath}; " +
+                    "reason=retired_or_superseded_or_model_less " +
+                    "token_generation=${pending.effectToken.generation} live_generation=$liveEffectGeneration",
+            )
+            return completeRemoteEditorApply(
+                pending,
+                RemoteEditorApplyOutcome(false, null),
+                started,
+            )
+        }
         val outcome = try {
             val targetFile = LocalFileSystem.getInstance().findFileByPath(pending.filePath)
                 ?: return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, null), started)

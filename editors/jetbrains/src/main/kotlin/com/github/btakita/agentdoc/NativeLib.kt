@@ -572,6 +572,7 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_deferred_write_reconnect_content(filePath: String, editorContent: String): Pointer?
     fun agent_doc_deferred_write_post_register_content(filePath: String, editorContent: String): Pointer?
+    fun agent_doc_deferred_write_post_register_project(filePath: String, editorContent: String): Int
     fun agent_doc_deferred_write_reconnect_propagated(filePath: String, editorContent: String): Int
 
     /**
@@ -909,9 +910,10 @@ interface AgentDocLib : Library {
                     "agent_doc_start_ipc_listener_v2",
                     "agent_doc_stop_ipc_listener",
                     "agent_doc_reliable_sync_liveness_enqueue",
-                    "agent_doc_reliable_sync_liveness_flush",
-                    "agent_doc_reliable_sync_document_op_push",
-                ).forEach { symbol ->
+            "agent_doc_reliable_sync_liveness_flush",
+            "agent_doc_reliable_sync_document_op_push",
+            "agent_doc_deferred_write_post_register_project",
+        ).forEach { symbol ->
                     handler.nativeLibrary.getFunction(symbol)
                 }
             }
@@ -1853,6 +1855,21 @@ object NativePatching {
             return ptr?.getString(0)
         } finally {
             lib.agent_doc_free_string(ptr)
+        }
+    }
+
+    /**
+     * Project a retained post-registration semantic intent into the
+     * controller-owned CRDT authority. This is transport-only: the returned
+     * status never carries editor bytes for Kotlin to apply directly.
+     */
+    fun projectDeferredWritePostRegister(filePath: String, editorContent: String): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            lib.agent_doc_deferred_write_post_register_project(filePath, editorContent) == 1
+        } catch (e: UnsatisfiedLinkError) {
+            LOG.debug("[native] deferred-write post-register projection unavailable: ${e.message}")
+            false
         }
     }
 

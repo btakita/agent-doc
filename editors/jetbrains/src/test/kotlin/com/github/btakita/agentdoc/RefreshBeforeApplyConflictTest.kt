@@ -149,6 +149,14 @@ class RefreshBeforeApplyConflictTest {
             crdtReplica,
             "private fun replayDeferredWriteAfterRegistration(",
         )
+        val queueRemoteApply = functionBody(
+            crdtReplica,
+            "private fun queueRemoteTextApply(",
+        )
+        val applyRemoteOnEdt = functionBody(
+            crdtReplica,
+            "private fun applyRemoteTextOnEdt(",
+        )
 
         assertFalse(ensureOpenReplica.contains("deferredWritePostRegisterContent("))
         assertFalse(ensureOpenReplica.contains("applyMinimalDocumentEditUtil("))
@@ -166,14 +174,57 @@ class RefreshBeforeApplyConflictTest {
                 scheduleReplay.contains("replayDeferredWriteAfterRegistration("),
         )
         assertTrue(
-            "the queued replay must reconstruct only after exact editor and local-edit fences",
+            "the queued replay must project only after exact editor and local-edit fences",
             replay.indexOf("tryReadDocumentText(document) != registrationText") <
-                replay.indexOf("NativePatching.deferredWritePostRegisterContent") &&
-                replay.contains("templateStructureState(filePath, recovered, \"post-register-replay\")") &&
-                replay.contains("prepareNonOperatorEditorMutationOnWorker(filePath)") &&
-                replay.contains("applyMinimalDocumentEditUtil(document, registrationText, recovered)") &&
-                replay.contains("persistRemoteCrdtTextIfSafe(") &&
-                replay.contains("forwarder.ensureEditorText(recovered)"),
+                replay.indexOf("NativePatching.projectDeferredWritePostRegister") &&
+                replay.contains("requestUrgentRemoteDrain(filePath, \"post-register-projected-intent\")"),
+        )
+        assertFalse(replay.contains("applyMinimalDocumentEditUtil("))
+        assertFalse(replay.contains("persistRemoteCrdtTextIfSafe("))
+        assertFalse(replay.contains("invokeAndWait"))
+        assertTrue(queueRemoteApply.contains("RemoteEditorEffectToken("))
+        assertTrue(
+            "the standard EDT delivery path must validate its Lazily effect token before resolving or mutating a document",
+            applyRemoteOnEdt.indexOf("remoteEditorEffectTokenCurrentUtil(") <
+                applyRemoteOnEdt.indexOf("LocalFileSystem.getInstance()") &&
+                applyRemoteOnEdt.indexOf("remoteEditorEffectTokenCurrentUtil(") <
+                applyRemoteOnEdt.indexOf("applyMinimalDocumentEditUtil("),
+        )
+    }
+
+    @Test
+    fun `queued editor effect is refused after intent retirement or endpoint loss`() {
+        assertTrue(
+            remoteEditorEffectTokenCurrentUtil(
+                tokenGeneration = 7L,
+                liveGeneration = 7L,
+                endpointMatches = true,
+                endpointBacked = true,
+            ),
+        )
+        assertFalse(
+            remoteEditorEffectTokenCurrentUtil(
+                tokenGeneration = 7L,
+                liveGeneration = 8L,
+                endpointMatches = true,
+                endpointBacked = true,
+            ),
+        )
+        assertFalse(
+            remoteEditorEffectTokenCurrentUtil(
+                tokenGeneration = 7L,
+                liveGeneration = 7L,
+                endpointMatches = false,
+                endpointBacked = true,
+            ),
+        )
+        assertFalse(
+            remoteEditorEffectTokenCurrentUtil(
+                tokenGeneration = 7L,
+                liveGeneration = 7L,
+                endpointMatches = true,
+                endpointBacked = false,
+            ),
         )
     }
 

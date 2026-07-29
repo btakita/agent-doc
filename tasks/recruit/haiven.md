@@ -907,13 +907,36 @@ The response is retained but not committed because the editor has not acknowledg
 The retained response about “crime involving moral turpitude” is now present in the authoritative editor document, so I did not duplicate or replace it. Its recommendation remains: use an objective, enumerated Cause definition with a material employment nexus, exclude arrests and intent-free technical offenses, and specify a definite cure period where cure is possible. The existing `#haiven-paper` review item already tracks that negotiation point, so no additional backlog item is needed.
 
 Recovery verification: IntelliJ plugin 0.2.319 re-registered the exact editor buffer; the controller recorded an exact retained-target acknowledgment and converged CRDT delivery. No force-disk path, direct document patch, email modification, signature, attachment, or external action was used. Final contract language should still be reviewed by employment counsel.
-<!-- agent:boundary:e0e08a1e -->
+
+### Re: Remove “intentional dishonesty” — gpt-5
+
+> **Queue prompt:**
+>
+> Remove "and intentional dishonesty" since it is subjective and can occur without breaking the law.
+
+Done. I updated item 4 of [haiven-addendum-response-draft.md](../professional/haiven/haiven-addendum-response-draft.md) so the proposed Cause language **does not include “intentional dishonesty.”** I agree with the reason: dishonesty can be subjective, and conduct described that way is not necessarily criminal.
+
+The draft now requests an objective definition limited to convictions or guilty/no-contest pleas for serious offenses involving:
+
+- fraud;
+- theft;
+- embezzlement;
+- bribery;
+- intentional violence; or
+- sexual abuse or exploitation.
+
+It retains the material nexus to your duties or demonstrable material harm to Haiven, and excludes arrests, pending charges, civil violations, traffic infractions, and offenses based solely on negligence or strict liability.
+
+Changed path: `tasks/professional/haiven/haiven-addendum-response-draft.md`. The file was staged alone and committed as `0125022b6` (`draft Haiven addendum response`); all unrelated workspace changes were left untouched. Verification: `git diff --check` passed, the staged path set contained only the email draft, the staged diff digest showed one added file, and the final targeted text check confirmed the enumerated wording without “intentional dishonesty.” Confidence is high.
+
+The existing `#haiven-paper` review item already tracks the unresolved Cause-language negotiation, so no new backlog item is needed. No email, Gmail draft, attachment, signature, or other external action was taken.
+<!-- agent:boundary:f7db5817 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- I interpret "crime involving moral turpitude" as being a sex crime or any other criminal offense that is morally objectionable. Is the language clear enough or should we propose something more precise. Haiven really likes me. I don't want to go too many rounds but it would be good to have the contract be precise. We don't need to go too in depth with how breaking the law can revoke the contract. I don't plan on breaking the law & I think Luke + Craig are trustworthy
+- Remove "and intentional dishonesty" since it is subjective and can occur without breaking the law.
 <!-- /agent:queue -->
 
 ## Backlog

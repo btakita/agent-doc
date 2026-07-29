@@ -26,7 +26,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-complete
+Agent-doc 0.35.71 / JetBrains 0.2.313 released and installed; IDEA restart required to activate the plugin generation.
 <!-- /agent:status -->
 
 ## Exchange
@@ -62,12 +62,41 @@ The post-install IDEA restart provided the live proof: plugin 0.2.312 loaded nat
 Do not ask the haiven Codex to finalize again. I performed the single status-only check after recovery: its original retained cycle `cycle-1785289132562` is now committed successfully, with no queue continuation. A second finalize would create exactly the duplicate transaction the retention design prevents.
 
 The pane layout is also reconciled through the new state plane: `agent-doc-bugs2.md` is visible in pane `%63`, `monsterrodholders.md` in `%43`, and the unrelated haiven pane is stashed. The monsterrodholders controller record remains intentionally closed from its earlier Ctrl-D, while its editor replica now attaches normally; focusing/syncing the editor no longer depends on reading a sidecar or on another document’s replica worker.
-<!-- agent:boundary:24ad5dd5 -->
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> 📌 do [#sidecarstate]
+
+
+Implemented and released the agent-doc performance and state-authority repair.
+
+The thread dump did not show a JVM deadlock. The Agent Doc workers were predominantly waiting normally; the visible IDEA freeze came from a feedback loop on the editor hot path. On each typing burst, the plugin was re-running open-document attachment work, normalizing the whole document, and advancing its shadow ahead of already-queued `DocumentEvent`s. Those older events then appeared to conflict with the new shadow, which manufactured stale-baseline recovery. Each ordinary keystroke also crossed FFI for `node.text()`, and recovery could publish 1.4–1.7 MB whole-document updates taking seconds.
+
+The fix makes an already-attached replica an immediate no-work path. Each document actor now owns a cached `knownReplicaText`: registration materializes native text once, local deltas carry their exact resulting text into the actor, and remote updates refresh the cache. Ordinary typing no longer performs a native full-text read per key or mutates the shadow from a coalesced future editor cut. A 100K-document regression proves eight sequential deltas require only the initial native text read.
+
+Text adoption now retains the operation durably and synchronously asks the controller to project `crdt_text_adopt`; success is returned only after the controller acknowledges it. That closes the retained-but-not-yet-projected race behind the repeated haiven convergence state, without resending or replacing the exact-once operation.
+
+Sidecars are not runtime authority. The legacy `editor_op_captures` table is no longer read or imported, normal append/clear/GC paths do not consult it, and a regression proves a legacy row remains inert. Runtime recovery uses the typed Lazily state projection. If an actor socket disappears it may rebuild from the typed cold event ledger; if the live actor remains present but unresponsive, it fails closed instead of falling back to a sidecar. Sidecars should be named crash-state files/snapshots, materialized only by crash-state effects/writers.
+
+The broader architecture is now explicit:
+
+- Lazily desired/observed state represents the entire pane-layout pipeline; reconciliation/retry drives tmux toward the desired pane set.
+- Plugins use RPC only as cross-process transport into typed Lazily projections. Effects, not plugins or state readers, perform tmux and crash-state writes.
+- Phase and reason values should be typed enums. Protobuf is not needed merely for those enums; add a schema/IDL only when independently versioned non-Kotlin/non-Rust consumers justify it.
+- Replica isolation is one serialized actor/worker per document on a bounded native pool, not one operating-system thread per replica and not a project-wide lock.
+- The same cross-process state plane that first drives editor–tmux sync is the right substrate for CRDT convergence intent, observed acknowledgments, leases, and retries.
+
+Released agent-doc 0.35.71 and JetBrains plugin 0.2.313. The matching binary/library and plugin package were installed; the controller accepted an idle-boundary recycle. Source commit `89d56d8aa` and parent integration commit `5e987c09c` are pushed, with tag `v0.35.71` published. Verification passed: 390 JetBrains tests, the op-capture authority tests, `cargo fmt --all`, and the full `make check` gate. The user-owned untracked `editors/zed/extension.wasm` was preserved.
+
+Restart the running IntelliJ IDEA instance once to load plugin 0.2.313. After that, typing in a large agent-doc document should stay on the delta-only path instead of entering the attach/full-refresh recovery loop.
+<!-- agent:boundary:deb22508 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 📌 do [#sidecarstate]
+- ~~📌 do [#sidecarstate]~~
 - 📌 do [#5qjj]
 <!-- /agent:queue -->
 
@@ -81,7 +110,6 @@ The pane layout is also reconciled through the new state plane: `agent-doc-bugs2
 <!-- agent:backlog priority priority queue -->
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
-- [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Plan: tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md
 <!-- /agent:backlog -->
 
 ## Review

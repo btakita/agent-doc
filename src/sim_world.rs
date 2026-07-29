@@ -1528,6 +1528,100 @@ mod editor_commit_projection_model {
     }
 }
 
+/// SimWorld reproduction for a restarted-editor recovery wedge: a retained
+/// response has reached `write_applied`, the editor owns a newer authoritative
+/// buffer, disk remains one cut behind, and an idle controller does not
+/// manufacture another write. A recovery-only session check must ask the editor
+/// to save that exact authority instead of requiring IDE exit.
+mod read_only_retained_projection_model {
+    use agent_doc_session_check_io::command::{
+        ReadOnlyTerminalProjectionDecision, decide_read_only_terminal_projection,
+    };
+    use agent_doc_turn::CyclePhase;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        SessionCheck,
+        EditorNativeSave,
+        ControllerCommit,
+    }
+
+    #[derive(Clone, Debug)]
+    struct World {
+        authority: String,
+        disk: String,
+        phase: CyclePhase,
+        retained_write_blocks: bool,
+        native_save_requested: bool,
+        committed: bool,
+        operator_exit_requested: bool,
+    }
+
+    impl World {
+        fn retained_write_applied_wedge() -> Self {
+            Self {
+                authority: "retained response\nrestored operator text\n".into(),
+                disk: "retained response\n".into(),
+                phase: CyclePhase::WriteApplied,
+                retained_write_blocks: true,
+                native_save_requested: false,
+                committed: false,
+                operator_exit_requested: false,
+            }
+        }
+
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::SessionCheck => match decide_read_only_terminal_projection(
+                    self.authority == self.disk,
+                    Some(self.phase),
+                    self.retained_write_blocks,
+                ) {
+                    ReadOnlyTerminalProjectionDecision::Converged => {}
+                    ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave => {
+                        self.native_save_requested = true;
+                    }
+                    ReadOnlyTerminalProjectionDecision::ObserveOnly => {
+                        self.operator_exit_requested = true;
+                    }
+                },
+                Action::EditorNativeSave if self.native_save_requested => {
+                    self.disk = self.authority.clone();
+                    self.native_save_requested = false;
+                }
+                Action::ControllerCommit
+                    if self.phase == CyclePhase::WriteApplied && self.authority == self.disk =>
+                {
+                    self.phase = CyclePhase::Committed;
+                    self.retained_write_blocks = false;
+                    self.committed = true;
+                }
+                _ => {}
+            }
+            assert!(
+                !self.committed || self.authority == self.disk,
+                "retained closeout committed before exact editor-owned save: {self:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn retained_write_applied_session_check_saves_without_operator_idea_exit() {
+        let mut world = World::retained_write_applied_wedge();
+        world.step(Action::SessionCheck);
+        assert!(world.native_save_requested);
+        assert!(!world.operator_exit_requested);
+
+        world.step(Action::EditorNativeSave);
+        assert!(world.disk.contains("restored operator text"));
+        world.step(Action::ControllerCommit);
+
+        assert!(world.committed);
+        assert_eq!(world.phase, CyclePhase::Committed);
+        assert!(!world.operator_exit_requested);
+    }
+}
+
 /// SimWorld for the mid-turn editor-plugin update failure class. It couples the
 /// production generation-refresh and authoritative-rebase policies with durable
 /// response/steering state. A native-only reload is intentionally a separate

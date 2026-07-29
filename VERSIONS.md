@@ -4,6 +4,18 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.86
+
+_JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Recovery-only session checks can now flush a retained `write_applied`
+  editor authority without operator intervention.** The narrow effect asks the
+  editor to save its own latest buffer only when a durable retained closeout
+  proves that disk persistence is the remaining boundary. It still cannot
+  replace, replay, repair, or commit document content. A production-backed
+  SimWorld schedule covers the restarted-editor divergence and proves that
+  restored operator text survives without requiring IDE exit.
+
 ## 0.35.85
 
 _JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._
@@ -19,10 +31,10 @@ _JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._
   response already materialized in HEAD, while a separate queue-only write
   remains retained until raw editor/disk convergence. Interrupted MCP closeout
   reports queue continuation as unknown instead of falsely returning
-  `required=false`, and preflight performs one bounded recovery transition
-  rather than nesting a full session-check that can exhaust the 300-second tool
-  deadline. Focused regressions and SimWorld cover the `haiven.md` failure
-  schedule.
+`required=false`, and preflight performs one bounded recovery transition
+rather than nesting a full session-check that can exhaust the 300-second tool
+deadline. Focused regressions and SimWorld cover the restarted-editor retained
+closeout schedule.
 
 ## 0.35.84
 

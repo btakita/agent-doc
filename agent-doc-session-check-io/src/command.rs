@@ -101,6 +101,32 @@ pub enum CapturedFinalizeResumeOutcome {
     Retained { reason: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadOnlyTerminalProjectionDecision {
+    Converged,
+    RequestNativeEditorSave,
+    ObserveOnly,
+}
+
+/// A direct `session-check` remains unable to replay, repair, or commit document
+/// content. It may, however, ask the live editor to save its own authoritative
+/// buffer when a durable `write_applied` closeout is blocked solely on the disk
+/// projection. This is an editor-owned persistence effect, not a competing
+/// document replacement.
+pub fn decide_read_only_terminal_projection(
+    authority_matches_disk: bool,
+    cycle_phase: Option<CyclePhase>,
+    retained_document_write_blocks: bool,
+) -> ReadOnlyTerminalProjectionDecision {
+    if authority_matches_disk {
+        return ReadOnlyTerminalProjectionDecision::Converged;
+    }
+    if retained_document_write_blocks && cycle_phase == Some(CyclePhase::WriteApplied) {
+        return ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave;
+    }
+    ReadOnlyTerminalProjectionDecision::ObserveOnly
+}
+
 pub trait SessionCheckEffects {
     /// Whether this caller owns document/lifecycle recovery. The operator-facing
     /// `session-check` command sets this false: it is an observer, while
@@ -505,9 +531,10 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
     }
 }
 
-/// Operator-facing, strictly status-only session check. It may read live
-/// authority and write diagnostics/metadata logs, but it cannot project,
-/// repair, replay, or commit document content.
+/// Operator-facing session check. It may read live authority, write
+/// diagnostics/metadata logs, and request one editor-owned native save for a
+/// retained `write_applied` closeout. It cannot replace, repair, replay, or
+/// commit document content.
 pub fn run_read_only_with_options(
     file: &Path,
     codex_final_gate: bool,
@@ -634,9 +661,31 @@ fn run_with_options_inner(
             effects,
         )?;
     } else {
+        let cycle_phase =
+            agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|state| state.phase);
+        if decide_read_only_terminal_projection(
+            authority_content == disk_content,
+            cycle_phase,
+            effects.retained_document_write_blocks(file),
+        ) == ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave
+            && agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
+                file,
+                "session_check_read_only_retained_native_save",
+            )?
+        {
+            crate::invalidate_current_document_pass(file);
+            authority_content = crate::resolve_current_document_content(
+                file,
+                "session_check_read_only_retained_native_save",
+            )?;
+            disk_content = crate::resolve_disk_document_content(
+                file,
+                "session_check_read_only_retained_native_save",
+            )?;
+        }
         anyhow::ensure!(
             authority_content == disk_content,
-            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); status-only check made no projection write, repair, replay, or commit",
+            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); session-check made no semantic projection, repair, replay, or commit, and a safe native editor save was not proven",
             file.display(),
             agent_doc_hash::content_hash(&authority_content),
             agent_doc_hash::content_hash(&disk_content),
@@ -2368,7 +2417,7 @@ mod terminal_convergence_tests {
     }
 
     #[test]
-    fn operator_session_check_effects_refuse_every_document_mutation() {
+    fn operator_session_check_effects_refuse_every_semantic_document_mutation() {
         let effects = ReadOnlySessionCheckEffects {
             inner: &TestEffects,
         };
@@ -2396,6 +2445,26 @@ mod terminal_convergence_tests {
             CapturedFinalizeResumeOutcome::NotApplicable
         );
         assert!(!effects.recover_retained_document_write(file).unwrap());
+    }
+
+    #[test]
+    fn retained_write_applied_session_check_requests_editor_owned_save() {
+        assert_eq!(
+            decide_read_only_terminal_projection(false, Some(CyclePhase::WriteApplied), true,),
+            ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave,
+        );
+        assert_eq!(
+            decide_read_only_terminal_projection(false, Some(CyclePhase::WriteApplied), false,),
+            ReadOnlyTerminalProjectionDecision::ObserveOnly,
+        );
+        assert_eq!(
+            decide_read_only_terminal_projection(false, Some(CyclePhase::ResponseCaptured), true,),
+            ReadOnlyTerminalProjectionDecision::ObserveOnly,
+        );
+        assert_eq!(
+            decide_read_only_terminal_projection(true, Some(CyclePhase::WriteApplied), true),
+            ReadOnlyTerminalProjectionDecision::Converged,
+        );
     }
 
     struct RepairOnlyEffects;

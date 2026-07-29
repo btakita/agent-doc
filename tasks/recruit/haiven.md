@@ -1067,8 +1067,22 @@ The agent-doc skill required an in-place refresh from `0.35.80` to `0.35.81`; th
 
 The Haiven changes are committed as `e298afc6b`, but the agent-doc response commit is waiting for live-editor convergence.
 
-Please save the open [haiven.md](/home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md) buffer, then reply “continue.” The response is durably captured; I won’t resubmit or duplicate it.
-<!-- agent:boundary:974b765e -->
+❯ Please save the open [haiven.md](/home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md) buffer, then reply “continue.” The response is durably captured; I won’t resubmit or duplicate it.
+### Re: Exhibit A recommended additions completed — gpt-5
+
+`#recommendedadditionsexhi` is complete in commit `e298afc6b` (`haiven: expand Exhibit A prior IP scope`).
+
+The committed revision:
+
+- added the identified websites and repository families, including `brookebrodack.net` / `brookebrodack-dev`;
+- added `lazily-hub`, `signal-space`, and `freehold-hub`;
+- added ownership-neutral third-party exclusions and a confidential-manifest mechanism;
+- narrowed the future continuation/successor language;
+- regenerated the three-page US Letter portrait PDF; and
+- shortened the email's submodule safe harbor while identifying the employee-controlled superproject as private.
+
+Verification already completed: `git diff --check` passed, PDF text extraction found all added identifiers, visual inspection found no clipping, and the relevant files are clean after commit. No external message or attachment was sent.
+<!-- agent:boundary:ad4a3778 -->
 <!-- /agent:exchange -->
 
 ## Queue

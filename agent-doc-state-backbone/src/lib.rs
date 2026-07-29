@@ -1311,7 +1311,12 @@ impl DocumentStateProjection {
             .is_some_and(|proof| {
                 proof.capture_id.as_deref() == Some(capture.capture_id.as_str())
                     && proof.response_sha256.as_deref() == Some(capture.response_sha256.as_str())
-                    && proof.did_commit
+                    // `commit_already_current` records `did_commit=false`: Git
+                    // created no commit because the exact response was already
+                    // materialized in HEAD. That proof still settles response
+                    // ownership; otherwise a later queue-only target appears
+                    // to own the older response merely because it contains it.
+                    && (proof.did_commit || proof.response_materialized_in_head)
                     && proof.state_snapshot_hash_matches
                     && proof.snapshot_hash == proof.head_hash
                     && (proof.file_hash == proof.snapshot_hash
@@ -7912,12 +7917,37 @@ mod tests {
         );
 
         ledger.append(state_event(
+            "terminal-proof-without-materialized-response",
+            StateFact::TerminalCloseoutProofRecorded {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                last_event: "commit_already_current".into(),
+                did_commit: false,
+                file_hash: committed_hash.into(),
+                snapshot_hash: committed_hash.into(),
+                head_hash: committed_hash.into(),
+                state_file_hash_matches: true,
+                state_snapshot_hash_matches: true,
+                agreement: TerminalCloseoutAgreement::FileSnapshotHead,
+                response_materialized_in_head: false,
+                capture_id: Some(capture_id.into()),
+                response_sha256: Some(response_sha256.into()),
+                recorded_at_ms: 2,
+            },
+        ));
+        let unmaterialized = ledger.project_document(document_hash).unwrap();
+        assert!(
+            unmaterialized.retained_captured_response_write().is_some(),
+            "an already-current proof without the response in HEAD must retain ownership"
+        );
+
+        ledger.append(state_event(
             "terminal-proof-retained",
             StateFact::TerminalCloseoutProofRecorded {
                 document_hash: document_hash.into(),
                 cycle_id: cycle_1.into(),
-                last_event: "commit_success".into(),
-                did_commit: true,
+                last_event: "commit_already_current".into(),
+                did_commit: false,
                 file_hash: "newer-queue-only-visible-hash".into(),
                 snapshot_hash: committed_hash.into(),
                 head_hash: committed_hash.into(),
@@ -7927,14 +7957,14 @@ mod tests {
                 response_materialized_in_head: true,
                 capture_id: Some(capture_id.into()),
                 response_sha256: Some(response_sha256.into()),
-                recorded_at_ms: 2,
+                recorded_at_ms: 3,
             },
         ));
 
         let terminal = ledger.project_document(document_hash).unwrap();
         assert!(
             terminal.retained_captured_response_write().is_none(),
-            "a matching terminal proof must release retained ownership even after authority advances"
+            "an exact already-current proof must release response ownership even after authority advances"
         );
 
         ledger.append(state_event(

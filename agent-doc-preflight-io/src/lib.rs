@@ -843,37 +843,18 @@ pub fn enforce_cycle_completion(
     // A retained document-write effect is an unfinished durable sink, even
     // when an older repair accidentally made its closeout cycle look terminal.
     // Reading the gate settles a `Satisfied` intent through the controller's
-    // subscribed clear (`#retainedclearreactive`); give session-check one
-    // chance at the exact capture, then fail closed before a new preflight can
-    // replace its live projection.
+    // subscribed clear (`#retainedclearreactive`). When the recovery attempt
+    // leaves it unsettled, fail immediately: calling full session-check from
+    // preflight repeats the same controller/editor observations and can stack
+    // several RPC deadlines behind the MCP tools/call deadline. Reconciliation
+    // is resumable, so one bounded recovery transition is the whole preflight
+    // budget for an already-owned durable sink.
     if effects.retained_document_write(file) {
-        if let Some(reason) = effects.session_interruption(file)? {
-            anyhow::bail!("{}", reason.replace('\n', " "));
-        }
-        if effects.retained_document_write(file) {
-            // `#adretainedcircle`: reaching here means `session_interruption`
-            // just returned `None` — `session-check` reports **ok**. Telling the
-            // operator to "retry session-check" from inside that branch is a
-            // closed loop with no exit, and it is one the binary can already
-            // see: preflight refuses, session-check succeeds, preflight refuses.
-            // Observed 2026-07-26 on tasks/agent-doc/agent-doc-bugs2.md, where
-            // the recovery took an out-of-band manual repair to escape.
-            //
-            // The reachable cause at this point is a reaped `do`-directive head
-            // whose `### Re:` block does not carry the hash-prefixed id, so the
-            // directive-response materializer never matched it and the intent
-            // stayed retained. `session-check` prints that as a warning while
-            // still returning ok, which is why it cannot clear it. Name the
-            // repair that can (`#closeoutwaitchurn`: a refusal must say what to
-            // run, not restate the fact).
-            anyhow::bail!(
-                "retained document-write effect remains unsettled for {file}, but `agent-doc session-check {file}` reports ok — re-running it cannot clear this. \
-                 The usual cause is a reaped `do [#id]` queue head whose answering `### Re:` block does not carry the hash-prefixed id, so the response record never matched the intent; \
-                 check `agent-doc session-check {file}` output for a `reaped ... without an assistant response` warning naming the id, then land one `agent-doc write --commit {file}` whose response header is `### Re: #<that-id>`. \
-                 See ops.log `retained_write_blocks_new_cycle` for the intent id and cause.",
-                file = file.display(),
-            );
-        }
+        anyhow::bail!(
+            "retained document-write reconciliation is still pending for {file}; preflight performed one bounded recovery transition and will not run session-check inline because nested controller/editor observations can hold the MCP call open. \
+             Do not start a new response or replace the queued edit. Let controller reconciliation settle, then run only `agent-doc session-check {file}`.",
+            file = file.display(),
+        );
     }
 
     let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
@@ -5214,6 +5195,7 @@ mod tests {
         /// clears on read rather than exposing a `settle_*` companion.
         settle_satisfies: bool,
         session_interruption: Option<String>,
+        session_interruption_calls: std::cell::Cell<usize>,
     }
 
     impl PreflightCycleCompletionEffects for TestPreflightCycleCompletionEffects {
@@ -5247,6 +5229,8 @@ mod tests {
         }
 
         fn session_interruption(&self, _file: &Path) -> Result<Option<String>> {
+            self.session_interruption_calls
+                .set(self.session_interruption_calls.get() + 1);
             Ok(self.session_interruption.clone())
         }
 
@@ -10228,10 +10212,15 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("binary-owned response delivery is retained"),
+                .contains("one bounded recovery transition"),
         );
         assert_eq!(effects.repair_calls.get(), 0);
         assert_eq!(effects.commit_calls.get(), 0);
+        assert_eq!(
+            effects.session_interruption_calls.get(),
+            0,
+            "preflight must not nest a full session-check behind an unresolved retained write"
+        );
     }
 
     #[test]
@@ -10315,12 +10304,17 @@ mod tests {
 
         let error = enforce_cycle_completion(&doc, &effects).unwrap_err();
         assert!(
-            error.to_string().contains("remains unsettled"),
+            error
+                .to_string()
+                .contains("reconciliation is still pending"),
             "unexpected error: {error}"
         );
-        // Read once for the gate, once after `session_interruption` returned
-        // `None` — the fail-closed re-check.
-        assert_eq!(effects.gate_reads.get(), 2);
+        assert_eq!(
+            effects.gate_reads.get(),
+            1,
+            "one derived gate read is the bounded preflight decision"
+        );
+        assert_eq!(effects.session_interruption_calls.get(), 0);
     }
 
     fn id_set<const N: usize>(ids: [&str; N]) -> std::collections::HashSet<String> {
@@ -10450,21 +10444,20 @@ mod tests {
     }
 
     #[test]
-    fn a_blocked_gate_never_tells_the_operator_to_rerun_a_session_check_that_reports_ok() {
-        // #adretainedcircle: this branch is only reachable when
-        // `session_interruption` returned `None` — session-check reports ok. The
-        // old message said "retry `agent-doc session-check <FILE>`", which is a
-        // closed loop: preflight refuses, session-check succeeds, preflight
-        // refuses. Escaping it took an out-of-band manual repair on 2026-07-26.
-        // The binary can see both halves here, so the refusal must say so and
-        // name a command that can actually clear the intent.
+    fn a_blocked_gate_returns_bounded_reconciliation_without_nested_session_check() {
+        // #adretainedcircle: preflight used to invoke full session-check here,
+        // then either report its interruption or discover that session-check
+        // said ok and prescribe another write. Besides creating a closed loop,
+        // the nested controller/editor reads could exhaust the MCP deadline.
+        // One recovery transition followed by one gate read is the bounded,
+        // resumable decision.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         let effects = TestPreflightCycleCompletionEffects {
             retained_document_write: std::cell::Cell::new(true),
             settle_satisfies: false,
-            // `None`: session-check is happy. That is the whole trap.
+            // A nested session-check would report ok; it must not be called.
             session_interruption: None,
             ..Default::default()
         };
@@ -10473,16 +10466,19 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
-            error.contains("reports ok") && error.contains("cannot clear this"),
-            "the refusal must state that session-check already succeeds: {error}"
+            error.contains("one bounded recovery transition")
+                && error.contains("will not run session-check inline"),
+            "the refusal must explain the bounded recovery boundary: {error}"
         );
         assert!(
-            error.contains("write --commit") && error.contains("### Re: #"),
-            "the refusal must name a repair that can actually clear the intent: {error}"
+            error.contains("Do not start a new response")
+                && error.contains("run only `agent-doc session-check"),
+            "the refusal must preserve the retained effect and prescribe status-only continuation: {error}"
         );
-        assert!(
-            !error.contains("retry `agent-doc session-check"),
-            "must not send the operator back around the loop: {error}"
+        assert_eq!(
+            effects.session_interruption_calls.get(),
+            0,
+            "preflight must not nest session-check behind the unresolved gate"
         );
     }
 

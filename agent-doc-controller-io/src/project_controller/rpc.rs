@@ -70,6 +70,10 @@ static PANE_LAYOUT_STATUS_EPOCH: AtomicU64 = AtomicU64::new(1);
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
 /// gets a generous ceiling.
 const CONTROLLER_COMMIT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(120);
+/// A native editor save is an effect request, not a second convergence loop.
+/// Give the editor a short window to publish the exact raw projection; if it
+/// does not, the retained closeout remains resumable and the caller retries.
+const CONTROLLER_COMMIT_NATIVE_SAVE_SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
 const CONTROLLER_COMPACT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(300);
 static EMBEDDED_NATIVE_HOST: AtomicBool = AtomicBool::new(false);
 thread_local! {
@@ -5730,6 +5734,131 @@ struct ControllerCommitDocumentPayload {
     authoritative_compaction: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControllerCommitProjectionDecision {
+    Ready,
+    NativeSaveRequired,
+    AwaitConvergence,
+}
+
+/// Decide whether Git may observe the live editor projection.
+///
+/// CRDT delivery convergence and disk persistence are separate facts. Git only
+/// sees disk, so a converged relay value that differs byte-for-byte from disk
+/// must first cross the editor's native save boundary. Queue-only mutations are
+/// intentionally significant here even though closeout normalization excludes
+/// them from semantic response comparisons.
+pub fn decide_controller_commit_projection(
+    barrier_ready: bool,
+    current: &agent_doc_crdt_relay_io::CurrentText,
+    disk: Option<&[u8]>,
+) -> ControllerCommitProjectionDecision {
+    if !barrier_ready {
+        return ControllerCommitProjectionDecision::AwaitConvergence;
+    }
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Detached => ControllerCommitProjectionDecision::Ready,
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors,
+            delivery_converged,
+            ..
+        } if *live_editors > 0 && *delivery_converged => {
+            if disk.is_some_and(|disk| disk == text.as_bytes()) {
+                ControllerCommitProjectionDecision::Ready
+            } else {
+                ControllerCommitProjectionDecision::NativeSaveRequired
+            }
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
+        | agent_doc_crdt_relay_io::CurrentText::Current { .. } => {
+            ControllerCommitProjectionDecision::AwaitConvergence
+        }
+    }
+}
+
+fn controller_commit_projection_decision(
+    canonical: &Path,
+    barrier_ready: bool,
+) -> Result<(
+    ControllerCommitProjectionDecision,
+    agent_doc_crdt_relay_io::CurrentText,
+)> {
+    // This executes in the controller that owns the relay. Read its in-memory
+    // Lazily projection directly; never round-trip through the controller
+    // socket while handling a controller RPC.
+    let current = agent_doc_crdt_relay_io::current_text_for_file_nonblocking(canonical)?;
+    let disk = std::fs::read(canonical).ok();
+    let decision = decide_controller_commit_projection(barrier_ready, &current, disk.as_deref());
+    Ok((decision, current))
+}
+
+fn ensure_controller_commit_projection_saved(
+    bootstrap: &ControllerBootstrap,
+    canonical: &Path,
+    barrier_ready: bool,
+) -> Result<bool> {
+    let (decision, current) = controller_commit_projection_decision(canonical, barrier_ready)?;
+    match decision {
+        ControllerCommitProjectionDecision::Ready => return Ok(true),
+        ControllerCommitProjectionDecision::AwaitConvergence => return Ok(false),
+        ControllerCommitProjectionDecision::NativeSaveRequired => {}
+    }
+
+    let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } = current else {
+        return Ok(false);
+    };
+    let target_hash = agent_doc_hash::content_hash(&text);
+    let Some(registration) = live_editor_registration_for_file(canonical)? else {
+        return Ok(false);
+    };
+    if !agent_doc_ipc_io::is_listener_active_for_pid(&bootstrap.project_root, registration.pid) {
+        return Ok(false);
+    }
+    let patch_id = format!("controller-commit-save-{target_hash}");
+    let path = canonical.to_string_lossy();
+    if !agent_doc_ipc_io::send_save_document_to_editor(
+        &bootstrap.project_root,
+        registration.pid,
+        &registration.editor_id,
+        &path,
+        &patch_id,
+    )? {
+        return Ok(false);
+    }
+
+    let deadline = Instant::now() + CONTROLLER_COMMIT_NATIVE_SAVE_SETTLE_TIMEOUT;
+    loop {
+        let (decision, latest) = controller_commit_projection_decision(canonical, true)?;
+        if decision == ControllerCommitProjectionDecision::Ready {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "controller_commit_native_save_converged file={} patch_id={} target_hash={} disk_write=false",
+                    canonical.display(),
+                    patch_id,
+                    target_hash,
+                ),
+            );
+            return Ok(true);
+        }
+        if matches!(
+            latest,
+            agent_doc_crdt_relay_io::CurrentText::Current { ref text, .. }
+                if agent_doc_hash::content_hash(text) != target_hash
+        ) {
+            // The operator edited during the save. Preserve that newer authority
+            // and let a later retry save its revision; never commit the old one.
+            return Ok(false);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 /// Perform the git commit for a document from inside the controller process. This
 /// is the CP-owned commit: the controller hosts the converged relay canonical, so
 /// running the commit here — rather than the CLI asking over the socket and then
@@ -5755,21 +5884,31 @@ fn handle_commit_document_rpc(
         }
         None => ControllerCommitDocumentPayload::default(),
     };
-    // Converge: flush live editor ops into the canonical so the in-process commit
-    // reads the authoritative merged content. We proceed regardless of the
-    // editor-behind readiness bit — this is an explicit authority commit, the
-    // canonical is authority, and editors reconcile via the replace-capable replica
-    // delivery.
+    // Converge the relay, then prove the editor has projected that exact raw
+    // revision to disk. Git cannot observe the in-memory canonical, and a
+    // normalized "already current" comparison deliberately ignores queue-only
+    // mutations; skipping this distinct save proof lost queue strikes.
     let barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
+    let disk_projection_ready =
+        ensure_controller_commit_projection_saved(bootstrap, &canonical, barrier_ready)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
-            "controller_commit_document file={} authoritative_compaction={} barrier_ready={}",
+            "controller_commit_document file={} authoritative_compaction={} barrier_ready={} disk_projection_ready={}",
             canonical.display(),
             payload.authoritative_compaction,
-            barrier_ready
+            barrier_ready,
+            disk_projection_ready,
         ),
     );
+    if !barrier_ready || !disk_projection_ready {
+        anyhow::bail!(
+            "live editor commit projection is not durable yet for {} (barrier_ready={} disk_projection_ready={}); native editor save/reconciliation remains pending",
+            canonical.display(),
+            barrier_ready,
+            disk_projection_ready,
+        );
+    }
     runtime_effects()?.commit_document(&canonical, payload.authoritative_compaction)
 }
 
@@ -23882,6 +24021,53 @@ mod tests {
         // An absent field defaults to false so an older client's payload stays valid.
         let legacy: ControllerCommitDocumentPayload = serde_json::from_str("{}").unwrap();
         assert!(!legacy.authoritative_compaction);
+    }
+
+    #[test]
+    fn live_commit_requires_exact_raw_disk_projection_after_delivery_converges() {
+        use agent_doc_crdt_relay_io::CurrentText;
+
+        let authority = CurrentText::Current {
+            text: "# Queue\n- [x] [#done] answer\n".into(),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 7,
+            semantics: None,
+        };
+        assert_eq!(
+            decide_controller_commit_projection(
+                true,
+                &authority,
+                Some(b"# Queue\n- [ ] [#done] answer\n"),
+            ),
+            ControllerCommitProjectionDecision::NativeSaveRequired,
+            "a queue-only raw difference must cross the native save boundary before Git's already-current shortcut"
+        );
+        assert_eq!(
+            decide_controller_commit_projection(
+                true,
+                &authority,
+                Some(b"# Queue\n- [x] [#done] answer\n"),
+            ),
+            ControllerCommitProjectionDecision::Ready,
+        );
+        assert_eq!(
+            decide_controller_commit_projection(false, &authority, None),
+            ControllerCommitProjectionDecision::AwaitConvergence,
+        );
+
+        let pending = CurrentText::Current {
+            text: "# Queue\n- [x] [#done] answer\n".into(),
+            live_editors: 1,
+            delivery_converged: false,
+            delivery_version: 8,
+            semantics: None,
+        };
+        assert_eq!(
+            decide_controller_commit_projection(true, &pending, None),
+            ControllerCommitProjectionDecision::AwaitConvergence,
+            "native save cannot substitute for an unconverged relay cut"
+        );
     }
 
     #[test]

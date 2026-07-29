@@ -561,8 +561,9 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
             (false, "interrupted", message)
         }
     };
-    let continuation =
-        resolve_tool_queue_continuation(&file, "mcp_session_check_queue_continuation")?;
+    let continuation = ok
+        .then(|| resolve_tool_queue_continuation(&file, "mcp_session_check_queue_continuation"))
+        .transpose()?;
     let mut structured = json!({
         "ok": ok,
         "status": status,
@@ -573,7 +574,11 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
         structured
             .as_object_mut()
             .expect("session-check result is an object"),
-        continuation.as_ref(),
+        if ok {
+            QueueContinuationProjection::Known(continuation.as_ref().and_then(Option::as_ref))
+        } else {
+            QueueContinuationProjection::Unsettled("closeout_unsettled")
+        },
     );
     Ok(tool_success_result(
         serde_json::to_string_pretty(&structured)?,
@@ -684,7 +689,9 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
             (false, "interrupted", message)
         }
     };
-    let continuation = resolve_tool_queue_continuation(&file, "mcp_finalize_queue_continuation")?;
+    let continuation = ok
+        .then(|| resolve_tool_queue_continuation(&file, "mcp_finalize_queue_continuation"))
+        .transpose()?;
     let mut structured = json!({
         "ok": ok,
         "status": status,
@@ -695,7 +702,11 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         structured
             .as_object_mut()
             .expect("finalize result is an object"),
-        continuation.as_ref(),
+        if ok {
+            QueueContinuationProjection::Known(continuation.as_ref().and_then(Option::as_ref))
+        } else {
+            QueueContinuationProjection::Unsettled("closeout_unsettled")
+        },
     );
     Ok(tool_success_result(
         serde_json::to_string_pretty(&structured)?,
@@ -712,13 +723,28 @@ fn resolve_tool_queue_continuation(
     agent_doc_queue_io::queue_continuation::detect_for_content(file, &content)
 }
 
+#[derive(Clone, Copy)]
+enum QueueContinuationProjection<'a> {
+    Known(Option<&'a agent_doc_queue::queue_continuation::QueueContinuation>),
+    Unsettled(&'static str),
+}
+
 fn add_queue_continuation_fields(
     result: &mut Map<String, Value>,
-    continuation: Option<&agent_doc_queue::queue_continuation::QueueContinuation>,
+    projection: QueueContinuationProjection<'_>,
 ) {
+    let (known, continuation, unsettled_reason) = match projection {
+        QueueContinuationProjection::Known(continuation) => (true, continuation, None),
+        QueueContinuationProjection::Unsettled(reason) => (false, None, Some(reason)),
+    };
+    result.insert("queue_continuation_known".to_string(), Value::Bool(known));
     result.insert(
         "queue_continuation_required".to_string(),
-        Value::Bool(continuation.is_some()),
+        if known {
+            Value::Bool(continuation.is_some())
+        } else {
+            Value::Null
+        },
     );
     result.insert(
         "next_queue_prompt".to_string(),
@@ -737,6 +763,12 @@ fn add_queue_continuation_fields(
         "queue_continuation_reason".to_string(),
         continuation
             .map(|item| Value::String(item.reason.clone()))
+            .unwrap_or(Value::Null),
+    );
+    result.insert(
+        "queue_continuation_unsettled_reason".to_string(),
+        unsettled_reason
+            .map(|reason| Value::String(reason.to_string()))
             .unwrap_or(Value::Null),
     );
 }
@@ -1017,8 +1049,12 @@ mod tests {
             reason: "queue_auto_continuation".to_string(),
         };
         let mut result = Map::new();
-        add_queue_continuation_fields(&mut result, Some(&continuation));
+        add_queue_continuation_fields(
+            &mut result,
+            QueueContinuationProjection::Known(Some(&continuation)),
+        );
 
+        assert_eq!(result["queue_continuation_known"], true);
         assert_eq!(result["queue_continuation_required"], true);
         assert_eq!(result["next_queue_prompt"], "do [#next]");
         assert_eq!(result["next_queue_head_id"], "next");
@@ -1027,11 +1063,31 @@ mod tests {
             "queue_auto_continuation"
         );
 
-        add_queue_continuation_fields(&mut result, None);
+        add_queue_continuation_fields(&mut result, QueueContinuationProjection::Known(None));
+        assert_eq!(result["queue_continuation_known"], true);
         assert_eq!(result["queue_continuation_required"], false);
         assert!(result["next_queue_prompt"].is_null());
         assert!(result["next_queue_head_id"].is_null());
         assert!(result["queue_continuation_reason"].is_null());
+        assert!(result["queue_continuation_unsettled_reason"].is_null());
+    }
+
+    #[test]
+    fn interrupted_closeout_keeps_queue_projection_unknown() {
+        let mut result = Map::new();
+        add_queue_continuation_fields(
+            &mut result,
+            QueueContinuationProjection::Unsettled("closeout_unsettled"),
+        );
+
+        assert_eq!(result["queue_continuation_known"], false);
+        assert!(result["queue_continuation_required"].is_null());
+        assert!(result["next_queue_prompt"].is_null());
+        assert!(result["next_queue_head_id"].is_null());
+        assert_eq!(
+            result["queue_continuation_unsettled_reason"],
+            "closeout_unsettled"
+        );
     }
 
     #[test]

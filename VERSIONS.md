@@ -4,6 +4,26 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.85
+
+_JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Live-editor commits now require the exact raw editor projection on disk.**
+  CRDT delivery convergence no longer authorizes Git's normalized
+  `already_current` shortcut while queue-only mutations remain unsaved. The
+  controller requests one native editor save, rechecks the latest authoritative
+  revision, preserves operator edits made during the save, and leaves closeout
+  resumably pending when exact persistence is not yet proven.
+- **Retained-response and queue continuation projections no longer manufacture
+  churn.** An exact `commit_already_current` proof settles ownership of a
+  response already materialized in HEAD, while a separate queue-only write
+  remains retained until raw editor/disk convergence. Interrupted MCP closeout
+  reports queue continuation as unknown instead of falsely returning
+  `required=false`, and preflight performs one bounded recovery transition
+  rather than nesting a full session-check that can exhaust the 300-second tool
+  deadline. Focused regressions and SimWorld cover the `haiven.md` failure
+  schedule.
+
 ## 0.35.84
 
 _JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._

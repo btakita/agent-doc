@@ -1411,6 +1411,123 @@ mod retained_closeout_recovery_model {
     }
 }
 
+/// Deterministic model for the queue-strike loss seen when the live editor and
+/// disk differed only in route-owned queue state. Delivery ACK, native editor
+/// save, and Git commit are distinct transitions.
+mod editor_commit_projection_model {
+    use agent_doc_controller_io::project_controller::{
+        ControllerCommitProjectionDecision, decide_controller_commit_projection,
+    };
+    use agent_doc_crdt_relay_io::CurrentText;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        StrikeQueue,
+        DeliveryAck,
+        Commit,
+        OperatorEdit,
+        NativeSave,
+    }
+
+    #[derive(Clone, Debug)]
+    struct World {
+        authority: String,
+        disk: String,
+        delivery_converged: bool,
+        native_save_requested: bool,
+        committed: bool,
+    }
+
+    impl Default for World {
+        fn default() -> Self {
+            let initial = "# Queue\n- [ ] [#implementlazilyintent] implement\n";
+            Self {
+                authority: initial.into(),
+                disk: initial.into(),
+                delivery_converged: false,
+                native_save_requested: false,
+                committed: false,
+            }
+        }
+    }
+
+    impl World {
+        fn decision(&self) -> ControllerCommitProjectionDecision {
+            decide_controller_commit_projection(
+                self.delivery_converged,
+                &CurrentText::Current {
+                    text: self.authority.clone(),
+                    live_editors: 1,
+                    delivery_converged: self.delivery_converged,
+                    delivery_version: u64::from(self.delivery_converged),
+                    semantics: None,
+                },
+                Some(self.disk.as_bytes()),
+            )
+        }
+
+        fn step(&mut self, action: Action) {
+            if self.committed {
+                return;
+            }
+            match action {
+                Action::StrikeQueue => {
+                    self.authority = "# Queue\n- [x] [#implementlazilyintent] implement\n".into();
+                    self.delivery_converged = false;
+                }
+                Action::DeliveryAck => self.delivery_converged = true,
+                Action::Commit => match self.decision() {
+                    ControllerCommitProjectionDecision::Ready => self.committed = true,
+                    ControllerCommitProjectionDecision::NativeSaveRequired => {
+                        self.native_save_requested = true;
+                    }
+                    ControllerCommitProjectionDecision::AwaitConvergence => {}
+                },
+                Action::OperatorEdit => {
+                    self.authority
+                        .push_str("\noperator text typed during closeout\n");
+                    self.delivery_converged = true;
+                }
+                Action::NativeSave if self.native_save_requested => {
+                    // The editor saves its latest authoritative buffer, including
+                    // operator text that arrived after the original request.
+                    self.disk = self.authority.clone();
+                    self.native_save_requested = false;
+                }
+                Action::NativeSave => {}
+            }
+            assert!(
+                !self.committed
+                    || (self.delivery_converged
+                        && self.disk.as_bytes() == self.authority.as_bytes()),
+                "Git committed before the exact live editor projection reached disk: {self:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn queue_strike_waits_for_native_save_and_preserves_concurrent_operator_text() {
+        let mut world = World::default();
+        world.step(Action::StrikeQueue);
+        world.step(Action::DeliveryAck);
+        world.step(Action::Commit);
+        assert!(!world.committed);
+        assert!(world.native_save_requested);
+        assert_eq!(
+            world.decision(),
+            ControllerCommitProjectionDecision::NativeSaveRequired
+        );
+
+        world.step(Action::OperatorEdit);
+        world.step(Action::NativeSave);
+        world.step(Action::Commit);
+
+        assert!(world.committed);
+        assert!(world.disk.contains("[x] [#implementlazilyintent]"));
+        assert!(world.disk.contains("operator text typed during closeout"));
+    }
+}
+
 /// SimWorld for the mid-turn editor-plugin update failure class. It couples the
 /// production generation-refresh and authoritative-rebase policies with durable
 /// response/steering state. A native-only reload is intentionally a separate

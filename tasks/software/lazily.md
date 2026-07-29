@@ -8,14 +8,14 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-completed
+gated: npm security-key user presence required
 <!-- /agent:status -->
 
 ## Exchange
@@ -355,30 +355,33 @@ Published and verified:
 JavaScript `0.31.0` is intentionally still untagged and npm returns E404 for it. Brave is connected to the package access page, but npm is waiting for physical security-key/user-presence confirmation before the trusted publisher can be saved for `lazily-hub/lazily-js` / `release.yml`. Both `#lzstdlibmatrixrelease` and `#lzjspublish` remain gated on that external confirmation; once the key is touched, configure the publisher, push `v0.31.0`, and verify npm.
 
 The root network-suite CI run did not start any steps because the GitHub account has failed payments or a spending-limit restriction. Local full-suite and nightly evidence is green; this is an external CI-start blocker rather than a test failure.
-<!-- agent:boundary:ddf1691a -->
+
+### Re: Phase 5 external release gate — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzstdlibmatrixrelease]
+
+
+The implementation, matrix, mutation, coverage, and eight non-JavaScript releases are complete. `#lzstdlibmatrixrelease` remains gated only because npm still requires the operator’s physical security-key confirmation before `lazily-js 0.31.0` can be trusted-publisher released. No JavaScript tag or false registry claim was created.
+<!-- agent:boundary:28c6ba2b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzstdlibspec]~~
-- ~~do [#lzstdlibrsfixtures]~~
-- ~~do [#lzstdlibportsnative]~~
-- ~~do [#lzstdlibportsmanaged]~~
-- ~~do [#lzstdlibcspromote]~~
-- do [#lzstdlibmatrixrelease]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
-- [ ] [#lzstdlibmatrixrelease] Implement Phase 5 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: run the capability-driven all-peer/all-channel matrix, enforce CI and mutation gates, publish coverage evidence, and release bindings inside-out only after every claimed cell is green.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzstdlibmatrixrelease] Implement Phase 5 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: run the capability-driven all-peer/all-channel matrix, enforce CI and mutation gates, publish coverage evidence, and release bindings inside-out only after every claimed cell is green.
 - [/] [#lzjsnpmtrustedpub] [operator-action] lazily-js repository workflow/OIDC/provenance is ready, but npm rejects publication until trusted-publisher setup is completed. NEXT: authenticate npm, register `@lazily-hub/lazily-js` for `lazily-hub/lazily-js` workflow `release.yml` with no environment and allowed action `npm publish`, verify with `npm trust list @lazily-hub/lazily-js`, then prove the next version tag.
 <!-- /agent:review -->
 

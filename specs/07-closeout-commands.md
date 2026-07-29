@@ -69,13 +69,18 @@ the save effect.
 If the editor endpoint remains live while its controller replica or native
 content-projection callback is missing, current-document resolution may send a
 save-only `save_document` request without `patch_id`. A terminal applied receipt
-proves the editor's save API completed and authorizes one structurally validated
-read of that editor-written disk cut. This is not general disk fallback: no
-receipt, a rejected request, a missing endpoint, or invalid saved bytes preserves
-the original missing-replica failure. Because the save-only payload is stable
-across builds, this one request may retry the same protocol version using the
-listener's reported build ID; all projection-bearing mutations remain strictly
-build-fenced.
+proves the editor's save API completed. The binary must then send
+`observe_lazily_current` to that same endpoint, wait for its terminal applied
+receipt, and re-resolve through controller/CRDT authority. The saved disk cut is
+never promoted to live authority. No save receipt, rejected observation, missing
+endpoint, absent replica after observation, or structurally invalid current
+content preserves the original missing-replica failure.
+
+Because both halves are protocol-stable, the save-only request and its paired
+post-save observation may retry the same protocol version using the listener's
+reported build ID. The observation exception is admitted only after the applied
+save receipt; general observation and projection-bearing mutation intents remain
+strictly build-fenced.
 
 After a response is committed, an editor/CRDT replica may not regress authority
 to that capture's pre-response baseline. When the current authority is proven

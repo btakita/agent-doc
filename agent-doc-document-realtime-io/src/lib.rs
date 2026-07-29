@@ -1232,6 +1232,15 @@ fn canonical_disk_projection_is_exact(path: &Path, canonical: &str) -> bool {
 /// distinct protocol transition: it is successful only when disk contains the
 /// exact canonical version and that same version remains the converged live
 /// editor authority.
+fn editor_save_authority_is_sufficient(
+    authoritative_text: &str,
+    canonical: &str,
+    live_editors: usize,
+    delivery_converged: bool,
+) -> bool {
+    authoritative_text == canonical && live_editors > 0 && (delivery_converged || live_editors == 1)
+}
+
 fn request_native_editor_save_for_canonical_projection(
     path: &Path,
     canonical: &str,
@@ -1391,24 +1400,30 @@ fn request_native_editor_save_for_canonical_projection(
                 path,
                 "native_editor_save_projection_proof",
             )?;
-            if matches!(
-                current,
-                agent_doc_crdt_relay_io::CurrentText::Current {
-                        ref text,
-                        live_editors,
-                        delivery_converged: true,
-                        ..
-                    } if live_editors > 0 && text == canonical
-            ) {
+            if let agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                live_editors,
+                delivery_converged,
+                ..
+            } = current
+                && editor_save_authority_is_sufficient(
+                    &text,
+                    canonical,
+                    live_editors,
+                    delivery_converged,
+                )
+            {
                 agent_doc_ops_log_io::log_op(
                     path,
                     &format!(
-                        "native_editor_save_settled file={} source={} patch_id={} transport={} content_hash={} editor_version_exact=true disk_version_exact=true",
+                        "native_editor_save_settled file={} source={} patch_id={} transport={} content_hash={} editor_version_exact=true delivery_converged={} single_editor_exact={} disk_version_exact=true",
                         path.display(),
                         source,
                         patch_id,
                         "socket",
                         agent_doc_hash::content_hash(canonical),
+                        delivery_converged,
+                        live_editors == 1,
                     ),
                 );
                 return Ok(true);
@@ -1438,8 +1453,11 @@ fn request_native_editor_save_for_canonical_projection(
 ///
 /// This is the terminal recovery path for a valid, delivery-converged editor
 /// cut whose historical deferred-write event was incorrectly retired after an
-/// ACK but before disk-save proof. The editor remains the source of truth: no
-/// disk candidate is merged into it and no force-disk write is permitted.
+/// ACK but before disk-save proof, or whose sole editor already holds the exact
+/// retained target while the historical delivery ACK remains pending. The
+/// editor remains the source of truth: no disk candidate is merged into it and
+/// no force-disk write is permitted. Multiple live editors still require full
+/// delivery convergence before any one of them is allowed to save.
 pub fn settle_live_editor_projection_through_authority(path: &Path, source: &str) -> Result<bool> {
     let canonical = try_resolve_current_document_content(path, source)?;
     let disk = resolve_disk_current_document_content(path, source)?;
@@ -1450,13 +1468,13 @@ pub fn settle_live_editor_projection_through_authority(path: &Path, source: &str
     let agent_doc_crdt_relay_io::CurrentText::Current {
         text,
         live_editors,
-        delivery_converged: true,
+        delivery_converged,
         ..
     } = observe_live_editor_authority_after_model_ensure(path, source)?
     else {
         return Ok(false);
     };
-    if live_editors == 0 || text != canonical {
+    if !editor_save_authority_is_sufficient(&text, &canonical, live_editors, delivery_converged) {
         return Ok(false);
     }
     if !request_native_editor_save_for_canonical_projection(path, &canonical, source)? {
@@ -1470,10 +1488,12 @@ pub fn settle_live_editor_projection_through_authority(path: &Path, source: &str
     agent_doc_ops_log_io::log_op(
         path,
         &format!(
-            "live_editor_projection_settled file={} source={} content_hash={} editor_authority=true delivery_converged=true disk_version_exact=true",
+            "live_editor_projection_settled file={} source={} content_hash={} editor_authority=true delivery_converged={} single_editor_exact={} disk_version_exact=true",
             path.display(),
             source,
             agent_doc_hash::content_hash(&canonical),
+            delivery_converged,
+            live_editors == 1,
         ),
     );
     Ok(true)
@@ -5669,11 +5689,12 @@ fn try_resolve_current_document_uncached_with_source(
 /// Recover a current-document snapshot through the editor's own save API when
 /// the live controller replica is missing.
 ///
-/// This is not a disk fallback. The disk read is admitted only after the exact
-/// registered editor endpoint returns a terminal `applied` receipt for a typed
-/// save-only request. The saved cut is structurally validated before it becomes
-/// the pass-scoped current document; a missing listener, rejected receipt, or
-/// invalid document leaves the original authority failure intact.
+/// This is not a disk fallback. After the exact registered editor endpoint
+/// returns a terminal `applied` receipt for a typed save-only request, the
+/// binary asks that endpoint to publish and force-register its current content.
+/// Only the resulting controller/CRDT reconciliation becomes the pass-scoped
+/// current document; a missing listener, rejected receipt, failed registration,
+/// or invalid document leaves the original authority failure intact.
 fn recover_current_document_from_editor_save(
     file: &std::path::Path,
     source: &str,
@@ -5706,28 +5727,36 @@ fn recover_current_document_from_editor_save(
         return Ok(None);
     }
 
-    let saved = std::fs::read_to_string(&canonical_path).with_context(|| {
-        format!(
-            "{source}: editor save was applied but its disk projection could not be read for {}",
-            canonical_path.display()
-        )
-    })?;
-    validate_canonical_document_target(&canonical_path, &saved, source)?;
-    let saved_buffer = BufferState::new(saved.clone(), false, 0);
-    let document = CurrentDocument::new(
-        canonical_path.clone(),
-        reconcile_current_doc(&saved, Some(&saved_buffer)),
-    );
+    if !agent_doc_ipc_io::send_observe_lazily_current_after_editor_save_to_editor(
+        &project_root,
+        registration.pid,
+        &registration.editor_id,
+        &path_str,
+    )? {
+        return Ok(None);
+    }
+
+    let reconciliation =
+        try_resolve_current_doc_from_file_with_source(&canonical_path, source).with_context(|| {
+            format!(
+                "{source}: editor save and current-content observation were applied, but the CRDT replica was still unavailable for {}",
+                canonical_path.display()
+            )
+        })?;
+    let authoritative_content = reconciliation.authoritative_content();
+    validate_canonical_document_target(&canonical_path, authoritative_content, source)?;
+    let content_hash = agent_doc_hash::content_hash(authoritative_content);
+    let document = CurrentDocument::new(canonical_path.clone(), reconciliation);
     agent_doc_ops_log_io::log_op(
         &canonical_path,
         &format!(
-            "current_document_recovered_from_editor_save file={} source={} save_request_id={} editor_id={} editor_pid={} content_hash={} editor_save_receipt=true disk_version_editor_saved=true",
+            "current_document_recovered_from_editor_save file={} source={} save_request_id={} editor_id={} editor_pid={} content_hash={} editor_save_receipt=true editor_observe_receipt=true crdt_replica_registered=true",
             canonical_path.display(),
             source,
             save_request_id,
             registration.editor_id,
             registration.pid,
-            agent_doc_hash::content_hash(&saved),
+            content_hash,
         ),
     );
     Ok(Some(document))
@@ -10572,6 +10601,34 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), editor_target);
         assert!(pending_document_write(&file).is_none());
+    }
+
+    #[test]
+    fn exact_single_editor_can_save_while_historical_delivery_ack_is_pending() {
+        assert!(editor_save_authority_is_sufficient(
+            "canonical",
+            "canonical",
+            1,
+            false,
+        ));
+        assert!(!editor_save_authority_is_sufficient(
+            "canonical",
+            "canonical",
+            2,
+            false,
+        ));
+        assert!(editor_save_authority_is_sufficient(
+            "canonical",
+            "canonical",
+            2,
+            true,
+        ));
+        assert!(!editor_save_authority_is_sufficient(
+            "different",
+            "canonical",
+            1,
+            false,
+        ));
     }
 
     #[test]

@@ -118,7 +118,12 @@ recovery or pane creation. The editor surface graph owns that structural work.
 Its `active_window_guard` registers a project-scoped fence at async admission;
 supersession and the command deadline are checked again while holding that
 fence across the final `select-pane` effect. A worker that was accepted earlier
-cannot select after a newer editor intent has arrived.
+cannot select after a newer editor intent has arrived. On i3, the same final
+effect also requires a supported editor to own desktop focus. When the operator
+has moved to another i3 window, editor-origin focus is suppressed. Automatic
+layout reconciliation may still repair pane placement, but its focus target is
+stripped at the effect boundary so it cannot surface `stash` after the editor
+loses desktop focus.
 - Explicit `--pane` remains a direct tmux selection escape hatch. `--blocking`
   keeps the legacy synchronous local actor/registry resolver and may surface a
   stashed pane before returning.

@@ -735,11 +735,36 @@ pub fn send_save_document_without_projection_to_editor(
     message["editor_id"] = serde_json::Value::String(editor_id.to_string());
     message["editor_pid"] = serde_json::Value::from(editor_pid);
 
+    let receipt = send_terminal_protocol_stable_message_with_listener_build_retry(
+        project_root,
+        editor_pid,
+        &message,
+        "save-only",
+    )?;
+
+    match receipt {
+        Some(receipt) => {
+            eprintln!("[ipc-socket] save_document without projection applied, receipt: {receipt}");
+            Ok(true)
+        }
+        None => {
+            eprintln!("[ipc-socket] save_document without projection had no terminal receipt");
+            Ok(false)
+        }
+    }
+}
+
+fn send_terminal_protocol_stable_message_with_listener_build_retry(
+    project_root: &Path,
+    editor_pid: u64,
+    message: &serde_json::Value,
+    operation: &str,
+) -> Result<Option<String>> {
     let send = |identity: &IpcPeerIdentity| {
         send_message_with_timeout_inner_with_identity(
             project_root,
             Some(editor_pid),
-            &message,
+            message,
             Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
             PendingReceiptMode::WaitForTerminal,
             identity,
@@ -755,28 +780,21 @@ pub fn send_save_document_without_projection_to_editor(
                 return Err(error);
             };
             eprintln!(
-                "[ipc-socket] save-only build compatibility retry: listener_build={received}"
+                "[ipc-socket] {operation} build compatibility retry: listener_build={received}"
             );
             send(&IpcPeerIdentity::new(
                 IPC_PROTOCOL_VERSION,
                 received.clone(),
             ))
             .with_context(|| {
-                format!("save-only IPC compatibility retry failed after build mismatch: {error:#}")
+                format!(
+                    "{operation} IPC compatibility retry failed after build mismatch: {error:#}"
+                )
             })?
         }
     };
 
-    match receipt {
-        Some(receipt) => {
-            eprintln!("[ipc-socket] save_document without projection applied, receipt: {receipt}");
-            Ok(true)
-        }
-        None => {
-            eprintln!("[ipc-socket] save_document without projection had no terminal receipt");
-            Ok(false)
-        }
-    }
+    Ok(receipt)
 }
 
 /// Send committed content to the editor when the binary has just repaired a
@@ -836,6 +854,43 @@ pub fn send_observe_lazily_current_to_editor_with_timeout(
     // liveness probe. Returning on the early `accepted` receipt lets the caller
     // poll the relay before the plugin has registered/refreshed its replica.
     send_message_to_pid_with_timeout(project_root, editor_pid, &message, timeout).map(|_| true)
+}
+
+/// Re-register the editor's current document immediately after that same
+/// endpoint returned an applied save-only receipt.
+///
+/// A freshly installed CLI may be one build ahead of an already-running editor
+/// listener. This narrowly scoped post-save observation may therefore retry a
+/// same-protocol listener using its reported build identity. Callers must not
+/// use this as a general build-fence bypass: the preceding editor save is the
+/// proof that makes the visible baseline safe to register and lets any retained
+/// semantic write resume over it.
+pub fn send_observe_lazily_current_after_editor_save_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    file: &str,
+) -> Result<bool> {
+    let mut message = observe_lazily_current_message(file);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
+
+    let receipt = send_terminal_protocol_stable_message_with_listener_build_retry(
+        project_root,
+        editor_pid,
+        &message,
+        "post-save observe",
+    )?;
+    match receipt {
+        Some(receipt) => {
+            eprintln!("[ipc-socket] post-save observe_lazily_current applied, receipt: {receipt}");
+            Ok(true)
+        }
+        None => {
+            eprintln!("[ipc-socket] post-save observe_lazily_current had no terminal receipt");
+            Ok(false)
+        }
+    }
 }
 
 /// Send a VCS refresh signal.
@@ -1909,6 +1964,55 @@ mod tests {
             captured.lock().as_ref().and_then(|msg| msg.get("type")),
             Some(&serde_json::Value::String("save_document".to_string()))
         );
+
+        shutdown.store(true, Ordering::SeqCst);
+        wake_listener(&root).unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn post_save_observe_retries_a_same_protocol_older_build_listener() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let captured = std::sync::Arc::new(Mutex::new(None::<serde_json::Value>));
+        let captured_clone = captured.clone();
+        let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener_with_logger_and_read_timeout(
+                &root_clone,
+                move |msg| {
+                    let value: serde_json::Value = serde_json::from_str(msg).ok()?;
+                    *captured_clone.lock() = Some(value);
+                    Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
+                },
+                noop_ops_logger,
+                Duration::from_secs(1),
+                Some(server_shutdown),
+                IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "older-compatible-build"),
+            )
+            .unwrap();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let ok = send_observe_lazily_current_after_editor_save_to_editor(
+            &root,
+            u64::from(std::process::id()),
+            "test-editor",
+            "/tmp/plan.md",
+        )
+        .unwrap();
+        assert!(ok);
+        let message = captured.lock().clone().expect("listener saw a message");
+        assert_eq!(message["type"], "observe_lazily_current");
+        assert_eq!(message["file"], "/tmp/plan.md");
+        assert_eq!(message["early_receipt"], true);
+        assert!(message.get("content").is_none());
+        assert!(message.get("patches").is_none());
 
         shutdown.store(true, Ordering::SeqCst);
         wake_listener(&root).unwrap();

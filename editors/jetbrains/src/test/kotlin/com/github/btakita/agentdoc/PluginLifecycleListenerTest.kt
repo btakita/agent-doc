@@ -41,6 +41,8 @@ class PluginLifecycleListenerTest {
             1,
             Regex("""instances\.computeIfAbsent\(project\)""").findAll(focusSyncSource).count(),
         )
+        assertTrue(focusSyncSource.contains("manager.openFile(file, false, true)"))
+        assertFalse(focusSyncSource.contains("manager.openFile(file, true, true)"))
     }
 
     @Test

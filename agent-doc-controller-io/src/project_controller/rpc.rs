@@ -6666,6 +6666,94 @@ enum AsyncEditorFocusFenceDecision {
     Expired,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DesktopEditorFocusState {
+    #[cfg(any(test, not(feature = "test-support")))]
+    Editor,
+    Other,
+    Unknown,
+}
+
+#[cfg(any(test, not(feature = "test-support")))]
+fn focused_i3_window_class(tree: &serde_json::Value) -> Option<&str> {
+    if tree.get("focused").and_then(serde_json::Value::as_bool) == Some(true)
+        && let Some(class) = tree
+            .get("window_properties")
+            .and_then(|properties| properties.get("class"))
+            .and_then(serde_json::Value::as_str)
+    {
+        return Some(class);
+    }
+    for child_key in ["nodes", "floating_nodes"] {
+        if let Some(children) = tree.get(child_key).and_then(serde_json::Value::as_array) {
+            for child in children {
+                if let Some(class) = focused_i3_window_class(child) {
+                    return Some(class);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(any(test, not(feature = "test-support")))]
+fn desktop_window_class_is_editor(class: &str) -> bool {
+    let class = class.to_ascii_lowercase();
+    class.contains("jetbrains")
+        || matches!(
+            class.as_str(),
+            "code" | "code-oss" | "codium" | "vscodium" | "zed"
+        )
+        || class.contains("visual studio code")
+        || class.contains("zed")
+}
+
+#[cfg(any(test, not(feature = "test-support")))]
+fn desktop_editor_focus_state_from_i3_tree(tree: &serde_json::Value) -> DesktopEditorFocusState {
+    match focused_i3_window_class(tree) {
+        Some(class) if desktop_window_class_is_editor(class) => DesktopEditorFocusState::Editor,
+        Some(_) => DesktopEditorFocusState::Other,
+        None => DesktopEditorFocusState::Unknown,
+    }
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn desktop_editor_focus_state() -> DesktopEditorFocusState {
+    let Ok(output) = std::process::Command::new("i3-msg")
+        .args(["-t", "get_tree"])
+        .output()
+    else {
+        return DesktopEditorFocusState::Unknown;
+    };
+    if !output.status.success() {
+        return DesktopEditorFocusState::Unknown;
+    }
+    let Ok(tree) = serde_json::from_slice(&output.stdout) else {
+        return DesktopEditorFocusState::Unknown;
+    };
+    desktop_editor_focus_state_from_i3_tree(&tree)
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn desktop_editor_focus_state() -> DesktopEditorFocusState {
+    DesktopEditorFocusState::Unknown
+}
+
+fn suppress_inactive_automatic_layout_focus(
+    invocation: &mut ControllerTmuxLayoutSyncInvocation,
+    focus_state: DesktopEditorFocusState,
+) -> bool {
+    if invocation.caller_kind == "automatic"
+        && invocation.focus.is_some()
+        && focus_state == DesktopEditorFocusState::Other
+    {
+        invocation.focus = None;
+        true
+    } else {
+        false
+    }
+}
+
 fn async_editor_command_results()
 -> &'static parking_lot::Mutex<std::collections::HashMap<String, AsyncEditorCommandResult>> {
     static RESULTS: std::sync::LazyLock<
@@ -15276,10 +15364,21 @@ fn pane_layout_effect_worker(runtime: std::sync::Weak<ControllerRuntime>) {
                 return;
             }
         };
+        let mut guarded_invocation = desired.invocation.clone();
+        if suppress_inactive_automatic_layout_focus(
+            &mut guarded_invocation,
+            desktop_editor_focus_state(),
+        ) {
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "controller_automatic_layout_focus_suppressed generation={} reason=desktop_editor_inactive",
+                    desired.generation
+                ),
+            );
+        }
         let effect_result = match runtime_effects() {
-            Ok(effects) => {
-                effects.sync_tmux_layout(&bootstrap.project_root, desired.invocation.clone())
-            }
+            Ok(effects) => effects.sync_tmux_layout(&bootstrap.project_root, guarded_invocation),
             Err(error) => Err(error),
         };
         let report = tmux_layout_sync_state_for_invocation(
@@ -15857,7 +15956,31 @@ fn handle_focus_document_pane_with_policy(
             window_name,
         ));
     }
-    apply_async_editor_focus_effect(focus_fence, || tmux.select_pane(&pane_id))?;
+    let focused = apply_async_editor_focus_effect(focus_fence, || {
+        if focus_fence.is_some() && desktop_editor_focus_state() == DesktopEditorFocusState::Other {
+            return Ok(false);
+        }
+        tmux.select_pane(&pane_id)?;
+        Ok(true)
+    })?;
+    if !focused {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "controller_focus_suppressed document={} pane={} reason=desktop_editor_inactive",
+                document_id, pane_id
+            ),
+        );
+        return Ok(tmux_focus_receipt(
+            false,
+            "desktop_editor_inactive",
+            Some(document_id),
+            Some(pane_id),
+            Some(session_name_value),
+            window_id,
+            window_name,
+        ));
+    }
     Ok(tmux_focus_receipt(
         true,
         focused_reason,
@@ -15867,6 +15990,80 @@ fn handle_focus_document_pane_with_policy(
         window_id,
         window_name,
     ))
+}
+
+#[cfg(test)]
+mod desktop_editor_focus_tests {
+    use super::*;
+
+    fn i3_tree(class: Option<&str>) -> serde_json::Value {
+        let focused = match class {
+            Some(class) => serde_json::json!({
+                "focused": true,
+                "window_properties": {"class": class},
+                "nodes": [],
+                "floating_nodes": []
+            }),
+            None => serde_json::json!({
+                "focused": true,
+                "nodes": [],
+                "floating_nodes": []
+            }),
+        };
+        serde_json::json!({
+            "focused": false,
+            "nodes": [{
+                "focused": false,
+                "nodes": [focused],
+                "floating_nodes": []
+            }],
+            "floating_nodes": []
+        })
+    }
+
+    #[test]
+    fn i3_desktop_focus_distinguishes_editors_from_other_windows() {
+        assert_eq!(
+            desktop_editor_focus_state_from_i3_tree(&i3_tree(Some("jetbrains-idea"))),
+            DesktopEditorFocusState::Editor
+        );
+        assert_eq!(
+            desktop_editor_focus_state_from_i3_tree(&i3_tree(Some("Brave-browser"))),
+            DesktopEditorFocusState::Other
+        );
+        assert_eq!(
+            desktop_editor_focus_state_from_i3_tree(&i3_tree(None)),
+            DesktopEditorFocusState::Unknown
+        );
+    }
+
+    #[test]
+    fn inactive_desktop_strips_only_automatic_layout_focus() {
+        let mut automatic = ControllerTmuxLayoutSyncInvocation {
+            columns: vec!["a.md,b.md".to_string()],
+            window: None,
+            focus: Some("a.md".to_string()),
+            no_autostart: true,
+            exact_visible: true,
+            caller_kind: "automatic".to_string(),
+        };
+        assert!(suppress_inactive_automatic_layout_focus(
+            &mut automatic,
+            DesktopEditorFocusState::Other
+        ));
+        assert_eq!(automatic.focus, None);
+
+        let mut manual = ControllerTmuxLayoutSyncInvocation {
+            focus: Some("a.md".to_string()),
+            caller_kind: "manual".to_string(),
+            ..automatic
+        };
+        assert!(!suppress_inactive_automatic_layout_focus(
+            &mut manual,
+            DesktopEditorFocusState::Other
+        ));
+        assert_eq!(manual.focus.as_deref(), Some("a.md"));
+    }
 }
 
 fn publish_pane_layout_desired(

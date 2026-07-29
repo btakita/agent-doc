@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-skill-harness"
-version = "0.35.74"
+version = "0.35.75"
 edition = "2024"
 description = "skill-harness integration adapter for agent-doc"
 license = "MIT"

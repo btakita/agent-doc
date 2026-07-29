@@ -4,6 +4,29 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.75
+
+_JetBrains plugin 0.2.315; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Editor-owned missing-replica recovery now restores the replica instead of
+  promoting disk to authority.** The binary first asks the editor to save its
+  exact buffer, then sends a typed `observe_lazily_current` request to the same
+  endpoint and resolves the document again through controller/CRDT authority.
+  Both protocol-stable requests may cross a same-protocol older-listener build
+  fence; no disk cut is adopted as live authority.
+- **A sole exact editor can close an ACK-pending save boundary.** When one live
+  editor already holds the exact canonical retained target, its typed save
+  receipt plus exact post-save editor and disk proof settles the historical
+  delivery gap. Multiple live editors still require full delivery convergence.
+  This removes the stale-supervisor deadlock that left `agent-doc commit` and
+  Haiven recovery waiting even though the visible editor buffer was correct.
+- **Leaving JetBrains for another i3 window cancels late focus effects at the
+  real effect boundary.** Editor-origin pane selection now checks the focused
+  i3 window immediately before `tmux select-pane`, and automatic layout repair
+  strips its focus target while another desktop window is active. A dormant
+  reverse tmux-to-editor mirror also opens tabs with `focusEditor=false`, so it
+  cannot reactivate the IDE or surface `stash`.
+
 ## 0.35.74
 
 _JetBrains plugin 0.2.314; VS Code extension 0.2.62; Zed extension 0.1.0._

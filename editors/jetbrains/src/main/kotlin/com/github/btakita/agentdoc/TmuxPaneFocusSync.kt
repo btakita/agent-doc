@@ -162,7 +162,10 @@ class TmuxPaneFocusSync private constructor(
             val manager = FileEditorManager.getInstance(project)
             val current = manager.selectedTextEditor?.virtualFile
             if (current?.path == file.path) return@invokeLater
-            manager.openFile(file, true, true)
+            // A reverse mirror may update the selected tab, but it is background
+            // state reconciliation and must never reactivate the IDE's desktop
+            // window after the operator moved to another i3 window.
+            manager.openFile(file, false, true)
         }
     }
 

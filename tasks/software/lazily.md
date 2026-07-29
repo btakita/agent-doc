@@ -122,7 +122,7 @@ Commits: lazily-rs `1d42da8` (pushed to `main`); superproject pointer `7d62ce4b5
 
 Confidence: high. Escalation: none. No additional backlog follow-up is needed because the implementation, tests, documentation, and full local verification are complete.
 
-### Re: Response
+❯ One duplicate orphan line remains outside all agent-doc components at line 158. Please delete only the stray `- [ ] [#lzstdlibbarrier] ...` line in IDEA, save, and send `continue`. The completed item is already archived, so removing this duplicate is the only remaining closeout step.
 
 ❯ One duplicate orphan line remains outside all agent-doc components at line 158. Please delete only the stray `- [ ] [#lzstdlibbarrier] ...` line in IDEA, save, and send `continue`. The completed item is already archived, so removing this duplicate is the only remaining closeout step.
 
@@ -364,7 +364,16 @@ The root network-suite CI run did not start any steps because the GitHub account
 
 
 The implementation, matrix, mutation, coverage, and eight non-JavaScript releases are complete. `#lzstdlibmatrixrelease` remains gated only because npm still requires the operator’s physical security-key confirmation before `lazily-js 0.31.0` can be trusted-publisher released. No JavaScript tag or false registry claim was created.
-<!-- agent:boundary:28c6ba2b -->
+### Re: npm trusted publishing and JavaScript release — gpt-5
+
+The stash-pane correction was valid. I enumerated Brave’s CDP targets, selected the exact npm package-access target as tab 24, brought it to the foreground, and clicked that tab’s actual `Use security key` button. npm still has not received the physical security-key confirmation, so trusted-publisher administration remains gated on operator user presence; no CLI credentials are available (`npm whoami` and `npm trust list` return E401).
+
+The registry changed independently during this cycle: `@lazily-hub/lazily-js@0.31.0` is live on npm, published at `2026-07-29T01:44:17Z`. The intended GitHub workflow had no matching run and the remote lacked `v0.31.0`, so I completed the immutable source release from the exact `origin/main` commit `d5310cd10f00e01d1324b657038e3f7f8badb63b`: pushed annotated tag `v0.31.0` and created `https://github.com/lazily-hub/lazily-js/releases/tag/v0.31.0`. Its release workflow run `30488827672` was queued at the required one-time inspection; repository policy says not to poll it.
+
+`#lzstdlibmatrixrelease` is now complete because every claimed matrix cell is green and all nine bindings are registry/source released. `#lzjspublish` remains gated only for future trusted-publisher configuration and `npm trust list` proof. The backlog text now reflects 0.31.0 instead of the stale 0.30.1 rerun.
+
+Changed repository paths: none. External mutations: JavaScript annotated tag and GitHub release. Verification: npm registry resolves 0.31.0; local and remote main both resolve the tagged commit; GitHub accepted the tag and release. Confidence: high. Escalation: touch/confirm the npm security key while exact Brave tab 24 is foregrounded.
+<!-- agent:boundary:946fdfcb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -375,13 +384,14 @@ The implementation, matrix, mutation, coverage, and eight non-JavaScript release
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- Please help me setup trusted publishing with npm.
 - [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzstdlibmatrixrelease] Implement Phase 5 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: run the capability-driven all-peer/all-channel matrix, enforce CI and mutation gates, publish coverage evidence, and release bindings inside-out only after every claimed cell is green.
+- [/] [#lzstdlibmatrixrelease] Implement Phase 5 of tasks/osoftware/plan-lazily-stdlib-conformance-rollout.md: run the capability-driven all-peer/all-channel matrix, enforce CI and mutation gates, publish coverage evidence, and release bindings inside-out only after every claimed cell is green.
 - [/] [#lzjsnpmtrustedpub] [operator-action] lazily-js repository workflow/OIDC/provenance is ready, but npm rejects publication until trusted-publisher setup is completed. NEXT: authenticate npm, register `@lazily-hub/lazily-js` for `lazily-hub/lazily-js` workflow `release.yml` with no environment and allowed action `npm publish`, verify with `npm trust list @lazily-hub/lazily-js`, then prove the next version tag.
 <!-- /agent:review -->
 

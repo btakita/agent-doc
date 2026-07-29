@@ -17,6 +17,34 @@ normal prompt contract.
 Follow-up operator direction: sidecars should be replaced with the lazily state
 backbone.
 
+Operator correction (2026-07-28): there is no compatibility fallback from the
+lazily backbone to a sidecar. Sidecars are write-only crash/audit evidence.
+Normal preflight, repair, finalize, session-check, supervisor, capture, cycle,
+baseline, and rename decisions must never read, scan, or import them. Any older
+ledger entry below that describes a sidecar as a compatibility fallback records
+historical migration state and is superseded by this rule.
+
+Sidecar emission is an effect of a typed state transition: the state event lands
+first, then an effect may project crash/audit evidence. A command must not write
+a normal baseline/cycle/capture sidecar directly, and a sidecar effect must not
+feed data back into the state graph.
+
+Implementation update (2026-07-28):
+
+- Markdown baseline checkpoints append `DocumentBaselineCheckpointed` to
+  `state.db` first and only then invoke `CrashStateEffects` to write the hashed
+  markdown crash-state sidecar. Clear follows the same direction: typed
+  clear fact first, filesystem removal effect second.
+- Snapshot resolution, closeout, reset, diff, and rename never read or scan
+  crash projections. Rename transactionally rekeys typed events and durable
+  session-registry identity while leaving crash-time evidence untouched.
+- Editor mixed-root tmux layouts carry an owning-controller-proven pane binding
+  as ephemeral router input. Missing nested panes are resumed by an effect
+  against the nested project controller; the parent controller does not copy
+  the foreign binding into its registry. This prevents a visible spare pane
+  from aliasing `src/boost-client/tasks/monsterrodholders.md` while its real
+  actor remains stashed.
+
 ## Failure class
 
 The incident combined two related problems:
@@ -56,6 +84,10 @@ Use the lazily-backed state backbone as the source for document/session state:
   comparison. They are not competing document sources. Once all current text
   flows through the realtime model, "drift" means a named baseline comparison
   result, not disagreement about which source owns the document.
+- Baselines/checkpoints are typed lazily/ledger state. Filesystem snapshot,
+  capture, cycle, pending, live-buffer, and ACK sidecars may be emitted only as
+  crash/audit evidence. They are never read as compatibility authority or used
+  to fill a missing typed fact.
 - `agent-doc-flow-io/src/closeout.rs` still has path-heavy function signatures
   because the old closeout pipeline treated `file: &Path` as both identity and
   content authority. Keep `DocumentKey` / `CurrentDocument` at the outer
@@ -833,6 +865,26 @@ Status as of 2026-07-05 in `src/agent-doc`:
   against live visible-document authority only. A stale compatibility snapshot
   baseline can no longer veto a current typed observation; the snapshot hash
   retained in that observation remains advisory recovery evidence.
+- The Project Controller now hosts a generic cross-process Lazily state plane:
+  keyed covering snapshots, causally fenced deltas, producer identity/epoch,
+  idempotent at-least-once projection delivery, and cursor-based subscription.
+  RPC is the transport plane only.
+- Pane layout is the first state-plane consumer. JetBrains publishes desired
+  columns/window/focus and subscribes to typed status. The controller persists
+  desired layout before effects, derives the desired/observed/effect projection,
+  observes tmux on a fixed cadence, and retries drift/failures with bounded
+  backoff until convergence or supersession.
+- Desired-state projection delivery has its own retained retry worker: a transient
+  SQLite/bootstrap failure after publication no longer waits for another plugin
+  message. A newer plane version replaces the pending projection safely.
+- Pane-layout `phase` and `reason_code` are enums with optional diagnostic
+  `reason_detail`. Version 1 keeps Lazily's canonical JSON envelope and typed JSON
+  payloads; protobuf remains an optional future payload codec rather than a
+  state-plane dependency.
+- JetBrains forced replica refresh now fences the editor text before any CRDT
+  publication, and realtime observer normalization no longer writes a stale
+  queue cut back into the document. This closes the prompt-deletion path observed
+  while typing in `monsterrodholders.md`.
 
 The queue/supervisor bullets are Phase 3 sidecar-retirement slices for narrow
 gates. The Phase 1 hook closes the first raw preflight failure shape, but it is
@@ -900,8 +952,9 @@ Define typed lazily state for the facts currently inferred from sidecars:
   remains in typed facts/projections and must not regress to marker-file
   authority.
 
-Read this state in preflight, write/finalize, repair, and session-check before
-falling back to sidecar projections.
+Read this state in preflight, write/finalize, repair, and session-check. If a
+required typed fact is missing, fail closed with a state-backbone diagnostic;
+never fall back to a sidecar projection.
 
 Initial implementation status:
 
@@ -960,24 +1013,22 @@ Initial implementation status:
   projection, or projected capture id plus response hash, protects the cycle even
   when the capture sidecar is missing; stale empty-cycle repair only treats the
   cycle as empty after that projection-first proof check fails.
-- Repair committed-capture materialization checks now read the projected
-  committed captured-response body before `latest_committed` capture JSON. A
-  committed closeout projection can prove the response body is already in HEAD
-  even after the committed capture sidecar is missing; the JSON record remains
-  the compatibility fallback for older projection gaps.
+- Repair committed-capture materialization checks read the projected committed
+captured-response body. A committed closeout projection can prove the response
+body is already in HEAD even when crash evidence is missing; JSON sidecars must
+not fill projection gaps.
 - Repair historical committed-capture replay now uses the same committed
   captured-response projection payload before `latest_committed` capture JSON.
   Orphaned-prompt replay can recover from a committed closeout projection after
-  the committed capture sidecar is missing, while the legacy JSON record remains
-  only the fallback when no matching projected response body exists.
+  the crash capture is missing. A missing projected body fails closed instead of
+  importing legacy JSON.
 - Session-check blocked-followup, gated-phase split, queue-audit
   partial-completion, pending, response, queue-head/provenance, partial-staging,
   write-time pending, and recoverable cache-conflict readers now use the
-  projection-aware cycle view, and their captured-response body payloads now
-  prefer the typed closeout projection before capture JSON compatibility
-  fallback. Remaining cutover: replace detailed backlog/pending/hash/proof
-  payload reads with typed backbone facts, then use cycle/capture/snapshot
-  sidecars only as compatibility projections or recovery evidence.
+projection-aware cycle view, and their captured-response body payloads come
+from the typed closeout projection. Remaining cutover: replace detailed
+backlog/pending/hash/proof payload reads with typed backbone facts and delete
+all runtime sidecar imports; sidecars remain write-only crash/audit evidence.
 - Commit-proof status: the cycle-state bridge still emits a compatibility
   content-hash `CommitObserved` when that layer lacks git context, but the git
   closeout path now appends the exact `HEAD` SHA after real and no-op closeout.
@@ -986,10 +1037,9 @@ Initial implementation status:
   assertions now prefer that projection instead of parsing the proof ledger.
   Commit materialization checks now also prefer the typed captured-response
   projection before active capture JSON, and queue-consume commit seam response
-  proof plus post-response hook metadata use the same projection before capture
-  JSON fallback. Remaining cutover is to route any new production proof guard
-  through terminal/captured-response projections instead of trusting terminal or
-  capture sidecar state.
+proof plus post-response hook metadata use the same projection. Remaining
+cutover is to route every production proof guard through terminal/captured-
+response projections and remove terminal/capture sidecar reads.
 
 Each stage must have an explicit re-entry transition:
 
@@ -1015,8 +1065,9 @@ Regression:
 Sidecars remain useful for diagnostics, crash recovery, and audit history, but
 their contract changes:
 
-- Sidecar read/parse/mismatch failures are warnings unless no authoritative
-  backbone/editor/git state exists.
+- Sidecars are write-only crash state emitted by `CrashStateEffects` after the
+authoritative typed commit. Normal runtime paths never read, scan, import, or
+fall back to them, including when authoritative state is absent.
 - `reset --from-current --preserve-session` rebuilds projections from backbone
   + visible document state, not the other way around.
 - `write --commit` repair validates against backbone lifecycle state and the
@@ -1055,7 +1106,31 @@ Regression:
 
 - A stale editor buffer cannot be committed from disk.
 - A missing/corrupt sidecar cannot block a commit when the editor-sync state
-  vector proves the model is current.
+vector proves the model is current.
+
+### Phase 5: cross-process state projections
+
+Expose generic Lazily state publication/subscription over controller IPC. Domain
+plugins publish keyed desired state, while controller-owned effects reconcile
+external systems and publish typed observed/effect status.
+
+Initial implementation status:
+
+- Pane layout uses `agent-doc/pane-layout/desired/v1` and
+  `agent-doc/pane-layout/status/v1`.
+- The editor publishes one covering desired-state snapshot and subscribes from a
+  monotonic plane cursor; it does not resend or directly retry tmux effects.
+- The controller persists desired layout to `state.db`, reconciles tmux from a
+  Lazily desired/observed/receipt graph, and retries until convergence or
+  supersession.
+- Rust and Kotlin tests pin the Lazily JSON envelope, keyed payload, subscription
+  cursor, phase enum, and reason-code enum.
+- The next suitable domain is CRDT closeout convergence: publish desired document
+  revision, observed editor revision/state vector, and effect receipt so one
+  controller reconciler owns the bounded lease and retry while session-check
+  remains an observer. Status should expose a typed pending-ACK phase/reason,
+  lease deadline, attempt, and supersession identity instead of repeating opaque
+  prose or inviting a second transaction.
 
 ## Acceptance
 
@@ -1069,3 +1144,6 @@ Regression:
 - A live editor proof shows the document can recover from missing relay/model
   registration without forcing disk or asking the agent/operator to run
   sidecar-reset commands.
+- Editor-tmux sync converges from published desired state even after transient
+  projection/effect failure, and a plugin process never owns an imperative tmux
+  retry loop.

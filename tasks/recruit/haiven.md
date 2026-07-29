@@ -1,5 +1,6 @@
 ---
 agent_doc_session: 7a3dfe1a-875b-4b93-9e8e-12d156448f63
+resume: 019fac53-f094-7572-aa6c-2a3f3378f68d
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -1006,14 +1007,77 @@ The concise replacement for item 4 is:
 That structure already excludes an arrest or pending charge because it requires a conviction or plea. It also avoids inviting a side discussion about hypothetical traffic or negligence offenses. If counsel wants belt-and-suspenders language in the executed addendum, the only extra sentence I would consider is: “An allegation, charge, or arrest without a resulting conviction or plea does not constitute Cause under this subsection.” I would not include the longer list.
 
 Verification: I compared the proposed Exhibit A against the local repository/site inventory, checked the exact Agreement §3.4 license, the addendum's Prior-IP and outside-activity provisions, and the current Cause clause, and reviewed the cited official Washington statute and court materials. No contract draft or Exhibit A source file was modified in this cycle; the existing `#haiven-paper` review item was expanded to capture these conclusions. Confidence is high on the factual omissions and drafting recommendations, and moderate on ultimate enforceability, which depends on the complete signed package and counsel's jurisdiction-specific review.
-<!-- agent:boundary:5d9c3445 -->
+### Re: Private submodule wording, Exhibit A additions, and addendum form — gpt-5
+
+> **Queue prompt:**
+>
+> "Separate Git repositories—including repositories referenced solely as Git submodules of an employee-controlled superproject—should satisfy the repository-separation requirement, provided the superproject stores only ordinary submodule metadata and commit pointers and does not store or expose Haiven source code, credentials, Confidential Information, or work product outside the dedicated Haiven repository.": Is this too much detail? Does the previous sentence already cover? They will see it if I screenshare. If we should include it, mention the superproject is private.
+>
+> **Queue prompt:**
+>
+> Add the recommended additions to Exhibit A.
+>
+> **Queue prompt:**
+>
+> Should I also draft a second addendum or have Luke and/or Craig draft it? If we draft it, the process maybe faster.
+
+**The previous submodule sentence was too detailed for the email, but the preceding sentence did not fully cover the actual arrangement.** The preceding sentence establishes the general rule—reasonable account, repository, credential, and work-product separation without requiring separate physical devices. It does not expressly confirm that a metadata-only submodule reference from the private superproject satisfies that rule. Because Haiven is likely to see the arrangement during a screen share, a short explicit safe harbor is worthwhile.
+
+I shortened item 5 to:
+
+> A dedicated private Haiven Git repository should satisfy the repository-separation requirement even if referenced as a submodule from my private, employee-controlled superproject, provided that the superproject contains only standard submodule metadata and the referenced commit—not Haiven source code, credentials, Confidential Information, or work product.
+
+This states the relevant fact without turning the email into a Git tutorial. I verified that `btakita/agent-loop` is currently private. Git's own documentation confirms the technical premise: a submodule has its own history, while the superproject records a `.gitmodules` entry and a gitlink identifying the expected commit. [Git submodule documentation](https://git-scm.com/docs/gitsubmodules/2.14.6)
+
+“Private” helps explain the limited exposure, but it is not enough by itself. Before a screen share, use a Haiven-specific checkout or context and avoid root-wide search/AI/index results that ingest the Haiven submodule. The current root `tsift` index treats `haiven-websocket-hub` as a searchable scope, so a screen share from the superproject can reveal more than the Git metadata even though the parent repository is private.
+
+**I added the recommended Exhibit A changes and regenerated the PDF.** The revision now:
+
+- expressly identifies `brookebrodack.net` / `brookebrodack-dev`, `herbaliciousbliss.com`, `peakexistence.com`, `cogov.me`, `demo.cogov.me`, `mi-www.site`, `esg.briantakita.me`, and `prescience-notes`, with ownership-neutral third-party exclusions;
+- adds the omitted repository families to the personal portfolio examples;
+- adds `lazily-hub`, `signal-space`, and `freehold-hub` to the controlled-organization category;
+- provides for an attached dated confidential identifier manifest without requiring disclosure of source code, credentials, or client secrets; and
+- replaces the broad future “successor projects” claim with a limitation for independently developed continuations that do not incorporate Company Inventions, Company Confidential Information, work created within Brian's duties, or otherwise assignable work.
+
+Changed and committed files:
+
+- [haiven-exhibit-a-proposed.md](../professional/haiven/haiven-exhibit-a-proposed.md)
+- [haiven-exhibit-a-proposed.pdf](../professional/haiven/haiven-exhibit-a-proposed.pdf)
+- [haiven-addendum-response-draft.md](../professional/haiven/haiven-addendum-response-draft.md)
+
+Commit: `e298afc6b` (`haiven: expand Exhibit A prior IP scope`). No email, attachment, signature, or other external message was sent.
+
+**For the next agreement revision, draft it ourselves to save time—but draft one clean consolidated replacement, not a layered “second addendum.”** Brian has not signed the July 28 v1.0 addendum. Although Haiven signed it, it is not a fully executed two-party amendment. The clearest path is therefore a proposed **“Amended and Restated Employment Addendum”** or clean **v1.1 Employment Addendum** that replaces v1.0, incorporates all agreed changes, and attaches Exhibit A as part of the same signature package.
+
+Recommended process:
+
+1. Prepare the clean consolidated draft locally, with a redline against v1.0 if useful.
+2. Label it proposed language and send it only after Brian explicitly authorizes “send.”
+3. Ask Luke/Craig and Haiven's counsel to review it, place it into Haiven's final form, and return a clean company-signed version with Exhibit A attached.
+4. Have Brian and Haiven sign the same integrated final package.
+
+This gives them editable language and should accelerate the process, while leaving Haiven responsible for approving and issuing the final company instrument. If they insist on preserving v1.0 and using a second addendum, that document should identify the prior instruments by exact title and date, state which provisions it amends or supersedes, establish priority for conflicts, incorporate the completed Exhibit A, and contain signature blocks for both parties. A single amended-and-restated document is less error-prone.
+
+I did not create that consolidated addendum in this cycle because the prompt asks which drafting route to use rather than directing the draft itself. The existing `#haiven-paper` review item now records the recommended consolidated-draft path.
+
+Verification: `git diff --check` passed; the regenerated PDF is three-page US Letter portrait; extracted PDF text contains every added identifier and limitation; and a rendered three-page contact sheet showed no clipping or layout defects. The agent-doc suite passed all 8,337 tests. Repository-wide `make check` later encountered four concurrent `corky-core` OAuth-loopback tests contending for the same local port; all eight affected tests passed when rerun serially. This repository has no workflow named `CI`, so the required one-time CI lookup returned no workflow. Confidence is high on the Git/submodule explanation, file changes, and drafting-process recommendation; final contract language should still be reviewed by Haiven and employment/IP counsel.
+
+The agent-doc skill required an in-place refresh from `0.35.80` to `0.35.81`; that generated instruction-file update was left unstaged and was not included in the Haiven commit.
+### Re: Response
+
+The Haiven changes are committed as `e298afc6b`, but the agent-doc response commit is waiting for live-editor convergence.
+
+Please save the open [haiven.md](/home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md) buffer, then reply “continue.” The response is durably captured; I won’t resubmit or duplicate it.
+<!-- agent:boundary:44c009bf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go priority -->
-- Is Exhibit A comprehensive + appropriate in scope? I don't see brookebrodack.net for example.
-- "Arrests, pending charges, civil violations, traffic infractions, and offenses based solely on negligence or strict liability should not constitute Cause.": Does this draw too much attention to the matter? I won't be committing these crimes of course. Could you tell me what negligence would mean?
+<!-- agent:queue priority -->
+- "Separate Git repositories—including repositories referenced solely as Git submodules of an employee-controlled superproject—should satisfy the repository-separation requirement, provided the superproject stores only ordinary submodule metadata and commit pointers and does not store or expose Haiven source code, credentials, Confidential Information, or work product outside the dedicated Haiven repository.": Is this too much detail? Does the previous sentence already cover? They will see it if I screenshare. If we should include it, mention the superproject is private.
+- Add the recommended additions to Exhibit A.
+- Should I also draft a second addendum or have Luke and/or Craig draft it? If we draft it, the process maybe faster.
+- Does unpaid "outside activity" need approval as well?
 <!-- /agent:queue -->
 
 ## Backlog

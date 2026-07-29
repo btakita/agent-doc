@@ -1086,7 +1086,7 @@ Verification already completed: `git diff --check` passed, PDF text extraction f
 ### Re: Response
 
 `#recommendedadditionsexhi` was already completed and committed; the stale queue head is being reaped without duplicating its response.
-<!-- agent:boundary:cb64fa37 -->
+<!-- agent:boundary:840d5bdb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1099,7 +1099,6 @@ Verification already completed: `git diff --check` passed, PDF text extraction f
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [x] 🚧 [#recommendedadditionsexhi] Add the recommended additions to Exhibit A.
 - [ ] [#unpaidoutsideactivity] Does unpaid "outside activity" need approval as well?
 <!-- /agent:backlog -->
 

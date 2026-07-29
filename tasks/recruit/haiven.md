@@ -5,7 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -855,14 +855,20 @@ No email, attachment, signature, or other external action was taken.
 The response is captured but not committed because the editor/controller has not acknowledged the CRDT delivery. Under the `agent-doc` retained-capture rule, I did not resend or force-write it.
 
 Please save or close/reopen `haiven.md`, then invoke the same `agent-doc` command. The retained answer recommends protecting future unrelated work through a “Future Independent Work” clause in the addendum—not listing hypothetical projects in Exhibit A.
-<!-- agent:boundary:4d8c3f5c -->
+
+### Re: Truncated future-work queue entry — gpt-5
+
+> **Queue prompt:** Should I include future wor
+
+This truncated queue entry is the same future-work question answered in the immediately preceding response. The answer remains: **protect genuinely new, unrelated future work through a signed “Future Independent Work” clause in the addendum, but do not list hypothetical future projects as Prior Inventions in Exhibit A.** Exhibit A should describe pre-employment property; its existing successor-project language can protect later development of the listed pre-existing projects.
+
+No additional analysis or backlog item is needed. No email, attachment, signature, or other external action was taken.
+<!-- agent:boundary:54f97d96 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~Where is the Exhibit A?~~ — auto-struck: answered this cycle (#ftstrike)
-- Should I include future wor
 <!-- /agent:queue -->
 
 ## Backlog

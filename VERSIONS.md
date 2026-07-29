@@ -4,6 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.81
+
+_JetBrains plugin 0.2.319; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Queue closeout now retries transient controller-read errors instead of
+  discarding an already-computed answered-row strike.** The shared typed
+  authority-recovery policy treats controller observation errors like missing
+  or syncing editor authority while retry budget remains. A regression covers
+  the live `haiven.md` timeout-at-attempt-1/3 trace and proves the next current
+  observation completes without another agent turn.
+
 ## 0.35.80
 
 _JetBrains plugin 0.2.319; VS Code extension 0.2.62; Zed extension 0.1.0._

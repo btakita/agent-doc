@@ -49,7 +49,7 @@ pub const fn decide_authority_recovery(facts: AuthorityRecoveryFacts) -> Authori
     match facts.observation {
         Current => AcceptCurrent,
         Detached => DescendToDisk,
-        MissingReplica | SyncPending if facts.retries_remaining => Retry {
+        MissingReplica | SyncPending | Error if facts.retries_remaining => Retry {
             request_plugin_refresh: matches!(facts.observation, MissingReplica),
         },
         MissingReplica | SyncPending
@@ -102,6 +102,12 @@ mod tests {
         );
         assert_eq!(
             decide(AuthorityObservation::SyncPending, true, true, false),
+            AuthorityRecoveryDecision::Retry {
+                request_plugin_refresh: false,
+            }
+        );
+        assert_eq!(
+            decide(AuthorityObservation::Error, false, true, false),
             AuthorityRecoveryDecision::Retry {
                 request_plugin_refresh: false,
             }

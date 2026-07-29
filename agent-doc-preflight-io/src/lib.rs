@@ -144,8 +144,9 @@ fn current_text_status_token(
 ///    `editor_replica_reregister=requested` BEFORE surfacing the error, so this
 ///    self-heals instead of needing manual `admin recycle` + `admin reload-lib`.
 ///
-/// A `Current`/`Detached`/`None` observation returns immediately — only the
-/// transient editor-authority statuses are retried.
+/// A `Current`/`Detached`/`None` observation returns immediately. Transient
+/// editor-authority statuses and controller observation errors consume the
+/// bounded retry budget.
 fn current_text_via_preflight_authority_retrying(
     file: &Path,
     source: &str,
@@ -5403,8 +5404,37 @@ mod tests {
         }
     }
 
+    // A controller read timeout is another transient authority observation. The
+    // live `haiven.md` failure reached attempt 1/3, but `Error` bypassed the typed
+    // retry transition and discarded an already-computed two-row queue strike.
+    #[test]
+    fn queue_authority_observation_retries_controller_error_then_current() {
+        let file = Path::new("/tmp/agent-doc-px82-controller-error.md");
+        let mut calls = 0usize;
+        let observed = observe_current_text_with_bounded_retry(file, "test", 3, |_| {
+            calls += 1;
+            if calls == 1 {
+                anyhow::bail!("timed out after 5.0s waiting for project controller response")
+            }
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+                text: "recovered".to_string(),
+                live_editors: 1,
+                delivery_converged: true,
+                delivery_version: 2,
+                semantics: None,
+            }))
+        });
+        assert_eq!(calls, 2, "the controller error must consume a retry");
+        match observed {
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => {
+                assert_eq!(text, "recovered");
+            }
+            other => panic!("expected a recovered current observation, got {other:?}"),
+        }
+    }
+
     // A settled status must not pay the retry cost — only the transient
-    // editor-authority statuses are re-observed.
+    // editor-authority statuses and observation errors are re-observed.
     #[test]
     fn queue_authority_observation_returns_immediately_on_settled_status() {
         let file = Path::new("/tmp/agent-doc-px82-settled.md");

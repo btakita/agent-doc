@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019fabf0-9af0-7f73-a25c-6a43fd6470c5
+resume: 019fafe5-8be5-73d1-add0-f9314b2080a1
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -234,11 +234,20 @@ Fixed, installed, and released as agent-doc `0.35.89`.
 - Unrelated `editors/zed/extension.wasm` was untouched.
 
 The document response is retained but awaiting an editor delivery ACK. Please restart IDEA once to activate the installed plugin generation; no Save All or duplicate finalize is needed.
-<!-- agent:boundary:01007db8 -->
+
+### Re: reactive editor authority live verification — gpt-5
+
+The restarted IDEA host is running JetBrains plugin `0.2.322` and native agent-doc `0.35.93`. The reliable-sync plane reports both `agent-doc-bugs2.md` and `lazily.md` live on the new editor endpoint, and the post-restart log has no new native-generation poison event.
+
+The retained Lazily write replayed successfully and appears exactly once as `#designimplementtransport`. Its plan specifies keyed lifecycle-scoped event Sources; generation, sequence, freshness, and receipt envelopes; event-channel-first adapters with reconnect/replay, stale rejection, merge, and backpressure; RPC-triggered or bounded-polling fallback only where event delivery is unavailable; Computed/Effect extraction for readiness, validation, authority, and retry; and cross-language conformance schedules before binding projection. No duplicate backlog add or operator save was performed.
+
+The agent-doc repair is therefore live-verified as well as test-verified and released. `make check` and `make install-full` passed; agent-doc `0.35.93` and JetBrains `0.2.322` are installed; commit `0ccb82449`, tag `v0.35.93`, PyPI package `0.35.93`, and the GitHub release are published. The root reactive-ingress harness policy and submodule pointer are pushed in `f64f481da`. The required one-shot CI observation was `in_progress` and was not polled. The user-owned untracked Zed WASM remains untouched.
+<!-- agent:boundary:418e228a -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- Compact Exchange error: "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: waiting for the pre-write editor delivery barrier for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: visible document write for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md deferred: editor delivery remained unacknowledged after the 8000ms recovery barrier; the exact write remains retained, no secondary snapshot/commit or forced disk write was attempted. ACK replay, force-refresh, and build-skew recovery were requested automatically; if the editor listener cannot hot-reload, reload the IDE host and retry the existing operation". Also Run Agent Doc did not do anything. I'm manually running agent-doc.
 - do [#implementlazilyintent]
 - do [#unpaidoutsideactivity]
 <!-- /agent:queue -->

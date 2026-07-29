@@ -91,7 +91,15 @@ The broader architecture is now explicit:
 Released agent-doc 0.35.71 and JetBrains plugin 0.2.313. The matching binary/library and plugin package were installed; the controller accepted an idle-boundary recycle. Source commit `89d56d8aa` and parent integration commit `5e987c09c` are pushed, with tag `v0.35.71` published. Verification passed: 390 JetBrains tests, the op-capture authority tests, `cargo fmt --all`, and the full `make check` gate. The user-owned untracked `editors/zed/extension.wasm` was preserved.
 
 Restart the running IntelliJ IDEA instance once to load plugin 0.2.313. After that, typing in a large agent-doc document should stay on the delta-only path instead of entering the attach/full-refresh recovery loop.
-<!-- agent:boundary:deb22508 -->
+
+### Re: `#5qjj` operator verification: restart confirmed, aggregate UI proof still pending
+
+The restart loaded the current installed generation: IntelliJ IDEA 2026.1 has `agent-doc-jetbrains-0.2.313.jar`, and its startup log confirms native agent-doc `0.35.71` loaded successfully.
+
+I cannot yet close the aggregate-steering acceptance criterion. For the active cycle `cycle-1785295203530`, the typed `realtime_steering` observation is still empty and no post-baseline editor delta arrived during the observation window. Therefore there is no honest live evidence yet that the banner/status item renders `(<N> edits)` and exposes the full verbatim aggregate in its hover, nor that a subsequent Run Agent Doc queues the aggregate handoff without submitting a partial edit.
+
+`#5qjj` remains pending. To finish it, make two separate exchange edits while a turn is active, observe the banner count and hover, then run Agent Doc once. I can verify the resulting aggregate projection and handoff from the controller logs; the operator must report the rendered banner/hover because that UI is not represented in the logs.
+<!-- agent:boundary:a9161326 -->
 <!-- /agent:exchange -->
 ## Queue
 

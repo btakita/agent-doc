@@ -1,5 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 019fabf0-9af0-7f73-a25c-6a43fd6470c5
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -220,12 +221,26 @@ Implemented and installed the post-registration intent fence.
 The new Haiven symptom is separate: `--done` persisted the checked state for `#unpaidoutsideactivity`, then `guard_completed_pending_reap` observed that same row before reap crossed the closeout boundary. I recorded that atomicity failure as a regression item rather than driving another Haiven repair from this session.
 
 `#steeringmirrorverifylive313` remains operator-gated and is not complete until its live UI verification is observed.
-<!-- agent:boundary:92ab0349 -->
+
+### Re: Response
+
+Fixed, installed, and released as agent-doc `0.35.89`.
+
+- Pure Codex threads now ignore agent-doc work owned by other threads.
+- Exact session restart/resume recovery is preserved.
+- 8,366 tests and model checks passed.
+- Pushed commit `149f7e1ad` and tag `v0.35.89`.
+- CI was in progress on the single required check.
+- Unrelated `editors/zed/extension.wasm` was untouched.
+
+The document response is retained but awaiting an editor delivery ACK. Please restart IDEA once to activate the installed plugin generation; no Save All or duplicate finalize is needed.
+<!-- agent:boundary:01007db8 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - do [#implementlazilyintent]
+- do [#unpaidoutsideactivity]
 <!-- /agent:queue -->
 
 ## Notes
@@ -236,7 +251,7 @@ The new Haiven symptom is separate: `--done` persisted the checked state for `#u
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#implementlazilyintent] Implement a Lazily intent-generation effect token at the JetBrains post-registration editor boundary so retired, superseded, or model-less reconnect targets are refused before mutation; keep RPC/FFI transport-only and add plugin plus SimWorld coverage for an intent retired while its EDT effect is queued.
+- [ ] [#unpaidoutsideactivity] #agent-doc-bug Make `--done`/backlog-only closeout atomically reap the completed tracked row before `guard_completed_pending_reap`; add a recovery regression proving a hook-captured committed response plus late `--done` does not require another preflight/repair cycle. Live recurrence: haiven.md `#unpaidoutsideactivity`.
 <!-- /agent:backlog -->
 
 ## Review

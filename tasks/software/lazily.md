@@ -311,7 +311,25 @@ Verification is green:
 Committed and pushed all implementation/spec repositories and the orchestration commit `d3a3dc4e6`. One-shot CI snapshots: spec, Zig, Go, and JavaScript green; Rust, Kotlin, Dart, C++, and C# in progress; root, formal, and Python have no workflow named `CI`. Per repository policy, no polling was performed.
 
 Unrelated workspace state was preserved: Zig/C# `AGENTS.md`, Python's linked worktree, and JS/C# build directories were not committed.
-<!-- agent:boundary:e0260ef0 -->
+
+### Re: #lzstdlibcspromote — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzstdlibcspromote]
+
+
+Completed Phase 4 and promoted lazily-cs to portable-stdlib feature parity.
+
+- Published the production C# `Timer`, caller-driven `Timeout`, and `RevisionBarrier` surfaces plus their corpus runners in lazily-cs commit `95c93f4` and pushed `main`.
+- The full C# gate is green: 196 tests, 127/127 canonical fixtures, package/FFI/peer checks, and the final repository `make check`.
+- C# is active—without staging—in all three nine-peer feature scenarios. The network suite reports Timer, Timeout, and RevisionBarrier passing across all nine bindings.
+- The C# peer accepts the canonical decimal-string representation for full-range `u64` wire values while keeping the production API strongly typed.
+- The suite exercises the production stdlib implementation; it does not substitute test-only DTOs or an alternate state machine.
+- Channel promotion remains intentionally staged for C# because lazily-cs does not yet advertise executable `transport_links`. Semantic CRDT/stdlib parity does not earn transport-channel credit. C# will enter each channel cell only after a real .NET adapter exists and passes as sender and receiver.
+
+This satisfies the Phase 4 rule: promote C# per feature on green evidence, and stage only the unsupported executable channel capabilities.
+<!-- agent:boundary:6cfdd596 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -321,7 +339,7 @@ Unrelated workspace state was preserved: Zig/C# `AGENTS.md`, Python's linked wor
 - ~~do [#lzstdlibrsfixtures]~~
 - ~~do [#lzstdlibportsnative]~~
 - ~~do [#lzstdlibportsmanaged]~~
-- do [#lzstdlibcspromote]
+- ~~do [#lzstdlibcspromote]~~
 - do [#lzstdlibmatrixrelease]
 <!-- /agent:queue -->
 
@@ -329,7 +347,6 @@ Unrelated workspace state was preserved: Zig/C# `AGENTS.md`, Python's linked wor
 
 <!-- agent:backlog priority queue -->
 - [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
-- [ ] [#lzstdlibcspromote] Implement Phase 4 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: add .NET stdlib production surfaces and corpus runners, then promote C# per feature and per executable channel only when evidence is green.
 - [ ] [#lzstdlibmatrixrelease] Implement Phase 5 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: run the capability-driven all-peer/all-channel matrix, enforce CI and mutation gates, publish coverage evidence, and release bindings inside-out only after every claimed cell is green.
 <!-- /agent:backlog -->
 

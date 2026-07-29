@@ -110,21 +110,30 @@ pub fn handle_stop() -> Result<()> {
     Ok(())
 }
 
+/// Resolve only the document binding owned by this exact Codex thread.
+///
+/// This is intentionally narrower than document- or project-scoped recovery:
+/// ambient hooks must not infer ownership from another thread's hook state or
+/// from a durable queue marker.
+pub fn load_bound_session_for_stop(
+    cwd: &Path,
+    session_id: &str,
+) -> Result<Option<(PathBuf, SessionState)>> {
+    let roots = project_roots_for(cwd);
+    if roots.is_empty() {
+        return Ok(None);
+    }
+    load_state_any(&roots, session_id)
+}
+
 fn apply_stop(input: &StopInput) -> Result<StopResponse> {
     let cwd = PathBuf::from(&input.cwd);
-    let roots = project_roots_for(&cwd);
-    if roots.is_empty() {
-        return Ok(StopResponse::Continue { continue_: true });
-    }
-    let Some((loaded_root, state)) = load_state_any(&roots, &input.session_id)? else {
-        // No tracked in-memory session state — but a cleanly-committed document
-        // can still owe an `agent:queue auto` continuation. Consult the durable
-        // marker before letting Codex send its final answer; this is the live
-        // failure mode the marker exists to close.
-        // (#codex-auto-queue-stalled-final-gate)
-        if let Some(response) = marker_fallback_continuation_response(&roots, input)? {
-            return Ok(response);
-        }
+    let Some((loaded_root, state)) = load_bound_session_for_stop(&cwd, &input.session_id)? else {
+        // Ambient Codex hooks are exact-thread scoped. A durable document queue
+        // marker proves that some agent-doc actor owes work, but it does not
+        // prove that this Codex thread owns that work. Falling back from a
+        // missing exact session binding to a project-scoped marker lets an
+        // unrelated pure Codex session inherit agent-doc work.
         return Ok(StopResponse::Continue { continue_: true });
     };
 
@@ -741,68 +750,6 @@ fn tracked_repeated_queue_recovery_response(
     })
 }
 
-fn marker_repeated_queue_recovery_response(
-    file: &Path,
-    previous_prompt: &str,
-    note: String,
-) -> Result<StopResponse> {
-    let Some(next_prompt) = active_auto_queue_prompt(file)? else {
-        return Ok(StopResponse::Continue { continue_: true });
-    };
-    if next_prompt == previous_prompt {
-        return Ok(StopResponse::Block {
-            decision: "block",
-            reason: format!(
-                "agent-doc Stop hook replayed a response for {} from the durable continuation marker, but the queue head still did not advance: {:?}.{} {}",
-                file.display(),
-                previous_prompt,
-                note,
-                render_prompt_continuation_instruction(
-                    &file.display().to_string(),
-                    agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
-                    None,
-                )
-            ),
-        });
-    }
-    agent_doc_queue_io::continuation_marker::record_continuation_requested_head(
-        file,
-        &next_prompt,
-    )?;
-    let context_reset_reason = agent_doc_codex_hook_io::codex_continuation_clear_reason(file, None);
-    if let Some(response) = background_context_clear_suppression_response(
-        file,
-        &next_prompt,
-        "durable_marker_after_recovery",
-        context_reset_reason.as_deref(),
-    ) {
-        return Ok(response);
-    }
-    Ok(StopResponse::Block {
-        decision: "block",
-        reason: format!(
-            "agent-doc Stop hook recovered the previous queue response for {disp} from the durable continuation marker.{note} The next queue prompt is {prompt:?}. {instruction}",
-            disp = file.display(),
-            note = note,
-            prompt = next_prompt,
-            instruction = {
-                let display_path = file.display().to_string();
-                if let Some(command) =
-                    agent_doc_queue::queue_command::slash_command_text(&next_prompt)
-                {
-                    render_slash_command_continuation_instruction(&display_path, &command)
-                } else {
-                    render_prompt_continuation_instruction(
-                        &display_path,
-                        agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
-                        context_reset_reason.as_deref(),
-                    )
-                }
-            },
-        ),
-    })
-}
-
 fn auto_queue_continuation_response(
     file: &Path,
     cleanup_roots: &[PathBuf],
@@ -845,8 +792,8 @@ fn auto_queue_continuation_response(
     next_state.last_auto_queue_head = Some(prompt.clone());
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
-    // Keep the durable marker's requested-head in sync so a later stop with
-    // missing session state still applies the non-advancing-head guard.
+    // Keep the durable marker's requested-head in sync for document-level
+    // diagnostics. Ambient hooks still require this exact tracked session.
     let _ =
         agent_doc_queue_io::continuation_marker::record_continuation_requested_head(file, &prompt);
     let context_reset_reason =
@@ -882,108 +829,6 @@ fn auto_queue_continuation_response(
                     render_prompt_continuation_instruction(
                         &display_path,
                         agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
-                        context_reset_reason.as_deref(),
-                    )
-                }
-            },
-        ),
-    }))
-}
-
-/// Codex Stop-hook fallback when no tracked in-memory session state exists: a
-/// durable continuation marker (written at the last clean closeout) may still
-/// prove the document owes an `agent:queue auto` continuation. The marker is
-/// re-confirmed against the live document inside
-/// [`agent_doc_queue_io::queue_continuation::pending_marker_continuation_for_roots_with_actor_binding`], so a
-/// stale marker never forces a spurious block. (#codex-auto-queue-stalled-final-gate)
-fn marker_fallback_continuation_response(
-    roots: &[PathBuf],
-    input: &StopInput,
-) -> Result<Option<StopResponse>> {
-    // `#codex-stop-cross-doc-queue-continuation`: this fallback has no tracked
-    // in-memory session state, so it must not blindly drive the first durable
-    // marker — pass the current Codex pane (inherited via TMUX_PANE) so a marker
-    // owned by another live actor's pane is skipped instead of forcing this pane
-    // to run a foreign-owned document.
-    let current_pane = std::env::var("TMUX_PANE").ok();
-    let Some((file, continuation, marker)) =
-        agent_doc_queue_io::queue_continuation::pending_marker_continuation_for_roots_with_actor_binding(
-            roots,
-            current_pane.as_deref(),
-            agent_doc_controller_io::project_controller::authoritative_actor_binding,
-        )?
-    else {
-        return Ok(None);
-    };
-
-    if agent_doc_codex_hook_io::is_context_clear_prompt(&continuation.head_prompt) {
-        return Ok(None);
-    }
-
-    // Non-advancing-head guard: a repeated stop whose marker already requested
-    // this exact head must either recover the in-pane response or fail closed
-    // without letting Codex send an unpersisted final answer.
-    if input.stop_hook_active
-        && marker.last_requested_head.as_deref() == Some(continuation.head_prompt.as_str())
-    {
-        return Ok(Some(
-            match try_recover_repeated_queue_head_response(
-                &file,
-                &continuation.head_prompt,
-                input,
-                None,
-            )? {
-                RepeatedQueueHeadRecovery::Recovered { note } => {
-                    marker_repeated_queue_recovery_response(&file, &continuation.head_prompt, note)?
-                }
-                RepeatedQueueHeadRecovery::NotRecoverable { note } => {
-                    repeated_queue_recovery_unavailable_response(
-                        &file,
-                        &continuation.head_prompt,
-                        &note,
-                    )
-                }
-            },
-        ));
-    }
-
-    agent_doc_queue_io::continuation_marker::record_continuation_requested_head(
-        &file,
-        &continuation.head_prompt,
-    )?;
-    let context_reset_reason =
-        agent_doc_codex_hook_io::codex_continuation_clear_reason(&file, None);
-    agent_doc_codex_hook_io::log_codex_stop_queue_continuation(
-        &file,
-        &continuation.head_prompt,
-        "durable_marker",
-    );
-    if let Some(response) = background_context_clear_suppression_response(
-        &file,
-        &continuation.head_prompt,
-        "durable_marker",
-        context_reset_reason.as_deref(),
-    ) {
-        return Ok(Some(response));
-    }
-    // #codex-self-reinvoke-prevent (Option B): in-pane continuation, not a CLI
-    // re-run (see auto_queue_continuation_response).
-    Ok(Some(StopResponse::Block {
-        decision: "block",
-        reason: format!(
-            "agent-doc Stop hook found a durable `agent:queue auto` continuation for {disp} with no tracked session state. The next queue prompt is {prompt:?}. {instruction}",
-            disp = file.display(),
-            prompt = continuation.head_prompt.as_str(),
-            instruction = {
-                let display_path = file.display().to_string();
-                if let Some(command) =
-                    agent_doc_queue::queue_command::slash_command_text(&continuation.head_prompt)
-                {
-                    render_slash_command_continuation_instruction(&display_path, &command)
-                } else {
-                    render_prompt_continuation_instruction(
-                        &display_path,
-                        agent_doc_codex_hook_io::agent_doc_mcp_configured_for(&file),
                         context_reset_reason.as_deref(),
                     )
                 }
@@ -2725,51 +2570,32 @@ Done.\n\
     }
 
     #[test]
-    fn stop_blocks_from_durable_marker_when_session_state_missing() {
-        // #codex-auto-queue-stalled-final-gate live regression (sampleorders
-        // shape): the completed head was consumed, `#seopdp` remains, queue_active
-        // is true with `agent:queue auto`, and the document is clean — but the
-        // Stop hook has NO tracked in-memory session state (the live failure). The
-        // durable continuation marker (written at the prior clean closeout) must
-        // still force continuation instead of letting Codex send a final answer.
+    fn unbound_codex_thread_ignores_another_threads_durable_agent_doc_marker() {
+        // Two Codex threads share one project. Thread A explicitly entered
+        // agent-doc and left a durable auto-queue marker. Ambient Stop hooks for
+        // pure thread B must remain a no-op instead of inheriting A's document.
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
-        // Prior clean closeout wrote the durable marker.
+        track_doc(&dir, &doc, "turn-a");
         agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
             .expect("continuation required");
 
-        // Untracked session id → load_state_any returns None.
         let response = apply_stop(&StopInput {
-            session_id: "untracked-session".to_string(),
-            turn_id: "turn-x".to_string(),
+            session_id: "pure-codex-thread-b".to_string(),
+            turn_id: "turn-b".to_string(),
             cwd: dir.path().display().to_string(),
             last_assistant_message: "Final answer.".to_string(),
             stop_hook_active: false,
         })
         .unwrap();
 
-        match response {
-            StopResponse::Block { reason, .. } => {
-                assert!(reason.contains("durable"), "{reason}");
-                assert!(
-                    reason.contains("do [#seopdp] deploy product page"),
-                    "{reason}"
-                );
-                assert!(reason.contains("send the final answer"), "{reason}");
-                assert!(!reason.contains("agent_doc_finalize"), "{reason}");
-            }
-            other => panic!("expected durable-marker continuation block, got {other:?}"),
-        }
-        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let ops_log =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            ops_log.contains("codex_stop_queue_continuation")
-                && ops_log.contains("source=durable_marker")
-                && ops_log.contains("mcp_configured=false")
-                && ops_log.contains(&agent_doc_hash::content_hash(
-                    "do [#seopdp] deploy product page"
-                )),
-            "Stop hook should log durable-marker queue-continuation proof:\n{ops_log}"
+            !ops_log.contains("codex_stop_queue_continuation"),
+            "pure thread B must not run thread A's agent-doc queue:\n{ops_log}"
         );
     }
 
@@ -2794,7 +2620,7 @@ Done.\n\
     }
 
     #[test]
-    fn stop_marker_fallback_suppresses_background_clear_after_exchange_compaction() {
+    fn stop_tracked_session_suppresses_background_clear_after_exchange_compaction() {
         let dir = setup_project();
         // Background context clears are disabled even when the document opted into
         // queue context reset. The Stop hook should keep queue continuation in-pane.
@@ -2808,9 +2634,10 @@ Done.\n\
         agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
             .expect("continuation required");
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
+        track_doc(&dir, &doc, "turn-x");
 
         let response = apply_stop(&StopInput {
-            session_id: "untracked-session".to_string(),
+            session_id: "codex-session".to_string(),
             turn_id: "turn-x".to_string(),
             cwd: dir.path().display().to_string(),
             last_assistant_message: "Final answer.".to_string(),
@@ -2832,7 +2659,7 @@ Done.\n\
         let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("codex_background_context_clear_suppressed")
-                && ops_log.contains("source=durable_marker")
+                && ops_log.contains("source=tracked_state")
                 && ops_log.contains("result=in_pane_continuation"),
             "fresh-context continuation should be kept in-pane, not handed to supervisor:\n{ops_log}"
         );
@@ -2911,9 +2738,10 @@ Done.\n\
         agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
             .expect("continuation required");
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
+        track_doc(&dir, &doc, "turn-x");
 
         apply_stop(&StopInput {
-            session_id: "untracked-session".to_string(),
+            session_id: "codex-session".to_string(),
             turn_id: "turn-x".to_string(),
             cwd: dir.path().display().to_string(),
             last_assistant_message: "Final answer.".to_string(),
@@ -2973,9 +2801,10 @@ Done.\n\
         init_git_repo(dir.path(), &doc);
         agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
             .expect("continuation required");
+        track_doc(&dir, &doc, "turn-x");
 
         let response = apply_stop(&StopInput {
-            session_id: "untracked-session".to_string(),
+            session_id: "codex-session".to_string(),
             turn_id: "turn-x".to_string(),
             cwd: dir.path().display().to_string(),
             last_assistant_message: "Final answer.".to_string(),
@@ -3019,9 +2848,10 @@ Done.\n\
         agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
             .expect("continuation required");
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
+        track_doc(&dir, &doc, "turn-x");
 
         apply_stop(&StopInput {
-            session_id: "untracked-session".to_string(),
+            session_id: "codex-session".to_string(),
             turn_id: "turn-x".to_string(),
             cwd: dir.path().display().to_string(),
             last_assistant_message: "Final answer.".to_string(),
@@ -3087,16 +2917,17 @@ Done.\n\
     }
 
     #[test]
-    fn stop_marker_fallback_continuation_prefers_configured_mcp_tools() {
+    fn stop_tracked_continuation_prefers_configured_mcp_tools() {
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         write_codex_mcp_config(dir.path());
         init_git_repo(dir.path(), &doc);
         agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
             .expect("continuation required");
+        track_doc(&dir, &doc, "turn-x");
 
         let response = apply_stop(&StopInput {
-            session_id: "untracked-session".to_string(),
+            session_id: "codex-session".to_string(),
             turn_id: "turn-x".to_string(),
             cwd: dir.path().display().to_string(),
             last_assistant_message: "Final answer.".to_string(),
@@ -3106,7 +2937,6 @@ Done.\n\
 
         match response {
             StopResponse::Block { reason, .. } => {
-                assert!(reason.contains("durable"), "{reason}");
                 assert!(
                     reason.contains("do [#seopdp] deploy product page"),
                     "{reason}"
@@ -3120,48 +2950,8 @@ Done.\n\
                 assert!(reason.contains("agent_doc_session_check"), "{reason}");
                 assert!(reason.contains("agent-doc write --commit"), "{reason}");
             }
-            other => panic!("expected durable-marker continuation block, got {other:?}"),
+            other => panic!("expected tracked continuation block, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn stop_marker_fallback_replays_plain_final_answer_when_head_does_not_advance() {
-        // #codex-auto-queue-stalled-final-gate: a repeated stop (stop_hook_active)
-        // whose durable marker already requested this exact head must persist a
-        // plain Codex final answer into agent:exchange instead of allowing it to
-        // escape as chat-only text.
-        let dir = setup_project();
-        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy"]);
-        init_git_repo(dir.path(), &doc);
-        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit").unwrap();
-        // The first continuation request recorded this head into the marker.
-        agent_doc_queue_io::continuation_marker::record_continuation_requested_head(
-            &doc,
-            "do [#seopdp] deploy",
-        )
-        .unwrap();
-
-        let response = apply_stop(&StopInput {
-            session_id: "untracked-session".to_string(),
-            turn_id: "turn-x".to_string(),
-            cwd: dir.path().display().to_string(),
-            last_assistant_message: "Final answer.\n\nVerification: Codex stop-hook simulation."
-                .to_string(),
-            stop_hook_active: true,
-        })
-        .unwrap();
-
-        assert_eq!(response, StopResponse::Continue { continue_: true });
-        let content = fs::read_to_string(&doc).unwrap();
-        assert!(content.contains("### Re: do [#seopdp] deploy — gpt-5"));
-        assert!(content.contains("Verification: Codex stop-hook simulation."));
-        assert!(!content.contains("- do [#seopdp] deploy"));
-        assert!(
-            agent_doc_queue_io::queue_continuation::detect(&doc)
-                .unwrap()
-                .is_none(),
-            "replayed response should drain the only active head"
-        );
     }
 
     #[test]

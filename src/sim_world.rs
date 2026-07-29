@@ -1677,8 +1677,8 @@ mod editor_commit_projection_model {
 /// SimWorld reproduction for a restarted-editor recovery wedge: a retained
 /// response has reached `write_applied`, the editor owns a newer authoritative
 /// buffer, disk remains one cut behind, and an idle controller does not
-/// manufacture another write. A recovery-only session check must ask the editor
-/// to save that exact authority instead of requiring IDE exit.
+/// manufacture another write. The actual editor-delivery ACK must trigger one
+/// native save; neither a single connected editor nor timer ticks are proof.
 mod read_only_retained_projection_model {
     use agent_doc_session_check_io::command::{
         ReadOnlyRetainedCloseoutResumeProjection, ReadOnlyTerminalProjectionDecision,
@@ -1689,7 +1689,10 @@ mod read_only_retained_projection_model {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Action {
         SessionCheck,
-        EditorNativeSave,
+        TimerTick,
+        EditorDeliveryAck,
+        StaleNativeSaveReceipt,
+        ExactNativeSaveReceipt,
     }
 
     struct World {
@@ -1697,7 +1700,9 @@ mod read_only_retained_projection_model {
         disk: String,
         phase: CyclePhase,
         retained_write_blocks: bool,
+        delivery_converged: bool,
         native_save_requested: bool,
+        native_save_requests: usize,
         committed: bool,
         response_replays: usize,
         operator_exit_requested: bool,
@@ -1706,7 +1711,7 @@ mod read_only_retained_projection_model {
 
     impl World {
         fn retained_write_applied_wedge() -> Self {
-            let authority = "retained response\nrestored operator text\n".to_string();
+            let authority = "orchard offer response\nrestored operator note\n".to_string();
             let disk = "retained response\n".to_string();
             let phase = CyclePhase::WriteApplied;
             let retained_write_blocks = true;
@@ -1720,7 +1725,9 @@ mod read_only_retained_projection_model {
                 disk,
                 phase,
                 retained_write_blocks,
+                delivery_converged: false,
                 native_save_requested: false,
+                native_save_requests: 0,
                 committed: false,
                 response_replays: 0,
                 operator_exit_requested: false,
@@ -1728,22 +1735,42 @@ mod read_only_retained_projection_model {
             }
         }
 
+        fn evaluate_projection(&mut self) {
+            match decide_read_only_terminal_projection(
+                self.authority == self.disk,
+                Some(self.phase),
+                self.retained_write_blocks,
+                self.delivery_converged,
+            ) {
+                ReadOnlyTerminalProjectionDecision::Converged
+                | ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery => {}
+                ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave => {
+                    if !self.native_save_requested {
+                        self.native_save_requested = true;
+                        self.native_save_requests += 1;
+                    }
+                }
+                ReadOnlyTerminalProjectionDecision::ObserveOnly => {
+                    self.operator_exit_requested = true;
+                }
+            }
+        }
+
         fn step(&mut self, action: Action) {
             match action {
-                Action::SessionCheck => match decide_read_only_terminal_projection(
-                    self.authority == self.disk,
-                    Some(self.phase),
-                    self.retained_write_blocks,
-                ) {
-                    ReadOnlyTerminalProjectionDecision::Converged => {}
-                    ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave => {
-                        self.native_save_requested = true;
-                    }
-                    ReadOnlyTerminalProjectionDecision::ObserveOnly => {
-                        self.operator_exit_requested = true;
-                    }
-                },
-                Action::EditorNativeSave if self.native_save_requested => {
+                Action::SessionCheck => self.evaluate_projection(),
+                // A clock is not a document-state Source. It cannot create
+                // another closeout or native-save Effect.
+                Action::TimerTick => {}
+                Action::EditorDeliveryAck => {
+                    self.delivery_converged = true;
+                    self.evaluate_projection();
+                }
+                Action::StaleNativeSaveReceipt if self.native_save_requested => {
+                    self.retained_closeout_resume
+                        .observe_native_save(false, false);
+                }
+                Action::ExactNativeSaveReceipt if self.native_save_requested => {
                     self.disk = self.authority.clone();
                     self.native_save_requested = false;
                     self.retained_closeout_resume
@@ -1764,14 +1791,30 @@ mod read_only_retained_projection_model {
     }
 
     #[test]
-    fn retained_write_applied_session_check_saves_without_operator_idea_exit() {
+    fn orchard_offer_waits_for_delivery_edge_and_saves_exactly_once() {
         let mut world = World::retained_write_applied_wedge();
         world.step(Action::SessionCheck);
-        assert!(world.native_save_requested);
+        assert!(!world.native_save_requested);
+        assert_eq!(world.native_save_requests, 0);
         assert!(!world.operator_exit_requested);
 
-        world.step(Action::EditorNativeSave);
-        assert!(world.disk.contains("restored operator text"));
+        for _ in 0..20 {
+            world.step(Action::TimerTick);
+        }
+        assert_eq!(world.native_save_requests, 0);
+
+        world.step(Action::EditorDeliveryAck);
+        assert!(world.native_save_requested);
+        assert_eq!(world.native_save_requests, 1);
+        world.step(Action::SessionCheck);
+        assert_eq!(world.native_save_requests, 1);
+
+        world.step(Action::StaleNativeSaveReceipt);
+        assert!(!world.committed);
+        assert_eq!(world.response_replays, 0);
+
+        world.step(Action::ExactNativeSaveReceipt);
+        assert!(world.disk.contains("restored operator note"));
 
         assert!(world.committed);
         assert_eq!(world.phase, CyclePhase::Committed);
@@ -7190,6 +7233,96 @@ fn accepted_stale_supervisor_replacement_timeout_preserves_mid_turn_session() {
     assert_eq!(world.coverage.supervisor_restart_drain_reexecs, 1);
     assert_eq!(world.route.durable.generation, generation_before + 1);
     assert_eq!(world.route.durable.pane_id, pane_before);
+}
+
+#[test]
+fn codex_child_termination_restarts_exact_orchard_conversation() {
+    use agent_doc_supervisor::session_lineage::HarnessSessionLineage;
+
+    // Reproduce the missing-frontmatter failure with a neutral document name.
+    // The Codex prompt hook has published the real thread id to controller state,
+    // while the compatibility `resume:` projection is still absent.
+    let frontmatter_resume: Option<&str> = None;
+    let mut lineage = HarnessSessionLineage::new(None, Some("older-thread".into()));
+    assert!(lineage.observe_projected_id(Some("orchard-thread")));
+    assert_eq!(frontmatter_resume, None);
+
+    // Timer/reconcile observations and a lagging frontmatter projection cannot
+    // replace or erase the controller-owned binding.
+    assert!(!lineage.observe_projected_id(Some("older-thread")));
+    assert_eq!(lineage.active_id(), Some("orchard-thread"));
+
+    // Child termination is a lifecycle edge, not a request for a new
+    // conversation. The replacement argv names the exact id and never uses
+    // Codex's process-global `--last` selector.
+    let fresh_args = vec![
+        "-s".to_string(),
+        "danger-full-access".to_string(),
+        "--model".to_string(),
+        "gpt-5".to_string(),
+    ];
+    let args = agent_doc_harness::HarnessConfig::codex()
+        .exact_resume_args(
+            &fresh_args,
+            lineage.active_id().expect("controller lineage"),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(&args[..2], ["resume", "orchard-thread"]);
+    assert!(!args.iter().any(|arg| arg == "--last"));
+}
+
+#[test]
+fn pure_codex_thread_does_not_inherit_orchard_agent_doc_work() {
+    use agent_doc_codex_hook_io::SessionState;
+    use agent_doc_queue::queue_continuation::QueueContinuation;
+
+    // Thread A explicitly owns an agent-doc document and the document has a
+    // durable continuation marker. Thread B starts as a plain Codex session in
+    // the same project. The ambient Stop-hook boundary must remain keyed only
+    // by B's exact thread id; project-local liveness is not ownership.
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir(project.path().join(".git")).unwrap();
+    let document = project.path().join("orchard-notes.md");
+    std::fs::write(&document, "# Orchard notes\n").unwrap();
+    agent_doc_codex_hook_io::save_state(
+        project.path(),
+        &SessionState {
+            session_id: "orchard-agent-thread".into(),
+            doc_path: document.display().to_string(),
+            last_turn_id: "turn-a".into(),
+            last_prompt: format!("agent-doc {}", document.display()),
+            last_auto_queue_head: None,
+            last_context_clear_at: None,
+            updated_at: 1,
+        },
+    )
+    .unwrap();
+    agent_doc_queue_io::continuation_marker::write_continuation_marker(
+        &document,
+        &QueueContinuation {
+            head_prompt: "review orchard offer".into(),
+            head_id: Some("orchard-review".into()),
+            reason: "ready".into(),
+        },
+        "simworld",
+    )
+    .unwrap();
+
+    assert!(
+        agent_doc_codex_stop_io::load_bound_session_for_stop(
+            project.path(),
+            "orchard-agent-thread",
+        )
+        .unwrap()
+        .is_some()
+    );
+    assert!(
+        agent_doc_codex_stop_io::load_bound_session_for_stop(project.path(), "plain-codex-thread",)
+            .unwrap()
+            .is_none(),
+        "the document marker and thread A binding must not attach plain thread B"
+    );
 }
 
 #[test]

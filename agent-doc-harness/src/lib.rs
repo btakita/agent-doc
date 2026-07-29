@@ -554,6 +554,36 @@ impl HarnessConfig {
     /// Build the full arg list for a restart iteration.
     /// On first run, returns `base_args` unchanged.
     /// On restart, applies the `restart_behavior`.
+    /// Build an id-addressed resume launch from fresh, document-scoped args.
+    ///
+    /// Unlike [`Self::restart_args`], this never uses a process-global
+    /// "latest conversation" selector. Codex also needs its fresh-launch
+    /// sandbox flags translated into the shape accepted by `codex resume`.
+    pub fn exact_resume_args(
+        &self,
+        fresh_args: &[String],
+        id: &str,
+    ) -> Result<Option<Vec<String>>> {
+        match &self.resume_behavior {
+            ResumeBehavior::AppendFlag(flag) => {
+                let mut args = fresh_args.to_vec();
+                args.push(flag.clone());
+                args.push(id.to_string());
+                Ok(Some(args))
+            }
+            ResumeBehavior::PrependSubcommand(subcommand) => {
+                let prefix = vec![subcommand.clone(), id.to_string()];
+                if self.binary == "codex" {
+                    return Ok(Some(codex_resume_restart_args(&prefix, fresh_args)?));
+                }
+                let mut args = prefix;
+                args.extend(fresh_args.iter().cloned());
+                Ok(Some(args))
+            }
+            ResumeBehavior::Unsupported => Ok(None),
+        }
+    }
+
     pub fn restart_args(&self, base_args: &[String]) -> Result<Vec<String>> {
         match &self.restart_behavior {
             RestartBehavior::Append(extra) => {
@@ -4035,6 +4065,36 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
             None
         );
         assert_eq!(codex_args, ["resume", "conv-42", "--model", "gpt-5"]);
+    }
+
+    #[test]
+    fn exact_codex_resume_uses_bound_id_and_resume_compatible_args() {
+        let fresh = vec![
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+            "--add-dir".to_string(),
+            "/tmp/orchard".to_string(),
+            "--model".to_string(),
+            "gpt-5".to_string(),
+        ];
+
+        let args = HarnessConfig::codex()
+            .exact_resume_args(&fresh, "thread-orchard")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            args,
+            [
+                "resume",
+                "thread-orchard",
+                "-c",
+                "sandbox_mode=\"danger-full-access\"",
+                "--model",
+                "gpt-5",
+            ]
+        );
+        assert!(!args.iter().any(|arg| arg == "--last"));
     }
 
     /// `#resumenocontinue`: agent-doc must NEVER emit a continue-latest flag.

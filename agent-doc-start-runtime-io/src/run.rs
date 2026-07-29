@@ -6,6 +6,7 @@ use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
     lifecycle::{BootResumeAction, boot_resume_action},
     run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
+    session_lineage::HarnessSessionLineage,
 };
 use agent_doc_supervisor_process::{
     REEXEC_CAPABILITY_PROOF_CONTRACT_ENV, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState,
@@ -54,6 +55,49 @@ fn resolve_resume_claim_for_start(
         );
     }
     claim.effective_request(resume)
+}
+
+fn resolve_resume_request_from_sources(
+    requested: Option<&agent_doc_harness::ResumeRequest>,
+    frontmatter_resume: Option<&str>,
+    controller_resume: Option<&str>,
+) -> Option<agent_doc_harness::ResumeRequest> {
+    match requested? {
+        agent_doc_harness::ResumeRequest::Id(id) => {
+            Some(agent_doc_harness::ResumeRequest::Id(id.clone()))
+        }
+        agent_doc_harness::ResumeRequest::Latest => controller_resume
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .or_else(|| {
+                frontmatter_resume
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+            })
+            .map(|id| agent_doc_harness::ResumeRequest::Id(id.to_string())),
+    }
+}
+
+fn latest_codex_session_projection(
+    canonical: &Path,
+    harness: &agent_doc_harness::HarnessConfig,
+) -> Option<agent_doc_codex_hook_io::ActiveSessionState> {
+    if harness.binary != "codex" {
+        return None;
+    }
+    match agent_doc_codex_hook_io::load_latest_prompt_state_for_file(canonical) {
+        Ok(state) => state,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "start_codex_session_projection_read_failed error={}",
+                    format!("{err:#}").replace('\n', "\\n")
+                ),
+            );
+            None
+        }
+    }
 }
 
 /// Degrade a resolved `--resume <id>` to fresh when its transcript is verifiably
@@ -253,30 +297,15 @@ fn codex_reports_missing_resume_id(output: &[u8], attempted_id: &str) -> bool {
         && output.contains(&attempted_id.to_ascii_lowercase())
 }
 
-fn document_has_resume_pointer(current: &str) -> Result<bool> {
-    let (fm, _) = frontmatter::parse(current)?;
-    Ok(fm.resume.as_deref().is_some_and(|id| !id.trim().is_empty()))
-}
-
-fn document_resume_pointer_was_removed(file: &Path) -> Result<bool> {
-    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "start_resume_authority_recheck",
-    )?;
-    Ok(!document_has_resume_pointer(&current)?)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CodexResumeRecoveryReason {
     MissingSession,
-    PointerRemoved,
 }
 
 impl CodexResumeRecoveryReason {
     fn as_str(self) -> &'static str {
         match self {
             Self::MissingSession => "missing_session",
-            Self::PointerRemoved => "pointer_removed",
         }
     }
 }
@@ -480,9 +509,10 @@ pub fn run_with_reap_policy_and_resume(
     // `#resumeclaim` / `#resumestale`: resolve what this launch will actually
     // resume BEFORE building the launch spec, in three steps that must run in
     // THIS order:
-    //   1. Frontmatter lookup — bare `--resume`/the default only ever means
-    //      "look up this document's own recorded id"; it must never fall back to
-    //      the harness's continue-latest mode (`#resumenocontinue`).
+    //   1. Controller projection lookup — bare `--resume` means this document's
+    //      newest exact Codex hook binding, with frontmatter only as a durable
+    //      cold-recovery seed. It must never fall back to process-global latest
+    //      (`#resumenocontinue`).
     //   2. Claim check — on a document whose own id, this DOES nothing to
     //      explicit `--resume <id>` (checking before resolution left the common
     //      default-resume case unprotected: `Latest` never matches the `Id`
@@ -491,7 +521,14 @@ pub fn run_with_reap_policy_and_resume(
     //      transcript is gone (pruned, cleared `~/.claude`, moved machine),
     //      verified against the real CLI. Checking first degrades to fresh
     //      silently instead of the start command failing outright.
-    let resume = agent_doc_harness::resolve_resume_request(resume.as_ref(), fm.resume.as_deref());
+    let initial_codex_projection = latest_codex_session_projection(&canonical, &harness);
+    let resume = resolve_resume_request_from_sources(
+        resume.as_ref(),
+        fm.resume.as_deref(),
+        initial_codex_projection
+            .as_ref()
+            .map(|state| state.session_id.as_str()),
+    );
     let resume = resolve_resume_claim_for_start(&canonical, resume);
     let resume = degrade_resume_if_transcript_missing(
         &canonical,
@@ -585,7 +622,8 @@ pub fn run_with_reap_policy_and_resume(
         )?
     };
     let mut harness = initial_launch_spec.harness.clone();
-    let mut base_args = initial_launch_spec.base_args.clone();
+    let mut initial_launch_args = initial_launch_spec.base_args.clone();
+    let mut base_args = initial_launch_spec.fresh_base_args.clone();
     let mut resolved_env = initial_launch_spec.resolved_env.clone();
     let mut capability_proof_frontmatter = fm.clone();
     let mut active_resume_id = resume.as_ref().and_then(|request| match request {
@@ -596,7 +634,35 @@ pub fn run_with_reap_policy_and_resume(
     // `#resumecapture`: mint this launch's conversation id, hand it to the
     // harness, and record it on the document — so the NEXT restart can resume
     // precisely instead of starting fresh. No-op when already resuming.
-    assign_and_record_session_id(&canonical, &harness, &mut base_args);
+    if let Some(assigned) =
+        assign_and_record_session_id(&canonical, &harness, &mut initial_launch_args)
+    {
+        base_args = initial_launch_args.clone();
+        active_resume_id.get_or_insert(assigned);
+    }
+    let mut session_lineage = HarnessSessionLineage::new(
+        active_resume_id,
+        initial_codex_projection.map(|state| state.session_id),
+    );
+    if let Some(id) = session_lineage.active_id()
+        && fm.resume.as_deref() != Some(id)
+    {
+        match record_document_resume_id(&canonical, id) {
+            Ok(changed) => log_event(
+                &mut session_log,
+                &format!(
+                    "start_resume_projection id={id} changed={changed} source=controller_lineage"
+                ),
+            ),
+            Err(err) => log_event(
+                &mut session_log,
+                &format!(
+                    "start_resume_projection_failed id={id} error={}",
+                    format!("{err:#}").replace('\n', "\\n")
+                ),
+            ),
+        }
+    }
 
     // Query initial terminal size
     let initial_size = {
@@ -942,9 +1008,13 @@ pub fn run_with_reap_policy_and_resume(
                             // harness (and route emitting a stale harness-mismatch
                             // defer) until an unrelated reconcile catches up.
                             shared.set_current_harness(&new_harness);
-                            base_args = restart_spec.base_args.clone();
+                            base_args = restart_spec.fresh_base_args.clone();
                             resolved_env = restart_spec.resolved_env.clone();
                             capability_proof_frontmatter = restart_fm.clone();
+                            session_lineage.begin_fresh(
+                                latest_codex_session_projection(&canonical, &harness)
+                                    .map(|state| state.session_id),
+                            );
                             // Retire the old harness proof before the restart marker lands in
                             // the session log, so stale proof events cannot satisfy post-restart
                             // route checks.
@@ -1012,35 +1082,112 @@ pub fn run_with_reap_policy_and_resume(
                 }
             }
         }
-        // Build args for this iteration. A restart can be "fresh" (base args,
-        // no resume/continue flags) while still needing the document trigger
-        // re-submitted after the new child prompt appears.
+        // Build args for this iteration from the document's exact conversation
+        // lineage. The hook/controller projection is observed once at this child
+        // lifecycle edge; there is no polling and no global "latest" selector.
         let launch_plan = child_launch_plan(first_run, auto_trigger_next_launch);
         auto_trigger_next_launch = false;
         let auto_trigger = launch_plan.auto_trigger;
         let args = if launch_plan.restart_requested {
-            // A managed supervisor owns one document. Harness shortcuts such as
-            // Claude `--continue`, Codex `resume --last`, and OpenCode
-            // `--continue` select process-global history and can therefore
-            // hijack another document's live conversation after a CP recycle.
-            // Until a harness-specific session id is durably bound to this
-            // document, restart fresh and re-submit only this document's trigger.
-            let restart_args = base_args.clone();
-            start_console_status(
-                &mut session_log,
-                route_owned,
-                format!("Restarting {} (fresh, document-bound)...", harness.binary),
-            );
-            log_event(
-                &mut session_log,
-                &format!(
-                    "{}_restart requested_mode=continue effective_mode=fresh reason=unscoped_global_resume_disabled restart_count={}",
-                    harness.binary, restart_count
-                ),
-            );
-            restart_args
+            if session_lineage.active_id().is_none()
+                && let Some(projected) = latest_codex_session_projection(&canonical, &harness)
+                && session_lineage.observe_projected_id(Some(&projected.session_id))
+            {
+                let id = session_lineage
+                    .active_id()
+                    .expect("projection just captured");
+                match record_document_resume_id(&canonical, id) {
+                    Ok(changed) => log_event(
+                        &mut session_log,
+                        &format!(
+                            "restart_resume_projection id={id} changed={changed} source=controller_lineage"
+                        ),
+                    ),
+                    Err(err) => log_event(
+                        &mut session_log,
+                        &format!(
+                            "restart_resume_projection_failed id={id} error={}",
+                            format!("{err:#}").replace('\n', "\\n")
+                        ),
+                    ),
+                }
+            }
+
+            if let Some(id) = session_lineage.active_id()
+                && let Some(restart_args) = harness.exact_resume_args(&base_args, id)?
+            {
+                start_console_status(
+                    &mut session_log,
+                    route_owned,
+                    format!("Restarting {} (exact session {id})...", harness.binary),
+                );
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "{}_restart requested_mode=continue effective_mode=exact_resume resume_id={} restart_count={}",
+                        harness.binary, id, restart_count
+                    ),
+                );
+                restart_args
+            } else {
+                start_console_status(
+                    &mut session_log,
+                    route_owned,
+                    format!(
+                        "Cannot resume {}: exact document session id is unavailable",
+                        harness.binary
+                    ),
+                );
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "{}_restart requested_mode=continue effective_mode=blocked reason=exact_session_id_unavailable restart_count={}",
+                        harness.binary, restart_count
+                    ),
+                );
+                if harness.binary == "codex" {
+                    shared.transition_actor_state(
+                        agent_doc_sqlite::state_store::ActorState::WaitingInput,
+                        "supervisor",
+                        "exact_session_id_unavailable",
+                    );
+                    raw_mode.suspend();
+                    eprintln!(
+                        "\nCodex restart is blocked because this document has no exact thread id."
+                    );
+                    match prompt_for_restart_or_quit(
+                        &mut session_log,
+                        "exact_session_id_unavailable",
+                        "Press Enter to explicitly start fresh, or 'q' to exit.",
+                        "user_quit_without_exact_session_id",
+                        PromptEofPolicy::Quit,
+                    ) {
+                        PromptOutcome::Quit => {
+                            break "exact_session_id_unavailable";
+                        }
+                        PromptOutcome::RestartFresh => {
+                            raw_mode.resume();
+                            first_run = true;
+                            auto_trigger_next_launch = true;
+                            restart_count += 1;
+                            continue;
+                        }
+                    }
+                }
+                base_args.clone()
+            }
         } else {
-            let args = base_args.clone();
+            if restart_count > 0 {
+                session_lineage.begin_fresh(
+                    latest_codex_session_projection(&canonical, &harness)
+                        .map(|state| state.session_id),
+                );
+            }
+            let args = if restart_count == 0 {
+                initial_launch_args.clone()
+            } else {
+                base_args.clone()
+            };
             start_console_status(
                 &mut session_log,
                 route_owned,
@@ -1052,7 +1199,11 @@ pub fn run_with_reap_policy_and_resume(
                     "{}_start mode={} restart_count={}",
                     harness.binary,
                     if restart_count == 0 {
-                        "fresh"
+                        if session_lineage.active_id().is_some() {
+                            "exact_resume"
+                        } else {
+                            "fresh"
+                        }
                     } else {
                         "fresh_restart"
                     },
@@ -1365,8 +1516,8 @@ pub fn run_with_reap_policy_and_resume(
         drop(session);
         let _ = reader_thread.join();
 
-        let missing_resume_id = active_resume_id
-            .as_deref()
+        let missing_resume_id = session_lineage
+            .active_id()
             .filter(|id| {
                 harness.binary == "codex"
                     && shared
@@ -1374,37 +1525,8 @@ pub fn run_with_reap_policy_and_resume(
                         .with_recent_output(|output| codex_reports_missing_resume_id(output, id))
             })
             .map(str::to_string);
-        let removed_resume_id = if harness.binary == "codex" && missing_resume_id.is_none() {
-            if let Some(id) = active_resume_id.as_deref() {
-                match document_resume_pointer_was_removed(&canonical) {
-                    Ok(true) => Some(id.to_string()),
-                    Ok(false) => None,
-                    Err(err) => {
-                        eprintln!(
-                            "[start] warning: failed to recheck the Codex resume pointer in {}: {err:#}",
-                            canonical.display()
-                        );
-                        log_event(
-                            &mut session_log,
-                            &format!(
-                                "codex_resume_authority_recheck_failed id={id} error={}",
-                                format!("{err:#}").replace('\n', "\\n")
-                            ),
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        let codex_resume_recovery = missing_resume_id
-            .map(|id| (id, CodexResumeRecoveryReason::MissingSession))
-            .or_else(|| {
-                removed_resume_id.map(|id| (id, CodexResumeRecoveryReason::PointerRemoved))
-            });
+        let codex_resume_recovery =
+            missing_resume_id.map(|id| (id, CodexResumeRecoveryReason::MissingSession));
 
         // Flush any stale stdin bytes that the writer thread consumed from the
         // kernel but couldn't forward (e.g., user pressed Enter during the
@@ -1472,7 +1594,9 @@ pub fn run_with_reap_policy_and_resume(
                     }
                     PromptOutcome::RestartFresh => {
                         raw_mode.resume();
-                        first_run = true;
+                        // "Stop Agent" terminates the child, not its document-bound
+                        // conversation. Replacement must use the exact lineage.
+                        first_run = false;
                         auto_trigger_next_launch = auto_trigger;
                         restart_count += 1;
                         continue;
@@ -1482,6 +1606,12 @@ pub fn run_with_reap_policy_and_resume(
             PostChildExitAction::AutoRestart => {
                 let mode = shared.restart_mode.lock().clone();
                 first_run = mode == "fresh";
+                if first_run {
+                    session_lineage.begin_fresh(
+                        latest_codex_session_projection(&canonical, &harness)
+                            .map(|state| state.session_id),
+                    );
+                }
                 auto_trigger_next_launch = true;
                 restart_count += 1;
                 log_event(
@@ -1494,27 +1624,34 @@ pub fn run_with_reap_policy_and_resume(
         }
 
         if let Some((stale_id, recovery_reason)) = codex_resume_recovery {
-            let cleared = if recovery_reason == CodexResumeRecoveryReason::MissingSession {
-                match clear_document_resume_id_if_matches(&canonical, &stale_id) {
-                    Ok(cleared) => cleared,
-                    Err(err) => {
-                        eprintln!(
-                            "[start] warning: failed to clear stale Codex resume id {stale_id} from {}: {err:#}",
-                            canonical.display()
-                        );
-                        log_event(
-                            &mut session_log,
-                            &format!(
-                                "codex_stale_resume_clear_failed id={stale_id} error={}",
-                                format!("{err:#}").replace('\n', "\\n")
-                            ),
-                        );
-                        false
-                    }
+            let cleared = match clear_document_resume_id_if_matches(&canonical, &stale_id) {
+                Ok(cleared) => cleared,
+                Err(err) => {
+                    eprintln!(
+                        "[start] warning: failed to clear stale Codex resume id {stale_id} from {}: {err:#}",
+                        canonical.display()
+                    );
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "codex_stale_resume_clear_failed id={stale_id} error={}",
+                            format!("{err:#}").replace('\n', "\\n")
+                        ),
+                    );
+                    false
                 }
-            } else {
-                false
             };
+            if let Err(err) =
+                agent_doc_codex_hook_io::clear_session_state_for_file(&canonical, &stale_id)
+            {
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "codex_stale_controller_lineage_clear_failed id={stale_id} error={}",
+                        format!("{err:#}").replace('\n', "\\n")
+                    ),
+                );
+            }
 
             // Rebuild from the admitted frontmatter with resume forced off. The
             // writeback above is best-effort because a live editor may race it;
@@ -1527,10 +1664,11 @@ pub fn run_with_reap_policy_and_resume(
             };
             let fresh_spec =
                 build_harness_launch_spec(&fresh_fm, &global_config, &canonical, &mut launch_log)?;
-            base_args = fresh_spec.base_args;
+            base_args = fresh_spec.fresh_base_args;
             resolved_env = fresh_spec.resolved_env;
             capability_proof_frontmatter = fresh_fm;
-            active_resume_id = None;
+            session_lineage.clear_proven_missing(&stale_id);
+            session_lineage.begin_fresh(None);
             policy.reset();
             failed_resume_tracker.reset();
             first_run = true;
@@ -1539,15 +1677,10 @@ pub fn run_with_reap_policy_and_resume(
             // the fresh prompt becomes dispatch-ready.
             auto_trigger_next_launch = true;
             restart_count += 1;
-            let recovery_message = match recovery_reason {
-                CodexResumeRecoveryReason::MissingSession => format!(
-                    "[start] Codex session {stale_id} does not exist; cleared={} and starting a fresh document-bound session",
-                    cleared
-                ),
-                CodexResumeRecoveryReason::PointerRemoved => format!(
-                    "[start] Codex resume pointer {stale_id} was removed from the document; discarding cached launch arguments and starting a fresh document-bound session"
-                ),
-            };
+            let recovery_message = format!(
+                "[start] Codex session {stale_id} does not exist; cleared={} and starting a fresh document-bound session",
+                cleared
+            );
             start_console_status(&mut session_log, route_owned, recovery_message);
             log_event(
                 &mut session_log,
@@ -1653,7 +1786,7 @@ pub fn run_with_reap_policy_and_resume(
                             }
                             PromptOutcome::RestartFresh => {
                                 raw_mode.resume();
-                                first_run = true;
+                                first_run = false;
                                 restart_count += 1;
                             }
                         }
@@ -2080,12 +2213,61 @@ mod tests {
     }
 
     #[test]
-    fn resume_authority_recheck_detects_manual_pointer_removal() {
-        let resumed = "---\nagent: codex\nresume: stale-id\n---\n\n# Plan\n";
-        let fresh = "---\nagent: codex\nqueue: stop\n---\n\n# Plan\n";
+    fn controller_lineage_is_authority_and_frontmatter_is_fallback_projection() {
+        let latest = agent_doc_harness::ResumeRequest::Latest;
+        assert_eq!(
+            resolve_resume_request_from_sources(
+                Some(&latest),
+                Some("stale-frontmatter"),
+                Some("controller-thread"),
+            ),
+            Some(agent_doc_harness::ResumeRequest::Id(
+                "controller-thread".into()
+            ))
+        );
+        assert_eq!(
+            resolve_resume_request_from_sources(Some(&latest), None, Some("controller-thread")),
+            Some(agent_doc_harness::ResumeRequest::Id(
+                "controller-thread".into()
+            )),
+            "missing frontmatter cannot erase controller-owned lineage"
+        );
+        assert_eq!(
+            resolve_resume_request_from_sources(Some(&latest), Some("cold-seed"), None),
+            Some(agent_doc_harness::ResumeRequest::Id("cold-seed".into()))
+        );
+    }
 
-        assert!(document_has_resume_pointer(resumed).unwrap());
-        assert!(!document_has_resume_pointer(fresh).unwrap());
+    #[test]
+    fn bare_codex_resume_recovers_hook_ledger_without_frontmatter() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("orchard-offer.md");
+        std::fs::write(&doc, "---\nagent: codex\n---\n").unwrap();
+        agent_doc_codex_hook_io::apply_user_prompt_submit(
+            &agent_doc_codex_hook_io::UserPromptSubmitInput {
+                session_id: "orchard-thread".into(),
+                turn_id: "turn-1".into(),
+                cwd: dir.path().display().to_string(),
+                prompt: format!("agent-doc {}", doc.display()),
+            },
+        )
+        .unwrap();
+
+        let projected =
+            latest_codex_session_projection(&doc, &agent_doc_harness::HarnessConfig::codex())
+                .expect("Codex hook projection");
+        assert_eq!(projected.session_id, "orchard-thread");
+        assert_eq!(
+            resolve_resume_request_from_sources(
+                Some(&agent_doc_harness::ResumeRequest::Latest),
+                None,
+                Some(&projected.session_id),
+            ),
+            Some(agent_doc_harness::ResumeRequest::Id(
+                "orchard-thread".into()
+            ))
+        );
     }
 
     #[test]

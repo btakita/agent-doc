@@ -1238,7 +1238,7 @@ fn editor_save_authority_is_sufficient(
     live_editors: usize,
     delivery_converged: bool,
 ) -> bool {
-    authoritative_text == canonical && live_editors > 0 && (delivery_converged || live_editors == 1)
+    authoritative_text == canonical && live_editors > 0 && delivery_converged
 }
 
 fn canonical_editor_save_patch_id(canonical: &str) -> String {
@@ -1400,59 +1400,81 @@ fn request_native_editor_save_for_canonical_projection(
         }
     }
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_000);
-    loop {
-        if canonical_disk_projection_is_exact(path, canonical) {
-            let current = observe_live_editor_authority_after_model_ensure(
-                path,
-                "native_editor_save_projection_proof",
-            )?;
-            if let agent_doc_crdt_relay_io::CurrentText::Current {
-                text,
+    // The editor's typed save receipt is projected back through the controller
+    // as a visible-write observation. That state edge feeds the retained-write
+    // disk Source and its settlement Effect; polling disk here would create a
+    // second, timer-driven convergence mechanism. Accept a synchronously
+    // completed receipt when it is already visible, otherwise leave this exact
+    // patch id in flight and let the controller wake closeout.
+    if canonical_disk_projection_is_exact(path, canonical) {
+        let current = observe_live_editor_authority_after_model_ensure(
+            path,
+            "native_editor_save_projection_proof",
+        )?;
+        if let agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors,
+            delivery_converged,
+            ..
+        } = current
+            && editor_save_authority_is_sufficient(
+                &text,
+                canonical,
                 live_editors,
                 delivery_converged,
-                ..
-            } = current
-                && editor_save_authority_is_sufficient(
-                    &text,
-                    canonical,
-                    live_editors,
-                    delivery_converged,
-                )
-            {
-                agent_doc_ops_log_io::log_op(
-                    path,
-                    &format!(
-                        "native_editor_save_settled file={} source={} patch_id={} transport={} content_hash={} editor_version_exact=true delivery_converged={} single_editor_exact={} disk_version_exact=true",
-                        path.display(),
-                        source,
-                        patch_id,
-                        "socket",
-                        agent_doc_hash::content_hash(canonical),
-                        delivery_converged,
-                        live_editors == 1,
-                    ),
-                );
-                return Ok(true);
-            }
-            return Ok(false);
-        }
-        if std::time::Instant::now() >= deadline {
+            )
+        {
             agent_doc_ops_log_io::log_op(
                 path,
                 &format!(
-                    "native_editor_save_pending file={} source={} patch_id={} transport={} reason=exact_disk_projection_timeout content_hash={}",
+                    "native_editor_save_settled file={} source={} patch_id={} transport=socket content_hash={} editor_version_exact=true delivery_converged=true disk_version_exact=true",
                     path.display(),
                     source,
                     patch_id,
-                    "socket",
                     agent_doc_hash::content_hash(canonical),
                 ),
             );
-            return Ok(false);
+            return Ok(true);
         }
-        std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "native_editor_save_pending file={} source={} patch_id={} transport=socket reason=await_typed_save_receipt content_hash={} retry=state_edge",
+            path.display(),
+            source,
+            patch_id,
+            agent_doc_hash::content_hash(canonical),
+        ),
+    );
+    Ok(false)
+}
+
+/// Whether the actual live editor replica has acknowledged the exact canonical
+/// version and can therefore own the native-save Effect.
+///
+/// A controller CP-model match alone is insufficient: the editor `Document`
+/// may still contain the prior version until its delivery ACK arrives.
+pub fn live_editor_projection_ready_for_native_save(
+    path: &Path,
+    canonical: &str,
+    source: &str,
+) -> Result<bool> {
+    let agent_doc_crdt_relay_io::CurrentText::Current {
+        text,
+        live_editors,
+        delivery_converged,
+        ..
+    } = observe_live_editor_authority_after_model_ensure(path, source)?
+    else {
+        return Ok(false);
+    };
+    Ok(editor_save_authority_is_sufficient(
+        &text,
+        canonical,
+        live_editors,
+        delivery_converged,
+    ))
 }
 
 /// Project the exact live editor authority through the editor's native save
@@ -1460,11 +1482,10 @@ fn request_native_editor_save_for_canonical_projection(
 ///
 /// This is the terminal recovery path for a valid, delivery-converged editor
 /// cut whose historical deferred-write event was incorrectly retired after an
-/// ACK but before disk-save proof, or whose sole editor already holds the exact
-/// retained target while the historical delivery ACK remains pending. The
-/// editor remains the source of truth: no disk candidate is merged into it and
-/// no force-disk write is permitted. Multiple live editors still require full
-/// delivery convergence before any one of them is allowed to save.
+/// ACK but before disk-save proof. The editor remains the source of truth: no
+/// disk candidate is merged into it and no force-disk write is permitted. A
+/// canonical CP model is not proof that even a sole editor has applied the
+/// revision; every live-editor save therefore requires delivery convergence.
 pub fn settle_live_editor_projection_through_authority(path: &Path, source: &str) -> Result<bool> {
     let canonical = try_resolve_current_document_content(path, source)?;
     let disk = resolve_disk_current_document_content(path, source)?;
@@ -1495,12 +1516,11 @@ pub fn settle_live_editor_projection_through_authority(path: &Path, source: &str
     agent_doc_ops_log_io::log_op(
         path,
         &format!(
-            "live_editor_projection_settled file={} source={} content_hash={} editor_authority=true delivery_converged={} single_editor_exact={} disk_version_exact=true",
+            "live_editor_projection_settled file={} source={} content_hash={} editor_authority=true delivery_converged={} disk_version_exact=true",
             path.display(),
             source,
             agent_doc_hash::content_hash(&canonical),
             delivery_converged,
-            live_editors == 1,
         ),
     );
     Ok(true)
@@ -10611,8 +10631,8 @@ mod tests {
     }
 
     #[test]
-    fn exact_single_editor_can_save_while_historical_delivery_ack_is_pending() {
-        assert!(editor_save_authority_is_sufficient(
+    fn exact_cp_model_never_substitutes_for_editor_delivery_ack() {
+        assert!(!editor_save_authority_is_sufficient(
             "canonical",
             "canonical",
             1,

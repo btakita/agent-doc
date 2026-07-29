@@ -36,6 +36,9 @@ pub trait SupervisorLaunchLog {
 #[derive(Clone, Debug)]
 pub struct HarnessLaunchSpec {
     pub harness: HarnessConfig,
+    /// Fresh, document-scoped launch args before any conversation resume shape.
+    pub fresh_base_args: Vec<String>,
+    /// Effective args for this launch, including an exact resume when requested.
     pub base_args: Vec<String>,
     pub resolved_env: HashMap<String, String>,
     pub capability_proof_required: bool,
@@ -210,40 +213,6 @@ pub fn build_harness_launch_spec_with_resume(
             ));
         }
     }
-    // Resume args go on before workspace-access/`--no-mcp` args so a
-    // subcommand-shaped resume (Codex: `resume <id>`) stays in argv position 0,
-    // where the CLI expects its subcommand.
-    // `#resumenocontinue` / `#resumeclaim`: only ever resume this document's own,
-    // unclaimed conversation id. Anything else starts fresh and says why —
-    // continue-latest and a stolen id both land in someone else's conversation.
-    // `#resumenocontinue`: only ever resume this document's own recorded id.
-    // Claim conflicts are resolved by the caller (which can see sibling
-    // documents); anything unresolved starts fresh and says why — continue-latest
-    // would land in whatever conversation ran last in this directory.
-    let resolved_resume = agent_doc_harness::resolve_resume_request(resume, fm.resume.as_deref());
-    let effective_resume = resolved_resume;
-    match agent_doc_harness::apply_resume_launch_args(
-        &harness,
-        &mut base_args,
-        effective_resume.as_ref(),
-    ) {
-        Some(degrade) => {
-            log.start_console_status(&format!(
-                "[start] --resume requested but starting a FRESH {} conversation: {}",
-                harness.binary,
-                degrade.reason()
-            ));
-            log.log_event(&format!(
-                "{}_start_resume_fresh reason={:?}",
-                harness.binary, degrade
-            ));
-        }
-        None => {
-            if let Some(agent_doc_harness::ResumeRequest::Id(id)) = effective_resume.as_ref() {
-                log.log_event(&format!("{}_start_resume id={id}", harness.binary));
-            }
-        }
-    }
     agent_doc_git_io::dirs::append_workspace_access_args(
         &harness.binary,
         &mut base_args,
@@ -251,6 +220,43 @@ pub fn build_harness_launch_spec_with_resume(
     );
     if harness.supports_no_mcp && fm.no_mcp.unwrap_or(false) {
         base_args.push("--no-mcp".into());
+    }
+    let fresh_base_args = base_args.clone();
+
+    // Resume only an exact document-bound conversation. In particular, Codex
+    // resume args must be derived from the complete fresh arg set so sandbox
+    // flags are translated and unsupported `--add-dir` flags are removed.
+    let resolved_resume = agent_doc_harness::resolve_resume_request(resume, fm.resume.as_deref());
+    if let Some(agent_doc_harness::ResumeRequest::Id(id)) = resolved_resume.as_ref() {
+        match harness.exact_resume_args(&fresh_base_args, id)? {
+            Some(resume_args) => {
+                base_args = resume_args;
+                log.log_event(&format!("{}_start_resume id={id}", harness.binary));
+            }
+            None => {
+                let degrade = agent_doc_harness::ResumeDegrade::HarnessUnsupported;
+                log.start_console_status(&format!(
+                    "[start] --resume requested but starting a FRESH {} conversation: {}",
+                    harness.binary,
+                    degrade.reason()
+                ));
+                log.log_event(&format!(
+                    "{}_start_resume_fresh reason={:?}",
+                    harness.binary, degrade
+                ));
+            }
+        }
+    } else if matches!(resume, Some(agent_doc_harness::ResumeRequest::Latest)) {
+        let degrade = agent_doc_harness::ResumeDegrade::NoRecordedId;
+        log.start_console_status(&format!(
+            "[start] --resume requested but starting a FRESH {} conversation: {}",
+            harness.binary,
+            degrade.reason()
+        ));
+        log.log_event(&format!(
+            "{}_start_resume_fresh reason={:?}",
+            harness.binary, degrade
+        ));
     }
     if harness.binary == "codex" {
         let codex_network_access = resolve_codex_network_access(
@@ -288,6 +294,7 @@ pub fn build_harness_launch_spec_with_resume(
 
     Ok(HarnessLaunchSpec {
         harness,
+        fresh_base_args,
         base_args,
         resolved_env,
         capability_proof_required,

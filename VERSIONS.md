@@ -4,6 +4,37 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.89
+
+_JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **A canonical CRDT model no longer substitutes for the editor buffer's
+delivery acknowledgment.** Even with one connected editor, agent-doc waits
+until that exact revision reaches the editor replica before asking the editor
+to save. This prevents a stale IDEA `Document` from being saved over the
+retained target and eliminates the resulting operator “Save All” churn.
+- **Retained editor saves now advance only from state edges.** The controller
+wakes captured closeout when the exact replica ACK reaches delivery convergence,
+and the typed native-save receipt feeds the retained-write graph. The save path
+no longer polls disk for one second, while the stable revision-derived patch ID
+keeps the Effect one-shot.
+- **SimWorld covers the stale-single-editor failure.** The anonymized orchard
+offer schedule proves that arbitrary timer ticks issue no save, delivery ACK
+issues exactly one save, a stale save receipt cannot commit, and an exact receipt
+finishes without replaying the response or asking the operator to save.
+- **Codex child replacement preserves the exact document conversation.** Bare
+`start --resume` now recovers the newest document-bound thread ID from the
+durable Codex hook/controller ledger when frontmatter projection is missing,
+and managed child termination launches `codex resume <thread-id>` instead of a
+fresh session or `resume --last`. The binding stays authoritative across the
+restart; frontmatter is backfilled as a compatibility projection. SimWorld's
+anonymized orchard schedule covers termination with a missing projection.
+- **Pure Codex threads no longer inherit project-local agent-doc work.** The
+ambient Stop hook now requires an exact durable binding for its current Codex
+`session_id`. A queue-continuation marker belongs to the document, not to every
+Codex thread in the project, so an unbound thread passes through without
+capturing, replaying, or continuing another thread's agent-doc cycle.
+
 ## 0.35.88
 
 _JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._

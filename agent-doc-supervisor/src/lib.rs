@@ -29,6 +29,7 @@ pub mod route_owned;
 pub mod route_runtime;
 pub mod run_loop;
 pub mod selfkill;
+pub mod session_lineage;
 pub mod session_owner;
 pub mod startup_miss;
 pub mod terminal_filter;

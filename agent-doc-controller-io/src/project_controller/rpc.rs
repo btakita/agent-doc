@@ -6560,6 +6560,35 @@ fn handle_crdt_replica_rpc(
         None
     };
     let data = controller_crdt_replica_data(&canonical, method_name, identity, &payload)?;
+    if method_name == "replica_ack"
+        && replica_ack_reached_delivery_edge(
+            data.get("acknowledged")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
+                &canonical, authority,
+            )
+            .ok()
+            .is_some_and(|current| {
+                matches!(
+                    current,
+                    agent_doc_crdt_relay_io::CurrentText::Current {
+                        delivery_converged: true,
+                        ..
+                    }
+                )
+            }),
+        )
+        && let Some(runtime) = runtime
+    {
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        if let Ok(Some(projection)) = runtime.document_state_projection(&document_hash) {
+            // Delivery ACK is the Source edge that enables the editor-native
+            // save Effect. Wake the retained closeout worker exactly here;
+            // timer ticks must never synthesize another finalize attempt.
+            publish_captured_finalize_wake(runtime, &projection, "editor_delivery_converged");
+        }
+    }
     if method_name == "replica_update"
         && let Some(runtime) = runtime
         && let Err(error) = observe_retained_write_authority_from_live_model(runtime, &canonical)
@@ -6609,6 +6638,19 @@ fn handle_crdt_replica_rpc(
         ),
     );
     Ok(data)
+}
+
+fn replica_ack_reached_delivery_edge(acknowledged: bool, delivery_converged: bool) -> bool {
+    acknowledged && delivery_converged
+}
+
+#[cfg(test)]
+#[test]
+fn captured_closeout_wakes_only_on_acknowledged_delivery_convergence() {
+    assert!(!replica_ack_reached_delivery_edge(false, false));
+    assert!(!replica_ack_reached_delivery_edge(true, false));
+    assert!(!replica_ack_reached_delivery_edge(false, true));
+    assert!(replica_ack_reached_delivery_edge(true, true));
 }
 
 fn observe_realtime_steering_after_replica_update(

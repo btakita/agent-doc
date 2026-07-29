@@ -106,6 +106,7 @@ pub enum CapturedFinalizeResumeOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadOnlyTerminalProjectionDecision {
     Converged,
+    AwaitEditorDelivery,
     RequestNativeEditorSave,
     ObserveOnly,
 }
@@ -119,11 +120,15 @@ pub fn decide_read_only_terminal_projection(
     authority_matches_disk: bool,
     cycle_phase: Option<CyclePhase>,
     retained_document_write_blocks: bool,
+    editor_delivery_converged: bool,
 ) -> ReadOnlyTerminalProjectionDecision {
     if authority_matches_disk {
         return ReadOnlyTerminalProjectionDecision::Converged;
     }
     if retained_document_write_blocks && cycle_phase == Some(CyclePhase::WriteApplied) {
+        if !editor_delivery_converged {
+            return ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery;
+        }
         return ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave;
     }
     ReadOnlyTerminalProjectionDecision::ObserveOnly
@@ -764,16 +769,25 @@ fn run_with_options_inner(
         let cycle_phase =
             agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|state| state.phase);
         let retained_document_write_blocks = effects.retained_document_write_blocks(file);
+        let editor_delivery_converged = authority_content == disk_content
+            || agent_doc_document_realtime_io::live_editor_projection_ready_for_native_save(
+                file,
+                &authority_content,
+                "session_check_read_only_retained_delivery_gate",
+            )?;
+        let terminal_projection_decision = decide_read_only_terminal_projection(
+            authority_content == disk_content,
+            cycle_phase,
+            retained_document_write_blocks,
+            editor_delivery_converged,
+        );
         let retained_closeout_resume = ReadOnlyRetainedCloseoutResumeProjection::new(
             authority_content == disk_content,
             cycle_phase,
             retained_document_write_blocks,
         );
-        if decide_read_only_terminal_projection(
-            authority_content == disk_content,
-            cycle_phase,
-            retained_document_write_blocks,
-        ) == ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave
+        if terminal_projection_decision
+            == ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave
             && agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
                 file,
                 "session_check_read_only_retained_native_save",
@@ -792,10 +806,20 @@ fn run_with_options_inner(
         }
         anyhow::ensure!(
             authority_content == disk_content,
-            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); session-check made no semantic projection, repair, replay, or commit, and a safe native editor save was not proven",
+            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); {}. The controller owns the next closeout attempt and will wake on that state edge. Do not ask the operator to save, rerun session-check, or resubmit finalize",
             file.display(),
             agent_doc_hash::content_hash(&authority_content),
             agent_doc_hash::content_hash(&disk_content),
+            match terminal_projection_decision {
+                ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery =>
+                    "the exact editor delivery acknowledgement is pending",
+                ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave =>
+                    "the one-shot editor-native save receipt is pending",
+                ReadOnlyTerminalProjectionDecision::ObserveOnly =>
+                    "session-check is observing a non-recoverable projection state",
+                ReadOnlyTerminalProjectionDecision::Converged =>
+                    "the projection changed after its converged observation",
+            },
         );
         if retained_closeout_resume.should_resume() {
             match crate::profile::timed("resume_retained_closeout_after_native_save", || {
@@ -2612,21 +2636,40 @@ mod terminal_convergence_tests {
     }
 
     #[test]
-    fn retained_write_applied_session_check_requests_editor_owned_save() {
+    fn retained_write_applied_session_check_waits_for_delivery_before_editor_owned_save() {
         assert_eq!(
-            decide_read_only_terminal_projection(false, Some(CyclePhase::WriteApplied), true,),
+            decide_read_only_terminal_projection(
+                false,
+                Some(CyclePhase::WriteApplied),
+                true,
+                false,
+            ),
+            ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery,
+        );
+        assert_eq!(
+            decide_read_only_terminal_projection(false, Some(CyclePhase::WriteApplied), true, true,),
             ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave,
         );
         assert_eq!(
-            decide_read_only_terminal_projection(false, Some(CyclePhase::WriteApplied), false,),
+            decide_read_only_terminal_projection(
+                false,
+                Some(CyclePhase::WriteApplied),
+                false,
+                false,
+            ),
             ReadOnlyTerminalProjectionDecision::ObserveOnly,
         );
         assert_eq!(
-            decide_read_only_terminal_projection(false, Some(CyclePhase::ResponseCaptured), true,),
+            decide_read_only_terminal_projection(
+                false,
+                Some(CyclePhase::ResponseCaptured),
+                true,
+                true,
+            ),
             ReadOnlyTerminalProjectionDecision::ObserveOnly,
         );
         assert_eq!(
-            decide_read_only_terminal_projection(true, Some(CyclePhase::WriteApplied), true),
+            decide_read_only_terminal_projection(true, Some(CyclePhase::WriteApplied), true, false,),
             ReadOnlyTerminalProjectionDecision::Converged,
         );
     }

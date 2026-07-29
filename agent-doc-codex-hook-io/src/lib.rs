@@ -241,6 +241,10 @@ pub fn load_prompt_for_current_session(file: &Path) -> Result<Option<String>> {
     Ok(Some(state.last_prompt))
 }
 
+/// Load the newest file-scoped prompt for explicit document recovery.
+///
+/// Do not use this from an ambient Codex hook: it deliberately ignores the
+/// current thread and may return another thread's document binding.
 pub fn load_latest_prompt_for_file(file: &Path) -> Result<Option<String>> {
     let Some(state) = load_latest_state_for_file(file)? else {
         return Ok(None);
@@ -251,6 +255,9 @@ pub fn load_latest_prompt_for_file(file: &Path) -> Result<Option<String>> {
     Ok(Some(state.last_prompt))
 }
 
+/// Load the newest file-scoped state for explicit cold resume/route recovery.
+///
+/// Ambient hooks must instead use their exact payload `session_id`.
 pub fn load_latest_prompt_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>> {
     load_latest_state_for_file(file)
 }
@@ -458,7 +465,13 @@ pub fn current_session_id() -> Option<String> {
         })
 }
 
-fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>> {
+/// Return the newest durable Codex thread binding observed for `file`.
+///
+/// This controller-side ledger is the lifecycle authority used by an explicit
+/// document resume to recover an exact conversation when frontmatter projection
+/// lags or is absent. It is not an ambient-hook lookup: those must remain keyed
+/// to the exact current Codex thread.
+pub fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>> {
     let current_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let mut latest: Option<SessionState> = None;
 
@@ -487,6 +500,15 @@ fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>>
     }
 
     Ok(latest.map(active_session_state))
+}
+
+/// Retire a proven-missing Codex thread binding from every state root for the
+/// document so a later bare resume cannot select it again.
+pub fn clear_session_state_for_file(file: &Path, session_id: &str) -> Result<()> {
+    for root in project_roots_for(file) {
+        clear_state(&root, session_id)?;
+    }
+    Ok(())
 }
 
 fn active_session_state(state: SessionState) -> ActiveSessionState {

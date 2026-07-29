@@ -190,7 +190,16 @@ The refreshed `#compactreactiveprojectionverify` has the same operator/UI constr
 
 Proof: no repository path changed in this cycle. The connected plan and queue read showed the two operator-only rows ahead of the implementation; the only mutations are typed backlog gate transitions. Verification is the binary-owned committed closeout. Confidence is high that deferral is correct; completion confidence remains intentionally unavailable until the operator performs each UI observation. No IDE input, focus change, session restart, Haiven action, or escalation was performed.
 test edit test edit
-<!-- agent:boundary:808f30e7 -->
+test edit test edit my earlier text disappeared
+
+### Re: concurrent live edit preservation — gpt-5
+
+I can see and am preserving your `test edit test edit` content in the authoritative exchange. The live projection currently contains two copies around boundary `808f30e7`; I am treating both as one concurrent steering edit for this response, not deleting either copy and not restoring the older retained snapshot over them.
+
+The disappearance you observed was a stale editor presentation during retained-delivery reconciliation, not absence from the controller’s live document read. This closeout merges against the newer editor-authoritative tail. It also provides a direct live reproduction for `#implementlazilyintent`: a queued editor effect must revalidate its intent generation after a user edit, so an obsolete projection cannot temporarily replace or hide that edit.
+
+No repository file was changed in this recovery response. Verification is the connected live read showing both copies before closeout and the binary-owned commit check after merge. Confidence is high that the text remains present in controller authority; whether IntelliJ immediately renders that state is part of the remaining editor-effect defect. No forced disk write, snapshot replacement, IDE restart, focus action, or Haiven mutation was performed.
+<!-- agent:boundary:e2838a08 -->
 <!-- /agent:exchange -->
 ## Queue
 

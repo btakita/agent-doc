@@ -6648,6 +6648,52 @@ fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
 }
 
 #[test]
+fn accepted_stale_supervisor_replacement_timeout_preserves_mid_turn_session() {
+    use agent_doc_controller::supervisor_replacement::{
+        SupervisorReplacementEscalation, SupervisorReplacementEscalationFacts,
+        SupervisorReplacementIpcOutcome, decide_supervisor_replacement_escalation,
+    };
+
+    // Reproduce the live failure: the controller handed a replacement request to
+    // a stale supervisor while Codex was mid-turn. The supervisor correctly owned
+    // a drain-to-boundary reexec, but the controller's short proof wait expired and
+    // escalated to kill + cold-start, interrupting the conversation.
+    let mut world = SimWorld::new(4_244);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+    world.apply(SimCommand::RequestSupervisorRestart).unwrap();
+
+    let generation_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+    let decision = decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
+        ipc_outcome: SupervisorReplacementIpcOutcome::Accepted,
+        force: false,
+        initial_host_stale: true,
+    });
+    assert_eq!(
+        decision,
+        SupervisorReplacementEscalation::AwaitAcceptedInPlace,
+        "an observation timeout cannot revoke an accepted drain owned by the live supervisor"
+    );
+    assert_eq!(world.route.durable.generation, generation_before);
+    assert_eq!(world.route.durable.pane_id, pane_before);
+    assert_eq!(
+        world.coverage.supervisor_restart_drain_reexecs, 0,
+        "the controller observation leaves the mid-turn child untouched"
+    );
+
+    // The existing supervisor eventually reaches the real boundary and performs
+    // the already-covered in-place reexec on the same pane.
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.supervisor_restart_drain_reexecs, 1);
+    assert_eq!(world.route.durable.generation, generation_before + 1);
+    assert_eq!(world.route.durable.pane_id, pane_before);
+}
+
+#[test]
 fn restart_supervisor_open_cycle_escalates_then_reexecs_in_place() {
     // A CP-authorized supervisor replacement must not starve forever behind a
     // stale open closeout cycle. It should share the bounded cycle-open escalation

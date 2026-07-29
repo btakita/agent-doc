@@ -11,6 +11,16 @@ use agent_doc_controller::dispatch::{
     spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
 use agent_doc_controller::status;
+#[cfg(not(any(test, feature = "test-support")))]
+use agent_doc_controller::supervisor_replacement::{
+    SupervisorReplacementEscalation, SupervisorReplacementEscalationFacts,
+    SupervisorReplacementIpcOutcome, decide_supervisor_replacement_escalation,
+};
+#[cfg(any(test, not(feature = "test-support")))]
+use agent_doc_controller::supervisor_replacement::{
+    SupervisorReplacementMode, SupervisorReplacementPaneDecision, SupervisorReplacementPaneFacts,
+    decide_supervisor_replacement_pane,
+};
 use agent_doc_controller::supervisor_replacement::{
     SupervisorReplacementRequestFields, parse_supervisor_replacement_request,
 };
@@ -16741,18 +16751,6 @@ enum SupervisorReplacementIpcStatus {
     Failed,
 }
 
-#[cfg(any(test, not(feature = "test-support")))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SupervisorReplacementPaneStartDecision {
-    PreserveExisting,
-    AutoStartNew,
-    /// The pane runs THIS document's own harness. Quit it, then start under a
-    /// supervisor — that is literally what "Restart Agent" means.
-    RestartLiveHarness,
-    /// The pane runs something else. Never touch it.
-    BlockLiveNonShell,
-}
-
 /// `#restartlivepane`: refusing every live non-shell pane made "Restart Agent"
 /// impossible on the one pane it is always aimed at — the document's own agent.
 /// The operator explicitly asked to restart THIS document's harness, and
@@ -16771,31 +16769,32 @@ enum SupervisorReplacementPaneStartDecision {
 /// assuming it.
 #[cfg(any(test, not(feature = "test-support")))]
 fn supervisor_replacement_pane_start_decision(
+    mode: SupervisorReplacementMode,
     pane_alive: bool,
     current_command: Option<&str>,
     document_harness_binary: Option<&str>,
-) -> SupervisorReplacementPaneStartDecision {
-    if !pane_alive {
-        return SupervisorReplacementPaneStartDecision::AutoStartNew;
-    }
+    process_tree_owns_document: bool,
+) -> SupervisorReplacementPaneDecision {
     let current_command = current_command
         .map(str::trim)
         .filter(|command| !command.is_empty());
-    if current_command.is_some_and(agent_doc_tmux::pane_current_command_is_bare_shell) {
-        return SupervisorReplacementPaneStartDecision::PreserveExisting;
-    }
-    let runs_own_harness = match (current_command, document_harness_binary) {
-        (Some(command), Some(harness)) => {
-            let harness = harness.trim();
-            !harness.is_empty() && command.eq_ignore_ascii_case(harness)
-        }
-        _ => false,
-    };
-    if runs_own_harness {
-        SupervisorReplacementPaneStartDecision::RestartLiveHarness
-    } else {
-        SupervisorReplacementPaneStartDecision::BlockLiveNonShell
-    }
+    let runs_own_harness = process_tree_owns_document
+        || match (current_command, document_harness_binary) {
+            (Some(command), Some(harness)) => {
+                let harness = harness.trim();
+                !harness.is_empty() && command.eq_ignore_ascii_case(harness)
+            }
+            _ => false,
+        };
+    decide_supervisor_replacement_pane(
+        mode,
+        SupervisorReplacementPaneFacts {
+            pane_alive,
+            current_command_is_shell: current_command
+                .is_some_and(agent_doc_tmux::pane_current_command_is_bare_shell),
+            runs_document_harness: runs_own_harness,
+        },
+    )
 }
 
 pub(crate) fn handle_supervisor_replacement(
@@ -16932,38 +16931,63 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
     );
 
     let ipc_status = request_supervisor_replacement_ipc(&work, &socket);
-    let needs_escalation = match ipc_status {
-        SupervisorReplacementIpcStatus::Accepted => work.force || initial_host_stale,
-        SupervisorReplacementIpcStatus::Dead => true,
-        SupervisorReplacementIpcStatus::Failed => work.force || initial_host_stale,
+    let ipc_outcome = match ipc_status {
+        SupervisorReplacementIpcStatus::Accepted => SupervisorReplacementIpcOutcome::Accepted,
+        SupervisorReplacementIpcStatus::Dead => SupervisorReplacementIpcOutcome::Dead,
+        SupervisorReplacementIpcStatus::Failed => SupervisorReplacementIpcOutcome::Failed,
     };
-    if !needs_escalation {
-        agent_doc_ops_log_io::log_op(
-            &work.file,
-            &format!(
-                "controller_supervisor_replacement_background_completed stage=ipc_only mode={} session={} pane={} generation={} receipt_id={} reason=fresh_supervisor_restart_accepted",
-                work.mode, work.session_id, work.pane_id, work.generation, work.operator_receipt_id
-            ),
-        );
-        return Ok(());
-    }
-
-    if ipc_status == SupervisorReplacementIpcStatus::Accepted
-        && wait_for_supervisor_replacement_completion(&work.file, initial_pid, initial_host_stale)
-    {
-        agent_doc_ops_log_io::log_op(
-            &work.file,
-            &format!(
-                "controller_supervisor_replacement_background_completed stage=ipc_reexec mode={} session={} pane={} generation={} receipt_id={} initial_host_stale={}",
-                work.mode,
-                work.session_id,
-                work.pane_id,
-                work.generation,
-                work.operator_receipt_id,
-                initial_host_stale
-            ),
-        );
-        return Ok(());
+    match decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
+        ipc_outcome,
+        force: work.force,
+        initial_host_stale,
+    }) {
+        SupervisorReplacementEscalation::AwaitAcceptedInPlace => {
+            // The live supervisor owns the accepted request. A stale binary
+            // deliberately waits for the active turn to drain before execve;
+            // the foreground proof timeout is observation only, never authority
+            // to kill that supervisor or its live harness child.
+            agent_doc_ops_log_io::log_op(
+                &work.file,
+                &format!(
+                    "controller_supervisor_replacement_background_completed stage=ipc_accepted_deferred mode={} session={} pane={} generation={} receipt_id={} initial_host_stale={} reason=live_supervisor_owns_drain",
+                    work.mode,
+                    work.session_id,
+                    work.pane_id,
+                    work.generation,
+                    work.operator_receipt_id,
+                    initial_host_stale
+                ),
+            );
+            return Ok(());
+        }
+        SupervisorReplacementEscalation::WaitThenEscalate => {
+            if wait_for_supervisor_replacement_completion(
+                &work.file,
+                initial_pid,
+                initial_host_stale,
+            ) {
+                agent_doc_ops_log_io::log_op(
+                    &work.file,
+                    &format!(
+                        "controller_supervisor_replacement_background_completed stage=ipc_reexec mode={} session={} pane={} generation={} receipt_id={} initial_host_stale={}",
+                        work.mode,
+                        work.session_id,
+                        work.pane_id,
+                        work.generation,
+                        work.operator_receipt_id,
+                        initial_host_stale
+                    ),
+                );
+                return Ok(());
+            }
+        }
+        SupervisorReplacementEscalation::EscalateColdStart => {}
+        SupervisorReplacementEscalation::FailClosed => {
+            anyhow::bail!(
+                "live supervisor rejected the replacement request for {} and no force/stale-host evidence authorizes a destructive cold start",
+                work.file.display()
+            );
+        }
     }
 
     agent_doc_ops_log_io::log_op(
@@ -17207,14 +17231,60 @@ fn quit_live_harness_pane_to_shell(
 #[cfg(not(any(test, feature = "test-support")))]
 fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
     let tmux = tmux_router::Tmux::default_server();
-    // `#restartresume`: `restart-supervisor` defaults to continue-mode (`--fresh`
-    // is the opt-out), but a replacement that has to (re)launch the harness was
-    // dropping that mode and starting a brand-new conversation. That is the worst
-    // possible moment to discard context: the operator is recovering, not starting
-    // over. BOTH launch branches below must carry it — the preserve-existing-pane
-    // branch is the COMMON one (a pane whose agent already exited is a bare shell),
-    // so fixing only the cold-start branch leaves the usual path still lossy.
-    let resume = (work.mode != "fresh").then_some(agent_doc_harness::ResumeRequest::Latest);
+    let mode = SupervisorReplacementMode::parse(&work.mode)?;
+    // The editor/controller model is the document authority. Cold recovery must
+    // not select a harness or conversation from a stale disk replica.
+    let current_document = match current_text_via_controller_model_read_for_doc(
+        &work.file,
+        "controller_supervisor_replacement_current_document",
+    )
+    .with_context(|| {
+        format!(
+            "failed to resolve editor-authoritative document state for supervisor replacement of {}",
+            work.file.display()
+        )
+    })? {
+        Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+        Some(agent_doc_crdt_relay_io::CurrentText::Detached) => {
+            std::fs::read_to_string(&work.file).with_context(|| {
+                format!(
+                    "failed to read detached document state for supervisor replacement of {}",
+                    work.file.display()
+                )
+            })?
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+            anyhow::bail!(
+                "editor authority for {} has no registered replica; refusing supervisor replacement",
+                work.file.display()
+            )
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
+            anyhow::bail!(
+                "editor authority for {} is still converging; refusing supervisor replacement",
+                work.file.display()
+            )
+        }
+        None => anyhow::bail!(
+            "controller model is unavailable for {}; refusing supervisor replacement",
+            work.file.display()
+        ),
+    };
+    let (current_frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(&current_document)?;
+    // Continue mode means this document's exact conversation, never a global
+    // latest selector and never a silent fresh fallback.
+    let resume = match mode {
+        SupervisorReplacementMode::Fresh => None,
+        SupervisorReplacementMode::Continue => current_frontmatter
+            .resume
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(|id| agent_doc_harness::ResumeRequest::Id(id.to_string())),
+    };
+    let document_harness = agent_doc_harness::document_harness_from_content(&current_document)
+        .map(|name| agent_doc_harness::HarnessConfig::from_agent_name(&name).binary)
+        .unwrap_or_else(|| agent_doc_harness::HarnessConfig::claude().binary);
     if !work.pane_id.trim().is_empty() {
         let pane_alive = tmux.pane_alive(&work.pane_id);
         let current_command = if pane_alive {
@@ -17222,19 +17292,33 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         } else {
             None
         };
-        let document_harness = std::fs::read_to_string(&work.file)
-            .ok()
-            .and_then(|content| agent_doc_harness::document_harness_from_content(&content))
-            .map(|name| agent_doc_harness::HarnessConfig::from_agent_name(&name).binary)
-            .unwrap_or_else(|| agent_doc_harness::HarnessConfig::claude().binary);
-        if matches!(
-            supervisor_replacement_pane_start_decision(
-                pane_alive,
-                current_command.as_deref(),
-                Some(document_harness.as_str()),
-            ),
-            SupervisorReplacementPaneStartDecision::RestartLiveHarness
-        ) {
+        let initial_pane_decision = supervisor_replacement_pane_start_decision(
+            mode,
+            pane_alive,
+            current_command.as_deref(),
+            Some(document_harness.as_str()),
+            process_tree_exactly_owns_document(&tmux, &work.pane_id, &work.file),
+        );
+        if initial_pane_decision == SupervisorReplacementPaneDecision::PreserveLiveHarness {
+            agent_doc_ops_log_io::log_op(
+                &work.file,
+                &format!(
+                    "controller_supervisor_replacement_live_harness_preserved mode={} session={} pane={} generation={} receipt_id={} harness={} action=fail_closed_without_new_session",
+                    work.mode,
+                    work.session_id,
+                    work.pane_id,
+                    work.generation,
+                    work.operator_receipt_id,
+                    document_harness,
+                ),
+            );
+            anyhow::bail!(
+                "supervisor recovery for {} found its live {document_harness} session in pane {}; continue mode preserved and reattached that session instead of terminating it or starting another conversation. Retry supervisor replacement after the harness returns to a shell.",
+                work.file.display(),
+                work.pane_id
+            );
+        }
+        if initial_pane_decision == SupervisorReplacementPaneDecision::RestartLiveHarness {
             // Quit the document's own harness so the pane falls back to its
             // shell, then take the normal preserve-existing start path below.
             // Bounded and fail-closed: if the pane does not become a shell we
@@ -17270,12 +17354,20 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             }
         }
         match supervisor_replacement_pane_start_decision(
+            mode,
             pane_alive,
             // Re-read: the quit above may have turned this into a bare shell.
             agent_doc_tmux_io::target_current_command(&tmux, &work.pane_id).as_deref(),
             Some(document_harness.as_str()),
+            process_tree_exactly_owns_document(&tmux, &work.pane_id, &work.file),
         ) {
-            SupervisorReplacementPaneStartDecision::PreserveExisting => {
+            SupervisorReplacementPaneDecision::PreserveExistingShell => {
+                if mode == SupervisorReplacementMode::Continue && resume.is_none() {
+                    anyhow::bail!(
+                        "cannot cold-start supervisor recovery for {} in continue mode: the editor-authoritative document records no exact `resume:` conversation id; the existing pane was preserved and no fresh session was started",
+                        work.file.display()
+                    );
+                }
                 let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
                 let project_root = agent_doc_project_root_io::project_root_containing(&work.file)
                     .or_else(|| work.file.parent().map(Path::to_path_buf))
@@ -17350,7 +17442,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                 })?;
                 return Ok(work.pane_id.clone());
             }
-            SupervisorReplacementPaneStartDecision::BlockLiveNonShell => {
+            SupervisorReplacementPaneDecision::BlockLiveNonShell => {
                 let current_command = current_command
                     .as_deref()
                     .map(str::trim)
@@ -17381,7 +17473,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                     work.file.display()
                 );
             }
-            SupervisorReplacementPaneStartDecision::RestartLiveHarness => {
+            SupervisorReplacementPaneDecision::RestartLiveHarness => {
                 // The quit above reported the pane back at a shell, so re-reading
                 // it must not still show the harness. If it does, something else
                 // reclaimed the pane between the two reads — fail closed rather
@@ -17391,8 +17483,21 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                     work.pane_id
                 );
             }
-            SupervisorReplacementPaneStartDecision::AutoStartNew => {}
+            SupervisorReplacementPaneDecision::PreserveLiveHarness => {
+                anyhow::bail!(
+                    "supervisor recovery for {} still observes its live {document_harness} session in pane {}; preserving it without starting another conversation",
+                    work.file.display(),
+                    work.pane_id
+                );
+            }
+            SupervisorReplacementPaneDecision::AutoStartNew => {}
         }
+    }
+    if mode == SupervisorReplacementMode::Continue && resume.is_none() {
+        anyhow::bail!(
+            "cannot cold-start supervisor recovery for {} in continue mode: the editor-authoritative document records no exact `resume:` conversation id; no fresh session was started",
+            work.file.display()
+        );
     }
     let file_str = work.file.to_string_lossy().to_string();
     // `#restartresume`: `restart-supervisor` defaults to continue-mode (`--fresh`
@@ -20824,33 +20929,67 @@ mod tests {
     #[test]
     fn supervisor_replacement_preserves_only_bare_shell_panes() {
         assert_eq!(
-            supervisor_replacement_pane_start_decision(false, None, Some("claude")),
-            SupervisorReplacementPaneStartDecision::AutoStartNew
+            supervisor_replacement_pane_start_decision(
+                SupervisorReplacementMode::Continue,
+                false,
+                None,
+                Some("claude"),
+                false,
+            ),
+            SupervisorReplacementPaneDecision::AutoStartNew
         );
         for shell in ["sh", "bash", "zsh", "-zsh", "fish"] {
             assert_eq!(
-                supervisor_replacement_pane_start_decision(true, Some(shell), Some("claude")),
-                SupervisorReplacementPaneStartDecision::PreserveExisting,
+                supervisor_replacement_pane_start_decision(
+                    SupervisorReplacementMode::Continue,
+                    true,
+                    Some(shell),
+                    Some("claude"),
+                    false,
+                ),
+                SupervisorReplacementPaneDecision::PreserveExistingShell,
                 "{shell} should be safe for shell-command cold start"
             );
         }
         assert_eq!(
-            supervisor_replacement_pane_start_decision(true, None, Some("claude")),
-            SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+            supervisor_replacement_pane_start_decision(
+                SupervisorReplacementMode::Continue,
+                true,
+                None,
+                Some("claude"),
+                false,
+            ),
+            SupervisorReplacementPaneDecision::BlockLiveNonShell,
             "unknown command on a live pane is not safe for prompt injection"
         );
     }
 
-    /// `#restartlivepane`: a pane running THIS document's own harness is what
-    /// "Restart Agent" is always aimed at. Refusing it made the command
-    /// impossible to use on its own target.
+    /// Continue-mode replaces the supervisor, not the conversation. Fresh-mode
+    /// is the explicit operator authorization to quit and relaunch the harness.
     #[test]
-    fn supervisor_replacement_restarts_a_pane_running_its_own_harness() {
+    fn supervisor_replacement_preserves_or_restarts_own_harness_by_mode() {
         for harness in ["claude", "codex", "opencode"] {
             assert_eq!(
-                supervisor_replacement_pane_start_decision(true, Some(harness), Some(harness)),
-                SupervisorReplacementPaneStartDecision::RestartLiveHarness,
-                "{harness} pane bound to a {harness} document must be restartable"
+                supervisor_replacement_pane_start_decision(
+                    SupervisorReplacementMode::Continue,
+                    true,
+                    Some(harness),
+                    Some(harness),
+                    false,
+                ),
+                SupervisorReplacementPaneDecision::PreserveLiveHarness,
+                "{harness} continue-mode recovery must preserve the live child"
+            );
+            assert_eq!(
+                supervisor_replacement_pane_start_decision(
+                    SupervisorReplacementMode::Fresh,
+                    true,
+                    Some(harness),
+                    Some(harness),
+                    false,
+                ),
+                SupervisorReplacementPaneDecision::RestartLiveHarness,
+                "{harness} fresh-mode recovery may restart the live child"
             );
         }
     }
@@ -20872,29 +21011,68 @@ mod tests {
             "",
         ] {
             assert_eq!(
-                supervisor_replacement_pane_start_decision(true, Some(foreign), Some("claude")),
-                SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+                supervisor_replacement_pane_start_decision(
+                    SupervisorReplacementMode::Continue,
+                    true,
+                    Some(foreign),
+                    Some("claude"),
+                    false,
+                ),
+                SupervisorReplacementPaneDecision::BlockLiveNonShell,
                 "{foreign:?} must not be quit or receive route-owned start text"
             );
         }
         // A codex pane must not be quit just because a claude document asked.
         assert_eq!(
-            supervisor_replacement_pane_start_decision(true, Some("codex"), Some("claude")),
-            SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+            supervisor_replacement_pane_start_decision(
+                SupervisorReplacementMode::Continue,
+                true,
+                Some("codex"),
+                Some("claude"),
+                false,
+            ),
+            SupervisorReplacementPaneDecision::BlockLiveNonShell,
             "a pane running a DIFFERENT harness is someone else's session"
         );
         // `node` is in claude's `process_names`; matching on that list instead of
         // the exact binary would make any Node process look restartable.
         assert_eq!(
-            supervisor_replacement_pane_start_decision(true, Some("node"), Some("claude")),
-            SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+            supervisor_replacement_pane_start_decision(
+                SupervisorReplacementMode::Continue,
+                true,
+                Some("node"),
+                Some("claude"),
+                false,
+            ),
+            SupervisorReplacementPaneDecision::BlockLiveNonShell,
             "process_names substring matching must not be used here"
         );
         // Unknown document harness proves nothing, so it cannot authorise a quit.
         assert_eq!(
-            supervisor_replacement_pane_start_decision(true, Some("claude"), None),
-            SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+            supervisor_replacement_pane_start_decision(
+                SupervisorReplacementMode::Continue,
+                true,
+                Some("claude"),
+                None,
+                false,
+            ),
+            SupervisorReplacementPaneDecision::BlockLiveNonShell,
             "an unresolved document harness must not authorise quitting a live pane"
+        );
+    }
+
+    #[test]
+    fn supervisor_replacement_preserves_owned_codex_node_wrapper() {
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(
+                SupervisorReplacementMode::Continue,
+                true,
+                Some("node"),
+                Some("codex"),
+                true,
+            ),
+            SupervisorReplacementPaneDecision::PreserveLiveHarness,
+            "exact process-tree document ownership must preserve Codex even when tmux reports node",
         );
     }
 

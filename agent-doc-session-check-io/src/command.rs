@@ -240,9 +240,9 @@ fn ensure_terminal_authority_disk_convergence(
         );
         return Ok(());
     }
-    let non_capture_cycle = terminal_phase_allows_non_capture_projection_settlement(
-        agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|state| state.phase),
-    );
+    let cycle_phase =
+        agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|state| state.phase);
+    let non_capture_cycle = terminal_phase_allows_non_capture_projection_settlement(cycle_phase);
     if non_capture_cycle
         && agent_doc_document_realtime_io::settle_retained_non_capture_projection_through_authority(
             file,
@@ -271,7 +271,7 @@ fn ensure_terminal_authority_disk_convergence(
         )?;
         return Ok(());
     }
-    if non_capture_cycle
+    if terminal_phase_allows_live_editor_projection_settlement(cycle_phase)
         && agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
             file,
             "session_check_terminal_live_editor_projection_settlement",
@@ -336,6 +336,10 @@ fn ensure_terminal_authority_disk_convergence(
 
 fn terminal_phase_allows_non_capture_projection_settlement(phase: Option<CyclePhase>) -> bool {
     phase.is_none_or(|phase| phase == CyclePhase::PreflightStarted)
+}
+
+fn terminal_phase_allows_live_editor_projection_settlement(phase: Option<CyclePhase>) -> bool {
+    phase.is_none_or(|phase| matches!(phase, CyclePhase::PreflightStarted | CyclePhase::Committed))
 }
 
 fn self_heal_transiently_stale_committed_projection(
@@ -2591,6 +2595,29 @@ mod terminal_convergence_tests {
             assert!(
                 !terminal_phase_allows_non_capture_projection_settlement(Some(phase)),
                 "captured or terminal phase {phase:?} must stay on its identity-checked closeout path",
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_convergence_can_native_save_an_exact_committed_editor_projection() {
+        assert!(terminal_phase_allows_live_editor_projection_settlement(
+            None
+        ));
+        assert!(terminal_phase_allows_live_editor_projection_settlement(
+            Some(CyclePhase::PreflightStarted)
+        ));
+        assert!(terminal_phase_allows_live_editor_projection_settlement(
+            Some(CyclePhase::Committed)
+        ));
+        for phase in [
+            CyclePhase::ResponseCaptured,
+            CyclePhase::WriteApplied,
+            CyclePhase::Abandoned,
+        ] {
+            assert!(
+                !terminal_phase_allows_live_editor_projection_settlement(Some(phase)),
+                "uncommitted or abandoned phase {phase:?} must not issue a generic editor save",
             );
         }
     }

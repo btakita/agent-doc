@@ -4,6 +4,24 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.82
+
+_JetBrains plugin 0.2.319; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Supervisor replacement preserves the exact active conversation.** An
+  accepted non-forced replacement remains owned by the live supervisor until
+  its turn drains; a controller observation timeout no longer escalates into
+  killing the harness. Continue-mode preserves a live child and requires the
+  editor-authoritative document's exact `resume:` id for a cold start, while
+  only explicit fresh-mode may start another conversation. SimWorld reproduces
+  the stale-binary, mid-turn timeout and proves same-pane in-place recovery.
+- **Committed live-editor projections now converge without manual-save churn.**
+  Session-check may request a native save for the exact committed editor cut
+  even while an old delivery acknowledgement trails. The editor buffer remains
+  content authority, disk is only the verified materialization, and identical
+  retries share `canonical-save-<content-hash>` instead of creating a new save
+  effect on every check.
+
 ## 0.35.81
 
 _JetBrains plugin 0.2.319; VS Code extension 0.2.62; Zed extension 0.1.0._

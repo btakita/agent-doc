@@ -36,6 +36,7 @@
 | Native save proves exact canonical bytes on disk | Emit convergence and clear matching deferred lineage |
 | Historical version already cleared the intent after ACK | In no-cycle/preflight-only state, save the exact live canonical cut and verify authority/disk equality |
 | Captured response cycle | Use capture-identity recovery; generic editor projection is forbidden |
+| Committed cycle with an exact live editor cut | Request the idempotent native save keyed by canonical hash; disk is a materialized projection, not content authority |
 
 ### Routed pane
 

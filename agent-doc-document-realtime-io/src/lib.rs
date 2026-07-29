@@ -1241,6 +1241,10 @@ fn editor_save_authority_is_sufficient(
     authoritative_text == canonical && live_editors > 0 && (delivery_converged || live_editors == 1)
 }
 
+fn canonical_editor_save_patch_id(canonical: &str) -> String {
+    format!("canonical-save-{}", agent_doc_hash::content_hash(canonical))
+}
+
 fn request_native_editor_save_for_canonical_projection(
     path: &Path,
     canonical: &str,
@@ -1258,7 +1262,10 @@ fn request_native_editor_save_for_canonical_projection(
     })?;
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical_path);
     let path_str = canonical_path.to_string_lossy().to_string();
-    let patch_id = format!("canonical-save-{}", uuid::Uuid::new_v4());
+    // The canonical revision is the save effect identity. Reobserving the same
+    // stalled projection must join the in-flight editor save instead of
+    // manufacturing a new request on every session-check retry.
+    let patch_id = canonical_editor_save_patch_id(canonical);
     let build_recovery_deadline = std::time::Instant::now()
         + std::time::Duration::from_millis(NATIVE_EDITOR_SAVE_BUILD_RECOVERY_TIMEOUT_MS);
     let mut build_recovery_requested = false;
@@ -10629,6 +10636,17 @@ mod tests {
             1,
             false,
         ));
+    }
+
+    #[test]
+    fn canonical_editor_save_retries_share_revision_identity() {
+        let first = canonical_editor_save_patch_id("same editor revision\n");
+        let retry = canonical_editor_save_patch_id("same editor revision\n");
+        let next = canonical_editor_save_patch_id("next editor revision\n");
+
+        assert_eq!(first, retry);
+        assert_ne!(first, next);
+        assert!(first.starts_with("canonical-save-"));
     }
 
     #[test]

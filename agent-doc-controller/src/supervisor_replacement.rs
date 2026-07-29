@@ -65,6 +65,102 @@ impl fmt::Display for SupervisorReplacementParseError {
 
 impl std::error::Error for SupervisorReplacementParseError {}
 
+/// Result of attempting to hand a supervisor replacement to the currently
+/// running supervisor over its IPC socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SupervisorReplacementIpcOutcome {
+    Accepted,
+    Dead,
+    Failed,
+}
+
+/// Controller action after the supervisor IPC attempt.
+///
+/// An accepted non-forced replacement is owned by the live supervisor. It may
+/// legitimately remain pending while an active turn drains, so a foreground
+/// proof timeout is never authority to kill that supervisor or its child.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SupervisorReplacementEscalation {
+    AwaitAcceptedInPlace,
+    WaitThenEscalate,
+    EscalateColdStart,
+    FailClosed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SupervisorReplacementEscalationFacts {
+    pub ipc_outcome: SupervisorReplacementIpcOutcome,
+    pub force: bool,
+    pub initial_host_stale: bool,
+}
+
+pub const fn decide_supervisor_replacement_escalation(
+    facts: SupervisorReplacementEscalationFacts,
+) -> SupervisorReplacementEscalation {
+    match (facts.ipc_outcome, facts.force, facts.initial_host_stale) {
+        (SupervisorReplacementIpcOutcome::Accepted, false, _) => {
+            SupervisorReplacementEscalation::AwaitAcceptedInPlace
+        }
+        (SupervisorReplacementIpcOutcome::Accepted, true, _) => {
+            SupervisorReplacementEscalation::WaitThenEscalate
+        }
+        (SupervisorReplacementIpcOutcome::Dead, _, _) => {
+            SupervisorReplacementEscalation::EscalateColdStart
+        }
+        (SupervisorReplacementIpcOutcome::Failed, true, _)
+        | (SupervisorReplacementIpcOutcome::Failed, false, true) => {
+            SupervisorReplacementEscalation::EscalateColdStart
+        }
+        (SupervisorReplacementIpcOutcome::Failed, false, false) => {
+            SupervisorReplacementEscalation::FailClosed
+        }
+    }
+}
+
+/// What a cold supervisor-replacement path may do with the recorded owner pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SupervisorReplacementPaneDecision {
+    PreserveExistingShell,
+    AutoStartNew,
+    /// Continue-mode found this document's harness still alive. Preserve it;
+    /// an unowned live child is more valuable than a replacement supervisor.
+    PreserveLiveHarness,
+    /// Fresh-mode explicitly authorizes replacing this document's harness.
+    RestartLiveHarness,
+    BlockLiveNonShell,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SupervisorReplacementPaneFacts {
+    pub pane_alive: bool,
+    pub current_command_is_shell: bool,
+    pub runs_document_harness: bool,
+}
+
+pub const fn decide_supervisor_replacement_pane(
+    mode: SupervisorReplacementMode,
+    facts: SupervisorReplacementPaneFacts,
+) -> SupervisorReplacementPaneDecision {
+    if !facts.pane_alive {
+        return SupervisorReplacementPaneDecision::AutoStartNew;
+    }
+    if facts.current_command_is_shell {
+        return SupervisorReplacementPaneDecision::PreserveExistingShell;
+    }
+    if facts.runs_document_harness {
+        match mode {
+            SupervisorReplacementMode::Continue => {
+                SupervisorReplacementPaneDecision::PreserveLiveHarness
+            }
+            SupervisorReplacementMode::Fresh => {
+                SupervisorReplacementPaneDecision::RestartLiveHarness
+            }
+        }
+    } else {
+        SupervisorReplacementPaneDecision::BlockLiveNonShell
+    }
+}
+
 pub fn parse_supervisor_replacement_request(
     fields: SupervisorReplacementRequestFields<'_>,
 ) -> Result<ParsedSupervisorReplacementRequest, SupervisorReplacementParseError> {
@@ -207,6 +303,56 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "unsupported supervisor replacement mode ``"
+        );
+    }
+
+    #[test]
+    fn accepted_stale_replacement_waits_for_in_place_drain_without_escalating() {
+        assert_eq!(
+            decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
+                ipc_outcome: SupervisorReplacementIpcOutcome::Accepted,
+                force: false,
+                initial_host_stale: true,
+            }),
+            SupervisorReplacementEscalation::AwaitAcceptedInPlace
+        );
+    }
+
+    #[test]
+    fn forced_accepted_replacement_may_escalate_after_wait() {
+        assert_eq!(
+            decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
+                ipc_outcome: SupervisorReplacementIpcOutcome::Accepted,
+                force: true,
+                initial_host_stale: true,
+            }),
+            SupervisorReplacementEscalation::WaitThenEscalate
+        );
+    }
+
+    #[test]
+    fn continue_mode_preserves_live_document_harness() {
+        assert_eq!(
+            decide_supervisor_replacement_pane(
+                SupervisorReplacementMode::Continue,
+                SupervisorReplacementPaneFacts {
+                    pane_alive: true,
+                    current_command_is_shell: false,
+                    runs_document_harness: true,
+                },
+            ),
+            SupervisorReplacementPaneDecision::PreserveLiveHarness
+        );
+        assert_eq!(
+            decide_supervisor_replacement_pane(
+                SupervisorReplacementMode::Fresh,
+                SupervisorReplacementPaneFacts {
+                    pane_alive: true,
+                    current_command_is_shell: false,
+                    runs_document_harness: true,
+                },
+            ),
+            SupervisorReplacementPaneDecision::RestartLiveHarness
         );
     }
 }

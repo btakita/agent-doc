@@ -782,8 +782,13 @@ Ctrl+S, preflight repair, recapture, and force-disk are not recovery steps.
   are preserved when present in the operator cut, while retained-target-only
   replay copies are removed on the next merge over a cleaned operator cut.
 - IDE document selection is operator-owned. Replica refresh, reconnect,
-controller activity, tmux focus changes, and background queue work must not
+  controller activity, tmux focus changes, and background queue work must not
   open, select, or focus a different JetBrains document.
+- Automatic editor-surface observation crosses the editor-native boundary as a
+  bounded validate-and-enqueue operation. Controller probes and tmux
+  consequences run outside the native-call generation, serialize per project
+  root, and are latest-wins before execution; a blocked route cannot disable
+  unrelated editor/CRDT calls or replay a superseded intermediate layout.
 
 ## Realtime Parse State
 

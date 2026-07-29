@@ -15,7 +15,8 @@ import java.util.concurrent.TimeUnit
  * The plugin no longer plans (`#jbsurfaceswap`) — focus-vs-sync, dedup, and the
  * retry ladder are the reactive graph's, exercised by
  * `agent-doc-editor-surface`. What is left here is the observation: the editor
- * has to report the surface it actually sees, and read the derived intent back.
+ * has to enqueue the surface it actually sees without waiting for controller
+ * probes or tmux consequences.
  */
 class EditorTabSyncListenerTest {
     private val gson = Gson()
@@ -256,37 +257,17 @@ TimeUnit.SECONDS.toNanos(1),
 }
 
     @Test
-    fun `a derived sync intent produces the operator hint`() {
-        val hint = EditorTabSyncListener.syncHintFromReceipt(
-            """
-            {"intent":{"kind":"sync","columns":[{"files":["/repo/a.md"]},{"files":["/repo/b.md"]}],
-             "document":"/repo/b.md"},"idle":false,"outcome":"{}","error":null}
-            """.trimIndent()
-        )
+    fun `surface reporting enqueues without waiting for a controller receipt`() {
+        val listenerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"),
+        ).first { Files.exists(it) }
+        val reportBody = Files.readString(listenerPath)
+            .substringAfter("private fun reportLatestSurface()")
+            .substringBefore("private fun requestImmediateFocus")
 
-        assertEquals("Sync: --col /repo/a.md --col /repo/b.md [focus: /repo/b.md]", hint)
-        assertEquals("sync", EditorTabSyncListener.intentKindFromReceipt(
-            """{"intent":{"kind":"sync","columns":[],"document":"/repo/b.md"},"idle":false}"""
-        ))
-    }
-
-    @Test
-    fun `focus and idle intents produce no hint`() {
-        assertNull(
-            EditorTabSyncListener.syncHintFromReceipt(
-                """{"intent":{"kind":"focus","document":"/repo/b.md"},"idle":false}"""
-            )
-        )
-        assertNull(
-            EditorTabSyncListener.syncHintFromReceipt("""{"intent":{"kind":"idle"},"idle":true}""")
-        )
-    }
-
-    @Test
-    fun `an unusable receipt is reported as no intent instead of throwing`() {
-        assertNull(EditorTabSyncListener.syncHintFromReceipt(null))
-        assertNull(EditorTabSyncListener.syncHintFromReceipt(""))
-        assertNull(EditorTabSyncListener.syncHintFromReceipt("not json"))
-        assertNull(EditorTabSyncListener.intentKindFromReceipt("{}"))
+        assertTrue(reportBody.contains("NativeAdminControls.editorSurfaceEnqueue("))
+        assertFalse(reportBody.contains("editorSurfaceObserve("))
+        assertFalse(reportBody.contains("syncHintFromReceipt("))
     }
 }

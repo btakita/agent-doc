@@ -364,6 +364,12 @@ interface AgentDocLib : Library {
         surface_json: String,
     ): FfiJsonResult.ByValue
 
+    /** Validate and enqueue an observation without waiting for tmux work. */
+    fun agent_doc_editor_surface_enqueue_json(
+        project_root: String,
+        surface_json: String,
+    ): Int
+
     /**
      * Forget a project root's editor-surface graph — the editor closed the
      * project. Returns `1` when a surface was forgotten, `0` when none was
@@ -1440,6 +1446,19 @@ object NativeAdminControls {
             return null
         }
         return decodeJsonResult(lib, result, "editor_surface_observe")
+    }
+
+    fun editorSurfaceEnqueue(
+        projectRoot: String,
+        surfaceJson: String,
+    ): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            lib.agent_doc_editor_surface_enqueue_json(projectRoot, surfaceJson) == 1
+        } catch (e: Throwable) {
+            LOG.warn("[native] editor_surface_enqueue unavailable: ${e.message}")
+            false
+        }
     }
 
     /** Release a project root's editor-surface graph. */

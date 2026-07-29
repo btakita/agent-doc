@@ -4,6 +4,18 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.77
+
+_JetBrains plugin 0.2.317; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Automatic editor-surface observation no longer runs controller probes or
+  tmux consequences inside the JetBrains native-call lease.** The plugin now
+  crosses a bounded validate-and-enqueue FFI boundary. A per-project worker
+  performs the controller work afterward and replaces any not-yet-started
+  surface with the newest observation. A blocked route can therefore neither
+  disable the shared native generation nor replay an intermediate layout that
+  refocuses `stash` after the operator selects another i3 window.
+
 ## 0.35.76
 
 _JetBrains plugin 0.2.316; VS Code extension 0.2.62; Zed extension 0.1.0._

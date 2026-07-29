@@ -2659,6 +2659,34 @@ pub unsafe extern "C" fn agent_doc_editor_surface_observe_json(
     })())
 }
 
+/// Validate and enqueue one editor-surface observation without waiting for its
+/// controller probe or tmux consequence.
+///
+/// Returns `1` when queued and `-1` for an invalid argument or payload.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_editor_surface_enqueue_json(
+    project_root: *const c_char,
+    surface_json: *const c_char,
+) -> c_int {
+    let Ok(project_root) = (unsafe { required_ffi_string(project_root, "project_root") }) else {
+        return -1;
+    };
+    let Ok(surface_json) = (unsafe { required_ffi_string(surface_json, "surface_json") }) else {
+        return -1;
+    };
+    match agent_doc_editor_surface_io::enqueue_from_json(Path::new(&project_root), &surface_json) {
+        Ok(()) => 1,
+        Err(error) => {
+            eprintln!("[editor-surface] enqueue rejected: {error:#}");
+            -1
+        }
+    }
+}
+
 /// Report the column layout tmux is currently showing at `project_root`.
 ///
 /// The controller's half of the mirror. `layout_json` is a `TmuxLayout`:

@@ -27,6 +27,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::thread;
 
 use agent_doc_editor_surface::{
     EditorSurface, EditorSurfaceState, SurfaceColumn, SurfaceIntent, TmuxLayout,
@@ -69,6 +70,92 @@ pub type IntentRunner = Arc<dyn Fn(&Path, &SurfaceIntent) -> Result<String> + Se
 /// `None` means "not asked, or no answer" — deliberately distinct from "tmux
 /// matches" and from "tmux drifted" (`#idlerevisionreactive`).
 pub type TmuxLayoutProbe = Arc<dyn Fn(&Path, &EditorSurface) -> Option<TmuxLayout> + Send + Sync>;
+
+type SurfaceObserver = Arc<dyn Fn(&Path, EditorSurface) + Send + Sync>;
+
+#[derive(Default)]
+struct DeferredRoot {
+    latest: Option<EditorSurface>,
+    running: bool,
+}
+
+/// Per-root latest-wins dispatcher for editor observations.
+///
+/// Controller probes and tmux consequences can block on a route-owned actor.
+/// They must therefore never run inside an editor's native-call lease. One
+/// worker per active root preserves that root's observation order while a
+/// newer queued surface replaces any superseded surface that has not started.
+struct DeferredSurfaceDispatcher {
+    roots: Mutex<HashMap<PathBuf, DeferredRoot>>,
+    observe: SurfaceObserver,
+}
+
+impl DeferredSurfaceDispatcher {
+    fn new(observe: SurfaceObserver) -> Arc<Self> {
+        Arc::new(Self {
+            roots: Mutex::new(HashMap::new()),
+            observe,
+        })
+    }
+
+    fn roots(&self) -> std::sync::MutexGuard<'_, HashMap<PathBuf, DeferredRoot>> {
+        self.roots.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn enqueue(self: &Arc<Self>, root: PathBuf, surface: EditorSurface) -> Result<()> {
+        let should_start = {
+            let mut roots = self.roots();
+            let entry = roots.entry(root.clone()).or_default();
+            entry.latest = Some(surface);
+            if entry.running {
+                false
+            } else {
+                entry.running = true;
+                true
+            }
+        };
+        if !should_start {
+            return Ok(());
+        }
+
+        let dispatcher = Arc::clone(self);
+        let worker_root = root.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("agent-doc-editor-surface".to_string())
+            .spawn(move || dispatcher.run_root(worker_root))
+        {
+            if let Some(entry) = self.roots().get_mut(&root) {
+                entry.running = false;
+            }
+            anyhow::bail!(
+                "spawn editor-surface worker for {}: {error}",
+                root.display()
+            );
+        }
+        Ok(())
+    }
+
+    fn run_root(&self, root: PathBuf) {
+        loop {
+            let Some(surface) = ({
+                let mut roots = self.roots();
+                let Some(entry) = roots.get_mut(&root) else {
+                    return;
+                };
+                match entry.latest.take() {
+                    Some(surface) => Some(surface),
+                    None => {
+                        roots.remove(&root);
+                        None
+                    }
+                }
+            }) else {
+                return;
+            };
+            (self.observe)(&root, surface);
+        }
+    }
+}
 
 struct RootSurface {
     state: EditorSurfaceState,
@@ -329,9 +416,23 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     )
 });
 
+static DEFERRED_SURFACES: LazyLock<Arc<DeferredSurfaceDispatcher>> = LazyLock::new(|| {
+    DeferredSurfaceDispatcher::new(Arc::new(|root, surface| {
+        let _ = REGISTRY.observe(root, surface);
+    }))
+});
+
 /// Record an editor-surface observation for the process-wide registry.
 pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservationReceipt {
     REGISTRY.observe(project_root, surface)
+}
+
+/// Validate and enqueue an editor-surface observation without waiting for its
+/// controller probe or tmux consequence.
+pub fn enqueue_from_json(project_root: &Path, surface_json: &str) -> Result<()> {
+    let surface: EditorSurface =
+        serde_json::from_str(surface_json).context("parse editor surface json")?;
+    DEFERRED_SURFACES.enqueue(project_root.to_path_buf(), surface)
 }
 
 /// Record a tmux-layout observation for the process-wide registry.
@@ -360,6 +461,8 @@ pub fn forget(project_root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Condvar, mpsc};
+    use std::time::Duration;
 
     fn mirrored(surface: &EditorSurface) -> TmuxLayout {
         TmuxLayout {
@@ -666,5 +769,52 @@ mod tests {
         assert_eq!(receipt["intent"]["kind"], serde_json::json!("idle"));
 
         assert!(registry.observe_json(Path::new("/p"), "not json").is_err());
+    }
+
+    #[test]
+    fn deferred_surface_dispatch_is_non_blocking_and_latest_wins_per_root() {
+        let (seen_tx, seen_rx) = mpsc::channel();
+        let release_first = Arc::new((Mutex::new(false), Condvar::new()));
+        let dispatcher = {
+            let release_first = Arc::clone(&release_first);
+            DeferredSurfaceDispatcher::new(Arc::new(move |_, surface| {
+                seen_tx.send(surface.focused.clone()).unwrap();
+                if surface.focused == "/one.md" {
+                    let (released, wake) = &*release_first;
+                    drop(
+                        wake.wait_while(released.lock().unwrap(), |released| !*released)
+                            .unwrap(),
+                    );
+                }
+            }))
+        };
+
+        dispatcher
+            .enqueue(PathBuf::from("/p"), surface("/one.md", &[&["/one.md"]]))
+            .unwrap();
+        assert_eq!(
+            seen_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "/one.md"
+        );
+
+        dispatcher
+            .enqueue(PathBuf::from("/p"), surface("/two.md", &[&["/two.md"]]))
+            .unwrap();
+        dispatcher
+            .enqueue(PathBuf::from("/p"), surface("/three.md", &[&["/three.md"]]))
+            .unwrap();
+
+        let (released, wake) = &*release_first;
+        *released.lock().unwrap() = true;
+        wake.notify_all();
+
+        assert_eq!(
+            seen_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "/three.md"
+        );
+        assert!(
+            seen_rx.recv_timeout(Duration::from_millis(50)).is_err(),
+            "the superseded middle surface must never run",
+        );
     }
 }

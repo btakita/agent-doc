@@ -1,6 +1,5 @@
 package com.github.btakita.agentdoc
 
-import com.google.gson.JsonParser
 import com.google.gson.annotations.SerializedName
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -92,42 +91,6 @@ ageNanos in 0..FOCUS_MAX_AGE_NANOS
             instances.remove(project)?.shutdown()
         }
 
-        internal fun formatCpSyncHint(columns: List<String>, focus: String): String =
-            "Sync: ${columns.joinToString(" ") { "--col $it" }} [focus: $focus]"
-
-        /**
-         * The user-visible hint for an observation receipt, or `null` when the
-         * derived intent was idle or a pure focus move (which needs no hint —
-         * the operator just moved between documents they can already see).
-         */
-        internal fun syncHintFromReceipt(receiptJson: String?): String? {
-            val intent = intentObject(receiptJson) ?: return null
-            if (intent.get("kind")?.asString != "sync") return null
-            val document = intent.get("document")?.asString ?: return null
-            val columns = intent.getAsJsonArray("columns")
-                ?.map { column ->
-                    column.asJsonObject.getAsJsonArray("files")
-                        .joinToString(",") { it.asString }
-                }
-                .orEmpty()
-            return formatCpSyncHint(columns, document)
-        }
-
-        /** The `kind` of the intent a receipt reports, for diagnostics. */
-        internal fun intentKindFromReceipt(receiptJson: String?): String? =
-            intentObject(receiptJson)?.get("kind")?.asString
-
-        private fun intentObject(receiptJson: String?): com.google.gson.JsonObject? {
-            if (receiptJson.isNullOrBlank()) return null
-            return try {
-                JsonParser.parseString(receiptJson)
-                    .asJsonObject
-                    .getAsJsonObject("intent")
-            } catch (e: Exception) {
-                LOG.warn("[layout-sync] unparseable surface receipt: ${e.message}")
-                null
-            }
-        }
     }
 
     /** One column of the reported split layout. Wire shape of Rust `SurfaceColumn`. */
@@ -216,18 +179,15 @@ ageNanos in 0..FOCUS_MAX_AGE_NANOS
     private fun reportLatestSurface() {
         val pending = latestSurface.get() ?: return
         observedRoots.add(pending.projectRoot)
-        val receipt = NativeAdminControls.editorSurfaceObserve(
+        val accepted = NativeAdminControls.editorSurfaceEnqueue(
             projectRoot = pending.projectRoot,
             surfaceJson = pending.surfaceJson,
         )
-        if (receipt == null) {
+        if (!accepted) {
             LOG.warn("[layout-sync] surface observation unavailable for ${pending.relativePath}")
             return
         }
-        log("observe: file=${pending.relativePath} intent=${intentKindFromReceipt(receipt)} receipt=$receipt")
-        syncHintFromReceipt(receipt)?.let { hint ->
-            TerminalUtil.showHint(pending.project, hint)
-        }
+        log("observe: queued file=${pending.relativePath}")
     }
 
 private fun requestImmediateFocus(project: Project, file: VirtualFile) {

@@ -420,6 +420,36 @@ pub fn is_committed_response_replay_including_stale(current: &str, head: &str) -
         .any(|line| line_carries_user_directive(line) && !head_lines.contains(line))
 }
 
+/// Detect a late replay that concatenated one or more complete committed
+/// documents instead of re-applying only the response block.
+///
+/// Boundary identities and empty-line placement are transient at this recovery
+/// boundary. Every non-empty line of every replayed copy must otherwise match
+/// committed `HEAD` exactly, so distinct operator or response content fails
+/// closed.
+pub fn is_committed_whole_document_overapplication(current: &str, head: &str) -> bool {
+    fn normalized_nonempty_lines(content: &str) -> Vec<String> {
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+
+    let current_lines = normalized_nonempty_lines(current);
+    let head_lines = normalized_nonempty_lines(head);
+    if head_lines.is_empty()
+        || current_lines.len() <= head_lines.len()
+        || !current_lines.len().is_multiple_of(head_lines.len())
+    {
+        return false;
+    }
+    current_lines
+        .chunks_exact(head_lines.len())
+        .all(|copy| copy == head_lines)
+}
+
 /// Classify a late-IPC committed-response over-application and return the
 /// content that should be restored.
 pub fn classify_late_ipc_response_overapplication(
@@ -428,6 +458,7 @@ pub fn classify_late_ipc_response_overapplication(
 ) -> Option<LateIpcResponseOverapplication> {
     if is_committed_response_overapplication(current, head)
         || is_committed_response_replay_including_stale(current, head)
+        || is_committed_whole_document_overapplication(current, head)
     {
         return Some(LateIpcResponseOverapplication {
             remediated_content: head.to_string(),
@@ -989,6 +1020,34 @@ Fixed it.
             .expect("late IPC replay should be classified");
 
         assert_eq!(overapplication.remediated_content, HEAD_DOC);
+    }
+
+    #[test]
+    fn whole_document_overapplication_restores_head_without_losing_distinct_content() {
+        let first = HEAD_DOC.replace(
+            "<!-- agent:boundary:88409761 -->",
+            "<!-- agent:boundary:first -->",
+        );
+        let second = HEAD_DOC
+            .replace(
+                "<!-- agent:boundary:88409761 -->",
+                "<!-- agent:boundary:second -->",
+            )
+            .replace("\n\n", "\n");
+        let current = format!("{first}{second}");
+
+        let overapplication = classify_late_ipc_response_overapplication(&current, HEAD_DOC)
+            .expect("whole-document replay should be classified");
+        assert_eq!(overapplication.remediated_content, HEAD_DOC);
+
+        let distinct = format!(
+            "{first}{}",
+            second.replace("Fixed it.", "A new operator answer.")
+        );
+        assert!(
+            classify_late_ipc_response_overapplication(&distinct, HEAD_DOC).is_none(),
+            "distinct content in either replayed document must fail closed"
+        );
     }
 
     #[test]

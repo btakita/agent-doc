@@ -150,6 +150,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         "preflight_entry",
     );
 
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     // #rtwwire (rung 3): classify against the realtime document model. When an
     // editor is active, the CRDT relay is the authority and disk is not read as
     // a substitute; with no editor attached, disk is the fallback replica.
@@ -176,6 +177,33 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             ),
         );
     }
+    // A retired retained intent can still have one already-queued editor effect.
+    // If that effect concatenates two complete committed projections, there is no
+    // pending intent left for the file-aware recovery above to use. HEAD is still
+    // an exact safe proof, so restore it before singleton-component validation.
+    if let Some(head) = rc.head_content()
+        && agent_doc_turn::response_replay::classify_late_ipc_response_overapplication(
+            &content, &head,
+        )
+        .is_some()
+    {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &head)?;
+        content =
+            resolve_current_preflight_document(file, "after_committed_overapplication_repair")?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &head,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_committed_overapplication_self_healed file={} content_hash={}",
+                file.display(),
+                agent_doc_hash::content_hash(&content),
+            ),
+        );
+    }
     // A preflight may perform recovery and queue/backlog maintenance. Refuse
     // every mutation when the authoritative document is already structurally
     // invalid; recovery must never normalize corruption into a new baseline.
@@ -195,7 +223,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             &agent_doc_markdown_lossless::shadow_audit_ops_log_line(&content, "preflight_initial"),
         );
     }
-    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     // `#preflightreactive`: this scope owns the derived read projection and the
     // effect gate for the whole open document observation. The command remains
     // the IO adapter; ordering is now a graph dependency, not a comment/line
@@ -3658,6 +3685,81 @@ mod tests {
             "preflight repair should restore the working tree to committed HEAD"
         );
     }
+
+    #[test]
+    fn preflight_repairs_whole_document_late_ipc_overapplication() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: answer — opus-4-8\n\n",
+            "Committed answer.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed response", "--no-verify"])
+            .output()
+            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        let first = committed.replace("boundary:committed", "boundary:first");
+        let second = committed
+            .replace("boundary:committed", "boundary:second")
+            .replace("\n\n", "\n");
+        std::fs::write(&doc, format!("{first}{second}")).unwrap();
+
+        assert!(
+            agent_doc_session_check_io::detect_late_ipc_response_overapplication(&doc)
+                .unwrap()
+                .is_some(),
+            "whole-document replay should be classified before singleton integrity checks"
+        );
+
+        run(&doc).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), committed);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            committed,
+        );
+        let diff = Command::new("git")
+            .current_dir(root)
+            .args(["diff", "--", "session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            diff.stdout.is_empty(),
+            "preflight repair should restore committed HEAD before structural validation"
+        );
+    }
+
     #[test]
     fn preflight_repairs_stale_jb_cache_conflict_accept_replay() {
         // #jb-cache-conflict-stale-accept-replay: a JB File Cache Conflict

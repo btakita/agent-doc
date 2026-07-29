@@ -497,6 +497,17 @@ When an unacknowledged response is already visible with later operator text, tha
 response intent counts as applied before later entries are replayed, so an
 ours-wins exchange conflict cannot erase the operator text.
 
+The Lazily intent generation is the authority that permits each reconnect
+effect. RPC and in-process FFI are transport/wakeup mechanisms only: returning
+target bytes does not itself authorize a later editor mutation. Immediately at
+the editor-effect boundary, the worker must still observe the same desired
+intent id, expected editor revision, target revision, and endpoint generation;
+retired, superseded, or model-less observations cancel that effect without
+touching the document. Effect completion publishes the observed editor revision
+and receipt back into the same projection. A registered endpoint with no backing
+model therefore derives an idempotent re-registration effect; it never grants
+disk read authority and never requires an agent-managed library reload.
+
 Exact target bytes are not sufficient settlement proof for a semantic rebase
 intent. The non-capture byte-equality fast path is limited to delivery-only
 reasons (missing replica, stale delivery worker, or pending delivery ACK). An

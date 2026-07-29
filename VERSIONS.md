@@ -4,6 +4,23 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.83
+
+_JetBrains plugin 0.2.319; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Committed whole-document replay self-heals before structural guards.** A
+  post-registration editor effect can outlive retirement of its retained intent
+  and concatenate two complete committed projections with different transient
+  boundary identities. Preflight now proves both copies against committed HEAD,
+  restores HEAD through live document authority before singleton validation,
+  and rejects any copy containing distinct operator or response content.
+- **Reconnect effects are state projections, not RPC authority.** The realtime
+  contract now makes the Lazily desired/observed intent generation authoritative
+  for editor replay. RPC and in-process FFI may transport or wake that projection
+  but cannot independently authorize a stale editor mutation; a registered
+  endpoint without a model is an observed re-registration state, not a disk
+  fallback or an operator reload requirement.
+
 ## 0.35.82
 
 _JetBrains plugin 0.2.319; VS Code extension 0.2.62; Zed extension 0.1.0._

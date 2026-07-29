@@ -1127,7 +1127,45 @@ Changed paths: none. Verification: I compared the returned addendum's Section 2 
 Answered and committed in [haiven.md](/home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md).
 
 Bottom line: unpaid activity does not automatically require approval, but conflict-related or materially interfering activity may. The proposed language now includes a safe harbor for ordinary personal, volunteer, and open-source activity. No external message was sent.
-<!-- agent:boundary:feaef49b -->
+
+
+### Re: Timing for supporting materials and the first workday — gpt-5
+
+> **Queue prompt:**
+>
+> "Supporting materials, payroll, and timing": In the interest of starting my first day, is this necessary, or can I ask for this to be provided by today or tomorrow?
+
+**Yes—ask for the materials today or tomorrow rather than making every supporting document a condition to beginning day-one onboarding.** But separate routine onboarding materials from the core terms that should be settled before Brian signs the final package or begins substantive IP-producing work.
+
+#### Resolve before final signature or substantive product/code work
+
+- a clean, correctly rendered, mutually executed addendum containing the agreed core terms;
+- the completed Exhibit A, expressly incorporated into that same signed package;
+- the final equity commitment and protection if the Board does not approve the promised grant;
+- the outside-activity/IP carveouts and the remaining Cause/Good Reason language; and
+- written confirmation of the applicable Connecticut payroll frequency.
+
+Brian can reasonably participate in administrative onboarding, introductory meetings, account setup, and orientation today, provided he states that doing so **does not waive any unresolved document terms**. Until the IP/addendum package is executed, the safer course is to avoid substantive coding, product design, invention work, or incorporating any pre-existing tools into Haiven systems.
+
+#### Reasonable to request by today or tomorrow
+
+- employee handbook and vacation policy;
+- equity plan and proposed option form—still review these before signing any equity acknowledgment or final agreement;
+- health-plan effective date, enrollment deadline, employer contribution, dependent costs, and plan materials;
+- payroll calendar, onboarding forms, and confirmation of Connecticut withholding, unemployment, workers' compensation, and Paid Leave setup.
+
+The legal onboarding deadlines do not require every benefit and policy document before the first meeting. Form I-9 Section 1 is due by the employee's first paid workday, while the employer generally has three business days after that first day to complete Section 2. [USCIS Form I-9 instructions](https://www.uscis.gov/sites/default/files/document/forms/i-9instr.pdf). Connecticut requires written notice at hiring of remuneration, hours, and the wage-payment schedule, and requires applicable wage, vacation, sick-leave, and benefit policies to be made available. [Conn. Gen. Stat. § 31-71f](https://www.cga.ct.gov/current/pub/chap_558.htm#sec_31-71f).
+
+The payroll-frequency point should be confirmed now, not deferred until the first paycheck. Connecticut generally requires weekly or biweekly payment; a less-frequent schedule requires the Labor Commissioner's permission. [Conn. Gen. Stat. §§ 31-71b and 31-71i](https://www.cga.ct.gov/current/pub/chap_558.htm#sec_31-71b). Haiven's Connecticut withholding and unemployment registrations are employer compliance obligations; Brian can ask for written confirmation rather than demanding the underlying filings. [Connecticut DRS new-employer guidance](https://portal.ct.gov/drs/withholding-taxes/new-employer-information).
+
+I would replace item 6 with:
+
+> **6. Supporting materials, payroll, and timing.** To avoid delaying my start, I am comfortable beginning administrative onboarding and introductory work on July 29, 2026 while we finalize the remaining documents, provided that doing so does not waive any open term or constitute acceptance of the current addendum. Please provide the handbook, vacation policy, equity plan, option form, health-coverage effective date, enrollment deadline, and employer contribution rates by July 30, 2026. Please also confirm today that Connecticut payroll, withholding, unemployment, workers' compensation, and Paid Leave setup is active, and that payroll will be biweekly or that any waiver required for a less-frequent schedule is in place before that schedule is used. I will review these materials before signing the final integrated addendum and Exhibit A or any related acknowledgment.
+
+This keeps the tone cooperative and lets the first day begin without surrendering leverage on the provisions that allocate equity, IP, outside work, and termination rights.
+
+Changed paths: none. Verification: I compared item 6 against the offer/addendum package and checked current official USCIS and Connecticut payroll/onboarding sources. Confidence is high on the timing distinction and drafting recommendation; employment counsel should approve the final no-waiver and IP language. No email, signature, attachment, or external message was sent.
+<!-- agent:boundary:1a5b5b91 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1135,7 +1173,7 @@ Bottom line: unpaid activity does not automatically require approval, but confli
 <!-- agent:queue priority start -->
 - ~~do [#recommendedadditionsexhi]~~
 - ~~do [#unpaidoutsideactivity]~~
-- 🚧 "Supporting materials, payroll, and timing": In the interest of starting my first day, is this necessary, or can I ask for this to be provided by today or tomorrow?
+- ~~"Supporting materials, payroll, and timing": In the interest of starting my first day, is this necessary, or can I ask for this to be provided by today or tomorrow?~~
 - Should I ask if this is sufficient for me to get started while we finalize the agreement?
 <!-- /agent:queue -->
 

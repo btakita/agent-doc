@@ -1,5 +1,5 @@
 .PHONY: check fmt-check clippy test schema-check mutation-check prepare-network-peers \
-	network-suite network-suite-pr network-suite-merge network-suite-nightly
+mutation-report network-suite network-suite-pr network-suite-merge network-suite-nightly
 
 NETWORK_SEED ?= 17
 NETWORK_TIER ?= local
@@ -21,6 +21,12 @@ schema-check:
 
 mutation-check:
 	cargo run --quiet -- mutation-check
+
+mutation-report:
+	mkdir -p $(REPORT_DIR)
+	cargo run --quiet -- mutation-check --json > $(REPORT_DIR)/$(NETWORK_TIER)-transport-mutations.json
+	cd ../lazily-spec && uv run --group dev python tests/test_stdlib_conformance.py \
+		> ../lazily-interop/$(REPORT_DIR)/$(NETWORK_TIER)-stdlib-mutations.json
 
 prepare-network-peers:
 	cmake -S ../lazily-cpp -B ../lazily-cpp/build
@@ -55,3 +61,4 @@ network-suite-nightly:
 	$(MAKE) network-suite NETWORK_TIER=nightly-17 NETWORK_SEED=17
 	$(MAKE) network-suite NETWORK_TIER=nightly-29 NETWORK_SEED=29
 	$(MAKE) network-suite NETWORK_TIER=nightly-43 NETWORK_SEED=43
+	$(MAKE) mutation-report NETWORK_TIER=nightly

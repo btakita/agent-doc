@@ -284,7 +284,34 @@ Pushed commits:
 - Coverage-only syncs: Rust `3ccfff6`, Python `eb7e29c`, Kotlin `f3a6144`, JS `bc75340`, Dart `cb990ed`, C# `eb21925`, Formal `0fff845`.
 
 The one-time CI inspection found the new CI runs queued/in progress with no immediate red. Python, Formal, and the root repo have no workflow named `CI`.
-<!-- agent:boundary:87c51562 -->
+
+### Re: #lzstdlibportsmanaged — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzstdlibportsmanaged]
+
+
+Completed portable stdlib parity across all nine active bindings, with `lazily-cs` fully participating rather than staged.
+
+Implemented and published the shared `Timer`, `Timeout`, and `RevisionBarrier` contract in C#, Dart, JavaScript, Kotlin, and Python; tightened Rust, Zig, Go, and C++ where the strengthened corpus exposed native parity gaps. The contract now covers strict/exact `u64` handling, decimal-string wire decoding for values that cannot safely transit JavaScript numbers, deadline overflow and clock regression, operation/cancellation ordering, async adapters, callback reentrancy, first-terminal latching, revision/generation invariants, and browser-safe Dart serialization.
+
+The canonical revision-barrier fixture now requires clock regression to latch typed `unavailable/clock_regression`, skip cancellation, and preserve revision/generation. The all-binding interop scenarios exercise that behavior.
+
+Verification is green:
+
+- Every changed implementation repository passes `make check`.
+- `lazily-spec` and `lazily-interop` pass `make check`.
+- Nine-way semantic convergence passes with 9 peers and no staged peers.
+- Timer passes 153 feature steps across all 9 bindings with no staged peers.
+- Timeout passes 171 feature steps across all 9 bindings with no staged peers.
+- RevisionBarrier passes 216 feature steps across all 9 bindings with no staged peers.
+- The channel matrix passes all 10 reference cells in both directions across in-process FFI, shared memory, IPC socket, WebSocket, and WebRTC data channel. Binding transport links remain honestly staged only for the separate `transport_links` capability.
+
+Committed and pushed all implementation/spec repositories and the orchestration commit `d3a3dc4e6`. One-shot CI snapshots: spec, Zig, Go, and JavaScript green; Rust, Kotlin, Dart, C++, and C# in progress; root, formal, and Python have no workflow named `CI`. Per repository policy, no polling was performed.
+
+Unrelated workspace state was preserved: Zig/C# `AGENTS.md`, Python's linked worktree, and JS/C# build directories were not committed.
+<!-- agent:boundary:e0260ef0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -293,7 +320,7 @@ The one-time CI inspection found the new CI runs queued/in progress with no imme
 - ~~do [#lzstdlibspec]~~
 - ~~do [#lzstdlibrsfixtures]~~
 - ~~do [#lzstdlibportsnative]~~
-- do [#lzstdlibportsmanaged]
+- ~~do [#lzstdlibportsmanaged]~~
 - do [#lzstdlibcspromote]
 - do [#lzstdlibmatrixrelease]
 <!-- /agent:queue -->
@@ -302,7 +329,6 @@ The one-time CI inspection found the new CI runs queued/in progress with no imme
 
 <!-- agent:backlog priority queue -->
 - [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
-- [ ] [#lzstdlibportsmanaged] Implement Phase 3 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: port and independently capability-gate Timer, Timeout, and RevisionBarrier in Python, Kotlin, JavaScript, and Dart, with deterministic clock/wait seams and honest runtime/channel carve-outs.
 - [ ] [#lzstdlibcspromote] Implement Phase 4 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: add .NET stdlib production surfaces and corpus runners, then promote C# per feature and per executable channel only when evidence is green.
 - [ ] [#lzstdlibmatrixrelease] Implement Phase 5 of tasks/software/plan-lazily-stdlib-conformance-rollout.md: run the capability-driven all-peer/all-channel matrix, enforce CI and mutation gates, publish coverage evidence, and release bindings inside-out only after every claimed cell is green.
 <!-- /agent:backlog -->

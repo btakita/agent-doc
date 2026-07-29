@@ -885,6 +885,16 @@ Status as of 2026-07-05 in `src/agent-doc`:
   publication, and realtime observer normalization no longer writes a stale
   queue cut back into the document. This closes the prompt-deletion path observed
   while typing in `monsterrodholders.md`.
+- JetBrains document replicas now have one lazy FIFO worker lane per document,
+  with idle thread timeout. Project-wide work only snapshots and fans out
+  retained drain requests. The native generation uses a bounded owned worker
+  pool, and the Rust FFI registry locks each replica independently instead of
+  holding one process-wide lock across its operation. Thus the 11-second
+  `haiven.md` attach/normalization observed after an IDEA restart cannot block
+  `monsterrodholders.md`, `agent-doc-bugs2.md`, or reliable-sync liveness.
+  Native watchdog state distinguishes a call that never left the queue from one
+  that actually ran beyond its lease: a queued timeout cancels that invocation
+  and retains the generation; only a running timeout poisons it.
 
 The queue/supervisor bullets are Phase 3 sidecar-retirement slices for narrow
 gates. The Phase 1 hook closes the first raw preflight failure shape, but it is
@@ -1131,6 +1141,11 @@ Initial implementation status:
   remains an observer. Status should expose a typed pending-ACK phase/reason,
   lease deadline, attempt, and supersession identity instead of repeating opaque
   prose or inviting a second transaction.
+- Document-replica execution is isolated per document before that projection
+  cutover: local edits, attach/normalize, remote drain, replay, and ACK work are
+  FIFO within one document lane and concurrent across documents. Native
+  generation hot-reload remains one lifecycle gate over a bounded worker pool;
+  it drains every owner thread before unmapping.
 
 ## Acceptance
 
@@ -1147,3 +1162,5 @@ Initial implementation status:
 - Editor-tmux sync converges from published desired state even after transient
   projection/effect failure, and a plugin process never owns an imperative tmux
   retry loop.
+- Blocking one document replica lane does not delay a second document lane or
+  poison the native generation merely because another call waited in its queue.

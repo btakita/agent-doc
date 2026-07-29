@@ -1086,13 +1086,13 @@ Verification already completed: `git diff --check` passed, PDF text extraction f
 ### Re: Response
 
 `#recommendedadditionsexhi` was already completed and committed; the stale queue head is being reaped without duplicating its response.
-<!-- agent:boundary:840d5bdb -->
+<!-- agent:boundary:6aca9307 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority -->
-- 🚧 do [#recommendedadditionsexhi]
+- ~~do [#recommendedadditionsexhi]~~
 - do [#unpaidoutsideactivity]
 <!-- /agent:queue -->
 

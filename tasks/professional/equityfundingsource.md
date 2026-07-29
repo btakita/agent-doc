@@ -1,5 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
+resume: 019fa782-f025-7a10-8a66-3296f1b2bbc7
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -17,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -32,40 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260728-224849.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260729-211428.md`*
 
 Compacted content:
-- Archived 25 response topic(s): Judith and Robert production admins; Judith and Robert production admins; Production email authentication fixed; 22 more
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): What do you need me to verify for #tmo-snapshot-verify?; Add b...
-
-### Re: TMO sandbox purge authorization — gpt-5
-
-> **Queue prompt:**
->
-> do [#tmo-sandbox-purge-apply]
-
-
-I did not execute the TMO sandbox purge or issue any `DeleteLoan` operations. The queued `do #tmo-sandbox-purge-apply` directive is the auto-mirrored queue item that its own safety text explicitly says is not approval for permanent deletion.
-
-The item remains gated pending an explicit operator instruction approving the sandbox purge after acknowledging that attachment bytes and deleted RecIDs are not recoverable. Before any approved purge, I will take the documented snapshot and preserve the 16-loan target list, keep-list, and dry-run evidence required by `docs/TMO/snapshot.md` and `docs/TMO/delete-loan.md`.
-
-### Re: EFS production route token — gpt-5
-
-> **Queue prompt:**
->
-> do [#efs-prod-route-token]
-
-
-Completed `#efs-prod-route-token`.
-
-- Granted the account-owned production token at `passage:btak/equityfundingsource/production/cloudflare_api_token` domain-scoped **Workers Routes Write** access for `equityfundingsource.com`; the token value was updated in place and remains active.
-- Deployed committed EFS revision `c6d4133ec38278d4f7428f0d6d8919be466b1288` from an isolated temporary worktree with `bun run deploy:worker:production:no-migrate`. The command exited 0, including Wrangler route synchronization, and produced Worker version `58884065-ce70-4ce4-9ae2-98c30e08ebcb`.
-- Verified through Cloudflare that the existing custom-domain bindings were preserved unchanged: `equityfundingsource.com` and `www.equityfundingsource.com` both remain attached to service `equityfundingsource-production`, environment `production`, in zone `426085c68d8d584075c824ff1d715926`.
-- Verified both public URLs return HTTP 200.
-- Changed paths: no repository files were changed; the original dirty worktree was left untouched, and the temporary worktree was removed after verification.
-
-Confidence: high. No escalation remains for this item.
-<!-- agent:boundary:2e7a0c14 -->
+- Archived 2 response topic(s): TMO sandbox purge authorization; EFS production route token
+- Prior summary/context: prior compacted content: Archived 25 response topic(s): Judith and Robert production admins; Judith and Robert produc...
+<!-- agent:boundary:0e37d27b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

@@ -824,13 +824,45 @@ The completed Exhibit A is here:
 It is **not attached to the company-signed `Employment Addendum - Brian Takita v1.0.pdf`**. The original At-Will Employee and Contractor Agreement contains Haiven’s blank Exhibit A form on PDF page 5; our completed Exhibit A is currently a separate proposed attachment. Before signing, it should be incorporated into the final combined agreement/addendum and expressly acknowledged by Haiven, as already tracked in `#haiven-paper`.
 
 No email, attachment, signature, or other external action was taken.
-<!-- agent:boundary:4fd96d53 -->
+
+### Re: Protecting future unrelated work — gpt-5
+
+> **Queue prompt:** Should I include future work not related to Haiven?
+
+**Yes—protect future unrelated work in the signed documents, but do not list hypothetical future projects as “Prior Inventions” in Exhibit A.** Exhibit A should remain factually limited to intellectual property and activities that exist before employment begins.
+
+The proposed Exhibit A already handles continuations of existing work correctly: its Effect of Listing §2 says the listed Prior Inventions include their later modifications, enhancements, updates, derivative works, documentation, and successor projects, and that continued development during employment does not by itself transfer ownership. Haiven must expressly sign or incorporate that language for it to be reliable.
+
+For a genuinely new project first conceived after employment begins, add a separate **Future Independent Work** clause to the addendum. The current package is not sufficient because:
+
+- Agreement §3.2 initially assigns Haiven all broadly defined “Inventions” created during employment;
+- Addendum §2 protects the three named engagements but requires written approval for any additional outside activity and modifies Agreement §11 only for approved activities; and
+- Washington’s statutory carve-out is helpful but narrower than a clean contractual safe harbor. It protects an invention developed entirely on the employee’s own time without employer resources or trade secrets, except when it relates directly to the employer’s business or demonstrably anticipated R&D, or results from the employee’s work for the employer. [RCW 49.44.140](https://app.leg.wa.gov/rcw/default.aspx?cite=49.44.140) Washington law also calls for disclosure of inventions being developed so employer/employee ownership can be determined. [RCW 49.44.150](https://app.leg.wa.gov/rcw/default.aspx?cite=49.44.150)
+
+I would request language along these lines:
+
+> **Future Independent Work.** Employee may undertake and retain all rights in future independent software, open-source projects, personal research, writings, websites, products, consulting engagements, and other work without further Company or Board approval, provided the activity: (a) is not created in the performance of Employee’s duties for the Company; (b) does not use or disclose Company Confidential Information or Company funds, equipment, accounts, credentials, repositories, or personnel; (c) does not materially interfere with Employee’s duties; and (d) does not directly relate to the Company’s then-current products or business or its demonstrably anticipated research or development. All compensation, equity, work product, inventions, and intellectual property arising from such activity remain with Employee or the applicable third party and are excluded from Company Inventions and Work Product. If Employee reasonably believes an activity may present an actual conflict, Employee will provide a limited written description that excludes third-party confidential information. The Company will respond within ten business days, and approval will not be unreasonably withheld, conditioned, delayed, or revoked retroactively. Failure to respond within that period constitutes approval.
+
+This avoids imposing a rigid clock-hour separation rule while still excluding work created in the performance of Haiven duties. “Not related to Haiven” by itself is too vague for an AI/software company; the objective conditions above are safer. Haiven may resist deemed approval, so a reasonable fallback is written approval by the CEO or Company—not unanimous Board approval—within a fixed deadline.
+
+I would ask for this in the addendum before signing. Do not add unknown project names or promise disclosure of source code, client secrets, or confidential details in Exhibit A. The existing `#haiven-paper` review item already tracks this unresolved future-work protection, so no new backlog item is needed.
+
+This is contract issue-spotting, not legal advice. Because you work in Connecticut while the agreement selects Washington law, counsel should confirm the governing-law treatment and final wording.
+
+No email, attachment, signature, or other external action was taken.
+### Re: Response
+
+The response is captured but not committed because the editor/controller has not acknowledged the CRDT delivery. Under the `agent-doc` retained-capture rule, I did not resend or force-write it.
+
+Please save or close/reopen `haiven.md`, then invoke the same `agent-doc` command. The retained answer recommends protecting future unrelated work through a “Future Independent Work” clause in the addendum—not listing hypothetical projects in Exhibit A.
+<!-- agent:boundary:4d8c3f5c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
 - ~~Where is the Exhibit A?~~ — auto-struck: answered this cycle (#ftstrike)
+- Should I include future wor
 <!-- /agent:queue -->
 
 ## Backlog

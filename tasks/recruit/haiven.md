@@ -1207,7 +1207,31 @@ The draft no longer asks Haiven to confirm its Connecticut registrations, unempl
 The remaining draft keeps the clean-PDF and integrated Exhibit A request, equity and signing-bonus questions, outside-activity/separation language, the July 31 supporting-materials request, and written confirmation that Brian can begin limited onboarding without waiving unresolved terms while preserving July 29 as the compensation, benefits, and vesting commencement date.
 
 Changed paths: none. External change: one unsent Gmail reply draft with one PDF attachment. Verification through the live Gmail DOM confirmed subject `Re: Addendum to Offer Letter :)`, recipients `luke@haiven.gg` and `craig@haiven.gg`, the Exhibit A attachment, normal line breaks, the simplified Connecticut sentence, the no-waiver start language, and the absence of termination-definition language. The Send button remains present; it was not activated. Confidence is high.
-<!-- agent:boundary:ae3e4bc3 -->
+
+### Re: Gmail reply draft completed — gpt-5
+
+> **Queue prompt:**
+>
+> I need to get this email out. Please draft a reply in gmail to https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVhWChVfCmrxpKKxzwmJtNMxH. We are all excited to get started. I'm ok without pushing back on "Termination definitions".
+
+Completed in the existing Gmail thread as an unsent reply-all draft to `luke@haiven.gg` and `craig@haiven.gg`.
+
+The final draft:
+
+- expresses enthusiasm about getting started;
+- includes a brief, proportional apology for Brian's part in the paperwork delay;
+- notes that Brian was ready for the 9:00 a.m. PT start but did not see connection information;
+- says Brian is ready to sign promptly and begin administrative and substantive development work today or tomorrow;
+- asks Haiven to confirm the actual employment/service commencement date and whether July 29 remains effective for salary, signing-bonus timing, benefits, and vesting if onboarding begins tomorrow;
+- omits all termination-definition pushback;
+- keeps the clean integrated signature-package, equity, signing-bonus, outside-activity, repository-separation, and supporting-material requests;
+- limits the Connecticut payroll request to treating Connecticut as Brian's work/tax location and stating the regular pay frequency; and
+- has `haiven-exhibit-a-proposed.pdf` attached.
+
+Verification through the live Gmail DOM confirmed subject `Re: Addendum to Offer Letter :)`, both intended recipients, the Exhibit A attachment, normal line breaks, every final wording change, and the absence of termination-definition language. The Send button remains present and was not activated. No email was sent.
+
+Changed paths: none. External change: one Gmail reply draft with one PDF attachment. Confidence is high.
+<!-- agent:boundary:05b74849 -->
 <!-- /agent:exchange -->
 
 ## Queue

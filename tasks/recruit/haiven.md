@@ -1121,7 +1121,13 @@ For material ongoing unpaid work on a named site or project, the safest course i
 The carveout should also state that it does not restrict legally protected activity. Connecticut protects certain employee speech, assembly, and related constitutional activity when it does not substantially or materially interfere with job performance or the employment relationship, and federal law separately protects covered employees' concerted activity concerning working conditions. These are activity-specific protections, not a blanket exemption for all off-duty projects. [Conn. Gen. Stat. § 31-51q](https://www.cga.ct.gov/current/pub/chap_557.htm#sec_31-51q); [NLRB employee-rights guidance](https://www.nlrb.gov/about-nlrb/rights-we-protect/your-rights/employee-rights).
 
 Changed paths: none. Verification: I compared the returned addendum's Section 2 against Agreement Sections 4, 8, and 11, Exhibit B, and the current email draft, and checked the current official Connecticut and NLRB materials. Confidence is high on the textual interpretation and recommended clarification; final negotiated language should still be reviewed by employment counsel.
-<!-- agent:boundary:3b3346e3 -->
+
+### Re: Response
+
+Answered and committed in [haiven.md](/home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md).
+
+Bottom line: unpaid activity does not automatically require approval, but conflict-related or materially interfering activity may. The proposed language now includes a safe harbor for ordinary personal, volunteer, and open-source activity. No external message was sent.
+<!-- agent:boundary:65bb4e31 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -220,6 +220,12 @@ class TypingTrackerEdtBudgetTest {
                 native.contains("poisonGeneration(this, reason)") &&
                 native.contains("disabled the wedged generation to keep the IDE responsive"),
         )
+        assertTrue(
+            "ordinary native calls must stay on an isolated caller lane so they cannot disable reactive ingress",
+            native.contains("NativeCallLane.IsolatedCaller") &&
+                native.contains("else -> NativeCallLane.IsolatedCaller") &&
+                native.contains("native generation retained and unrelated reactive ingress remains available"),
+        )
         assertFalse("JNA's path-cached Native.load shortcut must not own generations", native.contains("Native.load("))
         assertTrue("mtime changes must schedule the same generation handoff", native.contains("requestReload(\"mtime\")"))
         assertTrue("reload must have no filesystem watcher", !watcher.contains("newWatchService()"))
@@ -551,9 +557,10 @@ class TypingTrackerEdtBudgetTest {
             remoteApplyBody.contains("NativePatching.normalizeTemplateStructure"),
         )
         assertTrue(
-            "remote CRDT template normalization should run on the replica worker before the EDT apply",
+            "remote CRDT template validation should publish into the shared reactive plane before the EDT apply",
             source.contains("private fun templateStructureState(") &&
-                source.substringAfter("private fun templateStructureState(").contains("NativePatching.normalizeTemplateStructure(text)"),
+                source.substringAfter("private fun templateStructureState(")
+                    .contains("templateValidation.publish(filePath, lane, text).state"),
         )
         val guardRecoveryBody = source.substringAfter("private fun recoverRejectedRemoteCanonical")
             .substringBefore("private fun scheduleTemplateGuardRecoveryRetry")
@@ -605,7 +612,7 @@ class TypingTrackerEdtBudgetTest {
             "CRDT timing logs should identify slow native/socket/EDT operations",
             source.contains("[crdt-perf]") &&
                 source.contains("remote-apply-edt") &&
-                source.contains("template-normalize-worker"),
+                source.contains("template-validation-computed"),
         )
     }
 }

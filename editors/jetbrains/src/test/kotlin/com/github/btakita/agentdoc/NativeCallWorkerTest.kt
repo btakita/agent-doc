@@ -12,6 +12,31 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class NativeCallWorkerTest {
     @Test
+    fun `ordinary native methods stay off the generation lifecycle lane`() {
+        listOf(
+            "agent_doc_replica_apply_update",
+            "agent_doc_replica_encode_state",
+            "agent_doc_normalize_template_structure",
+            "agent_doc_apply_patch_with_boundary",
+            "agent_doc_editor_surface_enqueue",
+            "agent_doc_state_projection",
+            "agent_doc_turn_projection",
+            "agent_doc_sync_tmux_layout_json",
+        ).forEach { methodName ->
+            assertEquals(NativeCallLane.IsolatedCaller, nativeCallLaneUtil(methodName))
+        }
+        listOf(
+            "agent_doc_quiesce_for_reload",
+            "agent_doc_resume_after_reload_failure",
+            "agent_doc_start_ipc_listener",
+            "agent_doc_start_ipc_listener_v2",
+            "agent_doc_stop_ipc_listener",
+        ).forEach { methodName ->
+            assertEquals(NativeCallLane.GenerationLifecycle, nativeCallLaneUtil(methodName))
+        }
+    }
+
+    @Test
     fun `queued timeout retains the native generation for a later call`() {
         val workerThreads = ConcurrentHashMap.newKeySet<Thread>()
         val executor = newNativeGenerationExecutor(workerThreads, workerCount = 1)

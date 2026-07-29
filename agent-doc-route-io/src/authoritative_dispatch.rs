@@ -172,7 +172,10 @@ pub fn route_via_authoritative_actor(
     if let Some(pending) = actor.pending_harness_switch.as_ref() {
         return accept_pending_harness_switch(tmux, file, &actor, pending);
     }
-    match drain_open_closeout_before_routed_dispatch(file, effects.closeout_drain_effects)? {
+    let closeout_drain = agent_doc_tmux_io::with_current_pane_id_override(&dispatch_pane, || {
+        drain_open_closeout_before_routed_dispatch(file, effects.closeout_drain_effects)
+    })?;
+    match closeout_drain {
         RouteCloseoutDrainOutcome::NoOpenCycle => {}
         RouteCloseoutDrainOutcome::Recovered(outcome) => {
             eprintln!(

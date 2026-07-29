@@ -319,18 +319,25 @@ class CrdtReplicaAckFrontierTest {
 
     @Test
     fun `already visible target acknowledges and save echo realigns an equal replica`() {
-        assertEquals(
-            ReplicaBaselineDecision.AcknowledgeRemoteTarget,
-            replicaBaselineDecisionUtil(
-                editorState = TemplateStructureProjectionState.Exact,
-                editorMatchesExpected = false,
-                replicaMatchesExpected = false,
-                replicaMatchesEditor = true,
-                editorMatchesRemoteTarget = true,
-                replicaMatchesRemoteTarget = true,
-                recoveryInFlight = false,
-            ),
-        )
+        listOf(
+            TemplateStructureProjectionState.Exact,
+            TemplateStructureProjectionState.RepairRequired,
+            TemplateStructureProjectionState.Invalid,
+        ).forEach { validationState ->
+            assertEquals(
+                "delivery ACK must depend on exact target visibility, not validation=$validationState",
+                ReplicaBaselineDecision.AcknowledgeRemoteTarget,
+                replicaBaselineDecisionUtil(
+                    editorState = validationState,
+                    editorMatchesExpected = false,
+                    replicaMatchesExpected = false,
+                    replicaMatchesEditor = true,
+                    editorMatchesRemoteTarget = true,
+                    replicaMatchesRemoteTarget = true,
+                    recoveryInFlight = false,
+                ),
+            )
+        }
         assertEquals(
             ReplicaBaselineDecision.RealignShadow,
             replicaBaselineDecisionUtil(

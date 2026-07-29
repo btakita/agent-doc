@@ -196,11 +196,6 @@ const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 1_800;
 #[cfg(not(test))]
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 8_000;
 const _: () = assert!(CRDT_ACK_RECOVERY_TIMEOUT_MS > CRDT_ACK_FALLBACK_BACKOFF_MAX_MS);
-#[cfg(test)]
-const NATIVE_EDITOR_SAVE_BUILD_RECOVERY_TIMEOUT_MS: u64 = 500;
-#[cfg(not(test))]
-const NATIVE_EDITOR_SAVE_BUILD_RECOVERY_TIMEOUT_MS: u64 = 8_000;
-
 #[derive(Debug)]
 struct AwaitEditorReplicaNoDiskWrite(String);
 
@@ -1266,137 +1261,73 @@ fn request_native_editor_save_for_canonical_projection(
     // stalled projection must join the in-flight editor save instead of
     // manufacturing a new request on every session-check retry.
     let patch_id = canonical_editor_save_patch_id(canonical);
-    let build_recovery_deadline = std::time::Instant::now()
-        + std::time::Duration::from_millis(NATIVE_EDITOR_SAVE_BUILD_RECOVERY_TIMEOUT_MS);
-    let mut build_recovery_requested = false;
-    loop {
-        let registration =
-            agent_doc_controller_io::project_controller::live_editor_registration_for_file(path)
-                .ok()
-                .flatten();
-        let socket_active = registration.as_ref().is_some_and(|registration| {
-            agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid)
-        });
-        let requested = match registration.as_ref() {
-            Some(registration) if socket_active => agent_doc_ipc_io::send_save_document_to_editor(
-                &project_root,
-                registration.pid,
-                &registration.editor_id,
-                &path_str,
-                &patch_id,
-            ),
-            _ => Ok(false),
-        };
-        match requested {
-            Ok(true) => break,
-            Err(error) if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) => {
-                let Some(registration) = registration else {
-                    return Ok(false);
-                };
-                if !build_recovery_requested {
-                    match agent_doc_controller_io::project_controller::
-                        recover_editor_ipc_build_mismatch_for_file(
-                            path,
-                            registration.pid,
-                            &registration.editor_id,
-                            source,
-                        )
-                    {
-                        Ok(agent_doc_controller_io::project_controller::
-                            IpcBuildMismatchRecovery::EditorReloadRequested) =>
-                        {
-                            build_recovery_requested = true;
-                        }
-                        Ok(agent_doc_controller_io::project_controller::
-                            IpcBuildMismatchRecovery::ControllerRecycleRequested) =>
-                        {
-                            agent_doc_ops_log_io::log_op(
-                                path,
-                                &format!(
-                                    "native_editor_save_pending file={} source={} patch_id={} transport=socket reason=stale_controller_recycle_requested disk_write=false",
-                                    path.display(),
-                                    source,
-                                    patch_id,
-                                ),
-                            );
-                            return Ok(false);
-                        }
-                        Ok(agent_doc_controller_io::project_controller::
-                            IpcBuildMismatchRecovery::Deferred) =>
-                        {
-                            return Ok(false);
-                        }
-                        Err(recovery_error) => {
-                            agent_doc_ops_log_io::log_op(
-                                path,
-                                &format!(
-                                    "native_editor_save_pending file={} source={} patch_id={} transport=socket reason=build_recovery_failed error={recovery_error:#} disk_write=false",
-                                    path.display(),
-                                    source,
-                                    patch_id,
-                                ),
-                            );
-                            return Ok(false);
-                        }
-                    }
-                }
-                if std::time::Instant::now() >= build_recovery_deadline {
-                    agent_doc_ops_log_io::log_op(
+    let registration =
+        agent_doc_controller_io::project_controller::live_editor_registration_for_file(path)
+            .ok()
+            .flatten();
+    let socket_active = registration.as_ref().is_some_and(|registration| {
+        agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid)
+    });
+    let requested = match registration.as_ref() {
+        Some(registration) if socket_active => agent_doc_ipc_io::send_save_document_to_editor(
+            &project_root,
+            registration.pid,
+            &registration.editor_id,
+            &path_str,
+            &patch_id,
+        ),
+        _ => Ok(false),
+    };
+    match requested {
+        Ok(true) => {}
+        Err(error) if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) => {
+            let recovery = if let Some(registration) = registration {
+                agent_doc_controller_io::project_controller::
+                    recover_editor_ipc_build_mismatch_for_file(
                         path,
-                        &format!(
-                            "native_editor_save_pending file={} source={} patch_id={} transport=socket reason=editor_reload_not_observed timeout_ms={} recovery=reload_ide_host disk_write=false",
-                            path.display(),
-                            source,
-                            patch_id,
-                            NATIVE_EDITOR_SAVE_BUILD_RECOVERY_TIMEOUT_MS,
-                        ),
-                    );
-                    return Ok(false);
-                }
-                // The reload-only compatibility receipt means the old listener
-                // accepted the transition, not that the replacement listener
-                // is already serving. Re-negotiate the mutation against a
-                // freshly looked-up registration until the bounded deadline.
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            _ if build_recovery_requested
-                && std::time::Instant::now() < build_recovery_deadline =>
-            {
-                // Listener teardown/rebind is expected between the compatible
-                // reload receipt and the replacement handshake.
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            requested => {
-                agent_doc_ops_log_io::log_op(
-                    path,
-                    &format!(
-                        "native_editor_save_pending file={} source={} patch_id={} transport={} reason={} detail={} disk_write=false",
-                        path.display(),
+                        registration.pid,
+                        &registration.editor_id,
                         source,
-                        patch_id,
-                        if socket_active {
-                            "socket"
-                        } else {
-                            "unavailable"
-                        },
-                        if build_recovery_requested {
-                            "editor_reload_not_observed"
-                        } else {
-                            "request_failed"
-                        },
-                        match requested {
-                            Ok(false) => "no_active_listener".to_string(),
-                            Ok(true) => unreachable!("successful save request handled above"),
-                            Err(error) => format!("{error:#}")
-                                .replace('\n', " | ")
-                                .chars()
-                                .take(160)
-                                .collect(),
-                        },
-                    ),
-                );
-                return Ok(false);
-            }
+                    )
+            } else {
+                Ok(agent_doc_controller_io::project_controller::IpcBuildMismatchRecovery::Deferred)
+            };
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "native_editor_save_pending file={} source={} patch_id={} transport=socket reason=build_generation_transition recovery={recovery:?} retry=registration_or_receipt_state_edge operator_action=none disk_write=false",
+                    path.display(),
+                    source,
+                    patch_id,
+                ),
+            );
+            return Ok(false);
+        }
+        requested => {
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "native_editor_save_pending file={} source={} patch_id={} transport={} reason=request_failed detail={} retry=registration_or_receipt_state_edge operator_action=none disk_write=false",
+                    path.display(),
+                    source,
+                    patch_id,
+                    if socket_active {
+                        "socket"
+                    } else {
+                        "unavailable"
+                    },
+                    match requested {
+                        Ok(false) => "no_active_listener".to_string(),
+                        Ok(true) => unreachable!("successful save request handled above"),
+                        Err(error) => format!("{error:#}")
+                            .replace('\n', " | ")
+                            .chars()
+                            .take(160)
+                            .collect(),
+                    },
+                ),
+            );
+            return Ok(false);
         }
     }
 
@@ -1492,7 +1423,11 @@ pub fn settle_live_editor_projection_through_authority(path: &Path, source: &str
     if canonical == disk {
         return Ok(true);
     }
-    validate_canonical_document_target(path, &canonical, source)?;
+    // Persisting the exact live editor revision is an authority-convergence
+    // effect, not a semantic document mutation. Template validation may gate a
+    // later structure-dependent write, but it must never gate saving the
+    // operator-authoritative buffer or transfer that responsibility to the
+    // operator.
     let agent_doc_crdt_relay_io::CurrentText::Current {
         text,
         live_editors,
@@ -5716,12 +5651,22 @@ fn try_resolve_current_document_uncached_with_source(
 /// Recover a current-document snapshot through the editor's own save API when
 /// the live controller replica is missing.
 ///
-/// This is not a disk fallback. After the exact registered editor endpoint
-/// returns a terminal `applied` receipt for a typed save-only request, the
-/// binary asks that endpoint to publish and force-register its current content.
-/// Only the resulting controller/CRDT reconciliation becomes the pass-scoped
-/// current document; a missing listener, rejected receipt, failed registration,
-/// or invalid document leaves the original authority failure intact.
+/// This is not generic disk authority. After the exact registered editor
+/// endpoint returns a terminal `applied` receipt for a typed save-only request,
+/// the binary asks that endpoint to publish and force-register its current
+/// content. When build skew prevents that second observation, the editor-written
+/// disk cut proven by the save receipt remains a pass-scoped editor-authority
+/// snapshot. A missing listener, rejected save receipt, or invalid saved
+/// document leaves the original authority failure intact.
+fn editor_save_receipt_reconciliation(saved_content: String) -> Reconciliation {
+    Reconciliation {
+        authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
+        content: saved_content,
+        diverged: false,
+        reason: "editor_save_receipt",
+    }
+}
+
 fn recover_current_document_from_editor_save(
     file: &std::path::Path,
     source: &str,
@@ -5754,36 +5699,64 @@ fn recover_current_document_from_editor_save(
         return Ok(None);
     }
 
-    if !agent_doc_ipc_io::send_observe_lazily_current_after_editor_save_to_editor(
+    let observe_result = agent_doc_ipc_io::send_observe_lazily_current_after_editor_save_to_editor(
         &project_root,
         registration.pid,
         &registration.editor_id,
         &path_str,
-    )? {
-        return Ok(None);
+    );
+    if matches!(observe_result, Ok(true))
+        && let Ok(reconciliation) =
+            try_resolve_current_doc_from_file_with_source(&canonical_path, source)
+    {
+        let authoritative_content = reconciliation.authoritative_content();
+        validate_canonical_document_target(&canonical_path, authoritative_content, source)?;
+        let content_hash = agent_doc_hash::content_hash(authoritative_content);
+        let document = CurrentDocument::new(canonical_path.clone(), reconciliation);
+        agent_doc_ops_log_io::log_op(
+            &canonical_path,
+            &format!(
+                "current_document_recovered_from_editor_save file={} source={} save_request_id={} editor_id={} editor_pid={} content_hash={} authority=editor_crdt editor_save_receipt=true editor_observe_receipt=true crdt_replica_registered=true operator_action=none",
+                canonical_path.display(),
+                source,
+                save_request_id,
+                registration.editor_id,
+                registration.pid,
+                content_hash,
+            ),
+        );
+        return Ok(Some(document));
     }
 
-    let reconciliation =
-        try_resolve_current_doc_from_file_with_source(&canonical_path, source).with_context(|| {
-            format!(
-                "{source}: editor save and current-content observation were applied, but the CRDT replica was still unavailable for {}",
-                canonical_path.display()
-            )
-        })?;
-    let authoritative_content = reconciliation.authoritative_content();
-    validate_canonical_document_target(&canonical_path, authoritative_content, source)?;
-    let content_hash = agent_doc_hash::content_hash(authoritative_content);
+    // The terminal save receipt is emitted only after the owning editor's save
+    // API completes. Reading the cut immediately here projects that receipt; it
+    // does not promote an unproven filesystem snapshot over a live editor.
+    let saved_content = std::fs::read_to_string(&canonical_path).with_context(|| {
+        format!(
+            "{source}: editor save was applied, but its receipt-backed projection could not read {}",
+            canonical_path.display()
+        )
+    })?;
+    validate_canonical_document_target(&canonical_path, &saved_content, source)?;
+    let content_hash = agent_doc_hash::content_hash(&saved_content);
+    let observe_status = match observe_result {
+        Ok(true) => "applied_crdt_unavailable",
+        Ok(false) => "no_terminal_receipt",
+        Err(_) => "error",
+    };
+    let reconciliation = editor_save_receipt_reconciliation(saved_content);
     let document = CurrentDocument::new(canonical_path.clone(), reconciliation);
     agent_doc_ops_log_io::log_op(
         &canonical_path,
         &format!(
-            "current_document_recovered_from_editor_save file={} source={} save_request_id={} editor_id={} editor_pid={} content_hash={} editor_save_receipt=true editor_observe_receipt=true crdt_replica_registered=true",
+            "current_document_recovered_from_editor_save file={} source={} save_request_id={} editor_id={} editor_pid={} content_hash={} authority=editor_save_receipt editor_save_receipt=true editor_observe_status={} crdt_replica_registered=false operator_action=none",
             canonical_path.display(),
             source,
             save_request_id,
             registration.editor_id,
             registration.pid,
             content_hash,
+            observe_status,
         ),
     );
     Ok(Some(document))
@@ -10667,6 +10640,23 @@ mod tests {
         assert_eq!(first, retry);
         assert_ne!(first, next);
         assert!(first.starts_with("canonical-save-"));
+    }
+
+    #[test]
+    fn editor_save_receipt_remains_editor_authority_without_crdt_observation() {
+        let reconciliation =
+            editor_save_receipt_reconciliation("# Session\n\nsaved by editor\n".to_string());
+
+        assert_eq!(
+            reconciliation.authority,
+            agent_doc_document_realtime::DocAuthority::EditorBuffer,
+        );
+        assert_eq!(
+            reconciliation.authoritative_content(),
+            "# Session\n\nsaved by editor\n",
+        );
+        assert!(!reconciliation.diverged);
+        assert_eq!(reconciliation.reason, "editor_save_receipt");
     }
 
     #[test]

@@ -274,9 +274,7 @@ internal fun replicaBaselineDecisionUtil(
 ): ReplicaBaselineDecision = when {
     recoveryInFlight ->
         ReplicaBaselineDecision.RetryFailClosed
-    editorState == TemplateStructureProjectionState.Exact &&
-        editorMatchesRemoteTarget &&
-        replicaMatchesEditor ->
+    editorMatchesRemoteTarget && replicaMatchesEditor ->
         ReplicaBaselineDecision.AcknowledgeRemoteTarget
     editorMatchesExpected && replicaMatchesRemoteTarget ->
         ReplicaBaselineDecision.ReplayRemoteTarget
@@ -428,6 +426,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     // This keeps cross-thread projections composable instead of creating a
     // private reactive island per open editor.
     private val ownershipContext = ThreadSafeContext()
+    private val templateValidation =
+        TemplateValidationPlane(
+            ownershipContext,
+            NativePatching::normalizeTemplateStructure,
+            ::contentHash,
+        )
     private val shadows = ConcurrentHashMap<String, String>()
     private val applyingRemote = ConcurrentHashMap.newKeySet<String>()
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
@@ -493,6 +497,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         forwarders.values.forEach { it.deregister() }
         forwarders.clear()
         shadows.clear()
+        templateValidation.clear()
     }
 
     private fun awaitWorkerTermination(timeoutMs: Long): Boolean {
@@ -726,7 +731,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                     return@attach false
             }
-            val registrationState = templateStructureState(filePath, registrationText, "replica-registration")
+            val registrationState =
+                templateStructureState(
+                    filePath,
+                    registrationText,
+                    TemplateValidationPlane.Lane.Editor,
+                    "replica-registration",
+                )
             val registrationMode = replicaRegistrationModeUtil(registrationState)
             if (registrationMode == ReplicaRegistrationMode.AuthoritativeEditorBaseline) {
                 log.warn(
@@ -855,6 +866,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (forwarders.remove(filePath, forwarder)) {
                     forwarder.deregister()
                 }
+                templateValidation.remove(filePath)
                 true
             }.get(CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
@@ -1318,7 +1330,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         expectedText: String,
         canonical: String,
     ): Boolean {
-        val remoteState = templateStructureState(filePath, canonical, "replace-remote")
+        val remoteState =
+            templateStructureState(
+                filePath,
+                canonical,
+                TemplateValidationPlane.Lane.RemoteCandidate,
+                "replace-remote",
+            )
         if (!remoteReplaceStructureAcceptedUtil(remoteState)) {
             recoverRejectedRemoteCanonical(
                 filePath = filePath,
@@ -1447,7 +1465,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         forwarder: CrdtReplicaForwarder,
         updates: List<ReplicaRemoteUpdate>,
     ): RemoteTextApplyDisposition {
-        val remoteState = templateStructureState(filePath, converged, "remote")
+        val remoteState =
+            templateStructureState(
+                filePath,
+                converged,
+                TemplateValidationPlane.Lane.RemoteCandidate,
+                "remote",
+            )
         if (remoteState != TemplateStructureProjectionState.Exact) {
             return recoverRejectedRemoteCanonical(
                 filePath = filePath,
@@ -1505,7 +1529,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         remoteState: TemplateStructureProjectionState,
     ): RemoteTextApplyDisposition {
         val editorText = editorBufferText(filePath)
-        val editorState = editorText?.let { templateStructureState(filePath, it, "editor-recovery") }
+        val editorState =
+            editorText?.let {
+                templateStructureState(
+                    filePath,
+                    it,
+                    TemplateValidationPlane.Lane.Editor,
+                    "editor-recovery",
+                )
+            }
         val decision = remoteTemplateProjectionDecisionUtil(
             remoteState = remoteState,
             editorState = editorState,
@@ -1575,7 +1607,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         allowPendingLocal: Boolean,
         reason: String,
     ): Boolean {
-        if (templateStructureState(filePath, editorText, "editor-adopt") != TemplateStructureProjectionState.Exact) {
+        if (
+            templateStructureState(
+                filePath,
+                editorText,
+                TemplateValidationPlane.Lane.Editor,
+                "editor-adopt",
+            ) != TemplateStructureProjectionState.Exact
+        ) {
             scheduleTemplateGuardRecoveryRetry(filePath, "$reason-editor-structure-not-exact")
             return false
         }
@@ -1923,7 +1962,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     ): Boolean {
         val editorText = editorBufferText(filePath) ?: return false
         val replicaText = forwarder.replicaText()
-        val editorState = templateStructureState(filePath, editorText, "editor-baseline")
+        val editorState =
+            templateStructureState(
+                filePath,
+                editorText,
+                TemplateValidationPlane.Lane.Editor,
+                "editor-baseline",
+            )
         val editorHash = contentHash(editorText)
         val replicaHash = replicaText?.let(::contentHash)
         val editorRemoteGeneration = matchingRemoteTargetGenerationUtil(updates, editorHash)
@@ -2067,21 +2112,26 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun templateStructureState(
         filePath: String,
         text: String,
+        lane: TemplateValidationPlane.Lane,
         source: String,
     ): TemplateStructureProjectionState {
         val started = System.nanoTime()
         return try {
-            val normalized = NativePatching.normalizeTemplateStructure(text)
-            templateStructureProjectionStateUtil(text, normalized).also { state ->
+            templateValidation.publish(filePath, lane, text).state.also { state ->
                 if (state != TemplateStructureProjectionState.Exact) {
                     log.warn(
                         "[crdt-replica] $source text rejected by template-structure guard for $filePath; " +
-                            "state=$state",
+                            "state=$state lane=$lane revision_hash=${contentHash(text)}",
                     )
                 }
             }
         } finally {
-            logSlow("template-normalize-worker", filePath, started, details = "source=$source target_chars=${text.length}")
+            logSlow(
+                "template-validation-computed",
+                filePath,
+                started,
+                details = "source=$source lane=$lane target_chars=${text.length}",
+            )
         }
     }
 

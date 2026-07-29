@@ -4,6 +4,34 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.93
+
+_JetBrains plugin 0.2.322; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Editor-visible CRDT targets acknowledge independently of template
+validation.** Exact editor and replica revisions now advance the delivery
+frontier even when semantic template validation reports repairable or invalid
+structure, preventing retained Compact Exchange writes from wedging behind a
+validation concern that does not govern delivery.
+- **Template validation is shared reactive state.** Editor and remote-candidate
+revision `Source`s feed memoized validation `Computed`s with independent
+lifetimes, so validation invalidates from revision changes instead of relying
+on imperative call-site coordination.
+- **Ordinary native operations cannot poison reactive ingress.** Document,
+  projection, editor-surface, and tmux calls use isolated caller lanes. Only
+  explicit native-generation lifecycle operations use the poisonable lease, so
+  a call blocked behind native global state cannot disable unrelated ingress.
+- **Routed closeout and recovery honor unsaved editor authority.** Controller
+dispatch evaluates ownership through the authoritative actor pane, while
+preserve-session reset and terminal session checks converge the exact live
+editor revision through native save without requiring the operator to save,
+reload, or retry.
+- **Reactive architecture review now includes ingress and computed extraction.**
+The development harness prefers event-channel ingress, permits RPC or bounded
+polling only at non-reactive boundaries, and requires derived validators,
+readiness facts, authority decisions, caches, and retry state to be extracted
+into lifecycle-scoped `Computed`s.
+
 ## 0.35.92
 
 _JetBrains plugin 0.2.321; VS Code extension 0.2.62; Zed extension 0.1.0._

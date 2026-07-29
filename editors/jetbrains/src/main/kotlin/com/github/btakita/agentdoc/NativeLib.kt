@@ -55,6 +55,32 @@ internal fun nativeReloadTransition(
     else -> NativeReloadTransition.PublishReplacement
 }
 
+internal enum class NativeCallLane {
+    GenerationLifecycle,
+    IsolatedCaller,
+}
+
+/**
+* Ordinary native work stays on the caller's already-scoped lane. A slow
+* document, projection, controller, or editor-surface call may delay that
+* scope, but cannot poison the process-wide native generation and disable
+* unrelated reactive ingress such as editor-surface/tmux synchronization.
+*
+* Only explicit generation lifecycle transitions use the bounded poisonable
+* lease. Those transitions are the operations that can actually prove a
+* generation is no longer safe to retain.
+ */
+internal fun nativeCallLaneUtil(methodName: String): NativeCallLane =
+    when (methodName) {
+        "agent_doc_quiesce_for_reload",
+        "agent_doc_resume_after_reload_failure",
+        "agent_doc_start_ipc_listener",
+        "agent_doc_start_ipc_listener_v2",
+        "agent_doc_stop_ipc_listener",
+        -> NativeCallLane.GenerationLifecycle
+        else -> NativeCallLane.IsolatedCaller
+    }
+
 internal class NativeCallQueueTimeoutException(message: String) : IllegalStateException(message)
 
 private enum class NativeCallExecutionState {
@@ -881,7 +907,9 @@ interface AgentDocLib : Library {
 
         fun resumeNativeAfterFailure(): Boolean {
             return try {
-                callOnWorker { delegate.agent_doc_resume_after_reload_failure() }
+                    callOnWorker("agent_doc_resume_after_reload_failure") {
+                        delegate.agent_doc_resume_after_reload_failure()
+                    }
                 true
             } catch (error: Throwable) {
                 LOG.warn("[native] failed to resume retained native generation: ${error.message}")
@@ -918,10 +946,24 @@ interface AgentDocLib : Library {
                 }
             }
 
-            private fun <T> callOnWorker(call: () -> T): T {
+            private fun <T> callOnWorker(methodName: String, call: () -> T): T {
                 if (workerThreads.contains(Thread.currentThread())) return call()
                 check(!SwingUtilities.isEventDispatchThread()) {
                     "agent-doc native calls are forbidden on the IDEA event-dispatch thread"
+                }
+        if (nativeCallLaneUtil(methodName) == NativeCallLane.IsolatedCaller) {
+            val started = System.nanoTime()
+            return try {
+                call()
+                    } finally {
+                        val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+                        if (elapsedMs > NATIVE_CALL_TIMEOUT_MS) {
+                    LOG.warn(
+                        "[native] isolated call $methodName ran for ${elapsedMs}ms on its caller lane; " +
+                            "native generation retained and unrelated reactive ingress remains available",
+                    )
+                }
+            }
                 }
                 return callOnNativeWorker(
                     executor = executor,
@@ -931,11 +973,11 @@ interface AgentDocLib : Library {
                         synchronized(callMonitor) {
                             acceptingCalls = false
                             callMonitor.notifyAll()
-                        }
-                        executor.shutdownNow()
-                        val reason =
-                            "native call ran longer than ${NATIVE_CALL_TIMEOUT_MS}ms; " +
-                                "disabled the wedged generation to keep the IDE responsive"
+                }
+                executor.shutdownNow()
+                val reason =
+                    "native generation lifecycle call $methodName ran longer than ${NATIVE_CALL_TIMEOUT_MS}ms; " +
+                        "disabled the wedged generation to keep the IDE responsive"
                         poisonGeneration(this, reason)
                         throw IllegalStateException(reason)
                     },
@@ -966,7 +1008,7 @@ interface AgentDocLib : Library {
                             generation.activeCalls.incrementAndGet()
                         }
                         try {
-                            generation.callOnWorker {
+                            generation.callOnWorker(method.name) {
                                 try {
                                     method.invoke(delegate, *(args ?: emptyArray()))
                                 } catch (error: InvocationTargetException) {

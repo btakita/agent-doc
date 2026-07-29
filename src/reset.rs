@@ -50,7 +50,7 @@ pub fn run(
         anyhow::bail!("--preserve-session requires --from-current");
     }
 
-    let content = if force_disk {
+    let mut content = if force_disk {
         agent_doc_document_realtime_io::resolve_disk_current_document_content(
             file,
             "reset_command_document",
@@ -72,16 +72,41 @@ pub fn run(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "reset_preserve_session_refused_authority_disk_divergence file={} authority_hash={} disk_hash={} recovery=save_or_rerun_force_disk",
+                        "reset_preserve_session_authority_disk_divergence file={} authority_hash={} disk_hash={} recovery=automatic_native_editor_save operator_action=none",
                         file.display(),
                         agent_doc_hash::content_hash(&content),
                         agent_doc_hash::content_hash(&disk_content),
                     ),
                 );
-                anyhow::bail!(
-                    "reset --from-current --preserve-session refused for {}: editor/current authority differs from disk. Save or reload the editor if the editor buffer is authoritative, or rerun with --force-disk if the on-disk document is the intended authority.",
-                    file.display()
+                if !agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
+                    file,
+                    "reset_preserve_session_editor_authority_convergence",
+                )? {
+                    anyhow::bail!(
+                        "reset --from-current --preserve-session is waiting for automatic editor-authority convergence for {} (authority_hash={}, disk_hash={}); the exact editor revision remains authoritative and retained, and no operator save, reload, or retry is required",
+                        file.display(),
+                        agent_doc_hash::content_hash(&content),
+                        agent_doc_hash::content_hash(&disk_content),
+                    );
+                }
+                let settled_authority =
+                    agent_doc_document_realtime_io::try_resolve_current_document_content(
+                        file,
+                        "reset_preserve_session_settled_authority",
+                    )?;
+                let settled_disk =
+                    agent_doc_document_realtime_io::resolve_disk_current_document_content(
+                        file,
+                        "reset_preserve_session_settled_disk",
+                    )?;
+                anyhow::ensure!(
+                    settled_authority == settled_disk,
+                    "reset --from-current --preserve-session automatic editor save for {} returned without exact authority/disk convergence (authority_hash={}, disk_hash={}); the convergence effect remains controller-owned and no operator save, reload, or retry is required",
+                    file.display(),
+                    agent_doc_hash::content_hash(&settled_authority),
+                    agent_doc_hash::content_hash(&settled_disk),
                 );
+                content = settled_authority;
             }
         }
         rebuild_recovery_projections_from_current(file, &content)?;
@@ -345,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn preserve_session_from_current_refuses_stale_live_authority_and_force_disk_rebuilds_it() {
+    fn preserve_session_from_current_retains_stale_live_authority_for_automatic_save() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -397,9 +422,14 @@ mod tests {
         .unwrap();
 
         let err = run(&doc, true, true, false).unwrap_err();
+        let message = format!("{err:#}");
         assert!(
-            format!("{err:#}").contains("editor/current authority differs from disk"),
-            "plain preserve reset must fail closed on stale live authority: {err:#}"
+            message.contains("waiting for automatic editor-authority convergence"),
+            "plain preserve reset must retain stale live authority for its save effect: {err:#}"
+        );
+        assert!(
+            message.contains("no operator save, reload, or retry is required"),
+            "recovery guidance must never delegate persistence to the operator: {err:#}"
         );
         assert_eq!(
             agent_doc_snapshot_io::load_document_baseline(&doc)

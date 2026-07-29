@@ -27,6 +27,42 @@ use agent_doc_tmux_commands::{
     text_submit_command, tmux_submit_profile_for_harness,
 };
 
+thread_local! {
+    /// Logical pane identity for controller work executed on behalf of a
+    /// document actor. A project controller is process-global, so its ambient
+    /// `TMUX_PANE` identifies the controller host rather than the actor whose
+    /// state transition is being applied.
+    static CURRENT_PANE_ID_OVERRIDE: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+struct CurrentPaneIdOverrideGuard;
+
+impl Drop for CurrentPaneIdOverrideGuard {
+    fn drop(&mut self) {
+        CURRENT_PANE_ID_OVERRIDE.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
+
+/// Run one controller-owned effect with an explicit logical pane identity.
+///
+/// The override is thread-scoped, nestable, and panic-safe. This preserves the
+/// pane-ownership guard while binding it to the authoritative document actor
+/// instead of the unrelated pane that happens to host the project controller.
+pub fn with_current_pane_id_override<T>(pane_id: &str, effect: impl FnOnce() -> T) -> T {
+    CURRENT_PANE_ID_OVERRIDE.with(|stack| {
+        stack.borrow_mut().push(pane_id.to_string());
+    });
+    let _guard = CurrentPaneIdOverrideGuard;
+    effect()
+}
+
+fn current_pane_id_override() -> Option<String> {
+    CURRENT_PANE_ID_OVERRIDE.with(|stack| stack.borrow().last().cloned())
+}
+
 pub mod input_diag;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,9 +273,12 @@ pub fn current_pane_id(runner: &(impl TmuxCommandRunner + ?Sized)) -> Option<Str
 pub fn current_pane_id_from_env_or_tmux(
     runner: &(impl TmuxCommandRunner + ?Sized),
 ) -> Option<String> {
-    std::env::var("TMUX_PANE")
-        .ok()
-        .filter(|pane| !pane.trim().is_empty())
+    current_pane_id_override()
+        .or_else(|| {
+            std::env::var("TMUX_PANE")
+                .ok()
+                .filter(|pane| !pane.trim().is_empty())
+        })
         .or_else(|| current_pane_id(runner))
 }
 
@@ -714,6 +753,42 @@ mod tests {
         };
         assert_eq!(current_pane_id(&blank), None);
         assert_eq!(target_window_id(&blank, "test"), None);
+    }
+
+    #[test]
+    fn logical_pane_override_is_nested_and_restored() {
+        let runner = FakeRunner {
+            response: "%ambient\n".to_string(),
+        };
+
+        with_current_pane_id_override("%actor-1", || {
+            assert_eq!(
+                current_pane_id_from_env_or_tmux(&runner),
+                Some("%actor-1".to_string())
+            );
+            with_current_pane_id_override("%actor-2", || {
+                assert_eq!(
+                    current_pane_id_from_env_or_tmux(&runner),
+                    Some("%actor-2".to_string())
+                );
+            });
+            assert_eq!(
+                current_pane_id_from_env_or_tmux(&runner),
+                Some("%actor-1".to_string())
+            );
+        });
+
+        assert_eq!(current_pane_id_override(), None);
+    }
+
+    #[test]
+    fn logical_pane_override_is_cleared_after_panic() {
+        let result = std::panic::catch_unwind(|| {
+            with_current_pane_id_override("%actor", || panic!("effect failed"));
+        });
+
+        assert!(result.is_err());
+        assert_eq!(current_pane_id_override(), None);
     }
 
     #[test]

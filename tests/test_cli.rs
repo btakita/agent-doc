@@ -2476,7 +2476,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
     );
     assert_eq!(
         tmux_router.get("version").and_then(toml::Value::as_str),
-        Some("0.3.17")
+        Some("0.3.19")
     );
 }
 

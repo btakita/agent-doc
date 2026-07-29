@@ -206,14 +206,20 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
-    fun `replica registration never adopts malformed editor authority`() {
-        assertTrue(replicaRegistrationStructureAcceptedUtil(TemplateStructureProjectionState.Exact))
-        assertTrue(
-            replicaRegistrationStructureAcceptedUtil(TemplateStructureProjectionState.RepairRequired),
+    fun `replica registration preserves the attached editor as authority`() {
+        assertEquals(
+            ReplicaRegistrationMode.ExactTemplate,
+            replicaRegistrationModeUtil(TemplateStructureProjectionState.Exact),
         )
-        assertFalse(
-            replicaRegistrationStructureAcceptedUtil(TemplateStructureProjectionState.Invalid),
-        )
+        for (state in listOf(
+            TemplateStructureProjectionState.RepairRequired,
+            TemplateStructureProjectionState.Invalid,
+        )) {
+            assertEquals(
+                ReplicaRegistrationMode.AuthoritativeEditorBaseline,
+                replicaRegistrationModeUtil(state),
+            )
+        }
     }
 
     @Test

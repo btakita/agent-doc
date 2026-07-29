@@ -204,6 +204,20 @@ class CpRouteClientCommandPlaneTest {
     }
 
     @Test
+    fun `null controller fields retain a stable diagnostic instead of Gson JsonNull`() {
+        val failed = JsonParser.parseString("""{"ok":null,"error":null}""").asJsonObject
+        assertEquals("Project Controller request failed", controllerFailureMessageUtil(failed))
+
+        val receipt =
+            JsonParser.parseString(
+                """{"accepted":null,"plane_version":null,"reason":null}""",
+            ).asJsonObject
+        assertNull(jsonBooleanFieldOrNull(receipt, "accepted"))
+        assertNull(jsonLongFieldOrNull(receipt, "plane_version"))
+        assertNull(jsonStringFieldOrNull(receipt, "reason"))
+    }
+
+    @Test
     fun `syncTmuxLayoutCommandSubmitRequest can target async submit endpoint`() {
         val request = CpRouteClient.syncTmuxLayoutCommandSubmitRequest(
             projectRoot = "/proj",

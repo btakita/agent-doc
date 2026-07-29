@@ -2896,6 +2896,10 @@ enum SimCommand {
     SyncRerequestVisibleEditorManual,
     SyncRerequestVisibleEditorPassive,
     SyncFocusStashedMoveBeforeSelect,
+    /// A passive editor reconciliation observes both a stale pane in the stash
+    /// and an inactive document pane beside the operator. The attached client
+    /// must preserve its window and pane throughout, not merely restore them.
+    SyncPassiveSelectionPreservesClientFocus,
     /// `#exact-visible-focus-swap`: a deliberate editor tab/focus change emits
     /// `sync --focus <file> --exact-visible --no-autostart`. The focused document's
     /// owned pane is alive but parked off-screen and still proves ownership, so the
@@ -3956,6 +3960,10 @@ struct SimWorld {
     recycle_clear: RecycleClearModel,
     sync: SyncProjection,
     sync_guard: SyncGuardModel,
+    client_visible_window: String,
+    client_window_trace: Vec<String>,
+    client_visible_pane: String,
+    client_pane_trace: Vec<String>,
     ops_log: Vec<String>,
     next_prompt: usize,
     coverage: Coverage,
@@ -4632,6 +4640,31 @@ fn move_before_select_promotes_stashed_pane_before_focus() {
         err.to_string().contains("#tmux-switch-lag"),
         "unexpected ordering error: {err}"
     );
+}
+
+#[test]
+fn passive_selection_never_surfaces_stash_or_adjacent_pane() {
+    // Regression for transient stash focus theft: a final-state-only model
+    // misses the bug because the reconcile restores the working window after
+    // briefly activating a stale background pane in stash. Track every client
+    // window transition and require focus neutrality throughout.
+    let mut world = SimWorld::new(3_008);
+    world
+        .apply(SimCommand::SyncPassiveSelectionPreservesClientFocus)
+        .unwrap();
+
+    assert_eq!(
+        world.client_window_trace,
+        vec!["working".to_string()],
+        "safe-passive reconciliation must never make the attached client display stash"
+    );
+    assert_eq!(world.client_visible_window, "working");
+    assert_eq!(
+        world.client_pane_trace,
+        vec!["operator".to_string()],
+        "safe-passive reconciliation must never select an adjacent document pane"
+    );
+    assert_eq!(world.client_visible_pane, "operator");
 }
 
 #[test]

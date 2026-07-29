@@ -4,6 +4,35 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.79
+
+_JetBrains plugin 0.2.319; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Passive editor-surface sync is now window-neutral throughout the tmux
+  transaction.** The bundled tmux-router dependency is updated to 0.3.19.
+  Background pane selection uses `select-pane` without first activating its
+  window, and passive reconciliation omits every intermediate or final
+  `select-window` effect. A deterministic SimWorld client-visibility trace and
+  an isolated real-tmux regression test cover the transient stash-window focus
+  steal that final-layout assertions could not observe.
+- **Passive reconciliation also preserves the active pane inside the visible
+  window.** An adjacent document pane is no longer selected even transiently
+  while the operator types. Every passive selection records before/after window
+  and pane snapshots; an unexpected movement emits a structured
+  `focus_steal_detected=true` warning and immediately restores the operator
+  pane.
+- **Missing JetBrains replicas now re-register from the attached editor even
+  when its current template structure is incomplete.** Registration records the
+  exact editor cut as the authoritative CRDT baseline without normalizing,
+  replacing, refreshing, or saving it. Retained reconstruction remains queued
+  behind registration and must independently produce an exact validated
+  structure before it may project a minimal edit, so editor authority no longer
+  deadlocks recovery or weakens remote-write fencing.
+- **JetBrains controller receipts treat JSON nulls as missing typed fields.**
+  A malformed or mixed-generation pane-layout response now reports a stable
+  controller/projection error instead of masking it with Gson's unhelpful
+  `JsonNull` exception.
+
 ## 0.35.78
 
 _JetBrains plugin 0.2.318; VS Code extension 0.2.62; Zed extension 0.1.0._

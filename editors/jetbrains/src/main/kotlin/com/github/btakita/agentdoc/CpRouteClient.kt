@@ -16,6 +16,37 @@ import java.nio.channels.SocketChannel
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
+internal fun jsonBooleanFieldOrNull(
+    value: JsonObject,
+    field: String,
+): Boolean? =
+    value.get(field)
+        ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+        ?.asBoolean
+
+internal fun jsonLongFieldOrNull(
+    value: JsonObject,
+    field: String,
+): Long? =
+    value.get(field)
+        ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }
+        ?.asLong
+
+internal fun jsonStringFieldOrNull(
+    value: JsonObject,
+    field: String,
+): String? =
+    value.get(field)
+        ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
+        ?.asString
+
+internal fun controllerFailureMessageUtil(root: JsonObject): String? =
+    if (jsonBooleanFieldOrNull(root, "ok") == true) {
+        null
+    } else {
+        jsonStringFieldOrNull(root, "error") ?: "Project Controller request failed"
+    }
+
 internal data class CpEditorRouteResult(
     val exitCode: Int,
     val output: String,
@@ -175,9 +206,9 @@ internal object CpRouteClient {
         )
         return try {
             val data = sendRequestDataToSocket(socket, request)
-            val publishedPlaneVersion = data.get("plane_version")?.asLong
+            val publishedPlaneVersion = jsonLongFieldOrNull(data, "plane_version")
             val accepted = if (
-                data.get("accepted")?.asBoolean == true &&
+                jsonBooleanFieldOrNull(data, "accepted") == true &&
                 publishedPlaneVersion != null &&
                 publishedPlaneVersion > 0
             ) {
@@ -189,7 +220,7 @@ internal object CpRouteClient {
             } else {
                 CpEditorRouteResult(
                     exitCode = 1,
-                    output = data.get("reason")?.asString
+                    output = jsonStringFieldOrNull(data, "reason")
                         ?: "pane layout projection was not accepted with a valid plane version",
                 )
             }
@@ -235,11 +266,11 @@ internal object CpRouteClient {
                 timeoutMs = minOf(remainingMs, 5_000L),
             )
             val data = sendRequestDataToSocket(socket, request)
-            cursor = maxOf(cursor, data.get("latest_version")?.asLong ?: cursor)
-            val frames = data.getAsJsonArray("frames") ?: continue
+            cursor = maxOf(cursor, jsonLongFieldOrNull(data, "latest_version") ?: cursor)
+            val frames = data.get("frames")?.takeIf { it.isJsonArray }?.asJsonArray ?: continue
             for (frame in frames) {
                 val messageJson =
-                    frame.asJsonObject.get("message_json")?.asString ?: continue
+                    jsonStringFieldOrNull(frame.asJsonObject, "message_json") ?: continue
                 val message = IpcMessage.decodeJson(messageJson)
                 val snapshot = (message as? IpcMessage.SnapshotMessage)?.snapshot ?: continue
                 val node = snapshot.nodes.firstOrNull {
@@ -249,7 +280,7 @@ internal object CpRouteClient {
                 val payload = (node.state as? NodeState.Payload)?.toByteArray() ?: continue
                 val status = JsonParser.parseString(payload.decodeToString()).asJsonObject
                 val sourcePlaneVersion =
-                    status.get("source_plane_version")?.asLong ?: continue
+                    jsonLongFieldOrNull(status, "source_plane_version") ?: continue
                 if (sourcePlaneVersion < expectedSourcePlaneVersion) continue
                 if (sourcePlaneVersion > expectedSourcePlaneVersion) {
                     return CpEditorRouteResult(
@@ -258,13 +289,13 @@ internal object CpRouteClient {
                             "plane_version=$sourcePlaneVersion",
                     )
                 }
-                latestPhase = PaneLayoutPhase.fromToken(status.get("phase")?.asString)
+                latestPhase = PaneLayoutPhase.fromToken(jsonStringFieldOrNull(status, "phase"))
                     ?: latestPhase
                 latestReasonCode =
-                    PaneLayoutReasonCode.fromToken(status.get("reason_code")?.asString)
-                        ?: latestReasonCode
+                    PaneLayoutReasonCode.fromToken(jsonStringFieldOrNull(status, "reason_code"))
+                    ?: latestReasonCode
                 latestReasonDetail =
-                    status.get("reason_detail")?.asString ?: latestReasonDetail
+                    jsonStringFieldOrNull(status, "reason_detail") ?: latestReasonDetail
                 if (latestPhase == PaneLayoutPhase.Converged) {
                     return CpEditorRouteResult(
                         exitCode = 0,
@@ -793,8 +824,8 @@ private const val SYNC_COMMAND_COMPLETION_TIMEOUT_MS = 60_000L
         val line = reader.readLine()
             ?: throw IllegalStateException("Project Controller returned an empty response")
         val root = JsonParser.parseString(line).asJsonObject
-        if (root.get("ok")?.asBoolean != true) {
-            throw IllegalStateException(root.get("error")?.asString ?: "Project Controller request failed")
+        controllerFailureMessageUtil(root)?.let { error ->
+            throw IllegalStateException(error)
         }
         return root.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
         ?: throw IllegalStateException("Project Controller response missing data")

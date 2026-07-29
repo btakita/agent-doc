@@ -29,6 +29,10 @@ impl SimWorld {
             },
             sync: SyncProjection::default(),
             sync_guard: SyncGuardModel::default(),
+            client_visible_window: "working".to_string(),
+            client_window_trace: vec!["working".to_string()],
+            client_visible_pane: "operator".to_string(),
+            client_pane_trace: vec!["operator".to_string()],
             ops_log: Vec::new(),
             next_prompt: 1,
             coverage: Coverage::default(),
@@ -474,6 +478,9 @@ impl SimWorld {
                 self.sync.focus_doc_move_before_select("requested");
                 self.coverage.sync_move_before_select_focuses += 1;
             }
+            SimCommand::SyncPassiveSelectionPreservesClientFocus => {
+                self.apply_sync_passive_selection();
+            }
             SimCommand::SyncExactVisibleFocusResolvesOffscreenOwner => {
                 self.apply_sync_exact_visible_focus_offscreen_owner(true);
             }
@@ -794,6 +801,40 @@ impl SimWorld {
             .sync
             .apply_requested_projection(&["editor"], "editor", mode);
         self.record_sync_outcome(outcome);
+    }
+
+    pub(crate) fn apply_sync_passive_selection(&mut self) {
+        let operator_window = self.client_visible_window.clone();
+        let operator_pane = self.client_visible_pane.clone();
+        match tmux_router::sync::reconcile_selection_mode(true, false) {
+            tmux_router::sync::ReconcileSelectionMode::Activate => {
+                self.client_visible_window = "stash".to_string();
+                self.client_visible_pane = "stashed-document".to_string();
+                self.client_window_trace
+                    .push(self.client_visible_window.clone());
+                self.client_pane_trace
+                    .push(self.client_visible_pane.clone());
+            }
+            tmux_router::sync::ReconcileSelectionMode::SelectInBackground
+            | tmux_router::sync::ReconcileSelectionMode::PreserveVisiblePane => {}
+        }
+        if tmux_router::sync::reconcile_selection_mode(true, true)
+            != tmux_router::sync::ReconcileSelectionMode::PreserveVisiblePane
+        {
+            self.client_visible_pane = "adjacent-document".to_string();
+            self.client_pane_trace
+                .push(self.client_visible_pane.clone());
+        }
+        if self.client_visible_window != operator_window {
+            self.client_visible_window = operator_window;
+            self.client_window_trace
+                .push(self.client_visible_window.clone());
+        }
+        if self.client_visible_pane != operator_pane {
+            self.client_visible_pane = operator_pane;
+            self.client_pane_trace
+                .push(self.client_visible_pane.clone());
+        }
     }
 
     pub(crate) fn bind_route_owner(&mut self) {

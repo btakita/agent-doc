@@ -188,9 +188,19 @@ internal fun remoteReplaceStructureAcceptedUtil(
     remoteState: TemplateStructureProjectionState,
 ): Boolean = remoteState == TemplateStructureProjectionState.Exact
 
-internal fun replicaRegistrationStructureAcceptedUtil(
+internal enum class ReplicaRegistrationMode {
+    ExactTemplate,
+    AuthoritativeEditorBaseline,
+}
+
+internal fun replicaRegistrationModeUtil(
     editorState: TemplateStructureProjectionState,
-): Boolean = editorState != TemplateStructureProjectionState.Invalid
+): ReplicaRegistrationMode =
+    if (editorState == TemplateStructureProjectionState.Exact) {
+        ReplicaRegistrationMode.ExactTemplate
+    } else {
+        ReplicaRegistrationMode.AuthoritativeEditorBaseline
+    }
 
 internal enum class RemoteTemplateProjectionDecision {
     QueueRemote,
@@ -697,15 +707,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             "native FFI unavailable",
                     )
                     return@attach false
-                }
-                val registrationState = templateStructureState(filePath, registrationText, "replica-registration")
-                if (!replicaRegistrationStructureAcceptedUtil(registrationState)) {
-                    log.warn(
-                        "[crdt-replica] refused malformed open-document replica registration for ${File(filePath).name}; " +
-                            "recovery=retry_deferred_intent_rebase operator_action=none",
-                    )
-                    return@attach false
-                }
+            }
+            val registrationState = templateStructureState(filePath, registrationText, "replica-registration")
+            val registrationMode = replicaRegistrationModeUtil(registrationState)
+            if (registrationMode == ReplicaRegistrationMode.AuthoritativeEditorBaseline) {
+                log.warn(
+                    "[crdt-replica] registering authoritative non-exact editor baseline for ${File(filePath).name}; " +
+                        "state=$registrationState retained_replay=exact_structure_guarded operator_action=none",
+                )
+            }
                 chars = registrationText.length
                 val forwarder = forwarderFor(
                     filePath,

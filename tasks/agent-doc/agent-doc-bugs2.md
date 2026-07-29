@@ -199,13 +199,21 @@ I can see and am preserving your `test edit test edit` content in the authoritat
 The disappearance you observed was a stale editor presentation during retained-delivery reconciliation, not absence from the controller’s live document read. This closeout merges against the newer editor-authoritative tail. It also provides a direct live reproduction for `#implementlazilyintent`: a queued editor effect must revalidate its intent generation after a user edit, so an obsolete projection cannot temporarily replace or hide that edit.
 
 No repository file was changed in this recovery response. Verification is the connected live read showing both copies before closeout and the binary-owned commit check after merge. Confidence is high that the text remains present in controller authority; whether IntelliJ immediately renders that state is part of the remaining editor-effect defect. No forced disk write, snapshot replacement, IDE restart, focus action, or Haiven mutation was performed.
-<!-- agent:boundary:e2838a08 -->
+
+### Re: re-added editor text — gpt-5
+
+Your re-added text is the authoritative version for this cycle. I preserved it by admitting from the newer editor hash and did not restore, deduplicate, or normalize the earlier retained snapshot over it.
+
+The two stale operator-verification queue mirrors are now explicitly struck through the guarded orphan-id path. The first controller call timed out after applying its strike; a live read proved that exact row was struck before I proceeded. The second strike completed normally. `#implementlazilyintent` is now the first runnable queue item.
+
+No source path changed in this response cycle. Commands were the two exact `queue consume --id` repairs plus connected live queue reads and replanning. Verification shows both orphan rows struck and the implementation row still open. Confidence is high in the queue repair and preservation of the admitted editor state. No force-disk write, old-snapshot replay, IDE restart, focus action, or Haiven mutation was performed.
+<!-- agent:boundary:59ddbf7a -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ do [#steeringmirrorverifylive313]
-- do [#compactreactiveprojectionverify]
+- ~~⏭️ do [#steeringmirrorverifylive313]~~
+- ~~do [#compactreactiveprojectionverify]~~
 - do [#implementlazilyintent]
 <!-- /agent:queue -->
 

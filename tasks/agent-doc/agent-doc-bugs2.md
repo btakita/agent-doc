@@ -110,11 +110,36 @@ I cannot yet close the aggregate-steering acceptance criterion. For the active c
 The current-plugin prerequisite is verified: IntelliJ IDEA restarted with `agent-doc-jetbrains-0.2.313.jar`, and native agent-doc `0.35.71` loaded. The live two-edit banner/hover observation did not occur, so it would be incorrect to mark that UI behavior verified.
 
 The old `#5qjj` item is now closed as superseded because its queued operator-verification shape repeatedly redispatched itself without an operator event. The still-required proof is preserved as the non-queued backlog item `#steeringmirrorverifylive313`, pinned to the installed generation. This separates agent-drainable work from operator-only UI observation and prevents another automatic queue loop.
-<!-- agent:boundary:86542e11 -->
+
+### Re: editor-authoritative recovery and focus sync — gpt-5
+
+Fixed and released.
+
+The refusal to read disk while an editor was attached was correct: an unsaved editor buffer must remain the source of truth. The bug was that missing-replica recovery stopped at that refusal and asked the operator to close/reopen the tab. In agent-doc 0.35.74, current-document resolution instead sends a typed, non-projecting save request to the registered editor. The editor saves its exact live buffer and immediately republishes the current content; agent-doc requires the applied receipt before it may read that editor-written disk cut and rebuild the controller model. There is still no unproved disk fallback, force-disk path, or close/reopen requirement.
+
+The safe save-only request can cross a same-protocol build mismatch by retrying with the live listener's reported build identity. That exception is deliberately limited to saving without a projection; all document-mutating intents remain strictly build-fenced.
+
+Live verification succeeded on both affected documents:
+
+- `agent-doc-bugs2.md` returned an applied editor-save receipt and advanced past the missing-current-document failure. Its older retained delivery then cleared through the existing status-only recovery path.
+- `haiven.md` returned the same applied receipt and resolved successfully. Session-check repaired its historical committed snapshot drift and reported committed cycle `cycle-1785300038605`, `queue_continuation_required=false`, and `no_drainable_work`. The earlier instruction to save manually or reopen the tab is obsolete.
+
+The editor-selection/tmux issue shipped in 0.35.73. JetBrains selection events are micro-coalesced; inactive-window, superseded-generation, and aged intents are refused; the controller holds a project-scoped latest-wins fence through the final `tmux select-pane`; and the low-latency path only selects an already-visible pane. There was no agent-doc pointer-warp command—the mouse jump was the window manager's side effect of a stale worker briefly selecting the other pane. Preventing that stale selection removes the trigger.
+
+The earlier retained-closeout editor-save barrier shipped in 0.35.72, so both ordinary retained delivery and the zero-replica recovery now preserve editor authority end to end.
+
+Verification passed: focused protocol/IPC/current-document tests, live JetBrains receipts on both documents, installation of CLI/native/editor packages, and the complete `make check` gate. An initial parallel run saw three temporary test-controller connection refusals; each reproduced cleanly in isolation, and the required full rerun passed. Agent-doc 0.35.74 is installed, source commit `84cafa20d` is pushed on `main`, and tag `v0.35.74` is published. The user-owned untracked `editors/zed/extension.wasm` was preserved.
+
+Harper is LSP4IJ's local Markdown grammar/style language server and is unrelated to agent-doc's controller, CRDT replica, or tmux synchronization paths.
+<!-- agent:boundary:de0f9b08 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- `Sync failed: pane layout projection did not converge within 60000ms (phase=retry_pending reason=pane_order_mismatch detail=pane_order_mismatch; applied); controller reconciliation remains active`
+- Compact Exchange failed "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: waiting for the pre-write editor delivery barrier for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: visible document write for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md deferred: editor delivery remained unacknowledged after the 8000ms recovery barrier; the exact write remains retained, no secondary snapshot/commit or forced disk write was attempted. ACK replay, force-refresh, and build-skew recovery were requested automatically; if the editor listener cannot hot-reload, reload the IDE host and retry the existing operation"
+- do [#steeringmirrorverifylive313]
+- do [#compactreactiveprojectionverify]
 <!-- /agent:queue -->
 
 ## Notes

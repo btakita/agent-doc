@@ -38,10 +38,22 @@ complete
 Compacted content:
 - Archived 2 response topic(s): TMO sandbox purge authorization; EFS production route token
 - Prior summary/context: prior compacted content: Archived 25 response topic(s): Judith and Robert production admins; Judith and Robert produc...
-<!-- agent:boundary:0e37d27b -->
+### Re: Production logs — gpt-5
+
+Yes—there are two issues, but I found **no production Worker crash/outage signal**.
+
+**Runtime health:** I audited `equityfundingsource-production`, current version `58884065-ce70-4ce4-9ae2-98c30e08ebcb` (deployed 2026-07-28 23:42 UTC). Cloudflare invocation metrics from that deployment through this audit show **11,516 invocations, 0 Worker errors**: 11,479 success, 15 `responseStreamDisconnected`, and 22 `clientDisconnected`. Cloudflare documents the disconnect outcomes as common for long-lived connections such as WebSockets, not Worker exceptions. A three-minute live tail (21:17:06–21:20:07 UTC) plus controlled requests to `/`, `/funded-deals`, `/apply`, `/contact`, and `/login` produced 200s, no 5xx responses, no exceptions, and no CPU/memory failures. The sampled admin WebSocket 101/disconnect events were normal connection lifecycle noise. See Cloudflare's [Workers metrics and invocation-status definitions](https://developers.cloudflare.com/workers/observability/metrics-and-analytics/).
+
+**Issue 1 — anonymous message WebSocket retry loop:** the live tail captured **17 repeated 401s in about three minutes** from one open public-site browser, all at `/api/public/messages/realtime/ws`. The launcher calls `use_admin_events_` immediately; that hook reconnects five seconds after every close, while the public route correctly requires a guest session. A brand-new visitor does not receive that session until sending the first message. The result is an unnecessary production request/log loop for anonymous visitors and a failed realtime connection until a guest identity exists. I added `#public-msg-ws-auth-loop` to fix and regression-test it.
+
+**Issue 2 — historical logs are not reliably available:** the deployed Worker reports top-level `observability.enabled = false` even though its nested logs/traces blocks say enabled/persist. Cloudflare requires the top-level setting to be true for Workers Logs persistence. The production token also receives Cloudflare `10000 Authentication error` from the Workers Observability telemetry-query endpoint, so it lacks usable query permission. Consequently I could inspect live logs and retained aggregate metrics, but **not search event-level historical logs**. I added `#prod-workers-observability` to enable persistence, protect it with a config test, add the needed token permission, deploy, and verify historical queries. See Cloudflare's [Workers Logs configuration](https://developers.cloudflare.com/workers/observability/logs/workers-logs/) and [telemetry query API](https://developers.cloudflare.com/api/resources/workers/subresources/observability/subresources/telemetry/methods/query/).
+
+**Proof:** no application files were changed. Commands/evidence included production `wrangler tail --env production --format json`, five HTTPS smoke requests, deployment/version inspection, deployed settings inspection, a Workers Analytics GraphQL query scoped to the current deployment, and a Workers Observability telemetry-query probe. Confidence is high for the two findings and the zero-runtime-error count; the observability gap is the explicit reason event-level historical coverage remains unavailable.
+<!-- agent:boundary:cc12ac07 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Please look in the production logs. Are there any issues?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -5,7 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -740,7 +740,43 @@ Workflow note: preflight reported that the installed `agent-doc` binary is one c
 ❯ No additional backlog item is needed because every remaining condition is external/approval-gated and is captured in the updated `#haiven-paper` review item.
 
 ❯ Workflow note: the exchange remains large, but the active queue contract says to continue rather than compact without explicit auto-compact authorization. The installed `agent-doc` build also remains stale because the earlier requested reinstall is blocked by unrelated concurrent Rust compile errors.
-<!-- agent:boundary:2d0f2ccc -->
+Should we ask what the purchase price of the options are...against the current company valuation?
+
+❯ Please draft a response md + email draft replying to https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVhWChVfCmrxpKKxzwmJtNMxH using chromium-bridge. We will modify the response together.
+### Re: Option pricing and Haiven addendum reply draft — gpt-5
+
+**Yes—ask, but separate the option's strike price from the Company's financing valuation.** Section 1 says the exercise price will equal common-stock fair market value on the grant date under the latest 409A valuation, but it does not state the current 409A value or what exercising 16,053 options is likely to cost.
+
+The useful questions are:
+
+- the current 409A common-stock fair market value per share and effective date;
+- the expected strike price per share if the Board grants the option under that valuation;
+- the estimated total exercise cost, calculated as `16,053 × strike price`;
+- confirmation that 16,053 shares equals 1.00% of a 1,605,300-share fully diluted denominator, and the denominator's measurement date; and
+- separately, the most recent preferred financing price per share and post-money valuation, if available.
+
+The distinction matters: the 409A value of common stock normally sets the strike price, while a preferred financing price or headline valuation reflects different rights and does not by itself determine the option's purchase price or realizable value. The final strike price can also change before the actual grant date.
+
+I inspected the Gmail thread with `chromium-bridge`. It contains Luke's signature and a newly attached `Employment Addendum - Brian Takita v1.0.pdf`; the apparent “Great!”, “Here you go!”, and “Fixed!” strings are Gmail Smart Reply controls, not message-body text. I did not reply, type into Gmail, create a Gmail draft, or send anything.
+
+I used the PDF you identified at `tasks/professional/haiven/Employment Addendum - Brian Takita v1.0.pdf`. All three downloaded copies in that folder have the same SHA-256 hash, `e4886af183efabba08afd9edbfb4296fd1bb8e16357e7f6f2b26b5c14b7af4b1`. I rendered and inspected all four pages. Page 1 still visibly reads `Haiven, Inc. (“Comp`, then the standalone `Employee will attach`, then `any”)`, so the attachment still needs to be regenerated and re-signed.
+
+I created [haiven-addendum-response-draft.md](../professional/haiven/haiven-addendum-response-draft.md). The local-only email draft asks for:
+
+1. a clean corrected and re-signed PDF;
+2. the current 409A value, expected strike price, total exercise cost, fully diluted denominator, and financing valuation context;
+3. a remedy if the Board does not approve the promised grant, plus the equity plan and option form;
+4. an integrated, expressly acknowledged Exhibit A;
+5. exact signing-bonus remittance and repayment-tax details;
+6. current Good Reason/Cause language corrections;
+7. timely, conflict-based future-outside-work approval and a practical separation standard;
+8. all supporting materials and Connecticut payroll-waiver confirmation before signature; and
+9. an acceptance-deadline extension until the corrected package is complete.
+
+Verification: `git diff --check` passed for the new draft; Chromium confirmed the intended thread and attachment; the three PDF hashes match; and every rendered PDF page was visually inspected. Confidence is high on the document defect and option-pricing distinction. Contract enforceability, tax treatment, and final redline language remain appropriate subjects for employment/startup counsel.
+
+No email, attachment, signature, or other external message was sent. We can modify the local draft together before any further action.
+<!-- agent:boundary:2c0dfe7b -->
 <!-- /agent:exchange -->
 
 ## Queue

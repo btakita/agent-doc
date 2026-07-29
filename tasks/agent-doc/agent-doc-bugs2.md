@@ -19,14 +19,14 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-Agent-doc 0.35.71 / JetBrains 0.2.313 released and installed; IDEA restart required to activate the plugin generation.
+Closed stale queued #5qjj as superseded; preserved unproven current-plugin UI proof as non-queued #steeringmirrorverifylive313.
 <!-- /agent:status -->
 
 ## Exchange
@@ -99,13 +99,22 @@ The restart loaded the current installed generation: IntelliJ IDEA 2026.1 has `a
 I cannot yet close the aggregate-steering acceptance criterion. For the active cycle `cycle-1785295203530`, the typed `realtime_steering` observation is still empty and no post-baseline editor delta arrived during the observation window. Therefore there is no honest live evidence yet that the banner/status item renders `(<N> edits)` and exposes the full verbatim aggregate in its hover, nor that a subsequent Run Agent Doc queues the aggregate handoff without submitting a partial edit.
 
 `#5qjj` remains pending. To finish it, make two separate exchange edits while a turn is active, observe the banner count and hover, then run Agent Doc once. I can verify the resulting aggregate projection and handoff from the controller logs; the operator must report the rendered banner/hover because that UI is not represented in the logs.
-<!-- agent:boundary:a9161326 -->
+
+### Re: `#5qjj` queue-loop resolution
+
+> **Queue prompt:**
+>
+> 📌 do [#5qjj]
+
+
+The current-plugin prerequisite is verified: IntelliJ IDEA restarted with `agent-doc-jetbrains-0.2.313.jar`, and native agent-doc `0.35.71` loaded. The live two-edit banner/hover observation did not occur, so it would be incorrect to mark that UI behavior verified.
+
+The old `#5qjj` item is now closed as superseded because its queued operator-verification shape repeatedly redispatched itself without an operator event. The still-required proof is preserved as the non-queued backlog item `#steeringmirrorverifylive313`, pinned to the installed generation. This separates agent-drainable work from operator-only UI observation and prevents another automatic queue loop.
+<!-- agent:boundary:86542e11 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~📌 do [#sidecarstate]~~
-- 📌 do [#5qjj]
 <!-- /agent:queue -->
 
 ## Notes
@@ -116,8 +125,8 @@ I cannot yet close the aggregate-steering acceptance criterion. For the active c
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#steeringmirrorverifylive313] [operator-verify] With IntelliJ IDEA running JetBrains plugin 0.2.313 / native agent-doc 0.35.71, make two separate exchange edits during one active turn. Confirm the banner/status item shows the aggregate edit count and its hover contains both edits verbatim; then run Agent Doc once and verify the controller records one aggregate handoff without submitting a partial edit. Do not queue this item automatically; it requires operator UI observation.
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
-- [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 <!-- /agent:backlog -->
 
 ## Review

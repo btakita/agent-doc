@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-exchange"
-version = "0.35.79"
+version = "0.35.80"
 edition = "2024"
 description = "Exchange element descriptor for agent-doc"
 license = "MIT"
@@ -11,13 +11,13 @@ publish = false
 name = "agent_doc_element_exchange"
 
 [dependencies]
-agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.35.79" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.79" }
-agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.79" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.79" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.79" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.35.80" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.80" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.80" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.80" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.80" }
 anyhow = "1"
 similar = "3"
 
 [dev-dependencies]
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.79" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.80" }

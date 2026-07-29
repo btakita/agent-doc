@@ -4,6 +4,25 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.80
+
+_JetBrains plugin 0.2.319; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Controller orphan-drain recovery now honors effective queue pause state.**
+  A retained supervisor-scope head can no longer reactivate a document after
+  `admin queue pause`, so the watchdog does not periodically rerun a paused
+  `agent-doc` session.
+- **Background orphan recovery is existing-pane-only and focus-neutral.** It
+  never rescues a stashed pane, searches for an alternate, or auto-starts a
+  replacement. A closed target, cross-document pane reuse, or changed ownership
+  fails closed with structured focus-preservation evidence. SimWorld covers
+  paused retained heads, closed owner panes, reused pane ids, repeated watchdog
+  ticks, replacement-pane count, and operator focus.
+- **Orphan-drain diagnostics now use one typed event vocabulary.** Queue-control
+  read failure, authority/hash/lease/backoff failures, dispatch outcomes, and
+  worker outcomes derive their stable log names from `OrphanDrainEvent` instead
+  of inline strings.
+
 ## 0.35.79
 
 _JetBrains plugin 0.2.319; VS Code extension 0.2.62; Zed extension 0.1.0._

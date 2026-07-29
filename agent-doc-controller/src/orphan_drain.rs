@@ -23,6 +23,68 @@
 //! This module is the pure decision. It performs no IO so every gate is
 //! testable: the caller supplies observations and executes the outcome.
 
+/// Effective queue-control observation for controller orphan recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrphanDrainQueueControl {
+    Runnable,
+    Paused,
+    /// A control-plane read failure fails open so a transient SQLite problem
+    /// cannot strand otherwise-drainable work.
+    ReadFailedFailOpen,
+}
+
+impl OrphanDrainQueueControl {
+    pub fn allows_unattended_drain(self) -> bool {
+        self != Self::Paused
+    }
+
+    pub fn diagnostic_event(self, has_drainable_head: bool) -> Option<OrphanDrainEvent> {
+        match self {
+            Self::Paused if has_drainable_head => Some(OrphanDrainEvent::QueuePausedSuppressed),
+            Self::ReadFailedFailOpen => Some(OrphanDrainEvent::QueueControlReadFailed),
+            Self::Runnable | Self::Paused => None,
+        }
+    }
+}
+
+/// Stable ops-log vocabulary for the entire orphan-drain subsystem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrphanDrainEvent {
+    AuthorityReadFailed,
+    DocumentHashFailed,
+    DrainOwnerReadFailed,
+    BackoffReadFailed,
+    QueueControlReadFailed,
+    QueuePausedSuppressed,
+    BackoffClaimFailed,
+    Dispatch,
+    DispatchSkipped,
+    DispatchFailed,
+    WorkerSettled,
+    WorkerFailed,
+    WorkerPanicked,
+}
+
+impl OrphanDrainEvent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AuthorityReadFailed => "controller_orphan_drain_authority_failed",
+            Self::DocumentHashFailed => "controller_orphan_drain_hash_failed",
+            Self::DrainOwnerReadFailed => "controller_orphan_drain_owner_read_failed",
+            Self::BackoffReadFailed => "controller_orphan_drain_backoff_read_failed",
+            Self::QueueControlReadFailed => "controller_orphan_drain_queue_control_read_failed",
+            Self::QueuePausedSuppressed => "controller_orphan_drain_suppressed",
+            Self::BackoffClaimFailed => "controller_orphan_drain_backoff_claim_failed",
+            Self::Dispatch => "controller_orphan_drain_dispatch",
+            Self::DispatchSkipped => "controller_orphan_drain_dispatch_skipped",
+            Self::DispatchFailed => "controller_orphan_drain_dispatch_failed",
+            Self::WorkerSettled => "controller_orphan_drain_worker_settled",
+            Self::WorkerFailed => "controller_orphan_drain_worker_failed",
+            Self::WorkerPanicked => "controller_orphan_drain_worker_panicked",
+        }
+    }
+}
+
 /// Why a supervisor-less document was not dispatched this tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrphanDrainSkip {
@@ -198,6 +260,27 @@ mod tests {
         assert_eq!(
             orphan_drain_decision(observation, DEFAULT_MIN_DISPATCH_INTERVAL_SECS),
             OrphanDrainDecision::Skip(OrphanDrainSkip::QueueInactive)
+        );
+    }
+
+    #[test]
+    fn queue_control_observations_are_typed_and_read_failure_is_fail_open() {
+        assert!(!OrphanDrainQueueControl::Paused.allows_unattended_drain());
+        assert!(
+            OrphanDrainQueueControl::ReadFailedFailOpen.allows_unattended_drain(),
+            "a transient control-plane read failure must not strand queue progress"
+        );
+        assert_eq!(
+            OrphanDrainQueueControl::ReadFailedFailOpen
+                .diagnostic_event(true)
+                .map(OrphanDrainEvent::as_str),
+            Some("controller_orphan_drain_queue_control_read_failed"),
+        );
+        assert_eq!(
+            OrphanDrainQueueControl::Paused
+                .diagnostic_event(true)
+                .map(OrphanDrainEvent::as_str),
+            Some("controller_orphan_drain_suppressed"),
         );
     }
 

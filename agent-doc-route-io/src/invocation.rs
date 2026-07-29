@@ -16,6 +16,12 @@ thread_local! {
     static WAIT_FOR_READY_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
     /// Per-invocation flag forcing route-owned document mutations to disk.
     static FORCE_DISK_ROUTE_WRITES: Cell<bool> = const { Cell::new(false) };
+    /// Controller background recovery may only submit to its already-proven pane.
+    ///
+    /// It must never rescue a stashed pane into the visible layout, select an
+    /// alternate pane, or cold-start a replacement. Foreground editor routes
+    /// leave this false and retain the normal routing behavior.
+    static BACKGROUND_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn wait_for_ready_override() -> Option<Duration> {
@@ -27,6 +33,10 @@ pub fn wait_for_ready_override() -> Option<Duration> {
 
 pub fn force_disk_route_writes() -> bool {
     FORCE_DISK_ROUTE_WRITES.with(Cell::get)
+}
+
+pub fn background_existing_pane_only() -> bool {
+    BACKGROUND_EXISTING_PANE_ONLY.with(Cell::get)
 }
 
 pub struct WaitForReadyOverrideGuard {
@@ -63,6 +73,23 @@ impl Drop for ForceDiskRouteWritesGuard {
     fn drop(&mut self) {
         let previous = self.previous;
         FORCE_DISK_ROUTE_WRITES.with(|cell| cell.set(previous));
+    }
+}
+
+pub struct BackgroundExistingPaneOnlyGuard {
+    previous: bool,
+}
+
+impl BackgroundExistingPaneOnlyGuard {
+    pub fn set(value: bool) -> Self {
+        let previous = BACKGROUND_EXISTING_PANE_ONLY.with(|cell| cell.replace(value));
+        Self { previous }
+    }
+}
+
+impl Drop for BackgroundExistingPaneOnlyGuard {
+    fn drop(&mut self) {
+        BACKGROUND_EXISTING_PANE_ONLY.with(|cell| cell.set(self.previous));
     }
 }
 

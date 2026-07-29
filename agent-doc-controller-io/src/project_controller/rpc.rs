@@ -6486,6 +6486,7 @@ fn handle_editor_route_rpc(
         wait_for_ready_secs: Some(wait_secs),
         force_disk: payload.force_disk.unwrap_or(false),
         prune_before_lookup: true,
+        background_existing_pane_only: false,
     })?;
     agent_doc_ops_log_io::log_op(
         &canonical,
@@ -8937,6 +8938,19 @@ pub(crate) fn serve_with_options(
 const ORPHAN_DRAIN_BACKOFF_SCOPE: &str = "queue_orphan_drain_backoff";
 const ORPHAN_DRAIN_BACKOFF_HOLDER: &str = "controller_orphan_drain";
 
+fn log_orphan_drain_event(
+    file: &Path,
+    event: agent_doc_controller::orphan_drain::OrphanDrainEvent,
+    detail: &str,
+) {
+    let message = if detail.is_empty() {
+        event.as_str().to_string()
+    } else {
+        format!("{} {detail}", event.as_str())
+    };
+    agent_doc_ops_log_io::log_op(file, &message);
+}
+
 /// `#orphandrain` — advance `queue: go` documents that have no supervisor.
 ///
 /// The controller only decides and enqueues here. One bounded controller-owned
@@ -8969,26 +8983,30 @@ fn start_orphan_drain_route_worker() -> Result<OrphanDrainRouteWorker> {
                 }));
                 match route_result {
                     Ok(Ok(result)) if result.exit_code == 0 => {
-                        agent_doc_ops_log_io::log_op(
+                        log_orphan_drain_event(
                             &file,
-                            "controller_orphan_drain_worker_settled status=success",
+                            agent_doc_controller::orphan_drain::OrphanDrainEvent::WorkerSettled,
+                            "status=success",
                         );
                     }
-                    Ok(Ok(result)) => agent_doc_ops_log_io::log_op(
+                    Ok(Ok(result)) => log_orphan_drain_event(
                         &file,
+                        agent_doc_controller::orphan_drain::OrphanDrainEvent::WorkerFailed,
                         &format!(
-                            "controller_orphan_drain_worker_failed exit_code={} output={}",
+                            "exit_code={} output={}",
                             result.exit_code,
                             result.output.replace('\n', "\\n")
                         ),
                     ),
-                    Ok(Err(err)) => agent_doc_ops_log_io::log_op(
+                    Ok(Err(err)) => log_orphan_drain_event(
                         &file,
-                        &format!("controller_orphan_drain_worker_failed error={err:#}"),
+                        agent_doc_controller::orphan_drain::OrphanDrainEvent::WorkerFailed,
+                        &format!("error={err:#}"),
                     ),
-                    Err(_) => agent_doc_ops_log_io::log_op(
+                    Err(_) => log_orphan_drain_event(
                         &file,
-                        "controller_orphan_drain_worker_panicked recovery=worker_continues",
+                        agent_doc_controller::orphan_drain::OrphanDrainEvent::WorkerPanicked,
+                        "recovery=worker_continues",
                     ),
                 }
                 worker_in_flight.lock().remove(&file);
@@ -9085,10 +9103,24 @@ fn orphan_drain_memoize_head(
         .insert(file.to_path_buf(), (revision, OrphanDrainHead(head)));
 }
 
+fn orphan_drain_pause_suppression_transition(file: &Path, suppressed: bool) -> bool {
+    static SUPPRESSED_DOCUMENTS: OnceLock<Mutex<std::collections::HashSet<PathBuf>>> =
+        OnceLock::new();
+    let mut documents = SUPPRESSED_DOCUMENTS
+        .get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+        .lock();
+    if suppressed {
+        documents.insert(file.to_path_buf())
+    } else {
+        documents.remove(file);
+        false
+    }
+}
+
 fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
     use agent_doc_controller::orphan_drain::{
-        DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainObservation,
-        orphan_drain_decision,
+        DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainEvent,
+        OrphanDrainObservation, OrphanDrainQueueControl, orphan_drain_decision,
     };
 
     let bootstrap = match runtime.bootstrap_snapshot() {
@@ -9195,9 +9227,10 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                 Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
                 | Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => continue,
                 Err(err) => {
-                    agent_doc_ops_log_io::log_op(
+                    log_orphan_drain_event(
                         &file,
-                        &format!("controller_orphan_drain_authority_failed error={err:#}"),
+                        OrphanDrainEvent::AuthorityReadFailed,
+                        &format!("error={err:#}"),
                     );
                     continue;
                 }
@@ -9223,9 +9256,10 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         let document_hash = match agent_doc_fs::document_state_hash(&file) {
             Ok(hash) => hash,
             Err(err) => {
-                agent_doc_ops_log_io::log_op(
+                log_orphan_drain_event(
                     &file,
-                    &format!("controller_orphan_drain_hash_failed error={err:#}"),
+                    OrphanDrainEvent::DocumentHashFailed,
+                    &format!("error={err:#}"),
                 );
                 continue;
             }
@@ -9243,9 +9277,10 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             ),
             Ok(None) => false,
             Err(err) => {
-                agent_doc_ops_log_io::log_op(
+                log_orphan_drain_event(
                     &file,
-                    &format!("controller_orphan_drain_owner_read_failed error={err:#}"),
+                    OrphanDrainEvent::DrainOwnerReadFailed,
+                    &format!("error={err:#}"),
                 );
                 continue;
             }
@@ -9257,17 +9292,64 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         ) {
             Ok(last_dispatch) => last_dispatch,
             Err(err) => {
-                agent_doc_ops_log_io::log_op(
+                log_orphan_drain_event(
                     &file,
-                    &format!("controller_orphan_drain_backoff_read_failed error={err:#}"),
+                    OrphanDrainEvent::BackoffReadFailed,
+                    &format!("error={err:#}"),
                 );
                 continue;
             }
         };
+        // A drainable head can remain visible after the operator pauses queue
+        // control. Drainability and activation are separate facts: treating the
+        // retained head as activation made this watchdog reopen the same
+        // background document every backoff interval, including after its pane
+        // was closed. The controller pause is the effective authority here.
+        let document_id = file
+            .canonicalize()
+            .unwrap_or_else(|_| file.clone())
+            .to_string_lossy()
+            .to_string();
+        let queue_control = match state_store::load_effective_queue_control_from_db(
+            &conn,
+            &document_id,
+            &project_root.to_string_lossy(),
+        ) {
+            Ok(control)
+                if control
+                    .as_ref()
+                    .is_some_and(|control| control.state == "paused") =>
+            {
+                OrphanDrainQueueControl::Paused
+            }
+            Ok(_) => OrphanDrainQueueControl::Runnable,
+            Err(err) => {
+                log_orphan_drain_event(
+                    &file,
+                    OrphanDrainEvent::QueueControlReadFailed,
+                    &format!("error={err:#}"),
+                );
+                OrphanDrainQueueControl::ReadFailedFailOpen
+            }
+        };
+        let paused_head_suppressed = queue_control
+            .diagnostic_event(drainable.is_some())
+            .is_some_and(|event| event == OrphanDrainEvent::QueuePausedSuppressed);
+        if orphan_drain_pause_suppression_transition(&file, paused_head_suppressed) {
+            log_orphan_drain_event(
+                &file,
+                OrphanDrainEvent::QueuePausedSuppressed,
+                &format!(
+                    "file={} pane={} reason=queue_controller_paused focus_effect=preserved pane_effect=none",
+                    file.display(),
+                    record.pane_id,
+                ),
+            );
+        }
         let observation = OrphanDrainObservation {
             // The supervisor-scope resolver owns activation (`queue: go`,
             // queue-tag `go`, and legacy active state) as well as drainability.
-            queue_active: drainable.is_some(),
+            queue_active: drainable.is_some() && queue_control.allows_unattended_drain(),
             has_drainable_head: drainable.is_some(),
             supervisor_alive: agent_doc_supervisor_io::process::supervisor_pid_for_doc(&file)
                 .is_some(),
@@ -9299,9 +9381,10 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             Ok(true) => {}
             Ok(false) => continue,
             Err(err) => {
-                agent_doc_ops_log_io::log_op(
+                log_orphan_drain_event(
                     &file,
-                    &format!("controller_orphan_drain_backoff_claim_failed error={err:#}"),
+                    OrphanDrainEvent::BackoffClaimFailed,
+                    &format!("error={err:#}"),
                 );
                 continue;
             }
@@ -9312,10 +9395,11 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             .unwrap_or(&file)
             .to_string_lossy()
             .to_string();
-        agent_doc_ops_log_io::log_op(
+        log_orphan_drain_event(
             &file,
+            OrphanDrainEvent::Dispatch,
             &format!(
-                "controller_orphan_drain_dispatch file={} pane={} head={} reason=no_supervisor_idle_watch",
+                "file={} pane={} head={} reason=no_supervisor_idle_watch",
                 file.display(),
                 record.pane_id,
                 drainable.as_deref().unwrap_or("unknown")
@@ -9331,19 +9415,22 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             wait_for_ready_secs: None,
             force_disk: false,
             prune_before_lookup: false,
+            background_existing_pane_only: true,
         };
         match enqueue_orphan_drain_route(invocation) {
             Ok(true) => {}
-            Ok(false) => agent_doc_ops_log_io::log_op(
+            Ok(false) => log_orphan_drain_event(
                 &file,
-                "controller_orphan_drain_dispatch_skipped reason=route_already_in_flight",
+                OrphanDrainEvent::DispatchSkipped,
+                "reason=route_already_in_flight",
             ),
             Err(err) => {
                 // Keep the durable claim even on enqueue failure. Releasing it
                 // here would recreate the original restart/dispatch storm.
-                agent_doc_ops_log_io::log_op(
+                log_orphan_drain_event(
                     &file,
-                    &format!("controller_orphan_drain_dispatch_failed error={err:#}"),
+                    OrphanDrainEvent::DispatchFailed,
+                    &format!("error={err:#}"),
                 );
             }
         }

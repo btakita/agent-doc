@@ -9856,8 +9856,22 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
     assert!(
         orphan_drain.contains("enqueue_orphan_drain_route(invocation)")
             && orphan_drain.contains("pane: Some(record.pane_id.clone())")
-            && orphan_drain.contains("prune_before_lookup: false"),
-        "orphan drain must enqueue target-scoped route work without a fleet prune"
+            && orphan_drain.contains("prune_before_lookup: false")
+            && orphan_drain.contains("background_existing_pane_only: true"),
+        "orphan drain must enqueue existing-pane-only target-scoped work without a fleet prune"
+    );
+    assert!(
+        orphan_drain.contains("load_effective_queue_control_from_db(")
+            && orphan_drain.contains("queue_control.allows_unattended_drain()"),
+        "a retained drainable head must not reactivate controller-paused queue work"
+    );
+    let orphan_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/orphan_drain.rs")).unwrap();
+    assert!(
+        orphan_policy.contains("pub enum OrphanDrainEvent")
+            && orphan_drain.contains("OrphanDrainEvent::QueueControlReadFailed")
+            && !controller.contains("\"controller_orphan_drain_queue_control_read_failed"),
+        "orphan-drain ops events must come from the typed policy vocabulary, not inline strings"
     );
     assert!(
         !controller.contains("spawn_editor_route_detached"),

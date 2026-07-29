@@ -210,6 +210,10 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         let wait_for_ready = invocation
             .wait_for_ready_secs
             .map(|secs| Duration::from_secs(secs.min(600)));
+        let _background_existing_pane_only =
+            agent_doc_route_io::invocation::BackgroundExistingPaneOnlyGuard::set(
+                invocation.background_existing_pane_only,
+            );
         match agent_doc_route_io::invocation::run_with_force_disk_and_prune(
             &invocation.file,
             invocation.pane.as_deref(),

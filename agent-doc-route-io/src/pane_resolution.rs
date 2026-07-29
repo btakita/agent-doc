@@ -58,6 +58,70 @@ use agent_doc_supervisor::startup_miss::StartingPaneRecoveryTarget;
 use agent_doc_tmux::is_first_column;
 use tmux_router::Tmux;
 
+/// Controller background recovery is intentionally weaker than an editor route:
+/// it may submit only to the exact pane whose ownership was already proven.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackgroundExistingPaneDecision {
+    UseExistingPane,
+    MissingExplicitPane,
+    ExplicitPaneDead,
+    ForeignDocumentOwner,
+    AuthoritativePaneChanged,
+    RegistrationChanged,
+    LiveOwnerChanged,
+    MissingOwnershipProof,
+}
+
+impl BackgroundExistingPaneDecision {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::UseExistingPane => "existing_pane_proven",
+            Self::MissingExplicitPane => "missing_explicit_pane",
+            Self::ExplicitPaneDead => "explicit_pane_dead",
+            Self::ForeignDocumentOwner => "foreign_document_owner",
+            Self::AuthoritativePaneChanged => "authoritative_pane_changed",
+            Self::RegistrationChanged => "registration_changed",
+            Self::LiveOwnerChanged => "live_owner_changed",
+            Self::MissingOwnershipProof => "missing_ownership_proof",
+        }
+    }
+}
+
+/// Pure policy used by the route and SimWorld. A background recovery route must
+/// fail closed instead of searching, rescuing, or provisioning when its target
+/// changed after the watchdog observation.
+pub fn background_existing_pane_decision(
+    explicit_pane: Option<&str>,
+    explicit_pane_alive: bool,
+    explicit_pane_runs_other_document: bool,
+    authoritative_pane: Option<&str>,
+    registered_pane: Option<&str>,
+    live_owner: Option<&str>,
+) -> BackgroundExistingPaneDecision {
+    let Some(explicit_pane) = explicit_pane else {
+        return BackgroundExistingPaneDecision::MissingExplicitPane;
+    };
+    if !explicit_pane_alive {
+        return BackgroundExistingPaneDecision::ExplicitPaneDead;
+    }
+    if explicit_pane_runs_other_document {
+        return BackgroundExistingPaneDecision::ForeignDocumentOwner;
+    }
+    if authoritative_pane.is_some_and(|pane| pane != explicit_pane) {
+        return BackgroundExistingPaneDecision::AuthoritativePaneChanged;
+    }
+    if registered_pane.is_some_and(|pane| pane != explicit_pane) {
+        return BackgroundExistingPaneDecision::RegistrationChanged;
+    }
+    if live_owner.is_some_and(|pane| pane != explicit_pane) {
+        return BackgroundExistingPaneDecision::LiveOwnerChanged;
+    }
+    if authoritative_pane.is_none() && registered_pane.is_none() {
+        return BackgroundExistingPaneDecision::MissingOwnershipProof;
+    }
+    BackgroundExistingPaneDecision::UseExistingPane
+}
+
 pub fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
     match health {
         SupervisorHealth::Healthy => DispatchRuntimeHealth::Healthy,
@@ -272,6 +336,80 @@ pub fn resolve_or_create_pane_dispatch_only(
     } else {
         None
     };
+    let resolved_actor = authoritative_actor.as_ref().or(registered_actor.as_ref());
+    let live_owner = if registered.is_some() {
+        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
+    } else {
+        None
+    };
+    let resolved_pane = resolved_actor
+        .map(|actor| actor.record.pane_id.as_str())
+        .or(registered.as_deref());
+    if let Some(resolved_pane) = resolved_pane
+        && tmux.pane_alive(resolved_pane)
+        && agent_doc_sync_io::sync::pane_runs_other_document_owner(tmux, resolved_pane, file)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_inactive_pane_focus_guard file={} pane={} outcome=blocked reason=foreign_document_owner focus_effect=preserved pane_effect=none",
+                file.display(),
+                resolved_pane,
+            ),
+        );
+        anyhow::bail!(
+            "refusing to route {} through pane {} because it now runs another document; tmux focus was preserved",
+            file.display(),
+            resolved_pane,
+        );
+    }
+
+    let background_existing_pane_only = crate::invocation::background_existing_pane_only();
+    if background_existing_pane_only {
+        let explicit_pane_alive = pane.is_some_and(|pane| tmux.pane_alive(pane));
+        let explicit_pane_runs_other_document = pane.is_some_and(|pane| {
+            explicit_pane_alive
+                && agent_doc_sync_io::sync::pane_runs_other_document_owner(tmux, pane, file)
+        });
+        let decision = background_existing_pane_decision(
+            pane,
+            explicit_pane_alive,
+            explicit_pane_runs_other_document,
+            resolved_actor.map(|actor| actor.record.pane_id.as_str()),
+            registered.as_deref(),
+            live_owner.as_deref(),
+        );
+        if decision != BackgroundExistingPaneDecision::UseExistingPane {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_background_existing_pane_guard file={} pane={} outcome=blocked reason={} focus_effect=preserved pane_effect=none",
+                    file.display(),
+                    pane.unwrap_or("none"),
+                    decision.reason(),
+                ),
+            );
+            anyhow::bail!(
+                "background recovery for {} was blocked ({}) so tmux focus and pane layout remain unchanged",
+                file.display(),
+                decision.reason(),
+            );
+        }
+        if authoritative_actor.as_ref().is_some_and(|actor| {
+            supervisor_authoritative_actor_dispatch_target_eligible(&actor.runtime)
+        }) {
+            let existing_pane = pane.expect("background pane policy proved an explicit pane");
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_background_existing_pane_guard file={} pane={} outcome=suppressed reason=supervisor_recovered focus_effect=preserved pane_effect=none",
+                    file.display(),
+                    existing_pane,
+                ),
+            );
+            return Ok(existing_pane.to_string());
+        }
+    }
     if let Some(actor) = authoritative_actor
         .as_ref()
         .filter(|actor| supervisor_authoritative_actor_dispatch_target_eligible(&actor.runtime))
@@ -292,11 +430,6 @@ pub fn resolve_or_create_pane_dispatch_only(
             authoritative_effects,
         );
     }
-    let live_owner = if registered.is_some() {
-        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
-    } else {
-        None
-    };
     let preferred_active_window = tmux.active_window(target_session);
     let associated_candidates =
         agent_doc_sync_io::sync::find_associated_panes(tmux, file, session_id);
@@ -306,6 +439,17 @@ pub fn resolve_or_create_pane_dispatch_only(
     );
 
     let rescue_target = |pane_id: &str| {
+        if background_existing_pane_only {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_background_existing_pane_guard file={} pane={} outcome=allowed action=skip_stash_rescue focus_effect=preserved pane_effect=none",
+                    file.display(),
+                    pane_id,
+                ),
+            );
+            return;
+        }
         rescue_from_stash(
             tmux,
             pane_id,
@@ -316,7 +460,7 @@ pub fn resolve_or_create_pane_dispatch_only(
         );
     };
 
-    let degraded_authoritative_actor = authoritative_actor.as_ref().or(registered_actor.as_ref());
+    let degraded_authoritative_actor = resolved_actor;
     if let Some(actor) = degraded_authoritative_actor
         && let Some(reason) =
             supervisor_authoritative_actor_dispatch_guard_reason(actor.runtime.facts())
@@ -384,8 +528,8 @@ pub fn resolve_or_create_pane_dispatch_only(
                 pending_prompt_context
                     .as_ref()
                     .map(|context| context.prompt_text.as_str()),
-                true,
-                true,
+                !background_existing_pane_only,
+                !background_existing_pane_only,
                 false,
                 dispatch_pane.as_str(),
                 DispatchOnlyReopenDelivery::DirectPaneSubmit,
@@ -452,7 +596,11 @@ pub fn resolve_or_create_pane_dispatch_only(
                 redundant
             ));
         }
-        let dispatch_pane = live_owner.as_deref().unwrap_or(registered_pane.as_str());
+        let dispatch_pane = if background_existing_pane_only {
+            pane.expect("background pane policy proved an explicit pane")
+        } else {
+            live_owner.as_deref().unwrap_or(registered_pane.as_str())
+        };
         rescue_target(dispatch_pane);
         return dispatch_only_reopen_existing_pane(
             tmux,
@@ -470,8 +618,8 @@ pub fn resolve_or_create_pane_dispatch_only(
             pending_prompt_context
                 .as_ref()
                 .map(|context| context.prompt_text.as_str()),
-            true,
-            true,
+            !background_existing_pane_only,
+            !background_existing_pane_only,
             false,
             dispatch_pane,
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
@@ -541,7 +689,8 @@ pub fn resolve_or_create_pane_dispatch_only(
         .filter(|entry| tmux.pane_alive(&entry.pane))
         .map(|entry| entry.pane.clone())
         .collect();
-    if registered.is_some()
+    if !background_existing_pane_only
+        && registered.is_some()
         && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)
         && is_agent_process(tmux, &new_pane, harness)
     {
@@ -572,6 +721,22 @@ pub fn resolve_or_create_pane_dispatch_only(
         );
     }
 
+    if background_existing_pane_only {
+        let requested_pane = pane.unwrap_or("none");
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_background_existing_pane_guard file={} pane={} outcome=blocked reason=existing_target_unavailable focus_effect=preserved pane_effect=none",
+                file.display(),
+                requested_pane,
+            ),
+        );
+        anyhow::bail!(
+            "background recovery for {} cannot use its existing pane {}; auto-start is forbidden and tmux focus was preserved",
+            file.display(),
+            requested_pane,
+        );
+    }
     eprintln!("[route] No active pane found, auto-starting...");
     if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");

@@ -21,7 +21,10 @@ const MEDIUM_CORPUS_BUDGET: Duration = Duration::from_secs(12);
 mod orphan_drain_model {
     use agent_doc_controller::orphan_drain::{
         DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainObservation,
-        orphan_drain_decision,
+        OrphanDrainQueueControl, orphan_drain_decision,
+    };
+    use agent_doc_route_io::pane_resolution::{
+        BackgroundExistingPaneDecision, background_existing_pane_decision,
     };
 
     #[derive(Clone, Copy, Debug)]
@@ -32,6 +35,9 @@ mod orphan_drain_model {
         Advance89Seconds,
         AdvanceOneSecond,
         RouteSettles,
+        PauseQueue,
+        CloseOwnerPane,
+        ReuseOwnerPaneForOtherDocument,
     }
 
     const ACTIONS: [Action; 6] = [
@@ -43,7 +49,7 @@ mod orphan_drain_model {
         Action::RouteSettles,
     ];
 
-    #[derive(Clone, Debug, Default)]
+    #[derive(Clone, Debug)]
     struct World {
         now: u64,
         durable_last_dispatch: Option<u64>,
@@ -51,12 +57,37 @@ mod orphan_drain_model {
         route_in_flight: bool,
         controller_event_loop_blocked: bool,
         dispatches: usize,
+        queue_control: OrphanDrainQueueControl,
+        owner_pane_alive: bool,
+        owner_pane_runs_other_document: bool,
+        replacement_panes_created: usize,
+        operator_focus_stolen: bool,
+        blocked_background_routes: usize,
+    }
+
+    impl Default for World {
+        fn default() -> Self {
+            Self {
+                now: 0,
+                durable_last_dispatch: None,
+                controller_generation: 0,
+                route_in_flight: false,
+                controller_event_loop_blocked: false,
+                dispatches: 0,
+                queue_control: OrphanDrainQueueControl::Runnable,
+                owner_pane_alive: true,
+                owner_pane_runs_other_document: false,
+                replacement_panes_created: 0,
+                operator_focus_stolen: false,
+                blocked_background_routes: 0,
+            }
+        }
     }
 
     impl World {
         fn controller_tick(&mut self) {
             let observation = OrphanDrainObservation {
-                queue_active: true,
+                queue_active: self.queue_control.allows_unattended_drain(),
                 has_drainable_head: true,
                 supervisor_alive: false,
                 loop_owns_drain: false,
@@ -71,6 +102,28 @@ mod orphan_drain_model {
                 != OrphanDrainDecision::Dispatch
             {
                 return;
+            }
+
+            let pane_decision = background_existing_pane_decision(
+                Some("%owner"),
+                self.owner_pane_alive,
+                self.owner_pane_runs_other_document,
+                Some("%owner"),
+                Some("%owner"),
+                Some("%owner"),
+            );
+            if pane_decision != BackgroundExistingPaneDecision::UseExistingPane {
+                self.blocked_background_routes += 1;
+                return;
+            }
+
+            // Simulate the old unrestricted route semantics if the pure guard
+            // ever incorrectly admits a dead or foreign pane: it would search
+            // or provision and surface the result. The invariant below makes
+            // that policy regression fail immediately.
+            if !self.owner_pane_alive || self.owner_pane_runs_other_document {
+                self.replacement_panes_created += usize::from(!self.owner_pane_alive);
+                self.operator_focus_stolen = true;
             }
 
             // Model the single-statement SQLite conditional upsert. Both
@@ -105,10 +158,24 @@ mod orphan_drain_model {
                 Action::Advance89Seconds => self.now += 89,
                 Action::AdvanceOneSecond => self.now += 1,
                 Action::RouteSettles => self.route_in_flight = false,
+                Action::PauseQueue => self.queue_control = OrphanDrainQueueControl::Paused,
+                Action::CloseOwnerPane => self.owner_pane_alive = false,
+                Action::ReuseOwnerPaneForOtherDocument => {
+                    self.owner_pane_alive = true;
+                    self.owner_pane_runs_other_document = true;
+                }
             }
             assert!(
                 !self.controller_event_loop_blocked,
                 "detached orphan drain must never self-block the controller"
+            );
+            assert_eq!(
+                self.replacement_panes_created, 0,
+                "background orphan recovery must never create a replacement pane"
+            );
+            assert!(
+                !self.operator_focus_stolen,
+                "background orphan recovery must preserve operator tmux focus"
             );
         }
     }
@@ -146,6 +213,35 @@ mod orphan_drain_model {
     #[test]
     fn bounded_interleavings_preserve_detachment_and_backoff() {
         explore(World::default(), 7);
+    }
+
+    #[test]
+    fn paused_stale_head_and_closed_or_reused_panes_never_reopen_or_steal_focus() {
+        let mut paused = World::default();
+        paused.step(Action::PauseQueue);
+        paused.step(Action::ControllerATick);
+        paused.step(Action::Advance89Seconds);
+        paused.step(Action::AdvanceOneSecond);
+        paused.step(Action::ControllerBTick);
+        assert_eq!(paused.dispatches, 0, "a paused retained head is not active");
+
+        let mut closed = World::default();
+        closed.step(Action::CloseOwnerPane);
+        closed.step(Action::ControllerATick);
+        closed.step(Action::Advance89Seconds);
+        closed.step(Action::AdvanceOneSecond);
+        closed.step(Action::ControllerBTick);
+        assert_eq!(closed.dispatches, 0);
+        assert_eq!(closed.blocked_background_routes, 2);
+
+        let mut reused = World::default();
+        reused.step(Action::ReuseOwnerPaneForOtherDocument);
+        reused.step(Action::ControllerATick);
+        reused.step(Action::Advance89Seconds);
+        reused.step(Action::AdvanceOneSecond);
+        reused.step(Action::ControllerBTick);
+        assert_eq!(reused.dispatches, 0);
+        assert_eq!(reused.blocked_background_routes, 2);
     }
 }
 

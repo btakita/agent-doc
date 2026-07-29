@@ -950,12 +950,70 @@ The result is three portrait pages at 612 × 792 points. I rendered and visually
 The two intended files were staged alone and committed as `0d63396e6` (`render Haiven Exhibit A in portrait`); unrelated workspace changes were left untouched. Confidence is high.
 
 No email, Gmail draft, attachment upload, signature, or other external action was taken.
-<!-- agent:boundary:4c78a46c -->
+
+### Re: Exhibit A scope and the Cause exclusions — gpt-5
+
+> **Queue prompt:**
+>
+> Is Exhibit A comprehensive + appropriate in scope? I don't see brookebrodack.net for example.
+>
+> **Queue prompt:**
+>
+> "Arrests, pending charges, civil violations, traffic infractions, and offenses based solely on negligence or strict liability should not constitute Cause.": Does this draw too much attention to the matter? I won't be committing these crimes of course. Could you tell me what negligence would mean?
+
+**Exhibit A has a strong protective structure, but it is not factually comprehensive enough to attach unchanged.** `brookebrodack.net` is not named. It is *arguably* covered by the categories for all Employee-owned `github.com/btakita` repositories, other consulting/business activities, and private projects because its repository is `brookebrodack-dev`. That is not as good as naming it: the site is third-party-facing, and the existing third-party exclusions make it unclear whether the retained interest is Brian's reusable code, client work product, site content, the domain, or something else.
+
+I would add a distinct row rather than place it under “Personal sites,” because that title could imply that Brooke's site, identity, or content belongs to Brian. Suggested language:
+
+> **Pre-existing website and digital-property work** — Employee's rights, if any, in pre-employment source code, architecture, reusable components, deployment tooling, configurations, documentation, and services created for or used in the websites and projects identified below. Names, likenesses, trademarks, domains, client content, media, data, business records, confidential information, and all other third-party rights remain with their applicable owners. Listing an item does not assert Employee ownership of those third-party materials.
+
+Based on the local portfolio, the factual-confirmation list should include:
+
+| Candidate identifier | Why it should be considered |
+| --- | --- |
+| `brookebrodack.net` / `brookebrodack-dev` | Clear omission and the example you identified. |
+| `herbaliciousbliss.com` / `herbaliciousbliss-dev` | Separate pre-employment site/repository family. |
+| `peakexistence.com` / `drmanny-dev` | Separate third-party-facing site/repository family. |
+| `cogov.me`, `demo.cogov.me` / `cogov-dev` | Named site and software family. |
+| `mi-www.site`, `esg.briantakita.me` / `censible-core` | Existing deployed-site identifiers tied to a separate project family. |
+| `prescience-notes` | Material pre-existing project that is absent from the representative list. |
+
+Only include each after confirming that Brian actually retains some right in the underlying code, tooling, or materials. The “rights, if any” formulation is important; do not claim a client's or another person's domain, brand, content, data, name, likeness, or work product.
+
+I would also add the missing organization families `lazily-hub`, `signal-space`, and `freehold-hub` to “Controlled GitHub organizations,” again limited to Brian's rights, if any. The representative repository list should at least identify material omitted families such as `presence`, `cloudflare`, `mail`, `session-share`, `censible-core`, `prescience-notes`, `mag7-viewer`, `pubnub-example`, `brookebrodack-dev`, `herbaliciousbliss-dev`, `drmanny-dev`, and the `signal-space` repositories. It need not enumerate every small repository if the signed schedule combines clear project-family categories with a dated confidential repository/site manifest.
+
+The current scope has four other points to tighten:
+
+- Keep the “rights and interests, if any” and third-party exclusions. Those are appropriate and prevent repository administration from becoming an ownership assertion.
+- Replace “private repository names … need not be disclosed” with a stronger evidence mechanism: a dated confidential annex, exported repository list, or signed manifest. The Agreement's §3.4 asks for a list describing all related Prior Inventions, and the addendum calls for a completed Exhibit A. An undisclosed catchall is useful but less reliable than a countersigned identifier list.
+- Narrow the future-looking “modifications, enhancements, derivative works, and successor projects” clause. As drafted, it could be read to reserve future work even when created within Haiven duties or using Haiven confidential information. A more balanced limitation is: “independently developed continuations, modifications, ports, and derivatives, but only to the extent they do not incorporate Company Inventions, Company Confidential Information, or work created within Employee's duties and are not otherwise assignable under applicable law.” The Agreement invokes Washington's invention-assignment rule; that rule protects qualifying own-time inventions but has exceptions for work directly related to the employer's business/R&D or resulting from employee work. [RCW 49.44.140](https://app.leg.wa.gov/rcw/default.aspx?cite=49.44.140) The related disclosure provision is another reason to use a dated, specific schedule. [RCW 49.44.150](https://app.leg.wa.gov/rcw/default.aspx?cite=49.44.150)
+- Preserve the explicit Haiven signature and priority language. Original §3.4 grants Haiven a broad automatic license when Brian-owned material is incorporated into a Company product; the proposed Exhibit A says the opposite. The Exhibit A priority clause is useful only if Haiven expressly agrees that the completed schedule, including “Effect of Listing” and “Incorporation and Priority,” is incorporated and controls.
+
+One important distinction: **listing a project as Prior IP does not necessarily approve continuing to work on it during employment.** The current addendum expressly approves only Apollo/Acadian, MonsterRodHolders.com, and Equity Funding Source. Any intended ongoing maintenance for `brookebrodack.net` or the other sites should also receive written outside-activity approval under the addendum, separately from the ownership listing.
+
+So the answer is: the categories are appropriately protective, but the schedule should be revised before signature. Name the material sites and project families, use ownership-neutral descriptions, attach a dated manifest, narrow the future-successor language, and obtain Haiven's countersignature. This is a drafting audit rather than a legal opinion; because the Exhibit A changes the original §3.4 license and future-invention allocation, final review by employment/IP counsel remains worthwhile.
+
+**On the Cause sentence: yes, I would delete it from the email.** It is longer and more defensive than needed, and “traffic infractions,” “negligence,” and “strict liability” can distract from the real request: replacing a subjective moral-turpitude standard with an objective conviction-or-plea standard.
+
+In ordinary legal usage, **negligence** means failing to exercise the care a reasonably careful person would use in similar circumstances. It can be an accidental act or omission; it does not require an intent to do something wrong. Under Washington law, **gross negligence** is substantially greater than ordinary negligence—roughly, a failure to exercise even slight care. [The Washington Supreme Court explains that distinction in *Swank v. Valley Christian School*](https://www.courts.wa.gov/opinions/pdf/932824.pdf). The current addendum already makes “gross negligence … that materially harms the Company” a separate form of Cause, so a blanket statement that negligence-based offenses can never be Cause introduces tension with that clause.
+
+**Strict liability** means the law does not require proof of a culpable mental state such as intent, knowledge, recklessness, or negligence; it does not necessarily mean the underlying conduct is minor. [Washington appellate authority describes strict-liability crimes as requiring the act but not mens rea](https://www.courts.wa.gov/opinions/pdf/800451.pdf). That is another reason not to request a categorical strict-liability exclusion.
+
+The concise replacement for item 4 is:
+
+> **Termination definitions.** Please define Good Reason in this addendum rather than leaving it to a possible later agreement, and give curable Cause events a definite cure period. Please also replace “crime involving moral turpitude” with an objective definition limited to conviction of, or a guilty/no-contest plea to, (A) a felony or (B) an offense whose statutory elements involve fraud, theft, embezzlement, bribery, intentional violence, sexual abuse or exploitation, or intentional dishonesty, provided in either case that the conduct has a material nexus to my duties or causes demonstrable material harm to the Company.
+
+That structure already excludes an arrest or pending charge because it requires a conviction or plea. It also avoids inviting a side discussion about hypothetical traffic or negligence offenses. If counsel wants belt-and-suspenders language in the executed addendum, the only extra sentence I would consider is: “An allegation, charge, or arrest without a resulting conviction or plea does not constitute Cause under this subsection.” I would not include the longer list.
+
+Verification: I compared the proposed Exhibit A against the local repository/site inventory, checked the exact Agreement §3.4 license, the addendum's Prior-IP and outside-activity provisions, and the current Cause clause, and reviewed the cited official Washington statute and court materials. No contract draft or Exhibit A source file was modified in this cycle; the existing `#haiven-paper` review item was expanded to capture these conclusions. Confidence is high on the factual omissions and drafting recommendations, and moderate on ultimate enforceability, which depends on the complete signed package and counsel's jurisdiction-specific review.
+<!-- agent:boundary:5d9c3445 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go priority -->
+- Is Exhibit A comprehensive + appropriate in scope? I don't see brookebrodack.net for example.
+- "Arrests, pending charges, civil violations, traffic infractions, and offenses based solely on negligence or strict liability should not constitute Cause.": Does this draw too much attention to the matter? I won't be committing these crimes of course. Could you tell me what negligence would mean?
 <!-- /agent:queue -->
 
 ## Backlog
@@ -966,7 +1024,7 @@ No email, Gmail draft, attachment upload, signature, or other external action wa
 ## Review
 
 <!-- agent:review -->
-- [/] [#haiven-paper] Haiven returned a company-signed July 28, 2026 v1.0 employment addendum. Do not sign it yet and do not send any correction, follow-up, attachment, or external message without Brian’s explicit instruction containing “send.” Obtain a clean re-signed PDF correcting the visibly malformed page-1 “Comp / Employee will attach / any” text. Attach tasks/professional/haiven/haiven-exhibit-a-proposed.pdf as part of one integrated document and obtain Haiven’s explicit acknowledgment of its Effect of Listing and priority terms. Resolve the 16,053-shares-versus-1.00%-denominator ambiguity and Board-nonapproval risk; obtain and review the equity plan, option form, handbook, vacation policy, health effective date, and tier contribution rates before signing. Add exact remittance dates and payment methods for both $10,000 signing-bonus installments; define Good Reason now; narrow moral-turpitude/cure language; clarify gross/net bonus repayment tax treatment; expressly protect ongoing general-purpose OSS/personal research and make future approvals timely, conflict-based, not unreasonably withheld, and not dependent on unanimous Board approval; clarify that reasonable separation does not require separate physical devices unless intended; confirm Connecticut semimonthly-pay waiver before payroll; and extend acceptance until after the complete corrected package arrives. Then complete final verification with counsel before signing.
+- [/] [#haiven-paper] Haiven returned a company-signed July 28, 2026 v1.0 employment addendum. Do not sign it yet and do not send any correction, follow-up, attachment, or external message without Brian’s explicit instruction containing “send.” Obtain a clean re-signed PDF correcting the visibly malformed page-1 “Comp / Employee will attach / any” text. Before attaching Exhibit A, revise tasks/professional/haiven/haiven-exhibit-a-proposed.md and its PDF to explicitly identify material third-party-facing sites and repository families—including brookebrodack.net / brookebrodack-dev and the other factually confirmed site candidates—with ownership-neutral third-party exclusions; add missing organization families lazily-hub, signal-space, and freehold-hub; decide on a dated confidential repository/site manifest; narrow future successor-project language; and separately obtain written outside-activity approval for any site that will be maintained during employment. Attach the revised Exhibit A as part of one integrated document and obtain Haiven’s explicit acknowledgment of its Effect of Listing and priority terms. Resolve the 16,053-shares-versus-1.00%-denominator ambiguity and Board-nonapproval risk; obtain and review the equity plan, option form, handbook, vacation policy, health effective date, and tier contribution rates before signing. Add exact remittance dates and payment methods for both $10,000 signing-bonus installments; define Good Reason now; narrow moral-turpitude/cure language using an objective conviction-or-plea, serious-offense, material-nexus standard without the extended arrests/traffic/negligence/strict-liability sentence; clarify gross/net bonus repayment tax treatment; expressly protect ongoing general-purpose OSS/personal research and make future approvals timely, conflict-based, not unreasonably withheld, and not dependent on unanimous Board approval; clarify that reasonable separation does not require separate physical devices unless intended; confirm Connecticut semimonthly-pay waiver before payroll; and extend acceptance until after the complete corrected package arrives. Then complete final verification with counsel before signing.
 <!-- /agent:review -->
 
 ## Icebox

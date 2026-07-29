@@ -1231,7 +1231,45 @@ The final draft:
 Verification through the live Gmail DOM confirmed subject `Re: Addendum to Offer Letter :)`, both intended recipients, the Exhibit A attachment, normal line breaks, every final wording change, and the absence of termination-definition language. The Send button remains present and was not activated. No email was sent.
 
 Changed paths: none. External change: one Gmail reply draft with one PDF attachment. Confidence is high.
-<!-- agent:boundary:05b74849 -->
+
+### Re: Whether to sign v1.0, strike-price wording, and signed Exhibit A — gpt-5
+
+**Do not sign the v1.0 PDF exactly as sent.** The substantive revisions are a major improvement, but the signature package still has two concrete defects:
+
+1. Page 1 visibly reads `Haiven, Inc. (“Comp`, then `Employee will attach`, then `any”)` instead of a clean `Haiven, Inc. (“Company”)` sentence with the Exhibit A language in Section 3.
+2. The addendum says Brian will attach a completed Exhibit A, but the company-signed PDF does not physically include it and Haiven has not completed the Exhibit A acknowledgment block.
+
+The shortest safe path is to ask Haiven for one clean, company-signed replacement package that attaches Brian's signed Exhibit A and has Haiven acknowledge it. If work starts July 30 rather than July 29, Haiven should also confirm the actual employment/service commencement date and whether July 29 remains effective for salary, signing-bonus timing, benefits, and vesting.
+
+#### Revisions worth distinguishing
+
+**Must fix before signature:**
+
+- regenerate the corrupted page 1;
+- attach the signed Exhibit A to the integrated package and have Haiven acknowledge it; and
+- reconcile the actual start date if onboarding moves to July 30.
+
+**Strongly preferable, but Brian can consciously accept the residual risk if speed matters:**
+
+- a remedy or protection if the Board does not approve the promised 16,053-share/1.00% grant; and
+- an express safe harbor for noncompensated personal, open-source, writing, speaking, portfolio, charitable, and educational activity that creates no material conflict or interference.
+
+Brian has already decided not to push the termination-definition revisions. The payroll-administration details, bonus payment mechanics, handbook/benefit materials, and current valuation disclosure can be handled as prompt follow-up items rather than holding up signature, provided Brian accepts that tradeoff and the signed package does not say they were already delivered when they were not.
+
+#### Expected strike price
+
+**Do not put a fixed expected strike price in the addendum before the grant date.** The current formula—exercise price equals fair market value on the actual grant date under the then-current 409A valuation—is the right contractual structure. A current 409A value, estimated per-share strike price, and estimated total exercise cost should be provided separately as a clearly nonbinding estimate. The final Board-approved option agreement should state the actual exercise price and valuation date.
+
+For an ISO, federal law requires the option price to be at least the stock's fair market value when the option is granted. Fixing today's estimate in the employment addendum could therefore become inaccurate before Board approval. [26 U.S.C. § 422(b)(4)](https://uscode.house.gov/view.xhtml?edition=prelim&num=0&req=%28title%3A26+section%3A422+edition%3Aprelim%29). IRS guidance likewise treats grant-date fair market value as the relevant strike-price benchmark. [IRS stock-option guidance](https://www.irs.gov/newsroom/us-taxation-of-stock-based-compensation-received-by-nonresident-aliens-youtube-video-text-script).
+
+#### Gmail attachment replacement
+
+The unsigned `haiven-exhibit-a-proposed.pdf` was removed from the Gmail reply and replaced with `haiven-exhibit-a-proposed-signed.pdf`. The email body now identifies it as Brian's signed proposed Exhibit A.
+
+Verification confirmed that the signed PDF is three-page, unencrypted US Letter; its final page contains Brian's signature and July 29, 2026 date, while Haiven's acknowledgment block remains blank. Live Gmail verification confirmed that the signed PDF is the **only** attachment, the reply remains addressed to Luke and Craig, the body is intact, and the Send button was not activated. No email was sent.
+
+Changed paths: none. External change: the attachment and one descriptive sentence in the unsent Gmail draft. Confidence is high on the document defects and strike-price structure; this is issue-spotting rather than legal advice, and final counsel review remains appropriate.
+<!-- agent:boundary:b308d30f -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -21,6 +21,7 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -37,6 +38,8 @@ private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
 private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
+private const val LOCAL_EDITOR_FLUSH_QUIET_MS = 16L
+private const val LOCAL_EDITOR_READ_RETRY_MS = 25L
 private const val STALE_BASELINE_RECOVERY_QUIET_MS = 150L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
 private const val ACK_RECOVERY_REREGISTER_MIN_INTERVAL_MS = 5_000L
@@ -264,6 +267,80 @@ internal fun replicaBaselineDecisionUtil(
 internal fun shouldForwardLocalDeltaUtil(replicaText: String?, shadowText: String): Boolean =
     replicaText == shadowText
 
+internal data class CoalescedLocalEdit(
+    val offsetCodePoints: Int,
+    val deleteCodePoints: Int,
+    val insert: String,
+    val resultingText: String,
+)
+
+/**
+ * Collapse any editor burst into one splice against the last actor-owned shadow.
+ *
+ * IntelliJ offsets are UTF-16 while yrs uses Unicode scalar positions. Common
+ * prefix/suffix boundaries are therefore moved away from surrogate interiors
+ * before converting the offset and deletion length to code points.
+ */
+internal fun coalescedLocalEditUtil(
+    before: String,
+    after: String,
+): CoalescedLocalEdit? {
+    if (before == after) return null
+    val commonLimit = minOf(before.length, after.length)
+    var prefix = 0
+    while (prefix < commonLimit && before[prefix] == after[prefix]) {
+        prefix += 1
+    }
+    if (
+        prefix > 0 &&
+        prefix < before.length &&
+        prefix < after.length &&
+        Character.isHighSurrogate(before[prefix - 1]) &&
+        Character.isLowSurrogate(before[prefix])
+    ) {
+        prefix -= 1
+    }
+
+    var suffix = 0
+    while (
+        suffix < before.length - prefix &&
+        suffix < after.length - prefix &&
+        before[before.length - 1 - suffix] == after[after.length - 1 - suffix]
+    ) {
+        suffix += 1
+    }
+    var beforeEnd = before.length - suffix
+    var afterEnd = after.length - suffix
+    if (
+        suffix > 0 &&
+        (
+            (
+                beforeEnd > prefix &&
+                    beforeEnd < before.length &&
+                    Character.isHighSurrogate(before[beforeEnd - 1]) &&
+                    Character.isLowSurrogate(before[beforeEnd])
+                ) ||
+                (
+                    afterEnd > prefix &&
+                        afterEnd < after.length &&
+                        Character.isHighSurrogate(after[afterEnd - 1]) &&
+                        Character.isLowSurrogate(after[afterEnd])
+                    )
+            )
+    ) {
+        suffix -= 1
+        beforeEnd = before.length - suffix
+        afterEnd = after.length - suffix
+    }
+
+    return CoalescedLocalEdit(
+        offsetCodePoints = before.codePointCount(0, prefix),
+        deleteCodePoints = before.codePointCount(prefix, beforeEnd),
+        insert = after.substring(prefix, afterEnd),
+        resultingText = after,
+    )
+}
+
 internal fun pullDeliveryRequestsReplicaRefreshUtil(delivery: ReplicaPullDelivery): Boolean =
     delivery is ReplicaPullDelivery.Unavailable
 
@@ -328,6 +405,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val shadows = ConcurrentHashMap<String, String>()
     private val applyingRemote = ConcurrentHashMap.newKeySet<String>()
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
+    private val localEditorFlushVersions = ConcurrentHashMap<String, AtomicLong>()
+    private val localEditorFlushTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
+    private val localEditorFlushPendingPaths = ConcurrentHashMap.newKeySet<String>()
     private val drainQueued = AtomicBoolean(false)
     private val drainAllRequested = AtomicBoolean(false)
     private val drainRequestedPaths = ConcurrentHashMap.newKeySet<String>()
@@ -367,6 +447,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         disposed.set(true)
         executor.shutdownNow()
         documentWorkers.shutdownNow()
+        localEditorFlushTasks.clear()
+        localEditorFlushVersions.clear()
+        localEditorFlushPendingPaths.clear()
+        pendingLocalEdits.clear()
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
         pendingRemoteAckReplays.clear()
@@ -463,26 +547,96 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 seedAndAttachFromDocument(filePath, event.document)
                 return
             }
-            markLocalPending(filePath)
-            documentWorkers.forDocument(filePath).execute {
-                val workerStarted = System.nanoTime()
-                try {
-                    forwardLocalDeltaFromShadow(
-                        filePath,
-                        event.document,
-                        event.offset,
-                        oldFragment,
-                        newFragment,
-                        projectionEpoch,
-                    )
-                } finally {
-                    clearLocalPending(filePath)
-                    logSlow("local-delta-worker", filePath, workerStarted, details = "old_chars=${oldFragment.length} new_chars=${newFragment.length}")
-                    requestRemoteDrain(filePath, "local-delta")
-                }
-            }
+            scheduleLocalEditorFlush(filePath, event.document, projectionEpoch)
         } finally {
             loggedFilePath?.let { logSlow("documentChanged-listener", it, started, warnMs = CRDT_LISTENER_WARN_MS) }
+        }
+    }
+
+    /**
+     * Keep at most one running and one latest queued editor flush per document.
+     *
+     * A native/controller round trip can be slower than typing. Enqueuing every
+     * DocumentEvent then makes a one-second operation repeat once per character.
+     * The retained version owns one pending-local fence for the whole burst; a
+     * superseded task never clears that fence out from under its successor.
+     */
+    private fun scheduleLocalEditorFlush(
+        filePath: String,
+        document: Document,
+        projectionEpoch: Long,
+        retryVersion: Long? = null,
+    ) {
+        val versionCounter =
+            localEditorFlushVersions.computeIfAbsent(filePath) { AtomicLong(0L) }
+        val version = retryVersion ?: versionCounter.incrementAndGet()
+        if (retryVersion == null && localEditorFlushPendingPaths.add(filePath)) {
+            markLocalPending(filePath)
+        }
+        val delayMs =
+            if (retryVersion == null) LOCAL_EDITOR_FLUSH_QUIET_MS else LOCAL_EDITOR_READ_RETRY_MS
+        lateinit var scheduled: ScheduledFuture<*>
+        try {
+            scheduled =
+                documentWorkers.forDocument(filePath).schedule(
+                    Runnable {
+                        if (disposed.get() || versionCounter.get() != version) {
+                            return@Runnable
+                        }
+                        val workerStarted = System.nanoTime()
+                        var retryRead = false
+                        try {
+                            retryRead =
+                                !forwardLocalDeltaFromShadow(
+                                    filePath,
+                                    document,
+                                    projectionEpoch,
+                                )
+                        } catch (error: Exception) {
+                            log.warn(
+                                "[crdt-replica] coalesced local editor flush failed for $filePath: ${error.message}",
+                                error,
+                            )
+                        } finally {
+                            if (versionCounter.get() == version) {
+                                if (retryRead && !disposed.get()) {
+                                    scheduleLocalEditorFlush(
+                                        filePath,
+                                        document,
+                                        projectionEpoch,
+                                        retryVersion = version,
+                                    )
+                                } else {
+                                    localEditorFlushTasks.remove(filePath, scheduled)
+                                    localEditorFlushVersions.remove(filePath, versionCounter)
+                                    if (localEditorFlushPendingPaths.remove(filePath)) {
+                                        clearLocalPending(filePath)
+                                    }
+                                    logSlow(
+                                        "local-delta-worker",
+                                        filePath,
+                                        workerStarted,
+                                        details = "coalesced=true",
+                                    )
+                                    requestRemoteDrain(filePath, "local-delta")
+                                }
+                            }
+                        }
+                    },
+                    delayMs,
+                    TimeUnit.MILLISECONDS,
+                )
+            localEditorFlushTasks.put(filePath, scheduled)?.cancel(false)
+        } catch (error: RejectedExecutionException) {
+            if (versionCounter.get() == version) {
+                localEditorFlushVersions.remove(filePath, versionCounter)
+                if (localEditorFlushPendingPaths.remove(filePath)) {
+                    clearLocalPending(filePath)
+                }
+            }
+            if (!disposed.get()) {
+                log.warn("[crdt-replica] local editor flush scheduling rejected for $filePath", error)
+            }
         }
     }
 
@@ -563,12 +717,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 (forwarder != null).also { attached ->
                     if (attached) {
                         shadows[filePath] = registrationText
-                        // Registration is the editor-side boundary. Retained-response
-                        // replay remains controller-owned and arrives through ordinary
-                        // CRDT delivery; reconstructing it synchronously through JNA
-                        // let one unrelated large document wedge the shared native
-                        // generation and disable every editor endpoint.
-                        NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
+                        // Queue retained semantic replay behind this registration task.
+                        // In await mode the caller can therefore observe registration
+                        // before any native reconstruction or EDT mutation begins.
+                        scheduleDeferredWriteReplayAfterRegistration(
+                            filePath,
+                            document,
+                            registrationText,
+                            forwarder!!,
+                        )
                         requestRemoteDrain(filePath, "open-document")
                     }
                 }
@@ -592,6 +749,136 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
         }
         documentWorkers.forDocument(filePath).execute { attach() }
+        return true
+    }
+
+    private fun scheduleDeferredWriteReplayAfterRegistration(
+        filePath: String,
+        document: Document,
+        registrationText: String,
+        forwarder: CrdtReplicaForwarder,
+    ) {
+        try {
+            documentWorkers.forDocument(filePath).execute {
+                if (disposed.get() || forwarders[filePath] !== forwarder) {
+                    return@execute
+                }
+                replayDeferredWriteAfterRegistration(
+                    filePath,
+                    document,
+                    registrationText,
+                    forwarder,
+                )
+                requestRemoteDrain(filePath, "post-register-replay")
+            }
+        } catch (error: RejectedExecutionException) {
+            if (!disposed.get()) {
+                log.warn(
+                    "[crdt-replica] deferred write replay scheduling rejected for $filePath",
+                    error,
+                )
+            }
+        }
+    }
+
+    private fun replayDeferredWriteAfterRegistration(
+        filePath: String,
+        document: Document,
+        registrationText: String,
+        forwarder: CrdtReplicaForwarder,
+    ): Boolean {
+        if (
+            forwarders[filePath] !== forwarder ||
+            hasPendingLocal(filePath) ||
+            tryReadDocumentText(document) != registrationText
+        ) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-replica-raced")
+            return false
+        }
+        val recovered =
+            NativePatching.deferredWritePostRegisterContent(filePath, registrationText)
+                ?: run {
+                    NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
+                    return true
+                }
+        if (recovered == registrationText) {
+            NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
+            return true
+        }
+        if (
+            templateStructureState(filePath, recovered, "post-register-replay") !=
+            TemplateStructureProjectionState.Exact
+        ) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-structure")
+            return false
+        }
+        if (forwarders[filePath] !== forwarder || hasPendingLocal(filePath)) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-replica-raced")
+            return false
+        }
+        if (!prepareNonOperatorEditorMutationOnWorker(filePath)) {
+            log.warn("[crdt-replica] post-register replay retained because native op-capture fencing failed for $filePath")
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-op-epoch")
+            return false
+        }
+
+        var applied = false
+        var persisted = false
+        ApplicationManager.getApplication().invokeAndWait {
+            if (
+                forwarders[filePath] !== forwarder ||
+                hasPendingLocal(filePath) ||
+                document.text != registrationText
+            ) {
+                return@invokeAndWait
+            }
+            if (
+                !remoteCrdtDiskCanPersistUtil(
+                    registrationText,
+                    recovered,
+                    readRawDiskText(filePath),
+                )
+            ) {
+                log.warn(
+                    "[crdt-replica] post-register replay retained because disk contains novel external text for $filePath; " +
+                        "editor_hash=${contentHash(registrationText)} recovered_hash=${contentHash(recovered)}",
+                )
+                return@invokeAndWait
+            }
+            advanceNonOperatorMutationEpoch(filePath)
+            applyingRemote.add(filePath)
+            try {
+                runUndoableRemoteUpdateCommand(document) {
+                    applyMinimalDocumentEditUtil(document, registrationText, recovered)
+                }
+                shadows[filePath] = recovered
+                applied = true
+                persisted =
+                    persistRemoteCrdtTextIfSafe(
+                        filePath,
+                        document,
+                        registrationText,
+                        recovered,
+                    )
+            } finally {
+                applyingRemote.remove(filePath)
+            }
+        }
+        if (!applied) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-editor-raced")
+            return false
+        }
+
+        // The editor mutation was suppressed from the ordinary document
+        // listener above, so publish this validated semantic replay explicitly.
+        forwarder.ensureEditorText(recovered)
+        if (persisted) {
+            NativePatching.deferredWriteReconnectPropagated(filePath, recovered)
+        }
+        log.info(
+            "[crdt-replica] replayed deferred write after exact editor registration for $filePath; " +
+                "before_hash=${contentHash(registrationText)} recovered_hash=${contentHash(recovered)} persisted=$persisted",
+        )
         return true
     }
 
@@ -629,31 +916,24 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun forwardLocalDeltaFromShadow(
         filePath: String,
         document: Document,
-        eventOffset: Int,
-        oldFragment: String,
-        newFragment: String,
         projectionEpoch: Long,
-    ) {
+    ): Boolean {
         val started = System.nanoTime()
         if (projectionEpoch != nonOperatorMutationEpoch(filePath)) {
             log.debug(
                 "[crdt-replica] dropped stale operator event for $filePath after a newer CP projection",
             )
             requestRemoteDrain(filePath, "stale-operator-event-fenced")
-            return
+            return true
         }
+        val editorText = tryReadDocumentText(document) ?: return false
         val beforeText = shadows[filePath] ?: run {
-            seedAndAttachFromDocument(filePath, document)
-            return
+            shadows[filePath] = editorText
+            forwarderFor(filePath, editorText)
+            return true
         }
-        val nextText = applyEventToShadow(beforeText, eventOffset, oldFragment, newFragment) ?: run {
-            shadows.remove(filePath)
-            seedAndAttachFromDocument(filePath, document)
-            return
-        }
-        shadows[filePath] = nextText
-        val offset = codePointOffset(beforeText, eventOffset)
-        val deleteLen = oldFragment.codePointCount(0, oldFragment.length)
+        val edit = coalescedLocalEditUtil(beforeText, editorText) ?: return true
+        shadows[filePath] = editorText
         val forwarder = forwarderFor(filePath, beforeText)
         if (forwarder != null) {
             if (staleBaselineRecoveryTasks.containsKey(filePath)) {
@@ -662,10 +942,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val replicaText = forwarder.replicaText()
                 if (shouldForwardLocalDeltaUtil(replicaText, beforeText)) {
                     forwarder.forwardLocalDelta(
-                        offset = offset,
-                        deleteLen = deleteLen,
-                        insert = newFragment,
-                        resultingText = nextText,
+                        offset = edit.offsetCodePoints,
+                        deleteLen = edit.deleteCodePoints,
+                        insert = edit.insert,
+                        resultingText = edit.resultingText,
                     )
                 } else {
                     log.warn(
@@ -682,8 +962,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             "forward-local-delta",
             filePath,
             started,
-            details = "offset_utf16=$eventOffset offset_cp=$offset delete_cp=$deleteLen insert_chars=${newFragment.length}",
+            details =
+                "coalesced=true before_chars=${beforeText.length} after_chars=${editorText.length} " +
+                    "offset_cp=${edit.offsetCodePoints} delete_cp=${edit.deleteCodePoints} " +
+                    "insert_chars=${edit.insert.length}",
         )
+        return true
     }
 
     /**
@@ -2006,28 +2290,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             dir = dir.parentFile
         }
         return project.basePath?.takeIf { File(it, ".agent-doc").isDirectory }
-    }
-
-    private fun codePointOffset(text: String, utf16Offset: Int): Int {
-        val bounded = utf16Offset.coerceIn(0, text.length)
-        return text.codePointCount(0, bounded)
-    }
-
-    private fun applyEventToShadow(
-        oldText: String,
-        offset: Int,
-        oldFragment: String,
-        newFragment: String,
-    ): String? {
-        val bounded = offset.coerceIn(0, oldText.length)
-        val oldEnd = bounded + oldFragment.length
-        if (oldEnd > oldText.length) return null
-        if (oldFragment.isNotEmpty() && oldText.substring(bounded, oldEnd) != oldFragment) {
-            return null
-        }
-        return oldText.substring(0, bounded) +
-            newFragment +
-            oldText.substring(oldEnd)
     }
 
     private fun logSlow(

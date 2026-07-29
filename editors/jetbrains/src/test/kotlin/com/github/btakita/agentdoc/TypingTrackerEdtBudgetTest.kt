@@ -388,8 +388,8 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("private fun scheduleRemoteEditorApply")
 
         assertTrue(
-            "CRDT documentChanged should enqueue local CRDT forwarding onto its document worker",
-            listenerBody.contains("documentWorkers.forDocument(filePath).execute"),
+            "CRDT documentChanged should debounce local CRDT forwarding without retaining every keystroke",
+            listenerBody.contains("scheduleLocalEditorFlush(filePath, event.document, projectionEpoch)"),
         )
         assertTrue(
             "CRDT documentChanged should defer full-buffer seeding to a background worker",
@@ -425,7 +425,7 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
         val forceRefreshAttachBody = source.substringAfter("fun ensureOpenDocumentReplica(")
-            .substringBefore("private fun publishClosingDocumentCut(")
+            .substringBefore("private fun scheduleDeferredWriteReplayAfterRegistration(")
         assertFalse(
             "forced refresh must not replace the visible editor from a retained whole-document target",
             forceRefreshAttachBody.contains("deferredWriteReconnectContent(") ||
@@ -435,11 +435,20 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "forced refresh must register from the exact editor cut and fence a raced swap",
             forceRefreshAttachBody.contains("val registrationText = text") &&
-                forceRefreshAttachBody.contains("deferredWriteReconnectPropagated(filePath, registrationText)") &&
+                forceRefreshAttachBody.contains("scheduleDeferredWriteReplayAfterRegistration(") &&
                 forceRefreshAttachBody.contains("replaceCached = forceRefresh") &&
                 source.contains("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
                 source.contains("forwarder.deregister()") &&
                 source.contains("return null"),
+        )
+        val localFlushBody = source.substringAfter("private fun scheduleLocalEditorFlush(")
+            .substringBefore("private fun seedAndAttachFromDocument(")
+        assertTrue(
+            "typing bursts must retain one pending-local fence and cancel the superseded queued flush",
+            localFlushBody.contains("localEditorFlushPendingPaths.add(filePath)") &&
+                localFlushBody.contains("LOCAL_EDITOR_FLUSH_QUIET_MS") &&
+                localFlushBody.contains("LOCAL_EDITOR_READ_RETRY_MS") &&
+                localFlushBody.contains("localEditorFlushTasks.put(filePath, scheduled)?.cancel(false)"),
         )
         assertTrue(
             "every non-operator editor projection must close the prior native op-capture epoch on a worker before EDT dispatch",
@@ -480,7 +489,9 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("private fun requestRemoteDrain(")
         assertTrue(
             "a local editor delta must verify the native shadow frontier or coalesce exact-editor adoption",
-            localDeltaBody.contains("shouldForwardLocalDeltaUtil(replicaText, beforeText)") &&
+            localDeltaBody.contains("tryReadDocumentText(document)") &&
+                localDeltaBody.contains("coalescedLocalEditUtil(beforeText, editorText)") &&
+                localDeltaBody.contains("shouldForwardLocalDeltaUtil(replicaText, beforeText)") &&
                 localDeltaBody.contains("staleBaselineRecoveryTasks.containsKey(filePath)") &&
                 localDeltaBody.contains("scheduleStaleBaselineRecovery(filePath, document)") &&
                 source.contains("reason = \"coalesced-local-delta-baseline-diverged\""),
@@ -495,7 +506,7 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "the serialized local delta must install its exact resulting shadow in the forwarder projection",
-            localDeltaBody.contains("resultingText = nextText"),
+            localDeltaBody.contains("resultingText = edit.resultingText"),
         )
         assertTrue(
             "forced refresh must register and atomically swap before retiring the cached client",

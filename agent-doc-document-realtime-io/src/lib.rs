@@ -2662,8 +2662,8 @@ pub fn apply_canonical_replace_if_attached(
                             // A controller handoff can overlap the editor's application of
                             // the valid CP target. A replacement replica may then publish
                             // one transient, structurally incomplete buffer generation
-                            // (observed on equityfundingsource.md as an exchange close
-                            // without its open marker). That cut is not a new target and
+                            // (observed as an exchange close without its open marker).
+                            // That cut is not a new target and
                             // must never be fed through the semantic rebase below: doing so
                             // mislabels the malformed editor generation as a malformed
                             // compact target even though the exact valid target is already

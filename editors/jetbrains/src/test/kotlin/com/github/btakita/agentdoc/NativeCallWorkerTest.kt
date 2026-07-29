@@ -93,9 +93,9 @@ class NativeCallWorkerTest {
                 timeoutMs = 500L,
                 onRunningTimeout = { error("unrelated native call was head-of-line blocked") },
             ) {
-                "monsterrodholders-ready"
+                "independent-ready"
             }
-            assertEquals("monsterrodholders-ready", value)
+            assertEquals("independent-ready", value)
             assertFalse(firstFinished.await(25, TimeUnit.MILLISECONDS))
 
             releaseFirst.countDown()

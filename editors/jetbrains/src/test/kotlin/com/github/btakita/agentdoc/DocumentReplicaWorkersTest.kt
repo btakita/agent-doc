@@ -17,28 +17,28 @@ class DocumentReplicaWorkersTest {
         val firstDocumentOrder = CopyOnWriteArrayList<Int>()
 
         try {
-            workers.forDocument("/project/haiven.md").execute {
+            workers.forDocument("/project/large.md").execute {
                 firstDocumentOrder += 1
                 firstStarted.countDown()
                 assertTrue(releaseFirst.await(2, TimeUnit.SECONDS))
             }
-            workers.forDocument("/project/haiven.md").execute {
+            workers.forDocument("/project/large.md").execute {
                 firstDocumentOrder += 2
             }
 
             assertTrue(firstStarted.await(1, TimeUnit.SECONDS))
-            workers.forDocument("/project/monsterrodholders.md").execute {
+            workers.forDocument("/project/independent.md").execute {
                 secondDocumentFinished.countDown()
             }
 
             assertTrue(
-                "an unrelated document lane must run while haiven is blocked",
+                "an unrelated document lane must run while the large document is blocked",
                 secondDocumentFinished.await(1, TimeUnit.SECONDS),
             )
             assertEquals(listOf(1), firstDocumentOrder.toList())
 
             releaseFirst.countDown()
-            workers.forDocument("/project/haiven.md").submit<Unit> {}.get(1, TimeUnit.SECONDS)
+            workers.forDocument("/project/large.md").submit<Unit> {}.get(1, TimeUnit.SECONDS)
             assertEquals(listOf(1, 2), firstDocumentOrder.toList())
             assertEquals(2, workers.laneCount())
         } finally {

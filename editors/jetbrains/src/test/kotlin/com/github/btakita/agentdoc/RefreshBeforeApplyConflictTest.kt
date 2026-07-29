@@ -114,7 +114,7 @@ class RefreshBeforeApplyConflictTest {
         assertFalse(ensureOpenReplica.contains("applyMinimalDocumentEditUtil("))
         assertFalse(ensureOpenReplica.contains("persistRemoteCrdtTextIfSafe("))
         assertTrue(ensureOpenReplica.contains("registrationText = text"))
-        assertTrue(ensureOpenReplica.contains("deferredWriteReconnectPropagated(filePath, registrationText)"))
+        assertTrue(ensureOpenReplica.contains("scheduleDeferredWriteReplayAfterRegistration("))
         assertTrue(ensureOpenReplica.contains("replaceCached = forceRefresh"))
         assertTrue(ensureOpenReplica.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null"))
         val forwarderFor = functionBody(crdtReplica, "private fun forwarderFor(")
@@ -124,14 +124,14 @@ class RefreshBeforeApplyConflictTest {
                 forwarderFor.indexOf("forwarder.ensureEditorText(initialEditorText)"),
         )
         assertTrue(
-            "controller-owned replay notification must follow exact editor registration",
+            "deferred replay scheduling must follow exact editor registration",
             ensureOpenReplica.indexOf("val forwarder = forwarderFor(") <
-                ensureOpenReplica.indexOf("deferredWriteReconnectPropagated(filePath, registrationText)"),
+                ensureOpenReplica.indexOf("scheduleDeferredWriteReplayAfterRegistration("),
         )
     }
 
     @Test
-    fun `forced reconnect leaves retained intent replay controller-owned`() {
+    fun `forced reconnect queues retained intent replay behind registration`() {
         val crdtReplicaPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
@@ -141,17 +141,39 @@ class RefreshBeforeApplyConflictTest {
             crdtReplica,
             "fun ensureOpenDocumentReplica(",
         )
+        val scheduleReplay = functionBody(
+            crdtReplica,
+            "private fun scheduleDeferredWriteReplayAfterRegistration(",
+        )
+        val replay = functionBody(
+            crdtReplica,
+            "private fun replayDeferredWriteAfterRegistration(",
+        )
 
-        assertFalse(crdtReplica.contains("private fun replayDeferredWriteAfterRegistration("))
         assertFalse(ensureOpenReplica.contains("deferredWritePostRegisterContent("))
         assertFalse(ensureOpenReplica.contains("applyMinimalDocumentEditUtil("))
         assertFalse(ensureOpenReplica.contains("persistRemoteCrdtTextIfSafe("))
         assertTrue(
-            "retained replay must remain downstream of registration and flow through CRDT delivery",
+            "retained replay must be scheduled downstream of registration before ordinary delivery drains",
             ensureOpenReplica.indexOf("val forwarder = forwarderFor(") <
-                ensureOpenReplica.indexOf("deferredWriteReconnectPropagated(filePath, registrationText)") &&
-                ensureOpenReplica.indexOf("deferredWriteReconnectPropagated(filePath, registrationText)") <
+                ensureOpenReplica.indexOf("scheduleDeferredWriteReplayAfterRegistration(") &&
+                ensureOpenReplica.indexOf("scheduleDeferredWriteReplayAfterRegistration(") <
                 ensureOpenReplica.indexOf("requestRemoteDrain(filePath, \"open-document\")"),
+        )
+        assertTrue(
+            "replay must run as a second task on the same per-document lane",
+            scheduleReplay.contains("documentWorkers.forDocument(filePath).execute") &&
+                scheduleReplay.contains("replayDeferredWriteAfterRegistration("),
+        )
+        assertTrue(
+            "the queued replay must reconstruct only after exact editor and local-edit fences",
+            replay.indexOf("tryReadDocumentText(document) != registrationText") <
+                replay.indexOf("NativePatching.deferredWritePostRegisterContent") &&
+                replay.contains("templateStructureState(filePath, recovered, \"post-register-replay\")") &&
+                replay.contains("prepareNonOperatorEditorMutationOnWorker(filePath)") &&
+                replay.contains("applyMinimalDocumentEditUtil(document, registrationText, recovered)") &&
+                replay.contains("persistRemoteCrdtTextIfSafe(") &&
+                replay.contains("forwarder.ensureEditorText(recovered)"),
         )
     }
 

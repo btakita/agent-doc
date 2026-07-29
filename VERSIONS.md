@@ -4,6 +4,25 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.78
+
+_JetBrains plugin 0.2.318; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **JetBrains typing now coalesces editor bursts before crossing the CRDT
+  transport.** The document listener retains one pending-local fence and at
+  most one latest queued flush, then computes a single Unicode-safe splice
+  against the last actor-owned shadow. Slow native or controller operations can
+  no longer multiply once per typed character and backlog the IDE.
+- **Retained response replay resumes after editor registration without blocking
+  registration itself.** Replay is queued as a second task on the same
+  per-document lane, rechecks the exact live buffer and pending-local fences,
+  and only then reconstructs and applies the retained semantic edit. This lets
+  editor-owned recovery converge while keeping disk subordinate to the buffer.
+- **Passive stash reconciliation no longer changes the selected session inside
+  the stash window.** The bundled tmux-router dependency is updated to 0.3.17,
+  which restores the destination window's internal pane selection after a
+  detached stash move without activating that window.
+
 ## 0.35.77
 
 _JetBrains plugin 0.2.317; VS Code extension 0.2.62; Zed extension 0.1.0._
@@ -125,8 +144,8 @@ _JetBrains plugin 0.2.312; VS Code extension 0.2.62; Zed extension 0.1.0._
 - **Document replicas no longer share one blocking execution lane.** JetBrains
   runs attach, normalization, local edits, delivery, and ACK work on one lazy
   FIFO worker per document; the native generation uses a bounded owned worker
-  pool, and Rust locks each CRDT replica independently. A large `haiven.md`
-  startup attach therefore cannot block `monsterrodholders.md` registration or
+  pool, and Rust locks each CRDT replica independently. A large document's
+  startup attach therefore cannot block another document's registration or
   reliable-sync liveness for every other open document.
 - **Native call watchdogs distinguish queue delay from a wedged invocation.** A
   call that times out before starting is cancelled while the generation stays
@@ -148,8 +167,8 @@ _JetBrains plugin 0.2.311; VS Code extension 0.2.62; Zed extension 0.1.0._
   workspace sync asks a nested project controller to resume a missing actor and
   carries its controller-proven pane binding only as ephemeral tmux-router
   input. The router prefers that binding over visible spare geometry, so
-  `src/boost-client/tasks/monsterrodholders.md` brings its real supervisor pane
-  out of stash instead of aliasing an unrelated pane while reporting success.
+  a nested document brings its real supervisor pane out of stash instead of
+  aliasing an unrelated pane while reporting success.
 
 ## 0.35.68
 

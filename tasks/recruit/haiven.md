@@ -776,7 +776,40 @@ I created [haiven-addendum-response-draft.md](../professional/haiven/haiven-adde
 Verification: `git diff --check` passed for the new draft; Chromium confirmed the intended thread and attachment; the three PDF hashes match; and every rendered PDF page was visually inspected. Confidence is high on the document defect and option-pricing distinction. Contract enforceability, tax treatment, and final redline language remain appropriate subjects for employment/startup counsel.
 
 No email, attachment, signature, or other external message was sent. We can modify the local draft together before any further action.
-<!-- agent:boundary:2c0dfe7b -->
+Remove separation of "time". Would the agent-loop super-repo be a violation of separation of respositories or are git submodules ok?
+
+### Re: Separation language and the agent-loop super-repo — gpt-5
+
+I removed **“time”** from the separation language in the local email draft.
+
+A Git submodule is a genuinely separate repository with its own history. The superproject normally records a `gitlink`—the submodule path and expected commit—plus the `.gitmodules` metadata; it does not absorb the submodule’s source blobs into the parent repository. That is the repository boundary Git itself documents. [Git submodule documentation](https://git-scm.com/docs/gitsubmodules)
+
+So, **the `agent-loop` arrangement is not automatically a violation merely because a Haiven repository is mounted as a submodule.** But I would not assume the current contract language makes it safe. “Strict logical and physical separation” is undefined, and a submodule protects Git history/storage boundaries—not every surrounding tool or data path.
+
+There is a concrete issue in the present workspace:
+
+- `.gitmodules` registers `src/haiven-websocket-hub` as its own repository, which is helpful;
+- the root `tsift status` nevertheless lists `haiven-websocket-hub` as a searchable superproject scope; therefore root-level indexing can ingest Haiven symbols alongside unrelated client and personal repositories.
+
+The same concern applies to superproject-wide AI context, search databases, caches, logs, backups, credentials, build artifacts, patches, and copied files. If any of those contain Haiven source code, Confidential Information, or work product outside the dedicated repository boundary, the submodule alone does not provide meaningful separation.
+
+My practical recommendation is:
+
+1. Keep Haiven code in a dedicated private Git repository; a submodule can provide that Git boundary.
+2. Let the parent store only ordinary submodule metadata and the commit pointer—no Haiven source blobs, patches, generated artifacts, credentials, or confidential documentation.
+3. Exclude the Haiven repository from root-wide `tsift`/AI indexes and shared caches, or use an isolated Haiven checkout, index, and agent context.
+4. Keep Haiven remotes, tokens/SSH identities, logs, and build outputs scoped separately.
+5. Do not copy or import Haiven code into outside-work repositories or vice versa.
+6. Obtain Haiven’s written confirmation that this metadata-only submodule arrangement satisfies the agreement. If they will not give that confirmation, use a separate top-level checkout outside `agent-loop`.
+
+I updated [haiven-addendum-response-draft.md](../professional/haiven/haiven-addendum-response-draft.md) to request this safe harbor:
+
+> “Logical and physical separation” means reasonable separation of confidential information, accounts, credentials, repositories, work product, and access controls, and does not require separate physical devices unless specifically agreed. Separate Git repositories—including repositories referenced solely as Git submodules of an employee-controlled superproject—should satisfy the repository-separation requirement, provided the superproject stores only ordinary submodule metadata and commit pointers and does not store or expose Haiven source code, credentials, Confidential Information, or work product outside the dedicated Haiven repository.
+
+Changed path: `tasks/professional/haiven/haiven-addendum-response-draft.md`. Verification: the old “separation of time” phrase is absent, the submodule safe-harbor language is present, and `git diff --check` passes. Confidence is high on the Git mechanics and the current cross-indexing observation; confidence is necessarily lower on how Haiven or a court would interpret the undefined contract phrase, so written confirmation and counsel review remain the right escalation.
+
+No email, Gmail draft, attachment, or other external action was created or sent.
+<!-- agent:boundary:51748bdf -->
 <!-- /agent:exchange -->
 
 ## Queue

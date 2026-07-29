@@ -809,12 +809,28 @@ I updated [haiven-addendum-response-draft.md](../professional/haiven/haiven-adde
 Changed path: `tasks/professional/haiven/haiven-addendum-response-draft.md`. Verification: the old “separation of time” phrase is absent, the submodule safe-harbor language is present, and `git diff --check` passes. Confidence is high on the Git mechanics and the current cross-indexing observation; confidence is necessarily lower on how Haiven or a court would interpret the undefined contract phrase, so written confirmation and counsel review remain the right escalation.
 
 No email, Gmail draft, attachment, or other external action was created or sent.
-<!-- agent:boundary:51748bdf -->
+
+
+### Re: Exhibit A location — gpt-5
+
+> **Queue prompt:** Where is the Exhibit A?
+
+The completed Exhibit A is here:
+
+- [haiven-exhibit-a-proposed.pdf](../professional/haiven/haiven-exhibit-a-proposed.pdf) — the review/attachment-ready PDF
+- [haiven-exhibit-a-proposed.md](../professional/haiven/haiven-exhibit-a-proposed.md) — the editable source
+- [haiven-exhibit-a.css](../professional/haiven/haiven-exhibit-a.css) — its print styling
+
+It is **not attached to the company-signed `Employment Addendum - Brian Takita v1.0.pdf`**. The original At-Will Employee and Contractor Agreement contains Haiven’s blank Exhibit A form on PDF page 5; our completed Exhibit A is currently a separate proposed attachment. Before signing, it should be incorporated into the final combined agreement/addendum and expressly acknowledged by Haiven, as already tracked in `#haiven-paper`.
+
+No email, attachment, signature, or other external action was taken.
+<!-- agent:boundary:4fd96d53 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- ~~Where is the Exhibit A?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

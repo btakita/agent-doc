@@ -1,5 +1,5 @@
 @page {
-  size: letter landscape;
+size: letter portrait;
   margin: 0.52in 0.58in 0.58in;
 
   @bottom-left {

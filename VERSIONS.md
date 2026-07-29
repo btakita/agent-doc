@@ -4,6 +4,26 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.91
+
+_JetBrains plugin 0.2.321; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Commit-required `--done` no longer leaves a checked backlog row for a
+  second maintenance cycle.** Completion, reap, done archival, and top-backlog
+  status reconciliation now form one editor-authoritative document target. The
+  resulting target refreshes the response snapshot before commit, so both
+  pending-only recovery and ordinary response closeout place the reap in
+  `HEAD`.
+- **Pending-only recovery participates in the reactive queue lifecycle.** A
+  late `write --commit --backlog-only --done <id>` consumes the matching active
+  queue head through the normal proof path and records `QueueHeadCompleted`.
+  Completed is terminal within the hosting epoch, so delayed text projection or
+  a stale selection observation cannot reactivate an already-answered item.
+- **Recovery and SimWorld regressions cover the churn class.** Tests model an
+  already-committed response with a late done mutation, prove no additional
+  preflight/repair cycle is needed, verify the queue completion fact, and reject
+  late re-selection deterministically.
+
 ## 0.35.90
 
 _JetBrains plugin 0.2.321; VS Code extension 0.2.62; Zed extension 0.1.0._

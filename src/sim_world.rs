@@ -11599,6 +11599,30 @@ mod hosting_sim {
     }
 
     #[test]
+    fn completed_queue_lifecycle_rejects_late_selection_reactivation() {
+        // A late Markdown/poller observation may rediscover the old queue row
+        // after the semantic closeout completed. The reactive lifecycle is
+        // authoritative: Completed is terminal within the hosting epoch, so
+        // the delayed Selected fact cannot make the item active again.
+        let mut world = HostingSimWorld::new("%19:neutral-session");
+        world.host("neutral-document");
+        world.select_head("neutral-document", "tracked-head");
+        world.complete_head("neutral-document", "tracked-head");
+
+        world.select_head("neutral-document", "tracked-head");
+
+        assert_eq!(
+            world.completed_heads("neutral-document"),
+            vec!["tracked-head"]
+        );
+        assert_eq!(
+            world.active_head("neutral-document"),
+            None,
+            "late textual projection must not reactivate a completed queue item"
+        );
+    }
+
+    #[test]
     fn deterministic_replay_is_stable_across_runs() {
         // SimWorld determinism: the same scenario yields byte-identical projection
         // JSON on every run (no live tmux, no wall-clock, no RNG dependence).

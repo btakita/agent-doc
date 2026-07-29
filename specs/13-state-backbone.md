@@ -325,6 +325,12 @@ Implemented local FSMs:
 | `RouteSubmitMachine` | route | idle, in-flight, and bounded blocked submit windows |
 | `ProofGateMachine` | proof | marker observed versus disproved |
 
+Queue item completion is a semantic lifecycle transition, not a checkbox parse
+result. A proven closeout appends `QueueHeadCompleted`; `Completed` is terminal
+within its hosting epoch, so delayed Markdown projection, polling, or a stale
+`Selected` observation cannot reactivate the item. Queue/backlog/done text
+projects that lifecycle and may be reconciled lazily after the fact is durable.
+
 ## Regression Rule
 
 New state-bearing behavior must answer two questions in the same change:

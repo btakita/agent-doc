@@ -1108,6 +1108,43 @@ fn consume_queue_prompts_for_done_ids_closeout(
     }
 }
 
+/// Give pending-only `--done` closeouts the same queue lifecycle boundary as a
+/// response closeout. Consuming the active matching head records the
+/// `Selected -> Completed` proof/fact pair in the reactive state plane; marking
+/// any later matching rows keeps the Markdown projection convergent without
+/// making that text the lifecycle authority.
+fn complete_queue_prompts_for_pending_only_done(
+    file: &Path,
+    done_ids: &[String],
+    commit_mode: CommitMode,
+    force_disk: bool,
+) -> Result<()> {
+    if done_ids.is_empty() || commit_mode == CommitMode::None {
+        return Ok(());
+    }
+
+    let complete = || -> Result<()> {
+        consume_queue_prompts_for_done_ids_closeout(file, done_ids, force_disk)?;
+        queue_consume::mark_completed_queue_prompts_for_done_ids(
+            file,
+            done_ids,
+            force_disk,
+            queue_consume_writeback_effects(force_disk),
+        )?;
+        Ok(())
+    };
+    match commit_mode {
+        CommitMode::None => Ok(()),
+        CommitMode::BestEffort => {
+            if let Err(err) = complete() {
+                eprintln!("[queue] warning: pending-only done lifecycle projection failed: {err}");
+            }
+            Ok(())
+        }
+        CommitMode::Required => complete(),
+    }
+}
+
 /// True when a queue consume refused because the target head could not be
 /// proven to be the node it would strike (`#qconsumenostrike`).
 fn error_refused_unaddressable_queue_head(error: &anyhow::Error) -> bool {
@@ -1133,6 +1170,7 @@ fn apply_pending_and_status_mutations(
     options: &CommandOptions,
     pending_kept_open_ids: &[String],
     has_pending_ops: bool,
+    reap_done_in_same_write: bool,
 ) -> Result<()> {
     if has_pending_ops || options.status.is_some() {
         let current_content =
@@ -1354,13 +1392,39 @@ fn apply_pending_and_status_mutations(
                     }
                     for id in &options.pending_done {
                         agent_doc_session_check_io::enforce_review_done_guard(file, id)?;
-                        backlog_cmd::done(file, id)?;
                     }
                     if !options.pending_done.is_empty() {
+                        let reap_outcome = if reap_done_in_same_write {
+                            backlog_cmd::done_and_reap_many(file, &options.pending_done)?
+                        } else {
+                            for id in &options.pending_done {
+                                backlog_cmd::done(file, id)?;
+                            }
+                            backlog_cmd::DoneAndReapOutcome {
+                                removed_ids: Vec::new(),
+                                target_content: None,
+                            }
+                        };
+                        if let Some(target_content) = reap_outcome.target_content.as_deref() {
+                            // Response closeouts commit from the response snapshot. Refresh
+                            // that same commit input after the one-target reap so HEAD
+                            // cannot lag the editor-authoritative tracked-work mutation.
+                            agent_doc_snapshot_io::checkpoint_document_baseline(
+                                file,
+                                target_content,
+                                agent_doc_ops_log_io::log_op,
+                            )?;
+                        }
                         agent_doc_cycle_state_io::record_pending_done_ids(
                             file,
                             &options.pending_done,
                         )?;
+                        if !reap_outcome.removed_ids.is_empty() {
+                            agent_doc_cycle_state_io::record_reaped_pending_ids(
+                                file,
+                                &reap_outcome.removed_ids,
+                            )?;
+                        }
                         agent_doc_cycle_state_io::mark_pending_mutations(file)?;
                     }
                     if let Some(ref order) = options.pending_reorder {
@@ -1598,6 +1662,13 @@ fn run_command_inner(
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
+            commit_mode == CommitMode::Required,
+        )?;
+        complete_queue_prompts_for_pending_only_done(
+            file,
+            &options.pending_done,
+            commit_mode,
+            options.force_disk,
         )?;
         agent_doc_session_check_io::run_closeout_pending_maintenance(
             file,
@@ -1848,6 +1919,7 @@ fn run_command_inner(
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
+            write_result.is_ok() && commit_mode == CommitMode::Required,
         )
         .with_context(|| {
             if response_write_retained {

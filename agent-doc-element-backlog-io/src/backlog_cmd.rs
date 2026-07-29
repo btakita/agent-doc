@@ -136,7 +136,11 @@ pub fn open_item_component_name(file: &Path, id: &str) -> Result<Option<String>>
     backlog::open_tracked_work_component_name_in_content(&content, id)
 }
 
-fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
+fn tracked_work_id_already_resolved_in_content(
+    file: &Path,
+    content: &str,
+    id: &str,
+) -> Result<bool> {
     let id = backlog::normalize_pending_id(id);
     if id.is_empty() {
         return Ok(false);
@@ -145,8 +149,7 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
         return Ok(true);
     }
 
-    let content = read_command_document(file, "backlog_resolved_id")?;
-    if backlog::content_has_resolved_tracked_work_id(&content, &id)? {
+    if backlog::content_has_resolved_tracked_work_id(content, &id)? {
         return Ok(true);
     }
 
@@ -155,7 +158,12 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
     // after mark -> reap moved the item there; treating that as "not found"
     // makes the otherwise-idempotent `--done` repair impossible and leaves the
     // committed cycle permanently failing session-check.
-    Ok(external_done_archive_ids(file, &content)?.contains(&id))
+    Ok(external_done_archive_ids(file, content)?.contains(&id))
+}
+
+fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
+    let content = read_command_document(file, "backlog_resolved_id")?;
+    tracked_work_id_already_resolved_in_content(file, &content, id)
 }
 
 fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &backlog::SymptomDedupeKey) {
@@ -401,6 +409,89 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
+}
+
+/// Complete and reap tracked-work ids through one authoritative document target.
+///
+/// Commit-required closeouts use this operation so `--done` never exposes an
+/// intermediate `[x]` row that a later maintenance write must rediscover. The
+/// removed items are archived and top-backlog status is reconciled before the
+/// single editor/disk projection. Non-committing `write --done` continues to use
+/// [`done`] so its intentionally visible `[x]` state remains available.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoneAndReapOutcome {
+    pub removed_ids: Vec<String>,
+    pub target_content: Option<String>,
+}
+
+pub fn done_and_reap_many(file: &Path, ids: &[String]) -> Result<DoneAndReapOutcome> {
+    if ids.is_empty() {
+        return Ok(DoneAndReapOutcome {
+            removed_ids: Vec::new(),
+            target_content: None,
+        });
+    }
+
+    let full_content = read_command_document(file, "backlog_done_and_reap")?;
+    let mut target = full_content.clone();
+    let mut removed_items = Vec::new();
+    let mut removed_ids = Vec::new();
+    let mut seen = HashSet::new();
+    let mut backlog_changed = false;
+    let doc_id = agent_doc_hash::document_id_for_path(file);
+
+    for raw_id in ids {
+        let id = backlog::normalize_pending_id(raw_id);
+        if id.is_empty() || !seen.insert(id.clone()) {
+            continue;
+        }
+
+        let comp = match backlog::find_open_tracked_work_component_in_content(&target, &id) {
+            Ok(comp) => comp,
+            Err(_) if tracked_work_id_already_resolved_in_content(file, &target, &id)? => {
+                eprintln!(
+                    "[pending] done: id [#{id}] is already resolved; leaving backlog unchanged"
+                );
+                continue;
+            }
+            Err(err) => return Err(err),
+        };
+        let existing = &target[comp.open_end..comp.close_start];
+        let (new_content, item) = backlog::op_take_item(existing, &id)?;
+        let canonical = backlog::canonicalize_tracked_work_body(&new_content, &doc_id);
+        backlog_changed |= is_backlog_component(&comp.name);
+        target = comp.replace_content(&target, &canonical);
+        removed_ids.push(item.id.clone());
+        removed_items.push(item);
+    }
+
+    if removed_items.is_empty() {
+        return Ok(DoneAndReapOutcome {
+            removed_ids: Vec::new(),
+            target_content: None,
+        });
+    }
+
+    target = archive_pending_done(file, &target, &removed_items)
+        .context("failed to archive completed item(s) to agent:done")?
+        .context("failed to archive completed item(s) to agent:done")?;
+    if backlog_changed
+        && let Some(reconciled) =
+            agent_doc_document::status_projection::reconcile_top_backlog_status_content(&target)?
+    {
+        target = reconciled;
+    }
+
+    persist_pending_write(file, &full_content, &target)?;
+    eprintln!(
+        "[pending] completed and reaped {} item(s) atomically: {}",
+        removed_ids.len(),
+        removed_ids.join(", ")
+    );
+    Ok(DoneAndReapOutcome {
+        removed_ids,
+        target_content: Some(target),
+    })
 }
 
 /// Transition an item to `Gated` (`[/]`) by id.
@@ -980,6 +1071,10 @@ mod tests {
 
     static TEST_BACKLOG_COMMAND_EFFECTS: TestBacklogCommandEffects = TestBacklogCommandEffects;
 
+    thread_local! {
+        static TEST_WRITE_COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
     impl crate::BacklogCommandEffects for TestBacklogCommandEffects {
         fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
             Ok(fs::read_to_string(file)?)
@@ -996,6 +1091,7 @@ mod tests {
             target_content: &str,
             _reason: &str,
         ) -> Result<()> {
+            TEST_WRITE_COUNT.with(|count| count.set(count.get() + 1));
             fs::write(file, target_content)?;
             Ok(())
         }
@@ -1252,6 +1348,35 @@ mod tests {
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("<!-- agent:pending -->\n- [ ] [#keep1] Keep backlog item\n"));
         assert!(content.contains("<!-- agent:icebox -->\n- [x] [#ice01] Parked follow-up\n"));
+    }
+
+    #[test]
+    fn done_and_reap_many_projects_one_target_without_intermediate_checked_row() {
+        let (_tmp, doc) = doc_with_pending(
+            "- [ ] [#close1] Close the first loop\n- [ ] [#keep1] Keep the next item\n",
+        );
+        let before = TEST_WRITE_COUNT.with(Cell::get);
+
+        let outcome =
+            with_test_effects(|| done_and_reap_many(&doc, &["close1".to_string()]).unwrap());
+
+        assert_eq!(outcome.removed_ids, vec!["close1"]);
+        assert!(outcome.target_content.is_some());
+        assert_eq!(TEST_WRITE_COUNT.with(Cell::get) - before, 1);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            !content.contains("[#close1]") || content.contains("<!-- agent:done -->"),
+            "{content}"
+        );
+        assert!(
+            !pending_body(&content).contains("[#close1]"),
+            "the authoritative target must never retain an intermediate [x] row:\n{content}"
+        );
+        assert!(pending_body(&content).contains("[#keep1]"), "{content}");
+        assert!(
+            content.contains("<!-- agent:done -->") && content.contains("[#close1]"),
+            "{content}"
+        );
     }
 
     #[test]

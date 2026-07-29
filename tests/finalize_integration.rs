@@ -1062,7 +1062,7 @@ fn write_commit_empty_stdin_with_done_commits_pending_only_reap() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::write(
         &doc,
-        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n### Re: already handled — gpt-5\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- [ ] [#done1] Close the loop\n<!-- /agent:backlog -->\n",
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n### Re: already handled — gpt-5\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- [ ] [#done1] Close the loop\n<!-- /agent:backlog -->\n\n<!-- agent:queue auto -->\n- do [#done1]\n<!-- /agent:queue -->\n",
     )
     .unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -1093,6 +1093,16 @@ fn write_commit_empty_stdin_with_done_commits_pending_only_reap() {
     assert!(
         content.contains("<!-- agent:done -->") && content.contains("[#done1] Close the loop"),
         "empty write --commit with --done should archive the reaped item:\n{content}"
+    );
+    assert!(
+        !content.contains("- do [#done1]"),
+        "late --done must project the matching queue head as completed in the same closeout:\n{content}"
+    );
+    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("queue_consume_state_event_recorded")
+            && ops_log.contains("stage=AfterMutation"),
+        "pending-only --done must emit the reactive queue completion fact:\n{ops_log}"
     );
 
     let head = head_blob(tmp.path());

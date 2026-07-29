@@ -6,7 +6,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -1068,21 +1068,23 @@ The agent-doc skill required an in-place refresh from `0.35.80` to `0.35.81`; th
 The Haiven changes are committed as `e298afc6b`, but the agent-doc response commit is waiting for live-editor convergence.
 
 Please save the open [haiven.md](/home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md) buffer, then reply “continue.” The response is durably captured; I won’t resubmit or duplicate it.
-<!-- agent:boundary:44c009bf -->
+<!-- agent:boundary:974b765e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority -->
-- "Separate Git repositories—including repositories referenced solely as Git submodules of an employee-controlled superproject—should satisfy the repository-separation requirement, provided the superproject stores only ordinary submodule metadata and commit pointers and does not store or expose Haiven source code, credentials, Confidential Information, or work product outside the dedicated Haiven repository.": Is this too much detail? Does the previous sentence already cover? They will see it if I screenshare. If we should include it, mention the superproject is private.
-- Add the recommended additions to Exhibit A.
-- Should I also draft a second addendum or have Luke and/or Craig draft it? If we draft it, the process maybe faster.
-- Does unpaid "outside activity" need approval as well?
+- 🚧 do [#recommendedadditionsexhi]
+- do [#unpaidoutsideactivity]
+- ~~"Separate Git repositories—including repositories referenced solely as Git submodules of an employee-controlled superproject—should satisfy the repository-separation requirement, provided the superproject stores only ordinary submodule metadata and commit pointers and does not store or expose Haiven source code, credentials, Confidential Information, or work product outside the dedicated Haiven repository.": Is this too much detail? Does the previous sentence already cover? They will see it if I screenshare. If we should include it, mention the superproject is private.~~
+- ~~Should I also draft a second addendum or have Luke and/or Craig draft it? If we draft it, the process maybe faster.~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] 🚧 [#recommendedadditionsexhi] Add the recommended additions to Exhibit A.
+- [ ] [#unpaidoutsideactivity] Does unpaid "outside activity" need approval as well?
 <!-- /agent:backlog -->
 
 ## Review

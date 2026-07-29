@@ -1192,12 +1192,28 @@ This is better than asking whether the documents are merely “sufficient” bec
 If Haiven confirms those points, beginning limited onboarding while the documents are finalized is a reasonable compromise. If it will not confirm the no-waiver reservation, Brian should avoid substantive IP-producing work until the final integrated package is signed or employment counsel advises otherwise.
 
 Changed paths: none. Verification: I compared this wording with the current offer/addendum issues and the preceding onboarding-timing recommendation. Confidence is high that the explicit formulation is safer than “is this sufficient”; counsel should assess whether commencing work could imply acceptance under the final governing law and complete document set. No email, signature, attachment, or external message was sent.
-<!-- agent:boundary:b568a56f -->
+### Re: Gmail reply draft, Exhibit A, and Connecticut payroll — gpt-5
+
+The reply-all draft is now in the existing Gmail thread to **Luke Richey and Craig Fryar**, with `haiven-exhibit-a-proposed.pdf` attached. It has **not been sent**.
+
+On Connecticut payroll: Brian should care about the employee-facing results—not Haiven's internal compliance paperwork. The practical concerns are correct state withholding, applicable Paid Leave treatment, and knowing the pay frequency. Connecticut puts registration, withholding, and covered-employer duties on the employer. [Connecticut DRS](https://portal.ct.gov/drs/businesses/new-business-resource-center/registering-with-drs), [Connecticut wage statutes](https://www.cga.ct.gov/current/pub/chap_558.htm), and [CT Paid Leave](https://www.ctpaidleave.org/for-businesses-and-employers/i-am-an-employer) support that distinction.
+
+I therefore narrowed the email to:
+
+> Please also confirm that payroll will treat Connecticut as my work and tax location and state the regular pay frequency.
+
+The draft no longer asks Haiven to confirm its Connecticut registrations, unemployment, workers' compensation, Paid Leave setup, or waiver mechanics. It also omits the termination-definition pushback entirely rather than affirmatively accepting those definitions.
+
+The remaining draft keeps the clean-PDF and integrated Exhibit A request, equity and signing-bonus questions, outside-activity/separation language, the July 31 supporting-materials request, and written confirmation that Brian can begin limited onboarding without waiving unresolved terms while preserving July 29 as the compensation, benefits, and vesting commencement date.
+
+Changed paths: none. External change: one unsent Gmail reply draft with one PDF attachment. Verification through the live Gmail DOM confirmed subject `Re: Addendum to Offer Letter :)`, recipients `luke@haiven.gg` and `craig@haiven.gg`, the Exhibit A attachment, normal line breaks, the simplified Connecticut sentence, the no-waiver start language, and the absence of termination-definition language. The Send button remains present; it was not activated. Confidence is high.
+<!-- agent:boundary:ae3e4bc3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority start -->
+- I need to get this email out. Please draft a reply in gmail to https://mail.google.com/mail/u/0/#inbox/FMfcgzQhVhWChVfCmrxpKKxzwmJtNMxH. We are all excited to get started. I'm ok without pushing back on "Termination definitions".
 <!-- /agent:queue -->
 
 ## Backlog

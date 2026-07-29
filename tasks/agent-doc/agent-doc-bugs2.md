@@ -207,13 +207,24 @@ Your re-added text is the authoritative version for this cycle. I preserved it b
 The two stale operator-verification queue mirrors are now explicitly struck through the guarded orphan-id path. The first controller call timed out after applying its strike; a live read proved that exact row was struck before I proceeded. The second strike completed normally. `#implementlazilyintent` is now the first runnable queue item.
 
 No source path changed in this response cycle. Commands were the two exact `queue consume --id` repairs plus connected live queue reads and replanning. Verification shows both orphan rows struck and the implementation row still open. Confidence is high in the queue repair and preservation of the admitted editor state. No force-disk write, old-snapshot replay, IDE restart, focus action, or Haiven mutation was performed.
-<!-- agent:boundary:59ddbf7a -->
+### Re: Lazily-fenced post-registration effects — gpt-5
+
+Implemented and installed the post-registration intent fence.
+
+- JetBrains no longer receives a reconstructed whole-document target to mutate directly. The new status-only FFI projects the retained semantic intent into the controller-owned CRDT authority; normal replica delivery remains the sole editor mutation path.
+- Every queued EDT apply now carries a local effect generation plus its originating replica endpoint. The first EDT check refuses retired, superseded, endpoint-replaced, or model-less effects before VFS lookup, document mutation, or disk persistence, and logs `reason=retired_or_superseded_or_model_less`.
+- Added focused Kotlin structure/decision tests, a model-less FFI regression proving no disk write, and generated SimWorld schedules including retirement while an EDT effect is queued.
+- Bumped and installed agent-doc `0.35.84` and JetBrains plugin `0.2.320`. The Kotlin package is installed but requires the next IDE restart to become active; I did not restart or focus IntelliJ.
+- Verification passed: focused JetBrains test, focused FFI test, focused SimWorld tests, and full `make check`. Commit: `0b23d7cf5` (`fix: fence post-registration editor effects`). The user-owned `editors/zed/extension.wasm` remains untouched. No Haiven controller, pane, document, or session was mutated.
+
+The new Haiven symptom is separate: `--done` persisted the checked state for `#unpaidoutsideactivity`, then `guard_completed_pending_reap` observed that same row before reap crossed the closeout boundary. I recorded that atomicity failure as a regression item rather than driving another Haiven repair from this session.
+
+`#steeringmirrorverifylive313` remains operator-gated and is not complete until its live UI verification is observed.
+<!-- agent:boundary:92ab0349 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~⏭️ do [#steeringmirrorverifylive313]~~
-- ~~do [#compactreactiveprojectionverify]~~
 - do [#implementlazilyintent]
 <!-- /agent:queue -->
 

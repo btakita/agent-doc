@@ -764,11 +764,13 @@ Additional convergence invariants:
 incremental delivery. If the remote CRDT result is invalid, the plugin does
 not install or ACK it; it re-adopts the exact coherent editor baseline,
 atomically re-registers the replica, and retries the retained intent.
-- Forced reconnect is two-phase. Registration must publish the exact live editor
-cut before the binary may return a divergent semantic replay. That replay may be
-installed only while the editor, replacement replica, pending-local counter, and
-disk still satisfy their registration fences; the client then saves through the
-editor API and publishes the recovered cut through the registered replica.
+- Forced reconnect publishes the exact live editor cut and returns without
+  reconstructing or installing retained response content through the editor
+  bridge. Retained replay remains controller-owned and arrives through ordinary
+  CRDT delivery, where the editor, replacement replica, pending-local counter,
+  and disk fences are revalidated before mutation and acknowledgement. Replica
+  registration itself must stay bounded so one document's recovery cannot wedge
+  the shared editor-native generation.
 - A retained captured response whose editor authority has advanced is replayed
 over that authority whether the operator cut is still unsaved or has already
 reached disk. The binary then requests native editor save itself. Operator

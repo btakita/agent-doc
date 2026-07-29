@@ -110,11 +110,11 @@ class RefreshBeforeApplyConflictTest {
         )
 
         assertFalse(ensureOpenReplica.contains("deferredWriteReconnectContent("))
+        assertFalse(ensureOpenReplica.contains("deferredWritePostRegisterContent("))
         assertFalse(ensureOpenReplica.contains("applyMinimalDocumentEditUtil("))
         assertFalse(ensureOpenReplica.contains("persistRemoteCrdtTextIfSafe("))
         assertTrue(ensureOpenReplica.contains("registrationText = text"))
         assertTrue(ensureOpenReplica.contains("deferredWriteReconnectPropagated(filePath, registrationText)"))
-        assertTrue(ensureOpenReplica.contains("replayDeferredWriteAfterRegistration("))
         assertTrue(ensureOpenReplica.contains("replaceCached = forceRefresh"))
         assertTrue(ensureOpenReplica.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null"))
         val forwarderFor = functionBody(crdtReplica, "private fun forwarderFor(")
@@ -124,42 +124,34 @@ class RefreshBeforeApplyConflictTest {
                 forwarderFor.indexOf("forwarder.ensureEditorText(initialEditorText)"),
         )
         assertTrue(
-            "semantic replay must begin only after exact editor registration succeeds",
+            "controller-owned replay notification must follow exact editor registration",
             ensureOpenReplica.indexOf("val forwarder = forwarderFor(") <
-                ensureOpenReplica.indexOf("replayDeferredWriteAfterRegistration("),
+                ensureOpenReplica.indexOf("deferredWriteReconnectPropagated(filePath, registrationText)"),
         )
     }
 
     @Test
-    fun `forced reconnect replays retained intent only through fenced post-registration apply`() {
+    fun `forced reconnect leaves retained intent replay controller-owned`() {
         val crdtReplicaPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
         ).first { Files.exists(it) }
         val crdtReplica = Files.readString(crdtReplicaPath)
-        val replay = functionBody(
+        val ensureOpenReplica = functionBody(
             crdtReplica,
-            "private fun replayDeferredWriteAfterRegistration(",
+            "fun ensureOpenDocumentReplica(",
         )
 
-        assertTrue(replay.contains("deferredWritePostRegisterContent(filePath, registrationText)"))
-        assertTrue(replay.contains("forwarders[filePath] !== forwarder"))
-        assertTrue(replay.contains("hasPendingLocal(filePath)"))
-        assertTrue(replay.contains("document.text != registrationText"))
-        assertTrue(replay.contains("remoteCrdtDiskCanPersistUtil("))
-        assertTrue(replay.contains("applyMinimalDocumentEditUtil(document, registrationText, recovered)"))
-        assertTrue(replay.contains("persistRemoteCrdtTextIfSafe("))
-        assertTrue(replay.contains("forwarder.ensureEditorText(recovered)"))
-        assertTrue(replay.contains("deferredWriteReconnectPropagated(filePath, recovered)"))
+        assertFalse(crdtReplica.contains("private fun replayDeferredWriteAfterRegistration("))
+        assertFalse(ensureOpenReplica.contains("deferredWritePostRegisterContent("))
+        assertFalse(ensureOpenReplica.contains("applyMinimalDocumentEditUtil("))
+        assertFalse(ensureOpenReplica.contains("persistRemoteCrdtTextIfSafe("))
         assertTrue(
-            "deferred content must be resolved before any editor mutation",
-            replay.indexOf("deferredWritePostRegisterContent(") <
-                replay.indexOf("applyMinimalDocumentEditUtil("),
-        )
-        assertTrue(
-            "the recovered editor cut must be persisted before CRDT publication",
-            replay.indexOf("persistRemoteCrdtTextIfSafe(") <
-                replay.indexOf("forwarder.ensureEditorText(recovered)"),
+            "retained replay must remain downstream of registration and flow through CRDT delivery",
+            ensureOpenReplica.indexOf("val forwarder = forwarderFor(") <
+                ensureOpenReplica.indexOf("deferredWriteReconnectPropagated(filePath, registrationText)") &&
+                ensureOpenReplica.indexOf("deferredWriteReconnectPropagated(filePath, registrationText)") <
+                ensureOpenReplica.indexOf("requestRemoteDrain(filePath, \"open-document\")"),
         )
     }
 

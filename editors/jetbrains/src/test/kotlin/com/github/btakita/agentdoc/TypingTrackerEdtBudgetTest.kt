@@ -380,9 +380,6 @@ class TypingTrackerEdtBudgetTest {
         val remoteEditorApplyBody = source
             .substringAfter("private fun applyRemoteTextOnEdt")
             .substringBefore("private fun readRawDiskText")
-        val postRegisterReplayBody = source
-            .substringAfter("private fun replayDeferredWriteAfterRegistration")
-            .substringBefore("private fun installListener")
         val replaceDeliveryBody = source
             .substringAfter("private fun applyReplaceDelivery")
             .substringBefore("private fun queueRemoteTextApply")
@@ -463,9 +460,7 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "native op-capture fencing must precede every CRDT-driven EDT mutation",
-            postRegisterReplayBody.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
-                0 until postRegisterReplayBody.indexOf("invokeAndWait") &&
-                replaceDeliveryBody.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
+            replaceDeliveryBody.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
                 0 until replaceDeliveryBody.indexOf("invokeAndWait") &&
                 queueRemoteApplyBody.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
                 0 until queueRemoteApplyBody.indexOf("remoteEditorApplies.ingress"),

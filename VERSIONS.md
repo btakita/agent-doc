@@ -4,6 +4,18 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.76
+
+_JetBrains plugin 0.2.316; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Forced JetBrains replica registration no longer reconstructs retained
+  responses synchronously through JNA.** Registration publishes the exact live
+  editor cut, reports reconnect propagation, and schedules ordinary controller-
+  owned CRDT delivery. This keeps the editor-native boundary bounded so recovery
+  for one large document cannot trip the native-call watchdog and disable the
+  shared generation for every open document. The retained response still passes
+  the normal editor, replica, pending-local, disk, and acknowledgement fences.
+
 ## 0.35.75
 
 _JetBrains plugin 0.2.315; VS Code extension 0.2.62; Zed extension 0.1.0._

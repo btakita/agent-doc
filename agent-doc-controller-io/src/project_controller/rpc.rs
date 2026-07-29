@@ -6523,7 +6523,7 @@ fn handle_editor_command_submit_rpc(
 ) -> Result<serde_json::Value> {
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
     let command_result =
-        dispatch_command_submit_payload(bootstrap, runtime, &request, &submit, payload_json);
+        dispatch_command_submit_payload(bootstrap, runtime, &request, &submit, payload_json, None);
     terminal_command_submit_response(&submit, command_result)
 }
 
@@ -6652,12 +6652,155 @@ struct AsyncEditorCommandResult {
     updated_at: std::time::Instant,
 }
 
+#[derive(Clone, Debug)]
+struct AsyncEditorFocusFence {
+    project_root: PathBuf,
+    command_id: String,
+    expires_at: Option<std::time::Instant>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AsyncEditorFocusFenceDecision {
+    Current,
+    Superseded,
+    Expired,
+}
+
 fn async_editor_command_results()
 -> &'static parking_lot::Mutex<std::collections::HashMap<String, AsyncEditorCommandResult>> {
     static RESULTS: std::sync::LazyLock<
         parking_lot::Mutex<std::collections::HashMap<String, AsyncEditorCommandResult>>,
     > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
     &RESULTS
+}
+
+fn async_editor_focus_fences()
+-> &'static parking_lot::Mutex<std::collections::HashMap<PathBuf, AsyncEditorFocusFence>> {
+    static FENCES: std::sync::LazyLock<
+        parking_lot::Mutex<std::collections::HashMap<PathBuf, AsyncEditorFocusFence>>,
+    > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+    &FENCES
+}
+
+fn decide_async_editor_focus_fence(
+    current_command_id: Option<&str>,
+    fence: &AsyncEditorFocusFence,
+    now: std::time::Instant,
+) -> AsyncEditorFocusFenceDecision {
+    if current_command_id != Some(fence.command_id.as_str()) {
+        return AsyncEditorFocusFenceDecision::Superseded;
+    }
+    if fence.expires_at.is_some_and(|deadline| now >= deadline) {
+        return AsyncEditorFocusFenceDecision::Expired;
+    }
+    AsyncEditorFocusFenceDecision::Current
+}
+
+fn async_editor_focus_fence_reason(decision: AsyncEditorFocusFenceDecision) -> &'static str {
+    match decision {
+        AsyncEditorFocusFenceDecision::Current => "current",
+        AsyncEditorFocusFenceDecision::Superseded => "superseded_focus_intent",
+        AsyncEditorFocusFenceDecision::Expired => "expired_focus_intent",
+    }
+}
+
+fn admit_async_editor_focus_fence(
+    bootstrap: &ControllerBootstrap,
+    submit: &lazily::CommandSubmit,
+    payload_json: &str,
+) -> Result<Option<AsyncEditorFocusFence>> {
+    if submit.name != "focus_document_pane" {
+        return Ok(None);
+    }
+    let payload: FocusDocumentPaneCommandPayload =
+        serde_json::from_str(payload_json).context("parse focus_document_pane payload")?;
+    if !payload.active_window_guard {
+        return Ok(None);
+    }
+    if let Some(payload_root) = payload.project_root.as_deref() {
+        let payload_root = Path::new(payload_root);
+        let same_root = payload_root == bootstrap.project_root.as_path()
+            || payload_root
+                .canonicalize()
+                .ok()
+                .zip(bootstrap.project_root.canonicalize().ok())
+                .is_some_and(|(payload, authority)| payload == authority);
+        anyhow::ensure!(
+            same_root,
+            "focus_document_pane project_root does not match controller authority"
+        );
+    }
+    let admitted_at = std::time::Instant::now();
+    let expires_at =
+        (submit.deadline_ms > 0).then(|| admitted_at + Duration::from_millis(submit.deadline_ms));
+    let fence = AsyncEditorFocusFence {
+        project_root: bootstrap.project_root.clone(),
+        command_id: submit.command_id.clone(),
+        expires_at,
+    };
+    async_editor_focus_fences()
+        .lock()
+        .insert(fence.project_root.clone(), fence.clone());
+    Ok(Some(fence))
+}
+
+fn require_async_editor_focus_current(fence: Option<&AsyncEditorFocusFence>) -> Result<()> {
+    let Some(fence) = fence else {
+        return Ok(());
+    };
+    let fences = async_editor_focus_fences().lock();
+    let decision = decide_async_editor_focus_fence(
+        fences
+            .get(&fence.project_root)
+            .map(|current| current.command_id.as_str()),
+        fence,
+        std::time::Instant::now(),
+    );
+    anyhow::ensure!(
+        decision == AsyncEditorFocusFenceDecision::Current,
+        "{}",
+        async_editor_focus_fence_reason(decision)
+    );
+    Ok(())
+}
+
+fn apply_async_editor_focus_effect<T>(
+    fence: Option<&AsyncEditorFocusFence>,
+    effect: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let Some(fence) = fence else {
+        return effect();
+    };
+    // Hold admission's project-scoped fence across the final effect. A newer
+    // intent therefore either supersedes this command before `select-pane`, or
+    // is admitted immediately after this effect and deterministically follows it.
+    let fences = async_editor_focus_fences().lock();
+    let decision = decide_async_editor_focus_fence(
+        fences
+            .get(&fence.project_root)
+            .map(|current| current.command_id.as_str()),
+        fence,
+        std::time::Instant::now(),
+    );
+    anyhow::ensure!(
+        decision == AsyncEditorFocusFenceDecision::Current,
+        "{}",
+        async_editor_focus_fence_reason(decision)
+    );
+    effect()
+}
+
+fn release_async_editor_focus_fence(fence: Option<&AsyncEditorFocusFence>) {
+    let Some(fence) = fence else {
+        return;
+    };
+    let mut fences = async_editor_focus_fences().lock();
+    if fences
+        .get(&fence.project_root)
+        .is_some_and(|current| current.command_id == fence.command_id)
+    {
+        fences.remove(&fence.project_root);
+    }
 }
 
 fn retain_async_editor_command_result(command_id: &str, response: serde_json::Value) {
@@ -6727,6 +6870,7 @@ fn handle_editor_command_submit_async_rpc(
 ) -> Result<serde_json::Value> {
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
     validate_async_editor_command_payload(&submit, &payload_json)?;
+    let focus_fence = admit_async_editor_focus_fence(bootstrap, &submit, &payload_json)?;
 
     let command_id = submit.command_id.clone();
     let generation = submit.authority_generation;
@@ -6754,6 +6898,7 @@ fn handle_editor_command_submit_async_rpc(
     let worker_project_root = bootstrap.project_root.clone();
     let worker_command_id = command_id.clone();
     let worker_name = submit.name.clone();
+    let worker_focus_fence = focus_fence.clone();
     if let Err(err) = spawn_editor_command_async_worker(move || {
         let result = dispatch_command_submit_payload(
             &worker_bootstrap,
@@ -6761,6 +6906,7 @@ fn handle_editor_command_submit_async_rpc(
             &worker_request,
             &worker_submit,
             payload_json,
+            worker_focus_fence.as_ref(),
         );
         let terminal_reason = result.terminal_reason.as_deref().unwrap_or("");
         agent_doc_ops_log_io::log_op(
@@ -6784,8 +6930,10 @@ fn handle_editor_command_submit_async_rpc(
                 })
             });
         retain_async_editor_command_result(&worker_command_id, terminal_response);
+        release_async_editor_focus_fence(worker_focus_fence.as_ref());
     }) {
         async_editor_command_results().lock().remove(&command_id);
+        release_async_editor_focus_fence(focus_fence.as_ref());
         return Err(err);
     }
 
@@ -6914,6 +7062,7 @@ fn dispatch_command_submit_payload(
     request: &ControllerRequest,
     submit: &lazily::CommandSubmit,
     payload_json: String,
+    focus_fence: Option<&AsyncEditorFocusFence>,
 ) -> CommandSubmitDispatchResult {
     match submit.name.as_str() {
         "editor_route" => {
@@ -7000,17 +7149,20 @@ fn dispatch_command_submit_payload(
                     );
                 }
             };
-            let _guard_flags = (
-                payload.project_root.as_deref(),
-                payload.no_promotion,
-                payload.active_window_guard,
-            );
+            if let Err(err) = require_async_editor_focus_current(focus_fence) {
+                return CommandSubmitDispatchResult::rejected(
+                    "focus_document_pane",
+                    format!("{err:#}"),
+                );
+            }
+            let _guard_flags = (payload.project_root.as_deref(), payload.no_promotion);
             let mut focus_request = empty_controller_request("focus_document_pane");
             focus_request.file = Some(PathBuf::from(payload.document_path));
             match handle_focus_document_pane_with_policy(
                 bootstrap,
                 focus_request,
                 payload.missing_pane_policy,
+                focus_fence,
             ) {
                 Ok(receipt) => {
                     let output =
@@ -15524,13 +15676,19 @@ pub(crate) fn handle_focus_document_pane(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
 ) -> Result<ControllerTmuxFocusReceipt> {
-    handle_focus_document_pane_with_policy(bootstrap, request, MissingFocusPanePolicy::ResumeLatest)
+    handle_focus_document_pane_with_policy(
+        bootstrap,
+        request,
+        MissingFocusPanePolicy::ResumeLatest,
+        None,
+    )
 }
 
 fn handle_focus_document_pane_with_policy(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
     missing_pane_policy: MissingFocusPanePolicy,
+    focus_fence: Option<&AsyncEditorFocusFence>,
 ) -> Result<ControllerTmuxFocusReceipt> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
@@ -15609,6 +15767,7 @@ fn handle_focus_document_pane_with_policy(
         if missing_pane_policy == MissingFocusPanePolicy::ResumeLatest
             && let Some(session_id) = session_id.as_deref()
         {
+            require_async_editor_focus_current(focus_fence)?;
             let file_arg = canonical.to_string_lossy().to_string();
             let stale_pane = pane_id.clone();
             pane_id = runtime_effects()?
@@ -15698,7 +15857,7 @@ fn handle_focus_document_pane_with_policy(
             window_name,
         ));
     }
-    tmux.select_pane(&pane_id)?;
+    apply_async_editor_focus_effect(focus_fence, || tmux.select_pane(&pane_id))?;
     Ok(tmux_focus_receipt(
         true,
         focused_reason,
@@ -17862,6 +18021,67 @@ mod tests {
                 "missing_pane_policy": "resume_if_missing"
             }))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn newer_async_focus_admission_fences_the_older_effect() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let payload = |document: &str| {
+            serde_json::json!({
+                "project_root": dir.path().display().to_string(),
+                "document_path": dir.path().join(document).display().to_string(),
+                "active_window_guard": true,
+                "missing_pane_policy": "observe_only"
+            })
+        };
+        let first_request = command_submit_request_for_test(
+            None,
+            "focus_document_pane",
+            "agent-doc.focus_document_pane.v1",
+            payload("one.md"),
+            "cmd-focus-one",
+        );
+        let second_request = command_submit_request_for_test(
+            None,
+            "focus_document_pane",
+            "agent-doc.focus_document_pane.v1",
+            payload("two.md"),
+            "cmd-focus-two",
+        );
+        let (first_submit, first_payload) =
+            parse_editor_command_submit_request(&first_request).unwrap();
+        let (second_submit, second_payload) =
+            parse_editor_command_submit_request(&second_request).unwrap();
+
+        let first =
+            admit_async_editor_focus_fence(&bootstrap, &first_submit, &first_payload).unwrap();
+        assert!(require_async_editor_focus_current(first.as_ref()).is_ok());
+        let second =
+            admit_async_editor_focus_fence(&bootstrap, &second_submit, &second_payload).unwrap();
+        let first_err = require_async_editor_focus_current(first.as_ref()).unwrap_err();
+        assert!(format!("{first_err:#}").contains("superseded_focus_intent"));
+        assert!(require_async_editor_focus_current(second.as_ref()).is_ok());
+
+        // Completion of the older worker must not clear the newer fence.
+        release_async_editor_focus_fence(first.as_ref());
+        assert!(require_async_editor_focus_current(second.as_ref()).is_ok());
+        release_async_editor_focus_fence(second.as_ref());
+    }
+
+    #[test]
+    fn expired_async_focus_is_refused_at_the_effect_boundary() {
+        let now = std::time::Instant::now();
+        let fence = AsyncEditorFocusFence {
+            project_root: PathBuf::from("/tmp/focus-expiry"),
+            command_id: "cmd-expired".to_string(),
+            expires_at: Some(now),
+        };
+        assert_eq!(
+            decide_async_editor_focus_fence(Some("cmd-expired"), &fence, now),
+            AsyncEditorFocusFenceDecision::Expired
         );
     }
 

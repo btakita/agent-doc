@@ -8,6 +8,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.wm.WindowManager
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -31,11 +32,13 @@ import java.util.concurrent.atomic.AtomicReference
  * reports only its final state, and an off-EDT executor so the derived command
  * never blocks the UI thread.
  *
- * Focus is latency-sensitive and takes a separate zero-debounce lane. The
- * selected document is sent through the controller's project-scoped latest-wins
- * focus command before layout detection/reconciliation begins. The debounced
- * surface observation still owns safe passive layout sync; the fast lane only
- * makes an already-visible target pane react immediately.
+ * Focus is latency-sensitive and takes a separate micro-coalesced lane. IDEA
+ * emits both selection and component-focus events for one click, so a 12ms
+ * generation window collapses those duplicates before they cross the socket.
+ * The selected document is then sent through the controller's project-scoped
+ * latest-wins focus command before layout reconciliation. The debounced surface
+ * observation still owns safe passive layout sync; the fast lane only makes an
+ * already-visible target pane react immediately.
  *
  * Registered from [PluginLifecycleListener] via [install] so it survives
  * hot-reload.
@@ -60,14 +63,25 @@ class EditorTabSyncListener : FileEditorManagerListener {
     private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-editor-tab-sync").apply { isDaemon = true }
     }
-    private val focusExecutor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "agent-doc-editor-focus-sync").apply { isDaemon = true }
-    }
+private val focusExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+Thread(runnable, "agent-doc-editor-focus-sync").apply { isDaemon = true }
+}
 
-    companion object {
-        private const val DEBOUNCE_MS = 100L
-        private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
-        private val GSON = com.google.gson.Gson()
+companion object {
+private const val DEBOUNCE_MS = 100L
+private const val FOCUS_COALESCE_MS = 12L
+private val FOCUS_MAX_AGE_NANOS = TimeUnit.MILLISECONDS.toNanos(500)
+private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
+private val GSON = com.google.gson.Gson()
+
+internal fun shouldDispatchFocus(
+requestedGeneration: Long,
+currentGeneration: Long,
+projectWindowActive: Boolean,
+ageNanos: Long,
+): Boolean = requestedGeneration == currentGeneration &&
+projectWindowActive &&
+ageNanos in 0..FOCUS_MAX_AGE_NANOS
         private val instances = ConcurrentHashMap<Project, EditorTabSyncListener>()
 
         fun install(project: Project): EditorTabSyncListener =
@@ -216,28 +230,39 @@ class EditorTabSyncListener : FileEditorManagerListener {
         }
     }
 
-    private fun requestImmediateFocus(project: Project, file: VirtualFile) {
-        val documentPath = file.path
-        val requested = focusGeneration.incrementAndGet()
-        TmuxPaneFocusSync.recordEditorFocusIntent(project, documentPath)
-        focusExecutor.execute focus@{
-            if (focusGeneration.get() != requested) {
-                log("focus: superseded gen=$requested")
-                return@focus
-            }
-            // Project-root discovery crosses native/path services. Keep it off
-            // the IntelliJ event thread along with the controller round trip.
-            val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
-            if (focusGeneration.get() != requested) {
-                log("focus: superseded after root resolution gen=$requested")
-                return@focus
-            }
-            val receipt = CpRouteClient.submitFocusDocumentPane(
-                projectRoot = projectRoot,
-                documentPath = documentPath,
-            )
-            log("focus: file=$documentPath receipt=$receipt")
-        }
+private fun requestImmediateFocus(project: Project, file: VirtualFile) {
+val documentPath = file.path
+val requested = focusGeneration.incrementAndGet()
+val requestedAtNanos = System.nanoTime()
+focusExecutor.schedule(focus@{
+if (!shouldDispatchFocus(
+requestedGeneration = requested,
+currentGeneration = focusGeneration.get(),
+projectWindowActive = WindowManager.getInstance().getFrame(project)?.isActive == true,
+ageNanos = System.nanoTime() - requestedAtNanos,
+)) {
+log("focus: superseded, inactive, or expired before root resolution gen=$requested")
+return@focus
+}
+// Project-root discovery performs local filesystem walks. Keep it off the
+// IntelliJ event thread along with the controller round trip.
+val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
+if (!shouldDispatchFocus(
+requestedGeneration = requested,
+currentGeneration = focusGeneration.get(),
+projectWindowActive = WindowManager.getInstance().getFrame(project)?.isActive == true,
+ageNanos = System.nanoTime() - requestedAtNanos,
+)) {
+log("focus: superseded, inactive, or expired after root resolution gen=$requested")
+return@focus
+}
+TmuxPaneFocusSync.recordEditorFocusIntent(project, documentPath)
+val receipt = CpRouteClient.submitFocusDocumentPane(
+projectRoot = projectRoot,
+documentPath = documentPath,
+)
+log("focus: file=$documentPath receipt=$receipt")
+}, FOCUS_COALESCE_MS, TimeUnit.MILLISECONDS)
     }
 
     private fun captureSurface(
@@ -337,20 +362,16 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * never moves the tmux active pane. [EditorFocusSyncListener] wires the
      * per-editor focus events that call this.
      *
-     * Focus events fire repeatedly for the same editor. That used to need a
-     * `lastFocusRequestedFile` field here; now a repeat produces the identical
-     * observation, which the graph reports as idle and acts on not at all.
-     */
-    fun onEditorFocusGained(project: Project, file: VirtualFile) {
-        if (!file.name.endsWith(".md")) return
-        requestImmediateFocus(project, file)
-        val manager = FileEditorManager.getInstance(project)
-        val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
-        if (visibleMdFiles.isEmpty()) return
-        log("focusGained: file=${file.name} mdFiles=$visibleMdFiles")
-        val pending = captureSurface(project, file, forceReconcile = false) ?: return
-        requestObservation(pending)
-    }
+ * Focus events fire repeatedly for the same editor. The micro-coalesced focus
+ * lane collapses those repeats. A component-focus event cannot change which
+ * tabs or splits are visible, so it deliberately does not enqueue a second
+ * surface observation that could race the targeted pane focus.
+ */
+fun onEditorFocusGained(project: Project, file: VirtualFile) {
+if (!file.name.endsWith(".md")) return
+requestImmediateFocus(project, file)
+log("focusGained: file=${file.name}")
+}
 
     /**
      * A structural split/container change occurred. [LayoutChangeDetector]

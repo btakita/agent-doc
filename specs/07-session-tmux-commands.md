@@ -109,9 +109,16 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   evaluated. Restart uses typed `ProvisionOnly` startup policy so pane
   creation/start/selection completes inside the short focus RPC; harness
   readiness and the safe-passive layout pass settle asynchronously.
-  Provision-only startup may split only beside a pane already visible in the
-  `agent-doc` window; a durable registration in `stash` is ownership evidence,
-  never a geometry anchor.
+Provision-only startup may split only beside a pane already visible in the
+`agent-doc` window; a durable registration in `stash` is ownership evidence,
+never a geometry anchor.
+- The JetBrains low-latency selection lane uses typed `observe_only` rather
+than `resume_latest`: it may select an already-visible pane but never performs
+recovery or pane creation. The editor surface graph owns that structural work.
+Its `active_window_guard` registers a project-scoped fence at async admission;
+supersession and the command deadline are checked again while holding that
+fence across the final `select-pane` effect. A worker that was accepted earlier
+cannot select after a newer editor intent has arrived.
 - Explicit `--pane` remains a direct tmux selection escape hatch. `--blocking`
   keeps the legacy synchronous local actor/registry resolver and may surface a
   stashed pane before returning.

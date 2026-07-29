@@ -4,6 +4,24 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.73
+
+_JetBrains plugin 0.2.314; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **JetBrains document selection reaches tmux promptly without stale focus
+  effects.** Selection and component-focus notifications are micro-coalesced
+  into one current intent, and an inactive IDE window or intent older than 500
+  ms is refused before submission. Component focus no longer starts a redundant
+  surface reconciliation, and the low-latency lane only selects already-visible
+  panes; the authoritative surface graph retains pane recovery and creation.
+- **Accepted focus commands are latest-wins at the effect boundary.** The
+  controller registers the project-scoped focus intent at async admission,
+  checks supersession and the 750 ms deadline before expensive work, and holds
+  that fence across the final `tmux select-pane`. An older worker can no longer
+  select another session after a newer editor event or delayed focus transfer,
+  eliminating the brief wrong-pane selection and its window-manager pointer
+  movement side effect.
+
 ## 0.35.72
 
 _JetBrains plugin 0.2.313; VS Code extension 0.2.62; Zed extension 0.1.0._

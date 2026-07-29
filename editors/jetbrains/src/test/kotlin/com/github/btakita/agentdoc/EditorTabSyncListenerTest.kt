@@ -9,6 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.util.concurrent.TimeUnit
 
 /**
  * The plugin no longer plans (`#jbsurfaceswap`) — focus-vs-sync, dedup, and the
@@ -225,11 +226,34 @@ class EditorTabSyncListenerTest {
             "focus must bypass the serialized JNA worker",
             fastFocus.contains("NativeAdminControls.focusDocumentPane("),
         )
-        assertTrue(
-            "the fast lane must not sleep or inherit the 100ms layout debounce",
-            !fastFocus.contains("DEBOUNCE_MS") && !fastFocus.contains("schedule("),
-        )
-    }
+assertTrue(
+"the fast lane uses its own micro-coalescing window, not the layout debounce",
+!fastFocus.contains("DEBOUNCE_MS") && fastFocus.contains("FOCUS_COALESCE_MS"),
+)
+
+val focusGained = source.substringAfter(
+"fun onEditorFocusGained(project: Project, file: VirtualFile)",
+).substringBefore("fun onEditorLayoutChanged")
+assertFalse(
+"component focus must not enqueue a competing surface reconciliation",
+focusGained.contains("requestObservation("),
+)
+}
+
+@Test
+fun `focus dispatch requires the latest active and fresh editor intent`() {
+assertTrue(EditorTabSyncListener.shouldDispatchFocus(7, 7, true, 1))
+assertFalse(EditorTabSyncListener.shouldDispatchFocus(7, 8, true, 1))
+assertFalse(EditorTabSyncListener.shouldDispatchFocus(7, 7, false, 1))
+assertFalse(
+EditorTabSyncListener.shouldDispatchFocus(
+7,
+7,
+true,
+TimeUnit.SECONDS.toNanos(1),
+),
+)
+}
 
     @Test
     fun `a derived sync intent produces the operator hint`() {

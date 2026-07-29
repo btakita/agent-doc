@@ -268,9 +268,10 @@ class CpRouteClientCommandPlaneTest {
         val payload = inlinePayload(submit)
         assertEquals("/proj", payload.get("project_root").asString)
         assertEquals("/proj/tasks/one.md", payload.get("document_path").asString)
-        assertEquals(true, payload.get("no_promotion").asBoolean)
-        assertEquals(true, payload.get("active_window_guard").asBoolean)
-        assertEquals("resume_latest", payload.get("missing_pane_policy").asString)
+assertEquals(true, payload.get("no_promotion").asBoolean)
+assertEquals(true, payload.get("active_window_guard").asBoolean)
+assertEquals("observe_only", payload.get("missing_pane_policy").asString)
+assertEquals(750L, submit.get("deadline_ms").asLong)
     }
 
     @Test

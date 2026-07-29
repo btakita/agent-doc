@@ -601,10 +601,13 @@ internal fun editorCommandStatusRequest(filePath: String, commandId: String): Js
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("project_root", projectRoot)
-        payload.addProperty("document_path", documentPath)
-        payload.addProperty("no_promotion", true)
-        payload.addProperty("active_window_guard", true)
-        payload.addProperty("missing_pane_policy", MissingFocusPanePolicy.ResumeLatest.token)
+payload.addProperty("document_path", documentPath)
+payload.addProperty("no_promotion", true)
+payload.addProperty("active_window_guard", true)
+// The low-latency selection lane only focuses an already-visible pane.
+// Surface reconciliation owns pane recovery/creation; doing that work here
+// made a stale focus request slow enough to land after the operator moved on.
+payload.addProperty("missing_pane_policy", MissingFocusPanePolicy.ObserveOnly.token)
         return commandSubmitRequest(
             filePath = documentPath,
             name = "focus_document_pane",
@@ -616,7 +619,7 @@ internal fun editorCommandStatusRequest(filePath: String, commandId: String): Js
             // after the operator has moved on.
             idempotencyKey = "$projectRoot:selected-document-focus",
             commandId = commandId,
-            deadlineMs = 2_000,
+deadlineMs = 750,
             supersede = true,
             controllerCommand = controllerCommand,
         )

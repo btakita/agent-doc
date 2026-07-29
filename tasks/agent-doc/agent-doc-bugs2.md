@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -130,7 +130,6 @@ Harper is LSP4IJ's local Markdown grammar/style language server and is unrelated
 ### Re: editor-authoritative recovery and focus sync — gpt-5
 
 Fixed and released.
-
 ### Re: Response
 
 Yes. Continue in the original Haiven Codex session in tmux pane `%62`; agent-doc did not send input to, focus, terminate, or restart that pane while applying this fix.
@@ -149,15 +148,37 @@ Verification passed: the focused controller/session/realtime suites, the SimWorl
 For `haiven.md`, editor authority and disk now converge to the same SHA-256 (`21073485d8efb05caddba4317893d6f3778e4946e24e1bc60a1dc6d97b00cddb`), so the prior false “please save the buffer” loop is resolved. The original actor remains generation `293` on pane `%62`. Its latest status projection is stale because no live supervisor socket is attached, but the authoritative actor binding remains intact; conversation can continue in that original pane.
 
 A stale answered free-text queue row remains in `haiven.md`. It does not require or justify restarting the Codex session, but should be auto-struck during a later closeout so a future agent-doc admission is not blocked.
-<!-- agent:boundary:bee376cb -->
+
+### Re: late IPC versus Lazily authority — gpt-5
+
+Yes. The mutation should be authorized by Lazily state projection, not by an RPC or FFI call.
+
+The live incident was not one standalone controller RPC. JetBrains's post-registration document worker asked the in-process Rust library for a retained reconnect target through FFI, applied that target to the editor, and then republished the result through the CRDT path. The retained intent was retired while an already-queued editor effect could still run. That stale effect joined two complete document generations, producing a 464-line editor buffer from two 232-line projections with different transient boundary identities. The historical name “late IPC” describes where this class first appeared, but it is too narrow for the actual failure.
+
+The authority contract is now explicit:
+
+- Lazily owns the desired intent id, expected editor revision, target revision, endpoint generation, and observed application receipt.
+- RPC and in-process FFI only transport or wake that projection. Returning target bytes is not permission to mutate the editor later.
+- At the editor-effect boundary, the worker must still observe the same live intent and endpoint generation. Retired, superseded, or model-less state cancels the effect without touching the document.
+- A registered endpoint with no backing model is an observed state that derives an idempotent re-registration effect. It does not grant disk fallback authority and should not require the agent or operator to reload the library.
+
+The immediate recovery is implemented and installed as agent-doc `0.35.83`, commit `2684da785` (`fix: recover stale whole-document effects`). Preflight now recognizes a concatenated committed projection before singleton-component integrity checks, proves every non-empty line of every copy against committed HEAD after transient-marker normalization, and restores HEAD through live document authority. Any distinct operator or response content fails closed.
+
+The live bugs2 buffer reproduced the failure exactly: 464 editor-authoritative lines and two exchange boundaries, while disk/HEAD retained the correct 232-line document. After installing `0.35.83`, preflight collapsed it to one projection and passed structural validation. No direct markdown edit or force-disk override was used.
+
+Verification passed: focused classifier and preflight regressions, the existing agent-doc turn/preflight suites, and full `make check` (`tart-d6260b25e3`). The CLI and native library were installed, the library hot-reloaded into 1/1 editor endpoint, and the controller was recycled at a safe boundary. The separate Haiven pane was not focused, restarted, or sent input.
+
+For the pane-layout queue diagnostic, this closeout did not issue another tmux selection. The controller's existing reconciliation remains responsible for the applied-but-not-yet-converged pane order; document recovery no longer compounds that state with a duplicated editor projection.
+<!-- agent:boundary:10156c72 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- `Sync failed: pane layout projection did not converge within 60000ms (phase=retry_pending reason=pane_order_mismatch detail=pane_order_mismatch; applied); controller reconciliation remains active`
+- ~~`Sync failed: pane layout projection did not converge within 60000ms (phase=retry_pending reason=pane_order_mismatch detail=pane_order_mismatch; applied); controller reconciliation remains active`~~ — auto-struck: answered this cycle (#ftstrike)
 - Compact Exchange failed "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: waiting for the pre-write editor delivery barrier for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: visible document write for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md deferred: editor delivery remained unacknowledged after the 8000ms recovery barrier; the exact write remains retained, no secondary snapshot/commit or forced disk write was attempted. ACK replay, force-refresh, and build-skew recovery were requested automatically; if the editor listener cannot hot-reload, reload the IDE host and retry the existing operation"
-- do [#steeringmirrorverifylive313]
+- ⏭️ do [#steeringmirrorverifylive313]
 - do [#compactreactiveprojectionverify]
+- do [#implementlazilyintent]
 <!-- /agent:queue -->
 
 ## Notes
@@ -170,6 +191,7 @@ A stale answered free-text queue row remains in `haiven.md`. It does not require
 <!-- agent:backlog priority priority queue -->
 - [ ] [#steeringmirrorverifylive313] [operator-verify] With IntelliJ IDEA running JetBrains plugin 0.2.313 / native agent-doc 0.35.71, make two separate exchange edits during one active turn. Confirm the banner/status item shows the aggregate edit count and its hover contains both edits verbatim; then run Agent Doc once and verify the controller records one aggregate handoff without submitting a partial edit. Do not queue this item automatically; it requires operator UI observation.
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
+- [ ] [#implementlazilyintent] Implement a Lazily intent-generation effect token at the JetBrains post-registration editor boundary so retired, superseded, or model-less reconnect targets are refused before mutation; keep RPC/FFI transport-only and add plugin plus SimWorld coverage for an intent retired while its EDT effect is queued.
 <!-- /agent:backlog -->
 
 ## Review

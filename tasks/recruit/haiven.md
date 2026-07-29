@@ -6,7 +6,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -1165,16 +1165,39 @@ I would replace item 6 with:
 This keeps the tone cooperative and lets the first day begin without surrendering leverage on the provisions that allocate equity, IP, outside work, and termination rights.
 
 Changed paths: none. Verification: I compared item 6 against the offer/addendum package and checked current official USCIS and Connecticut payroll/onboarding sources. Confidence is high on the timing distinction and drafting recommendation; employment counsel should approve the final no-waiver and IP language. No email, signature, attachment, or external message was sent.
-<!-- agent:boundary:1a5b5b91 -->
+
+### Re: Confirming authority to start while documents are finalized — gpt-5
+
+> **Queue prompt:**
+>
+> Should I ask if this is sufficient for me to get started while we finalize the agreement?
+
+**Yes—ask for written confirmation before starting, but do not phrase it vaguely as “is this sufficient?”** Define exactly what “getting started” means and what starting does—and does not—accept.
+
+Suggested wording:
+
+> To keep onboarding moving, please confirm by reply that I am authorized to begin administrative onboarding, introductory meetings, and account setup today, July 29, 2026, while we finalize and sign the integrated addendum and Exhibit A. My beginning those limited activities will not waive any unresolved point, constitute acceptance of the current addendum draft, or prevent either party from incorporating the agreed revisions into the final signed package. Please also confirm that July 29, 2026 remains my employment and service commencement date for salary, signing-bonus timing, benefits eligibility, and equity vesting.
+
+If Brian wants to begin substantive work immediately, add:
+
+> Please also confirm whether you would like me to begin substantive product or engineering work before the final addendum and Exhibit A are executed. Unless confirmed otherwise in writing, I will limit today to administrative onboarding and introductory work so the pending IP and outside-activity terms remain clear.
+
+This is better than asking whether the documents are merely “sufficient” because that word could be read as Brian accepting the current package. The reply should establish four facts:
+
+1. Haiven authorizes the start;
+2. the permitted interim work scope is clear;
+3. starting is not a waiver or acceptance of unresolved terms; and
+4. the economic and service dates still begin July 29.
+
+If Haiven confirms those points, beginning limited onboarding while the documents are finalized is a reasonable compromise. If it will not confirm the no-waiver reservation, Brian should avoid substantive IP-producing work until the final integrated package is signed or employment counsel advises otherwise.
+
+Changed paths: none. Verification: I compared this wording with the current offer/addendum issues and the preceding onboarding-timing recommendation. Confidence is high that the explicit formulation is safer than “is this sufficient”; counsel should assess whether commencing work could imply acceptance under the final governing law and complete document set. No email, signature, attachment, or external message was sent.
+<!-- agent:boundary:b568a56f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority start -->
-- ~~do [#recommendedadditionsexhi]~~
-- ~~do [#unpaidoutsideactivity]~~
-- ~~"Supporting materials, payroll, and timing": In the interest of starting my first day, is this necessary, or can I ask for this to be provided by today or tomorrow?~~
-- Should I ask if this is sufficient for me to get started while we finalize the agreement?
 <!-- /agent:queue -->
 
 ## Backlog

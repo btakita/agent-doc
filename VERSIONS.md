@@ -4,6 +4,21 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.87
+
+_JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **An editor-native save now resumes its exact retained closeout.** After a
+  recovery-only session check requests a save and proves the same
+  `write_applied` authority on disk, it resumes that already-captured cycle
+  through checkpoint and commit. The permission is a bounded Lazily `Computed`
+  fed by native-save, exact-convergence, cycle-phase, and retained-write
+  observations; durable retained-write settlement remains controller-owned.
+  General replay and repair remain disabled, so the bounded transition cannot
+  write a second response or commit an unrelated cycle. An anonymized SimWorld
+  schedule reproduces the former save-then-stall gap and completes without a
+  separate controller-commit action, operator Save All, or IDE exit.
+
 ## 0.35.86
 
 _JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._

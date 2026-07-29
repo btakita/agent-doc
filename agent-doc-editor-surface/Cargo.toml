@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-editor-surface"
-version = "0.35.86"
+version = "0.35.87"
 edition = "2024"
 description = "Pure editor-surface observation and tmux-intent derivation for agent-doc"
 license = "MIT"
@@ -11,6 +11,6 @@ publish = false
 name = "agent_doc_editor_surface"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.86" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.87" }
 lazily = { version = "0.53.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

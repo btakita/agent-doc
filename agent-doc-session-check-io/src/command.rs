@@ -67,12 +67,14 @@
 //! - `session_check_rejects_crdt_disk_divergence_after_committed_closeout`
 
 use agent_doc_run_context_io::AgentDocContextExt;
+use agent_doc_state_scope::LocalReadScope;
 use agent_doc_turn::CyclePhase;
 use agent_doc_turn::op_log::{
     OpsLogEvent, PREFLIGHT_START_EVENT, event_name, is_write_completed_commit_missing_event,
 };
 use agent_doc_workflow::session_check::{BlockedCloseoutMessage, GuardResult};
 use anyhow::Result;
+use lazily::{Computed, Source};
 use std::path::Path;
 
 use crate::{
@@ -127,6 +129,84 @@ pub fn decide_read_only_terminal_projection(
     ReadOnlyTerminalProjectionDecision::ObserveOnly
 }
 
+fn derive_read_only_retained_closeout_resume(
+    native_save_settled: bool,
+    authority_matches_disk: bool,
+    cycle_phase: Option<CyclePhase>,
+    retained_document_write_blocks: bool,
+) -> bool {
+    native_save_settled
+        && authority_matches_disk
+        && cycle_phase == Some(CyclePhase::WriteApplied)
+        && retained_document_write_blocks
+}
+
+/// Reactive permission for a status-only check to resume the same retained
+/// closeout after its own editor-native save.
+///
+/// The observations live only for the current read pass. Durable retained-write
+/// settlement remains controller-owned; this graph cannot authorize response
+/// replay, repair, or an unrelated commit.
+pub struct ReadOnlyRetainedCloseoutResumeProjection {
+    scope: LocalReadScope,
+    native_save_settled: Source<bool>,
+    authority_matches_disk: Source<bool>,
+    cycle_phase: Source<Option<CyclePhase>>,
+    retained_document_write_blocks: Source<bool>,
+    should_resume: Computed<bool>,
+}
+
+impl ReadOnlyRetainedCloseoutResumeProjection {
+    pub fn new(
+        authority_matches_disk: bool,
+        cycle_phase: Option<CyclePhase>,
+        retained_document_write_blocks: bool,
+    ) -> Self {
+        let scope = LocalReadScope::new();
+        let native_save_settled = scope.ctx().source(false);
+        let authority_matches_disk = scope.ctx().source(authority_matches_disk);
+        let cycle_phase = scope.ctx().source(cycle_phase);
+        let retained_document_write_blocks = scope.ctx().source(retained_document_write_blocks);
+        let should_resume = scope.ctx().computed(move |ctx| {
+            derive_read_only_retained_closeout_resume(
+                native_save_settled.get(ctx),
+                authority_matches_disk.get(ctx),
+                cycle_phase.get(ctx),
+                retained_document_write_blocks.get(ctx),
+            )
+        });
+        Self {
+            scope,
+            native_save_settled,
+            authority_matches_disk,
+            cycle_phase,
+            retained_document_write_blocks,
+            should_resume,
+        }
+    }
+
+    pub fn observe_native_save(&self, settled: bool, authority_matches_disk: bool) {
+        self.scope.ctx().set(&self.native_save_settled, settled);
+        self.scope
+            .ctx()
+            .set(&self.authority_matches_disk, authority_matches_disk);
+    }
+
+    pub fn should_resume(&self) -> bool {
+        self.should_resume.get(self.scope.ctx())
+    }
+
+    pub fn observe_cycle_phase(&self, cycle_phase: Option<CyclePhase>) {
+        self.scope.ctx().set(&self.cycle_phase, cycle_phase);
+    }
+
+    pub fn observe_retained_document_write_blocks(&self, blocks: bool) {
+        self.scope
+            .ctx()
+            .set(&self.retained_document_write_blocks, blocks);
+    }
+}
+
 pub trait SessionCheckEffects {
     /// Whether this caller owns document/lifecycle recovery. The operator-facing
     /// `session-check` command sets this false: it is an observer, while
@@ -165,6 +245,18 @@ pub trait SessionCheckEffects {
         event: &str,
     ) -> Result<Option<&'static str>>;
     fn resume_captured_finalize(&self, file: &Path) -> Result<CapturedFinalizeResumeOutcome>;
+    /// Resume only the same durable `write_applied` capture whose editor-native
+    /// save was requested and proven exact by this session-check pass.
+    ///
+    /// The default keeps fixtures and non-runtime effects inert. Production
+    /// explicitly delegates this narrow transition to captured closeout
+    /// recovery without enabling the general recovery pipeline.
+    fn resume_retained_closeout_after_native_save(
+        &self,
+        _file: &Path,
+    ) -> Result<CapturedFinalizeResumeOutcome> {
+        Ok(CapturedFinalizeResumeOutcome::NotApplicable)
+    }
     /// Resume a durable document-write effect after terminal authority/disk
     /// convergence has made its semantic replay safe.
     ///
@@ -522,6 +614,13 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
         Ok(CapturedFinalizeResumeOutcome::NotApplicable)
     }
 
+    fn resume_retained_closeout_after_native_save(
+        &self,
+        file: &Path,
+    ) -> Result<CapturedFinalizeResumeOutcome> {
+        self.inner.resume_retained_closeout_after_native_save(file)
+    }
+
     fn recover_retained_document_write(&self, _file: &Path) -> Result<bool> {
         Ok(false)
     }
@@ -532,9 +631,10 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
 }
 
 /// Operator-facing session check. It may read live authority, write
-/// diagnostics/metadata logs, and request one editor-owned native save for a
-/// retained `write_applied` closeout. It cannot replace, repair, replay, or
-/// commit document content.
+/// diagnostics/metadata logs, request one editor-owned native save for a
+/// retained `write_applied` closeout, and resume that exact already-captured
+/// cycle after the save is proven exact. It cannot replace, repair, replay, or
+/// commit unrelated document content.
 pub fn run_read_only_with_options(
     file: &Path,
     codex_final_gate: bool,
@@ -663,10 +763,16 @@ fn run_with_options_inner(
     } else {
         let cycle_phase =
             agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|state| state.phase);
+        let retained_document_write_blocks = effects.retained_document_write_blocks(file);
+        let retained_closeout_resume = ReadOnlyRetainedCloseoutResumeProjection::new(
+            authority_content == disk_content,
+            cycle_phase,
+            retained_document_write_blocks,
+        );
         if decide_read_only_terminal_projection(
             authority_content == disk_content,
             cycle_phase,
-            effects.retained_document_write_blocks(file),
+            retained_document_write_blocks,
         ) == ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave
             && agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
                 file,
@@ -682,6 +788,7 @@ fn run_with_options_inner(
                 file,
                 "session_check_read_only_retained_native_save",
             )?;
+            retained_closeout_resume.observe_native_save(true, authority_content == disk_content);
         }
         anyhow::ensure!(
             authority_content == disk_content,
@@ -690,6 +797,39 @@ fn run_with_options_inner(
             agent_doc_hash::content_hash(&authority_content),
             agent_doc_hash::content_hash(&disk_content),
         );
+        if retained_closeout_resume.should_resume() {
+            match crate::profile::timed("resume_retained_closeout_after_native_save", || {
+                effects.resume_retained_closeout_after_native_save(file)
+            })? {
+                CapturedFinalizeResumeOutcome::Committed
+                | CapturedFinalizeResumeOutcome::Superseded => {
+                    crate::invalidate_current_document_pass(file);
+                    authority_content = crate::resolve_current_document_content(
+                        file,
+                        "session_check_read_only_retained_closeout_resumed",
+                    )?;
+                    disk_content = crate::resolve_disk_document_content(
+                        file,
+                        "session_check_read_only_retained_closeout_resumed",
+                    )?;
+                    anyhow::ensure!(
+                        authority_content == disk_content,
+                        "[session-check] INTERRUPTED: retained closeout resumed after editor-native save, but canonical authority and disk diverged again for {} (authority_hash={}, disk_hash={})",
+                        file.display(),
+                        agent_doc_hash::content_hash(&authority_content),
+                        agent_doc_hash::content_hash(&disk_content),
+                    );
+                }
+                CapturedFinalizeResumeOutcome::Retained { reason } => {
+                    anyhow::bail!(
+                        "[session-check] INTERRUPTED: editor-native save converged for {}, but the same retained closeout could not finish: {}",
+                        file.display(),
+                        reason,
+                    );
+                }
+                CapturedFinalizeResumeOutcome::NotApplicable => {}
+            }
+        }
     }
     let stale_projection_healed = allows_recovery
         && crate::profile::timed("self_heal_transiently_stale_committed_projection", || {
@@ -2340,6 +2480,30 @@ mod terminal_convergence_tests {
             retained_write_gate_status(existing.clone(), true, Path::new("/tmp/doc.md")),
             existing,
         );
+    }
+
+    #[test]
+    fn read_only_native_save_resumes_only_the_same_exact_write_applied_closeout() {
+        let projection = ReadOnlyRetainedCloseoutResumeProjection::new(
+            false,
+            Some(CyclePhase::WriteApplied),
+            true,
+        );
+        assert!(!projection.should_resume());
+
+        projection.observe_native_save(true, true);
+        assert!(projection.should_resume());
+
+        projection.observe_native_save(true, false);
+        assert!(!projection.should_resume());
+
+        projection.observe_native_save(true, true);
+        projection.observe_cycle_phase(Some(CyclePhase::ResponseCaptured));
+        assert!(!projection.should_resume());
+
+        projection.observe_cycle_phase(Some(CyclePhase::WriteApplied));
+        projection.observe_retained_document_write_blocks(false);
+        assert!(!projection.should_resume());
     }
 
     struct TestEffects;

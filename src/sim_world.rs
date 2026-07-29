@@ -1535,7 +1535,8 @@ mod editor_commit_projection_model {
 /// to save that exact authority instead of requiring IDE exit.
 mod read_only_retained_projection_model {
     use agent_doc_session_check_io::command::{
-        ReadOnlyTerminalProjectionDecision, decide_read_only_terminal_projection,
+        ReadOnlyRetainedCloseoutResumeProjection, ReadOnlyTerminalProjectionDecision,
+        decide_read_only_terminal_projection,
     };
     use agent_doc_turn::CyclePhase;
 
@@ -1543,10 +1544,8 @@ mod read_only_retained_projection_model {
     enum Action {
         SessionCheck,
         EditorNativeSave,
-        ControllerCommit,
     }
 
-    #[derive(Clone, Debug)]
     struct World {
         authority: String,
         disk: String,
@@ -1554,19 +1553,32 @@ mod read_only_retained_projection_model {
         retained_write_blocks: bool,
         native_save_requested: bool,
         committed: bool,
+        response_replays: usize,
         operator_exit_requested: bool,
+        retained_closeout_resume: ReadOnlyRetainedCloseoutResumeProjection,
     }
 
     impl World {
         fn retained_write_applied_wedge() -> Self {
+            let authority = "retained response\nrestored operator text\n".to_string();
+            let disk = "retained response\n".to_string();
+            let phase = CyclePhase::WriteApplied;
+            let retained_write_blocks = true;
+            let retained_closeout_resume = ReadOnlyRetainedCloseoutResumeProjection::new(
+                authority == disk,
+                Some(phase),
+                retained_write_blocks,
+            );
             Self {
-                authority: "retained response\nrestored operator text\n".into(),
-                disk: "retained response\n".into(),
-                phase: CyclePhase::WriteApplied,
-                retained_write_blocks: true,
+                authority,
+                disk,
+                phase,
+                retained_write_blocks,
                 native_save_requested: false,
                 committed: false,
+                response_replays: 0,
                 operator_exit_requested: false,
+                retained_closeout_resume,
             }
         }
 
@@ -1588,19 +1600,19 @@ mod read_only_retained_projection_model {
                 Action::EditorNativeSave if self.native_save_requested => {
                     self.disk = self.authority.clone();
                     self.native_save_requested = false;
-                }
-                Action::ControllerCommit
-                    if self.phase == CyclePhase::WriteApplied && self.authority == self.disk =>
-                {
-                    self.phase = CyclePhase::Committed;
-                    self.retained_write_blocks = false;
-                    self.committed = true;
+                    self.retained_closeout_resume
+                        .observe_native_save(true, self.authority == self.disk);
+                    if self.retained_closeout_resume.should_resume() {
+                        self.phase = CyclePhase::Committed;
+                        self.retained_write_blocks = false;
+                        self.committed = true;
+                    }
                 }
                 _ => {}
             }
             assert!(
                 !self.committed || self.authority == self.disk,
-                "retained closeout committed before exact editor-owned save: {self:?}",
+                "retained closeout committed before exact editor-owned save",
             );
         }
     }
@@ -1614,10 +1626,10 @@ mod read_only_retained_projection_model {
 
         world.step(Action::EditorNativeSave);
         assert!(world.disk.contains("restored operator text"));
-        world.step(Action::ControllerCommit);
 
         assert!(world.committed);
         assert_eq!(world.phase, CyclePhase::Committed);
+        assert_eq!(world.response_replays, 0);
         assert!(!world.operator_exit_requested);
     }
 }

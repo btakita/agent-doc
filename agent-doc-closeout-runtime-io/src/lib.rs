@@ -702,6 +702,13 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             })
         }
     }
+
+    fn resume_retained_closeout_after_native_save(
+        &self,
+        file: &Path,
+    ) -> Result<agent_doc_session_check_io::CapturedFinalizeResumeOutcome> {
+        self.resume_captured_finalize(file)
+    }
 }
 
 pub struct RuntimeCloseoutEffects;

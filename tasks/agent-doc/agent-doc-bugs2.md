@@ -111,10 +111,6 @@ The current-plugin prerequisite is verified: IntelliJ IDEA restarted with `agent
 
 The old `#5qjj` item is now closed as superseded because its queued operator-verification shape repeatedly redispatched itself without an operator event. The still-required proof is preserved as the non-queued backlog item `#steeringmirrorverifylive313`, pinned to the installed generation. This separates agent-drainable work from operator-only UI observation and prevents another automatic queue loop.
 
-### Re: editor-authoritative recovery and focus sync — gpt-5
-
-Fixed and released.
-
 The refusal to read disk while an editor was attached was correct: an unsaved editor buffer must remain the source of truth. The bug was that missing-replica recovery stopped at that refusal and asked the operator to close/reopen the tab. In agent-doc 0.35.74, current-document resolution instead sends a typed, non-projecting save request to the registered editor. The editor saves its exact live buffer and immediately republishes the current content; agent-doc requires the applied receipt before it may read that editor-written disk cut and rebuild the controller model. There is still no unproved disk fallback, force-disk path, or close/reopen requirement.
 
 The safe save-only request can cross a same-protocol build mismatch by retrying with the live listener's reported build identity. That exception is deliberately limited to saving without a projection; all document-mutating intents remain strictly build-fenced.
@@ -131,7 +127,10 @@ The earlier retained-closeout editor-save barrier shipped in 0.35.72, so both or
 Verification passed: focused protocol/IPC/current-document tests, live JetBrains receipts on both documents, installation of CLI/native/editor packages, and the complete `make check` gate. An initial parallel run saw three temporary test-controller connection refusals; each reproduced cleanly in isolation, and the required full rerun passed. Agent-doc 0.35.74 is installed, source commit `84cafa20d` is pushed on `main`, and tag `v0.35.74` is published. The user-owned untracked `editors/zed/extension.wasm` was preserved.
 
 Harper is LSP4IJ's local Markdown grammar/style language server and is unrelated to agent-doc's controller, CRDT replica, or tmux synchronization paths.
-<!-- agent:boundary:de0f9b08 -->
+### Re: editor-authoritative recovery and focus sync — gpt-5
+
+Fixed and released.
+<!-- agent:boundary:c90e44d1 -->
 <!-- /agent:exchange -->
 ## Queue
 

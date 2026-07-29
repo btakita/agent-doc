@@ -863,12 +863,57 @@ Please save or close/reopen `haiven.md`, then invoke the same `agent-doc` comman
 This truncated queue entry is the same future-work question answered in the immediately preceding response. The answer remains: **protect genuinely new, unrelated future work through a signed “Future Independent Work” clause in the addendum, but do not list hypothetical future projects as Prior Inventions in Exhibit A.** Exhibit A should describe pre-employment property; its existing successor-project language can protect later development of the listed pre-existing projects.
 
 No additional analysis or backlog item is needed. No email, attachment, signature, or other external action was taken.
-<!-- agent:boundary:54f97d96 -->
+### Re: “Crime involving moral turpitude” Cause language — gpt-5
+
+> **Queue prompt:**
+>
+> I interpret "crime involving moral turpitude" as being a sex crime or any other criminal offense that is morally objectionable. Is the language clear enough or should we propose something more precise.
+
+**We should propose something more precise.** Your interpretation captures the phrase’s general flavor, but it is not a reliable contractual definition. “Moral turpitude” is a legal term whose scope changes with context; it is not limited to sex crimes, and “morally objectionable” simply replaces one subjective phrase with another.
+
+The current [addendum](../professional/haiven/employment-addendum-brian-takita-v1.0.md) defines Cause as conviction of or a plea to “a felony or crime involving moral turpitude.” Because **any felony is already covered**, “crime involving moral turpitude” principally expands Cause to an uncertain set of misdemeanors. That uncertainty matters: a Cause determination would both eliminate the promised pre-cliff vesting protection and trigger signing-bonus repayment.
+
+Washington decisions illustrate the problem rather than supplying one clean employment-contract definition. In one criminal-law context, the Court of Appeals described moral-turpitude offenses as *malum in se* offenses that generally require guilty knowledge, with murder, arson, and rape as examples. In professional discipline, the court used a different, profession-specific test centered on whether conduct shows unfitness to practice. [Washington Court of Appeals, *State v. Christian*](https://www.courts.wa.gov/opinions/pdf/800451.pdf); [Washington Court of Appeals, *Cummings v. Department of Licensing*](https://www.courts.wa.gov/opinions/pdf/721623.pdf). That contextual variation leaves room for Haiven and an arbitrator to disagree with you later.
+
+I would replace the phrase with objective categories and a work-related materiality requirement. A balanced employee-side formulation is:
+
+> “Cause” means … (iii) Employee’s conviction of, or plea of guilty or nolo contendere to, (A) any felony, or (B) a misdemeanor whose statutory elements require fraud, theft, embezzlement, bribery, intentional violence, sexual abuse or exploitation, or intentional dishonesty; provided that, in either case, the offense materially impairs Employee’s ability to perform Employee’s material duties or causes demonstrable material harm to the Company. An arrest, pending charge, civil violation, traffic infraction, or offense based solely on negligence or strict liability does not constitute Cause under this subsection.
+
+That language:
+
+- preserves Haiven’s protection against genuinely serious misconduct;
+- expressly includes the sex-crime, violence, fraud, and dishonesty concerns you have in mind;
+- prevents an arrest or accusation alone from becoming Cause;
+- excludes technical/regulatory offenses lacking wrongful intent; and
+- requires a real employment or Company nexus rather than an employer’s subjective moral judgment.
+
+For additional protection, change “any felony” to “a felony within the listed categories.” Haiven may resist that narrower version, so the formulation above is a reasonable first proposal. I would also give the notice-and-cure provisions a fixed period—such as ten business days—where cure is possible; criminal convictions themselves would remain noncurable.
+
+Suggested replacement for item 4 of the email draft:
+
+> Please replace “crime involving moral turpitude” with an objective, enumerated definition covering convictions or guilty/no-contest pleas for serious offenses involving fraud, theft, embezzlement, bribery, intentional violence, sexual abuse or exploitation, or intentional dishonesty, together with a material nexus to my duties or demonstrable material harm to the Company. Arrests, pending charges, traffic infractions, and negligence- or strict-liability offenses should not constitute Cause. Please also state a definite cure period for curable breaches.
+
+I did not modify the local email draft because this prompt asks whether and how to revise the language rather than directing that edit. The existing `#haiven-paper` review item already tracks narrowing the moral-turpitude and cure provisions, so no new backlog item is needed. No email, signature, attachment, or other external action was taken.
+
+Verification: I checked the exact Cause clause and its surrounding vesting and bonus-repayment provisions, and reviewed current official Washington court materials. Confidence is high that the phrase is materially ambiguous for this contract; employment counsel should approve the final negotiated wording.
+The language should be more precise. “Moral turpitude” is context-dependent, not limited to sex crimes, and could sweep in uncertain misdemeanors. Washington cases illustrate that variability. [State v. Christian](https://www.courts.wa.gov/opinions/pdf/800451.pdf); [Cummings v. Department of Licensing](https://www.courts.wa.gov/opinions/pdf/721623.pdf).
+
+I drafted objective replacement language covering fraud, theft, bribery, intentional violence, sexual abuse/exploitation, and intentional dishonesty, with a material employment nexus and exclusions for arrests, pending charges, traffic infractions, negligence, and strict-liability offenses.
+
+The response is retained but not committed because the editor has not acknowledged CRDT delivery. Please save or close/reopen [haiven.md](/home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md), then invoke the same `agent-doc` command. I did not resend, force-write, modify the email draft, or take external action.
+
+### Re: Haiven session recovery and Cause language — gpt-5
+
+The retained response about “crime involving moral turpitude” is now present in the authoritative editor document, so I did not duplicate or replace it. Its recommendation remains: use an objective, enumerated Cause definition with a material employment nexus, exclude arrests and intent-free technical offenses, and specify a definite cure period where cure is possible. The existing `#haiven-paper` review item already tracks that negotiation point, so no additional backlog item is needed.
+
+Recovery verification: IntelliJ plugin 0.2.319 re-registered the exact editor buffer; the controller recorded an exact retained-target acknowledgment and converged CRDT delivery. No force-disk path, direct document patch, email modification, signature, attachment, or external action was used. Final contract language should still be reviewed by employment counsel.
+<!-- agent:boundary:e0e08a1e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- I interpret "crime involving moral turpitude" as being a sex crime or any other criminal offense that is morally objectionable. Is the language clear enough or should we propose something more precise. Haiven really likes me. I don't want to go too many rounds but it would be good to have the contract be precise. We don't need to go too in depth with how breaking the law can revoke the contract. I don't plan on breaking the law & I think Luke + Craig are trustworthy
 <!-- /agent:queue -->
 
 ## Backlog

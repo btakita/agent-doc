@@ -212,10 +212,19 @@ impl Registry {
         project_root: &Path,
         surface: EditorSurface,
     ) -> SurfaceObservationReceipt {
-        // Probe before taking the registry lock: it is a controller round trip,
-        // and holding the lock across it would serialize every other root's
-        // observations behind this one.
-        let tmux = (self.probe_tmux)(project_root, &surface);
+        let should_probe = {
+            let roots = self.roots();
+            roots
+                .get(project_root)
+                .is_some_and(|entry| entry.state.fold().tracking.requires_tmux_probe(&surface))
+        };
+        // A first or changed layout already derives Sync, so publish it without
+        // paying for a controller read first. Repeated layouts retain the probe
+        // that detects tmux-only drift. Never hold the registry lock across that
+        // round trip: one slow root must not serialize the others.
+        let tmux = should_probe
+            .then(|| (self.probe_tmux)(project_root, &surface))
+            .flatten();
         self.with_entry(project_root, move |entry| {
             entry.state.observe_with_tmux(surface, tmux)
         })
@@ -540,10 +549,9 @@ mod tests {
         let drifted = TmuxLayout {
             columns: vec![SurfaceColumn::new(["/b.md"]), SurfaceColumn::new(["/a.md"])],
         };
-        // First observation: tmux mirrors the editor. Second: identical editor
-        // surface, but the probe reports tmux has swapped its panes.
-        let (registry, ran, probes) =
-            registry_with_probe(vec![Some(mirrored(&visible)), Some(drifted)]);
+        // The first observation already implies Sync and skips the probe.
+        // The identical second surface probes and sees that tmux swapped panes.
+        let (registry, ran, probes) = registry_with_probe(vec![Some(drifted)]);
 
         let first = registry.observe(Path::new("/p"), visible.clone());
         assert!(!first.idle, "the first sighting must reconcile the layout");
@@ -556,8 +564,8 @@ mod tests {
         assert!(matches!(second.intent, SurfaceIntent::Sync { .. }));
         assert_eq!(
             *probes.lock().unwrap(),
-            2,
-            "every observation pulls the mirror"
+            1,
+            "only a repeated layout needs to pull the tmux mirror"
         );
         assert_eq!(ran.lock().unwrap().len(), 2);
     }
@@ -565,8 +573,7 @@ mod tests {
     #[test]
     fn a_pulled_matching_layout_leaves_a_repeated_surface_idle() {
         let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
-        let (registry, ran, _) =
-            registry_with_probe(vec![Some(mirrored(&visible)), Some(mirrored(&visible))]);
+        let (registry, ran, _) = registry_with_probe(vec![Some(mirrored(&visible))]);
 
         registry.observe(Path::new("/p"), visible.clone());
         let second = registry.observe(Path::new("/p"), visible);
@@ -578,9 +585,9 @@ mod tests {
     #[test]
     fn an_unanswered_probe_is_unknown_rather_than_drift() {
         let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
-        // `None` twice: the controller could not be asked. An unreachable
+        // `None`: the controller could not be asked for the repeated layout. An unreachable
         // controller must not read as drift, or every editor event reconciles.
-        let (registry, ran, _) = registry_with_probe(vec![None, None]);
+        let (registry, ran, _) = registry_with_probe(vec![None]);
 
         registry.observe(Path::new("/p"), visible.clone());
         let second = registry.observe(Path::new("/p"), visible);

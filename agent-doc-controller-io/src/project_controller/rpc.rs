@@ -15716,6 +15716,7 @@ struct PaneLayoutDesiredProjectionState {
 struct PaneLayoutDesiredStatePlaneSink {
     runtime: std::sync::Weak<ControllerRuntime>,
     state: Arc<Mutex<PaneLayoutDesiredProjectionState>>,
+    wake: Arc<Condvar>,
     last_applied_version: Arc<AtomicU64>,
 }
 
@@ -15741,16 +15742,18 @@ impl ControllerStatePlaneSink for PaneLayoutDesiredStatePlaneSink {
                 true
             }
         };
+        self.wake.notify_one();
         if !should_spawn {
             return;
         }
         let runtime = self.runtime.clone();
         let state = Arc::clone(&self.state);
+        let wake = Arc::clone(&self.wake);
         let last_applied_version = Arc::clone(&self.last_applied_version);
         let spawn = std::thread::Builder::new()
             .name("agent-doc-state-plane-projector".to_string())
             .spawn(move || {
-                pane_layout_desired_projection_worker(runtime, state, last_applied_version);
+                pane_layout_desired_projection_worker(runtime, state, wake, last_applied_version);
             });
         if let Err(error) = spawn {
             self.state.lock().worker_active = false;
@@ -15762,6 +15765,7 @@ impl ControllerStatePlaneSink for PaneLayoutDesiredStatePlaneSink {
 fn pane_layout_desired_projection_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
     state: Arc<Mutex<PaneLayoutDesiredProjectionState>>,
+    wake: Arc<Condvar>,
     last_applied_version: Arc<AtomicU64>,
 ) {
     let mut attempt = 0_u64;
@@ -15832,7 +15836,24 @@ fn pane_layout_desired_projection_worker(
                         ),
                     );
                 }
-                std::thread::sleep(pane_layout_retry_delay(attempt));
+                let retry_delay = pane_layout_retry_delay(attempt);
+                let mut projection = state.lock();
+                if projection
+                    .pending_frame
+                    .as_ref()
+                    .is_some_and(|current| current.plane_version > frame.plane_version)
+                {
+                    attempt = 0;
+                    continue;
+                }
+                wake.wait_for(&mut projection, retry_delay);
+                if projection
+                    .pending_frame
+                    .as_ref()
+                    .is_some_and(|current| current.plane_version > frame.plane_version)
+                {
+                    attempt = 0;
+                }
             }
         }
     }
@@ -15844,6 +15865,7 @@ pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRunti
         Arc::new(PaneLayoutDesiredStatePlaneSink {
             runtime: Arc::downgrade(runtime),
             state: Arc::new(Mutex::new(PaneLayoutDesiredProjectionState::default())),
+            wake: Arc::new(Condvar::new()),
             last_applied_version: Arc::new(AtomicU64::new(0)),
         }),
     );
@@ -15852,34 +15874,30 @@ pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRunti
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 struct ControllerPaneLayoutProjectionSink {
     runtime: std::sync::Weak<ControllerRuntime>,
-    worker_active: Arc<AtomicBool>,
+    state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
+    wake: Arc<Condvar>,
 }
 
 impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
-    fn reconcile(&self, _desired: PaneLayoutDesired) {
-        if self
-            .worker_active
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
+    fn reconcile(&self, desired: PaneLayoutDesired) {
+        let should_spawn = {
+            let mut state = self.state.lock();
+            state.schedule(desired.generation)
+        };
+        self.wake.notify_one();
+        if !should_spawn {
             return;
         }
         let runtime = self.runtime.clone();
-        let worker_active = Arc::clone(&self.worker_active);
+        let state = Arc::clone(&self.state);
+        let wake = Arc::clone(&self.wake);
         let spawn = std::thread::Builder::new()
             .name("agent-doc-pane-layout-effect".to_string())
             .spawn(move || {
-                struct WorkerGuard(Arc<AtomicBool>);
-                impl Drop for WorkerGuard {
-                    fn drop(&mut self) {
-                        self.0.store(false, Ordering::SeqCst);
-                    }
-                }
-                let _guard = WorkerGuard(worker_active);
-                pane_layout_effect_worker(runtime);
+                pane_layout_effect_worker(runtime, state, wake);
             });
         if let Err(error) = spawn {
-            self.worker_active.store(false, Ordering::SeqCst);
+            self.state.lock().deactivate();
             eprintln!("[controller] failed to spawn pane-layout effect worker: {error}");
         }
     }
@@ -15891,7 +15909,10 @@ pub(super) fn install_pane_layout_projection_sink(runtime: &Arc<ControllerRuntim
         .pane_layout_graph
         .install_sink(Arc::new(ControllerPaneLayoutProjectionSink {
             runtime: Arc::downgrade(runtime),
-            worker_active: Arc::new(AtomicBool::new(false)),
+            state: Arc::new(Mutex::new(
+                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+            )),
+            wake: Arc::new(Condvar::new()),
         }));
 }
 
@@ -15913,26 +15934,37 @@ fn pane_layout_retry_delay(attempt: u64) -> Duration {
 }
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-fn pane_layout_effect_worker(runtime: std::sync::Weak<ControllerRuntime>) {
+fn pane_layout_effect_worker(
+    runtime: std::sync::Weak<ControllerRuntime>,
+    state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
+    wake: Arc<Condvar>,
+) {
     let mut attempt = 0_u64;
     let mut active_generation = 0_u64;
     loop {
         let Some(runtime) = runtime.upgrade() else {
+            state.lock().deactivate();
             return;
         };
         let Some(desired) = runtime.pane_layout_desired() else {
+            state.lock().deactivate();
             return;
         };
         if desired.generation != active_generation {
             active_generation = desired.generation;
             attempt = 0;
         }
-        if matches!(
+        let already_converged = matches!(
             runtime.pane_layout_projection(),
             PaneLayoutProjection::Converged(ref converged)
                 if converged.generation == desired.generation
-        ) {
-            return;
+        );
+        if already_converged {
+            if pane_layout_effect_worker_retire_if_current(&runtime, &state, desired.generation) {
+                return;
+            }
+            attempt = 0;
+            continue;
         }
         attempt = attempt.saturating_add(1);
         runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
@@ -16041,11 +16073,43 @@ fn pane_layout_effect_worker(runtime: std::sync::Weak<ControllerRuntime>) {
             ),
         );
         if synced {
-            return;
+            if pane_layout_effect_worker_retire_if_current(&runtime, &state, desired.generation) {
+                return;
+            }
+            attempt = 0;
+            continue;
         }
         drop(runtime);
-        std::thread::sleep(pane_layout_retry_delay(attempt));
+        let retry_delay = pane_layout_retry_delay(attempt);
+        let mut worker = state.lock();
+        if worker.is_superseded(desired.generation) {
+            attempt = 0;
+            continue;
+        }
+        wake.wait_for(&mut worker, retry_delay);
+        if worker.is_superseded(desired.generation) {
+            attempt = 0;
+        }
     }
+}
+
+fn pane_layout_effect_worker_retire_if_current(
+    runtime: &ControllerRuntime,
+    state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
+    completed_generation: u64,
+) -> bool {
+    let desired_is_current = runtime
+        .pane_layout_desired()
+        .is_some_and(|desired| desired.generation == completed_generation);
+    let projection_is_converged = matches!(
+        runtime.pane_layout_projection(),
+        PaneLayoutProjection::Converged(ref converged)
+            if converged.generation == completed_generation
+    );
+    if !desired_is_current || !projection_is_converged {
+        return false;
+    }
+    state.lock().retire_if_current(completed_generation)
 }
 
 fn observe_pane_layout_projection(runtime: &Arc<ControllerRuntime>) {
@@ -16710,6 +16774,19 @@ pub(crate) fn handle_sync_tmux_layout(
     }
     #[cfg(not(any(test, feature = "test-support")))]
     {
+        if !pane_layout_invocation_awaits_projection(&invocation) {
+            let routes_created_panes = invocation.routes_created_panes();
+            return Ok(ControllerTmuxLayoutSyncReceipt {
+                applied: false,
+                reason: "projection_published".to_string(),
+                columns: invocation.columns,
+                window: invocation.window,
+                focus: invocation.focus,
+                no_autostart: invocation.no_autostart,
+                exact_visible: invocation.exact_visible,
+                routes_created_panes,
+            });
+        }
         let projection =
             runtime.await_pane_layout_generation(desired.generation, PANE_LAYOUT_COMMAND_AWAIT);
         let (applied, reason) = match projection {
@@ -16739,6 +16816,43 @@ pub(crate) fn handle_sync_tmux_layout(
             exact_visible: invocation.exact_visible,
             routes_created_panes,
         })
+    }
+}
+
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn pane_layout_invocation_awaits_projection(
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+) -> bool {
+    invocation.caller_kind != "automatic" && !invocation.no_autostart
+}
+
+#[cfg(test)]
+mod pane_layout_projection_dispatch_tests {
+    use super::*;
+
+    fn invocation(caller_kind: &str, no_autostart: bool) -> ControllerTmuxLayoutSyncInvocation {
+        ControllerTmuxLayoutSyncInvocation {
+            columns: vec!["tasks/left.md".to_string(), "tasks/right.md".to_string()],
+            window: None,
+            focus: Some("tasks/right.md".to_string()),
+            no_autostart,
+            exact_visible: true,
+            caller_kind: caller_kind.to_string(),
+        }
+    }
+
+    #[test]
+    fn automatic_and_passive_layout_updates_publish_without_waiting() {
+        assert!(!pane_layout_invocation_awaits_projection(&invocation(
+            "automatic",
+            false,
+        )));
+        assert!(!pane_layout_invocation_awaits_projection(&invocation(
+            "manual", true,
+        )));
+        assert!(pane_layout_invocation_awaits_projection(&invocation(
+            "manual", false,
+        )));
     }
 }
 

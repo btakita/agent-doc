@@ -14,6 +14,7 @@ pub mod editor_route_error;
 pub mod fleet;
 pub mod operator_clear;
 pub mod orphan_drain;
+pub mod pane_layout;
 pub mod paths;
 pub mod recycle;
 pub mod status;

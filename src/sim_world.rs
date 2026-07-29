@@ -16,6 +16,216 @@ const MEDIUM_CORPUS_SEEDS: std::ops::Range<u64> = 0..2_048;
 const MEDIUM_CORPUS_STEPS: usize = 32;
 const MEDIUM_CORPUS_BUDGET: Duration = Duration::from_secs(12);
 
+/// `#pane-layout-reactive-latest` reference model: a newer desired layout
+/// published while the current effect is finishing remains owned by one active
+/// worker. The production IO layer adds a Condvar wake; this model exercises the
+/// pure publish/retire boundary across the race.
+mod pane_layout_projection_model {
+    use agent_doc_controller::pane_layout::LatestProjectionWorkerState;
+
+    #[derive(Clone, Copy)]
+    enum Action {
+        Publish(u64),
+        Finish(u64),
+    }
+
+    #[derive(Default)]
+    struct World {
+        worker: LatestProjectionWorkerState,
+        starts: usize,
+    }
+
+    impl World {
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::Publish(generation) => {
+                    self.starts += usize::from(self.worker.schedule(generation));
+                }
+                Action::Finish(generation) => {
+                    self.worker.retire_if_current(generation);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn newer_layout_published_at_worker_exit_is_not_stranded_idle() {
+        let mut world = World::default();
+        world.step(Action::Publish(41));
+        world.step(Action::Publish(42));
+        world.step(Action::Finish(41));
+
+        assert!(world.worker.is_active());
+        assert_eq!(world.worker.pending_generation(), 42);
+        assert_eq!(
+            world.starts, 1,
+            "new state coalesces into the active worker"
+        );
+
+        world.step(Action::Finish(42));
+        assert!(!world.worker.is_active());
+    }
+
+    #[test]
+    fn publication_after_idle_starts_exactly_one_new_worker() {
+        let mut world = World::default();
+        world.step(Action::Publish(51));
+        world.step(Action::Finish(51));
+        world.step(Action::Publish(52));
+
+        assert!(world.worker.is_active());
+        assert_eq!(world.worker.pending_generation(), 52);
+        assert_eq!(world.starts, 2);
+    }
+}
+
+/// Installed-build handoff reference model. The controller process is the
+/// lifetime of the reactive actor: a replacement rebuilds its Sources from the
+/// durable projection, while write ordinals prevent observations from an older
+/// lineage from settling a newer intent.
+mod retained_write_generation_model {
+    use agent_doc_state_backbone::retained_write::{
+        RetainedIntentFacts, SettlementVerdict, durable_exact_observations, settlement_verdict,
+    };
+    use agent_doc_state_backbone::{
+        DocumentAuthority, DocumentStateProjection, DocumentWriteDeferredReason,
+        DocumentWriteSource, StateFact,
+    };
+
+    enum Action {
+        ObserveEditor {
+            epoch: u64,
+            hash: &'static str,
+        },
+        ObserveDisk {
+            epoch: u64,
+            hash: &'static str,
+        },
+        Defer {
+            intent_id: &'static str,
+            target: &'static str,
+        },
+        ReplaceController,
+    }
+
+    struct World {
+        projection: DocumentStateProjection,
+        actor_generation: u64,
+        settled: bool,
+    }
+
+    impl Default for World {
+        fn default() -> Self {
+            Self {
+                projection: DocumentStateProjection::new("generation-rebuild-document"),
+                actor_generation: 1,
+                settled: false,
+            }
+        }
+    }
+
+    impl World {
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::ObserveEditor { epoch, hash } => {
+                    self.observe(DocumentAuthority::EditorRelay, epoch, hash);
+                }
+                Action::ObserveDisk { epoch, hash } => {
+                    self.observe(DocumentAuthority::DiskReplica, epoch, hash);
+                }
+                Action::Defer { intent_id, target } => {
+                    self.projection
+                        .apply_fact(&StateFact::DocumentWriteDeferred {
+                            document_hash: self.projection.document_hash.clone(),
+                            intent_id: intent_id.to_string(),
+                            expected_hash: "before".to_string(),
+                            expected_content: None,
+                            target_hash: target.to_string(),
+                            target_content: format!("content-{target}"),
+                            source: DocumentWriteSource::PendingWrite,
+                            reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                        });
+                }
+                Action::ReplaceController => {
+                    self.actor_generation += 1;
+                    let Some(pending) = self.projection.document.pending_write.as_ref() else {
+                        return;
+                    };
+                    let facts = RetainedIntentFacts {
+                        intent_id: pending.intent_id.clone(),
+                        target_hash: pending.target_hash.clone(),
+                        reason: pending.reason.clone(),
+                        source: pending.source.clone(),
+                        superseding_stage: None,
+                        carries_response_payload: false,
+                        carries_content_delta: true,
+                    };
+                    let (editor, disk) = durable_exact_observations(&self.projection.document);
+                    self.settled = matches!(
+                        settlement_verdict(Some(&facts), editor.as_ref(), disk.as_ref()),
+                        SettlementVerdict::Satisfied { .. }
+                    );
+                }
+            }
+        }
+
+        fn observe(&mut self, authority: DocumentAuthority, epoch: u64, hash: &str) {
+            self.projection
+                .apply_fact(&StateFact::DocumentAuthorityObserved {
+                    document_hash: self.projection.document_hash.clone(),
+                    authority,
+                    authority_epoch: epoch,
+                    source: "simworld".to_string(),
+                    reason: "generation_rebuild".to_string(),
+                    content_hash: Some(hash.to_string()),
+                    editor_id: None,
+                });
+        }
+    }
+
+    #[test]
+    fn replacement_actor_settles_exact_durable_planes_without_a_retry() {
+        let mut world = World::default();
+        world.step(Action::Defer {
+            intent_id: "intent-a",
+            target: "target-a",
+        });
+        world.step(Action::ObserveEditor {
+            epoch: 10,
+            hash: "target-a",
+        });
+        world.step(Action::ObserveDisk {
+            epoch: 11,
+            hash: "target-a",
+        });
+        world.step(Action::ReplaceController);
+
+        assert_eq!(world.actor_generation, 2);
+        assert!(world.settled);
+    }
+
+    #[test]
+    fn replacement_actor_rejects_matching_planes_from_before_the_intent() {
+        let mut world = World::default();
+        world.step(Action::ObserveEditor {
+            epoch: 10,
+            hash: "target-b",
+        });
+        world.step(Action::ObserveDisk {
+            epoch: 11,
+            hash: "target-b",
+        });
+        world.step(Action::Defer {
+            intent_id: "intent-b",
+            target: "target-b",
+        });
+        world.step(Action::ReplaceController);
+
+        assert_eq!(world.actor_generation, 2);
+        assert!(!world.settled);
+    }
+}
+
 /// `#orphandrain` reference model: detached route dispatch and durable backoff
 /// remain safe across controller contention and restart.
 mod orphan_drain_model {

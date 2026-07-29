@@ -94,6 +94,43 @@ pub struct ContentObservation {
     pub intent_delta_materialized: bool,
 }
 
+/// Rehydrate the exact-hash settlement inputs owned by the durable document
+/// projection.
+///
+/// The controller's reactive graph is process-local, but editor and disk
+/// authority observations are durable facts. Keeping their two planes
+/// separately lets a replacement controller rebuild the graph after an
+/// installed-binary handoff without waiting for a polling caller to observe
+/// the same bytes again.
+///
+/// The write ordinal is the lineage fence: an observation made before the
+/// current retained intent is not evidence for that intent, even when the
+/// hashes happen to match. Payload/delta materialization remains false because
+/// the durable fact stores only a hash; exact target equality is the only proof
+/// this reconstruction can safely provide.
+pub fn durable_exact_observations(
+    document: &crate::DocumentProjection,
+) -> (Option<ContentObservation>, Option<ContentObservation>) {
+    let Some(pending) = document.pending_write.as_ref() else {
+        return (None, None);
+    };
+    let observation = |authority: Option<&crate::DocumentAuthorityProjection>| {
+        let authority = authority?;
+        if authority.write_fact_ordinal < pending.ordinal {
+            return None;
+        }
+        Some(ContentObservation {
+            content_hash: authority.content_hash.clone()?,
+            payload_materialized: false,
+            intent_delta_materialized: false,
+        })
+    };
+    (
+        observation(document.latest_editor_authority.as_ref()),
+        observation(document.latest_disk_authority.as_ref()),
+    )
+}
+
 /// Why a retained intent is not settleable yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UnsettledCause {

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-signals"
-version = "0.35.89"
+version = "0.35.90"
 edition = "2024"
 description = "Signals element descriptor for agent-doc"
 license = "MIT"
@@ -11,4 +11,4 @@ publish = false
 name = "agent_doc_element_signals"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.89" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.90" }

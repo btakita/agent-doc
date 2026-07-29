@@ -231,6 +231,19 @@ pub struct SurfaceTracking {
 }
 
 impl SurfaceTracking {
+    /// A controller probe is useful only when the editor layout is unchanged.
+    /// A first or structurally-new layout already implies `Sync`, so probing
+    /// tmux before publishing that intent adds a round trip without changing the
+    /// decision. Repeated layouts still probe so controller-observed drift can
+    /// turn an otherwise-idle/focus observation into a reconcile.
+    pub fn requires_tmux_probe(&self, surface: &EditorSurface) -> bool {
+        if surface.force_reconcile || surface.is_inert() {
+            return false;
+        }
+        let signature = surface.visible_signature();
+        self.reconciled_signature.as_deref() == Some(signature.as_str())
+    }
+
     /// Fold `surface` into this tracking value, returning the next tracking
     /// value and the intent the observation implies.
     ///
@@ -341,6 +354,17 @@ mod tests {
             again, tracking,
             "an idle observation must not advance the tracking value"
         );
+    }
+
+    #[test]
+    fn only_an_unchanged_layout_requires_a_tmux_probe() {
+        let first = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        let changed = surface("/c.md", &[&["/a.md"], &["/c.md"]]);
+        let tracking = SurfaceTracking::default().advance(&first, None).0;
+
+        assert!(tracking.requires_tmux_probe(&first));
+        assert!(!tracking.requires_tmux_probe(&changed));
+        assert!(!SurfaceTracking::default().requires_tmux_probe(&first));
     }
 
     #[test]

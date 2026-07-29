@@ -117,7 +117,7 @@ class LayoutChangeDetector(private val project: Project) {
     private fun isCurrentGeneration(generation: Long): Boolean =
         fallbackGeneration.get() == generation
 
-    private fun scheduleSync(source: String, delayMs: Long = 500L) {
+    private fun scheduleSync(source: String, delayMs: Long = STRUCTURAL_COALESCE_MS) {
         if (disposed.get()) return
         val myGen = nextGeneration()
         executor.schedule(sync@{
@@ -171,6 +171,7 @@ class LayoutChangeDetector(private val project: Project) {
     companion object {
         private val LOG = Logger.getInstance(LayoutChangeDetector::class.java)
         private val instances = ConcurrentHashMap<Project, LayoutChangeDetector>()
+        internal const val STRUCTURAL_COALESCE_MS = 75L
 
         fun getInstance(project: Project): LayoutChangeDetector {
             return instances.computeIfAbsent(project) { p ->

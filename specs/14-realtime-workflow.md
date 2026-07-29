@@ -652,6 +652,15 @@ Snapshots never create a realtime state. A snapshot can contribute a candidate
 delta to `AgentDeltaReady`; it cannot move a document to `MergePlanned`,
 `ApplyInFlight`, or `AppliedVerified` by itself.
 
+Controller replacement reconstructs live reactive inputs from durable facts,
+not from a disk fallback or a retrying status RPC. Editor-authority and
+disk-authority observations remain separate projection planes and carry the
+write-fact ordinal at which each was observed. A replacement generation may
+seed an exact-hash settlement input only when that ordinal is at or after the
+retained intent; an older matching hash is not convergence proof. Installing a
+new controller therefore recreates the graph and schedules its settlement
+Effect without requiring an editor restart or `session-check` polling.
+
 Closed-set workflow flags and transition provenance are typed enums in the
 development harness. Free-text strings are permitted only at presentation or
 serialization boundaries (`as_str`, logs, SQLite, or IPC). A matching frontend

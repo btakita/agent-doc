@@ -2831,6 +2831,15 @@ pub struct DocumentProjection {
     pub latest_disk_write: Option<DocumentDiskWriteProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_authority: Option<DocumentAuthorityProjection>,
+    /// Latest editor-plane observation, retained separately from the global
+    /// authority winner so a reconstructed controller can hydrate both inputs
+    /// of retained-write settlement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_editor_authority: Option<DocumentAuthorityProjection>,
+    /// Latest disk-plane observation. This remains available when a newer
+    /// editor observation owns the global authority projection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_disk_authority: Option<DocumentAuthorityProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_write: Option<DocumentWriteIntentProjection>,
     /// Ordered durable agent-write intents. `pending_write` remains the newest
@@ -2958,6 +2967,26 @@ impl DocumentProjection {
         content_hash: Option<&str>,
         editor_id: Option<&str>,
     ) -> bool {
+        let observed = DocumentAuthorityProjection {
+            authority,
+            authority_epoch,
+            source: source.to_string(),
+            reason: reason.to_string(),
+            content_hash: content_hash.map(str::to_string),
+            editor_id: editor_id.map(str::to_string),
+            write_fact_ordinal: self.write_fact_ordinal,
+        };
+        let plane = if authority.editor_active() {
+            &mut self.latest_editor_authority
+        } else {
+            &mut self.latest_disk_authority
+        };
+        if plane
+            .as_ref()
+            .is_none_or(|current| authority_epoch >= current.authority_epoch)
+        {
+            *plane = Some(observed.clone());
+        }
         let accept = match &self.latest_authority {
             None => true,
             Some(current) if authority_epoch > current.authority_epoch => true,
@@ -2969,14 +2998,7 @@ impl DocumentProjection {
         if !accept {
             return false;
         }
-        self.latest_authority = Some(DocumentAuthorityProjection {
-            authority,
-            authority_epoch,
-            source: source.to_string(),
-            reason: reason.to_string(),
-            content_hash: content_hash.map(str::to_string),
-            editor_id: editor_id.map(str::to_string),
-        });
+        self.latest_authority = Some(observed);
         true
     }
 }
@@ -3014,6 +3036,11 @@ pub struct DocumentAuthorityProjection {
     pub content_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editor_id: Option<String>,
+    /// Write-fact frontier when this plane was observed. A rebuilt actor may
+    /// use the observation only for an intent at or before this ordinal; this
+    /// prevents an old coincidental hash match from settling a newer write.
+    #[serde(default)]
+    pub write_fact_ordinal: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5974,6 +6001,18 @@ mod tests {
             .expect("authority projected");
         assert_eq!(authority.authority, DocumentAuthority::EditorRelay);
         assert_eq!(authority.authority_epoch, 10);
+        let editor_plane = projection
+            .document
+            .latest_editor_authority
+            .as_ref()
+            .expect("editor plane projected");
+        assert_eq!(editor_plane.authority_epoch, 10);
+        let disk_plane = projection
+            .document
+            .latest_disk_authority
+            .as_ref()
+            .expect("late disk remains a plane observation");
+        assert_eq!(disk_plane.authority_epoch, 9);
         assert_eq!(projection.rejected_stale_events.len(), 1);
         assert_eq!(
             projection.rejected_stale_events[0].domain,

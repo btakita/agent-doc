@@ -111,9 +111,7 @@ internal enum class MissingFocusPanePolicy(val token: String) {
 internal object CpRouteClient {
     private val log = Logger.getInstance(CpRouteClient::class.java)
     private const val PANE_LAYOUT_DESIRED_STATE_CHANNEL = "agent-doc/pane-layout/desired/v1"
-    private const val PANE_LAYOUT_STATUS_STATE_CHANNEL = "agent-doc/pane-layout/status/v1"
     private const val PANE_LAYOUT_DESIRED_TYPE_TAG = "agent-doc.pane-layout.desired.v1"
-    private const val PANE_LAYOUT_STATUS_TYPE_TAG = "agent-doc.pane-layout.status.v1"
     private val statePlaneProducerId = "jetbrains-" + java.util.UUID.randomUUID().toString()
     private val statePlaneEpoch = java.util.concurrent.atomic.AtomicLong(0)
 
@@ -224,20 +222,11 @@ internal object CpRouteClient {
                         ?: "pane layout projection was not accepted with a valid plane version",
                 )
             }
-            if (accepted.exitCode != 0 || !shouldAwaitSyncCompletion(callerKind, noAutostart)) {
-                accepted
-            } else {
-                val expectedPlaneVersion = publishedPlaneVersion
-                    ?: return CpEditorRouteResult(
-                        exitCode = 1,
-                        output = "pane layout projection receipt omitted plane_version",
-                    )
-                awaitPaneLayoutStateProjection(
-                    socket = socket,
-                    expectedSourcePlaneVersion = expectedPlaneVersion,
-                    timeoutMs = SYNC_COMMAND_COMPLETION_TIMEOUT_MS,
-                )
-            }
+            // Publishing the latest desired snapshot is the editor-side completion
+            // boundary. The controller owns retained, reactive reconciliation from
+            // here; waiting for one exact version couples the action to an obsolete
+            // snapshot whenever a newer editor observation supersedes it.
+            accepted
         } catch (e: Exception) {
             log.warn("[sync] pane-layout state projection publish failed via ${socket.path}: ${e.message}")
             CpEditorRouteResult(
@@ -246,77 +235,6 @@ internal object CpRouteClient {
             )
         }
     }
-
-    private fun awaitPaneLayoutStateProjection(
-        socket: File,
-        expectedSourcePlaneVersion: Long,
-        timeoutMs: Long,
-    ): CpEditorRouteResult {
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
-        var cursor = 0L
-        var latestPhase: PaneLayoutPhase? = null
-        var latestReasonCode: PaneLayoutReasonCode? = null
-        var latestReasonDetail = "projection_published"
-        while (System.nanoTime() < deadline) {
-            val remainingMs =
-                TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()).coerceAtLeast(1L)
-            val request = statePlaneSubscribeRequest(
-                channel = PANE_LAYOUT_STATUS_STATE_CHANNEL,
-                afterVersion = cursor,
-                timeoutMs = minOf(remainingMs, 5_000L),
-            )
-            val data = sendRequestDataToSocket(socket, request)
-            cursor = maxOf(cursor, jsonLongFieldOrNull(data, "latest_version") ?: cursor)
-            val frames = data.get("frames")?.takeIf { it.isJsonArray }?.asJsonArray ?: continue
-            for (frame in frames) {
-                val messageJson =
-                    jsonStringFieldOrNull(frame.asJsonObject, "message_json") ?: continue
-                val message = IpcMessage.decodeJson(messageJson)
-                val snapshot = (message as? IpcMessage.SnapshotMessage)?.snapshot ?: continue
-                val node = snapshot.nodes.firstOrNull {
-                    it.typeTag == PANE_LAYOUT_STATUS_TYPE_TAG &&
-                        it.key?.path == PANE_LAYOUT_STATUS_STATE_CHANNEL
-                } ?: continue
-                val payload = (node.state as? NodeState.Payload)?.toByteArray() ?: continue
-                val status = JsonParser.parseString(payload.decodeToString()).asJsonObject
-                val sourcePlaneVersion =
-                    jsonLongFieldOrNull(status, "source_plane_version") ?: continue
-                if (sourcePlaneVersion < expectedSourcePlaneVersion) continue
-                if (sourcePlaneVersion > expectedSourcePlaneVersion) {
-                    return CpEditorRouteResult(
-                        exitCode = 1,
-                        output = "pane layout projection superseded by desired " +
-                            "plane_version=$sourcePlaneVersion",
-                    )
-                }
-                latestPhase = PaneLayoutPhase.fromToken(jsonStringFieldOrNull(status, "phase"))
-                    ?: latestPhase
-                latestReasonCode =
-                    PaneLayoutReasonCode.fromToken(jsonStringFieldOrNull(status, "reason_code"))
-                    ?: latestReasonCode
-                latestReasonDetail =
-                    jsonStringFieldOrNull(status, "reason_detail") ?: latestReasonDetail
-                if (latestPhase == PaneLayoutPhase.Converged) {
-                    return CpEditorRouteResult(
-                        exitCode = 0,
-                        output = "pane layout converged: " +
-                            "${latestReasonCode?.token ?: "unknown"} ($latestReasonDetail)",
-                    )
-                }
-            }
-        }
-        return CpEditorRouteResult(
-            exitCode = 1,
-            output = "pane layout projection did not converge within ${timeoutMs}ms " +
-                "(phase=${latestPhase?.token ?: "unobserved"} " +
-                "reason=${latestReasonCode?.token ?: "unknown"} " +
-                "detail=$latestReasonDetail); " +
-                "controller reconciliation remains active",
-        )
-    }
-
-    internal fun shouldAwaitSyncCompletion(callerKind: String, noAutostart: Boolean): Boolean =
-        callerKind == "manual" && !noAutostart
 
     fun submitFocusDocumentPane(
         projectRoot: String,
@@ -780,7 +698,6 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
 private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
 private const val COMMAND_COMPLETION_GRACE_MS = 5_000L
 private const val COMMAND_COMPLETION_POLL_MS = 100L
-private const val SYNC_COMMAND_COMPLETION_TIMEOUT_MS = 60_000L
 
     private val socketWatchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }

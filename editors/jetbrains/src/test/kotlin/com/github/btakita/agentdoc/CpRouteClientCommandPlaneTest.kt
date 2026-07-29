@@ -242,13 +242,6 @@ class CpRouteClientCommandPlaneTest {
     }
 
     @Test
-    fun `only manual sync with autostart waits for terminal completion`() {
-        assertTrue(CpRouteClient.shouldAwaitSyncCompletion("manual", noAutostart = false))
-        assertFalse(CpRouteClient.shouldAwaitSyncCompletion("automatic", noAutostart = false))
-        assertFalse(CpRouteClient.shouldAwaitSyncCompletion("manual", noAutostart = true))
-    }
-
-    @Test
     fun `tmuxLayoutSyncStateRequest builds read side model check request`() {
         val request = CpRouteClient.tmuxLayoutSyncStateRequest(
             columnsJson = """["/proj/tasks/one.md","/proj/tasks/two.md"]""",

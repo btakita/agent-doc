@@ -227,10 +227,11 @@ class EditorTabSyncListenerTest {
             "focus must bypass the serialized JNA worker",
             fastFocus.contains("NativeAdminControls.focusDocumentPane("),
         )
-assertTrue(
-"the fast lane uses its own micro-coalescing window, not the layout debounce",
-!fastFocus.contains("DEBOUNCE_MS") && fastFocus.contains("FOCUS_COALESCE_MS"),
-)
+        assertTrue(
+            "the fast lane uses its own micro-coalescing window, not the layout debounce",
+            !fastFocus.contains("SURFACE_COALESCE_MS") &&
+                fastFocus.contains("FOCUS_COALESCE_MS"),
+        )
 
 val focusGained = source.substringAfter(
 "fun onEditorFocusGained(project: Project, file: VirtualFile)",
@@ -242,7 +243,7 @@ focusGained.contains("requestObservation("),
 }
 
 @Test
-fun `focus dispatch requires the latest active and fresh editor intent`() {
+    fun `focus dispatch requires the latest active and fresh editor intent`() {
 assertTrue(EditorTabSyncListener.shouldDispatchFocus(7, 7, true, 1))
 assertFalse(EditorTabSyncListener.shouldDispatchFocus(7, 8, true, 1))
 assertFalse(EditorTabSyncListener.shouldDispatchFocus(7, 7, false, 1))
@@ -254,7 +255,13 @@ true,
 TimeUnit.SECONDS.toNanos(1),
 ),
 )
-}
+    }
+
+    @Test
+    fun `automatic layout observations use short coalescing windows`() {
+        assertTrue(EditorTabSyncListener.SURFACE_COALESCE_MS in 1L..50L)
+        assertTrue(LayoutChangeDetector.STRUCTURAL_COALESCE_MS in 1L..75L)
+    }
 
     @Test
     fun `surface reporting enqueues without waiting for a controller receipt`() {

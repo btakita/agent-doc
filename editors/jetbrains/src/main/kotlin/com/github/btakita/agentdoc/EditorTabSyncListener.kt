@@ -67,7 +67,7 @@ Thread(runnable, "agent-doc-editor-focus-sync").apply { isDaemon = true }
 }
 
 companion object {
-private const val DEBOUNCE_MS = 100L
+        internal const val SURFACE_COALESCE_MS = 40L
 private const val FOCUS_COALESCE_MS = 12L
 private val FOCUS_MAX_AGE_NANOS = TimeUnit.MILLISECONDS.toNanos(500)
 private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
@@ -160,7 +160,10 @@ ageNanos in 0..FOCUS_MAX_AGE_NANOS
         LOG.debug("[layout-sync] $msg")
     }
 
-    private fun requestObservation(pending: PendingSurface, delayMs: Long = DEBOUNCE_MS) {
+    private fun requestObservation(
+        pending: PendingSurface,
+        delayMs: Long = SURFACE_COALESCE_MS,
+    ) {
         latestSurface.set(pending)
         val requested = generation.incrementAndGet()
         executor.schedule(observe@{

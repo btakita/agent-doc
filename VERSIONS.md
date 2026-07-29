@@ -4,6 +4,29 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.90
+
+_JetBrains plugin 0.2.321; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Automatic tmux layout sync is latest-wins and non-blocking.** JetBrains
+  publishes a desired layout and returns instead of waiting up to 60 seconds for
+  that exact plane version to converge. The controller coalesces superseding
+  observations, interrupts stale retry waits, and applies only the newest
+  generation. Faster selection and structural coalescing keeps editor-to-pane
+  feedback responsive without allowing an old completion to steal focus.
+- **Installed controller generations reconstruct exact retained-write
+  lineage.** Durable editor and disk observations now carry their write-fact
+  ordinal and survive state-actor replacement as separate authority planes. A
+  replacement generation immediately subscribes its settlement Effect and can
+  complete an exact retained write once both observations are at or after the
+  intent; matching observations from before the intent remain rejected. An
+  installed fix therefore takes effect through controller recreation without
+  restarting IDEA or polling `session-check`.
+- **SimWorld covers both replacement races.** Neutral document schedules prove
+  that a replacement actor settles exact durable authority without a retry,
+  refuses pre-intent observations, and that rapid pane-layout generations
+  converge on the newest request without stranding work.
+
 ## 0.35.89
 
 _JetBrains plugin 0.2.320; VS Code extension 0.2.62; Zed extension 0.1.0._

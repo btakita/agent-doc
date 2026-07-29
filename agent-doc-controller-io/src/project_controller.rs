@@ -1233,6 +1233,10 @@ struct ControllerDocumentGraphs {
         String,
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     >,
+    /// Controller-generation activation edge. A reconstructed graph first
+    /// hydrates its durable inputs, then the sink installation advances this
+    /// Source so already-satisfied effects rerun with a live durable sink.
+    settle_generation: lazily::ThreadSafeSourceMap<String, u64>,
     verdict: lazily::ThreadSafeComputedMap<
         String,
         agent_doc_state_backbone::retained_write::SettlementVerdict,
@@ -1326,6 +1330,7 @@ impl ControllerDocumentGraphs {
             pending: lazily::ThreadSafeComputedMap::new(&ctx),
             authority: lazily::ThreadSafeSourceMap::new(&ctx),
             disk: lazily::ThreadSafeSourceMap::new(&ctx),
+            settle_generation: lazily::ThreadSafeSourceMap::new(&ctx),
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
             preflight_facts: lazily::ThreadSafeSourceMap::new(&ctx),
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
@@ -1342,33 +1347,57 @@ impl ControllerDocumentGraphs {
             project_root,
             runtime: Arc::downgrade(runtime),
         });
+        let document_hashes = self
+            .settle_effects
+            .lock()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        self.ctx.batch(|ctx| {
+            for document_hash in document_hashes {
+                self.settle_generation.set(ctx, document_hash, 1);
+            }
+        });
     }
 
     /// Record the applied state projection. This is the only write into the
     /// retained-write graph; `pending` derives from it.
     ///
-    /// The content observations are dropped in the same batch. They were taken
-    /// against the *previous* projection, and a verdict is only as fresh as its
-    /// least fresh input: keeping them would let a new intent be judged against
-    /// planes nobody has looked at since, which is exactly the "I did not look"
-    /// vs "I looked" collapse `#idlerevisionreactive` forbids. Clearing them
-    /// yields `Unobserved`, which blocks nothing and settles nothing until a
-    /// caller looks again. The batch matters: without it the projection `set`
-    /// would flush the settle effect while the stale planes were still in place.
+    /// Content observations are reconstructed from the durable per-plane
+    /// authority facts. Their write ordinals fence them to the retained intent
+    /// they postdate, so rebuilding the graph after a binary handoff can settle
+    /// an exact target without letting a coincidental pre-intent hash clear a
+    /// newer write.
     fn set_projection(
         &self,
         document_hash: &str,
         projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
     ) {
+        let (authority, disk) = projection
+            .as_ref()
+            .map(|document| {
+                agent_doc_state_backbone::retained_write::durable_exact_observations(
+                    &document.document,
+                )
+            })
+            .unwrap_or((None, None));
+        let has_retained_intent = projection
+            .as_ref()
+            .and_then(retained_intent_facts_from_projection)
+            .is_some();
         let closeout_cycle_id = projection
             .as_ref()
             .and_then(|document| document.closeout.cycle_id.clone());
         let closeout_owner = projection
             .as_ref()
             .and_then(|document| document.closeout.owner.clone());
+        let settle_generation = u64::from(self.settle_sink.get().is_some());
         self.ctx.batch(|ctx| {
-            self.authority.set(ctx, document_hash.to_string(), None);
-            self.disk.set(ctx, document_hash.to_string(), None);
+            self.authority
+                .set(ctx, document_hash.to_string(), authority);
+            self.disk.set(ctx, document_hash.to_string(), disk);
+            self.settle_generation
+                .set(ctx, document_hash.to_string(), settle_generation);
             self.closeout_cycle_id
                 .set(ctx, document_hash.to_string(), closeout_cycle_id);
             self.closeout_owner
@@ -1376,6 +1405,13 @@ impl ControllerDocumentGraphs {
             self.projection
                 .set(ctx, document_hash.to_string(), projection);
         });
+        if has_retained_intent {
+            // A pending intent is itself the membership edge for the retained
+            // settle Effect. Mint it while rebuilding the graph; sink
+            // installation advances `settle_generation` once the runtime is
+            // safely inside its Arc.
+            self.current_verdict(document_hash);
+        }
     }
 
     /// Observe one clock edge beside the current durable closeout facts and
@@ -1444,7 +1480,7 @@ impl ControllerDocumentGraphs {
     fn verdict(
         &self,
         document_hash: &str,
-        file: &Path,
+        _file: &Path,
         authority: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
         disk: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
@@ -1456,37 +1492,36 @@ impl ControllerDocumentGraphs {
             self.disk.set(ctx, document_hash.to_string(), disk);
         });
 
-        self.current_verdict(document_hash, file)
+        self.current_verdict(document_hash)
     }
 
     /// Publish one live-authority edge without erasing the last disk edge.
     fn observe_authority(
         &self,
         document_hash: &str,
-        file: &Path,
+        _file: &Path,
         authority: agent_doc_state_backbone::retained_write::ContentObservation,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         self.authority
             .set(&self.ctx, document_hash.to_string(), Some(authority));
-        self.current_verdict(document_hash, file)
+        self.current_verdict(document_hash)
     }
 
     /// Publish one editor-save edge without erasing the last authority edge.
     fn observe_disk(
         &self,
         document_hash: &str,
-        file: &Path,
+        _file: &Path,
         disk: agent_doc_state_backbone::retained_write::ContentObservation,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         self.disk
             .set(&self.ctx, document_hash.to_string(), Some(disk));
-        self.current_verdict(document_hash, file)
+        self.current_verdict(document_hash)
     }
 
     fn current_verdict(
         &self,
         document_hash: &str,
-        file: &Path,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         // As of lazily 0.50 the slot factory receives the entry's own tracking
         // view (`Fn(&ThreadSafeContext, &K) -> V`), so reads through it register
@@ -1507,10 +1542,12 @@ impl ControllerDocumentGraphs {
         let pending = self.pending.clone();
         let authority_map = self.authority.clone();
         let disk_map = self.disk.clone();
+        let settle_generation = self.settle_generation.clone();
         let verdict = self.verdict.get_or_insert_with(
             &self.ctx,
             document_hash.to_string(),
             move |ctx, key| {
+                let _generation = settle_generation.observe(ctx, key).unwrap_or_default();
                 agent_doc_state_backbone::retained_write::settlement_verdict(
                     pending.observe(ctx, key).flatten().as_ref(),
                     authority_map.observe(ctx, key).flatten().as_ref(),
@@ -1521,7 +1558,7 @@ impl ControllerDocumentGraphs {
         // Minted after the slot it subscribes to, and only ever once per
         // document. On the first query it fires here; afterwards it has already
         // fired from the `set` above. Either way no caller decides to settle.
-        self.ensure_settle_effect(document_hash, file);
+        self.ensure_settle_effect(document_hash);
         verdict
     }
 
@@ -1559,16 +1596,23 @@ impl ControllerDocumentGraphs {
     /// in the graph that owns it, the clear fires whenever the signal says so and
     /// is a no-op for every verdict other than `Satisfied` — so there is no
     /// moment for a caller to miss.
-    fn ensure_settle_effect(&self, document_hash: &str, file: &Path) {
+    fn ensure_settle_effect(&self, document_hash: &str) {
         if self.settle_effects.lock().contains_key(document_hash) {
             return;
         }
         let key = document_hash.to_string();
         let verdict_map = self.verdict.clone();
+        let settle_generation = self.settle_generation.clone();
         let sink = self.settle_sink.clone();
-        let file = file.to_path_buf();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
+            // Subscribe directly to the controller-generation Source. The
+            // verdict value may remain `Satisfied` across reconstruction, so
+            // relying only on value propagation through the Computed would
+            // leave the pre-sink no-op effect dormant.
+            let _generation = settle_generation
+                .observe(ctx, &effect_key)
+                .unwrap_or_default();
             // Reading through the map is what subscribes this effect; a verdict
             // fetched any other way would make it fire exactly once.
             let Some(agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied {
@@ -1598,10 +1642,9 @@ impl ControllerDocumentGraphs {
                 &intent_source,
             );
             agent_doc_ops_log_io::log_op(
-                &file,
+                &sink.project_root,
                 &format!(
-                    "retained_write_settled_from_derived_verdict file={} intent_id={intent_id} retained_target_hash={retained_target_hash} settled_hash={settled_hash} proof={} source={source}",
-                    file.display(),
+                    "retained_write_settled_from_derived_verdict document_hash={effect_key} intent_id={intent_id} retained_target_hash={retained_target_hash} settled_hash={settled_hash} proof={} source={source}",
                     proof.token(),
                 ),
             );
@@ -8938,6 +8981,33 @@ agent:queue\n\
         )
     }
 
+    fn document_authority_event(
+        document_hash: &str,
+        authority: agent_doc_state_backbone::DocumentAuthority,
+        authority_epoch: u64,
+        content_hash: &str,
+    ) -> agent_doc_state_backbone::StateEvent {
+        agent_doc_state_backbone::StateEvent::new(
+            format!(
+                "document-authority-{document_hash}-{authority_epoch}-{}",
+                if authority.editor_active() {
+                    "editor"
+                } else {
+                    "disk"
+                }
+            ),
+            agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+                document_hash: document_hash.to_string(),
+                authority,
+                authority_epoch,
+                source: "controller-generation-test".to_string(),
+                reason: "exact_target_observed".to_string(),
+                content_hash: Some(content_hash.to_string()),
+                editor_id: None,
+            },
+        )
+    }
+
     fn pending_intent_id(runtime: &Arc<ControllerRuntime>, document_hash: &str) -> Option<String> {
         runtime
             .memory
@@ -9141,6 +9211,76 @@ agent:queue\n\
                 ..
             } if intent_id == "intent-before-start"
         ));
+    }
+
+    #[test]
+    fn rebuilt_controller_rehydrates_exact_planes_and_settles_without_polling() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+        let deferred =
+            deferred_document_write_event(&document_hash, "intent-before-rebuild", "target");
+        let editor = document_authority_event(
+            &document_hash,
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+            10,
+            "target",
+        );
+        let disk = document_authority_event(
+            &document_hash,
+            agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+            11,
+            "target",
+        );
+        for event in [&deferred, &editor, &disk] {
+            append_state_event(dir.path(), event).unwrap();
+        }
+
+        // Constructing the replacement controller is the installed-build
+        // generation edge. No verdict query, retry, or session-check follows.
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash),
+            None,
+            "the rebuilt reactive graph must settle exact durable editor+disk observations"
+        );
+        let ledger = load_state_event_ledger(dir.path()).unwrap();
+        assert!(ledger.events().iter().any(|event| matches!(
+            &event.fact,
+            agent_doc_state_backbone::StateFact::DocumentWriteConverged { intent_id, .. }
+            if intent_id == "intent-before-rebuild"
+        )));
+    }
+
+    #[test]
+    fn rebuilt_controller_does_not_reuse_planes_that_predate_the_intent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+        let editor = document_authority_event(
+            &document_hash,
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+            10,
+            "target",
+        );
+        let disk = document_authority_event(
+            &document_hash,
+            agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+            11,
+            "target",
+        );
+        let deferred =
+            deferred_document_write_event(&document_hash, "intent-after-observation", "target");
+        for event in [&editor, &disk, &deferred] {
+            append_state_event(dir.path(), event).unwrap();
+        }
+
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("intent-after-observation"),
+            "a matching hash from before the write is not settlement evidence"
+        );
     }
 
     #[test]

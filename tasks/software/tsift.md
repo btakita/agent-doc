@@ -137,6 +137,7 @@ The other 16 match expression-level patterns directly.
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- do [#tsiftnavrunbook]
 - ~~Please extract tsift:code-navigation section into a runbook. If AGENTS.md + CLAUDE.md are used and CLAUDE.md uses `@AGENTS.md`, please do not add redundant instructions.~~
 - ~~do [#astgreplangs]~~
 - do [#astgrepexec]
@@ -149,6 +150,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tsiftnavrunbook] Extract the generated tsift:code-navigation block into a runbook and de-duplicate it: AGENTS.md is canonical and CLAUDE.md uses @AGENTS.md, so the block should not be repeated in both. Re-filed because the original queue item was auto-struck during the #astgreplangs cycle without the work being done
 - [ ] [#astgrepexec] Register semantic-edit executors for languages that have an ast-grep grammar but no executor (kotlin and bash today, plus whatever #astgreplangs adds) so structural_rewrite and the symbol-resolved intent kinds reach them. Blocked on per-language tag queries + symbol extraction in tsift-graph/tsift-search
 <!-- /agent:backlog -->
 

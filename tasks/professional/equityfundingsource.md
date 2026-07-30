@@ -201,12 +201,13 @@ Also fixed a second fixed-window source-grep — `admin-investor-pipeline.test.t
 ### Re: Closing #tmo-sync-declined-unpublish — opus-5
 
 Complete in `0a87c46d`: the duplicate `investment_deal_status_sync_by_loan_` is deleted from `tmo-sync.ts`, both callers now go through `admin_deal_status_sync_by_loan_`, and the TMO sync path inherits the `disabled_at` guard it never had.
-<!-- agent:boundary:50866c62 -->
+<!-- agent:boundary:f19075af -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- 🚧 📌 do [#tmo-roster-error-still-silent]
-- 📌 do [#tmo-sync-cron-failures]
+- 🚧 In https://equityfundingsource.com/admin/lender-pipeline?tab=pipeline&dialog_user_id=5cdcb0dd-76e9-4d63-b57e-dd29ecce359e&dialog=lender, please allow the admin to set the date of the last verification. This will enable previously questioned lenders to have a schedule as to when the next date will occur. Test + deploy on staging first. If it works, then deploy to production.
+- do [#tmo-roster-error-still-silent]
+- do [#tmo-sync-cron-failures]
 <!-- /agent:queue -->
 
 ## Backlog

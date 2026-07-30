@@ -20,6 +20,7 @@ export interface SurfaceColumn {
 export interface EditorSurface {
     focused: string;
     visible: string[];
+    open: string[];
     columns: SurfaceColumn[];
     force_reconcile: boolean;
 }
@@ -40,6 +41,19 @@ export function isPreservedLayoutOutput(output: string): boolean {
 
 function normalizeVisibleMd(visibleMd: string[]): string[] {
     return [...new Set(visibleMd)].sort();
+}
+
+/**
+ * Stable editor-work priority: the focused document, adjacent tabs supplied by
+ * the adapter, visible documents, then the remaining open documents.
+ */
+export function prioritizeDocuments(
+    focused: string,
+    nearbyTabs: string[],
+    visible: string[],
+    open: string[],
+): string[] {
+    return [...new Set([focused, ...nearbyTabs, ...visible, ...open].filter(Boolean))];
 }
 
 export function normalizeVisibleColumns(visibleColumns: string[][]): string[][] {
@@ -74,6 +88,7 @@ export function buildSyncCommandArgs(
 export interface EditorSurfaceInput {
     activeFile: string;
     visibleMd: string[];
+    openMd?: string[];
     visibleColumns?: string[][];
     forceReconcile?: boolean;
 }
@@ -103,6 +118,7 @@ export function buildEditorSurface(input: EditorSurfaceInput): EditorSurface | n
     return {
         focused: input.activeFile,
         visible,
+        open: prioritizeDocuments(input.activeFile, input.openMd ?? [], visible, []),
         columns: columns.map((files) => ({ files })),
         force_reconcile: input.forceReconcile === true,
     };

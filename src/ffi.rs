@@ -483,89 +483,23 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
         Ok(s) => s,
         Err(_) => return CString::new(idle_json()).unwrap().into_raw(),
     };
-    // The Project Controller/state-backbone projection is the editor-facing turn
-    // source. Cycle sidecars are recovery artifacts only and are intentionally
-    // not consulted here.
-    let projected_phase = state_backbone_closeout_phase(std::path::Path::new(path))
-        .unwrap_or(agent_doc_turn::CyclePhase::Committed);
-    let phase = resolve_turn_phase(
-        document_model_actor_state(std::path::Path::new(path)),
-        projected_phase,
-    );
-    let mut proj = agent_doc_turn::cp_projection::TurnProjection::from_phase(phase);
-    if proj.turn_in_flight {
-        let steering =
-            agent_doc_session_check_io::realtime_steering_set_since_turn_baseline(Path::new(path))
-                .ok()
-                .map(|set| set.turn_projection())
-                .unwrap_or_else(agent_doc_turn::cp_projection::TurnSteeringProjection::none);
-        proj = proj.with_realtime_steering(steering);
-    }
+    // Compatibility cache read over the native Lazily projection. Subscription
+    // membership is supplied by the editor surface; this function never opens
+    // a controller request or reads SQLite.
+    let proj = agent_doc_project_root_io::project_root_containing(Path::new(path))
+        .and_then(|project_root| {
+            agent_doc_editor_surface_io::document_authority(&project_root, path)
+                .and_then(|authority| authority.turn)
+        })
+        .unwrap_or_else(|| {
+            agent_doc_turn::cp_projection::TurnProjection::from_phase(
+                agent_doc_turn::CyclePhase::Committed,
+            )
+        });
     let json = serde_json::to_string(&proj).unwrap_or_else(|_| idle_json());
     CString::new(json)
         .unwrap_or_else(|_| CString::new(idle_json()).unwrap())
         .into_raw()
-}
-
-/// Resolve the turn phase for the projection with the Project Controller
-/// document model authoritative and the lazily state-backbone closeout phase as
-/// the fine-label source. Pure so the authority policy is exhaustively
-/// unit-testable without a state store.
-///
-/// - Model `Busy`/`Blocked` → a turn is live: keep the projected phase for the
-///   awaiting/persisting label, but if the projection is terminal use a generic
-///   in-flight phase so a lagging terminal projection cannot hide it.
-/// - Model any other state → no turn is running: `Committed` (idle).
-/// - Model unavailable (`None`, cold start) → the state-backbone projection.
-fn resolve_turn_phase(
-    model_state: Option<agent_doc_controller::actor::ActorState>,
-    projected_phase: agent_doc_turn::CyclePhase,
-) -> agent_doc_turn::CyclePhase {
-    use agent_doc_controller::actor::ActorState;
-    match model_state {
-        Some(ActorState::Busy | ActorState::Blocked) => {
-            if projected_phase.is_open() {
-                projected_phase
-            } else {
-                agent_doc_turn::CyclePhase::PreflightStarted
-            }
-        }
-        Some(_) => agent_doc_turn::CyclePhase::Committed,
-        None => projected_phase,
-    }
-}
-
-fn state_backbone_closeout_phase(file: &Path) -> Option<agent_doc_turn::CyclePhase> {
-    let root = agent_doc_project_root_io::project_root_containing(file)?;
-    let document_hash = agent_doc_hash::document_id_for_path(file);
-    agent_doc_controller_io::project_controller::load_state_backbone_projection(&root)
-        .ok()?
-        .document(&document_hash)
-        .and_then(|document| document.closeout.phase)
-}
-
-/// The Project Controller document model's authoritative actor state for a
-/// document, read directly from the state store (a local sqlite read, NOT a
-/// controller RPC, so it stays cheap and works even while the controller is
-/// busy). `None` when there is no state store yet (cold start / never-registered)
-/// or the row is unreadable, so the projection falls back to the state-backbone
-/// closeout phase.
-///
-/// Reads WITHOUT creating the store (checks the path first), so a bare read from
-/// the editor plugin never materializes controller state as a side effect.
-fn document_model_actor_state(file: &Path) -> Option<agent_doc_controller::actor::ActorState> {
-    let root = agent_doc_project_root_io::project_root_containing(file)?;
-    let db_path = agent_doc_sqlite::state_store::state_db_path(&root);
-    if !db_path.exists() {
-        return None;
-    }
-    let conn = agent_doc_sqlite::state_store::open_state_db(&root).ok()?;
-    let document_id =
-        agent_doc_session_actor_io::canonical_document_id_in(&root, &file.to_string_lossy());
-    agent_doc_sqlite::state_store::load_actor_record_from_db(&conn, &document_id)
-        .ok()
-        .flatten()
-        .map(|record| record.state)
 }
 
 /// Return the `agent:exchange` nodes of `file_path` as a JSON array
@@ -2761,6 +2695,50 @@ pub unsafe extern "C" fn agent_doc_editor_surface_enqueue_json(
     }
 }
 
+/// Read the latest controller-published authority for one open document.
+///
+/// This is a cache read over the native Lazily graph. The editor surface owns
+/// subscription membership; no controller request, SQLite read, or filesystem
+/// probe occurs here.
+///
+/// # Safety
+///
+/// `project_root` and `document_path` must each be valid, NUL-terminated UTF-8
+/// strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_authority_json(
+    project_root: *const c_char,
+    document_path: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root =
+            PathBuf::from(unsafe { required_ffi_string(project_root, "project_root") }?);
+        let document_path = unsafe { required_ffi_string(document_path, "document_path") }?;
+        Ok(agent_doc_editor_surface_io::document_authority(
+            &project_root,
+            &document_path,
+        ))
+    })())
+}
+
+/// Read selected document × controller authority from the native Computed.
+///
+/// # Safety
+///
+/// `project_root` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_current_document_authority_json(
+    project_root: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root =
+            PathBuf::from(unsafe { required_ffi_string(project_root, "project_root") }?);
+        Ok(agent_doc_editor_surface_io::current_document_authority(
+            &project_root,
+        ))
+    })())
+}
+
 /// Report the column layout tmux is currently showing at `project_root`.
 ///
 /// The controller's half of the mirror. `layout_json` is a `TmuxLayout`:
@@ -3316,49 +3294,6 @@ mod tests {
             std::fs::read_to_string(&file).unwrap(),
             baseline,
             "post-registration FFI is transport-only and must not write disk",
-        );
-    }
-
-    #[test]
-    fn resolve_turn_phase_makes_document_model_authoritative() {
-        use agent_doc_controller::actor::ActorState;
-        use agent_doc_turn::CyclePhase;
-        // Model Busy/Blocked + a terminal projection → in-flight; a lagging
-        // terminal projection cannot hide a live turn.
-        assert_eq!(
-            resolve_turn_phase(Some(ActorState::Busy), CyclePhase::Committed),
-            CyclePhase::PreflightStarted
-        );
-        assert_eq!(
-            resolve_turn_phase(Some(ActorState::Blocked), CyclePhase::Abandoned),
-            CyclePhase::PreflightStarted
-        );
-        // Model Busy + an open projected phase → keep the fine awaiting/persisting label.
-        assert_eq!(
-            resolve_turn_phase(Some(ActorState::Busy), CyclePhase::ResponseCaptured),
-            CyclePhase::ResponseCaptured
-        );
-        // Model not-in-flight → idle regardless of a stale open projection.
-        for st in [
-            ActorState::Ready,
-            ActorState::Closed,
-            ActorState::Starting,
-            ActorState::WaitingInput,
-        ] {
-            assert_eq!(
-                resolve_turn_phase(Some(st), CyclePhase::PreflightStarted),
-                CyclePhase::Committed,
-                "{st:?} must not let a stale projection assert an in-flight turn"
-            );
-        }
-        // No document model (cold start) → state-backbone projection.
-        assert_eq!(
-            resolve_turn_phase(None, CyclePhase::PreflightStarted),
-            CyclePhase::PreflightStarted
-        );
-        assert_eq!(
-            resolve_turn_phase(None, CyclePhase::Committed),
-            CyclePhase::Committed
         );
     }
 

@@ -6,9 +6,9 @@ import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import java.awt.AWTEvent
 import java.awt.Container
-import java.awt.event.ContainerEvent
-import java.awt.event.AWTEventListener
 import java.awt.Toolkit
+import java.awt.event.AWTEventListener
+import java.awt.event.ContainerEvent
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -18,12 +18,11 @@ import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
 
 /**
- * Detects editor layout changes (tab drags between splits, new splits, closed splits)
- * using one process-wide AWT event listener filtered to this project's
- * EditorsSplitters tree. A recursive ContainerListener used to attach to every
- * transient Swing container under the editor; long-running IDE sessions grew
- * that set into thousands of listeners and made every UI structure change
- * progressively more expensive.
+ * Detects editor layout changes (tab drags between splits, new splits, closed splits) using one
+ * process-wide AWT event listener filtered to this project's EditorsSplitters tree. A recursive
+ * ContainerListener used to attach to every transient Swing container under the editor;
+ * long-running IDE sessions grew that set into thousands of listeners and made every UI structure
+ * change progressively more expensive.
  */
 class LayoutChangeDetector(private val project: Project) {
 
@@ -39,10 +38,14 @@ class LayoutChangeDetector(private val project: Project) {
 
     fun start() {
         // Resolve the splitters root before installing the filtered process listener.
-        executor.schedule(init@{
-            if (disposed.get()) return@init
-            attachContainerListener()
-        }, 2_000L, TimeUnit.MILLISECONDS)
+        executor.schedule(
+            init@{
+                if (disposed.get()) return@init
+                attachContainerListener()
+            },
+            2_000L,
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     fun dispose() {
@@ -62,12 +65,19 @@ class LayoutChangeDetector(private val project: Project) {
                 val root = splitters as? Container ?: return@invokeLater
                 editorsRoot.set(root)
                 if (listenerInstalled.compareAndSet(false, true)) {
-                    Toolkit.getDefaultToolkit().addAWTEventListener(
-                        containerEventListener,
-                        AWTEvent.CONTAINER_EVENT_MASK,
-                    )
+                    Toolkit.getDefaultToolkit()
+                        .addAWTEventListener(
+                            containerEventListener,
+                            AWTEvent.CONTAINER_EVENT_MASK,
+                        )
                 }
-                LOG.info("[layout] one filtered AWT ContainerEvent listener attached to EditorsSplitters")
+                LOG.info(
+                    "[layout] one filtered AWT ContainerEvent listener attached to EditorsSplitters"
+                )
+                // IDEA restores tabs before this delayed listener attaches. Seed
+                // the selected-document Source explicitly so startup does not
+                // wait for an unrelated later tab or split event.
+                EditorTabSyncListener.install(project).onEditorLayoutChanged(project)
             } catch (e: Exception) {
                 LOG.debug("[layout] Failed to attach filtered container listener: ${e.message}")
             }
@@ -91,7 +101,8 @@ class LayoutChangeDetector(private val project: Project) {
             LOG.debug("[state] filteredContainerEvents=$count listeners=1")
         }
         val sourceToken =
-            if (containerEvent.id == ContainerEvent.COMPONENT_ADDED) "containerAdd" else "containerRemove"
+            if (containerEvent.id == ContainerEvent.COMPONENT_ADDED) "containerAdd"
+            else "containerRemove"
         scheduleSync(sourceToken)
     }
 
@@ -111,8 +122,7 @@ class LayoutChangeDetector(private val project: Project) {
         }
     }
 
-    private fun nextGeneration(): Long =
-        fallbackGeneration.incrementAndGet()
+    private fun nextGeneration(): Long = fallbackGeneration.incrementAndGet()
 
     private fun isCurrentGeneration(generation: Long): Boolean =
         fallbackGeneration.get() == generation
@@ -120,23 +130,24 @@ class LayoutChangeDetector(private val project: Project) {
     private fun scheduleSync(source: String, delayMs: Long = STRUCTURAL_COALESCE_MS) {
         if (disposed.get()) return
         val myGen = nextGeneration()
-        executor.schedule(sync@{
-            if (disposed.get()) return@sync
-            val isCurrent = isCurrentGeneration(myGen)
-            if (!isCurrent) return@sync // superseded by newer event
-            checkAndSync(source, myGen)
-        }, delayMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
+        executor.schedule(
+            sync@{
+                if (disposed.get()) return@sync
+                val isCurrent = isCurrentGeneration(myGen)
+                if (!isCurrent) return@sync // superseded by newer event
+                checkAndSync(source, myGen)
+            },
+            delayMs.coerceAtLeast(0L),
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     private fun checkAndSync(source: String, requestedGeneration: Long) {
         if (disposed.get()) return
         // Read Swing component tree on EDT (thread-safe), then sync on background thread
         ApplicationManager.getApplication().invokeLater {
-            if (
-                disposed.get() ||
-                project.isDisposed ||
-                !isCurrentGeneration(requestedGeneration)
-            ) return@invokeLater
+            if (disposed.get() || project.isDisposed || !isCurrentGeneration(requestedGeneration))
+                return@invokeLater
             try {
                 val layout = LayoutDetector.detectEditorLayout(project)
                 // Hash on structural shape only (column count + window count), NOT file contents.
@@ -147,11 +158,12 @@ class LayoutChangeDetector(private val project: Project) {
                 // EditorTabSyncListener.selectionChanged handles .md file navigation separately.
                 val manager = FileEditorManagerEx.getInstanceEx(project)
                 val windowCount = manager.windows.size
-                val hash = if (layout != null) {
-                    "cols=${layout.columns.size},wins=$windowCount"
-                } else {
-                    "single,wins=$windowCount"
-                }
+                val hash =
+                    if (layout != null) {
+                        "cols=${layout.columns.size},wins=$windowCount"
+                    } else {
+                        "single,wins=$windowCount"
+                    }
 
                 val prev = lastLayoutHash.getAndSet(hash)
                 if (hash == prev) return@invokeLater // No change

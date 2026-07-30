@@ -69,6 +69,12 @@ pub struct EditorSurface {
     /// Every visible markdown document, in no particular order.
     #[serde(default)]
     pub visible: Vec<String>,
+    /// Every open markdown document owned by this editor process, ordered by
+    /// editor proximity: focused first, then nearby tabs, then the remaining
+    /// open documents. This may be larger than `visible`; the native authority
+    /// plane keeps one independent controller projection warm for each entry.
+    #[serde(default)]
+    pub open: Vec<String>,
     /// The split layout. Empty means "layout not detected"; the signature then
     /// falls back to the sorted visible set.
     #[serde(default)]
@@ -77,6 +83,59 @@ pub struct EditorSurface {
     /// observation shortcut.
     #[serde(default)]
     pub force_reconcile: bool,
+}
+
+/// Availability of the controller-owned turn projection for one document.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentAuthorityReadiness {
+    /// The editor reported the document and the native worker has not completed
+    /// its first controller projection yet.
+    #[default]
+    Pending,
+    /// The controller-owned projection was read successfully.
+    Ready,
+    /// The native worker could not resolve or read the controller projection.
+    Unavailable,
+}
+
+/// Native/controller input for one open document.
+///
+/// This is a Source value. Editors do not manufacture it: their only input is
+/// [`EditorSurface`], while the native adapter observes controller state and
+/// publishes this value independently for every open document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentAuthority {
+    pub document: String,
+    pub readiness: DocumentAuthorityReadiness,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<agent_doc_turn::cp_projection::TurnProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub revision: u64,
+}
+
+impl DocumentAuthority {
+    pub fn pending(document: impl Into<String>) -> Self {
+        Self {
+            document: document.into(),
+            readiness: DocumentAuthorityReadiness::Pending,
+            turn: None,
+            error: None,
+            revision: 0,
+        }
+    }
+}
+
+/// Pure join of the selected editor document and that document's native
+/// controller authority.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CurrentDocumentAuthority {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<DocumentAuthority>,
 }
 
 /// The column layout tmux is actually showing, as observed by the controller.
@@ -322,9 +381,10 @@ mod tests {
         let visible = columns
             .iter()
             .flat_map(|column| column.files.iter().cloned())
-            .collect();
+            .collect::<Vec<_>>();
         EditorSurface {
             focused: focused.to_string(),
+            open: visible.clone(),
             visible,
             columns,
             force_reconcile: false,

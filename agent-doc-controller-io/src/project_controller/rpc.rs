@@ -28,6 +28,7 @@ use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_document_realtime::watch_authority::{DiskChangeSignal, WatchAction, WatchDelivery};
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use std::collections::BTreeSet;
+use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 
 const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(1);
 // Foreground closeout reads may briefly queue behind a replica bootstrap or
@@ -65,6 +66,10 @@ const PANE_LAYOUT_COMMAND_AWAIT: Duration = Duration::from_secs(30);
 const STATE_PLANE_SUBSCRIBE_MAX: Duration = Duration::from_secs(120);
 const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
 const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
+const DOCUMENT_TURN_AUTHORITY_TYPE_TAG: &str = "agent-doc.document-turn-authority.v1";
+const DOCUMENT_TURN_AUTHORITY_LAUNCH_CONCURRENCY: usize = 4;
+static DOCUMENT_TURN_AUTHORITY_LAUNCH_PERMITS: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(DOCUMENT_TURN_AUTHORITY_LAUNCH_CONCURRENCY);
 pub const CAPTURED_FINALIZE_WAKE_STATE_CHANNEL: &str = "agent-doc/captured-finalize/wake/v1";
 const CAPTURED_FINALIZE_WAKE_TYPE_TAG: &str = "agent-doc.captured-finalize.wake.v1";
 static PANE_LAYOUT_STATUS_EPOCH: AtomicU64 = AtomicU64::new(1);
@@ -242,6 +247,43 @@ pub(crate) fn connect_path(path: &Path) -> Result<interprocess::local_socket::St
         .context("failed to connect to project controller")
 }
 
+async fn connect_path_async(path: &Path) -> Result<interprocess::local_socket::tokio::Stream> {
+    let name = path.to_fs_name::<GenericFilePath>()?;
+    interprocess::local_socket::ConnectOptions::new()
+        .name(name)
+        .connect_tokio()
+        .await
+        .context("failed to connect asynchronously to project controller")
+}
+
+async fn connect_or_launch_async(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+) -> Result<interprocess::local_socket::tokio::Stream> {
+    let controller_socket = socket_path(project_root);
+    if let Ok(stream) = connect_path_async(&controller_socket).await {
+        return Ok(stream);
+    }
+
+    // A burst of editor tabs can discover a missing controller together. Only a
+    // small bounded set may enter the blocking launch/recovery path, and every
+    // waiter rechecks the socket after acquiring a permit so one successful
+    // launch satisfies the rest.
+    let _launch_permit = DOCUMENT_TURN_AUTHORITY_LAUNCH_PERMITS
+        .acquire()
+        .await
+        .context("document-authority launch semaphore closed")?;
+    if let Ok(stream) = connect_path_async(&controller_socket).await {
+        return Ok(stream);
+    }
+
+    let blocking_root = project_root.to_path_buf();
+    tokio::task::spawn_blocking(move || connect_or_launch(&blocking_root, launch_mode).map(drop))
+        .await
+        .context("document-authority controller launch worker failed")??;
+    connect_path_async(&controller_socket).await
+}
+
 pub(crate) fn request(project_root: &Path, command: &str) -> Result<String> {
     request_path(&socket_path(project_root), command)
 }
@@ -356,6 +398,129 @@ pub(crate) fn request_controller<T: DeserializeOwned>(
     request: ControllerRequest,
 ) -> Result<T> {
     request_controller_with_timeout(project_root, request, CONTROLLER_RPC_TIMEOUT)
+}
+
+pub(super) fn document_turn_authority_channel(document_hash: &str) -> String {
+    format!("{DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX}{document_hash}")
+}
+
+/// Observe the controller's Lazily document-turn authority projection over one
+/// retained socket.
+///
+/// The client writes one subscription declaration. The controller then pushes a
+/// frame whenever the Computed changes. `keep_open` supplies editor membership,
+/// so closing a tab drops the stream without waiting for a heartbeat.
+pub async fn observe_document_turn_authority_stream(
+    project_root: &Path,
+    file: &Path,
+    mut observe: impl FnMut(agent_doc_turn::cp_projection::TurnProjection) + Send,
+    mut membership: tokio::sync::watch::Receiver<bool>,
+) -> Result<()> {
+    let authority_root = agent_doc_project_root_io::project_root_containing(file)
+        .unwrap_or_else(|| project_root.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    let invocation = ControllerStatePlaneSubscribeInvocation {
+        channel: document_turn_authority_channel(&document_hash),
+        after_controller_generation: None,
+        after_version: 0,
+        timeout_ms: STATE_PLANE_SUBSCRIBE_MAX.as_millis() as u64,
+    };
+    let request = ControllerRequest {
+        command: "document_turn_authority_stream".to_string(),
+        file: Some(file.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("native_editor_authority".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(&invocation)?),
+    };
+    let mut request_value = serde_json::to_value(&request)?;
+    if let Some(object) = request_value.as_object_mut() {
+        object.insert(
+            "binary_version".to_string(),
+            serde_json::Value::String(identity_version()),
+        );
+    }
+    let mut raw = serde_json::to_string(&request_value)?;
+    raw.push('\n');
+
+    while *membership.borrow() {
+        let stream = connect_or_launch_async(&authority_root, LaunchMode::Lazy).await?;
+        let (reader_half, mut writer_half) = tokio::io::split(stream);
+        if let Err(error) = writer_half.write_all(raw.as_bytes()).await {
+            if document_authority_transport_interrupted(&error) {
+                continue;
+            }
+            return Err(error).context("write document-authority stream declaration");
+        }
+        if let Err(error) = writer_half.flush().await {
+            if document_authority_transport_interrupted(&error) {
+                continue;
+            }
+            return Err(error).context("flush document-authority stream declaration");
+        }
+
+        let mut reader = tokio::io::BufReader::new(reader_half);
+        let mut response = String::new();
+        loop {
+            response.clear();
+            tokio::select! {
+                membership_result = membership.changed() => {
+                    if membership_result.is_err() || !*membership.borrow() {
+                        return Ok(());
+                    }
+                }
+                result = reader.read_line(&mut response) => {
+                    match result {
+                        Ok(0) => break,
+                        Ok(_) => {}
+                        Err(error) if document_authority_transport_interrupted(&error) => break,
+                        Err(error) => {
+                        return Err(error).context("read document-authority stream frame");
+                        }
+                    }
+                }
+            }
+            let subscription: ControllerStatePlaneSubscription =
+                decode_controller_response(&authority_root, &request, response.trim())?;
+            if let Some(projection) = subscription
+                .frames
+                .last()
+                .map(|frame| {
+                    let message: lazily::IpcMessage = serde_json::from_str(&frame.message_json)
+                        .context("decode document-turn authority state-plane message")?;
+                    let payload = state_plane_snapshot_payload(
+                        &message,
+                        &invocation.channel,
+                        DOCUMENT_TURN_AUTHORITY_TYPE_TAG,
+                    )?;
+                    serde_json::from_slice(&payload)
+                        .context("decode document-turn authority projection")
+                })
+                .transpose()?
+            {
+                observe(projection);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn document_authority_transport_interrupted(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::BrokenPipe
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionReset
+            | ErrorKind::NotConnected
+            | ErrorKind::UnexpectedEof
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -10353,6 +10518,15 @@ pub(crate) fn serve_client(
     match reader.read_line(&mut line) {
         Ok(0) => Ok(()),
         Ok(_) => {
+            let request: ControllerRequest = serde_json::from_str(line.trim())?;
+            if request.command == "document_turn_authority_stream" {
+                return serve_document_turn_authority_stream(
+                    runtime,
+                    request,
+                    should_stop,
+                    &mut writer_half,
+                );
+            }
             let (response, request_should_stop) = handle_request_for_client(&line, runtime)?;
             writer_half.write_all(response.as_bytes())?;
             writer_half.write_all(b"\n")?;
@@ -11040,6 +11214,79 @@ pub(crate) fn handle_request_locked(
                 "error": format!("unknown controller command: {other}")
         }))?),
     }
+}
+
+struct DocumentTurnAuthorityStreamLease<'a> {
+    runtime: &'a ControllerRuntime,
+    document_hash: String,
+    document_id: String,
+}
+
+impl Drop for DocumentTurnAuthorityStreamLease<'_> {
+    fn drop(&mut self) {
+        self.runtime
+            .release_document_turn_authority_subscription(&self.document_hash, &self.document_id);
+    }
+}
+
+fn serve_document_turn_authority_stream(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+    should_stop: &AtomicBool,
+    writer: &mut impl Write,
+) -> Result<()> {
+    let file = request_file(&request)?;
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let invocation: ControllerStatePlaneSubscribeInvocation =
+        serde_json::from_str(&payload_json)
+            .context("parse document-turn authority subscription")?;
+    let project_root = runtime.bootstrap_snapshot()?.project_root;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    anyhow::ensure!(
+        invocation.channel == document_turn_authority_channel(&document_hash),
+        "document-turn authority channel does not match requested document"
+    );
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    runtime.acquire_document_turn_authority_subscription(&document_hash, &document_id);
+    let _lease = DocumentTurnAuthorityStreamLease {
+        runtime,
+        document_hash,
+        document_id,
+    };
+    let timeout = Duration::from_millis(invocation.timeout_ms).min(STATE_PLANE_SUBSCRIBE_MAX);
+    let mut after_controller_generation = invocation.after_controller_generation;
+    let mut after_version = invocation.after_version;
+    while !should_stop.load(Ordering::SeqCst) {
+        let subscription = runtime.subscribe_state_plane(
+            &invocation.channel,
+            after_controller_generation,
+            after_version,
+            timeout,
+        );
+        after_controller_generation = Some(subscription.controller_generation);
+        after_version = subscription.latest_version;
+        let mut response = controller_envelope(Ok(subscription))?;
+        response.push('\n');
+        if let Err(error) = writer.write_all(response.as_bytes()) {
+            if matches!(
+                error.kind(),
+                ErrorKind::BrokenPipe
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::UnexpectedEof
+            ) {
+                return Ok(());
+            }
+            return Err(error).context("write document-authority stream frame");
+        }
+        writer
+            .flush()
+            .context("flush document-authority stream frame")?;
+    }
+    Ok(())
 }
 
 fn stale_mutating_client_binary(client_version: Option<&str>) -> Option<&str> {
@@ -15690,6 +15937,40 @@ fn state_plane_snapshot_message_json<T: Serialize>(
         roots: vec![lazily::NodeId(1)],
     });
     serde_json::to_string(&message).context("encode Lazily state-plane Snapshot")
+}
+
+pub(super) fn publish_document_turn_authority(
+    runtime: &ControllerRuntime,
+    document_hash: &str,
+    epoch: u64,
+    projection: &agent_doc_turn::cp_projection::TurnProjection,
+) {
+    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
+        return;
+    };
+    let channel = document_turn_authority_channel(document_hash);
+    let producer_id = format!(
+        "agent-doc-controller:{}:{}",
+        std::process::id(),
+        bootstrap.controller_generation
+    );
+    let result = state_plane_snapshot_message_json(
+        epoch,
+        &channel,
+        DOCUMENT_TURN_AUTHORITY_TYPE_TAG,
+        projection,
+    )
+    .and_then(|message_json| {
+        runtime.publish_state_plane_frame(channel, producer_id, message_json, epoch, None)
+    });
+    if let Err(error) = result {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "document_turn_authority_publish_deferred document_hash={document_hash} error={error:#}"
+            ),
+        );
+    }
 }
 
 pub(super) fn publish_captured_finalize_wake(

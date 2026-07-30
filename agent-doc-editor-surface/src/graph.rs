@@ -20,9 +20,14 @@
 //! editor threads, so this is the thread-safe family.
 
 use agent_doc_state_scope::ProcessScope;
-use lazily::{Computed, Effect, ThreadSafeContext, ThreadSafeStateMachine};
+use lazily::{
+    Computed, Effect, Source, ThreadSafeContext, ThreadSafeSourceMap, ThreadSafeStateMachine,
+};
 
-use crate::{EditorSurface, SurfaceIntent, SurfaceTracking, TmuxLayout, layout_matches};
+use crate::{
+    CurrentDocumentAuthority, DocumentAuthority, EditorSurface, SurfaceIntent, SurfaceTracking,
+    TmuxLayout, layout_matches,
+};
 
 /// One observation of the whole mirror: what the editor shows, and whether tmux
 /// currently matches it.
@@ -100,6 +105,14 @@ pub struct EditorSurfaceState {
     /// the editor is showing? This is the value that used to be a field on
     /// `EditorSurface`, asked of an editor that cannot know it.
     layout_matches: Computed<Option<bool>>,
+    /// Controller-owned input, independently materialized for every open
+    /// document by the native adapter.
+    document_authorities: ThreadSafeSourceMap<String, DocumentAuthority>,
+    /// A new map key is not yet a dependency of a Computed. This epoch makes
+    /// authority-map membership reactive as well as each existing value.
+    document_authority_membership: Source<u64>,
+    /// Selected document × its controller-owned authority.
+    current_document_authority: Computed<CurrentDocumentAuthority>,
     machine: ThreadSafeStateMachine<SurfaceFold, SurfaceObservation>,
     intent: Computed<SurfaceIntent>,
     _scope: Option<ProcessScope>,
@@ -131,11 +144,27 @@ impl EditorSurfaceState {
         let ctx = scope.ctx().clone();
         let editor = ctx.source(EditorSurface::default());
         let tmux = ctx.source(None::<TmuxLayout>);
+        let document_authorities = ThreadSafeSourceMap::new(&ctx);
+        let document_authority_membership = ctx.source(0_u64);
         let layout_matches = ctx.computed(move |c| {
             let surface = c.get(&editor);
             let tmux = c.get(&tmux);
             layout_matches(&surface, tmux.as_ref())
         });
+        let current_document_authority = {
+            let authorities = document_authorities.clone();
+            ctx.computed(move |c| {
+                let document = c.get(&editor).focused.trim().to_string();
+                let _membership = c.get(&document_authority_membership);
+                if document.is_empty() {
+                    return CurrentDocumentAuthority::default();
+                }
+                CurrentDocumentAuthority {
+                    authority: authorities.observe(c, &document),
+                    document: Some(document),
+                }
+            })
+        };
         let machine = ThreadSafeStateMachine::new(&ctx, SurfaceFold::default(), advance);
         let state = machine.state_handle();
         let intent = ctx.computed(move |c| c.get(&state).intent.clone());
@@ -144,6 +173,9 @@ impl EditorSurfaceState {
             editor,
             tmux,
             layout_matches,
+            document_authorities,
+            document_authority_membership,
+            current_document_authority,
             machine,
             intent,
             _scope: None,
@@ -196,6 +228,39 @@ impl EditorSurfaceState {
         self.fold_current();
     }
 
+    /// Record the native/controller authority for one open document.
+    pub fn observe_document_authority(&self, authority: DocumentAuthority) {
+        let document = authority.document.clone();
+        if self
+            .document_authorities
+            .observe(&self.ctx, &document)
+            .is_some_and(|current| current.revision > authority.revision)
+        {
+            return;
+        }
+        let newly_present = !self.document_authorities.is_present(&document);
+        self.document_authorities
+            .set(&self.ctx, document, authority);
+        if newly_present {
+            let epoch = self.ctx.get(&self.document_authority_membership);
+            self.ctx
+                .set(&self.document_authority_membership, epoch.wrapping_add(1));
+        }
+    }
+
+    /// Controller authority for a specific document, if its native worker has
+    /// published at least one value.
+    pub fn document_authority(&self, document: &str) -> Option<DocumentAuthority> {
+        self.document_authorities
+            .observe(&self.ctx, &document.to_string())
+    }
+
+    /// The selected editor document joined with its independently supplied
+    /// controller authority.
+    pub fn current_document_authority(&self) -> CurrentDocumentAuthority {
+        self.ctx.get(&self.current_document_authority)
+    }
+
     /// Whether tmux matches the layout the editor is showing, as currently
     /// derived. `None` until the controller has reported a tmux layout.
     pub fn layout_matches(&self) -> Option<bool> {
@@ -245,7 +310,8 @@ impl EditorSurfaceState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SurfaceColumn;
+    use crate::{DocumentAuthorityReadiness, SurfaceColumn};
+    use agent_doc_turn::{CyclePhase, cp_projection::TurnProjection};
     use std::sync::{Arc, Mutex};
 
     fn surface(focused: &str, columns: &[&[&str]]) -> EditorSurface {
@@ -256,9 +322,10 @@ mod tests {
         let visible = columns
             .iter()
             .flat_map(|column| column.files.iter().cloned())
-            .collect();
+            .collect::<Vec<_>>();
         EditorSurface {
             focused: focused.to_string(),
+            open: visible.clone(),
             visible,
             columns,
             force_reconcile: false,
@@ -297,6 +364,62 @@ mod tests {
                 document: "/b.md".to_string()
             }
         );
+    }
+
+    #[test]
+    fn current_authority_reacts_to_focus_and_each_document_source() {
+        let state = EditorSurfaceState::new();
+        state.observe(surface("/a.md", &[&["/a.md"], &["/b.md"]]));
+
+        let pending_a = DocumentAuthority::pending("/a.md");
+        state.observe_document_authority(pending_a.clone());
+        assert_eq!(
+            state.current_document_authority(),
+            CurrentDocumentAuthority {
+                document: Some("/a.md".to_string()),
+                authority: Some(pending_a),
+            }
+        );
+
+        let ready_b = DocumentAuthority {
+            document: "/b.md".to_string(),
+            readiness: DocumentAuthorityReadiness::Ready,
+            turn: Some(TurnProjection::from_phase(CyclePhase::WriteApplied)),
+            error: None,
+            revision: 2,
+        };
+        state.observe_document_authority(ready_b.clone());
+        state.observe(surface("/b.md", &[&["/a.md"], &["/b.md"]]));
+        assert_eq!(
+            state.current_document_authority(),
+            CurrentDocumentAuthority {
+                document: Some("/b.md".to_string()),
+                authority: Some(ready_b),
+            }
+        );
+    }
+
+    #[test]
+    fn stale_authority_cannot_replace_a_newer_document_projection() {
+        let state = EditorSurfaceState::new();
+        state.observe(surface("/a.md", &[&["/a.md"]]));
+        let ready = DocumentAuthority {
+            document: "/a.md".to_string(),
+            readiness: DocumentAuthorityReadiness::Ready,
+            turn: Some(TurnProjection::from_phase(CyclePhase::ResponseCaptured)),
+            error: None,
+            revision: 5,
+        };
+        state.observe_document_authority(ready.clone());
+        state.observe_document_authority(DocumentAuthority {
+            document: "/a.md".to_string(),
+            readiness: DocumentAuthorityReadiness::Unavailable,
+            turn: None,
+            error: Some("stale worker".to_string()),
+            revision: 4,
+        });
+
+        assert_eq!(state.document_authority("/a.md"), Some(ready));
     }
 
     #[test]

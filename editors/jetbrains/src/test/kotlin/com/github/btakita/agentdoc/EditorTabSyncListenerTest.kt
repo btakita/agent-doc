@@ -4,7 +4,6 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -132,6 +131,10 @@ class EditorTabSyncListenerTest {
             listOf("/repo/a.md", "/repo/b.md"),
             surface.getAsJsonArray("visible").map { it.asString },
         )
+        assertEquals(
+            listOf("/repo/b.md", "/repo/a.md"),
+            surface.getAsJsonArray("open").map { it.asString },
+        )
         val columns = surface.getAsJsonArray("columns")
         assertEquals(2, columns.size())
         assertEquals(
@@ -232,7 +235,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `document selection sends latest wins focus before layout reconciliation`() {
+    fun `document selection publishes one latest-wins surface observation`() {
         val source =
             Files.readString(
                 Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
@@ -245,57 +248,49 @@ class EditorTabSyncListenerTest {
             source
                 .substringAfter("override fun selectionChanged(event: FileEditorManagerEvent)")
                 .substringBefore("fun onEditorFocusGained")
-        assertTrue(selection.contains("requestImmediateFocus(project, file)"))
-        assertTrue(
-            "focus must be submitted before layout detection and the debounced surface sync",
-            selection.indexOf("requestImmediateFocus(project, file)") <
-                selection.indexOf("requestObservation("),
-        )
+        assertTrue(selection.contains("requestObservation("))
+        assertFalse(selection.contains("requestImmediateFocus"))
+        assertFalse(selection.contains("CpRouteClient"))
         assertTrue(selection.contains("forceReconcile = false"))
         assertFalse(
             "ordinary tab focus must not force a competing full layout reconcile",
             selection.contains("forceReconcile = true"),
         )
 
-        val fastFocus =
-            source
-                .substringAfter(
-                    "private fun requestImmediateFocus(project: Project, file: VirtualFile)"
-                )
-                .substringBefore("private fun captureSurface")
-        assertTrue(fastFocus.contains("focusGeneration.incrementAndGet()"))
-        assertTrue(fastFocus.contains("CpRouteClient.submitFocusDocumentPane("))
-        assertFalse(
-            "focus must bypass the serialized JNA worker",
-            fastFocus.contains("NativeAdminControls.focusDocumentPane("),
-        )
-        assertTrue(
-            "the fast lane uses its own micro-coalescing window, not the layout debounce",
-            !fastFocus.contains("SURFACE_COALESCE_MS") && fastFocus.contains("FOCUS_COALESCE_MS"),
-        )
-
         val focusGained =
             source
                 .substringAfter("fun onEditorFocusGained(project: Project, file: VirtualFile)")
                 .substringBefore("fun onEditorLayoutChanged")
-        assertFalse(
-            "component focus must not enqueue a competing surface reconciliation",
-            focusGained.contains("requestObservation("),
-        )
+        assertTrue(focusGained.contains("requestObservation("))
+        assertTrue(focusGained.contains("delayMs = 0L"))
     }
 
     @Test
-    fun `focus dispatch requires the latest active and fresh editor intent`() {
-        assertTrue(EditorTabSyncListener.shouldDispatchFocus(7, 7, true, 1))
-        assertFalse(EditorTabSyncListener.shouldDispatchFocus(7, 8, true, 1))
-        assertFalse(EditorTabSyncListener.shouldDispatchFocus(7, 7, false, 1))
-        assertFalse(
-            EditorTabSyncListener.shouldDispatchFocus(
-                7,
-                7,
-                true,
-                TimeUnit.SECONDS.toNanos(1),
-            )
+    fun `focused and adjacent tabs lead the open document priority`() {
+        assertEquals(
+            listOf(
+                "/repo/b.md",
+                "/repo/a.md",
+                "/repo/c.md",
+                "/repo/d.md",
+                "/repo/split.md",
+            ),
+            EditorTabSyncListener.SurfaceReport.prioritizeOpenDocuments(
+                focusedFile = "/repo/b.md",
+                nearbyTabs =
+                    EditorTabSyncListener.SurfaceReport.tabsByProximity(
+                        focusedFile = "/repo/b.md",
+                        tabs =
+                            listOf(
+                                "/repo/a.md",
+                                "/repo/b.md",
+                                "/repo/c.md",
+                                "/repo/d.md",
+                            ),
+                    ),
+                visibleMdFiles = listOf("/repo/b.md", "/repo/split.md"),
+                openMdFiles = listOf("/repo/d.md", "/repo/split.md"),
+            ),
         )
     }
 
@@ -325,7 +320,7 @@ class EditorTabSyncListenerTest {
         val report =
             source
                 .substringAfter("private fun reportLatestSurface()")
-                .substringBefore("private fun requestImmediateFocus")
+                .substringBefore("private fun captureSurfaceOnEditorThread")
 
         assertTrue(layoutChange.contains("latestSurfaceObservation.get()"))
         assertTrue(layoutChange.contains("it.preferredFile != null"))
@@ -348,9 +343,10 @@ class EditorTabSyncListenerTest {
         val reportBody =
             Files.readString(listenerPath)
                 .substringAfter("private fun reportLatestSurface()")
-                .substringBefore("private fun requestImmediateFocus")
+                .substringBefore("private fun captureSurfaceOnEditorThread")
 
         assertTrue(reportBody.contains("NativeAdminControls.editorSurfaceEnqueue("))
+        assertTrue(reportBody.contains("requestObservation(observation, SURFACE_COALESCE_MS)"))
         assertFalse(reportBody.contains("editorSurfaceObserve("))
         assertFalse(reportBody.contains("syncHintFromReceipt("))
     }

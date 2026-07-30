@@ -12,5 +12,6 @@ name = "agent_doc_editor_surface"
 
 [dependencies]
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.104" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.104" }
 lazily = { version = "0.53.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

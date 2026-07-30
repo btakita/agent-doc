@@ -173,6 +173,9 @@ function resetBindings(): void {
     _focus_document_pane_json = null;
     _sync_tmux_layout_json = null;
     _editor_surface_observe_json = null;
+    _editor_surface_enqueue_json = null;
+    _document_authority_json = null;
+    _current_document_authority_json = null;
     _editor_surface_forget = null;
     _admin_queue_control_json = null;
     _admin_reap_json = null;
@@ -216,7 +219,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
-export const EDITOR_PLUGIN_VERSION = '0.2.62';
+export const EDITOR_PLUGIN_VERSION = '0.2.63';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 // #ctrlkillreregister Tier 3: this extension calls agent_doc_peer_replicas_missing
@@ -360,6 +363,9 @@ let _tmux_focus_state_json: any = null;
 let _focus_document_pane_json: any = null;
 let _sync_tmux_layout_json: any = null;
 let _editor_surface_observe_json: any = null;
+let _editor_surface_enqueue_json: any = null;
+let _document_authority_json: any = null;
+let _current_document_authority_json: any = null;
 let _editor_surface_forget: any = null;
 let _admin_queue_control_json: any = null;
 let _admin_reap_json: any = null;
@@ -461,6 +467,21 @@ function bindFunctions(): void {
             FfiJsonResultType,
             ['str', 'str'],
         );
+        _editor_surface_enqueue_json = lib.func(
+            'agent_doc_editor_surface_enqueue_json',
+            'int',
+            ['str', 'str'],
+        );
+        _document_authority_json = lib.func(
+            'agent_doc_document_authority_json',
+            FfiJsonResultType,
+            ['str', 'str'],
+        );
+        _current_document_authority_json = lib.func(
+            'agent_doc_current_document_authority_json',
+            FfiJsonResultType,
+            ['str'],
+        );
         _editor_surface_forget = lib.func('agent_doc_editor_surface_forget', 'int', ['str']);
         _admin_queue_control_json = lib.func(
             'agent_doc_admin_queue_control_json',
@@ -489,6 +510,9 @@ function bindFunctions(): void {
         _focus_document_pane_json = null;
         _sync_tmux_layout_json = null;
         _editor_surface_observe_json = null;
+        _editor_surface_enqueue_json = null;
+        _document_authority_json = null;
+        _current_document_authority_json = null;
         _editor_surface_forget = null;
         _admin_queue_control_json = null;
         _admin_reap_json = null;
@@ -1736,6 +1760,45 @@ export function editorSurfaceObserveJson(options: {
     return decodeJsonResult(
         _editor_surface_observe_json(options.projectRoot, options.surfaceJson),
         'editor_surface_observe',
+    );
+}
+
+/** Queue an editor observation; controller effects run outside the extension host. */
+export function editorSurfaceEnqueueJson(options: {
+    projectRoot: string;
+    surfaceJson: string;
+}): boolean {
+    if (!ensureLoaded(options.projectRoot)) return false;
+    bindFunctions();
+    if (!_editor_surface_enqueue_json) return false;
+    try {
+        return _editor_surface_enqueue_json(options.projectRoot, options.surfaceJson) === 1;
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] editor_surface_enqueue failed: ${err.message}`);
+        return false;
+    }
+}
+
+export function documentAuthorityJson(options: {
+    projectRoot: string;
+    documentPath: string;
+}): string | null {
+    if (!ensureLoaded(options.projectRoot)) return null;
+    bindFunctions();
+    if (!_document_authority_json) return null;
+    return decodeJsonResult(
+        _document_authority_json(options.projectRoot, options.documentPath),
+        'document_authority',
+    );
+}
+
+export function currentDocumentAuthorityJson(projectRoot: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_current_document_authority_json) return null;
+    return decodeJsonResult(
+        _current_document_authority_json(projectRoot),
+        'current_document_authority',
     );
 }
 

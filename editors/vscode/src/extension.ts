@@ -45,6 +45,7 @@ import {
     intentFromReceipt,
     isPreservedLayoutOutput,
     normalizeVisibleColumns,
+    prioritizeDocuments,
     syncHintFromReceipt,
     type EditorSurface,
 } from './tabSync.js';
@@ -406,22 +407,15 @@ function showError(message: string): void {
     vscode.window.showErrorMessage(`Agent Doc: ${message}`);
 }
 
-// Project Controller→plugin turn-state coordination: reflect the authoritative
-// lazily state projection in a status-bar indicator. The editor never reads
-// cycle sidecars for this hot path.
+// Controller→native→plugin turn-state coordination. Native owns one reactive
+// authority subscription per open document; this view only samples the local
+// Computed cache and never requests controller or SQLite state.
 const turnStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
-const TURN_STATUS_MIN_REFRESH_INTERVAL_MS = 1_500;
-const TURN_STATUS_PROJECT_CONTROLLER_TIMEOUT_MS = 1_500;
+const TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS = 250;
+const TURN_STATUS_AUTHORITY_SETTLE_MS = 75;
 let turnStatusWatcherRoot: string | undefined;
 let turnStatusRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let turnStatusLastRefreshMs = 0;
-let turnStatusRefreshSeq = 0;
-const turnStatusMirrors = new Map<string, InstanceType<typeof stateMirror.GraphView>>();
-// Durable state-event versions successfully folded by this peer. Each value is
-// reported on the NEXT subscription, so delivery without a successful apply is
-// never acknowledged.
-const turnStatusAppliedDocumentVersions = new Map<string, number>();
-const turnStatusRecordedDocumentVersions = new Map<string, number>();
 
 function activeAgentDocProjectRoot(): string | undefined {
     const editor = vscode.window.activeTextEditor;
@@ -435,9 +429,6 @@ function disposeTurnStatusWatcher(): void {
     turnStatusWatcherRoot = undefined;
     if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
     turnStatusRefreshTimer = undefined;
-    turnStatusMirrors.clear();
-    turnStatusAppliedDocumentVersions.clear();
-    turnStatusRecordedDocumentVersions.clear();
 }
 
 function configureTurnStatusWatcher(): void {
@@ -450,88 +441,66 @@ function configureTurnStatusWatcher(): void {
 
 function turnStatusRefreshDelayMs(): number {
     const now = Date.now();
-    const minIntervalUntil = turnStatusLastRefreshMs + TURN_STATUS_MIN_REFRESH_INTERVAL_MS;
+    const minIntervalUntil = turnStatusLastRefreshMs + TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS;
     return Math.max(0, minIntervalUntil - now);
+}
+
+function scheduleTurnStatusCacheObservation(delayMs: number): void {
+    if (turnStatusRefreshTimer) return;
+    turnStatusRefreshTimer = setTimeout(() => {
+        turnStatusRefreshTimer = undefined;
+        refreshTurnStatusNow('native-authority');
+    }, delayMs);
 }
 
 function refreshTurnStatus(reason = 'event', force = false): void {
     if (force) {
         if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
         turnStatusRefreshTimer = undefined;
-        void refreshTurnStatusNow(reason);
+        refreshTurnStatusNow(reason);
         return;
     }
     if (turnStatusRefreshTimer) return;
     const delayMs = turnStatusRefreshDelayMs();
     turnStatusRefreshTimer = setTimeout(() => {
         turnStatusRefreshTimer = undefined;
-        void refreshTurnStatusNow(reason);
+        refreshTurnStatusNow(reason);
     }, delayMs);
 }
 
-async function turnProjectionFromProjectController(
+function currentNativeTurnAuthority(
     projectRoot: string,
     filePath: string,
-): Promise<import('./sessionUi.js').TurnProjection> {
-    const docHash = native.documentHash(filePath);
-    let mirror = turnStatusMirrors.get(docHash);
-    if (!mirror) {
-        mirror = new stateMirror.GraphView();
-        turnStatusMirrors.set(docHash, mirror);
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TURN_STATUS_PROJECT_CONTROLLER_TIMEOUT_MS);
-    const appliedVersion = turnStatusAppliedDocumentVersions.get(docHash) ?? 0;
-    const recordedVersion = turnStatusRecordedDocumentVersions.get(docHash) ?? 0;
-    const pendingAck = appliedVersion > recordedVersion ? appliedVersion : 0;
+): {
+    readiness: 'pending' | 'ready' | 'unavailable';
+    projection?: import('./sessionUi.js').TurnProjection;
+    error?: string;
+} {
     try {
-        const data = await requestProjectController(
-            projectRoot,
-            {
-                command: 'state_subscribe',
-                file: filePath,
-                generation: mirror.isInitialized ? mirror.epoch : 0,
-                diagnostic_payload: JSON.stringify({
-                    document_hash: docHash,
-                    peer_pid: process.pid,
-                    editor_id: EDITOR_ID,
-                    acked_version: pendingAck,
-                }),
-            },
-            controller.signal,
-        );
-        const message = data?.message;
-        if (!message || typeof message !== 'object') {
-            throw new Error('Project Controller state_subscribe response missing message');
+        const authorityJson = native.currentDocumentAuthorityJson(projectRoot);
+        if (!authorityJson) return { readiness: 'pending' };
+        const current = JSON.parse(authorityJson);
+        if (current?.document !== filePath || !current?.authority) {
+            return { readiness: 'pending' };
         }
-        if (data?.document_hash && data.document_hash !== docHash) {
-            throw new Error('Project Controller returned state for a different document');
+        const readiness = current.authority.readiness;
+        if (readiness === 'ready') {
+            return {
+                readiness,
+                projection: current.authority.turn as import('./sessionUi.js').TurnProjection,
+            };
         }
-        if (data?.peer_ack_recorded === true && pendingAck > 0) {
-            turnStatusRecordedDocumentVersions.set(
-                docHash,
-                Math.max(recordedVersion, pendingAck),
-            );
+        if (readiness === 'unavailable') {
+            return { readiness, error: current.authority.error };
         }
-        if (!stateMirror.applyIpcMessageToView(mirror, JSON.stringify(message))) {
-            throw new Error('Project Controller state_subscribe message did not apply');
-        }
-        if (typeof data?.document_version !== 'number') {
-            throw new Error('Project Controller state_subscribe response missing document_version');
-        }
-        const previousVersion = turnStatusAppliedDocumentVersions.get(docHash) ?? 0;
-        turnStatusAppliedDocumentVersions.set(
-            docHash,
-            Math.max(previousVersion, data.document_version),
-        );
-        return stateMirror.agentDocTurnProjectionFromView(mirror);
-    } finally {
-        clearTimeout(timer);
+        return { readiness: 'pending' };
+    } catch (err: any) {
+        return { readiness: 'unavailable', error: err?.message ?? 'Native authority parse failed' };
     }
 }
 
-async function refreshTurnStatusNow(reason: string): Promise<void> {
-    const seq = ++turnStatusRefreshSeq;
+function refreshTurnStatusNow(reason: string): void {
+    void reason;
     const editor = vscode.window.activeTextEditor;
     if (!editor || !editor.document.fileName.endsWith('.md')) {
         turnStatusBarItem.hide();
@@ -549,22 +518,22 @@ async function refreshTurnStatusNow(reason: string): Promise<void> {
         turnStatusBarItem.show();
         return;
     }
-    let projection: import('./sessionUi.js').TurnProjection | null = null;
-    let disconnected: string | null = null;
-    try {
-        projection = await turnProjectionFromProjectController(projectRoot, editor.document.fileName);
-    } catch (err: any) {
-        disconnected = err?.message ?? 'Project Controller request failed';
-    }
-    if (seq !== turnStatusRefreshSeq) return;
-    if (disconnected) {
-        turnStatusBarItem.text = 'agent-doc: Project Controller disconnected';
-        turnStatusBarItem.tooltip = `Agent Doc Project Controller is not connected for this document.\n${disconnected}`;
-        turnStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-        turnStatusBarItem.show();
+    const authority = currentNativeTurnAuthority(projectRoot, editor.document.fileName);
+    if (authority.readiness === 'pending') {
+        scheduleTurnStatusCacheObservation(TURN_STATUS_AUTHORITY_SETTLE_MS);
         return;
     }
-    const presentation = buildTurnStatePresentation(projection);
+    if (authority.readiness === 'unavailable') {
+        turnStatusBarItem.text = 'agent-doc: Project Controller disconnected';
+        turnStatusBarItem.tooltip =
+            `Agent Doc Project Controller is not connected for this document.\n`
+            + (authority.error ?? 'Start or reconnect the Project Controller.');
+        turnStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        turnStatusBarItem.show();
+        scheduleTurnStatusCacheObservation(TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS);
+        return;
+    }
+    const presentation = buildTurnStatePresentation(authority.projection ?? null);
     if (presentation.label) {
         // Prominence parity with the JetBrains editor banner: tooltip + an
         // attention background while the Project Controller turn is in flight.
@@ -580,6 +549,7 @@ async function refreshTurnStatusNow(reason: string): Promise<void> {
         turnStatusBarItem.backgroundColor = undefined;
         turnStatusBarItem.hide();
     }
+    scheduleTurnStatusCacheObservation(TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS);
 }
 
 function refreshActiveTurnStatus(): void {
@@ -1885,6 +1855,58 @@ function absolutizeColumns(root: string, columns: string[][]): string[][] {
     return columns.map((column) => column.map((file) => path.join(root, file)));
 }
 
+function tabFilePath(tab: vscode.Tab, root: string): string | undefined {
+    const uri = (tab.input as { uri?: vscode.Uri }).uri;
+    if (!uri || uri.scheme !== 'file' || path.extname(uri.fsPath).toLowerCase() !== '.md') {
+        return undefined;
+    }
+    return getWorkspaceRoot(uri) === root ? uri.fsPath : undefined;
+}
+
+/**
+ * Rank open markdown documents by likely next interaction. The active group's
+ * adjacent tabs come first, followed by nearby groups, visible documents, and
+ * finally background text documents that are open without a tab.
+ */
+function openMarkdownDocumentsByPriority(
+    root: string,
+    activeFsPath: string,
+    visibleMarkdownDocuments: string[],
+): string[] {
+    const groups = [...vscode.window.tabGroups.all];
+    const activeGroupIndex = Math.max(0, groups.indexOf(vscode.window.tabGroups.activeTabGroup));
+    const tabPaths = groups
+        .map((group, index) => ({ group, index }))
+        .sort((a, b) => (
+            Math.abs(a.index - activeGroupIndex) - Math.abs(b.index - activeGroupIndex)
+            || a.index - b.index
+        ))
+        .flatMap(({ group }) => {
+            const tabs = [...group.tabs];
+            const activeTabIndex = Math.max(0, tabs.indexOf(group.activeTab ?? tabs[0]));
+            return tabs
+                .map((tab, index) => ({ tab, index }))
+                .sort((a, b) => (
+                    Math.abs(a.index - activeTabIndex) - Math.abs(b.index - activeTabIndex)
+                    || a.index - b.index
+                ))
+                .map(({ tab }) => tabFilePath(tab, root))
+                .filter((filePath): filePath is string => filePath !== undefined);
+        });
+    const backgroundDocuments = vscode.workspace.textDocuments
+        .filter((document) => (
+            document.languageId === 'markdown'
+            && getWorkspaceRoot(document.uri) === root
+        ))
+        .map((document) => document.uri.fsPath);
+    return prioritizeDocuments(
+        activeFsPath,
+        tabPaths,
+        visibleMarkdownDocuments,
+        backgroundDocuments,
+    );
+}
+
 function captureCurrentSurface(forceReconcile: boolean): PendingSurfaceObservation | null {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return null;
@@ -1894,9 +1916,16 @@ function captureCurrentSurface(forceReconcile: boolean): PendingSurfaceObservati
 
     const activeFsPath = editor.document.uri.fsPath;
     const visibleColumns = absolutizeColumns(root, collectVisibleMarkdownColumns(root));
+    const visibleMarkdownDocuments = flattenVisibleColumns(visibleColumns);
+    const openMarkdownDocuments = openMarkdownDocumentsByPriority(
+        root,
+        activeFsPath,
+        visibleMarkdownDocuments,
+    );
     const surface = buildEditorSurface({
         activeFile: activeFsPath,
-        visibleMd: flattenVisibleColumns(visibleColumns),
+        visibleMd: visibleMarkdownDocuments,
+        openMd: openMarkdownDocuments,
         visibleColumns,
         forceReconcile,
     });
@@ -1922,16 +1951,11 @@ function reportCurrentSurface(requestedGeneration: number): void {
         const pending = captureCurrentSurface(false);
         if (pending === null) return;
         observedSurfaceRoots.add(pending.root);
-        const receipt = native.editorSurfaceObserveJson({
+        const accepted = native.editorSurfaceEnqueueJson({
             projectRoot: pending.root,
             surfaceJson: JSON.stringify(pending.surface),
         });
-        if (receipt === null) return;
-        const intent = intentFromReceipt(receipt);
-        if (intent && intent.kind !== 'idle') {
-            const hint = syncHintFromReceipt(receipt);
-            if (hint) showHint(hint);
-        }
+        if (!accepted) return;
     } finally {
         surfaceReportRunning = false;
         // A change that arrived while we were reporting has already bumped the
@@ -3197,6 +3221,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
         vscode.window.onDidChangeVisibleTextEditors(() => onTabChanged())
     );
+    requestSurfaceObservation(0);
 
     // Feature: File Rename Handling
     // When a session document is renamed/moved, trigger a sync so the Rust

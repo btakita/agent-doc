@@ -29,6 +29,7 @@ agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", v
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.104" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.104" }
 agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.35.104" }
+agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.35.104" }
 agent-doc-lint-io = { path = "../agent-doc-lint-io", version = "0.35.104" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.104" }
 agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.104" }

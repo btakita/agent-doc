@@ -12,8 +12,8 @@ import com.intellij.openapi.vfs.VirtualFileManager
 /**
  * Disposes per-project resources when a project closes.
  *
- * Registered in plugin.xml as a projectListener so IntelliJ manages the lifecycle.
- * Native code is process-lifetime state, so plugin updates require a full IDE restart.
+ * Registered in plugin.xml as a projectListener so IntelliJ manages the lifecycle. Native code is
+ * process-lifetime state, so plugin updates require a full IDE restart.
  */
 class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
@@ -42,10 +42,13 @@ class PluginLifecycleListener : ProjectManagerListener {
         TurnStateBannerRefresher.getInstance(project).start()
         // Register EditorTabSyncListener via code (not XML) so it survives hot-reload
         val editorTabSync = EditorTabSyncListener.install(project)
-        project.messageBus.connect(project).subscribe(
-            FileEditorManagerListener.FILE_EDITOR_MANAGER,
-            editorTabSync
-        )
+        project.messageBus
+            .connect(project)
+            .subscribe(
+                FileEditorManagerListener.FILE_EDITOR_MANAGER,
+                editorTabSync,
+            )
+        editorTabSync.onEditorLayoutChanged(project)
         // Drive tmux pane focus on split-editor focus changes (#panefocussplit):
         // selectionChanged does not fire for focus movement between existing
         // splits, so this reuses editorTabSync's reconcile from focus events.
@@ -55,43 +58,49 @@ class PluginLifecycleListener : ProjectManagerListener {
         // background agent, recovery, restart, or pane-focus events must never open
         // or select a different IDE document. The reverse focus mirror therefore
         // remains uninstalled.
-        project.messageBus.connect(project).subscribe(
-            FileEditorManagerListener.FILE_EDITOR_MANAGER,
-            object : FileEditorManagerListener {
-                override fun selectionChanged(event: FileEditorManagerEvent) {
-                    val file = event.newFile ?: return
-                    if (file.name.endsWith(".md")) {
-                        CrdtReplicaManager.requestRemoteDrain(project, file.path, "selection")
+        project.messageBus
+            .connect(project)
+            .subscribe(
+                FileEditorManagerListener.FILE_EDITOR_MANAGER,
+                object : FileEditorManagerListener {
+                    override fun selectionChanged(event: FileEditorManagerEvent) {
+                        val file = event.newFile ?: return
+                        if (file.name.endsWith(".md")) {
+                            CrdtReplicaManager.requestRemoteDrain(project, file.path, "selection")
+                        }
                     }
-                }
 
-                override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
-                    TypingTracker.scheduleOpenDocumentReport(file)
-                    if (file.name.endsWith(".md")) {
-                        patchWatcher.registerRootForFile(file.path)
-                        CrdtReplicaManager.requestRemoteDrain(project, file.path, "file-opened")
+                    override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+                        TypingTracker.scheduleOpenDocumentReport(file)
+                        if (file.name.endsWith(".md")) {
+                            patchWatcher.registerRootForFile(file.path)
+                            CrdtReplicaManager.requestRemoteDrain(project, file.path, "file-opened")
+                        }
                     }
-                }
 
-                override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
-                    TypingTracker.clearOpenDocumentReport(file)
-                }
-            }
-        )
-        FileEditorManager.getInstance(project).openFiles
+                    override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                        TypingTracker.clearOpenDocumentReport(file)
+                    }
+                },
+            )
+        FileEditorManager.getInstance(project)
+            .openFiles
             .asSequence()
             .filter { it.name.endsWith(".md") }
             .forEach { patchWatcher.registerRootForFile(it.path) }
         TypingTracker.reportOpenMarkdownDocuments(project)
         // Detect file renames/moves and update sessions.json path
-        project.messageBus.connect(project).subscribe(
-            VirtualFileManager.VFS_CHANGES,
-            FileRenameListener(project)
-        )
+        project.messageBus
+            .connect(project)
+            .subscribe(
+                VirtualFileManager.VFS_CHANGES,
+                FileRenameListener(project),
+            )
     }
 
     companion object {
-        private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(PluginLifecycleListener::class.java)
+        private val LOG =
+            com.intellij.openapi.diagnostic.Logger.getInstance(PluginLifecycleListener::class.java)
     }
 
     override fun projectClosed(project: Project) {

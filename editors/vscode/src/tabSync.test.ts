@@ -10,6 +10,7 @@ import {
     intentFromReceipt,
     isPreservedLayoutOutput,
     normalizeVisibleColumns,
+    prioritizeDocuments,
     syncHintFromReceipt,
 } from './tabSync.js';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +25,7 @@ describe('editor surface reporting wiring', () => {
         const start = source.indexOf('function reportCurrentSurface');
         assert.ok(start >= 0, 'extension.ts must define reportCurrentSurface');
         const body = source.slice(start, source.indexOf('function forgetObservedSurfaces', start));
-        assert.ok(body.includes('native.editorSurfaceObserveJson({'));
+        assert.ok(body.includes('native.editorSurfaceEnqueueJson({'));
 
         const tabChangedStart = source.indexOf('function onTabChanged');
         assert.ok(tabChangedStart >= 0, 'extension.ts must define onTabChanged');
@@ -60,6 +61,8 @@ describe('editor surface reporting wiring', () => {
         const body = source.slice(start, source.indexOf('function requestSurfaceObservation', start));
         assert.ok(body.includes('absolutizeColumns(root, collectVisibleMarkdownColumns(root))'));
         assert.ok(body.includes('activeFile: activeFsPath'));
+        assert.ok(body.includes('openMarkdownDocumentsByPriority('));
+        assert.ok(source.includes('vscode.window.tabGroups.activeTabGroup'));
     });
 });
 
@@ -74,6 +77,7 @@ describe('buildEditorSurface', () => {
         assert.deepStrictEqual(surface, {
             focused: '/repo/tasks/b.md',
             visible: ['/repo/tasks/a.md', '/repo/tasks/b.md'],
+            open: ['/repo/tasks/b.md', '/repo/tasks/a.md'],
             columns: [{ files: ['/repo/tasks/a.md'] }, { files: ['/repo/tasks/b.md'] }],
             force_reconcile: false,
         });
@@ -133,6 +137,18 @@ describe('buildEditorSurface', () => {
         const surface = buildEditorSurface({ activeFile: '/repo/a.md', visibleMd: ['/repo/a.md'] });
         assert.ok(surface !== null);
         assert.ok(!('layout_synced' in surface!));
+    });
+
+    it('preserves focused and nearby-tab priority without duplicates', () => {
+        assert.deepStrictEqual(
+            prioritizeDocuments(
+                '/repo/b.md',
+                ['/repo/b.md', '/repo/a.md', '/repo/c.md'],
+                ['/repo/b.md', '/repo/split.md'],
+                ['/repo/far.md', '/repo/a.md'],
+            ),
+            ['/repo/b.md', '/repo/a.md', '/repo/c.md', '/repo/split.md', '/repo/far.md'],
+        );
     });
 });
 

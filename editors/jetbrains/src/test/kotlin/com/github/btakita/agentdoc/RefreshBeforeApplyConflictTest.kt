@@ -6,12 +6,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /**
- * `#p2j4` / `#jbcfdiag` — pin the invariant that a content-bearing
- * `VirtualFile.refresh` never runs against an UNSAVED document on an agent
- * write/apply path. A refresh against an unsaved buffer whose disk bytes diverged
- * is what arms IntelliJ's memory↔disk "File Cache Conflict" dialog behind a live
- * editor (the remaining trigger after IPC-first writes removed the Rust-side
- * behind-editor disk writes).
+ * `#p2j4` / `#jbcfdiag` — pin the invariant that a content-bearing `VirtualFile.refresh` never runs
+ * against an UNSAVED document on an agent write/apply path. A refresh against an unsaved buffer
+ * whose disk bytes diverged is what arms IntelliJ's memory↔disk "File Cache Conflict" dialog behind
+ * a live editor (the remaining trigger after IPC-first writes removed the Rust-side behind-editor
+ * disk writes).
  */
 class RefreshBeforeApplyConflictTest {
 
@@ -27,10 +26,14 @@ class RefreshBeforeApplyConflictTest {
 
     @Test
     fun `apply-time refresh sites are gated on document save state`() {
-        val patchWatcherPath = listOf(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
-            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
-        ).first { Files.exists(it) }
+        val patchWatcherPath =
+            listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+                    Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"
+                    ),
+                )
+                .first { Files.exists(it) }
         val patchWatcher = Files.readString(patchWatcherPath)
 
         // Every content-bearing apply-time refresh must be wrapped by the
@@ -59,10 +62,14 @@ class RefreshBeforeApplyConflictTest {
 
     @Test
     fun `vcs refresh signal never recursively refreshes project content`() {
-        val patchWatcherPath = listOf(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
-            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
-        ).first { Files.exists(it) }
+        val patchWatcherPath =
+            listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+                    Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"
+                    ),
+                )
+                .first { Files.exists(it) }
         val patchWatcher = Files.readString(patchWatcherPath)
         val refreshVcs = functionBody(patchWatcher, "private fun refreshVcs(filePath: String?)")
 
@@ -81,10 +88,14 @@ class RefreshBeforeApplyConflictTest {
 
     @Test
     fun `remote crdt apply refreshes only a clean target before save`() {
-        val crdtReplicaPath = listOf(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-        ).first { Files.exists(it) }
+        val crdtReplicaPath =
+            listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                    Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"
+                    ),
+                )
+                .first { Files.exists(it) }
         val crdtReplica = Files.readString(crdtReplicaPath)
         val helper = functionBody(crdtReplica, "private fun refreshCleanDocumentBeforeRemoteApply(")
 
@@ -92,22 +103,27 @@ class RefreshBeforeApplyConflictTest {
         assertTrue(helper.contains("targetFile.refresh(false, false)"))
         assertTrue(helper.contains("isDocumentUnsaved(document)"))
         assertTrue(
-        "delta and REPLACE delivery must refresh the clean target before mutation",
-        crdtReplica.split("refreshCleanDocumentBeforeRemoteApply(").size - 1 >= 3,
+            "delta and REPLACE delivery must refresh the clean target before mutation",
+            crdtReplica.split("refreshCleanDocumentBeforeRemoteApply(").size - 1 >= 3,
         )
     }
 
     @Test
     fun `forced reconnect registers from the live editor without preinstalling a retained target`() {
-        val crdtReplicaPath = listOf(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-        ).first { Files.exists(it) }
+        val crdtReplicaPath =
+            listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                    Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"
+                    ),
+                )
+                .first { Files.exists(it) }
         val crdtReplica = Files.readString(crdtReplicaPath)
-        val ensureOpenReplica = functionBody(
-            crdtReplica,
-            "fun ensureOpenDocumentReplica(",
-        )
+        val ensureOpenReplica =
+            functionBody(
+                crdtReplica,
+                "fun ensureOpenDocumentReplica(",
+            )
 
         assertFalse(ensureOpenReplica.contains("deferredWriteReconnectContent("))
         assertFalse(ensureOpenReplica.contains("deferredWritePostRegisterContent("))
@@ -116,7 +132,11 @@ class RefreshBeforeApplyConflictTest {
         assertTrue(ensureOpenReplica.contains("registrationText = text"))
         assertTrue(ensureOpenReplica.contains("scheduleDeferredWriteReplayAfterRegistration("))
         assertTrue(ensureOpenReplica.contains("replaceCached = forceRefresh"))
-        assertTrue(ensureOpenReplica.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null"))
+        assertTrue(
+            ensureOpenReplica.contains(
+                "expectedEditorTextAtSwap = if (forceRefresh) registrationText else null"
+            )
+        )
         val forwarderFor = functionBody(crdtReplica, "private fun forwarderFor(")
         assertTrue(
             "a raced editor cut must be rejected before whole-buffer CRDT publication",
@@ -132,31 +152,40 @@ class RefreshBeforeApplyConflictTest {
 
     @Test
     fun `forced reconnect queues retained intent replay behind registration`() {
-        val crdtReplicaPath = listOf(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
-        ).first { Files.exists(it) }
+        val crdtReplicaPath =
+            listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                    Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"
+                    ),
+                )
+                .first { Files.exists(it) }
         val crdtReplica = Files.readString(crdtReplicaPath)
-        val ensureOpenReplica = functionBody(
-            crdtReplica,
-            "fun ensureOpenDocumentReplica(",
-        )
-        val scheduleReplay = functionBody(
-            crdtReplica,
-            "private fun scheduleDeferredWriteReplayAfterRegistration(",
-        )
-        val replay = functionBody(
-            crdtReplica,
-            "private fun replayDeferredWriteAfterRegistration(",
-        )
-        val queueRemoteApply = functionBody(
-            crdtReplica,
-            "private fun queueRemoteTextApply(",
-        )
-        val applyRemoteOnEdt = functionBody(
-            crdtReplica,
-            "private fun applyRemoteTextOnEdt(",
-        )
+        val ensureOpenReplica =
+            functionBody(
+                crdtReplica,
+                "fun ensureOpenDocumentReplica(",
+            )
+        val scheduleReplay =
+            functionBody(
+                crdtReplica,
+                "private fun scheduleDeferredWriteReplayAfterRegistration(",
+            )
+        val replay =
+            functionBody(
+                crdtReplica,
+                "private fun replayDeferredWriteAfterRegistration(",
+            )
+        val queueRemoteApply =
+            functionBody(
+                crdtReplica,
+                "private fun queueRemoteTextApply(",
+            )
+        val applyRemoteOnEdt =
+            functionBody(
+                crdtReplica,
+                "private fun applyRemoteTextOnEdt(",
+            )
 
         assertFalse(ensureOpenReplica.contains("deferredWritePostRegisterContent("))
         assertFalse(ensureOpenReplica.contains("applyMinimalDocumentEditUtil("))
@@ -166,7 +195,7 @@ class RefreshBeforeApplyConflictTest {
             ensureOpenReplica.indexOf("val forwarder = forwarderFor(") <
                 ensureOpenReplica.indexOf("scheduleDeferredWriteReplayAfterRegistration(") &&
                 ensureOpenReplica.indexOf("scheduleDeferredWriteReplayAfterRegistration(") <
-                ensureOpenReplica.indexOf("requestRemoteDrain(filePath, \"open-document\")"),
+                    ensureOpenReplica.indexOf("requestRemoteDrain(filePath, \"open-document\")"),
         )
         assertTrue(
             "replay must run as a second task on the same per-document lane",
@@ -177,7 +206,9 @@ class RefreshBeforeApplyConflictTest {
             "the queued replay must project only after exact editor and local-edit fences",
             replay.indexOf("tryReadDocumentText(document) != registrationText") <
                 replay.indexOf("NativePatching.projectDeferredWritePostRegister") &&
-                replay.contains("requestUrgentRemoteDrain(filePath, \"post-register-projected-intent\")"),
+                replay.contains(
+                    "requestUrgentRemoteDrain(filePath, \"post-register-projected-intent\")"
+                ),
         )
         assertFalse(replay.contains("applyMinimalDocumentEditUtil("))
         assertFalse(replay.contains("persistRemoteCrdtTextIfSafe("))
@@ -188,7 +219,7 @@ class RefreshBeforeApplyConflictTest {
             applyRemoteOnEdt.indexOf("remoteEditorEffectTokenCurrentUtil(") <
                 applyRemoteOnEdt.indexOf("LocalFileSystem.getInstance()") &&
                 applyRemoteOnEdt.indexOf("remoteEditorEffectTokenCurrentUtil(") <
-                applyRemoteOnEdt.indexOf("applyMinimalDocumentEditUtil("),
+                    applyRemoteOnEdt.indexOf("applyMinimalDocumentEditUtil("),
         )
     }
 
@@ -200,7 +231,7 @@ class RefreshBeforeApplyConflictTest {
                 liveGeneration = 7L,
                 endpointMatches = true,
                 endpointBacked = true,
-            ),
+            )
         )
         assertFalse(
             remoteEditorEffectTokenCurrentUtil(
@@ -208,7 +239,7 @@ class RefreshBeforeApplyConflictTest {
                 liveGeneration = 8L,
                 endpointMatches = true,
                 endpointBacked = true,
-            ),
+            )
         )
         assertFalse(
             remoteEditorEffectTokenCurrentUtil(
@@ -216,7 +247,7 @@ class RefreshBeforeApplyConflictTest {
                 liveGeneration = 7L,
                 endpointMatches = false,
                 endpointBacked = true,
-            ),
+            )
         )
         assertFalse(
             remoteEditorEffectTokenCurrentUtil(
@@ -224,36 +255,52 @@ class RefreshBeforeApplyConflictTest {
                 liveGeneration = 7L,
                 endpointMatches = true,
                 endpointBacked = false,
-            ),
+            )
         )
     }
 
     @Test
     fun `jetbrains prompt poller is removed`() {
-        val promptPollerPaths = listOf(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PromptPoller.kt"),
-            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PromptPoller.kt"),
-        )
-        val promptPanelPaths = listOf(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PromptPanel.kt"),
-            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PromptPanel.kt"),
-        )
+        val promptPollerPaths =
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PromptPoller.kt"),
+                Paths.get(
+                    "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PromptPoller.kt"
+                ),
+            )
+        val promptPanelPaths =
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PromptPanel.kt"),
+                Paths.get(
+                    "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PromptPanel.kt"
+                ),
+            )
 
         assertTrue(promptPollerPaths.none { Files.exists(it) })
         assertTrue(promptPanelPaths.none { Files.exists(it) })
 
-        val submitAction = Files.readString(
-            listOf(
-                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt"),
-                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt"),
-            ).first { Files.exists(it) }
-        )
-        val lifecycle = Files.readString(
-            listOf(
-                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
-                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
-            ).first { Files.exists(it) }
-        )
+        val submitAction =
+            Files.readString(
+                listOf(
+                        Paths.get("src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt"),
+                        Paths.get(
+                            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt"
+                        ),
+                    )
+                    .first { Files.exists(it) }
+            )
+        val lifecycle =
+            Files.readString(
+                listOf(
+                        Paths.get(
+                            "src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"
+                        ),
+                        Paths.get(
+                            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"
+                        ),
+                    )
+                    .first { Files.exists(it) }
+            )
 
         assertFalse(submitAction.contains("PromptPoller"))
         assertFalse(lifecycle.contains("PromptPoller"))
@@ -263,12 +310,16 @@ class RefreshBeforeApplyConflictTest {
 
     @Test
     fun `jetbrains plugin uses event loops instead of hot polling`() {
-        fun read(path: String): String = Files.readString(
-            listOf(
-                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/$path"),
-                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/$path"),
-            ).first { Files.exists(it) },
-        )
+        fun read(path: String): String =
+            Files.readString(
+                listOf(
+                        Paths.get("src/main/kotlin/com/github/btakita/agentdoc/$path"),
+                        Paths.get(
+                            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/$path"
+                        ),
+                    )
+                    .first { Files.exists(it) }
+            )
 
         val turnWidget = read("TurnStateStatusBarWidget.kt")
         val turnRefresher = read("TurnStateBannerRefresher.kt")
@@ -283,31 +334,91 @@ class RefreshBeforeApplyConflictTest {
         val lifecycle = read("PluginLifecycleListener.kt")
 
         assertFalse("status widget must not own a Swing timer", turnWidget.contains("Alarm("))
-        assertFalse("status widget must not call native projection while painting", turnWidget.contains("presentationForFile("))
+        assertFalse(
+            "status widget must not call native projection while painting",
+            turnWidget.contains("presentationForFile("),
+        )
         assertFalse("banner refresher must not use a timer", turnRefresher.contains("Alarm("))
-        assertFalse("banner refresher must not define a polling interval", turnRefresher.contains("POLL_MS"))
-        assertFalse("banner refresher must not retain slow-projection backoff", turnRefresher.contains("SLOW_BACKOFF"))
-        assertTrue("banner refresher must cap each event-drain slice", turnRefresher.contains("TURN_STATE_MAX_PATHS_PER_DRAIN"))
-        assertTrue("banner refresher must yield between backlog slices", turnRefresher.contains("TURN_STATE_DRAIN_YIELD_MS"))
-        assertTrue("turn projection must log slow Project Controller projection calls", turnBridge.contains("[turn-perf] projection"))
-        assertTrue("turn projection must read Project Controller lazily state", turnBridge.contains("subscribeMirrorForFileViaProjectController"))
-        assertTrue("turn projection must show Project Controller disconnects", turnBridge.contains("Project Controller disconnected"))
-        assertFalse("turn projection must not call the legacy sidecar-capable FFI", turnBridge.contains("agent_doc_turn_projection"))
-        assertFalse("banner collection must read cached state", turnProvider.contains("TurnStateBridge.presentationForFile"))
-        assertFalse("banner collection must not trigger its own refresh loop", turnProvider.contains("banner-collect"))
-        assertFalse("typing debounce report must not probe turn-state just for logging", typingTracker.contains("TurnStateBridge.presentationForFile"))
-        assertFalse("CRDT replica manager must not schedule fixed-delay pulls", crdtReplica.contains("scheduleWithFixedDelay"))
-        assertFalse("CRDT replica manager must not keep a poller thread", crdtReplica.contains("crdt-replica-poller"))
-        assertFalse("Lazily liveness must not be shadowed by a plugin-owner heartbeat", crdtReplica.contains("PLUGIN_OWNER") || crdtReplica.contains("plugin_owner"))
-        assertFalse("PatchWatcher must block on WatchService events", patchWatcher.contains("watchService.poll("))
-        assertFalse("reload broadcast must not use a polling interval", patchWatcher.contains("LIB_RELOAD_BROADCAST_POLL_MS"))
-        assertFalse("PatchWatcher must not use CRDT event sidecars", patchWatcher.contains(".agent-doc/crdt-replica-events"))
+        assertFalse(
+            "banner refresher must not define a polling interval",
+            turnRefresher.contains("POLL_MS"),
+        )
+        assertFalse(
+            "banner refresher must not retain slow-projection backoff",
+            turnRefresher.contains("SLOW_BACKOFF"),
+        )
+        assertTrue(
+            "banner refresher must cap each event-drain slice",
+            turnRefresher.contains("TURN_STATE_MAX_PATHS_PER_DRAIN"),
+        )
+        assertTrue(
+            "banner refresher must yield between backlog slices",
+            turnRefresher.contains("TURN_STATE_DRAIN_YIELD_MS"),
+        )
+        assertTrue(
+            "banner refresher must observe the native authority cache",
+            turnRefresher.contains("NativeAdminControls.documentAuthority"),
+        )
+        assertTrue(
+            "banner refresher must retain a bounded cache-observation cadence",
+            turnRefresher.contains("TURN_STATE_CACHE_OBSERVE_INTERVAL_MS"),
+        )
+        assertFalse(
+            "turn projection must not make imperative Project Controller subscriptions",
+            turnBridge.contains("subscribeMirrorForFileViaProjectController"),
+        )
+        assertTrue(
+            "turn projection must show Project Controller disconnects",
+            turnBridge.contains("Project Controller disconnected"),
+        )
+        assertFalse(
+            "turn projection must not call the legacy sidecar-capable FFI",
+            turnBridge.contains("agent_doc_turn_projection"),
+        )
+        assertFalse(
+            "banner collection must read cached state",
+            turnProvider.contains("TurnStateBridge.presentationForFile"),
+        )
+        assertFalse(
+            "banner collection must not trigger its own refresh loop",
+            turnProvider.contains("banner-collect"),
+        )
+        assertFalse(
+            "typing debounce report must not probe turn-state just for logging",
+            typingTracker.contains("TurnStateBridge.presentationForFile"),
+        )
+        assertFalse(
+            "CRDT replica manager must not schedule fixed-delay pulls",
+            crdtReplica.contains("scheduleWithFixedDelay"),
+        )
+        assertFalse(
+            "CRDT replica manager must not keep a poller thread",
+            crdtReplica.contains("crdt-replica-poller"),
+        )
+        assertFalse(
+            "Lazily liveness must not be shadowed by a plugin-owner heartbeat",
+            crdtReplica.contains("PLUGIN_OWNER") || crdtReplica.contains("plugin_owner"),
+        )
+        assertFalse(
+            "PatchWatcher must block on WatchService events",
+            patchWatcher.contains("watchService.poll("),
+        )
+        assertFalse(
+            "reload broadcast must not use a polling interval",
+            patchWatcher.contains("LIB_RELOAD_BROADCAST_POLL_MS"),
+        )
+        assertFalse(
+            "PatchWatcher must not use CRDT event sidecars",
+            patchWatcher.contains(".agent-doc/crdt-replica-events"),
+        )
         assertFalse(
             "missing-file recovery must not refresh the whole LocalFileSystem",
             patchWatcher.contains("LocalFileSystem.getInstance().refresh(false)"),
         )
-        val patchWatcherStart = patchWatcher.substringAfter("fun start()")
-            .substringBefore("/**\n     * Register a root directory")
+        val patchWatcherStart =
+            patchWatcher
+                .substringAfter("fun start()")
+                .substringBefore("/**\n     * Register a root directory")
         assertTrue(
             "base-root listener startup must leave the projectOpened EDT",
             patchWatcherStart.contains("executeOnPooledThread") &&
@@ -321,8 +432,10 @@ class RefreshBeforeApplyConflictTest {
             "open editor files must register their concrete root on demand",
             lifecycle.contains("patchWatcher.registerRootForFile(file.path)"),
         )
-        val registerRoot = patchWatcher.substringAfter("fun registerRoot(root: String)")
-            .substringBefore("internal fun quiesceNativeEndpointsForReload")
+        val registerRoot =
+            patchWatcher
+                .substringAfter("fun registerRoot(root: String)")
+                .substringBefore("internal fun quiesceNativeEndpointsForReload")
         assertTrue(registerRoot.contains("SwingUtilities.isEventDispatchThread()"))
         assertTrue(registerRoot.contains("executeOnPooledThread(startListener)"))
         assertTrue(
@@ -335,8 +448,14 @@ class RefreshBeforeApplyConflictTest {
                 patchWatcher.contains("CrdtReplicaEventReason.fromToken") &&
                 patchWatcher.contains("CrdtReplicaEventReason.RequestFullState"),
         )
-        assertFalse("layout detector must not run a fallback polling thread", layoutDetector.contains("startFallbackPoll"))
-        assertFalse("layout detector must not define a polling interval", layoutDetector.contains("POLL_INTERVAL_MS"))
+        assertFalse(
+            "layout detector must not run a fallback polling thread",
+            layoutDetector.contains("startFallbackPoll"),
+        )
+        assertFalse(
+            "layout detector must not define a polling interval",
+            layoutDetector.contains("POLL_INTERVAL_MS"),
+        )
         assertFalse(
             "layout detector must not recursively attach listeners to the Swing tree",
             layoutDetector.contains("addRecursiveContainerListener") ||
@@ -350,7 +469,9 @@ class RefreshBeforeApplyConflictTest {
         )
         assertTrue(
             "structural layout changes must use the same surface graph as focus changes",
-            layoutDetector.contains("EditorTabSyncListener.install(project).onEditorLayoutChanged(project)"),
+            layoutDetector.contains(
+                "EditorTabSyncListener.install(project).onEditorLayoutChanged(project)"
+            ),
         )
         assertFalse(
             "layout detector must not run a second tmux sync planner",
@@ -358,15 +479,25 @@ class RefreshBeforeApplyConflictTest {
                 layoutDetector.contains("agent_doc_sync_try_lock") ||
                 layoutDetector.contains("buildSyncCommand"),
         )
-        assertFalse("visual highlighter must not use a Swing timer", visualHighlighter.contains("Alarm("))
-        assertFalse("visual highlighter must not tokenize the editor text on the UI apply path", visualHighlighter.contains("NativePatching.visualTokens(editor.document.text)"))
-        assertTrue("visual highlighter tokenization must run on its event worker", visualHighlighter.contains("agent-doc-visual-highlighter-events"))
-        for ((name, source) in listOf(
-            "PatchWatcher" to patchWatcher,
-            "TypingTracker" to typingTracker,
-            "CrdtReplicaManager" to crdtReplica,
-            "VisualHighlighterManager" to visualHighlighter,
-        )) {
+        assertFalse(
+            "visual highlighter must not use a Swing timer",
+            visualHighlighter.contains("Alarm("),
+        )
+        assertFalse(
+            "visual highlighter must not tokenize the editor text on the UI apply path",
+            visualHighlighter.contains("NativePatching.visualTokens(editor.document.text)"),
+        )
+        assertTrue(
+            "visual highlighter tokenization must run on its event worker",
+            visualHighlighter.contains("agent-doc-visual-highlighter-events"),
+        )
+        for ((name, source) in
+            listOf(
+                "PatchWatcher" to patchWatcher,
+                "TypingTracker" to typingTracker,
+                "CrdtReplicaManager" to crdtReplica,
+                "VisualHighlighterManager" to visualHighlighter,
+            )) {
             assertFalse(
                 "$name must not let a native/background worker block indefinitely on an IDEA read permit",
                 source.contains("runReadAction"),
@@ -377,8 +508,10 @@ class RefreshBeforeApplyConflictTest {
             nativeReload.indexOf("PatchWatcher.quiesceAllForNativeReload()") <
                 nativeReload.indexOf("CrdtReplicaManager.quiesceAllForNativeReload()"),
         )
-        val forceRefreshReplica = crdtReplica.substringAfter("fun forceRefreshOpenDocumentReplica(")
-            .substringBefore("fun ensureReplicaForOpenDocument(")
+        val forceRefreshReplica =
+            crdtReplica
+                .substringAfter("fun forceRefreshOpenDocumentReplica(")
+                .substringBefore("fun ensureReplicaForOpenDocument(")
         assertTrue(forceRefreshReplica.contains("runOnEdtNonBlocking"))
         assertFalse(
             "native callbacks must not block waiting for an IDEA read permit",
@@ -388,22 +521,38 @@ class RefreshBeforeApplyConflictTest {
 
     @Test
     fun `jetbrains crdt replica transport talks to cp not supervisor`() {
-        val forwarder = Files.readString(
-            listOf(
-                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaForwarder.kt"),
-                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaForwarder.kt"),
-            ).first { Files.exists(it) },
-        )
+        val forwarder =
+            Files.readString(
+                listOf(
+                        Paths.get(
+                            "src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaForwarder.kt"
+                        ),
+                        Paths.get(
+                            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaForwarder.kt"
+                        ),
+                    )
+                    .first { Files.exists(it) }
+            )
 
-        assertTrue("CRDT transport must target the Project Controller socket", forwarder.contains(".agent-doc/controller.sock"))
-        assertTrue("CRDT transport must use the controller crdt_replica envelope", forwarder.contains("\"crdt_replica\""))
-        assertFalse("CRDT transport must not connect to per-session supervisor sockets", forwarder.contains(".agent-doc/supervisor"))
+        assertTrue(
+            "CRDT transport must target the Project Controller socket",
+            forwarder.contains(".agent-doc/controller.sock"),
+        )
+        assertTrue(
+            "CRDT transport must use the controller crdt_replica envelope",
+            forwarder.contains("\"crdt_replica\""),
+        )
+        assertFalse(
+            "CRDT transport must not connect to per-session supervisor sockets",
+            forwarder.contains(".agent-doc/supervisor"),
+        )
 
         val cpTransport = forwarder.substringAfter("class CpSocketReplicaTransport(")
-        val textAdopt = functionBody(
-            cpTransport,
-            "override fun pushTextAdopt(filePath: String, text: String)",
-        )
+        val textAdopt =
+            functionBody(
+                cpTransport,
+                "override fun pushTextAdopt(filePath: String, text: String)",
+            )
         assertTrue(
             "text adopt must be retained before its synchronous controller projection",
             textAdopt.indexOf("agent_doc_reliable_sync_text_adopt_push") <
@@ -411,8 +560,7 @@ class RefreshBeforeApplyConflictTest {
         )
         assertTrue(
             "a retained-but-unprojected text adopt must not authorize immediate re-registration",
-            textAdopt.contains("if (response?.ok != true)") &&
-                textAdopt.contains("return false"),
+            textAdopt.contains("if (response?.ok != true)") && textAdopt.contains("return false"),
         )
     }
 

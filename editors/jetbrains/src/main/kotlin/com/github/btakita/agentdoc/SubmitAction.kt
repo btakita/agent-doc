@@ -9,78 +9,87 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 /**
  * Action that routes the active document through the Project Controller editor_route RPC.
  *
- * Triggered by Ctrl+Shift+Alt+A (configurable in Keymap settings).
- * Only enabled when the active editor has a .md file open.
+ * Triggered by Ctrl+Shift+Alt+A (configurable in Keymap settings). Only enabled when the active
+ * editor has a .md file open.
  *
- * Saves the active document and routes immediately.
- * Manual Run stays intentionally stateless so the editor does not try to infer
- * whether the tmux session is "already running" or otherwise mid-recovery.
+ * Saves the active document and routes immediately. Manual Run stays intentionally stateless so the
+ * editor does not try to infer whether the tmux session is "already running" or otherwise
+ * mid-recovery.
  */
 class SubmitAction : AnAction() {
 
     companion object {
-        private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(SubmitAction::class.java)
+        private val LOG =
+            com.intellij.openapi.diagnostic.Logger.getInstance(SubmitAction::class.java)
     }
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
 
-        val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
         LOG.warn("[run] actionPerformed: ${file.name}")
-        val attempt = RunAgentDocAttemptLedger.begin(
-            cwd = cwd,
-            relativePath = relativePath,
-            filePath = file.path,
-            focusedFile = file.path,
-        )
-
-        ApplicationManager.getApplication().invokeLater {
-            if (project.isDisposed || !file.isValid) {
-                attempt.finishIfCurrent("document_unavailable", error = "project disposed or file invalid")
-                return@invokeLater
-            }
-            if (!attempt.isCurrent()) {
-                return@invokeLater
-            }
-            val fdm = FileDocumentManager.getInstance()
-            val document = fdm.getDocument(file)
-            if (document != null) {
-                attempt.recordIfCurrent("save_active_document")
-                // #jblocalhistcrash: IntelliJ's Local History VFS storage can throw an
-                // internal java.lang.AssertionError (AbstractRecordsTable.createNewRecord)
-                // during saveDocument when its local-history store is corrupt. That
-                // recording is best-effort — the document text is authoritative and the
-                // Run Agent Doc dispatch must still proceed, so catch + log and continue
-                // rather than aborting the whole action. Operator remediation for the
-                // corrupt store: File > Invalidate Caches / Restart.
-                try {
-                    fdm.saveDocument(document)
-                    attempt.recordIfCurrent("active_document_saved")
-                } catch (t: Throwable) {
-                    LOG.warn(
-                        "[run] saveDocument failed (best-effort local-history record; continuing dispatch): ${t.message}",
-                        t,
-                    )
-                    attempt.recordIfCurrent("active_document_save_failed")
-                }
+        val fileDocumentManager = FileDocumentManager.getInstance()
+        val document = fileDocumentManager.getDocument(file)
+        val saveStage =
+            if (document == null) {
+                "document_not_loaded"
             } else {
-                attempt.recordIfCurrent("document_not_loaded")
+                // IntelliJ Local History can throw an AssertionError while saving
+                // a valid document when its private store is corrupt. Saving is
+                // best-effort for dispatch; log the failure and continue.
+                try {
+                    fileDocumentManager.saveDocument(document)
+                    "active_document_saved"
+                } catch (failure: Throwable) {
+                    LOG.warn(
+                        "[run] saveDocument failed; continuing dispatch: ${failure.message}",
+                        failure,
+                    )
+                    "active_document_save_failed"
+                }
+            }
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            if (project.isDisposed || !file.isValid) return@executeOnPooledThread
+            val resolved =
+                try {
+                    TerminalUtil.resolveProject(project, file)
+                } catch (failure: Throwable) {
+                    LOG.warn("[run] project resolution failed for ${file.path}", failure)
+                    return@executeOnPooledThread
+                }
+            val (cwd, relativePath) = resolved
+            val attempt =
+                RunAgentDocAttemptLedger.begin(
+                    cwd = cwd,
+                    relativePath = relativePath,
+                    filePath = file.path,
+                    focusedFile = file.path,
+                )
+            attempt.recordIfCurrent(saveStage)
+            ApplicationManager.getApplication().invokeLater {
+                if (project.isDisposed || !file.isValid) {
+                    attempt.finishIfCurrent(
+                        "document_unavailable",
+                        error = "project disposed or file invalid",
+                    )
+                    return@invokeLater
+                }
+                if (!attempt.isCurrent()) return@invokeLater
+                LOG.warn("[run] invoking sendToTerminal after active document save: ${file.name}")
+                TerminalUtil.sendToTerminal(
+                    project,
+                    file,
+                    attempt = attempt,
+                    resolved = resolved,
+                )
+                TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "run-agent-doc")
+            }
         }
-        LOG.warn("[run] invoking sendToTerminal after active document save: ${file.name}")
-            TerminalUtil.sendToTerminal(
-                project,
-                file,
-                attempt = attempt,
-                resolved = cwd to relativePath,
-            )
-        TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "run-agent-doc")
     }
-}
 
     override fun update(e: AnActionEvent) {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
-        e.presentation.isEnabledAndVisible =
-            file != null && file.extension?.lowercase() == "md"
+        e.presentation.isEnabledAndVisible = file != null && file.extension?.lowercase() == "md"
     }
 }

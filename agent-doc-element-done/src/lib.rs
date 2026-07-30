@@ -28,6 +28,108 @@ pub const DONE_SECTION_HEADING: &str = "## Completed / Reaped";
 pub const EMPTY_DONE_COMPONENT: &str =
     "## Completed / Reaped\n\n<!-- agent:done -->\n<!-- /agent:done -->\n";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalDebrisPrune {
+    pub content: String,
+    pub removed_line_count: usize,
+}
+
+/// Remove invalid text below the terminal `agent:done` component when every
+/// meaningful line is provably redundant with the managed document.
+///
+/// The done component is the document's terminal boundary. A CRDT merge can
+/// nevertheless strand fragments below it. We only auto-prune when each
+/// nonblank fragment is one of:
+/// - an incomplete checklist stub;
+/// - a same-id copy of a managed item above the boundary; or
+/// - exact/subline text already present above the boundary.
+///
+/// Unique trailing text is left untouched so the structural guard can fail
+/// closed instead of silently discarding it.
+pub fn prune_proven_redundant_terminal_debris(document: &str) -> Option<TerminalDebrisPrune> {
+    let components = element::parse(document).ok()?;
+    let done = components
+        .iter()
+        .filter(|component| DESCRIPTOR.matches_name(&component.name))
+        .max_by_key(|component| component.close_end)?;
+    if components
+        .iter()
+        .any(|component| component.open_start >= done.close_end)
+    {
+        return None;
+    }
+
+    let managed = &document[..done.close_end];
+    let trailing = &document[done.close_end..];
+    let meaningful = trailing
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if meaningful.is_empty()
+        || !meaningful
+            .iter()
+            .all(|line| terminal_debris_line_is_redundant(managed, line))
+    {
+        return None;
+    }
+
+    Some(TerminalDebrisPrune {
+        content: managed.to_string(),
+        removed_line_count: trailing.lines().count(),
+    })
+}
+
+fn terminal_debris_line_is_redundant(managed: &str, line: &str) -> bool {
+    let normalized_stub = line
+        .trim_start_matches(['-', '*'])
+        .trim()
+        .trim_start_matches(['🚧', '⏭'])
+        .trim();
+    if matches!(normalized_stub, "[ ]" | "[/]" | "[x]" | "[X]") {
+        return true;
+    }
+    if line.starts_with("~~") && line.contains("~~") && line.contains("auto-struck:") {
+        return true;
+    }
+    if bare_boundary_identifier(line) {
+        return true;
+    }
+
+    if let Some(id_start) = line.find("[#")
+        && let Some(id_end) = line[id_start + 2..].find(']')
+    {
+        let id = &line[id_start + 2..id_start + 2 + id_end];
+        if agent_doc_element_backlog::backlog::is_valid_pending_id(id)
+            && managed.contains(&format!("[#{id}]"))
+        {
+            return true;
+        }
+    }
+
+    let line = line.trim_matches('~').trim();
+    if line.len() < 8 {
+        return managed.contains(line);
+    }
+    managed.lines().map(str::trim).any(|candidate| {
+        candidate == line
+            || (line.len() >= 16 && candidate.contains(line))
+            || (candidate.len() >= 16 && line.contains(candidate))
+    })
+}
+
+fn bare_boundary_identifier(line: &str) -> bool {
+    let line = line.trim();
+    let bare_hex =
+        (8..=64).contains(&line.len()) && line.bytes().all(|byte| byte.is_ascii_hexdigit());
+    let uuid = line.len() == 36
+        && line.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        });
+    bare_hex || uuid
+}
+
 /// Insert the canonical done archive component after the last tracked-work
 /// component in `content`.
 pub fn insert_done_component_after_tracked_work(content: &str) -> Option<String> {
@@ -152,6 +254,46 @@ mod tests {
             insert_done_component_after_tracked_work("plain text\n"),
             None
         );
+    }
+
+    #[test]
+    fn prunes_only_proven_redundant_debris_below_terminal_done() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#current] Current managed task with complete text\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "The correlation id was cf2d65db-105b-472b-9d1e-de6638dc2eb6.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "~~Completed prompt~~ — auto-struck: answered this cycle (#ftstrike)\n",
+            "- [ ] [#current] Superseded copy\n",
+            "- [ ]\n",
+            "410dfec2\n",
+            "cf2d65db-105b-472b-9d1e-de6638dc2eb6\n",
+        );
+
+        let pruned = prune_proven_redundant_terminal_debris(content).unwrap();
+
+        assert_eq!(
+            pruned.content,
+            content.split_once("~~Completed prompt~~").unwrap().0
+        );
+        assert_eq!(pruned.removed_line_count, 5);
+    }
+
+    #[test]
+    fn preserves_unique_text_below_terminal_done() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "Unique operator note that appears nowhere else.\n",
+        );
+
+        assert_eq!(prune_proven_redundant_terminal_debris(content), None);
     }
 
     #[test]

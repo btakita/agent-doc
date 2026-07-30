@@ -1,13 +1,14 @@
 package com.github.btakita.agentdoc
 
 import com.google.gson.annotations.SerializedName
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.wm.WindowManager
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -30,12 +31,9 @@ import java.util.concurrent.atomic.AtomicReference
  * generation guard so a burst reports only its final state, and an off-EDT executor so the derived
  * command never blocks the UI thread.
  *
- * Focus is latency-sensitive and takes a separate micro-coalesced lane. IDEA emits both selection
- * and component-focus events for one click, so a 12ms generation window collapses those duplicates
- * before they cross the socket. The selected document is then sent through the controller's
- * project-scoped latest-wins focus command before layout reconciliation. The debounced surface
- * observation still owns safe passive layout sync; the fast lane only makes an already-visible
- * target pane react immediately.
+ * Focus and layout are both projections of the same selected-document Source. There is no direct
+ * focus command lane for an older selection to occupy: the native graph receives only the latest
+ * stable surface and derives the consequence.
  *
  * Registered from [PluginLifecycleListener] via [install] so it survives hot-reload.
  */
@@ -53,31 +51,15 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * project's pending observation.
      */
     private val generation = AtomicLong(0)
-    private val focusGeneration = AtomicLong(0)
 
     private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-editor-tab-sync").apply { isDaemon = true }
     }
-    private val focusExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "agent-doc-editor-focus-sync").apply { isDaemon = true }
-    }
 
     companion object {
         internal const val SURFACE_COALESCE_MS = 40L
-        private const val FOCUS_COALESCE_MS = 12L
-        private val FOCUS_MAX_AGE_NANOS = TimeUnit.MILLISECONDS.toNanos(500)
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
         private val GSON = com.google.gson.Gson()
-
-        internal fun shouldDispatchFocus(
-            requestedGeneration: Long,
-            currentGeneration: Long,
-            projectWindowActive: Boolean,
-            ageNanos: Long,
-        ): Boolean =
-            requestedGeneration == currentGeneration &&
-                projectWindowActive &&
-                ageNanos in 0..FOCUS_MAX_AGE_NANOS
 
         private val instances = ConcurrentHashMap<Project, EditorTabSyncListener>()
 
@@ -103,6 +85,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
     internal data class EditorSurfacePayload(
         val focused: String,
         val visible: List<String>,
+        val open: List<String>,
         val columns: List<SurfaceColumnPayload>,
         @SerializedName("force_reconcile") val forceReconcile: Boolean,
     )
@@ -149,6 +132,37 @@ class EditorTabSyncListener : FileEditorManagerListener {
             return visibleMdFiles.firstOrNull()
         }
 
+        fun tabsByProximity(focusedFile: String, tabs: List<String>): List<String> {
+            val focusedIndex = tabs.indexOf(focusedFile).takeIf { it >= 0 } ?: 0
+            return tabs
+                .withIndex()
+                .sortedWith(
+                    compareBy<IndexedValue<String>>(
+                        { kotlin.math.abs(it.index - focusedIndex) },
+                        { it.index },
+                    )
+                )
+                .map { it.value }
+                .distinct()
+        }
+
+        fun prioritizeOpenDocuments(
+            focusedFile: String,
+            nearbyTabs: List<String>,
+            visibleMdFiles: List<String>,
+            openMdFiles: List<String>,
+        ): List<String> =
+            sequenceOf(
+                    sequenceOf(focusedFile),
+                    nearbyTabs.asSequence(),
+                    visibleMdFiles.asSequence(),
+                    openMdFiles.asSequence(),
+                )
+                .flatten()
+                .filter(String::isNotBlank)
+                .distinct()
+                .toList()
+
         /**
          * Build the observation. An undetected layout reports **no** columns rather than a
          * synthesized single column, so the graph can tell "the editor has one column" apart from
@@ -157,12 +171,20 @@ class EditorTabSyncListener : FileEditorManagerListener {
         fun buildSurface(
             focusedFile: String,
             visibleMdFiles: List<String>,
+            openMdFiles: List<String> = visibleMdFiles,
             editorLayout: EditorLayout?,
             forceReconcile: Boolean,
         ): EditorSurfacePayload =
             EditorSurfacePayload(
                 focused = focusedFile,
                 visible = visibleMdFiles.distinct(),
+                open =
+                    prioritizeOpenDocuments(
+                        focusedFile = focusedFile,
+                        nearbyTabs = openMdFiles,
+                        visibleMdFiles = visibleMdFiles,
+                        openMdFiles = emptyList(),
+                    ),
                 columns =
                     editorLayout
                         ?.columns
@@ -205,13 +227,16 @@ class EditorTabSyncListener : FileEditorManagerListener {
     private fun reportLatestSurface() {
         val observation = latestSurfaceObservation.get() ?: return
         val pending =
-            captureSurface(
+            captureSurfaceOnEditorThread(
                 project = observation.project,
                 preferredFile = observation.preferredFile,
                 forceReconcile = observation.forceReconcile,
             )
                 ?: run {
                     log("observe: awaiting selected document in stable editor surface")
+                    if (observation.preferredFile != null) {
+                        requestObservation(observation, SURFACE_COALESCE_MS)
+                    }
                     return
                 }
         observedRoots.add(pending.projectRoot)
@@ -228,54 +253,16 @@ class EditorTabSyncListener : FileEditorManagerListener {
         log("observe: queued file=${pending.relativePath}")
     }
 
-    private fun requestImmediateFocus(project: Project, file: VirtualFile) {
-        val documentPath = file.path
-        val requested = focusGeneration.incrementAndGet()
-        val requestedAtNanos = System.nanoTime()
-        focusExecutor.schedule(
-            focus@{
-                if (
-                    !shouldDispatchFocus(
-                        requestedGeneration = requested,
-                        currentGeneration = focusGeneration.get(),
-                        projectWindowActive =
-                            WindowManager.getInstance().getFrame(project)?.isActive == true,
-                        ageNanos = System.nanoTime() - requestedAtNanos,
-                    )
-                ) {
-                    log(
-                        "focus: superseded, inactive, or expired before root resolution gen=$requested"
-                    )
-                    return@focus
-                }
-                // Project-root discovery performs local filesystem walks. Keep it off the
-                // IntelliJ event thread along with the controller round trip.
-                val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
-                if (
-                    !shouldDispatchFocus(
-                        requestedGeneration = requested,
-                        currentGeneration = focusGeneration.get(),
-                        projectWindowActive =
-                            WindowManager.getInstance().getFrame(project)?.isActive == true,
-                        ageNanos = System.nanoTime() - requestedAtNanos,
-                    )
-                ) {
-                    log(
-                        "focus: superseded, inactive, or expired after root resolution gen=$requested"
-                    )
-                    return@focus
-                }
-                TmuxPaneFocusSync.recordEditorFocusIntent(project, documentPath)
-                val receipt =
-                    CpRouteClient.submitFocusDocumentPane(
-                        projectRoot = projectRoot,
-                        documentPath = documentPath,
-                    )
-                log("focus: file=$documentPath receipt=$receipt")
-            },
-            FOCUS_COALESCE_MS,
-            TimeUnit.MILLISECONDS,
-        )
+    private fun captureSurfaceOnEditorThread(
+        project: Project,
+        preferredFile: VirtualFile?,
+        forceReconcile: Boolean,
+    ): PendingSurface? {
+        var captured: PendingSurface? = null
+        ApplicationManager.getApplication().invokeAndWait {
+            captured = captureSurface(project, preferredFile, forceReconcile)
+        }
+        return captured
     }
 
     private fun captureSurface(
@@ -286,7 +273,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
         val manager = FileEditorManager.getInstance(project)
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
         if (visibleMdFiles.isEmpty()) return null
-        val preferredMarkdownFile = preferredFile?.takeIf { it.name.endsWith(".md") }
+        val openMarkdownFiles = manager.openFiles.filter { it.name.endsWith(".md") }
+        val preferredMarkdownFile = preferredFile?.takeIf { candidate ->
+            candidate.isValid &&
+                candidate.name.endsWith(".md") &&
+                openMarkdownFiles.any { it.path == candidate.path }
+        }
         if (
             SurfaceReport.projectionReadiness(
                 preferredActiveFile = preferredMarkdownFile?.path,
@@ -311,6 +303,25 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 )
                 .filterNotNull()
                 .firstOrNull { it.path == activeFilePath } ?: return null
+        val managerEx = FileEditorManagerEx.getInstanceEx(project)
+        val focusedWindowTabs =
+            managerEx.windows
+                .firstOrNull { it.selectedFile?.path == activeFilePath }
+                ?.fileList
+                ?.filter { it.name.endsWith(".md") }
+                ?.map { it.path }
+                .orEmpty()
+        val openMdFiles =
+            SurfaceReport.prioritizeOpenDocuments(
+                focusedFile = activeFilePath,
+                nearbyTabs =
+                    SurfaceReport.tabsByProximity(
+                        focusedFile = activeFilePath,
+                        tabs = focusedWindowTabs,
+                    ),
+                visibleMdFiles = visibleMdFiles,
+                openMdFiles = openMarkdownFiles.map { it.path },
+            )
 
         val (focusedProjectRoot, focusedRelativePath) = TerminalUtil.resolveProject(project, file)
         // One root keys the surface graph, and it has to be the one that spans
@@ -338,6 +349,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     SurfaceReport.buildSurface(
                         focusedFile = file.path,
                         visibleMdFiles = visibleMdFiles,
+                        openMdFiles = openMdFiles,
                         editorLayout = absoluteEditorLayout,
                         forceReconcile = forceReconcile,
                     )
@@ -347,7 +359,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
     private fun shutdown() {
         executor.shutdownNow()
-        focusExecutor.shutdownNow()
         val roots = observedRoots.toList()
         observedRoots.clear()
         latestSurfaceObservation.set(null)
@@ -370,7 +381,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
         if (!file.name.endsWith(".md")) return
 
         val project = event.manager.project
-        requestImmediateFocus(project, file)
         val manager = FileEditorManager.getInstance(project)
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
         log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
@@ -404,7 +414,14 @@ class EditorTabSyncListener : FileEditorManagerListener {
      */
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
-        requestImmediateFocus(project, file)
+        requestObservation(
+            PendingSurfaceObservation(
+                project = project,
+                preferredFile = file,
+                forceReconcile = false,
+            ),
+            delayMs = 0L,
+        )
         log("focusGained: file=${file.name}")
     }
 

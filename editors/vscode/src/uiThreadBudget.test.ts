@@ -59,26 +59,29 @@ describe('editor UI thread budget', () => {
         assert.ok(source.includes('private async drainRequestedRemoteUpdates()'));
     });
 
-    it('VS Code receives CRDT events through its PID endpoint and reads Project Controller state', () => {
+    it('VS Code receives CRDT events and renders native reactive authority from a local cache', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         assert.strictEqual(source.includes("'.agent-doc', 'crdt-replica-events'"), false);
         assert.ok(source.includes('case EditorIntent.DeliverCrdtRemote:'));
         assert.ok(source.includes('this.crdtReplicas?.requestRemoteDrain(filePath);'));
         assert.ok(source.includes('configureTurnStatusWatcher()'));
-        assert.ok(source.includes('TURN_STATUS_MIN_REFRESH_INTERVAL_MS'));
-        assert.ok(source.includes("command: 'state_subscribe'"));
-        assert.ok(source.includes('acked_version: pendingAck'));
-        assert.ok(source.includes('data?.peer_ack_recorded === true && pendingAck > 0'));
-        assert.ok(source.includes("typeof data?.document_version !== 'number'"));
-        assert.ok(source.includes('Math.max(previousVersion, data.document_version)'));
-        assert.ok(source.includes('turnProjectionFromProjectController'));
+        assert.ok(source.includes('TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS'));
+        assert.ok(source.includes('TURN_STATUS_AUTHORITY_SETTLE_MS'));
+        assert.ok(source.includes('currentNativeTurnAuthority'));
+        assert.ok(source.includes('native.currentDocumentAuthorityJson(projectRoot)'));
         assert.ok(source.includes('Project Controller disconnected'));
-        assert.ok(source.includes('async function refreshTurnStatusNow('));
+        assert.ok(source.includes('function refreshTurnStatusNow('));
         assert.ok(source.includes("refreshTurnStatus('active-editor', true)"));
         assert.strictEqual(source.includes("'.agent-doc', 'turn-scope'"), false);
         assert.strictEqual(source.includes('turnProjectionForFile('), false);
         assert.strictEqual(source.includes('TURN_STATUS_SLOW_BACKOFF_MS'), false);
         assert.strictEqual(source.includes('const turnStatusInterval = setInterval'), false);
+        const turnStatusSection = source.slice(
+            source.indexOf('// Controller→native→plugin turn-state coordination.'),
+            source.indexOf('// Visual highlighting'),
+        );
+        assert.strictEqual(turnStatusSection.includes('requestProjectController('), false);
+        assert.strictEqual(turnStatusSection.includes("command: 'state_subscribe'"), false);
     });
 
     it('VS Code Run Agent Doc dispatches through the project controller editor_route RPC', () => {

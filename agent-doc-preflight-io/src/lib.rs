@@ -1169,6 +1169,7 @@ pub struct PendingMaintenanceReport {
     pub review_count: usize,
     pub review_gated_count: usize,
     pub legacy_gated_in_backlog_count: usize,
+    pub terminal_debris_lines_pruned: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1244,6 +1245,33 @@ fn run_pending_maintenance_with_options(
     // separately from `mutated` so the snapshot is re-saved without an
     // unnecessary working-tree rewrite.
     let mut snapshot_mutated = false;
+    let mut terminal_debris_lines_pruned = 0usize;
+    if let Some(pruned) =
+        agent_doc_element_done::prune_proven_redundant_terminal_debris(&current_content)
+    {
+        terminal_debris_lines_pruned = pruned.removed_line_count;
+        current_content = pruned.content;
+        mutated = true;
+        eprintln!(
+            "[preflight] terminal boundary: pruned {} proven-redundant debris line(s)",
+            terminal_debris_lines_pruned
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "terminal_debris_pruned file={} lines={} authority=maintenance_convergence",
+                file.display(),
+                terminal_debris_lines_pruned
+            ),
+        );
+    }
+    if let Some(ref mut snapshot) = snapshot_content
+        && let Some(pruned) =
+            agent_doc_element_done::prune_proven_redundant_terminal_debris(snapshot)
+    {
+        *snapshot = pruned.content;
+        snapshot_mutated = true;
+    }
     let mut saw_completed_before = false;
     let project_root = file.canonicalize().ok().and_then(|canonical| {
         agent_doc_project_root_io::project_root_containing(&canonical)
@@ -1735,6 +1763,7 @@ fn run_pending_maintenance_with_options(
         review_count,
         review_gated_count,
         legacy_gated_in_backlog_count: backlog_gated_count,
+        terminal_debris_lines_pruned,
     })
 }
 
@@ -10103,6 +10132,49 @@ mod tests {
             "completed item must be archived in the document:\n{file_after}"
         );
     }
+
+    #[test]
+    fn pending_maintenance_prunes_redundant_terminal_debris_through_authority_path() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "The earlier response records correlation 93980072-a559-45d3-8fe5-98e2d0180fc4.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live] Current authoritative item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "- [ ] [#live] Superseded copy\n",
+            "93980072-a559-45d3-8fe5-98e2d0180fc4\n",
+            "- [ ]\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        // The non-force path can only change the file through the injected
+        // convergence effect. This is the regression for a disk-only cleanup
+        // being restored by the still-corrupt CRDT canonical.
+        let report =
+            run_pending_maintenance(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
+
+        assert_eq!(report.terminal_debris_lines_pruned, 3);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.ends_with("<!-- /agent:done -->\n"));
+        assert!(!updated.contains("Superseded copy"));
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot, updated);
+    }
+
     #[test]
     fn run_pending_maintenance_sorts_backlog_by_priority() {
         // #backlog-priority-attribute: a backlog carrying `priority` stable-sorts

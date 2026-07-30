@@ -24,13 +24,15 @@
 //! per-root history, and the membership rules are then exercised for real, with
 //! only the tmux command replaced.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 
 use agent_doc_editor_surface::{
-    EditorSurface, EditorSurfaceState, SurfaceColumn, SurfaceIntent, TmuxLayout,
+    CurrentDocumentAuthority, DocumentAuthority, DocumentAuthorityReadiness, EditorSurface,
+    EditorSurfaceState, SurfaceColumn, SurfaceIntent, TmuxLayout,
 };
 use agent_doc_state_scope::ProcessScope;
 use anyhow::{Context as _, Result};
@@ -77,12 +79,224 @@ pub type TmuxLayoutProbe = Arc<dyn Fn(&Path, &EditorSurface) -> Option<TmuxLayou
 /// surface merits an asynchronous controller probe.
 type SurfaceObserver = Arc<dyn Fn(&Path, EditorSurface) -> bool + Send + Sync>;
 type TmuxObserver = Arc<dyn Fn(&Path, Option<TmuxLayout>) + Send + Sync>;
+const DOCUMENT_AUTHORITY_WARM_SET_LIMIT: usize = 256;
+const DOCUMENT_AUTHORITY_ASYNC_THREADS: usize = 2;
+const DOCUMENT_AUTHORITY_BLOCKING_THREADS: usize = 4;
+static DOCUMENT_AUTHORITY_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(DOCUMENT_AUTHORITY_ASYNC_THREADS)
+        .max_blocking_threads(DOCUMENT_AUTHORITY_BLOCKING_THREADS)
+        .thread_name("agent-doc-document-authority")
+        .enable_all()
+        .build()
+        .expect("build document-authority async runtime")
+});
 
 #[derive(Default)]
 struct DeferredRoot {
     latest: Option<(u64, EditorSurface)>,
     running: bool,
     generation: u64,
+}
+
+struct DeferredDocumentAuthority {
+    generation: u64,
+    revision: u64,
+    membership: tokio::sync::watch::Sender<bool>,
+}
+
+/// Per-document native authority workers.
+///
+/// A document is a scheduling key, not an item in one global queue. A slow
+/// controller subscription therefore occupies only that document's worker. The
+/// editor reconciles membership; authority changes arrive from the controller's
+/// Lazily state plane without editor refresh requests.
+struct DeferredDocumentAuthorityDispatcher {
+    documents: Mutex<HashMap<(PathBuf, String), DeferredDocumentAuthority>>,
+    next_generation: AtomicU64,
+}
+
+impl DeferredDocumentAuthorityDispatcher {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            documents: Mutex::new(HashMap::new()),
+            next_generation: AtomicU64::new(1),
+        })
+    }
+
+    fn documents(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<(PathBuf, String), DeferredDocumentAuthority>> {
+        self.documents
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn prioritized_documents(surface: &EditorSurface) -> Vec<String> {
+        let mut prioritized_documents = Vec::new();
+        if !surface.focused.is_empty() {
+            prioritized_documents.push(surface.focused.clone());
+        }
+        // `open` is supplied in editor priority order: adjacent tabs precede
+        // farther tabs. Visibility is only a compatibility fallback for older
+        // adapters that did not report the open-document surface.
+        prioritized_documents.extend(surface.open.iter().cloned());
+        prioritized_documents.extend(surface.visible.iter().cloned());
+        let mut seen = HashSet::new();
+        prioritized_documents.retain(|document| seen.insert(document.clone()));
+        prioritized_documents.truncate(DOCUMENT_AUTHORITY_WARM_SET_LIMIT);
+        prioritized_documents
+    }
+
+    fn observe_surface(self: &Arc<Self>, root: &Path, surface: &EditorSurface) {
+        let prioritized_documents = Self::prioritized_documents(surface);
+        let desired = prioritized_documents
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        let mut starts = Vec::new();
+        {
+            let mut documents = self.documents();
+            documents.retain(|(document_root, document), authority| {
+                let retained = document_root != root || desired.contains(document);
+                if !retained {
+                    let _ = authority.membership.send(false);
+                }
+                retained
+            });
+            for document in prioritized_documents {
+                let key = (root.to_path_buf(), document.clone());
+                if documents.contains_key(&key) {
+                    continue;
+                }
+                let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
+                let (membership, membership_observer) = tokio::sync::watch::channel(true);
+                documents.insert(
+                    key,
+                    DeferredDocumentAuthority {
+                        generation,
+                        revision: generation,
+                        membership,
+                    },
+                );
+                starts.push((document, generation, membership_observer));
+            }
+        }
+        for (document, generation, membership) in starts {
+            self.start(root.to_path_buf(), document, generation, membership);
+        }
+    }
+
+    fn start(
+        self: &Arc<Self>,
+        root: PathBuf,
+        document: String,
+        generation: u64,
+        membership: tokio::sync::watch::Receiver<bool>,
+    ) {
+        REGISTRY.observe_document_authority(
+            &root,
+            DocumentAuthority {
+                document: document.clone(),
+                readiness: DocumentAuthorityReadiness::Pending,
+                turn: None,
+                error: None,
+                revision: generation,
+            },
+        );
+
+        let dispatcher = Arc::clone(self);
+        DOCUMENT_AUTHORITY_RUNTIME.spawn(async move {
+            dispatcher.run_document(root, document, membership).await;
+        });
+    }
+
+    async fn run_document(
+        self: Arc<Self>,
+        root: PathBuf,
+        document: String,
+        membership: tokio::sync::watch::Receiver<bool>,
+    ) {
+        let key = (root.clone(), document.clone());
+        let generation = match self.documents().get(&key) {
+            Some(entry) => entry.generation,
+            None => return,
+        };
+        if !self
+            .documents()
+            .get(&key)
+            .is_some_and(|entry| entry.generation == generation)
+        {
+            return;
+        }
+        let observe_dispatcher = Arc::clone(&self);
+        let observe_key = key.clone();
+        let observe_root = root.clone();
+        let observe_document = document.clone();
+        let result =
+            agent_doc_controller_io::project_controller::observe_document_turn_authority_stream(
+                &root,
+                Path::new(&document),
+                move |turn| {
+                    let revision = {
+                        let mut documents = observe_dispatcher.documents();
+                        let Some(entry) = documents.get_mut(&observe_key) else {
+                            return;
+                        };
+                        if entry.generation != generation {
+                            return;
+                        }
+                        entry.revision = entry.revision.saturating_add(1);
+                        entry.revision
+                    };
+                    REGISTRY.observe_document_authority(
+                        &observe_root,
+                        DocumentAuthority {
+                            document: observe_document.clone(),
+                            readiness: DocumentAuthorityReadiness::Ready,
+                            turn: Some(turn),
+                            error: None,
+                            revision,
+                        },
+                    );
+                },
+                membership,
+            )
+            .await;
+        if let Err(error) = result {
+            let revision = {
+                let mut documents = self.documents();
+                let Some(entry) = documents.get_mut(&key) else {
+                    return;
+                };
+                if entry.generation != generation {
+                    return;
+                }
+                entry.revision = entry.revision.saturating_add(1);
+                entry.revision
+            };
+            REGISTRY.observe_document_authority(
+                &root,
+                DocumentAuthority {
+                    document,
+                    readiness: DocumentAuthorityReadiness::Unavailable,
+                    turn: None,
+                    error: Some(format!("{error:#}")),
+                    revision,
+                },
+            );
+        }
+    }
+
+    fn forget(&self, root: &Path) {
+        self.documents().retain(|(document_root, _), authority| {
+            let retained = document_root != root;
+            if !retained {
+                let _ = authority.membership.send(false);
+            }
+            retained
+        });
+    }
 }
 
 /// Per-root latest-wins dispatcher for editor observations.
@@ -305,6 +519,41 @@ impl Registry {
         self.with_entry(project_root, |entry| entry.state.observe_tmux(layout))
     }
 
+    /// Publish one native/controller authority input into the same shared graph
+    /// as the editor selection.
+    pub fn observe_document_authority(&self, project_root: &Path, authority: DocumentAuthority) {
+        let _ = self.with_entry(project_root, |entry| {
+            entry.state.observe_document_authority(authority)
+        });
+    }
+
+    pub fn document_authority(
+        &self,
+        project_root: &Path,
+        document: &str,
+    ) -> Option<DocumentAuthority> {
+        let roots = self.roots();
+        roots
+            .get(project_root)
+            .and_then(|entry| entry.state.document_authority(document))
+            .or_else(|| {
+                // A split editor surface can be rooted above the focused
+                // document's nearest project root. Absolute document identity
+                // is unambiguous, so plugin cache reads may find that surface
+                // without rediscovering the editor's spanning root.
+                roots
+                    .values()
+                    .find_map(|entry| entry.state.document_authority(document))
+            })
+    }
+
+    pub fn current_document_authority(&self, project_root: &Path) -> CurrentDocumentAuthority {
+        self.roots()
+            .get(project_root)
+            .map(|entry| entry.state.current_document_authority())
+            .unwrap_or_default()
+    }
+
     fn with_entry(
         &self,
         project_root: &Path,
@@ -502,9 +751,14 @@ static DEFERRED_SURFACES: LazyLock<Arc<DeferredSurfaceDispatcher>> = LazyLock::n
     )
 });
 
+static DEFERRED_AUTHORITIES: LazyLock<Arc<DeferredDocumentAuthorityDispatcher>> =
+    LazyLock::new(DeferredDocumentAuthorityDispatcher::new);
+
 /// Record an editor-surface observation for the process-wide registry.
 pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservationReceipt {
-    REGISTRY.observe(project_root, surface)
+    let receipt = REGISTRY.observe(project_root, surface.clone());
+    DEFERRED_AUTHORITIES.observe_surface(project_root, &surface);
+    receipt
 }
 
 /// Validate and enqueue an editor-surface observation without waiting for its
@@ -512,7 +766,9 @@ pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservatio
 pub fn enqueue_from_json(project_root: &Path, surface_json: &str) -> Result<()> {
     let surface: EditorSurface =
         serde_json::from_str(surface_json).context("parse editor surface json")?;
-    DEFERRED_SURFACES.enqueue(project_root.to_path_buf(), surface)
+    DEFERRED_SURFACES.enqueue(project_root.to_path_buf(), surface.clone())?;
+    DEFERRED_AUTHORITIES.observe_surface(project_root, &surface);
+    Ok(())
 }
 
 /// Record a tmux-layout observation for the process-wide registry.
@@ -525,7 +781,9 @@ pub fn observe_from_json(
     project_root: &Path,
     surface_json: &str,
 ) -> Result<SurfaceObservationReceipt> {
-    REGISTRY.observe_from_json(project_root, surface_json)
+    let surface: EditorSurface =
+        serde_json::from_str(surface_json).context("parse editor surface json")?;
+    Ok(observe(project_root, surface))
 }
 
 /// [`observe_from_json`] with the receipt serialized back to JSON.
@@ -536,7 +794,16 @@ pub fn observe_json(project_root: &Path, surface_json: &str) -> Result<String> {
 /// Forget a project root in the process-wide registry.
 pub fn forget(project_root: &Path) -> bool {
     DEFERRED_SURFACES.forget(project_root);
+    DEFERRED_AUTHORITIES.forget(project_root);
     REGISTRY.forget(project_root)
+}
+
+pub fn document_authority(project_root: &Path, document: &str) -> Option<DocumentAuthority> {
+    REGISTRY.document_authority(project_root, document)
+}
+
+pub fn current_document_authority(project_root: &Path) -> CurrentDocumentAuthority {
+    REGISTRY.current_document_authority(project_root)
 }
 
 #[cfg(test)]
@@ -559,13 +826,69 @@ mod tests {
         let visible = columns
             .iter()
             .flat_map(|column| column.files.iter().cloned())
-            .collect();
+            .collect::<Vec<_>>();
         EditorSurface {
             focused: focused.to_string(),
+            open: visible.clone(),
             visible,
             columns,
             force_reconcile: false,
         }
+    }
+
+    #[test]
+    fn authority_workers_prioritize_focus_then_nearby_tabs() {
+        let surface = EditorSurface {
+            focused: "/repo/focused.md".to_string(),
+            visible: vec![
+                "/repo/other-split.md".to_string(),
+                "/repo/focused.md".to_string(),
+            ],
+            open: vec![
+                "/repo/focused.md".to_string(),
+                "/repo/left-neighbor.md".to_string(),
+                "/repo/right-neighbor.md".to_string(),
+                "/repo/far.md".to_string(),
+            ],
+            columns: Vec::new(),
+            force_reconcile: false,
+        };
+
+        assert_eq!(
+            DeferredDocumentAuthorityDispatcher::prioritized_documents(&surface),
+            vec![
+                "/repo/focused.md",
+                "/repo/left-neighbor.md",
+                "/repo/right-neighbor.md",
+                "/repo/far.md",
+                "/repo/other-split.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn focusing_a_cold_document_replaces_the_farthest_warm_subscription() {
+        let open = (0..=DOCUMENT_AUTHORITY_WARM_SET_LIMIT)
+            .map(|index| format!("/repo/{index}.md"))
+            .collect::<Vec<_>>();
+        let surface = EditorSurface {
+            focused: format!("/repo/{}.md", DOCUMENT_AUTHORITY_WARM_SET_LIMIT),
+            visible: vec![],
+            open,
+            columns: Vec::new(),
+            force_reconcile: false,
+        };
+
+        let prioritized = DeferredDocumentAuthorityDispatcher::prioritized_documents(&surface);
+        assert_eq!(prioritized.len(), DOCUMENT_AUTHORITY_WARM_SET_LIMIT);
+        assert_eq!(
+            prioritized.first().map(String::as_str),
+            Some("/repo/256.md")
+        );
+        assert!(
+            !prioritized.contains(&"/repo/255.md".to_string()),
+            "the farthest background document yields its warm slot"
+        );
     }
 
     type Ran = Arc<Mutex<Vec<(PathBuf, SurfaceIntent)>>>;

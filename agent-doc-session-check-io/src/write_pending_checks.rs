@@ -868,6 +868,7 @@ fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Resul
 
 fn content_requires_closeout_pending_maintenance(content: &str) -> bool {
     agent_doc_document::tracked_work_projection::tracked_work_maintenance_required(content)
+        || agent_doc_element_done::prune_proven_redundant_terminal_debris(content).is_some()
 }
 
 fn editor_authority_resolution_unavailable(err: &anyhow::Error) -> bool {
@@ -898,6 +899,22 @@ fn editor_authority_resolution_reason(err: &anyhow::Error) -> &'static str {
 mod precommit_pending_capture_tests {
     use std::fs;
     use std::path::Path;
+
+    #[test]
+    fn terminal_debris_requires_closeout_pending_maintenance() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#current] Current item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "- [ ] [#current] Superseded copy\n",
+        );
+
+        assert!(super::content_requires_closeout_pending_maintenance(
+            content
+        ));
+    }
 
     struct TestBacklogCommandEffects;
 

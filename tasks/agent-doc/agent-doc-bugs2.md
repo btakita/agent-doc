@@ -35,89 +35,11 @@ Installed Agent Doc 0.35.109 with reactive per-document authority, bounded Tokio
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260730-193256.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260730-231401.md`*
 
 Compacted content:
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): equityfundingsource.md has queue items for already done tasks....
-
-### Re: Response
-
-No manual or forced process restarts were performed. The installer only marked controllers/supervisors for safe handoff; IDEA was not restarted.
-
-Implemented and installed Agent Doc 0.35.107:
-
-- Tmux state is a reactive `Source`/Cell; Computeds derive the desired pane and an Effect performs tmux I/O.
-- Open-document authorities are pre-warmed independently, capped at 256, with readiness diagnostics.
-- Stale supervisor work is replaced immediately after active IPC drains, preserving the pane, child, composer text, and checkpoint.
-- The CLI no longer polls or falsely treats an unchanged PID as a successful replacement.
-- Full `make check` passed.
-- Code committed and pushed: `aff3ff3df`.
-- Root pointer/skill committed: `bbfbcd8ab`.
-- Previous CI runs are green; current CI is queued and was not awaited.
-
-You still need to restart IDEA once—the running process predates plugin 0.2.330. For Monster Rodholders, submit or cancel the preserved composer text so its old supervisor can complete the already-marked handoff.
-
-The Agent Doc response itself is retained with pending editor acknowledgement and a duplicate-exchange-boundary guard. Do not rerun finalize or force disk. After restarting IDEA, run only:
-
-```bash
-agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-```
-
-### Re: Response
-
-Two is the number of Tokio scheduler threads, not the number of document workers. Every warm open document owns an independent cancellable Tokio task (up to 256); idle tasks await watch/socket events and consume no OS thread. Two scheduler threads therefore multiplex the I/O-bound authority plane, while blocking/controller/tmux effects use a separate bounded pool with a maximum of eight threads. Increasing the scheduler count would not have fixed the observed 250 ms failure or tmux lag; allowing blocking work onto those schedulers would be the defect.
-
-Implemented and installed Agent Doc 0.35.109:
-
-- Open-document authority is an exact-key reactive projection. Each open document is pre-warmed out of band; focused documents and nearby tabs are prioritized, and membership cancellation is watch-driven.
-- Tmux/editor state is projected through Sources/Cells and Computeds; Effects perform native consequences. JetBrains and VS Code selection changes are event-driven and generation-fenced, with blocking work kept off the editor/UI and async scheduler threads.
-- Controller state-plane publication now wakes only the exact document/channel dependency. Retiring a document releases its history, Effect, sink, and dependency slot.
-- Compact Exchange's 250 ms timeout was a self-RPC deadlock, not an expensive authority calculation: spawned controller request workers lacked controller-local reactive identity and recursively requested their own socket. Every request worker now installs the local projection reader and controller marker.
-- Plain Run Agent Doc triggers now coalesce behind an authoritative active closeout owner. Prompt-bearing triggers remain durably queued; neither path resubmits finalize/write.
-- Descriptive constants now distinguish the 256-document warm-set limit, two async scheduler threads, and eight blocking-effect threads.
-
-Verification:
-
-- Full `make check` passed.
-- Focused controller, closeout-routing, and editor-authority tests passed.
-- Installed CLI reports `agent-doc 0.35.109`.
-- Live Compact Exchange on `tasks/software/tsift.md` succeeded and committed; `session-check` reported committed. The Lazily editor-op projection timeout did not recur, and `#tsrenameast1` remained queued.
-- Agent Doc repo commit: `7e567fb17`; superproject pointer/skill commit: `5acd0eef9`.
-- The previous CI run is green. Per instruction, CI was checked once and not awaited.
-
-Current retained-document state:
-
-- `equityfundingsource.md` no longer projects the reported merge debris/shadow backlog; its current head is `staging deploy` with three legitimate backlog items. The stale whole-editor adoption path that could restore removed debris was fixed in 0.35.105 and is included in this install.
-- `monsterrodholders.md` remains intentionally fail-closed at `write_applied`: its response is present but the terminal commit still awaits editor delivery, and route supervisor PID 1856779 is still mapped to the old binary. I observed it once with `session-check` and did not resend, force disk, recycle, or reload.
-
-IDEA must be restarted once after this install to load plugin 0.2.331; the earlier IDEA restart happened before this plugin package was installed. After that restart, run only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` to let the retained boundary converge.
-
-### Re: Response
-
-Implemented and installed the reactive recovery and latest-wins focus work.
-
-For the ACK question: retained closeout is now explicitly state-driven. The existing Lazily `Computed` joins the durable intent, current editor authority, replica membership, and delivery frontier; its Effect publishes the target once. A transport ACK remains evidence fed back into those reactives, but it no longer owns retry/progress or authorizes settlement. Settlement requires the recomputed current-authority projection to equal the target.
-
-The lazily.md wedge was not merely a delayed ACK. Its editor-authoritative text had a valid document through the terminal `agent:done` close followed by duplicated replay debris, including an unmatched `agent:backlog` close. The old repair required the entire corrupt document to parse, so it could never reach the safe debris-pruning seam. The repair now finds a structurally valid terminal prefix and removes the tail only when every meaningful line is provably redundant with managed content. Unique text still fails closed. Retained-capture settlement projects that repair through editor authority and then continues from the same durable response; it does not resubmit or force disk.
-
-Post-install, one permitted `session-check` reported lazily.md cycle `cycle-1785446694319` committed successfully and repaired the historical committed-capture snapshot drift. The response was not resubmitted. Its ready queue head `#lzbenchbudgetheadroom` remains untouched.
-
-The earlier tmux focus change is also installed: identical desired states coalesce, focus-only switches reuse the retained structural assignment, and stale generations are fenced before expensive layout work. The deterministic projection benchmark is available as `cargo run --release -p agent-doc-controller --example pane_layout_projection_benchmark`.
-
-Verification:
-- agent-doc element repair tests: 13 passed
-- realtime authority tests: 111 passed
-- full `make check`: passed
-- latest completed GitHub Actions CI run: green
-- install: succeeded; native reload reached 2/2 available editor endpoints, no editor restart required
-
-Commits:
-- `b7f96c567` — latest-wins pane focus projection
-- `631febbd5` — reactive retained terminal repair
-- root pointers `ddfd806f8` and `5b2a807e7`
-
-The installer marked route supervisors/controllers for safe idle replacement; I did not force-restart or disturb any retained owner.
-<!-- agent:boundary:196dc1b5 -->
+- Archived 3 response topic(s): Response; Response; Response
+<!-- agent:boundary:f8f7178d -->
 <!-- /agent:exchange -->
 ## Queue
 

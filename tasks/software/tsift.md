@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: d36b8e95-1cda-49bd-82a9-f3721cc70874
+resume: 365f6d6d-4dbc-4e55-9728-ad06701fde34
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -34,7 +34,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 
 <!-- agent:exchange patch=append -->
 
-<!-- agent:boundary:93dd174c -->
+<!-- agent:boundary:6b27b943 -->
 <!-- /agent:exchange -->
 
 ## Queue

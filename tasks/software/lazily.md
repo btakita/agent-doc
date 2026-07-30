@@ -242,22 +242,19 @@ Twelve repos committed and pushed, superproject gitlinks bumped in `8b0eb2831` +
 The corrected table now shows **18 honestly-absent cells**: js, zig and cs ship no thread-safe or async queue-family flavor. That gap was previously masked — three cells by a false green and six by unexplained partials — and it is the same projection work `#lzingressbindings` just did for ingress. Queued as `#lzqueuefamilyflavors`. The work-queue fixture's missing lease configuration is `#lzwqfixtureconfig`; it is small, but every binding independently hardcoding the same two numbers is a corpus gap, not a binding quirk.
 
 zig still lists 24 known-uncovered fixtures. Those are whole families with no runner (lossless-tree, message-passing, seqcrdt/textcrdt) rather than transcriptions masquerading as replays, so they are a different and larger piece of work than this item.
-<!-- agent:boundary:95d70311 -->
+<!-- agent:boundary:ebcb72e4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 do [#lzqueuefamilyflavors]
+- 🚧 📌 Fix the red test suites in the lazily implementations.
+- 📌 do [#lzegress]
+- do [#lzqueuefamilyflavors]
 - do [#lzwqfixtureconfig]
 - do [#lzingressadapters]
-- do [#lzgdbinding]
-- do [#lzcppwasm]
-- do [#lzcoveragelayout]
-- Fix the red test suites in the lazily implementations.
-- do [#lzegress]
-- do [#kny1]
-- Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
+- 📌 do [#kny1]
+- 📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
 <!-- /agent:queue -->
 
 ## Backlog

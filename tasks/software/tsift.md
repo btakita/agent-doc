@@ -314,13 +314,13 @@ I also added a contract-exhaustiveness guard: every registered executor must app
 **What's left is genuinely blocked**, and I filed it that way: the 20 structural-only languages need per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search` first, because `parse_semantic_edit_source` validates through `executor.graph_lang()`. Once a language has graph support, registering it is a contract row plus a conformance fixture — it unblocks one language at a time rather than as one big step.
 
 Queue after this: `release + publish`.
-<!-- agent:boundary:1f612323 -->
+<!-- agent:boundary:644a8b80 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#givestructuralast]
+- 🚧 do [#givestructuralast]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -329,7 +329,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#givestructuralast] Give the 20 structural-only ast-grep languages (go, cpp, csharp, dart, java, swift, ruby, php, scala, lua, elixir, haskell, nix, solidity, css, html, json, yaml, hcl, c) semantic-edit executors. Genuinely blocked: each needs per-language tag queries + symbol extraction in tsift-graph/tsift-search first, because parse_semantic_edit_source validates through executor.graph_lang(). Unblocks one language at a time as its graph support lands — the executor registration itself is then a contract row plus a conformance fixture
+- [ ] 🚧 [#givestructuralast] Give the 20 structural-only ast-grep languages (go, cpp, csharp, dart, java, swift, ruby, php, scala, lua, elixir, haskell, nix, solidity, css, html, json, yaml, hcl, c) semantic-edit executors. Genuinely blocked: each needs per-language tag queries + symbol extraction in tsift-graph/tsift-search first, because parse_semantic_edit_source validates through executor.graph_lang(). Unblocks one language at a time as its graph support lands — the executor registration itself is then a contract row plus a conformance fixture
 <!-- /agent:backlog -->
 
 ## Review

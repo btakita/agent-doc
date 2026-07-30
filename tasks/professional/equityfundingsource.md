@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 54dd188b-646d-44d7-82c4-c11f5b148696
+resume: b4dc4816-4b5b-4aa4-8087-41605766e4b7
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -201,11 +201,38 @@ Also fixed a second fixed-window source-grep — `admin-investor-pipeline.test.t
 ### Re: Closing #tmo-sync-declined-unpublish — opus-5
 
 Complete in `0a87c46d`: the duplicate `investment_deal_status_sync_by_loan_` is deleted from `tmo-sync.ts`, both callers now go through `admin_deal_status_sync_by_loan_`, and the TMO sync path inherits the `disabled_at` guard it never had.
-<!-- agent:boundary:f19075af -->
+
+### Re: setting the date of the last verification in the lender dialog — opus-5
+
+> **Queue prompt:**
+>
+> In https://equityfundingsource.com/admin/lender-pipeline?tab=pipeline&dialog_user_id=5cdcb0dd-76e9-4d63-b57e-dd29ecce359e&dialog=lender, please allow the admin to set the date of the last verification. This will enable previously questioned lenders to have a schedule as to when the next date will occur. Test + deploy on staging first. If it works, then deploy to production.
+
+Shipped as EFS `fee11117`, live on staging and production.
+
+The date field already existed, but on only half the paths. `0a87c46d` (9 hours ago) added "Requirements met on" to the admin-filled questionnaire, so expiry anchors to the real met-date. A lender who answered their **own** questionnaire — exactly the "previously questioned lender" — is decided with the **Accredit** button, and that endpoint never took the field. It stamped the met-date as the click date, so the next verification date drifted later by however long the decision sat. And once verified, Accredit was disabled forever, so an existing date could not be corrected at all; the only way to change a lender's schedule was to file a whole new questionnaire.
+
+What changed:
+
+- `POST /api/admin/investor-accreditation/:id/decision` now accepts `requirements_met_at` under the same contract as the questionnaire PUT — absent means "default to now" (behaviour unchanged), unusable **400s** rather than silently becoming today. A rejection still clears the met-date and the expiry.
+- Accredit posts the date and re-reads the saved record into the form, so the input shows what the server stored rather than a stale blank.
+- **A verified record is re-datable in place.** The button unlocks as soon as the admin changes the date and reads "Update verification date"; re-deciding the same row moves `requirements_met_at` and `expires_at` while `verified_at` moves to now, keeping its meaning as when the admin recorded it.
+- The dialog now states the schedule itself: **last verification**, **next verification due**, and the date the lender starts showing as renewal due. That window is a named 60-day constant matching `investor_requirements_status_`, so the date the admin reads and the status the board computes cannot drift apart. Dates render in UTC, matching how the met-date is stored.
+
+Also converted the fixed-window source-grep over the decision handler in `admin-investor-documents.test.ts` to slice to the end of the function — a fixed byte count silently stops covering what it guards, the same failure `653fe3fe` and `0a87c46d` each had to fix once.
+
+**Staging, end to end** (seeded a disposable lender + pending record, then removed it): back-dating to `2026-02-01` produced `verified_at` 2026-07-30, `requirements_met_at` 2026-02-01, `expires_at` **2027-02-01** — exactly 365 days from the met-date, renewal-due from 2026-12-03. Under the old behaviour that same click would have set expiry to 2027-07-30, so this removed ~6 months of drift on one decision. `01/02/2026` → 400, `2027-01-01` (future) → 400, re-dating the already-verified row to 2026-05-15 → same row id, expiry 2027-05-15, blank → defaults to today unchanged.
+
+**Production** — deployed, migration `0144` applied there for the first time (it had only ever run on staging), backfill a no-op since prod has no verified accreditations yet. Verified without touching real data: the browser bundle at `equityfundingsource.com` is content-hash `index.browser-7YCODNTY.js`, identical to the clean local build of this commit, and carries all four new UI strings; a bad met-date against a non-existent verification id returns the new 400 while a valid one falls through to `verification not found`, so the server path is live and validating rather than blanket-rejecting.
+
+`bun test` 2174 pass / 0 fail across 195 files; `build` and `build:worker` clean. Three mutations checked — dropping the met-date argument, dropping the 400 guard, and restoring the permanent disable each redden the new tests.
+
+One residue: the staging fixture user `VERIFY-LENDER-1` could not be deleted (the `users` soft-delete trigger refuses `DELETE`), so it is suspended and disabled with a reason naming it as a fixture. It is staging-only and inert.
+<!-- agent:boundary:bcd3663c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- 🚧 In https://equityfundingsource.com/admin/lender-pipeline?tab=pipeline&dialog_user_id=5cdcb0dd-76e9-4d63-b57e-dd29ecce359e&dialog=lender, please allow the admin to set the date of the last verification. This will enable previously questioned lenders to have a schedule as to when the next date will occur. Test + deploy on staging first. If it works, then deploy to production.
+- ~~In https://equityfundingsource.com/admin/lender-pipeline?tab=pipeline&dialog_user_id=5cdcb0dd-76e9-4d63-b57e-dd29ecce359e&dialog=lender, please allow the admin to set the date of the last verification. This will enable previously questioned lenders to have a schedule as to when the next date will occur. Test + deploy on staging first. If it works, then deploy to production.~~
 - do [#tmo-roster-error-still-silent]
 - do [#tmo-sync-cron-failures]
 <!-- /agent:queue -->

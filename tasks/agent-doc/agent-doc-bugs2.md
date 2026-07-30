@@ -39,7 +39,30 @@ Closed stale queued #5qjj as superseded; preserved unproven current-plugin UI pr
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): equityfundingsource.md has queue items for already done tasks....
-<!-- agent:boundary:f380362d -->
+
+### Re: Response
+
+No manual or forced process restarts were performed. The installer only marked controllers/supervisors for safe handoff; IDEA was not restarted.
+
+Implemented and installed Agent Doc 0.35.107:
+
+- Tmux state is a reactive `Source`/Cell; Computeds derive the desired pane and an Effect performs tmux I/O.
+- Open-document authorities are pre-warmed independently, capped at 256, with readiness diagnostics.
+- Stale supervisor work is replaced immediately after active IPC drains, preserving the pane, child, composer text, and checkpoint.
+- The CLI no longer polls or falsely treats an unchanged PID as a successful replacement.
+- Full `make check` passed.
+- Code committed and pushed: `aff3ff3df`.
+- Root pointer/skill committed: `bbfbcd8ab`.
+- Previous CI runs are green; current CI is queued and was not awaited.
+
+You still need to restart IDEA once—the running process predates plugin 0.2.330. For Monster Rodholders, submit or cancel the preserved composer text so its old supervisor can complete the already-marked handoff.
+
+The Agent Doc response itself is retained with pending editor acknowledgement and a duplicate-exchange-boundary guard. Do not rerun finalize or force disk. After restarting IDEA, run only:
+
+```bash
+agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+```
+<!-- agent:boundary:726fb282 -->
 <!-- /agent:exchange -->
 ## Queue
 

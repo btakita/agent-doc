@@ -242,13 +242,75 @@ Twelve repos committed and pushed, superproject gitlinks bumped in `8b0eb2831` +
 The corrected table now shows **18 honestly-absent cells**: js, zig and cs ship no thread-safe or async queue-family flavor. That gap was previously masked — three cells by a false green and six by unexplained partials — and it is the same projection work `#lzingressbindings` just did for ingress. Queued as `#lzqueuefamilyflavors`. The work-queue fixture's missing lease configuration is `#lzwqfixtureconfig`; it is small, but every binding independently hardcoding the same two numbers is a corpus gap, not a binding quirk.
 
 zig still lists 24 known-uncovered fixtures. Those are whole families with no runner (lossless-tree, message-passing, seqcrdt/textcrdt) rather than transcriptions masquerading as replays, so they are a different and larger piece of work than this item.
-<!-- agent:boundary:26c2b3c2 -->
+### Re: Fix the red test suites in the lazily implementations — opus-5
+
+> **Queue prompt:** 📌 Fix the red test suites in the lazily implementations.
+
+I audited all twelve lazily repositories. Exactly one suite was red, and it was not a defect: it was this document's own previous cycle, still running.
+
+#### The red, and what it actually was
+
+`lazily-zig` failed on Zig **0.15.2 and master** while passing on 0.16.0: `queue_family_conformance.zig`, "a derived node over a reader reruns exactly on invalidation (async)", at `try testing.expect(Derived.head_runs > head_runs)`.
+
+I instrumented it, and it passed. I reverted the instrumentation, and it passed three more times. That is the signature of a tree being written underneath you, not a heisenbug, and it was: the previous cycle's `#lzqueuefamilyflavors` subagent was still working `lazily-zig` and had been for about forty minutes. It finished during this cycle, committed `c103070`, pushed, and CI run `30523011815` is green.
+
+Current state of that repo, measured after it settled: **0.15.2 787/791** (4 version-gated `std.Io`/`mmap` skips), **0.16.0 849/849**, **master 849/849**, `make check` exit 0. Its own report records 15 mutation probes across the shared core and all six new shells, every one red then reverted green.
+
+So there was no standing red suite to fix. That is the honest answer to the item, and the useful part of this cycle is what proving it turned up.
+
+#### The measurement that nearly sent me at the wrong problem
+
+`git diff --stat` through the RTK wrapper told me `src/lazily/queue_family_conformance.zig | 2 +-`. The real diff was **2062 lines**. Reading the tree from that number is what made me class `lazily-zig` as idle-with-a-broken-test rather than mid-flight, and I burned a detour chasing a five-line discrepancy between the line number Zig reported (2095) and where the assertion actually sat (2100). Those five lines were a comment block the other agent added between my test run and my read.
+
+`rtk proxy git diff --stat` and `/usr/bin/git diff --stat` both reported 2062 correctly. This is the same false-pass class as the wrapper's per-file `diff` claiming "Files are identical" and bare `cargo check` returning a stale digest, but it had not been recorded for `--stat`. Memory updated.
+
+#### Eleven repos green as committed
+
+Each verified this cycle with an explicitly captured exit code, not a trusted summary line, and each with its coverage guard cross-checked against the runtime manifest rather than taken at its word.
+
+| Repo | Evidence |
+|---|---|
+| rs | 701 `test result:` lines all ok, 5479 passed across ~35 feature sets; 129/134 fixtures |
+| py | 650 passed; 130/134, manifest 130 unique |
+| kt | 413 tests, 0 skipped, forced `--rerun-tasks` to defeat Gradle up-to-date; 131 fixtures across 23 required areas |
+| js | 573 passed; 131/134 |
+| dart | 621 passed; 128/134, `comm`-reconciled against the corpus |
+| go | 326 top-level / 544 with subtests; also green under `-race`; 125/134 |
+| cpp | 52/52 ctest, `NDEBUG`-stripping still intact so `assert()` is live; 112 fixtures |
+| cs | 238 passed, **134/134 fixtures with an empty allowlist**; all six check stages ran |
+| spec | 162 schema tests + all five stages; 12 coverage targets confirmed non-empty |
+| formal | `lake build`, 52 jobs |
+| react | 18 passed, and I had it mutation-probe its own gate 3-for-3 |
+
+#### One real defect the greens were hiding
+
+`lazily-js` shipped `src/transport.d.ts` importing `IpcValue` and using it in four type positions, but `IpcValue` is the const factory object; the union type is `IpcValueValue`. Four `TS2749` errors, so `BlobRouter.resolve`, `spillValue` and `resolveValue` had unusable signatures for any TypeScript consumer of the `/transport` subpath. It survived because **nothing in the repo typechecked the declarations it publishes**: no tsconfig, no `tsc` script, no CI step. A suite that never looks cannot report a failure.
+
+Fixed and gated in `lazily-js 553d840`. All four positions were verified against `transport.js`'s `instanceof` dispatch before changing, and all four genuinely meant the union. The gate is a declaration-only tsconfig with `skipLibCheck: false` covering 43 of 43 `src/*.d.ts` (confirmed by `--listFiles`), wired into both `make check` and CI, plus a CI assertion that the program is non-empty, because an `include` matching nothing also exits 0. `typescript` was already a devDependency, so no lockfile churn.
+
+Probed in both directions by exit code: with the defect restored, `npm run typecheck` exits 2 with the four `TS2749`s and `make check` exits 2 *before the tests run* (`grep -c "^ℹ tests"` = 0); reverted, exit 0; and the empty-program guard fires on an `include` that matches nothing. Final `make check` green, 573/573, CI run `30523255284` in progress at my single check.
+
+#### Four gate gaps filed rather than folded in
+
+None of these is currently red, and none is a stall dressed up as a finding: each is a specific way a green could be reporting less than it claims, each is actionable, and each belongs to a binding I would rather not reformat mid-audit.
+
+- `#lzgoracegate` — go's gated library suite does not run under `-race`. It is green when I run it raced, so the hole is the gate. That is exactly where the v0.23.2 map data race fell through.
+- `#lzcovallowlistrot` — the coverage guards cannot fail on a *stale excuse*, so py, go and dart are over-excusing 6, ~6 and 7 fixtures that are in fact being replayed. Ledger rot in the same understating direction `#lzcoverageaudit` just corrected one layer up.
+- `#lzreactdtsgate` — lazily-react has the identical hole that hid the js defect, so it gets the identical gate.
+- `#lzrsbenchbudget` — rs `benchmark-check` prints "NO BENCHMARK BUDGET WAS ENFORCED" and exits 0.
+
+#### What `#lzqueuefamilyflavors` still owes
+
+Since its implementation landed mid-audit, I rewrote that backlog item so the next cycle does not re-implement it. All three bindings have the code (`js 67a0013`, `cs f056dd8`, `zig c103070`). What remains is the ledger and the plumbing: coverage.json rows 17/18/20/21/23/24 still read `—` for the JS, Zig and C# columns, the twelve generated coverage tables need regenerating, `lazily-zig`'s README still claims every Zig row is shipped while its own table shows six absent, and three superproject gitlinks are unbumped.
+
+I did not touch `lazily-zig` beyond reading it once its agent had committed, and I did not bump any gitlink, since that is that item's closeout rather than this one's.
+<!-- agent:boundary:c16f53b6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 📌 Fix the red test suites in the lazily implementations.
+- ~~📌 Fix the red test suites in the lazily implementations.~~ — auto-struck: answered this cycle (#ftstrike)
 - 📌 do [#lzegress]
 - do [#lzqueuefamilyflavors]
 - do [#lzwqfixtureconfig]
@@ -260,6 +322,10 @@ zig still lists 24 known-uncovered fixtures. Those are whole families with no ru
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzgoracegate] lazily-go's `make check` runs the library suite WITHOUT `-race`: check: is `fmt-check vet build test test-interop-peer conformance-coverage`, and only test-interop-peer (`go run -race`) is race-instrumented. Measured this cycle: `CGO_ENABLED=1 go test -race -count=1 ./...` is green, so the gap is the gate, not the code. That is the exact hole the v0.23.2 map data race fell through (every READ ran off the context lock; a Get mutates the graph), and it was caught by CI rather than locally. Add the raced library suite to the gated path locally and in CI, then mutation-check it: drop one context lock acquisition, confirm `make check` goes red on a DATA RACE rather than passing, revert, confirm green.
+- [ ] [#lzcovallowlistrot] The conformance coverage guards cannot fail on a STALE EXCUSE, so KNOWN_UNCOVERED allowlists are silently over-excusing fixtures that are actually being replayed: py 6 stale of 10 entries (130 covered + 10 excused > 134), go ~6 of 15, dart 7 of 13 (the 7 are collections/topiccell_*, collections/workqueue_* and signaling/frames.json). Each script only checks that an allowlisted fixture still EXISTS in the corpus, never that it is still uncovered. This produces no false green today, but it is ledger rot in the understating direction that #lzcoverageaudit just corrected one layer up in coverage.json, and nobody files a bug about coverage they are told they lack. Make each guard fail when the runtime manifest shows an allowlisted fixture was opened, then prune the excuses that fires on, per binding. Mutation-check by re-adding one covered fixture to the allowlist and confirming the guard reddens.
+- [ ] [#lzreactdtsgate] lazily-react ships src/*.d.ts and a `types` export but its `make check` is only `node --check` syntax validation plus `node --test` (18 tests), so nothing typechecks the declarations it publishes. Same hole that let lazily-js ship four TS2749 errors in transport.d.ts undetected until this cycle. Port the gate landed in lazily-js 553d840: a declaration-only tsconfig (include src/**/*.d.ts, noEmit, strict, skipLibCheck:false, allowJs:false), an npm typecheck script wired into both `make check` and CI, plus CI's non-empty-program assertion, since a gate whose include matches nothing also exits 0. Mutation-check by breaking one declaration and confirming a non-zero exit before the tests run.
+- [ ] [#lzrsbenchbudget] lazily-rs `make check` never enforces benchmark budgets on a pruned target/: benchmark-check prints "SKIPPED: no benchmark evidence in this checkout (target/criterion does not exist)" plus "NO BENCHMARK BUDGET WAS ENFORCED BY THIS RUN. This is not a pass - it is the absence of a measurement" and exits 0. The banner is honest and the skip is documented, but a green `make check` still reads as budgets-verified to anyone not reading the log. Either make the skip a hard failure when a budget file exists but evidence does not, or have check depend on generating evidence first, so local closeout cannot claim a performance gate it did not run.
 - [ ] [#lzqueuefamilyflavors] Ship the thread-safe and async queue-family flavors in lazily-js, lazily-zig and lazily-cs — the 18 cells that coverage.json rows 17/18/20/21/23/24 now honestly show absent, previously masked by a js false green and by unexplained partials on js/zig. Same shape as #lzingressbindings: a ThreadSafeQueueCell/AsyncQueueCell, ThreadSafeTopicCell/AsyncTopicCell and ThreadSafeWorkQueueCell/AsyncWorkQueueCell per binding, then extend that binding's existing queue-family ledger (which today records them shipped:false and greps src/ in both directions) and drive the canonical queuecell_/topiccell_/workqueue_ corpus against each new flavor with per-reader-kind invalidation asserted in BOTH directions. Mutation-check each new flavor before flipping a mark; a ledger going green on a flag flip alone is the exact false green those ledgers exist to prevent.
 - [ ] [#lzwqfixtureconfig] Put the WorkQueueCell lease configuration into the canonical workqueue_*.json fixtures' initial block: visibility_timeout and max_deliveries are absent, so every binding hardcodes them out of band (10, and max_deliveries 3 for competing_delivery vs 2 for lease_deadletter) and a new binding has to read lazily-go's runner to discover them. Add the fields to the fixture and the schema, then update the nine bindings' runners to read them, so a fixture change cannot silently mean something different in each binding.
 - [ ] [#lzegress] Design and implement the egress family as the mirror of ingress (#designimplementtransport): an EgressCore owning sequence assignment, the unacked window, the ack watermark, and retry budget, with sync + thread-safe + async shells exposing pending/inflight/acked_through/retry as Computeds and ONE Effect per attached transport as the sink attachment. An Effect alone cannot be the family — it has no delivery state — so the Effect attaches, the core decides. Reuse Outbox/RelayCell for conflation+backpressure and SpillStore/DurableOutbox for durability rather than reimplementing them; add a generation fence on the SEND side so a reconnected producer cannot replay under a stale incarnation. Spec + formal + conformance corpus alongside, as ingress did.

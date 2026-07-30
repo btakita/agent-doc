@@ -9,6 +9,7 @@ use agent_doc_document::queue_projection::{
     ActiveQueuePromptProjection, QueuePromptRow, strip_in_progress_marker, strip_priority_markers,
 };
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 use crate::document_queue::{self, QueueEntry};
 
@@ -28,7 +29,7 @@ pub struct QueueWorklistEntry {
     pub drainable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletedQueueHeadProjection {
     pub text: String,
     pub node_key: String,

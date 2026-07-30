@@ -147,6 +147,16 @@ fn route_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::Sess
     )
 }
 
+fn route_await_closeout_projection(
+    file: &Path,
+    cycle_id: &str,
+    wait: std::time::Duration,
+) -> Result<agent_doc_controller_io::project_controller::CloseoutCycleWaitOutcome> {
+    agent_doc_controller_io::project_controller::await_closeout_cycle_progress_for_file(
+        file, cycle_id, wait,
+    )
+}
+
 fn route_cancel_empty_preflight(file: &Path) -> Result<bool> {
     agent_doc_repair_io::cancel_preflight_cycle(
         &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
@@ -175,6 +185,7 @@ pub fn route_closeout_drain_effects(
         cancel_empty_preflight: route_cancel_empty_preflight,
         repair_closeout,
         inspect_session: route_inspect_session,
+        await_closeout_projection: route_await_closeout_projection,
         decide_closeout_recovery: route_decide_closeout_recovery,
     }
 }

@@ -64,5 +64,6 @@ tracing = "0.1"
 ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.104", features = ["test-support"] }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.104" }
 tempfile = "3"

@@ -132,56 +132,6 @@ pub fn queue_state_document_hash(file: &Path) -> String {
     agent_doc_hash::document_id_for_path(file)
 }
 
-pub fn record_authoritative_queue_completion_state<E: QueueConsumptionProofEffects + ?Sized>(
-    effects: &E,
-    file: &Path,
-    content: &str,
-) -> Result<usize> {
-    let canonical = file.canonicalize().with_context(|| {
-        format!(
-            "queue completion projection: failed to canonicalize {}",
-            file.display()
-        )
-    })?;
-    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
-        eprintln!(
-            "[queue] warning: completion state unavailable for {}: project root not found",
-            file.display()
-        );
-        return Ok(0);
-    };
-    let document_hash = queue_state_document_hash(&canonical);
-    let completed = agent_doc_queue::queue_projection::completed_queue_head_projections(content)?;
-    for head in &completed {
-        let content_hash = agent_doc_hash::content_hash(&head.text);
-        let event = agent_doc_state_backbone::StateEvent::new(
-            format!(
-                "queue-head-completed:{document_hash}:{}:{}:{content_hash}",
-                head.node_key, head.index
-            ),
-            agent_doc_state_backbone::StateFact::QueueHeadCompleted {
-                document_hash: document_hash.clone(),
-                node_key: head.node_key.clone(),
-                backlog_id: head.backlog_id.clone(),
-                hosting_epoch: None,
-            },
-        );
-        let inserted = effects.append_state_event(&project_root, &event)?;
-        effects.log_op(
-            file,
-            &format!(
-                "queue_authoritative_completed_state_event_recorded file={} event_id={} inserted={} document_hash={} node_id={}",
-                file.display(),
-                event.event_id,
-                inserted,
-                document_hash,
-                head.node_key
-            ),
-        );
-    }
-    Ok(completed.len())
-}
-
 struct QueueConsumptionStateEvent<'a> {
     file: &'a Path,
     project_root: &'a Path,
@@ -418,44 +368,6 @@ mod tests {
                 .borrow()
                 .iter()
                 .any(|entry| entry.contains("queue_consume_proof_recorded"))
-        );
-    }
-
-    #[test]
-    fn authoritative_struck_rows_record_terminal_state_without_consumption_plan() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
-        let content = concat!(
-            "<!-- agent:queue -->\n",
-            "- ~~do [#completed-work]~~\n",
-            "- do [#ready-work]\n",
-            "<!-- /agent:queue -->\n",
-        );
-        std::fs::write(&doc, content).unwrap();
-        let effects = TestEffects::new();
-
-        let projected =
-            record_authoritative_queue_completion_state(&effects, &doc, content).unwrap();
-
-        assert_eq!(projected, 1);
-        let events = effects.events.borrow();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0].fact,
-            agent_doc_state_backbone::StateFact::QueueHeadCompleted {
-                node_key,
-                backlog_id,
-                ..
-            } if node_key == "queue:0:completed-work:0"
-                && backlog_id.as_deref() == Some("completed-work")
-        ));
-        assert!(
-            effects
-                .logs
-                .borrow()
-                .iter()
-                .any(|entry| entry.contains("queue_authoritative_completed_state_event_recorded"))
         );
     }
 }

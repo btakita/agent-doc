@@ -16340,8 +16340,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn direct_pane_can_enter_existing_draft(",
         "pub fn dispatch_only_busy_should_wait_for_ready(",
         "pub fn dispatch_only_should_probe_active_turn_cue(",
-        "pub enum DispatchDrainRetryDecision",
-        "pub fn dispatch_drain_retry_decision(",
+        "pub enum CloseoutProjectionChange",
+        "pub enum CloseoutDrainProjection",
+        "pub const fn project_closeout_drain(",
         "pub enum RouteCloseoutDrainOutcome",
         "pub struct CloseoutBlockDispatchFacts",
         "pub enum CloseoutBlockDispatchDecision",
@@ -16641,9 +16642,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
                 .contains("dispatch_only_busy_should_wait_for_ready(")
             && route_authoritative_dispatch_source
                 .contains("dispatch_only_should_probe_active_turn_cue(")
-            && route_closeout_drain_source.contains("DispatchDrainRetryDecision")
-            && route_closeout_drain_source.contains("dispatch_drain_retry_decision("),
-        "agent-doc-route-io authoritative dispatch should call focused controller dispatch policy directly"
+            && route_closeout_drain_source.contains("CloseoutProjectionChange")
+            && route_closeout_drain_source.contains("CloseoutDrainProjection")
+            && route_closeout_drain_source.contains("project_closeout_drain("),
+        "agent-doc-route-io authoritative dispatch should project controller-owned closeout state directly"
     );
     assert!(
         route_diagnostics_source.contains("pub struct RouteDispatchBugReportEffects")
@@ -16856,7 +16858,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "dispatch_into_shell",
         "FreshStartAckOutcome",
         "fresh_start_ack_outcome",
-        "agent_doc_harness::ready_prompt_candidate_at_cursor(",
+        "agent_doc_harness::project_pane_composer_at_cursor(",
+        "PaneComposerReadinessEvidence",
         "agent_doc_tmux_io::pane_cursor_y(tmux, pane_id)",
     ] {
         assert!(
@@ -29156,7 +29159,8 @@ fn test_agent_doc_route_io_owns_route_closeout_drain() {
             && closeout_drain
                 .contains("agent_doc_document_realtime_io::try_resolve_current_document_content(")
             && closeout_drain.contains("\"route_closeout_block_active_queue_head\"")
-            && closeout_drain.contains("dispatch_drain_retry_decision(")
+            && closeout_drain.contains("await_closeout_projection")
+            && closeout_drain.contains("project_closeout_drain(")
             && closeout_drain.contains("classify_closeout_block_dispatch(")
             && closeout_drain.contains("agent_doc_ops_log_io::log_op")
             && closeout_drain
@@ -29165,8 +29169,9 @@ fn test_agent_doc_route_io_owns_route_closeout_drain() {
     );
     assert!(
         !closeout_drain.contains("std::fs::read_to_string(file)")
-            && !closeout_drain.contains("fs::read_to_string(file)"),
-        "route closeout drain must not read active documents directly from disk"
+            && !closeout_drain.contains("fs::read_to_string(file)")
+            && !closeout_drain.contains("std::thread::sleep"),
+        "route closeout drain must await controller projections instead of reading active documents or sleeping"
     );
 }
 

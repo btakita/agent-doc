@@ -5,7 +5,7 @@ use agent_doc_controller::dispatch::{
     classify_auto_start_dispatch_ready_block, fresh_start_ack_outcome,
     pane_composer_has_pending_trigger,
 };
-use agent_doc_harness::HarnessConfig;
+use agent_doc_harness::{HarnessConfig, PaneComposerProjection, PaneComposerReadinessEvidence};
 use anyhow::Result;
 use std::time::{Duration, Instant};
 use tmux_router::Tmux;
@@ -41,12 +41,17 @@ pub fn pane_ready_prompt_candidate(
     pane_id: &str,
     content: &str,
     harness: &HarnessConfig,
-) -> Option<String> {
-    agent_doc_harness::ready_prompt_candidate_at_cursor(
+) -> Option<PaneComposerReadinessEvidence> {
+    match agent_doc_harness::project_pane_composer_at_cursor(
         content,
         harness,
         agent_doc_tmux_io::pane_cursor_y(tmux, pane_id),
-    )
+    ) {
+        PaneComposerProjection::ReadyEmpty { evidence } => Some(evidence),
+        PaneComposerProjection::OperatorDraft { .. }
+        | PaneComposerProjection::Busy
+        | PaneComposerProjection::Absent => None,
+    }
 }
 
 /// Detect an operator-owned composer draft using the same cursor-scoped prompt
@@ -57,11 +62,16 @@ pub fn pane_composer_draft(
     content: &str,
     harness: &HarnessConfig,
 ) -> Option<String> {
-    agent_doc_harness::pane_composer_draft_at_cursor(
-        harness,
+    match agent_doc_harness::project_pane_composer_at_cursor(
         content,
+        harness,
         agent_doc_tmux_io::pane_cursor_y(tmux, pane_id),
-    )
+    ) {
+        PaneComposerProjection::OperatorDraft { preview } => Some(preview),
+        PaneComposerProjection::ReadyEmpty { .. }
+        | PaneComposerProjection::Busy
+        | PaneComposerProjection::Absent => None,
+    }
 }
 
 /// Poll a tmux pane until the agent is ready to accept input.
@@ -84,7 +94,7 @@ pub fn wait_for_agent_ready_outcome(
     let poll_interval = AGENT_READY_POLL_INTERVAL;
     let mut poll_count = 0u32;
     let mut ready_streak = 0u32;
-    let mut last_ready_line: Option<String> = None;
+    let mut last_ready_evidence: Option<PaneComposerReadinessEvidence> = None;
     let mut blocker_streak = 0u32;
     let mut last_blocker: Option<String> = None;
 
@@ -98,10 +108,10 @@ pub fn wait_for_agent_ready_outcome(
             );
             return AgentReadyWaitOutcome::TimedOut;
         }
-        if let Ok(content) = agent_doc_tmux_io::capture_pane(tmux, pane_id) {
+        if let Ok(content) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane_id) {
             if let Some(reason) = harness.dispatch_blocker_reason(&content) {
                 ready_streak = 0;
-                last_ready_line = None;
+                last_ready_evidence = None;
                 if last_blocker.as_deref() == Some(reason.as_str()) {
                     blocker_streak += 1;
                 } else {
@@ -137,12 +147,12 @@ pub fn wait_for_agent_ready_outcome(
             }
 
             match pane_ready_prompt_candidate(tmux, pane_id, &content, harness) {
-                Some(line) => {
-                    if last_ready_line.as_deref() == Some(line.as_str()) {
+                Some(evidence) => {
+                    if last_ready_evidence.as_ref() == Some(&evidence) {
                         ready_streak += 1;
                     } else {
                         ready_streak = 1;
-                        last_ready_line = Some(line);
+                        last_ready_evidence = Some(evidence);
                     }
                     if ready_streak >= 2 {
                         eprintln!(
@@ -156,7 +166,7 @@ pub fn wait_for_agent_ready_outcome(
                 }
                 None => {
                     ready_streak = 0;
-                    last_ready_line = None;
+                    last_ready_evidence = None;
                 }
             }
 

@@ -1492,6 +1492,11 @@ struct ControllerDocumentGraphs {
     /// application one-shot for an exact delivery frontier instead of relying
     /// on an effect scheduler's global drain behavior.
     retained_resume_applied: lazily::ThreadSafeSourceMap<String, Option<RetainedResumeSignal>>,
+    /// Authoritative markdown is ingress state. Terminal queue lifecycle facts
+    /// are derived beside the durable document projection instead of being
+    /// recorded by whichever mutation path happened to observe a strike.
+    queue_authority: lazily::ThreadSafeSourceMap<String, Option<QueueAuthorityObservation>>,
+    queue_completion: lazily::ThreadSafeComputedMap<String, QueueCompletionProjection>,
     /// `#preflightreactive`: per-document read observations and the shared
     /// Computed projection consumed by the short-lived preflight CLI process.
     preflight_facts: lazily::ThreadSafeSourceMap<
@@ -1513,6 +1518,8 @@ struct ControllerDocumentGraphs {
     /// lifetime so later replica events and controller activation invalidate
     /// the same subscription.
     retained_resume_effects: Mutex<BTreeMap<String, lazily::Effect>>,
+    /// One durable queue-completion projection Effect per document.
+    queue_completion_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// Where a `Satisfied` verdict's clear is written.
     ///
     /// Installed once, after the runtime is in its `Arc` — the effect must reach
@@ -1551,6 +1558,20 @@ struct RetainedResumeSignal {
     response_sha256: String,
     delivery_version: u64,
     controller_generation: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct QueueAuthorityObservation {
+    file: PathBuf,
+    content: String,
+    content_hash: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct QueueCompletionProjection {
+    content_hash: String,
+    completions: Vec<agent_doc_queue::queue_projection::CompletedQueueHeadProjection>,
+    error: Option<String>,
 }
 
 impl RetainedWriteSettleSink {
@@ -1620,6 +1641,62 @@ impl RetainedWriteSettleSink {
             ),
         );
     }
+
+    /// Persist terminal queue lifecycle facts selected by the controller's
+    /// queue-completion projection. Applying each event feeds the receipt back
+    /// into `projection`, so the Computed candidate disappears durably.
+    fn complete_queue_heads(
+        &self,
+        document_hash: &str,
+        file: &Path,
+        projection: &QueueCompletionProjection,
+    ) {
+        let Some(runtime) = self.runtime.upgrade() else {
+            return;
+        };
+        for head in &projection.completions {
+            let head_hash = agent_doc_hash::content_hash(&head.text);
+            let event = agent_doc_state_backbone::StateEvent::new(
+                format!(
+                    "queue-head-completed:{document_hash}:{}:{}:{head_hash}",
+                    head.node_key, head.index
+                ),
+                agent_doc_state_backbone::StateFact::QueueHeadCompleted {
+                    document_hash: document_hash.to_string(),
+                    node_key: head.node_key.clone(),
+                    backlog_id: head.backlog_id.clone(),
+                    hosting_epoch: None,
+                },
+            );
+            match append_state_event(&self.project_root, &event) {
+                Ok(_) => {
+                    if let Err(error) = runtime.apply_state_event(&event) {
+                        eprintln!(
+                            "[controller] queue completion apply failed for {document_hash}: {error}"
+                        );
+                        return;
+                    }
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_authority_completion_projected file={} event_id={} document_hash={} node_id={} authority_hash={}",
+                            file.display(),
+                            event.event_id,
+                            document_hash,
+                            head.node_key,
+                            projection.content_hash,
+                        ),
+                    );
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[controller] queue completion append failed for {document_hash}: {error}"
+                    );
+                    return;
+                }
+            }
+        }
+    }
 }
 
 impl ControllerDocumentGraphs {
@@ -1639,10 +1716,13 @@ impl ControllerDocumentGraphs {
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_resume: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
+            queue_authority: lazily::ThreadSafeSourceMap::new(&ctx),
+            queue_completion: lazily::ThreadSafeComputedMap::new(&ctx),
             preflight_facts: lazily::ThreadSafeSourceMap::new(&ctx),
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
             settle_effects: Mutex::new(BTreeMap::new()),
             retained_resume_effects: Mutex::new(BTreeMap::new()),
+            queue_completion_effects: Mutex::new(BTreeMap::new()),
             settle_sink: Arc::new(OnceLock::new()),
             ctx,
         }
@@ -1921,6 +2001,70 @@ impl ControllerDocumentGraphs {
         signal
     }
 
+    /// Publish one authoritative markdown frontier and read its derived
+    /// terminal queue projection. The caller supplies evidence only; the
+    /// controller-owned Computed decides which durable lifecycle facts are
+    /// missing, and its Effect persists them.
+    fn observe_queue_authority(
+        &self,
+        document_hash: &str,
+        file: &Path,
+        content: String,
+    ) -> Result<usize> {
+        let observation = QueueAuthorityObservation {
+            file: file.to_path_buf(),
+            content_hash: agent_doc_hash::content_hash(&content),
+            content,
+        };
+        self.queue_authority
+            .set(&self.ctx, document_hash.to_string(), Some(observation));
+        let projection = self.current_queue_completion(document_hash);
+        if let Some(error) = projection.error {
+            anyhow::bail!("{error}");
+        }
+        Ok(projection.completions.len())
+    }
+
+    fn current_queue_completion(&self, document_hash: &str) -> QueueCompletionProjection {
+        let authority = self.queue_authority.clone();
+        let durable_projection = self.projection.clone();
+        let projection = self.queue_completion.get_or_insert_with(
+            &self.ctx,
+            document_hash.to_string(),
+            move |ctx, key| {
+                let Some(observation) = authority.observe(ctx, key).flatten() else {
+                    return QueueCompletionProjection::default();
+                };
+                match agent_doc_queue::queue_projection::completed_queue_head_projections(
+                    &observation.content,
+                ) {
+                    Ok(completions) => {
+                        let completed_heads = durable_projection
+                            .observe(ctx, key)
+                            .flatten()
+                            .map(|projection| projection.queue.completed_heads)
+                            .unwrap_or_default();
+                        QueueCompletionProjection {
+                            content_hash: observation.content_hash,
+                            completions: completions
+                                .into_iter()
+                                .filter(|head| !completed_heads.contains(&head.node_key))
+                                .collect(),
+                            error: None,
+                        }
+                    }
+                    Err(error) => QueueCompletionProjection {
+                        content_hash: observation.content_hash,
+                        completions: Vec::new(),
+                        error: Some(error.to_string()),
+                    },
+                }
+            },
+        );
+        self.ensure_queue_completion_effect(document_hash);
+        projection
+    }
+
     /// Refresh this document's preflight read observations and return the
     /// controller-owned Computed projection. The slot stays subscribed across
     /// successive preflight CLI invocations for the controller lifetime.
@@ -2058,6 +2202,46 @@ impl ControllerDocumentGraphs {
             sink.resume(&effect_key, &signal);
         });
         let mut effects = self.retained_resume_effects.lock();
+        if effects.contains_key(&key) {
+            drop(effects);
+            self.ctx.dispose_effect(&effect);
+            return;
+        }
+        effects.insert(key, effect);
+    }
+
+    /// Subscribe durable queue completion to the authoritative markdown
+    /// projection. Mutation, cleanup, and preflight callers cannot forget a
+    /// companion lifecycle write because they do not own that decision.
+    fn ensure_queue_completion_effect(&self, document_hash: &str) {
+        if self
+            .queue_completion_effects
+            .lock()
+            .contains_key(document_hash)
+        {
+            return;
+        }
+        let key = document_hash.to_string();
+        let projection_map = self.queue_completion.clone();
+        let authority_map = self.queue_authority.clone();
+        let sink = self.settle_sink.clone();
+        let effect_key = key.clone();
+        let effect = self.ctx.effect(move |ctx| {
+            let Some(projection) = projection_map.observe(ctx, &effect_key) else {
+                return;
+            };
+            if projection.error.is_some() || projection.completions.is_empty() {
+                return;
+            }
+            let Some(observation) = authority_map.observe(ctx, &effect_key).flatten() else {
+                return;
+            };
+            let Some(sink) = sink.get() else {
+                return;
+            };
+            sink.complete_queue_heads(&effect_key, &observation.file, &projection);
+        });
+        let mut effects = self.queue_completion_effects.lock();
         if effects.contains_key(&key) {
             drop(effects);
             self.ctx.dispose_effect(&effect);
@@ -2521,6 +2705,16 @@ impl ControllerRuntime {
     ) -> agent_doc_state_backbone::preflight::PreflightReadProjection {
         self.document_graphs
             .preflight_projection(document_hash, facts)
+    }
+
+    pub(crate) fn document_queue_authority_observe(
+        &self,
+        document_hash: &str,
+        file: &Path,
+        content: String,
+    ) -> Result<usize> {
+        self.document_graphs
+            .observe_queue_authority(document_hash, file, content)
     }
 
     /// `#lazily-hot-path` W1 — bounded await for the visible-write receipt of
@@ -10262,5 +10456,42 @@ agent:queue\n\
             Some("retained_delivery_reactive"),
             "controller activation must apply the already-eligible Computed without another ACK"
         );
+    }
+
+    #[test]
+    fn authoritative_markdown_reactively_projects_terminal_queue_lifecycle() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~do [#completed-work]~~\n",
+            "- do [#ready-work]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        runtime
+            .document_graphs
+            .install_settle_sink(dir.path().to_path_buf(), &runtime);
+
+        let projected = runtime
+            .document_queue_authority_observe(&document_hash, &canonical, content.to_string())
+            .unwrap();
+
+        assert_eq!(projected, 1);
+        let state = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        assert!(
+            state
+                .queue
+                .completed_heads
+                .contains("queue:0:completed-work:0")
+        );
+        assert!(!state.queue.completed_heads.contains("queue:1:ready-work:0"));
     }
 }

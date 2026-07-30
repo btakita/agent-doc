@@ -2840,42 +2840,33 @@ pub fn route_closeout_user_outcome_fields(blocked_recovery_command: Option<&str>
     )
 }
 
-/// Decision for the route-dispatch drain retry loop after a mid-drain `repair`
-/// plus `session_check` failure.
+/// Controller projection change observed while routed dispatch is waiting for
+/// an active closeout to reach a terminal boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DispatchDrainRetryDecision {
-    /// A concurrent finalize in another process closed the cycle, so the drain is
-    /// satisfied and routed dispatch may proceed.
-    ConcurrentlyClosed,
-    /// The cycle advanced concurrently and attempts remain, so back off and retry.
-    Retry,
-    /// No concurrent progress was observed, or attempts are exhausted, so fail closed.
-    GiveUp,
+pub enum CloseoutProjectionChange {
+    Terminal,
+    Superseded,
+    OwnerReleased,
+    TimedOut,
 }
 
-/// Classify whether a mid-drain failure is a transient concurrent-finalize race.
-///
-/// `original_*` is the cycle observed when the drain started; `reloaded` is the
-/// cycle re-read after the failed check as `(cycle_id, phase, is_open)`, or
-/// `None` when no open cycle remains on disk.
-pub fn dispatch_drain_retry_decision(
-    original_cycle_id: &str,
-    original_phase: agent_doc_turn::CyclePhase,
-    reloaded: Option<(&str, agent_doc_turn::CyclePhase, bool)>,
-    attempt: u32,
-    max_attempts: u32,
-) -> DispatchDrainRetryDecision {
-    match reloaded {
-        None => DispatchDrainRetryDecision::ConcurrentlyClosed,
-        Some((_, _, false)) => DispatchDrainRetryDecision::ConcurrentlyClosed,
-        Some((cycle_id, phase, true)) => {
-            let progressed = cycle_id != original_cycle_id || phase != original_phase;
-            if progressed && attempt + 1 < max_attempts {
-                DispatchDrainRetryDecision::Retry
-            } else {
-                DispatchDrainRetryDecision::GiveUp
-            }
+/// Next route action derived from the controller-owned closeout projection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseoutDrainProjection {
+    DispatchReady,
+    RecoverAfterOwnerRelease,
+    AwaitingTerminal,
+}
+
+pub const fn project_closeout_drain(change: CloseoutProjectionChange) -> CloseoutDrainProjection {
+    match change {
+        CloseoutProjectionChange::Terminal | CloseoutProjectionChange::Superseded => {
+            CloseoutDrainProjection::DispatchReady
         }
+        CloseoutProjectionChange::OwnerReleased => {
+            CloseoutDrainProjection::RecoverAfterOwnerRelease
+        }
+        CloseoutProjectionChange::TimedOut => CloseoutDrainProjection::AwaitingTerminal,
     }
 }
 
@@ -5827,86 +5818,34 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
-    fn drain_retry_concurrent_close_when_cycle_gone() {
+    fn terminal_closeout_projection_releases_routed_dispatch() {
         assert_eq!(
-            dispatch_drain_retry_decision(
-                "cyc-1",
-                agent_doc_turn::CyclePhase::PreflightStarted,
-                None,
-                0,
-                3
-            ),
-            DispatchDrainRetryDecision::ConcurrentlyClosed
+            project_closeout_drain(CloseoutProjectionChange::Terminal),
+            CloseoutDrainProjection::DispatchReady
         );
     }
 
     #[test]
-    fn drain_retry_concurrent_close_when_cycle_no_longer_open() {
+    fn superseded_closeout_projection_releases_routed_dispatch() {
         assert_eq!(
-            dispatch_drain_retry_decision(
-                "cyc-1",
-                agent_doc_turn::CyclePhase::PreflightStarted,
-                Some(("cyc-1", agent_doc_turn::CyclePhase::Committed, false)),
-                0,
-                3
-            ),
-            DispatchDrainRetryDecision::ConcurrentlyClosed
+            project_closeout_drain(CloseoutProjectionChange::Superseded),
+            CloseoutDrainProjection::DispatchReady
         );
     }
 
     #[test]
-    fn drain_retry_retries_when_phase_advanced_and_attempts_remain() {
+    fn released_owner_projects_one_recovery_effect() {
         assert_eq!(
-            dispatch_drain_retry_decision(
-                "cyc-1",
-                agent_doc_turn::CyclePhase::PreflightStarted,
-                Some(("cyc-1", agent_doc_turn::CyclePhase::WriteApplied, true)),
-                0,
-                3
-            ),
-            DispatchDrainRetryDecision::Retry
+            project_closeout_drain(CloseoutProjectionChange::OwnerReleased),
+            CloseoutDrainProjection::RecoverAfterOwnerRelease
         );
     }
 
     #[test]
-    fn drain_retry_retries_when_cycle_id_changed_and_attempts_remain() {
+    fn projection_timeout_keeps_dispatch_behind_closeout() {
         assert_eq!(
-            dispatch_drain_retry_decision(
-                "cyc-1",
-                agent_doc_turn::CyclePhase::PreflightStarted,
-                Some(("cyc-2", agent_doc_turn::CyclePhase::PreflightStarted, true)),
-                1,
-                3
-            ),
-            DispatchDrainRetryDecision::Retry
-        );
-    }
-
-    #[test]
-    fn drain_retry_gives_up_when_no_progress_observed() {
-        assert_eq!(
-            dispatch_drain_retry_decision(
-                "cyc-1",
-                agent_doc_turn::CyclePhase::PreflightStarted,
-                Some(("cyc-1", agent_doc_turn::CyclePhase::PreflightStarted, true)),
-                0,
-                3
-            ),
-            DispatchDrainRetryDecision::GiveUp
-        );
-    }
-
-    #[test]
-    fn drain_retry_gives_up_when_attempts_exhausted_despite_progress() {
-        assert_eq!(
-            dispatch_drain_retry_decision(
-                "cyc-1",
-                agent_doc_turn::CyclePhase::PreflightStarted,
-                Some(("cyc-1", agent_doc_turn::CyclePhase::WriteApplied, true)),
-                2,
-                3
-            ),
-            DispatchDrainRetryDecision::GiveUp
+            project_closeout_drain(CloseoutProjectionChange::TimedOut),
+            CloseoutDrainProjection::AwaitingTerminal
         );
     }
 

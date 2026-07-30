@@ -1168,9 +1168,8 @@ impl HarnessConfig {
     }
 }
 
-pub fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
-    let candidate = harness.last_prompt_candidate(content)?;
-    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(&candidate);
+fn protected_prompt_draft_preview_from_candidate(candidate: &str) -> Option<String> {
+    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(candidate);
     let redacted = agent_doc_secret_redact::redact(stripped.trim());
     let preview = redacted.trim();
     if preview.is_empty() {
@@ -1186,34 +1185,127 @@ pub fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) ->
     }
 }
 
-/// Return the operator's unsent composer text when the pane's last prompt
-/// candidate IS a harness prompt line that is NOT dispatch-ready — i.e. the
-/// composer holds drafted input.
-///
-/// Returns `None` for an empty/idle composer, and `None` when the last candidate
-/// is ordinary output rather than a prompt line, so a busy pane's scrollback is
-/// never misreported as an operator draft. Route uses this to distinguish "the
-/// run is still booting, waiting will help" from "an operator draft is parked in
-/// the composer, waiting will NEVER help" (`#panedraftunblocker`).
-pub fn pane_composer_draft(harness: &HarnessConfig, content: &str) -> Option<String> {
+pub fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
     let candidate = harness.last_prompt_candidate(content)?;
-    if !harness.is_prompt_line(&candidate) || harness.is_dispatch_ready_prompt_line(&candidate) {
-        return None;
+    protected_prompt_draft_preview_from_candidate(&candidate)
+}
+
+/// Reactive projection of one ANSI-preserving pane-capture source observation.
+///
+/// Readiness, draft protection, and dynamic autosuggest handling consume this
+/// single projection so they cannot classify the same snapshot differently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneComposerReadinessEvidence {
+    Prompt { rendered: String },
+    CodexIdleStatusChrome,
+    OpenCodeIdleStatusChrome,
+    OpenCodeBottomIdleChrome,
+}
+
+impl PaneComposerReadinessEvidence {
+    fn compatibility_candidate(self) -> String {
+        match self {
+            Self::Prompt { rendered } => rendered,
+            Self::CodexIdleStatusChrome => "codex idle status chrome".to_string(),
+            Self::OpenCodeIdleStatusChrome => "opencode idle status chrome".to_string(),
+            Self::OpenCodeBottomIdleChrome => "bottom idle chrome".to_string(),
+        }
     }
-    // Ghost/placeholder text is an EMPTY composer wearing a hint, not unsent
-    // operator input. Harnesses render it dim/faint while real keystrokes render
-    // at normal intensity, so the styling — not the wording — is the signal.
-    // This is what generalizes past `is_*_idle_placeholder_prompt`'s static
-    // allow-lists: Claude Code's autosuggest hint is *dynamic* (e.g.
-    // `❯ yes, compact it`), so no enumerated list can cover it. Reporting it as a
-    // draft strands route with `unblocker=submit_or_clear_pane_draft`, which the
-    // operator cannot satisfy — there is nothing to submit or clear.
-    if agent_doc_turn_executor_tmux::prompt::prompt_candidate_is_dim_placeholder(
-        content, &candidate,
-    ) {
-        return None;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneComposerProjection {
+    ReadyEmpty {
+        evidence: PaneComposerReadinessEvidence,
+    },
+    OperatorDraft {
+        preview: String,
+    },
+    Busy,
+    Absent,
+}
+
+/// Project the current ANSI pane snapshot into its composer state.
+pub fn project_pane_composer(content: &str, harness: &HarnessConfig) -> PaneComposerProjection {
+    let latest_prompt_candidate = harness.last_prompt_candidate(content);
+    let latest_prompt_is_dim_placeholder =
+        latest_prompt_candidate.as_deref().is_some_and(|candidate| {
+            harness.is_prompt_line(candidate)
+                && agent_doc_turn_executor_tmux::prompt::prompt_candidate_is_dim_placeholder(
+                    content, candidate,
+                )
+        });
+
+    if let Some(candidate) = latest_prompt_candidate.as_deref()
+        && harness.is_prompt_line(candidate)
+        && !harness.is_dispatch_ready_prompt_line(candidate)
+        && !latest_prompt_is_dim_placeholder
+        && let Some(preview) = protected_prompt_draft_preview_from_candidate(candidate)
+    {
+        return PaneComposerProjection::OperatorDraft { preview };
     }
-    protected_prompt_draft_preview(harness, content)
+
+    let latest_dispatch_ready_prompt = latest_prompt_candidate.filter(|line| {
+        harness.is_dispatch_ready_prompt_line(line) || latest_prompt_is_dim_placeholder
+    });
+
+    // A rendered placeholder is conclusive proof of an empty Claude composer,
+    // even when stale busy scrollback remains visible above it. Dynamic
+    // autosuggest text is recognized once here from its dim ANSI style; wording
+    // is deliberately irrelevant.
+    if harness.binary == "claude"
+        && latest_dispatch_ready_prompt.as_deref().is_some_and(|line| {
+            harness.is_idle_placeholder_prompt_line(line) || latest_prompt_is_dim_placeholder
+        })
+    {
+        return PaneComposerProjection::ReadyEmpty {
+            evidence: PaneComposerReadinessEvidence::Prompt {
+                rendered: latest_dispatch_ready_prompt.expect("checked as present"),
+            },
+        };
+    }
+
+    if harness.has_busy_cue(content) {
+        return PaneComposerProjection::Busy;
+    }
+    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(content) {
+        return PaneComposerProjection::ReadyEmpty {
+            evidence: PaneComposerReadinessEvidence::OpenCodeIdleStatusChrome,
+        };
+    }
+    if harness.binary == "codex" && harness.is_bottom_idle_chrome(content, 12) {
+        return PaneComposerProjection::ReadyEmpty {
+            evidence: latest_dispatch_ready_prompt.map_or(
+                PaneComposerReadinessEvidence::CodexIdleStatusChrome,
+                |rendered| PaneComposerReadinessEvidence::Prompt { rendered },
+            ),
+        };
+    }
+    if harness.binary == "opencode" && harness.is_bottom_idle_chrome(content, 12) {
+        return PaneComposerProjection::ReadyEmpty {
+            evidence: latest_dispatch_ready_prompt.map_or(
+                PaneComposerReadinessEvidence::OpenCodeBottomIdleChrome,
+                |rendered| PaneComposerReadinessEvidence::Prompt { rendered },
+            ),
+        };
+    }
+    match latest_dispatch_ready_prompt {
+        Some(rendered) => PaneComposerProjection::ReadyEmpty {
+            evidence: PaneComposerReadinessEvidence::Prompt { rendered },
+        },
+        None => PaneComposerProjection::Absent,
+    }
+}
+
+/// Return the operator's unsent composer text projected from the current pane
+/// snapshot. Empty, busy, and absent composers do not produce a draft.
+pub fn pane_composer_draft(harness: &HarnessConfig, content: &str) -> Option<String> {
+    match project_pane_composer(content, harness) {
+        PaneComposerProjection::OperatorDraft { preview } => Some(preview),
+        PaneComposerProjection::ReadyEmpty { .. }
+        | PaneComposerProjection::Busy
+        | PaneComposerProjection::Absent => None,
+    }
 }
 
 /// Restrict prompt inspection to the portion of the visible pane at or above
@@ -1238,6 +1330,16 @@ fn cursor_scoped_prompt_content<'a>(
     std::borrow::Cow::Borrowed(content)
 }
 
+/// Project the cursor-scoped composer from one ANSI pane snapshot.
+pub fn project_pane_composer_at_cursor(
+    content: &str,
+    harness: &HarnessConfig,
+    cursor_y: Option<usize>,
+) -> PaneComposerProjection {
+    let scoped = cursor_scoped_prompt_content(content, harness, cursor_y);
+    project_pane_composer(&scoped, harness)
+}
+
 /// Cursor-aware counterpart to [`pane_composer_draft`]. For Claude and Codex,
 /// arbitrary user-configured status lines below the composer are excluded.
 pub fn pane_composer_draft_at_cursor(
@@ -1245,8 +1347,12 @@ pub fn pane_composer_draft_at_cursor(
     content: &str,
     cursor_y: Option<usize>,
 ) -> Option<String> {
-    let scoped = cursor_scoped_prompt_content(content, harness, cursor_y);
-    pane_composer_draft(harness, &scoped)
+    match project_pane_composer_at_cursor(content, harness, cursor_y) {
+        PaneComposerProjection::OperatorDraft { preview } => Some(preview),
+        PaneComposerProjection::ReadyEmpty { .. }
+        | PaneComposerProjection::Busy
+        | PaneComposerProjection::Absent => None,
+    }
 }
 
 pub fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Option<String> {
@@ -1282,39 +1388,12 @@ pub fn pane_idle_dispatch_ready(content: &str, harness: &HarnessConfig) -> bool 
 /// Return the latest captured prompt/chrome segment that proves the harness can
 /// accept routed input.
 pub fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<String> {
-    let latest_dispatch_ready_prompt = harness
-        .last_prompt_candidate(content)
-        .filter(|line| harness.is_dispatch_ready_prompt_line(line));
-    // See `live_pane_prompt_ready`: only a rendered placeholder composer (which
-    // proves input was accepted) may outrank Claude's potentially-stale busy
-    // cue. A bare `❯` under a live spinner is an active turn.
-    if harness.binary == "claude"
-        && latest_dispatch_ready_prompt
-            .as_deref()
-            .is_some_and(|line| harness.is_idle_placeholder_prompt_line(line))
-    {
-        return latest_dispatch_ready_prompt;
+    match project_pane_composer(content, harness) {
+        PaneComposerProjection::ReadyEmpty { evidence } => Some(evidence.compatibility_candidate()),
+        PaneComposerProjection::OperatorDraft { .. }
+        | PaneComposerProjection::Busy
+        | PaneComposerProjection::Absent => None,
     }
-    if harness.has_busy_cue(content) {
-        return None;
-    }
-    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(content) {
-        return Some("opencode idle status chrome".to_string());
-    }
-    if harness.binary == "codex" && harness.is_bottom_idle_chrome(content, 12) {
-        return latest_dispatch_ready_prompt
-            .or_else(|| Some("codex idle status chrome".to_string()));
-    }
-    if harness.binary == "opencode" && harness.is_bottom_idle_chrome(content, 12) {
-        return latest_dispatch_ready_prompt.or_else(|| Some("bottom idle chrome".to_string()));
-    }
-    if harness.binary == "codex"
-        && latest_dispatch_ready_prompt.is_some()
-        && harness.is_bottom_idle_chrome(content, 12)
-    {
-        return latest_dispatch_ready_prompt;
-    }
-    latest_dispatch_ready_prompt
 }
 
 /// Cursor-aware counterpart to [`ready_prompt_candidate`]. Claude and Codex
@@ -1327,8 +1406,12 @@ pub fn ready_prompt_candidate_at_cursor(
     harness: &HarnessConfig,
     cursor_y: Option<usize>,
 ) -> Option<String> {
-    let scoped = cursor_scoped_prompt_content(content, harness, cursor_y);
-    ready_prompt_candidate(&scoped, harness)
+    match project_pane_composer_at_cursor(content, harness, cursor_y) {
+        PaneComposerProjection::ReadyEmpty { evidence } => Some(evidence.compatibility_candidate()),
+        PaneComposerProjection::OperatorDraft { .. }
+        | PaneComposerProjection::Busy
+        | PaneComposerProjection::Absent => None,
+    }
 }
 
 fn is_opencode_help_screen(output: &str) -> bool {
@@ -2206,6 +2289,14 @@ mod tests {
             None,
             "dim autosuggest ghost text must not be reported as an unsent draft"
         );
+        assert!(matches!(
+            project_pane_composer(ghost, &h),
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
+        assert!(
+            ready_prompt_candidate(ghost, &h).is_some(),
+            "dim autosuggest ghost text is an empty composer and must project dispatch-ready"
+        );
 
         // Same wording at normal intensity = genuine operator input: still a draft.
         let typed = concat!(
@@ -2216,6 +2307,15 @@ mod tests {
         assert!(
             pane_composer_draft(&h, typed).is_some(),
             "real (non-dim) operator input must still be protected as a draft"
+        );
+        assert!(matches!(
+            project_pane_composer(typed, &h),
+            PaneComposerProjection::OperatorDraft { .. }
+        ));
+        assert_eq!(
+            ready_prompt_candidate(typed, &h),
+            None,
+            "real operator input must not project dispatch-ready"
         );
     }
 

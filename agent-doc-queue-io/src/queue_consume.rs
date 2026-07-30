@@ -6,7 +6,6 @@ use std::path::Path;
 
 use crate::queue_consumption_proof::{
     QueueConsumptionProofEffects, QueueConsumptionProofStage,
-    record_authoritative_queue_completion_state as record_authoritative_queue_completion_state_with_effects,
     record_queue_consumption_proofs as record_queue_consumption_proofs_with_effects,
 };
 use agent_doc_document::queue_projection::strip_priority_markers;
@@ -345,10 +344,23 @@ pub fn record_queue_consumption_proofs(
     )
 }
 
-pub fn record_authoritative_queue_completion_state(file: &Path, content: &str) -> Result<usize> {
-    record_authoritative_queue_completion_state_with_effects(
-        &QUEUE_CONSUMPTION_PROOF_EFFECTS,
-        file,
+pub fn observe_authoritative_queue_state(file: &Path, content: &str) -> Result<usize> {
+    let canonical = file.canonicalize().with_context(|| {
+        format!(
+            "queue authority observation: failed to canonicalize {}",
+            file.display()
+        )
+    })?;
+    let project_root = agent_doc_fs::find_project_root(&canonical).with_context(|| {
+        format!(
+            "queue authority observation: project root not found for {}",
+            file.display()
+        )
+    })?;
+    agent_doc_controller_io::project_controller::ensure_controller_running_for_file(&canonical)?;
+    agent_doc_controller_io::project_controller::observe_queue_authority(
+        &project_root,
+        &canonical,
         content,
     )
 }
@@ -642,6 +654,9 @@ pub fn prune_noise_queue_heads(
     effects
         .converge_document_or_disk(file, &new_document, &content, "noise_prune")
         .context("noise prune: failed to write document")?;
+    // Publish the post-mutation authoritative frontier. The controller's
+    // document-scoped queue projection owns terminal lifecycle persistence.
+    observe_authoritative_queue_state(file, &new_document)?;
     if let Some(snap) = new_snapshot {
         save_snapshot_recovery_only(file, &snap, "noise prune snapshot sync");
     }
@@ -3617,6 +3632,23 @@ Old.
             .unwrap()
             .unwrap();
         assert_eq!(snap, planned, "detached disk prune should update snapshot");
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let ledger =
+            agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path())
+                .unwrap();
+        let projection = ledger
+            .project_document(&document_hash)
+            .expect("pruned queue state should project for document");
+        let completed = projection
+            .queue
+            .heads
+            .values()
+            .find(|head| head.backlog_id.as_deref() == Some("kcb5"))
+            .expect("pruned queue head should have durable terminal state");
+        assert_eq!(
+            completed.phase,
+            agent_doc_state_backbone::QueueHeadPhase::Completed
+        );
     }
 
     #[test]

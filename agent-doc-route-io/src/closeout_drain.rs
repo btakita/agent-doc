@@ -5,9 +5,11 @@ use std::path::Path;
 use std::time::Duration;
 
 use agent_doc_controller::dispatch::{
-    CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts, DispatchDrainRetryDecision,
-    RouteCloseoutDrainOutcome, classify_closeout_block_dispatch, dispatch_drain_retry_decision,
+    CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts, CloseoutDrainProjection,
+    CloseoutProjectionChange, RouteCloseoutDrainOutcome, classify_closeout_block_dispatch,
+    project_closeout_drain,
 };
+use agent_doc_controller_io::project_controller::CloseoutCycleWaitOutcome;
 use agent_doc_session_check_io::SessionCheckStatus;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryCycleInput, CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
@@ -15,6 +17,7 @@ use agent_doc_turn::closeout_recovery::{
 
 pub type DecideRouteCloseoutRecoveryFn =
     for<'a> fn(&Path, CloseoutRecoveryDecisionInput<'a>) -> CloseoutRecoveryDecision;
+pub type AwaitCloseoutProjectionFn = fn(&Path, &str, Duration) -> Result<CloseoutCycleWaitOutcome>;
 
 #[derive(Clone, Copy)]
 pub struct RouteCloseoutDrainEffects {
@@ -23,7 +26,27 @@ pub struct RouteCloseoutDrainEffects {
     pub cancel_empty_preflight: fn(&Path) -> Result<bool>,
     pub repair_closeout: fn(&Path) -> Result<String>,
     pub inspect_session: fn(&Path) -> Result<SessionCheckStatus>,
+    pub await_closeout_projection: AwaitCloseoutProjectionFn,
     pub decide_closeout_recovery: DecideRouteCloseoutRecoveryFn,
+}
+
+enum CloseoutRecoveryAttempt {
+    Recovered(String),
+    Blocked(String),
+}
+
+fn project_closeout_recovery_effects(
+    file: &Path,
+    effects: RouteCloseoutDrainEffects,
+) -> Result<CloseoutRecoveryAttempt> {
+    let block_reason = match (effects.repair_closeout)(file) {
+        Ok(label) => match (effects.inspect_session)(file)? {
+            SessionCheckStatus::Ok(_) => return Ok(CloseoutRecoveryAttempt::Recovered(label)),
+            SessionCheckStatus::Interrupted(reason) => reason,
+        },
+        Err(error) => error.to_string(),
+    };
+    Ok(CloseoutRecoveryAttempt::Blocked(block_reason))
 }
 
 pub fn drain_open_closeout_before_routed_dispatch(
@@ -69,100 +92,68 @@ pub fn drain_open_closeout_before_routed_dispatch(
         ),
     );
 
-    // #pcp3a: a concurrent finalize in another process (the route-owned supervisor
-    // self-race) can move the document/cycle baseline mid-drain, so `repair` +
-    // `session_check` observe a transient "captured response baseline no longer
-    // matches current document" mismatch. Rather than fail closed on the first
-    // such block (the "could not drain the active closeout" / exit 75 the user
-    // hit, which self-resolves once the finalize completes), retry a bounded
-    // number of times when there is positive evidence the cycle is concurrently
-    // progressing (phase/cycle_id advanced) or has just closed. A genuine,
-    // non-advancing block still fails closed after the first attempt.
-    const DRAIN_MAX_ATTEMPTS: u32 = 3;
-    const DRAIN_RETRY_BACKOFF_MS: u64 = 200;
-    let mut last_reason = String::new();
+    // Reap completed tracked items once before recovery. Subsequent progress is
+    // driven by the controller's document projection, not a sleep/re-read loop.
+    if let Err(error) = (effects.run_pending_maintenance)(file, (effects.force_disk_route_writes)())
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_drain_pending_maintenance_warning file={} error={}",
+                file.display(),
+                agent_doc_secret_redact::redact(&error.to_string())
+            ),
+        );
+    }
 
-    for attempt in 0..DRAIN_MAX_ATTEMPTS {
-        // Reap completed tracked items across ALL surfaces (backlog, review,
-        // icebox) and re-sync the snapshot before the focused repair, matching
-        // what a manual re-run's full preflight maintenance does. The repair
-        // sub-step only reaps the backlog, so a deployed/completed `[x]` item left
-        // in review or icebox would make that reap a no-op, the post-repair
-        // session-check would still find the completed item, and route would
-        // refuse dispatch until the user manually retried (the "JB Run Agent Doc
-        // failed; repeat succeeded" report). run_pending_maintenance is
-        // idempotent, so this is safe even when there is nothing to reap.
-        if let Err(e) = (effects.run_pending_maintenance)(file, (effects.force_disk_route_writes)())
-        {
+    let first_reason = match project_closeout_recovery_effects(file, effects)? {
+        CloseoutRecoveryAttempt::Recovered(label) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_dispatch_drain_pending_maintenance_warning file={} error={}",
+                    "route_dispatch_drain_closeout_recovered file={} cycle_id={} outcome={}",
                     file.display(),
-                    agent_doc_secret_redact::redact(&e.to_string())
+                    state.cycle_id,
+                    label
                 ),
             );
+            return Ok(RouteCloseoutDrainOutcome::Recovered(label));
         }
+        CloseoutRecoveryAttempt::Blocked(reason) => reason,
+    };
 
-        let block_reason = match (effects.repair_closeout)(file) {
-            Ok(label) => match (effects.inspect_session)(file)? {
-                SessionCheckStatus::Ok(_) => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "route_dispatch_drain_closeout_recovered file={} cycle_id={} outcome={}",
-                            file.display(),
-                            state.cycle_id,
-                            label
-                        ),
-                    );
+    let change = match (effects.await_closeout_projection)(
+        file,
+        &state.cycle_id,
+        Duration::from_secs(30),
+    )? {
+        CloseoutCycleWaitOutcome::Terminal => CloseoutProjectionChange::Terminal,
+        CloseoutCycleWaitOutcome::Superseded => CloseoutProjectionChange::Superseded,
+        CloseoutCycleWaitOutcome::OwnerReleased => CloseoutProjectionChange::OwnerReleased,
+        CloseoutCycleWaitOutcome::TimedOut => CloseoutProjectionChange::TimedOut,
+    };
+    let last_reason = match project_closeout_drain(change) {
+        CloseoutDrainProjection::DispatchReady => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_dispatch_drain_closeout_projection_ready file={} cycle_id={}",
+                    file.display(),
+                    state.cycle_id
+                ),
+            );
+            return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
+        }
+        CloseoutDrainProjection::RecoverAfterOwnerRelease => {
+            match project_closeout_recovery_effects(file, effects)? {
+                CloseoutRecoveryAttempt::Recovered(label) => {
                     return Ok(RouteCloseoutDrainOutcome::Recovered(label));
                 }
-                SessionCheckStatus::Interrupted(reason) => reason,
-            },
-            Err(err) => err.to_string(),
-        };
-
-        // Concurrent-finalize detection: re-read the cycle after the failed check.
-        let reloaded = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
-        let decision = dispatch_drain_retry_decision(
-            &state.cycle_id,
-            state.phase,
-            reloaded
-                .as_ref()
-                .map(|s| (s.cycle_id.as_str(), s.phase, s.is_open())),
-            attempt,
-            DRAIN_MAX_ATTEMPTS,
-        );
-        last_reason = block_reason;
-        match decision {
-            DispatchDrainRetryDecision::ConcurrentlyClosed => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "route_dispatch_drain_closeout_concurrent_finalize_closed file={} cycle_id={}",
-                        file.display(),
-                        state.cycle_id
-                    ),
-                );
-                return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
+                CloseoutRecoveryAttempt::Blocked(reason) => reason,
             }
-            DispatchDrainRetryDecision::Retry => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "route_dispatch_drain_closeout_retry_concurrent_progress file={} cycle_id={} attempt={}",
-                        file.display(),
-                        state.cycle_id,
-                        attempt + 1
-                    ),
-                );
-                std::thread::sleep(Duration::from_millis(DRAIN_RETRY_BACKOFF_MS));
-                continue;
-            }
-            DispatchDrainRetryDecision::GiveUp => break,
         }
-    }
+        CloseoutDrainProjection::AwaitingTerminal => first_reason,
+    };
 
     agent_doc_ops_log_io::log_op(
         file,

@@ -2641,13 +2641,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             return Ok(QueueState::default());
         }
     };
-    // Text is the authoritative lifecycle surface. Persist terminal facts before
-    // any backlog sync, marker retargeting, or stale projection can reconsider
-    // these durable node identities as runnable queue heads.
-    agent_doc_queue_io::queue_consume::record_authoritative_queue_completion_state(
-        file,
-        &current_content,
-    )?;
+    // Publish authoritative markdown before any worklist projection. The
+    // controller's document-scoped Computed persists terminal lifecycle facts
+    // and returns only after its durable receipt feeds back into projection.
+    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(file, &current_content)?;
 
     let mut entries = entries;
     let mut queue_warnings = Vec::new();
@@ -4348,6 +4345,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         )
         .is_some();
+    // Publish the final authority frontier before worklist/selection facts.
+    // Lifecycle persistence remains a projection Effect, not a maintenance
+    // companion write.
+    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(file, &current_content)?;
     record_queue_worklist_state(
         file,
         &current_content,
@@ -5798,8 +5799,8 @@ mod tests {
     /// it had stopped writing, so a document whose only control was `queue: start`
     /// could never activate: the queue populated but stayed permanently UNARMED
     /// (`queue_drainable_head_count: 0`, `queue_continuation_required: false`) and
-    /// the auto-loop never got a head. Observed live on
-    /// `tasks/brookebrodack-dev.md` (11 queued heads, `queue: start`, bare marker).
+    /// the auto-loop never got a head. Observed live on an active session document
+    /// with 11 queued heads, `queue: start`, and a bare queue marker.
     #[test]
     fn run_queue_maintenance_arms_queue_from_canonical_frontmatter_start_control() {
         let dir = setup_project();
@@ -5862,7 +5863,7 @@ mod tests {
             "agent_doc_format: template\n",
             "agent_doc_write: crdt\n",
             "agent: claude\n",
-            "queue: start\n",
+            "queue: go\n",
             "---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "<!-- /agent:exchange -->\n\n",

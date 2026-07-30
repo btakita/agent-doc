@@ -1333,6 +1333,78 @@ pub fn preflight_read_projection(
     )
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct QueueAuthorityObservationRequest {
+    content: String,
+}
+
+pub(crate) fn handle_queue_authority_observation(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<usize> {
+    let file = request_file(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let observation = serde_json::from_str::<QueueAuthorityObservationRequest>(
+        request
+            .diagnostic_payload
+            .as_deref()
+            .context("queue_authority_observation requires content")?,
+    )
+    .context("queue_authority_observation content must be valid JSON")?;
+    runtime.document_queue_authority_observe(&document_hash, &file, observation.content)
+}
+
+/// Publish authoritative markdown as a controller Source. The returned count
+/// is the derived terminal queue delta at that frontier; durable lifecycle
+/// events are applied by the controller's subscribed Effect before the RPC
+/// completes.
+pub fn observe_queue_authority(project_root: &Path, file: &Path, content: &str) -> Result<usize> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
+        runtime
+            .document_graphs
+            .install_settle_sink(project_root.to_path_buf(), &runtime);
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        runtime.document_queue_authority_observe(&document_hash, &canonical, content.to_string())
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "queue_authority_observation".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&QueueAuthorityObservationRequest {
+                content: content.to_string(),
+            })?),
+        },
+    )
+}
+
 pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<ControllerTmuxFocusReceipt> {
     #[cfg(any(test, feature = "test-support"))]
     {
@@ -10846,6 +10918,10 @@ pub(crate) fn handle_request_locked(
         "preflight_read_projection" => {
             controller_envelope(handle_preflight_read_projection(runtime.as_ref(), request))
         }
+        "queue_authority_observation" => controller_envelope(handle_queue_authority_observation(
+            runtime.as_ref(),
+            request,
+        )),
         "reliable_sync" => controller_envelope(handle_reliable_sync(
             &bootstrap_snapshot.project_root,
             request,

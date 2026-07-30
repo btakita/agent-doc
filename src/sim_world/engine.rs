@@ -1357,23 +1357,27 @@ impl SimWorld {
         // (2b) `#supkill-bg` blue/green drain-and-supersede restart. An explicit
         // `restart-supervisor` (IPC `Restart`) drives the production
         // `supervisor_restart_action` policy BEFORE the opt-in auto-recycle path: it
-        // DRAINS while a turn is in flight (`AwaitDrain`, restart stays pending) and
-        // only at the turn boundary re-execs in place (stale binary → `ReexecInPlace`,
-        // the default healthy restart, no dropped turn) or relaunches (fresh binary →
-        // `RelaunchChild`). `reexec_intent` is the live staleness probe, exactly as the
-        // IPC handler stamps `restart_reexec` from `binary_stale`.
+        // DRAINS while supervisor IPC is in flight (`AwaitDrain`, restart stays
+        // pending). A stale binary re-execs in place at the first no-IPC safe
+        // checkpoint, even if a stale turn marker still says Busy; execve preserves
+        // the harness child, pane, and durable cycle. A fresh-binary child relaunch
+        // still waits for a real turn boundary. `reexec_intent` is the live
+        // staleness probe, exactly as the IPC handler stamps `restart_reexec`.
+        let stale_restart_safe_checkpoint =
+            self.recycle_clear.binary_stale && !self.recycle_clear.ipc_inflight;
         let restart_action = supervisor_restart_action(
             self.recycle_clear.restart_requested,
             self.recycle_clear.binary_stale,
             turn_boundary,
+            stale_restart_safe_checkpoint,
         );
         match restart_action {
-            // `#midturn-recycle-resume`: an open agent-doc cycle defers the in-place
-            // reexec so the operator restart cannot sever a live finalize IPC
-            // connection mid-cycle. A never-closing cycle eventually escalates through
-            // the shared effective-cycle gate so the replacement request cannot starve.
+            // `#midturn-recycle-resume`: a stale in-place reexec ignores an open
+            // cycle only at the no-IPC safe checkpoint. Non-stale replacement keeps
+            // the open-cycle interlock.
             SupervisorRestartAction::ReexecInPlace
-                if !self.recycle_clear.recycle_disabled && !effective_cycle_open =>
+                if !self.recycle_clear.recycle_disabled
+                    && (!effective_cycle_open || stale_restart_safe_checkpoint) =>
             {
                 self.recycle_clear.restart_requested = false;
                 if self.recycle_clear.reexec_will_fail {
@@ -1409,7 +1413,7 @@ impl SimWorld {
         let recycle_action = supervisor_recycle_action(
             self.recycle_clear.binary_stale,
             self.recycle_clear.auto_recycle,
-            turn_boundary,
+            turn_boundary && !self.recycle_clear.ipc_inflight,
             head_pending,
             self.recycle_clear.operator_recycle_marked,
             write_wedged,

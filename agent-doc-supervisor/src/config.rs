@@ -163,6 +163,18 @@ pub fn host_supervisor_is_stale(
     }
 }
 
+/// Positive proof that a live supervisor maps the currently installed binary.
+///
+/// An unreadable `/proc/<pid>/exe` is unknown, not fresh. Callers that report a
+/// completed replacement must require this stronger predicate instead of
+/// treating the continued existence of the old PID as success.
+pub fn host_supervisor_maps_installed_binary(
+    running_exe_inode: Option<u64>,
+    installed_binary_inode: u64,
+) -> bool {
+    running_exe_inode.is_some_and(|running| running == installed_binary_inode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,5 +525,23 @@ mod tests {
             installed_inode
         ));
         assert!(!host_supervisor_is_stale(None, installed_inode));
+    }
+
+    #[test]
+    fn host_supervisor_freshness_requires_positive_inode_identity() {
+        let installed_inode = 4242u64;
+
+        assert!(host_supervisor_maps_installed_binary(
+            Some(installed_inode),
+            installed_inode
+        ));
+        assert!(!host_supervisor_maps_installed_binary(
+            Some(installed_inode + 1),
+            installed_inode
+        ));
+        assert!(!host_supervisor_maps_installed_binary(
+            None,
+            installed_inode
+        ));
     }
 }

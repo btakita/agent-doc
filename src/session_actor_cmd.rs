@@ -560,10 +560,6 @@ fn restart_with_target(
     Ok(())
 }
 
-/// How long to wait for the background replacement worker to produce a live
-/// supervisor before reporting the request as unfulfilled.
-const SUPERVISOR_REPLACEMENT_PROOF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
-
 /// `#superviserrsilent`: `background_started=true` only means the worker THREAD
 /// spawned — not that a supervisor is live. The worker then runs asynchronously,
 /// and when it fails (for example `preserve_pane_blocked`, because the owner pane
@@ -577,8 +573,9 @@ const SUPERVISOR_REPLACEMENT_PROOF_TIMEOUT: std::time::Duration = std::time::Dur
 /// logged thousands each, and every replacement attempt on it ended in
 /// `background_failed` while reporting success.
 ///
-/// Wait briefly for proof of a live supervisor and say plainly what it means for
-/// the queue when there is none.
+/// Report only a positive binary-identity proof. Replacement continues on the
+/// controller's reactive lifecycle plane; this command must not poll/sleep while
+/// waiting for that asynchronously projected state.
 fn report_supervisor_replacement_outcome(file: &Path, background_started: bool) {
     if !background_started {
         eprintln!(
@@ -587,29 +584,30 @@ fn report_supervisor_replacement_outcome(file: &Path, background_started: bool) 
         );
         return;
     }
-    let deadline = std::time::Instant::now() + SUPERVISOR_REPLACEMENT_PROOF_TIMEOUT;
-    while std::time::Instant::now() < deadline {
-        if let Some(pid) = agent_doc_supervisor_io::process::supervisor_pid_for_doc(file) {
-            println!("[session] supervisor replacement proven live (pid {pid}).");
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250));
+    let Some(pid) = agent_doc_supervisor_io::process::supervisor_pid_for_doc(file) else {
+        println!(
+            "[session] supervisor replacement accepted; freshness proof is pending (no live supervisor has been projected yet)."
+        );
+        return;
+    };
+    let installed_binary_inode =
+        agent_doc_controller_io::project_controller::current_binary_identity()
+            .ok()
+            .and_then(|identity| agent_doc_fs::inode_of_path(&identity.path));
+    let running_binary_inode = agent_doc_fs::running_exe_inode_for_pid(pid);
+    if installed_binary_inode.is_some_and(|installed_binary_inode| {
+        agent_doc_supervisor::config::host_supervisor_maps_installed_binary(
+            running_binary_inode,
+            installed_binary_inode,
+        )
+    }) {
+        println!(
+            "[session] supervisor replacement proven live on the installed binary (pid {pid})."
+        );
+        return;
     }
-    eprintln!(
-        "[session] warning: no live supervisor for {} after {}s — the replacement request was accepted but did not produce one.",
-        file.display(),
-        SUPERVISOR_REPLACEMENT_PROOF_TIMEOUT.as_secs()
-    );
-    eprintln!(
-        "[session] warning: without a supervisor there is NO idle-queue watch, so an active `queue: go` document will not self-drain and needs a human to advance it."
-    );
-    eprintln!(
-        // `#restartlivepane`: "run it from a different pane" was wrong advice —
-        // the refusal is about the TARGET pane, not the calling one, so retrying
-        // elsewhere reproduces it exactly. A pane running the document's own
-        // harness now auto-restarts; anything else needs the pane freed.
-        "[session] hint: check `controller_supervisor_replacement_background_failed` in .agent-doc/logs/ops.log for the reason; if it is `preserve_pane_blocked`, the owner pane is running a program that is not this document's harness — quit it, or point the document at another pane with `agent-doc claim {}`.",
-        file.display()
+    println!(
+        "[session] supervisor replacement accepted; freshness proof is pending (pid {pid} still maps the prior or an unverified binary)."
     );
 }
 

@@ -7664,12 +7664,12 @@ fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
     // runs `restart-supervisor` WHILE a turn is in flight (the pane is Busy).
     world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
     world.apply(SimCommand::SupervisorBusy).unwrap();
+    world.apply(SimCommand::MarkIpcInflight(true)).unwrap();
     world.apply(SimCommand::RequestSupervisorRestart).unwrap();
 
-    // Mid-turn idle ticks must DRAIN, not tear down: `supervisor_restart_action`
-    // returns `AwaitDrain` while `turn_active`, so the restart stays pending and the
-    // live turn (generation/pane) is untouched. No env opt-in is needed — an explicit
-    // restart always supersedes.
+    // While supervisor IPC is active, idle ticks must DRAIN, not tear down:
+    // `supervisor_restart_action` returns `AwaitDrain`, so the restart stays pending
+    // and the live turn (generation/pane) is untouched.
     for tick in 1..=2 {
         world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
         assert_eq!(
@@ -7687,9 +7687,10 @@ fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
         );
     }
 
-    // The in-flight turn finishes (drains) → the pane returns to a dispatch-ready
-    // prompt. The NEXT idle tick is the turn boundary: the restart hot-reloads in place
-    // via `execve`, preserving the pane and advancing the generation.
+    // The in-flight IPC and turn finish (drain) → the pane returns to a
+    // dispatch-ready prompt. The NEXT idle tick hot-reloads in place via `execve`,
+    // preserving the pane and advancing the generation.
+    world.apply(SimCommand::MarkIpcInflight(false)).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(
@@ -7717,6 +7718,37 @@ fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
     // Idempotent: with no pending restart, later idle ticks do not re-fire.
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(world.coverage.supervisor_restart_drain_reexecs, 1);
+}
+
+#[test]
+fn stale_restart_reexecs_at_no_ipc_checkpoint_despite_stale_busy_marker() {
+    // A prior binary can retain a stale Busy/open-cycle marker after the harness
+    // has returned to an idle prompt. In-place execve preserves the harness child,
+    // pane, and checkpoint, so the absence of supervisor IPC is the authoritative
+    // safe checkpoint; waiting for that stale marker would wedge replacement.
+    let mut world = SimWorld::new(4_243);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    let generation_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+    world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
+    world.apply(SimCommand::MarkIpcInflight(false)).unwrap();
+    world.apply(SimCommand::RequestSupervisorRestart).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    assert_eq!(world.coverage.supervisor_restart_drain_reexecs, 1);
+    assert!(!world.recycle_clear.restart_requested);
+    assert!(!world.recycle_clear.binary_stale);
+    assert_eq!(world.route.durable.generation, generation_before + 1);
+    assert_eq!(world.route.durable.pane_id, pane_before);
+    assert!(
+        world.recycle_clear.cycle_open,
+        "in-place replacement preserves the durable open-cycle checkpoint"
+    );
 }
 
 #[test]
@@ -7856,11 +7888,11 @@ fn pure_codex_thread_does_not_inherit_orchard_agent_doc_work() {
 }
 
 #[test]
-fn restart_supervisor_open_cycle_escalates_then_reexecs_in_place() {
-    // A CP-authorized supervisor replacement must not starve forever behind a
-    // stale open closeout cycle. It should share the bounded cycle-open escalation
-    // used by recycle: below the threshold it defers; at the threshold it replaces
-    // the supervisor in place, preserving the pane and clearing the stale binary.
+fn restart_supervisor_open_cycle_never_overrides_active_ipc_then_reexecs_when_drained() {
+    // A stale open closeout cycle may hit the bounded cycle-open escalation,
+    // but that timer must never override an active supervisor IPC handler. Once
+    // IPC drains, in-place replacement is immediately safe even though the open
+    // cycle remains; execve preserves the child, pane, and durable checkpoint.
     use agent_doc_supervisor::lifecycle::MAX_CYCLE_OPEN_DEFER_TICKS;
 
     let mut world = SimWorld::new(4_243);
@@ -7871,29 +7903,30 @@ fn restart_supervisor_open_cycle_escalates_then_reexecs_in_place() {
 
     world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
     world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
+    world.apply(SimCommand::MarkIpcInflight(true)).unwrap();
     world.apply(SimCommand::RequestSupervisorRestart).unwrap();
 
-    for _ in 0..(MAX_CYCLE_OPEN_DEFER_TICKS - 1) {
+    for _ in 0..MAX_CYCLE_OPEN_DEFER_TICKS {
         world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     }
     assert_eq!(
         world.coverage.supervisor_restart_drain_reexecs, 0,
-        "the open cycle defers replacement below the escalation threshold"
+        "active IPC must defer replacement even after the cycle-open escalation"
     );
     assert!(
         world.recycle_clear.restart_requested,
-        "the restart request stays pending while the open cycle is still inside the safe defer window"
+        "the restart request stays pending until supervisor IPC drains"
     );
-    assert_eq!(world.coverage.cycle_open_defer_escalations, 0);
-
-    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(
         world.coverage.cycle_open_defer_escalations, 1,
-        "the wedged open cycle escalates at the threshold"
+        "the wedged open cycle still records its bounded escalation"
     );
+
+    world.apply(SimCommand::MarkIpcInflight(false)).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(
         world.coverage.supervisor_restart_drain_reexecs, 1,
-        "the pending replacement reexecs in place instead of starving"
+        "the pending replacement reexecs at the first no-IPC safe checkpoint"
     );
     assert!(
         !world.recycle_clear.restart_requested,

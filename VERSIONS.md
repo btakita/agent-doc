@@ -4,6 +4,25 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.107
+
+_JetBrains plugin 0.2.330; VS Code extension 0.2.63; Zed extension 0.1.0._
+
+- **A stale route supervisor now honors replacement at the first safe no-IPC
+  checkpoint.** In-place `execve` preserves the harness child, tmux pane, and
+  durable open-cycle checkpoint, so a stale Busy/turn marker can no longer pin
+  the old binary after an accepted restart. Fresh-binary child relaunches keep
+  the real turn-boundary interlock.
+- **Supervisor replacement reporting is event-driven and requires positive
+  binary identity.** The CLI no longer sleeps and polls for eight seconds or
+  calls an unchanged old PID “proven live”; it reports pending until the
+  supervisor maps the installed binary inode.
+- **Open-document authority warming now exposes bounded readiness diagnostics.**
+  Native startup and membership changes report subscribed, pending, ready, and
+  unavailable counts, followed by one fully-warm transition. The diagnostic
+  reads only the in-memory reactive authority workers and adds no SQLite or
+  controller work to navigation.
+
 ## 0.35.106
 
 _JetBrains plugin 0.2.330; VS Code extension 0.2.63; Zed extension 0.1.0._

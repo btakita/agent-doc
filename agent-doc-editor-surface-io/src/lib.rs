@@ -102,7 +102,16 @@ struct DeferredRoot {
 struct DeferredDocumentAuthority {
     generation: u64,
     revision: u64,
+    readiness: DocumentAuthorityReadiness,
     membership: tokio::sync::watch::Sender<bool>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct DocumentAuthorityWarmReadiness {
+    subscribed: usize,
+    pending: usize,
+    ready: usize,
+    unavailable: usize,
 }
 
 /// Per-document native authority workers.
@@ -113,6 +122,7 @@ struct DeferredDocumentAuthority {
 /// Lazily state plane without editor refresh requests.
 struct DeferredDocumentAuthorityDispatcher {
     documents: Mutex<HashMap<(PathBuf, String), DeferredDocumentAuthority>>,
+    fully_warm_roots_reported: Mutex<HashSet<PathBuf>>,
     next_generation: AtomicU64,
 }
 
@@ -120,6 +130,7 @@ impl DeferredDocumentAuthorityDispatcher {
     fn new() -> Arc<Self> {
         Arc::new(Self {
             documents: Mutex::new(HashMap::new()),
+            fully_warm_roots_reported: Mutex::new(HashSet::new()),
             next_generation: AtomicU64::new(1),
         })
     }
@@ -155,11 +166,13 @@ impl DeferredDocumentAuthorityDispatcher {
             .cloned()
             .collect::<HashSet<_>>();
         let mut starts = Vec::new();
+        let mut membership_changed = false;
         {
             let mut documents = self.documents();
             documents.retain(|(document_root, document), authority| {
                 let retained = document_root != root || desired.contains(document);
                 if !retained {
+                    membership_changed = true;
                     let _ = authority.membership.send(false);
                 }
                 retained
@@ -176,14 +189,60 @@ impl DeferredDocumentAuthorityDispatcher {
                     DeferredDocumentAuthority {
                         generation,
                         revision: generation,
+                        readiness: DocumentAuthorityReadiness::Pending,
                         membership,
                     },
                 );
+                membership_changed = true;
                 starts.push((document, generation, membership_observer));
             }
         }
+        if membership_changed {
+            self.fully_warm_roots_reported
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .remove(root);
+            self.report_warm_readiness(root, true);
+        }
         for (document, generation, membership) in starts {
             self.start(root.to_path_buf(), document, generation, membership);
+        }
+    }
+
+    fn report_warm_readiness(&self, root: &Path, membership_changed: bool) {
+        let readiness = {
+            let documents = self.documents();
+            let mut readiness = DocumentAuthorityWarmReadiness::default();
+            for ((document_root, _), authority) in documents.iter() {
+                if document_root != root {
+                    continue;
+                }
+                readiness.subscribed += 1;
+                match authority.readiness {
+                    DocumentAuthorityReadiness::Pending => readiness.pending += 1,
+                    DocumentAuthorityReadiness::Ready => readiness.ready += 1,
+                    DocumentAuthorityReadiness::Unavailable => readiness.unavailable += 1,
+                }
+            }
+            readiness
+        };
+        let fully_warm = readiness.subscribed > 0 && readiness.pending == 0;
+        let newly_fully_warm = fully_warm
+            && self
+                .fully_warm_roots_reported
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .insert(root.to_path_buf());
+        if membership_changed || newly_fully_warm {
+            eprintln!(
+                "[editor-surface] document-authority warm-set root={} subscribed={} pending={} ready={} unavailable={} state={}",
+                root.display(),
+                readiness.subscribed,
+                readiness.pending,
+                readiness.ready,
+                readiness.unavailable,
+                if fully_warm { "warm" } else { "warming" },
+            );
         }
     }
 
@@ -247,6 +306,7 @@ impl DeferredDocumentAuthorityDispatcher {
                             return;
                         }
                         entry.revision = entry.revision.saturating_add(1);
+                        entry.readiness = DocumentAuthorityReadiness::Ready;
                         entry.revision
                     };
                     REGISTRY.observe_document_authority(
@@ -259,6 +319,7 @@ impl DeferredDocumentAuthorityDispatcher {
                             revision,
                         },
                     );
+                    observe_dispatcher.report_warm_readiness(&observe_root, false);
                 },
                 membership,
             )
@@ -273,6 +334,7 @@ impl DeferredDocumentAuthorityDispatcher {
                     return;
                 }
                 entry.revision = entry.revision.saturating_add(1);
+                entry.readiness = DocumentAuthorityReadiness::Unavailable;
                 entry.revision
             };
             REGISTRY.observe_document_authority(
@@ -285,6 +347,7 @@ impl DeferredDocumentAuthorityDispatcher {
                     revision,
                 },
             );
+            self.report_warm_readiness(&root, false);
         }
     }
 
@@ -296,6 +359,10 @@ impl DeferredDocumentAuthorityDispatcher {
             }
             retained
         });
+        self.fully_warm_roots_reported
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(root);
     }
 }
 

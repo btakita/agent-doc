@@ -204,18 +204,28 @@ pub fn supervisor_restart_action(
     restart_requested: bool,
     reexec_intent: bool,
     turn_boundary: bool,
+    stale_reexec_safe_checkpoint: bool,
 ) -> SupervisorRestartAction {
     if !restart_requested {
         return SupervisorRestartAction::None;
     }
+    // Re-exec replaces only the stale supervisor host; execve preserves the
+    // harness child, pane, and durable cycle checkpoint. Its authoritative
+    // safety condition is drained supervisor IPC, even if a stale turn marker
+    // disagrees. A prompt boundary must never override an active IPC handler.
+    if reexec_intent {
+        return if stale_reexec_safe_checkpoint {
+            SupervisorRestartAction::ReexecInPlace
+        } else {
+            SupervisorRestartAction::AwaitDrain
+        };
+    }
+    // A fresh-binary relaunch replaces the harness child, so it still needs the
+    // real turn boundary.
     if !turn_boundary {
         return SupervisorRestartAction::AwaitDrain;
     }
-    if reexec_intent {
-        SupervisorRestartAction::ReexecInPlace
-    } else {
-        SupervisorRestartAction::RelaunchChild
-    }
+    SupervisorRestartAction::RelaunchChild
 }
 
 #[cfg(test)]
@@ -479,9 +489,30 @@ mod tests {
     fn restart_action_drain_and_supersede_policy() {
         use SupervisorRestartAction::*;
 
-        assert_eq!(supervisor_restart_action(false, true, true), None);
-        assert_eq!(supervisor_restart_action(true, true, false), AwaitDrain);
-        assert_eq!(supervisor_restart_action(true, true, true), ReexecInPlace);
-        assert_eq!(supervisor_restart_action(true, false, true), RelaunchChild);
+        assert_eq!(supervisor_restart_action(false, true, true, true), None);
+        assert_eq!(
+            supervisor_restart_action(true, true, false, false),
+            AwaitDrain
+        );
+        assert_eq!(
+            supervisor_restart_action(true, true, false, true),
+            ReexecInPlace
+        );
+        assert_eq!(
+            supervisor_restart_action(true, true, true, false),
+            AwaitDrain
+        );
+        assert_eq!(
+            supervisor_restart_action(true, true, true, true),
+            ReexecInPlace
+        );
+        assert_eq!(
+            supervisor_restart_action(true, false, false, true),
+            AwaitDrain
+        );
+        assert_eq!(
+            supervisor_restart_action(true, false, true, false),
+            RelaunchChild
+        );
     }
 }

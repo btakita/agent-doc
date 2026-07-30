@@ -2580,10 +2580,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // `generation closed` / stale-supervisor `#fcc0` case without dropping
                 // the live turn. Checked before the opt-in auto-recycle decision so a
                 // deliberate operator restart always supersedes (no env opt-in needed).
-                // `#midturn-recycle-resume`: an open cycle still gates operator-requested
-                // replacement, but binary staleness may recycle at any turn stage once
-                // supervisor IPC drains. The execve preserves the harness child and the
-                // durable cycle checkpoint; only an active receipt handler is unsafe.
+            // `#midturn-recycle-resume`: a stale operator-requested replacement may
+            // reexec at any turn stage once supervisor IPC drains. The execve
+            // preserves the harness child and durable cycle checkpoint; only an
+            // active receipt handler is unsafe. Fresh-binary child relaunches retain
+            // the real turn-boundary and open-cycle interlocks.
                 // This prevents a long model/tool turn from pinning an obsolete supervisor.
                 // `#suprecyclespin`: an open cycle whose harness turn has already
                 // ended (we are at `turn_boundary`) but that never reached
@@ -2701,22 +2702,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         ),
                     );
                 }
-                // The cycle-open escalation gates both recycle and operator
-                // supervisor replacement. A normal open cycle still defers the
-                // true `execve`, but a never-closing cycle at a proven turn boundary
-                // must not starve the CP-authorized replacement forever; the durable
-                // checkpoint remains on disk for the fresh supervisor to adopt or
-                // redispatch.
-                let effective_cycle_open = cycle_open && !escalate_cycle_open;
-                let restart_action = supervisor_restart_action(
-                    shared.restart_requested.load(Ordering::Relaxed),
-                    shared.restart_reexec.load(Ordering::Relaxed),
-                    turn_boundary,
-                );
-                if !reexec_recycle_disabled
-                    && !effective_cycle_open
-                    && matches!(restart_action, SupervisorRestartAction::ReexecInPlace)
-                {
+            // The cycle-open escalation remains the backstop for ordinary recycle
+            // and fresh-binary child relaunch. Stale in-place replacement instead
+            // uses the no-IPC safe checkpoint below: execve preserves both the
+            // child and durable cycle, so a stale turn marker cannot starve it.
+            let effective_cycle_open = cycle_open && !escalate_cycle_open;
+            let stale_restart_safe_checkpoint =
+                stale_recycle_safe_checkpoint(supervisor_stale, inflight);
+            let restart_action = supervisor_restart_action(
+                shared.restart_requested.load(Ordering::Relaxed),
+                shared.restart_reexec.load(Ordering::Relaxed),
+                turn_boundary,
+                stale_restart_safe_checkpoint,
+            );
+            if !reexec_recycle_disabled
+                && (!effective_cycle_open || stale_restart_safe_checkpoint)
+                && matches!(restart_action, SupervisorRestartAction::ReexecInPlace)
+            {
                     #[cfg(unix)]
                     {
                         let candidate_notes = supervisor_reexec_candidates()
@@ -2881,10 +2883,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // window. Off a safe checkpoint the recycle defers to the next tick and
                 // re-checks — it still fires mid-turn (no wait for the full turn
                 // boundary), just at the earliest point that cannot corrupt in-flight IO.
-                let inflight_handlers = agent_doc_ipc_io::inflight_connection_handlers();
-                let at_safe_checkpoint = inflight_handlers == 0;
-                let stale_safe_checkpoint =
-                    stale_recycle_safe_checkpoint(supervisor_stale, inflight_handlers);
+            let inflight_handlers = inflight;
+            let at_safe_checkpoint = inflight_handlers == 0;
+            let stale_safe_checkpoint = stale_restart_safe_checkpoint;
                 let write_wedged = wedge_needs_recycle && at_safe_checkpoint;
                 let editor_delivery_stale =
                     stale_editor_replica_requested && at_safe_checkpoint;
@@ -2915,11 +2916,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         ),
                     );
                 }
-                let recycle_action = supervisor_recycle_action(
-                    supervisor_stale,
-                    recycle_auto_enabled,
-                    turn_boundary || stale_safe_checkpoint,
-                    head_pending,
+            let recycle_action = supervisor_recycle_action(
+                supervisor_stale,
+                recycle_auto_enabled,
+                // A nominal prompt boundary cannot override an active supervisor
+                // IPC handler. The live handler count is the authoritative I/O
+                // safety fact for both ordinary and stale recycle.
+                (turn_boundary && at_safe_checkpoint) || stale_safe_checkpoint,
+                head_pending,
                     explicit_admin_recycle,
                     write_wedged,
                     editor_delivery_stale,

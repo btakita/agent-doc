@@ -170,15 +170,15 @@ Live on the installed binary, not just the suite: `tsift init` on the tsift repo
 CI is **in progress** on `1ed8f68` at the time of writing (run `30569395251`); the preceding commit was green, and the above is local evidence.
 
 `#astgrepexec` is unchanged — still blocked on per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search`, which is the same dependency that makes the 20 new grammars a structural-only tier.
-<!-- agent:boundary:5aef5cb4 -->
+<!-- agent:boundary:16802cce -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go priority -->
-- 🚧 do [#crosslanguageconformance]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ⏭️ do [#crosslanguageconformance]
 - ~~do [#tsiftnavrunbook]~~
-- do [#astgrepexec]
+- 🚧 do [#astgrepexec]
 - release + publish
 <!-- /agent:queue -->
 <!--
@@ -188,8 +188,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#crosslanguageconformance] Please add a cross language conformance suite, to ensure consistent behavior across all supported languages.
-- [ ] [#astgrepexec] Register semantic-edit executors for languages that have an ast-grep grammar but no executor (kotlin and bash today, plus whatever #astgreplangs adds) so structural_rewrite and the symbol-resolved intent kinds reach them. Blocked on per-language tag queries + symbol extraction in tsift-graph/tsift-search
+- [ ] [#crosslanguageconformance] Please add a cross language conformance suite, to ensure consistent behavior across all supported languages.
+- [ ] 🚧 [#astgrepexec] Register semantic-edit executors for languages that have an ast-grep grammar but no executor (kotlin and bash today, plus whatever #astgreplangs adds) so structural_rewrite and the symbol-resolved intent kinds reach them. Blocked on per-language tag queries + symbol extraction in tsift-graph/tsift-search
 <!-- /agent:backlog -->
 
 ## Review

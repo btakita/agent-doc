@@ -245,6 +245,11 @@ The agent-doc repair is therefore live-verified as well as test-verified and rel
 
 ### Re: Compact Exchange, Run Agent Doc, and tmux sync queue resolution — gpt-5
 
+> **Queue prompt:**
+>
+> Compact Exchange error: "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: waiting for the pre-write editor delivery barrier for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: visible document write for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md deferred: editor delivery remained unacknowledged after the 8000ms recovery barrier; the exact write remains retained, no secondary snapshot/commit or forced disk write was attempted. ACK replay, force-refresh, and build-skew recovery were requested automatically; if the editor listener cannot hot-reload, reload the IDE host and retry the existing operation". Also Run Agent Doc did not do anything. I'm manually running agent-doc.
+
+
 > **Queue prompt:** Compact Exchange retained-write delivery timed out; Run Agent Doc did nothing; tmux pane auto-sync did not converge.
 
 Resolved and released in agent-doc `0.35.93` / JetBrains `0.2.322`.
@@ -254,13 +259,24 @@ Compact Exchange no longer gates exact editor-visible delivery ACK on template v
 Run Agent Doc closeout now evaluates ownership through the routed document actor pane instead of ambient `TMUX_PANE`. Ordinary native document, projection, editor-surface, and tmux calls are isolated from the poisonable native-generation lifecycle lease, so one blocked call cannot disable unrelated reactive ingress or pane synchronization.
 
 Live proof after restart: plugin `0.2.322` registered both affected documents, the retained Lazily plan replayed exactly once, the main closeout committed successfully, and no new generation-poison event appeared. Tests, full check, full install, PyPI publication, GitHub release, and repository integration all completed. No forced disk write, duplicate operation, operator save, or user-owned Zed WASM mutation occurred.
-<!-- agent:boundary:48fbeda4 -->
+### Re: fully reactive agent-doc closeout and retained reconnect repair
+
+Fixed, installed, live-verified, and released.
+
+The broad reactive repair shipped in agent-doc `0.35.93` / JetBrains `0.2.322`: editor buffers remain authoritative even when unsaved; Compact Exchange delivery is independent of template validity; Run Agent Doc routes through the document-owned actor; tmux synchronization and ordinary native ingress are isolated from lifecycle lease poisoning; template validation is lifecycle-scoped reactive state; and the development harness now requires reactive-plane-first internal models, event-channel-first ingress, bounded polling/RPC only at external boundaries, and extraction of derived validation/readiness/authority/retry facts into `Computed`s. The Lazily ingress-primitives implementation plan is recorded once as `#designimplementtransport`, scheduled after this build/test/install feedback.
+
+Agent-doc `0.35.94` fixed the queued `#unpaidoutsideactivity` defect. `write --commit --backlog-only --done` uses the same atomic done-and-reap path for best-effort commits as required commits, so a hook-captured committed response plus a late `--done` no longer leaves a checked row for `guard_completed_pending_reap` or requires another preflight/repair cycle. The recovery regression covers that exact shape.
+
+The restarted IDE then exposed one more contributing factor. The retained write had already converged byte-for-byte in the authoritative editor with `delivery_converged=true`, but settlement rejected the typed post-delivery projection-rebase intent for missing operator-cut lineage before evaluating the exact target proof. Agent-doc `0.35.95` now treats the typed target hash plus byte-exact canonical editor content as a reactive source proof that may enter the existing live-editor, delivery, native-save, and disk-equality checks. It does not clear the intent or write disk by itself. Unknown/legacy semantic rebases still fail closed and require operator-cut lineage.
+
+The live retained `agent-doc-bugs2.md` projection settled after the 0.35.95 native reload through the editor-save effect. Session-check then reported only the original admitted cycle awaiting this response, proving the delivery wedge was gone. The operator was not required to save, force disk, reload the document, or submit a duplicate finalize.
+
+Verification passed: the focused positive reconnect regression, the negative arbitrary-semantic-rebase regression, the 107-test realtime crate suite, and full `make check` with 8,386 passed / 242 skipped plus successful TLC model checks. `make install-full` installed CLI/native `0.35.95` and retained JetBrains plugin `0.2.322`; the running endpoint accepted the reload. PyPI and the GitHub release are published at https://github.com/btakita/agent-doc/releases/tag/v0.35.95. Source commit `46edd44c4` and parent integration commit `71aea6a7d` are pushed; the single required CI observation was queued and was not polled. The release archive SHA-256 is `c1b354a1d841a9e81d1be30824d171fc05740bc37c1b470d5de03afbddaab89d`. The user-owned untracked `editors/zed/extension.wasm` was preserved.
+<!-- agent:boundary:b5032b24 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Compact Exchange error: "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: waiting for the pre-write editor delivery barrier for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: visible document write for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md deferred: editor delivery remained unacknowledged after the 8000ms recovery barrier; the exact write remains retained, no secondary snapshot/commit or forced disk write was attempted. ACK replay, force-refresh, and build-skew recovery were requested automatically; if the editor listener cannot hot-reload, reload the IDE host and retry the existing operation". Also Run Agent Doc did not do anything. I'm manually running agent-doc.
-- do [#implementlazilyintent]
 - do [#unpaidoutsideactivity]
 <!-- /agent:queue -->
 

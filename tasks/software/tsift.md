@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 879b4a73-62f4-41ee-b53a-ec5438d7faf5
+resume: b8a61422-b7ed-4cdd-80a6-c793c56e04df
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -401,14 +401,52 @@ Live check on a real Godot script after `cargo install`:
 Nested `class Inventory` and its `add` method, `@export var health`, and `@onready var sprite` all index and resolve by name.
 
 CI run `30584918454` for `5866ee3` was still in progress at closeout; local `make check` is the evidence here.
-<!-- agent:boundary:bd272be7 -->
+
+### Re: Plan to for rename_symbol — opus-5
+
+> **Queue prompt:** Plan to for rename_symbol.
+
+Plan written: **`tasks/software/plan-tsift-rename-symbol-ast.md`** (committed `3ab27a5d2`), with four phase-scoped backlog ids `#tsrenameast1`–`#tsrenameast4`.
+
+Before planning I probed the current implementation live against installed `tsift 0.1.78`, and it is worse than the session doc records. `rename_symbol` is a **substring scan, not an AST edit** — `replace_rust_identifier` (`semantic_edit.rs:2047`) walks `content.match_indices(old)` with a neighbouring-char guard and never parses at all; `replace_script_identifier` parses before and after, which only proves the file still *parses*, not that the rename landed in the right place.
+
+Three defects, all reproduced:
+
+**1 — it renames inside string literals and comments.**
+
+    /// Doc comment mentioning widget_count on purpose.
+    pub fn widget_count() -> usize { 3 }
+    ...
+        // widget_count in a line comment
+        let label = "widget_count";
+
+All four became `gadget_count`, reported `applied=1 conflicts=0`. The string-literal case is a silent behaviour change — that value could be a serialization key or a config lookup.
+
+**2 — the reported range is wrong.** Same run reported `range: 2-2` while the diff spanned lines 1–9. The bounded diff preview is describing an edit that isn't the edit.
+
+**3 — rename is per-file, so it breaks every caller.** Definition in `lib.rs`, `use crate::widget_count;` + call in `caller.rs`. After rename: `lib.rs` has `gadget_count`, `caller.rs` still imports and calls `widget_count`. `planned=1 applied=1 conflicts=0`, and the tree does not compile. This is the one that matters most — **tsift already has the call graph that knows which files reference the symbol, and the rename doesn't consult it.**
+
+**4 — it doesn't generalize.** Each family hand-rolls its own scan, so `rename_symbol` exists for Rust, Python and the JS-like family only. bash, zig, and now gdscript are refused — an artifact of the implementation, not a real constraint. (The *structural-only* refusal is genuine and stays.)
+
+The plan's core observation is that the graph tier already computes what a rename needs: `symbol_query` finds definitions, `call_query` finds call sites, the index stores byte spans. A correct rename is a span rewrite over identifier nodes — comments and strings are different node kinds, so they drop out *by construction* rather than by a special case. Per-language cost drops to one identifier-node-set entry.
+
+Phases: **1** AST occurrence collection, deleting both scans and fixing the range as a side effect; **2** cross-file rename through the call graph, all-or-nothing, refusing (and naming the site) where the graph can't prove same-symbol — a rename that silently renames the wrong `add()` is worse than one that declines; **3** open it to every indexed language, with conformance rows asserting renamed *and untouched* positions; **4** the end-to-end structural-only refusal test, which only becomes reachable once an indexed language could otherwise fall through — closing the honest gap recorded earlier in this document.
+
+Phases 1 and 2 are independently landable and each fixes a live correctness defect. Phase 1 is the highest value per unit of work: it stops tsift from silently editing string literals.
+
+Note: this is a plan only — no rename code changed this cycle. The four ids went into the go queue, so they'll drain as implementation work on the next passes.
+<!-- agent:boundary:725e5bca -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- do [#tsrenameast1]
+- do [#tsrenameast2]
+- do [#tsrenameast3]
+- do [#tsrenameast4]
 - ~~Add support for gdscript.~~
-- Plan to for rename_symbol.
+- ~~Plan to for rename_symbol.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -417,6 +455,10 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tsrenameast1] #tsrenameast1 rename_symbol phase 1 — AST occurrence collection: replace the substring scans in replace_rust_identifier/replace_script_identifier with tree-sitter identifier-node collection so string literals and comments stop being renamed, and report the true multi-line range. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
+- [ ] [#tsrenameast2] #tsrenameast2 rename_symbol phase 2 — cross-file rename via the call graph: resolve referencing files from call edges and emit one all-or-nothing multi-file patch; refuse (naming the site) where the graph cannot prove the reference is the same symbol. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
+- [ ] [#tsrenameast3] #tsrenameast3 rename_symbol phase 3 — open rename_symbol to every indexed language (bash, zig, gdscript) via a per-language identifier-node-set entry plus conformance fixture rows asserting renamed AND untouched positions. Depends on #tsrenameast1. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
+- [ ] [#tsrenameast4] #tsrenameast4 rename_symbol phase 4 — add the end-to-end test for the structural-only rename_symbol refusal, reachable for the first time once an indexed language could otherwise fall through. Depends on #tsrenameast3. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
 <!-- /agent:backlog -->
 
 ## Review

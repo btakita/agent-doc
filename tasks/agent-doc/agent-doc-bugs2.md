@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019fb36c-ad2b-7491-bd1c-b5990e4f42f6
+resume: 019fb3be-35ab-7e01-8a55-a3bee05ea75c
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -40,11 +40,45 @@ Closed stale queued #5qjj as superseded; preserved unproven current-plugin UI pr
 Compacted content:
 - Archived 21 response topic(s): Response; Response; `#5qjj` operator verification: restart confirmed, aggregate UI proof still pending; 18 more
 - Prior summary/context: prior compacted content: Archived 30 response topic(s): Live Sync Tmux Layout crash verification; #60ev and Compact E...
-<!-- agent:boundary:bf1b6da5 -->
+
+### Re: equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors. — gpt-5
+
+Implemented and installed the remaining fixes. The stale Equity Funding Source queue copy was not a strike-parser failure: the first cleanup changed only the disk replica, while the editor/CRDT canonical still contained the eleven-line tail below `&lt;!-- /agent:done --&gt;`; the next authoritative write therefore restored it. Older releases had guards that detected the resulting shadow backlog, but they did not automatically remove proven-redundant terminal debris through the authoritative convergence path.
+
+The binary now recognizes only provably redundant terminal debris—same-id managed copies, exact/subline duplicates, auto-struck lines, incomplete checklist stubs, and bare capture/hash identifiers—and fails closed on unique text. Preflight and closeout maintenance prune that debris before the shadow-backlog guard, update the snapshot, and persist the deletion through editor/CRDT convergence rather than a disk-only write. Regression coverage reproduces the restoration case and proves that unique operator text is preserved.
+
+Document authority and editor responsiveness were also moved to the requested reactive architecture:
+
+- Each open document has a stable dependency reactive whose `None` state means unavailable; the current-document authority is a Computed over the selected-document Source and that document's authority Source. The first authority publication can no longer be missed when the Computed exists first.
+- The controller projects model actor state and closeout state from Lazily Sources/Computeds. SQLite and filesystem recovery remain off the editor hot path.
+- Authority delivery is a persistent local-socket push stream. Tokio blocks on socket I/O or a `watch` cancellation edge; the 250 ms retry sleep and membership polling interval are gone. Socket closure is the reconnect event.
+- Async I/O runs on a two-worker Tokio runtime. Blocking launch/readiness and other CPU/blocking work is bounded to four blocking threads.
+- The editor keeps at most 256 warm document subscriptions, ordered focused document, nearby tabs, then other open documents. Focusing a cold document admits it immediately and evicts the farthest warm entry. Controller channel headroom remains 1,024.
+- JetBrains and VS Code use the same native authority inputs and cache-only read surface. Stale latest-wins tasks are cancellable, and editor callbacks no longer wait on controller/SQLite work.
+
+Validation completed:
+
+- `make check`: 8,431/8,431 tests passed, plus all formal models.
+- JetBrains: tests and `buildPlugin` passed; plugin 0.2.328 installed into four detected IDE installations.
+- VS Code: 165/165 tests passed; typecheck/bundle passed at 0.2.63.
+- Installed CLI/native library 0.35.104 atomically; live editor reload intent delivered to both detected endpoints.
+- Equity Funding Source session-check is committed/clean, terminal debris is absent, the shadow-backlog guard passes, and normal supervisor queue continuation is armed.
+- Monster Rodholders retained cycle `cycle-1785427330207` is now committed; `#convfix-parity-signoff` is one active gated item and the queue advanced to `#ads-audit-sot-align`.
+- Prior CI runs were green. The new run for `dea58f229` is in progress; per instruction, I checked once and did not wait.
+
+Created `tasks/software/plan-lazily-dependency-reactive-availability.md` and added/pushed Lazily backlog item `#lzdependencyavailability` for a first-class per-key dependency-reactive availability primitive across the single-threaded, thread-safe, async, and binding surfaces.
+
+Committed and pushed Agent Doc as `dea58f229` (`fix: make document authority event driven`). Committed and pushed the superproject pointer and Lazily plan as `e819466be`.
+<!-- agent:boundary:0f88a9ca -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors.
+- Idea is periodically non-responsive. Please fix thrashing in the plugin UI process. Be more efficient with calculation and move CPU heavy/bound tasks into another thread. Ensure plugin parity.
+- Run Agent Doc takes several seconds to complete. Editor -> Tmux Pane autosync performance has improved but is still slow at times. Can we have authority reactives ready for all open editor tabs...even tabs that are not currently active? Please improve performance to all issues.
+- Abstraction names should be descriptive instead of using project names. Please audit all abstraction names, particularly test names.
+- Please audit the hotpath + startup paths to ensure the systems are fully reactive. Any imperative operations should be replace by reactive operations if possible. Consolidate any "split-brain" login into cohesive reactives. Convert any magic strings or magic values into enums or consts.
 <!-- /agent:queue -->
 
 ## Notes

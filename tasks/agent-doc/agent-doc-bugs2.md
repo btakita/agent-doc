@@ -272,7 +272,35 @@ The restarted IDE then exposed one more contributing factor. The retained write 
 The live retained `agent-doc-bugs2.md` projection settled after the 0.35.95 native reload through the editor-save effect. Session-check then reported only the original admitted cycle awaiting this response, proving the delivery wedge was gone. The operator was not required to save, force disk, reload the document, or submit a duplicate finalize.
 
 Verification passed: the focused positive reconnect regression, the negative arbitrary-semantic-rebase regression, the 107-test realtime crate suite, and full `make check` with 8,386 passed / 242 skipped plus successful TLC model checks. `make install-full` installed CLI/native `0.35.95` and retained JetBrains plugin `0.2.322`; the running endpoint accepted the reload. PyPI and the GitHub release are published at https://github.com/btakita/agent-doc/releases/tag/v0.35.95. Source commit `46edd44c4` and parent integration commit `71aea6a7d` are pushed; the single required CI observation was queued and was not polled. The release archive SHA-256 is `c1b354a1d841a9e81d1be30824d171fc05740bc37c1b470d5de03afbddaab89d`. The user-owned untracked `editors/zed/extension.wasm` was preserved.
-<!-- agent:boundary:b5032b24 -->
+
+### Re: fully reactive agent-doc closeout, restart, and tmux recovery
+
+You were right about `#unpaidoutsideactivity`: the backlog row had been removed only in an uncommitted retained projection. Your editor re-add was authoritative. The stale deletion was never committed, and the recovery policy now supersedes it instead of replaying it. The operator is not required to save the document.
+
+Released agent-doc 0.35.96 with JetBrains plugin 0.2.323:
+
+- `--done` queue completion and backlog reaping are composed into one editor-authoritative target. There is no intermediate deletion-only write. The same projection emits the queue lifecycle proof into the reactive state plane.
+- Pending-only continuation retains the exact target hash, commits it only while live editor authority still matches, retires it when a newer editor cut supersedes it, and rejects/rolls back legacy deletion-only targets that do not also prove the matching queue strike.
+- Follow-on queue decisions now reread authority only when the closeout emitted the explicit reactive queue-completion fact. This prevents a second consumer from advancing an unrelated live prompt while preserving ordinary response-diff routing.
+- Template validation and other internal decisions are treated as derived reactive state. Editor/event ingress sets Sources; internal behavior composes computeds. Polling plus RPC remains valid only at non-reactive system boundaries, with an events channel preferred for ingress. The dev harness now calls out reactive-plane-over-imperative-call design and extracting Sources/reactives from computeds so dependencies remain observable.
+- The Lazily ingress-primitives design/implementation plan is queued once as `#designimplementtransport`, deliberately after this test/install cycle so it can incorporate these lessons.
+- Restart Agent is now a distinct command from Restart Supervisor. JetBrains and VS Code invoke `session restart-agent`; it replaces the harness child and re-resolves current frontmatter, so Codex-to-Claude switches are honored. Controller-only recycle preserves the child across stale-binary re-exec.
+- The tmux resize watcher registers for SIGWINCH before sampling geometry, then immediately samples the current pane. This closes the lost-event startup race that produced a half-width Claude PTY.
+
+Verification completed:
+
+- Full finalize integration suite: 69/69 passed.
+- Queue, backlog, cycle-state, closeout, write-runtime, supervisor, and CLI package suites passed.
+- Repository-wide `make check` passed.
+- `make install-full` passed; installed CLI is 0.35.96 and all four JetBrains targets contain plugin 0.2.323.
+- Both project controllers are fresh on the installed 0.35.96 inode.
+- The live monsterrodholders Claude child was preserved and its PTY is now 119x53, exactly matching tmux 119x53. Its pre-existing old supervisor remains preserved until its safe re-exec boundary rather than killing Claude.
+- Source commit: `805b71d9c`.
+- PyPI publication succeeded; the one-time CI check was in progress with no failure reported.
+- Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.96
+
+This closeout marks and reaps `#unpaidoutsideactivity` atomically through the fixed path.
+<!-- agent:boundary:a0516c0c -->
 <!-- /agent:exchange -->
 ## Queue
 

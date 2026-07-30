@@ -259,22 +259,63 @@ Two things I would not paper over:
 Deliverables specified: a pure `lib/tmo-api/anonymize.ts`, an offline `bin/tmo-artifact-anonymize.ts` (with an `--audit` residual-PII scan that exits non-zero), the orchestrator `bin/tmo-sandbox-clone.ts` (dry-run default, `--simulate` against `lib/tmo-sim` for a zero-risk rehearsal), and `bin/d1-staging-refresh.ts`. The clone verifies by re-capturing the sandbox and scanning **what TMO actually stored**, not just the file that was sent.
 
 **Six questions need your answer before any apply** (§7 of the plan): preserve `LoanNumber` (I recommend yes — it is the staging↔sandbox join key), attachments placeholder vs drop, purge-first vs sync-onto-existing (I recommend purge — `NewLoan`'s duplicate-`LoanNumber` behaviour is unverified), staging wipe-and-load vs additive, where the pseudonym seed lives, and whether loan amounts/rates count as sensitive (the plan deliberately preserves them, since anonymizing them removes the reason to clone live data at all).
-<!-- agent:boundary:f9dcbc66 -->
+
+### Re: draining #tmo-roster-error-still-silent and #tmo-sync-cron-failures — opus-5
+
+Both shipped as EFS `300b788d`, live on staging and production. They turned out to be one bug wearing two masks, and the root cause is documented in this repo — from 2026-07-18.
+
+**`LOS.svc/GetLoanPaymentSchedule` does not exist.** I called it against the real sandbox: HTTP 404, and the body is a WCF error page — UTF-8 BOM, `<?xml version="1.0"`, "Endpoint not found." `docs/TMO/backup.md` recorded that 404 twelve days ago, under a heading literally called *Endpoints that do not exist*, and `bin/tmo-snapshot.ts` and the backup sweep were fixed then. `tmo-sync.ts` was not, and the 15-minute cron has been calling it once per changed loan ever since.
+
+That is the whole of `#tmo-sync-cron-failures`, and it was worse than "intermittent". Production was not failing one run in two — the last four consecutive runs each re-swept **the same 28 loans**, each finished `partial`, each took ~250 seconds. A partial batch does not advance the cursor, so the next run got the same window back. It had been chewing the same 28 loans every 15 minutes.
+
+**And that is also why the log said nothing.** `res.json()` ran before the `res.ok` check, so a 404 HTML page threw a JSON `SyntaxError` and `tmo_read_error_message_` — the thing `29f27773` added last night specifically to make reads say why — was never reached. Then Workers Logs rendered that SyntaxError with its **header line dropped**, leaving `[tmo-sync] schedule fetch failed 1024` plus five minified frames and nothing else.
+
+I want to be precise about the premise in `#tmo-roster-error-still-silent`, because it was written from that log and the log was lying twice. The catch sites it named (`tmo-sync.ts` ~850-856) no longer exist — `292b52d6` removed the network roster calls hours after the item was filed. And the reason was never actually missing: `tmo_issue_` had been writing it to `tmo_sync_batches.error` in the same code path the whole time. That is where I found it, in one query:
+
+```
+Unexpected token '', "<?xml ver"... is not valid JSON     ×28, phase=payment_schedule
+```
+
+The log was the only sink that lost it.
+
+**What changed:**
+
+- **The schedule is read from the loan detail already in hand.** TMO carries it inline as a `Fields[]` entry keyed `PaymentSchedule` — an XML DataTable diffgram, documented in `docs/TMO/payment-schedule-field.md`, and the parser for it was already sitting in `tmo-api/index.ts`. `tmo_loan_payment_schedule_(loan)` is now pure, so the sweep makes one *fewer* round-trip per changed loan instead of one wasted 404. An empty result never clobbers a stored schedule.
+- **LOS reads go through `tmo_read_json_`**, which keeps the HTTP status and a readable one-line snippet of whatever TMO actually sent, with the BOM and tags stripped. A non-JSON answer can no longer erase the reason.
+- **Every `[tmo-sync]` catch site logs `error_message_(err)`, not the error object** — 16 sites, plus the three roster/lender sites in the admin path. Given how Workers Logs renders stacks, handing the console an Error is not safe.
+- **The simulator no longer implements an endpoint TMO lacks.** This is the part I would flag hardest: `lib/tmo-sim` served `GetLoanPaymentSchedule` with tidy JSON, so *every test passed while production failed 28 times a batch*. The sim was answering an error case more politely than the real service does. It now returns the real 404 XHTML page, so a caller that skips the status check fails in simulation the way it fails against TMO.
+
+I swept for the same class elsewhere: `GetBorrowers`, `GetPaymentSchedule`, `GetLoanSchedule`, `GetSchedule`, `GetLoanPayments` appear only in comments now. No live call to a nonexistent endpoint remains.
+
+**Verified live, not just green.** `bun test` 2187 pass / 0 fail across 195 files; `build` and `build:worker` clean. Nine mutations checked, each asserted against `Ran 47 tests` so nothing passes vacuously — reverting any read helper to bare `res.json()`, restoring the simulator route, dropping the empty-schedule guard, emptying the extractor, un-collapsing the body note, and un-stringifying any *individual* catch site each redden.
+
+| | staging full sweep | production full sweep |
+| --- | --- | --- |
+| before | `partial`, 25 issues, **0** schedules | `partial`, 28 issues, **0** schedules, ~250s, cursor stuck |
+| after | **`succeeded`**, 0 issues, **11** schedules | **`succeeded`**, 0 issues, **12** schedules |
+
+I forced a full sweep on both rather than wait a day for the natural one. Error-level logs since the production deploy: six, all stamped `v=a7a61fae` — the *old* build, from the 18:19:44–18:20:03 tail of the batch still draining when I deployed. Zero from `3b7d6d2d`.
+
+The number worth sitting with is the schedule count. Production has 31 loans and **not one of them has ever had a payment schedule stored** — `payment_schedule_json` was empty across the board, because the only code that could fill it called an endpoint that has never existed. It is 12 now. This was not a noisy-log fix; a feature that never once worked is working.
+
+One thing I did **not** do: `bin/tmo-backup.ts` and `bin/tmo-snapshot.ts` still say "TMO exposes no payment-schedule read" and skip schedules entirely. That is true of the HTTP surface and false of the data — the schedule is on the loan, and the sync now reads it. Backlogged as `#tmo-backup-schedule-inline` rather than folded in here, because it changes the backup artifact shape, and that artifact is exactly what `#tmo-sandbox-clone` is describing in a plan you are currently reviewing. I would rather not move that target while you are looking at it.
+
+`#tmo-sandbox-clone` stays open and untouched — it is still waiting on your answers to the six questions in §7.
+<!-- agent:boundary:f815b19c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- ~~Please plan into a file: Copy of the most recent live TMO data backup into the sandbox TMO. Please anonymize the lender + property records. Any PII should be anonymous. Create a script to copy live TMO into the sandbox TMO. Please also ensure the staging db is refreshed. Make sure you do not do any destructive operations on the production db or live TMO account. Do not execute any operations until I look at the plan and approve.~~
-- do [#tmo-roster-error-still-silent]
-- do [#tmo-sync-cron-failures]
+- 🚧 do [#tmo-sandbox-clone]
+- ~~⏭️ do [#tmo-roster-error-still-silent]~~
+- ~~do [#tmo-sync-cron-failures]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-sandbox-clone] Build the anonymized live->sandbox TMO clone + staging D1 refresh per src/equityfundingsource-dev/prds/tmo-sandbox-clone-and-staging-refresh-plan.md (EFS c484b0ee). BLOCKED ON OPERATOR: answer the six questions in plan section 7 (preserve LoanNumber, attachments placeholder-vs-drop, purge-vs-sync, staging wipe-vs-additive, pseudonym seed custody, whether amounts/rates are sensitive) before any apply. Deliverables: pure lib/tmo-api/anonymize.ts, offline bin/tmo-artifact-anonymize.ts with a fail-closed --audit residual-PII scan, bin/tmo-sandbox-clone.ts orchestrator (dry-run default, --simulate against lib/tmo-sim), bin/d1-staging-refresh.ts with a fail-closed 94-table classifier, plus offline tests mutation-checked. Nothing has been executed.
+- [ ] [#tmo-backup-schedule-inline] Capture payment schedules in bin/tmo-backup.ts and bin/tmo-snapshot.ts. Both skip schedules with the note 'TMO exposes no schedule read endpoint' (docs/TMO/backup.md, snapshot.ts:22). True of the HTTP surface, false of the data: the schedule rides inline on the loan as a Fields[] entry keyed PaymentSchedule (docs/TMO/payment-schedule-field.md), and tmo-sync.ts now reads it via tmo_loan_payment_schedule_(loan) as of EFS 300b788d - 12 of 31 production loans have one. A restored artifact currently loses every schedule, and tmo-snapshot's complete=true does not mean complete. COORDINATION: this changes the backup artifact shape, which #tmo-sandbox-clone's plan (prds/tmo-sandbox-clone-and-staging-refresh-plan.md, EFS c484b0ee) describes section by section - sequence it after that plan is approved, or update the plan in the same change.
+- [ ] 🚧 [#tmo-sandbox-clone] Build the anonymized live->sandbox TMO clone + staging D1 refresh per src/equityfundingsource-dev/prds/tmo-sandbox-clone-and-staging-refresh-plan.md (EFS c484b0ee). BLOCKED ON OPERATOR: answer the six questions in plan section 7 (preserve LoanNumber, attachments placeholder-vs-drop, purge-vs-sync, staging wipe-vs-additive, pseudonym seed custody, whether amounts/rates are sensitive) before any apply. Deliverables: pure lib/tmo-api/anonymize.ts, offline bin/tmo-artifact-anonymize.ts with a fail-closed --audit residual-PII scan, bin/tmo-sandbox-clone.ts orchestrator (dry-run default, --simulate against lib/tmo-sim), bin/d1-staging-refresh.ts with a fail-closed 94-table classifier, plus offline tests mutation-checked. Nothing has been executed.
 - [ ] [#efs-dev-vars-secret-history] Confirm .dev.vars.production / .dev.vars.staging were never committed, and rotate if they were. Both hold cleartext AUTH_SECRET and ADMIN_GLOBAL_PASSWORD; .gitignore covered '.dev.vars' but NOT the per-environment variants, so they sat untracked-but-committable until EFS 292b52d6 added '.dev.vars.*'. Run: git -C src/equityfundingsource-dev log --all --diff-filter=A -- '.dev.vars*'. If any commit ever added one, rotate AUTH_SECRET (wrangler secret put AUTH_SECRET, both envs) and ADMIN_GLOBAL_PASSWORD, and purge from history. Audit the same gap in sibling repos that copied this .gitignore.
-- [ ] [#tmo-roster-error-still-silent] Make the roster catch sites say why. EFS 29f27773 patched the five LOS READ helpers, but the failure observed live on the new build (version c50a9aaa, 2026-07-30 04:30:52Z, driver=delta) still logs '[tmo-sync] LOS lender roster failed' followed by a bare minified stack and NO reason. The catch sites at tmo-sync.ts ~850-856 do console.error('...failed', err) and rely on the platform rendering err; whatever is thrown there renders with an empty message. Stringify explicitly (err instanceof Error ? err.message : String(err)) at each of the [tmo-sync] borrower roster / LOS lender roster / loan sync catch sites and assert the reason is present. Same file-coordination caveat as #tmo-sync-declined-unpublish.
-- [ ] [#tmo-sync-cron-failures] Root-cause the TMO sync cron failures. UNBLOCKED on deploy: EFS 29f27773 is live (version c50a9aaa). CORRECTION 2026-07-30: these failures are NOT confined to the nightly full sweep - the 04:30:51Z run with driver=delta failed at 04:30:52Z with '[tmo-sync] LOS lender roster failed'. The 04:15:51Z delta run just before it was clean, so it is intermittent, roughly one run in two. Now BLOCKED ON #tmo-roster-error-still-silent: the read-error fix did not cover this path and the log still carries a bare minified stack with no reason. Production cadence: interval 15 min, full sweep every 1440 min, last full 2026-07-29 17:15:51Z. QUERY NOTE: telemetry groupBys currently return 0 groups for every field while filters and plain counts still work - use view:events over a short window, not the docs/deploy.md 2.4b group-by recipe.
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.
 <!-- /agent:backlog -->
 

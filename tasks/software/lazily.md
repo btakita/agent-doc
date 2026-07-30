@@ -82,19 +82,115 @@ Protobuf would delete the mechanism all three key guards depend on. They work by
 But the schema instinct is right, and the instrument already exists. lazily-spec has 14 JSON Schemas using `additionalProperties` and `required`, with `tests/test_schema_conformance.py` carrying both-directions stale-form rejection tests written after a real `slot_id`/base64 drift incident. Two gaps: those schemas validate the `wire` field, while every defect found in the last two cycles lived in `expect`/`expected`/`assertions`, which are entirely unschema'd; and only about 13 of 31 fixture areas have a schema at all. Filed as `#lzassertionblockschema`, marked recommended rather than actioned since it was a question, not a directive. Schema the assertion blocks and `#lzwqfixtureconfig` closes structurally.
 
 Protobuf for lazily's own *runtime* wire format is a separate and more legitimate question — but `protocol.md` already specifies a normative externally-tagged byte-array form that all nine bindings serialize, so that is a wire-break decision rather than test infrastructure. Not filed; say the word if you want it evaluated.
-<!-- agent:boundary:ad72f51a -->
+Please evaluate
+
+### Re: Please evaluate — Protobuf for lazily's runtime wire format — opus-5
+
+**First, I was wrong last cycle.** I said adopting Protobuf for the runtime wire format "is a wire-break decision rather than test infrastructure." That is not true, and the spec says so directly. `lazily-spec/README.md` § Wire Format already reads: *"Future binary codecs (bincode, postcard, protobuf) encode the same schemas — the JSON representation is normative."* Protobuf was anticipated as a **codec**, and the architecture already has the seam for it.
+
+**The seam is real and negotiated.** § Frame codecs defines a `codec` handshake field, peers fail closed if they disagree, and three codecs exist today:
+
+| codec | required | role | byte-canonical |
+|---|---|---|---|
+| `json` | MUST | the reference codec — dependency-free, human-inspectable interop floor; what fixtures, logs and receipts are written in | yes |
+| `msgpack` | MUST | negotiated cross-language binary default on any binary boundary between differing languages | **no** |
+| `postcard` | MAY | compact positional Rust/same-schema fast path | yes |
+
+The spec is careful that these are orthogonal properties: *"reference codec"* is a role, *"canonical bytes"* is a property of one codec+message. All codecs share one logical wire schema; the handshake selects only the byte encoding. Adding a fourth is additive.
+
+**So the question is not "can we" but "what would it buy".** My answer is no, not now, for three reasons.
+
+*It lands in a slot that is already occupied and already unfinished.* Protobuf is a cross-language binary codec that is **not byte-canonical** — protobuf has no canonical serialization guarantee (field ordering, non-minimal varints, unknown-field retention are all permitted). That is exactly `msgpack`'s row in the table above, including the "no" in the last column. And `msgpack` is a **MUST** that only two of nine bindings implement: `lazily-rs` and `lazily-cpp`. The other seven declare it as an explicit `carve_out` in their interop-peer handshake — honest and fail-closed, the codec-level equivalent of `KNOWN_UNCOVERED`, but a declared gap all the same. Building the second binary codec before the first one exists in seven bindings is the wrong order.
+
+*The one thing it uniquely offers is the thing this project has spent three cycles rejecting.* Protobuf's real advantage over msgpack is an IDL that **generates** codecs, which would reduce drift across nine hand-written encoder/decoders — and this repo has a documented drift incident (the `slot_id`/base64/type-discriminant form that `tests/test_schema_conformance.py` now guards). But generated code is trusted by construction, and the entire four-rung ladder exists because trusted-by-construction is what we do not accept here. Worse, generated structs are precisely the blind spot `lazily-go` found under `#lzconsumednotasserted`: an unused local will not compile, an unused *field* is silent. Codegen would move all nine bindings into that shape and put the corpus in the position of validating generated code rather than the implementation.
+
+*The costs are concentrated where this project is most constrained.* Zig has no first-party protobuf; the C++ runtime is heavy while `#lzcppwasm` is actively pursuing a narrow-include wasm-clean contract; and nine CI pipelines would gain a codegen step.
+
+**Cheaper wins are already specified and unbuilt.** `json-base64` (`#lzspecbase64`) is negotiated and cuts roughly 4× wire bloat and 3× parse cost over the canonical `json-u8` array form. Finishing `msgpack` closes a MUST. Both beat a fourth codec.
+
+**When to revisit:** if an external protobuf-speaking peer becomes a requirement — a gRPC service, something outside the family. Then add it as a negotiated fourth codec, which the handshake supports without a wire break. Even then, keep it a *codec*, not the internal representation, and do not let generated types replace the hand-written decoders the corpus validates.
+
+One finding fell out of this that outlives the question, filed as `#lzmsgpackparity`: the codec matrix is specified in prose with a MUST and a stated fixture obligation — *"every fixture's frames MUST round-trip through both json and msgpack"* — but `coverage.json` has no codec row, so the parity table cannot show that seven bindings carve it out, and the four-rung ladder cannot see it either, because every rung verifies fixture *content* replay rather than codec round-tripping.
+
+### Re: cross-project links in every lazily README — opus-5
+
+> **Queue prompt:** In the lazily-spec README.md, please link to the lazily implementation github projects + lazily-formal. Please make this a good place to refer people to. Repeat the cross-project links for all lazily project README.md files.
+
+Done across all twelve repos. Contract in `tasks/software/plan-lazily-cross-project-links.md`; superproject commit `78be26f19`.
+
+`lazily-spec` is now the referral page: a rewritten intro, an **Implementations** table placed between the intro and `## Feature Set` linking all nine language bindings plus `lazily-react`, a **Formal model** line for `lazily-formal`, and a cross-link from the existing `## Binding Conformance` section back to it. Every other README gained a `## The lazily family` section with the current repo bold and unlinked.
+
+**The work justified itself immediately: three hand-maintained family lists had already drifted.** The spec's own intro listed eight bindings, omitting `lazily-cs` and `lazily-react`; `lazily-py` listed four; `lazily-js` listed six. Its `## Feature Set` preamble also said eight bindings while the generated table has nine columns. Those were completed in place rather than duplicated.
+
+Two link defects were found and one fixed: `lazily-react` opened by linking `@lazily-hub/lazily-js` as the relative path `../lazily-js`, which resolves only inside a workspace checkout and was dead on GitHub — fixed. `lazily-zig` line 7 still links `lazily-py` under the old `btakita/` namespace; it redirects, so I left it and filed it.
+
+Two structural decisions worth recording. **`lazily-html` and `lazily-interop` are excluded** — their remotes point at `btakita/agent-loop`, not `lazily-hub`, and `gh` confirms no such repos exist under the org, so linking them would have produced dead links. And **no install instructions were invented**: several registry publishes are blocked or in flight, so every install line in all twelve READMEs is pre-existing text. In `lazily-py` that meant dropping a stale `Package` column rather than inventing registry cells for six new rows or leaving six em-dashes that read as "unpublished".
+
+`lazily-react` and `lazily-formal` are described as what they are rather than as peer bindings — React/Preact hooks layered over `lazily-js`, and the Lean 4 model that sits under the family with the bindings as its consumers.
+
+Verified independently of the agents: every README links exactly 11 of the 12 family repos, none links itself, `lazily-html`/`lazily-interop` appear nowhere, and all twelve repos are public. Every repo's own gate is green, including the four conformance guards now running in CI. The two previously-empty GitHub descriptions on `lazily-js` and `lazily-kt` were also filled in, so the org listing no longer shows blanks.
+
+### Re: do [#lzguardsnotinci] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzguardsnotinci]
+
+
+Re-recording this closeout: the previous cycle's response was captured but never persisted, because the delivery replay landed it outside the exchange component and duplicated the boundary marker, which hard-fails the integrity gate. The git work had already landed; only the document bookkeeping was lost. Superproject commit `2c13adf63`.
+
+All four rungs now run in CI in every binding. The correct frame turned out to be **per-rung, not per-binding**: guards that execute inside the test binary (dart `addTearDown`, go `t.Cleanup`, rs `Drop`, cpp `finish()`, cs `XunitException`, py `pytest_sessionfinish`) were already enforced anywhere the suite ran, while guards that run as a separate script step were enforced almost nowhere. Rung 1 ran in CI in 2 of 9 bindings before, rung 4 in 2 of 9; both are now 9 of 9.
+
+In rs, go, dart and cpp those two rungs were dead **twice over** — the script step was absent *and* the evidence env vars were unset, so the recorders early-returned and CI produced no evidence at all. Adding the script alone would have pointed each guard at a file nothing ever wrote.
+
+Every binding proved it by pushing a `ci-guard-probe` branch with a deliberate defect and confirming CI went red *for the guard reason*, then deleting the branch. In every run the suite itself stayed green — js 573 pass / 0 fail / 0 skipped, cs 238 passed, cpp ctest 52/52, go `go test` plus `-race`, dart analyze plus test. rs's probe is the clearest illustration of why there are four rungs: it disabled the sole replayer of a scenario in a fixture a sibling test still opens, so rung 1 stayed green because the file was opened, rungs 2–3 saw nothing because an unreplayed scenario contributes no key, and only rung 4 caught it.
+
+Requiring a probe on the two bindings that already looked compliant paid off. zig needed no change and is now proven rather than assumed. But kt had a real defect behind its green: rungs 2 and 3 *did* fail CI correctly, yet Gradle's default console prints only the failing test name, so the diagnostic naming the fixture and the offending key went to the HTML report and nowhere else — a guard whose reason is invisible is most of the way back to no guard.
+
+rs had the largest hole beyond the two rungs: 13 feature-matrix invocations that `make check` runs and CI did not, several of which compile to "running 0 tests" under narrower feature sets, so rungs 2 and 3 were only partially enforced there despite living inside the test binary.
+
+Filed from that work: `#lzvacuousrun` (guards report green over a run that opened zero fixtures — py verified and fixed it, cpp is already immune via its `MIN_` floors), `#lzinteroppeerci`, and `#lzbenchbudgetheadroom`.
+> **Queue prompt:**
+>
+> do [#lzguardsnotinci]
+
+
+> **Queue prompt:**
+>
+> do [#lzguardsnotinci]
+
+
+
+### Re: do [#lzguardsnotinci] — opus-5
+
+Re-recording this closeout: the previous cycle's response was captured but never persisted, because the delivery replay landed it outside the exchange component and duplicated the boundary marker, which hard-fails the integrity gate. The git work had already landed; only the document bookkeeping was lost. Superproject commit `2c13adf63`.
+
+All four rungs now run in CI in every binding. The correct frame turned out to be **per-rung, not per-binding**: guards that execute inside the test binary (dart `addTearDown`, go `t.Cleanup`, rs `Drop`, cpp `finish()`, cs `XunitException`, py `pytest_sessionfinish`) were already enforced anywhere the suite ran, while guards that run as a separate script step were enforced almost nowhere. Rung 1 ran in CI in 2 of 9 bindings before, rung 4 in 2 of 9; both are now 9 of 9.
+
+In rs, go, dart and cpp those two rungs were dead **twice over** — the script step was absent *and* the evidence env vars were unset, so the recorders early-returned and CI produced no evidence at all. Adding the script alone would have pointed each guard at a file nothing ever wrote.
+
+Every binding proved it by pushing a `ci-guard-probe` branch with a deliberate defect and confirming CI went red *for the guard reason*, then deleting the branch. In every run the suite itself stayed green — js 573 pass / 0 fail / 0 skipped, cs 238 passed, cpp ctest 52/52, go `go test` plus `-race`, dart analyze plus test. rs's probe is the clearest illustration of why there are four rungs: it disabled the sole replayer of a scenario in a fixture a sibling test still opens, so rung 1 stayed green because the file was opened, rungs 2–3 saw nothing because an unreplayed scenario contributes no key, and only rung 4 caught it.
+
+Requiring a probe on the two bindings that already looked compliant paid off. zig needed no change and is now proven rather than assumed. But kt had a real defect behind its green: rungs 2 and 3 *did* fail CI correctly, yet Gradle's default console prints only the failing test name, so the diagnostic naming the fixture and the offending key went to the HTML report and nowhere else — a guard whose reason is invisible is most of the way back to no guard.
+
+rs had the largest hole beyond the two rungs: 13 feature-matrix invocations that `make check` runs and CI did not, several of which compile to "running 0 tests" under narrower feature sets, so rungs 2 and 3 were only partially enforced there despite living inside the test binary.
+
+Filed from that work: `#lzvacuousrun` (guards report green over a run that opened zero fixtures — py verified and fixed it, cpp is already immune via its `MIN_` floors), `#lzinteroppeerci`, and `#lzbenchbudgetheadroom`.
+<!-- agent:boundary:588c1cbe -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzguardsnotinci]
+- do [#lzbenchbudgetheadroom]
+- do [#lzinteroppeerci]
+- do [#lzmsgpackparity]
+- do [#lzreadmelinkrot]
+- do [#lzvacuousrun]
 - do [#lzscenariobodyskip]
 - do [#lzspecscenarioids]
 - do [#lzassertionblockschema]
 - do [#lzdependencyavailability]
-- ~~📌 do [#lzscenariocoverage]~~
-- ~~do [#lzconsumednotasserted]~~
 - 📌 do [#lzcpptranscribedrunners]
 - 📌 do [#lzreactdtsgate]
 - 📌 do [#lzegress]
@@ -108,7 +204,11 @@ Protobuf for lazily's own *runtime* wire format is a separate and more legitimat
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzguardsnotinci] SIX OF NINE bindings never run the conformance guards in CI, so three rungs of guard work are enforced only on a developer's machine. Verified this cycle by reading every workflow: lazily-rs, lazily-go, lazily-js, lazily-cs, lazily-cpp and lazily-dart run the test binary directly (cargo test, go test, npm test, dotnet test, ctest, dart test) and never invoke make check, which is where check-conformance-coverage.sh and the scenario/assertion-key guards actually live. Only lazily-py, lazily-kt and lazily-zig reference a guard from CI. This means the fixture-manifest guard from #lzcoverageaudit, the unconsumed-key guard from #lzassertunknownkeys, the unasserted-key guard from #lzconsumednotasserted and the new scenario ledger are all local-only in two thirds of the tree - a guard CI never runs is a guard that rots, and the whole point of these rungs is that a green suite is not evidence. Wire the guard step into each of the six workflows, then mutation-check by pushing a branch with a deliberately skipped scenario and confirming CI reddens. Do not assume make check is the right hook everywhere: lazily-go's CI deliberately splits vet/build/test/race steps, so match each binding's existing shape.
+- [ ] [#lzmsgpackparity] msgpack is a spec MUST for frame codecs and is implemented in only two of nine bindings. protocol.md marks it MUST as the negotiated cross-language binary default on any binary boundary between differing languages, and further states that every fixture's frames MUST round-trip through both json and msgpack for all three IpcMessage variants. Actual state, verified by reading every binding: lazily-rs and lazily-cpp implement it (rs across ipc.rs, ffi.rs, reliable_sync.rs; cpp has include/lazily/codec.hpp and msgpack.hpp). The other seven - py, go, kt, js, cs, zig, dart - mention msgpack in exactly one place each, their interop-peer handshake, where they declare it as an explicit carve_out. That is honest and fails closed, and is the codec-level equivalent of KNOWN_UNCOVERED, so this is a declared gap rather than a hidden one. The problem is that it is invisible where every other parity fact lives: coverage.json has no codec row at all, so the feature matrix cannot show that a MUST-level codec is carved out by seven bindings, and the conformance ladder cannot see it either because all four rungs verify fixture CONTENT replay, not codec round-tripping. Add a codec row per flavor to coverage.json, then add a round-trip conformance obligation so the json/msgpack requirement is actually tested rather than asserted in prose.
+- [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.
+- [ ] [#lzinteroppeerci] The conformance guards are now enforced in CI everywhere, but they are not the only local-only gate - make check runs more than CI does in several bindings. Flagged independently by three agents while closing #lzguardsnotinci: lazily-go's make check runs test-interop-peer (go run -race ./cmd/lazily-interop-peer --self-check) which CI does not; lazily-js's make check runs npm run test:interop-peer which CI does not; lazily-dart's make check runs test-interop-peer and stdlib-browser-check which CI does not. These are not conformance rungs, which is why they were left alone, but they are the same category of defect - a check that only ever runs on a laptop is a check that rots, and the interop peer is precisely the cross-binding wire-compatibility gate that matters most when nine bindings must agree. Related and worth folding in: lazily-zig's make check covers only the default toolchain, while the three pinned toolchains are separate mise run targets outside check, so the pinned-toolchain matrix is CI-only in the other direction. Audit every binding's make check target against its CI workflow, list every target CI does not reach, and wire in the ones that are real gates.
+- [ ] [#lzbenchbudgetheadroom] The lazily-rs benchmark budget gate is flaking on runner scheduling because several budgets have almost no headroom. Observed twice while closing #lzconsumednotasserted and #lzguardsnotinci: thread_safe_contention_batched_write_bursts_16 failed with lock_acquisitions 17 against a budget of 16, and thread_safe_set_cell_invalidation_independent_slot_contention_16 failed with 703 against a budget of 700 - roughly 0.4 percent headroom. Both passed on main before and after, and the gate ran green again during the README cross-link cycle, so they read as scheduling noise rather than regressions. A gate that reddens on noise trains everyone to ignore it, which is how a real regression gets waived as a flake. Decide per budget whether the metric is genuinely deterministic - a lock-acquisition count under contention probably is not - and either give the nondeterministic ones headroom proportional to their observed variance, or measure them in a way that removes the scheduling dependence. Record the observed spread rather than guessing a margin.
+- [ ] [#lzreadmelinkrot] [recommended] Two small README link defects survived the family cross-linking pass, plus one log-noise issue, all found while doing it. First, lazily-zig README line 7 links lazily-py as github.com/btakita/lazily-py, the pre-lazily-hub namespace; GitHub redirects it so it is not dead, but it is the last non-canonical family link in the tree and it will break if that redirect is ever reclaimed. Second, lazily-react's opening paragraph linked @lazily-hub/lazily-js as the relative path ../lazily-js, which only resolves inside a workspace checkout and was dead on GitHub - already fixed in that pass, but it is worth a repo-wide sweep for other relative cross-repo links, since relative links never resolve across repositories. Third, lazily-zig's make check prints a bare failed command line mid-run while the target still exits 0 and every subsequent step passes, which makes a green gate read as red and is exactly the kind of noise that trains people to skim past a real failure. None of the three is urgent; all three are cheap.
 - [ ] [#lzscenariobodyskip] The scenario ledger books a scenario at the point the iteration helper YIELDS it, which cannot distinguish a body that ran from one that skipped past. lazily-py proved this empirically against the contract's own probe: with yield-time booking, a continue at the top of the loop body still booked the scenario and rung 4 stayed silent. lazily-kt independently flagged the same thing, and lazily-js hit a live instance - the anchored scenario of collections stableid_alignment.json matched neither arm of an if/else dispatch chain and replayed nothing, invisible to rungs 2 and 3 because key records are keyed by fixture plus block plus key, so a sibling scenario had already marked expect key_equal asserted for the whole file. lazily-py has the reference fix: yield a view that books on first read of the scenario PAYLOAD (steps, ops, frames, expect) and stays silent for label keys (id, name, description), which also stops a by-name lookup from booking every scenario it scans past. Port that booking rule to the other eight bindings, and give every scenario dispatch chain a fail-closed else so an unmatched shape errors instead of passing. Mutation-check with a no-op body, not just a skipped iteration.
 - [ ] [#lzspecscenarioids] The shared corpus does not identify scenarios uniformly, which forces every binding's scenario ledger to carry a positional fallback. collections mergecell_algebra.json carries three scenarios with neither an id nor a name - they are distinguishable only by their policy field - so all nine bindings now book them as position #0, #1 and #2 and print a NOTE every run. Separately, 28 fixtures identify a scenario by name while the three stdlib fixtures use id. Positional ids are fragile in exactly the way this ladder cares about: reordering the array silently rebinds every excuse and every ledger entry to a different scenario. Add a stable identifier to the mergecell scenarios and settle on one spelling across the corpus, then drop the positional fallback from the nine ledgers so the fallback cannot quietly become load-bearing. This is a shared-corpus change - a mutation probe against lazily-spec reddens every binding at once, so use a scratch copy and the fixture-dir env var rather than editing in place, and land the corpus change before the nine ledger changes.
 - [ ] [#lzassertionblockschema] [recommended] Extend lazily-spec's existing JSON Schema coverage from the wire field to the ASSERTION blocks. Raised by the operator as a question about whether Protobufs would help the key-validation work; the schema instinct is right but protobuf is the wrong instrument here, because codegen replaces the observable dynamic key access every tracker depends on with compiled struct fields, which is exactly the blind spot lazily-go found in #lzconsumednotasserted, and proto3 tolerates unknown fields by design so it would not even give rung 2. The instrument already exists: 14 schemas under lazily-spec schemas, using additionalProperties and required, with tests test_schema_conformance.py carrying both-directions stale-form rejection tests after a real slot_id and base64 drift incident. Two gaps. First, those schemas validate the wire field, while every defect found in #lzassertunknownkeys and #lzconsumednotasserted lived in expect, expected and assertions, which are entirely unschema'd. Second, roughly 13 of 31 fixture areas have a schema at all - collections, ingress, materialization, reactive-graph and temporal have none. Schema the assertion blocks and #lzwqfixtureconfig closes structurally, since visibility_timeout and max_deliveries stop being hardcoded out of band in nine runners.

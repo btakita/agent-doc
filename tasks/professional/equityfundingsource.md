@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+resume: 367579f8-dcd1-4120-820f-fd4f201c6bfd
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -54,16 +54,17 @@ Yes—there are two issues, but I found **no production Worker crash/outage sign
 > **Queue prompt:** Please look in the production logs. Are there any issues?
 
 The production audit is complete; the detailed findings are in the preceding response. I recorded the two actionable issues for follow-up: stop the anonymous public-message WebSocket authentication retry loop, and restore queryable historical Workers Logs. No application code or production configuration was changed during this diagnostic pass.
-<!-- agent:boundary:b42e1873 -->
+<!-- agent:boundary:0c011147 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Please look in the production logs. Are there any issues?
+- 🚧 do [#fixproductionissues]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#fixproductionissues] Please fix all production issues that you found.
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.
 <!-- /agent:backlog -->
 

@@ -138,7 +138,7 @@ Exit criteria: the defect-3 fixture renames both files and the result compiles.
 A second fixture with a same-named-but-unrelated symbol in a third file is
 refused with that file cited.
 
-### Phase 3 — `#tsrenameast3` — open it to every indexed language
+### Phase 3 — `#tsrenameast3` — open it to every indexed language — **DONE**
 
 With the implementation language-general, registration becomes a per-language
 identifier-node-set entry plus a fixture row. Bring bash, zig, and gdscript into
@@ -156,7 +156,30 @@ that claims `rename_symbol` with no rename fixture row is a failure, the same
 way `packages/tsift-graph/tests/conformance.rs` already treats symbol
 extraction. Fixtures assert renamed *and* untouched positions per language.
 
-### Phase 4 — `#tsrenameast4` — retire the dead guard
+**Landed**, and it took Kotlin with it — Kotlin was indexed and structural for
+the same implementation reason, so leaving it out would have been an arbitrary
+line. The new `Indexed` executor family covers Kotlin, Bash, Zig, and GDScript.
+
+Two things the phase surfaced that the plan above did not anticipate, both
+falsifying the "just add a table row" story:
+
+**Bash needed a position rule, not only a kind rule.** A bare `word` is the
+function name, the command name, *and* every unquoted argument, so `echo deploy`
+would have had the rename rewrite an argument that is data — the same defect as
+phase 1's string literal, arriving through a different door. `word` occurrences
+are restricted to the declaration and command-name positions.
+
+**Rename scope had to be keyed per language, not per family.** The phase-2
+scoping keyed on the executor family, and a single `Indexed` family would have
+had a Zig `deploy` block a rename of a Bash `deploy` — exactly the defect
+phase 2 fixed for Python vs JavaScript, reintroduced through the grouping. Each
+language in the indexed and structural tiers is now its own rename family.
+
+Zig and GDScript recognize `rename_symbol` and **not** `structural_rewrite`:
+this build has no ast-grep grammar for them, and advertising a kind that can
+only fail at match time is worse than refusing it at registration.
+
+### Phase 4 — `#tsrenameast4` — retire the dead guard — **DONE, with a correction**
 
 `tasks/software/tsift.md:358` records an honest gap: the executor-level refusal
 of `rename_symbol` for structural-only languages is asserted in unit tests but
@@ -164,6 +187,21 @@ is unreachable end to end, because an unindexed language has no symbol to
 resolve and the index layer refuses first. After phase 3 that guard becomes
 reachable for the first time (gdscript is indexed and would otherwise fall
 through), so add the end-to-end test that was impossible to write before.
+
+**The premise above is wrong, and phase 3 is why.** It assumed phase 3 would
+leave some language indexed *and* structural-only. Instead phase 3 made every
+indexed language renamable, so the structural-only tier is now defined by having
+no `tsift-graph` binding at all — which means the index layer still answers
+`no indexed symbol matched` first, and that refusal is still unreachable end to
+end. Verified live against `main.go`, not inferred.
+
+What phase 3 *did* make reachable is the same guard through a different door:
+Zig and GDScript are the first executors that recognize one kind and refuse
+another, so `structural_rewrite` on a `.zig` file now reaches the executor-level
+refusal end to end. Markdown reaches it for `rename_symbol` for the same reason.
+Both have end-to-end tests, and the structural-only case has one pinning where
+the refusal actually comes from, so a later change that moves it is noticed
+rather than read as a regression.
 
 ## Sequencing
 

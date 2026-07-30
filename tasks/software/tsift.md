@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: f81f81a1-f2aa-4dee-910a-835965b1a074
+resume: 879b4a73-62f4-41ee-b53a-ec5438d7faf5
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -360,13 +360,55 @@ One honest gap. The executor-level refusal of `rename_symbol` is asserted per la
 CI run `30577467047` is queued on `cd95daa` at the time of writing; the two preceding commits are green and the above is local evidence.
 
 Queue after this: `release + publish`.
-<!-- agent:boundary:c3f5613f -->
+
+### Re: Add support for gdscript — opus-5
+
+> **Queue prompt:**
+>
+> Add support for gdscript.
+
+
+Done — GDScript is now a first-class **indexed-tier** language in tsift. Committed as `5866ee3` (tsift) + `5e01b99a5` (superproject gitlink), pushed.
+
+**Grammar:** `tree-sitter-gdscript` 6.1.0 (crates.io, `tree-sitter-language` 0.1 / ABI 14), behind a default-on `lang-gdscript` feature wired through root `Cargo.toml` to `tsift-graph` + `tsift-search`.
+
+**Symbols** — `func`, inner `class`, `class_name`, `enum`, `signal`, `const`, `var` (including the `@export` and `@onready` forms, which the grammar gives distinct node kinds). `class_name Player` is a *statement*, not a block, but it is the name every other script refers to the file by, so it had to be a symbol.
+
+**Call edges** — all three GDScript call shapes resolve: bare `foo()` (`call`), `node.foo()` (`attribute_call`, nested under `attribute`), and the Godot-1.x `.foo()` super call (`base_call`).
+
+**Also wired:** complexity branch/loop/return query; `is_import_line` (GDScript has no `import` — the real dependency syntax is `extends`, `preload(...)`, `load("res://...")`, and I scoped the `load` match to `res://` so `downloader.load(path)` is not an import); markdown fenced-code embedding for `gdscript`; `.gd` added to the tagpath-audit, log-digest and `collect_source_files` extension sets.
+
+**Tier:** GDScript lands in Zig's tier — indexable but **not** structurally matchable, since `ast-grep-language` ships no GDScript grammar. `tsift ast-grep` and `structural_rewrite` do not reach `.gd`, and there is no semantic-edit executor for it. The `tsift-astgrep` stub feature mirrors `lang-zig = []`.
+
+**Verification** — `make check` green (67 suites, 0 failures, clippy clean, exit 0). New coverage: a conformance fixture row (that suite fails on any `Lang` variant without one), symbol-extraction and call-site unit tests, an `is_import_line` test, and a GDScript file added to the multilingual AST-navigation integration fixture so indexing is proven end-to-end.
+
+Live check on a real Godot script after `cargo install`:
+
+    $ tsift index .
+      + scripts/bullet.gd [gdscript]
+      + scripts/player.gd [gdscript]
+
+    $ tsift explain _flash .
+    _flash (function, gdscript)
+      scripts/player.gd:32
+    Callers (1):
+      take_damage (scripts/player.gd:30)
+
+    $ tsift graph take_damage --callees .
+      emit (scripts/player.gd:28)
+      _flash (scripts/player.gd:30)
+
+Nested `class Inventory` and its `add` method, `@export var health`, and `@onready var sprite` all index and resolve by name.
+
+CI run `30584918454` for `5866ee3` was still in progress at closeout; local `make check` is the evidence here.
+<!-- agent:boundary:bd272be7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#givestructuralast]
+- ~~Add support for gdscript.~~
+- Plan to for rename_symbol.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

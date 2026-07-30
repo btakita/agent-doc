@@ -2641,6 +2641,13 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             return Ok(QueueState::default());
         }
     };
+    // Text is the authoritative lifecycle surface. Persist terminal facts before
+    // any backlog sync, marker retargeting, or stale projection can reconsider
+    // these durable node identities as runnable queue heads.
+    agent_doc_queue_io::queue_consume::record_authoritative_queue_completion_state(
+        file,
+        &current_content,
+    )?;
 
     let mut entries = entries;
     let mut queue_warnings = Vec::new();
@@ -6693,6 +6700,111 @@ mod tests {
         assert!(
             active.iter().any(|text| text.contains("#stillopen")),
             "unrelated live head must stay runnable: active={active:?}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_preserves_completed_and_in_progress_heads() {
+        // A live closeout committed both lifecycle transitions, then the next
+        // maintenance pass rewrote the struck head and the in-progress head
+        // back to plain runnable rows. Reproduce the marker shapes so the
+        // generic stale-reemit fixture cannot hide a marker-specific regression.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: queue-lifecycle\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- ~~do [#completed-work]~~\n",
+            "- 🚧 do [#in-progress-work]\n",
+            "- do [#ready-work]\n",
+            "- ⏭️ do [#blocked-work]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#in-progress-work] Finish the active task.\n",
+            "- [ ] [#ready-work] Finish the ready task.\n",
+            "- [ ] [#blocked-work] Finish the blocked task.\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let entries = read_queue_entries(&doc);
+        assert!(
+            matches!(
+                &entries[0],
+                agent_doc_queue::document_queue::QueueEntry::Completed(prompt)
+                    if prompt.text.contains("#completed-work")
+            ),
+            "the completed head must remain struck: {entries:?}"
+        );
+        assert!(
+            matches!(
+                &entries[1],
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                    if prompt.text.starts_with("🚧 ")
+                        && prompt.text.contains("#in-progress-work")
+            ),
+            "the in-progress head must remain in progress: {entries:?}"
+        );
+
+        let completed_node_key = agent_doc_markdown_ast::mutations::item_nodes(&updated, "queue")
+            .unwrap()
+            .into_iter()
+            .find(|node| node.item.struck && node.item.text.contains("#completed-work"))
+            .expect("completed queue head should retain a durable node key")
+            .node_key;
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let late_selection = agent_doc_state_backbone::StateEvent::new(
+            "late-selection-after-authoritative-completion",
+            agent_doc_state_backbone::StateFact::QueueHeadSelected {
+                document_hash: document_hash.clone(),
+                node_key: completed_node_key.clone(),
+                backlog_id: Some("completed-work".to_string()),
+                prompt_text: Some("do [#completed-work]".to_string()),
+                drainable: true,
+                hosting_epoch: None,
+            },
+        );
+        agent_doc_controller_io::project_controller::append_state_event(
+            dir.path(),
+            &late_selection,
+        )
+        .unwrap();
+        let ledger =
+            agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path())
+                .unwrap();
+        let projection = ledger
+            .project_document(&document_hash)
+            .expect("completed queue state should project for document");
+        let completed_head = projection
+            .queue
+            .heads
+            .get(&completed_node_key)
+            .expect("completed queue head should be present in terminal state");
+        assert_eq!(
+            completed_head.phase,
+            agent_doc_state_backbone::QueueHeadPhase::Completed
+        );
+        assert_ne!(
+            projection.queue.active_head.as_deref(),
+            Some(completed_node_key.as_str()),
+            "a late selection must not reactivate an authoritative completion"
         );
     }
 

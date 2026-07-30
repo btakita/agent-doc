@@ -28,6 +28,14 @@ pub struct QueueWorklistEntry {
     pub drainable: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedQueueHeadProjection {
+    pub text: String,
+    pub node_key: String,
+    pub index: usize,
+    pub backlog_id: Option<String>,
+}
+
 pub fn queue_entry_do_id(entry: &QueueEntry) -> Option<String> {
     match entry {
         QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
@@ -112,6 +120,38 @@ pub fn selected_queue_head_node_key(content: &str, head_text: &str) -> Option<St
     let hash = agent_doc_hash::content_hash(trimmed);
     let short_hash = &hash[..hash.len().min(12)];
     Some(format!("queue:entry:0:{short_hash}"))
+}
+
+/// Project authoritative struck queue rows into terminal queue-head identities.
+///
+/// A queue row can become struck through response capture or an editor-origin
+/// mutation without passing through the direct queue-consumption proof path.
+/// The durable node key survives the strike, so orchestration can record the
+/// same terminal lifecycle fact before later maintenance considers selections.
+pub fn completed_queue_head_projections(
+    content: &str,
+) -> Result<Vec<CompletedQueueHeadProjection>> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
+        anyhow::anyhow!("queue completion projection: failed to parse queue nodes: {err}")
+    })?;
+    Ok(nodes
+        .into_iter()
+        .filter(|node| node.item.struck)
+        .filter_map(|node| {
+            let text = strip_in_progress_marker(&strip_priority_markers(node.item.text.trim()))
+                .trim()
+                .to_string();
+            if text.is_empty() {
+                return None;
+            }
+            Some(CompletedQueueHeadProjection {
+                backlog_id: crate::queue_response::queue_prompt_done_id(&text),
+                text,
+                node_key: node.node_key,
+                index: node.index,
+            })
+        })
+        .collect())
 }
 
 pub fn queue_worklist_hash(entries: &[QueueEntry]) -> String {
@@ -291,6 +331,28 @@ mod tests {
         assert_eq!(
             queue_worklist_hash(&entries),
             agent_doc_hash::content_hash(&document_queue::render(&entries))
+        );
+    }
+
+    #[test]
+    fn completed_projection_uses_durable_identity_for_only_struck_rows() {
+        let content = "\
+<!-- agent:queue -->
+- ~~🚧 do [#completed-work]~~
+- do [#ready-work]
+<!-- /agent:queue -->
+";
+
+        let completed = completed_queue_head_projections(content).unwrap();
+
+        assert_eq!(
+            completed,
+            vec![CompletedQueueHeadProjection {
+                text: "do [#completed-work]".to_string(),
+                node_key: "queue:0:completed-work:0".to_string(),
+                index: 0,
+                backlog_id: Some("completed-work".to_string()),
+            }]
         );
     }
 

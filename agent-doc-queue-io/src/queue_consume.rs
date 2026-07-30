@@ -6,6 +6,7 @@ use std::path::Path;
 
 use crate::queue_consumption_proof::{
     QueueConsumptionProofEffects, QueueConsumptionProofStage,
+    record_authoritative_queue_completion_state as record_authoritative_queue_completion_state_with_effects,
     record_queue_consumption_proofs as record_queue_consumption_proofs_with_effects,
 };
 use agent_doc_document::queue_projection::strip_priority_markers;
@@ -341,6 +342,14 @@ pub fn record_queue_consumption_proofs(
         file,
         plan,
         stage,
+    )
+}
+
+pub fn record_authoritative_queue_completion_state(file: &Path, content: &str) -> Result<usize> {
+    record_authoritative_queue_completion_state_with_effects(
+        &QUEUE_CONSUMPTION_PROOF_EFFECTS,
+        file,
+        content,
     )
 }
 

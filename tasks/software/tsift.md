@@ -226,16 +226,64 @@ Both direct and `obj.method()` navigation calls now resolve.
 CI on the preceding commit (`1ed8f68`, the runbook split) came back **green**; the conformance run is still in progress at the time of writing.
 
 I filed the one real gap left: the tables drive `search_source`/`rewrite_source` over in-memory buffers, but the CLI's `scan`/`codemod` path — extension dispatch across a real directory, `--apply` budgets, preview byte-identity — is still only covered for a handful of languages. Same fixture table, written to a temp tree.
-<!-- agent:boundary:9b40909f -->
+
+### Re: do [#extendcrosslanguage] — opus-5
+
+> **Queue prompt:**
+>
+> do [#extendcrosslanguage]
+
+
+Done — `tsift@942656e`, superproject `76926dcf5`. Extending the table to the file-scan path found a third defect, which is what I'd hoped for: `search_source` takes a language as an argument, and the CLI doesn't — it walks a tree and picks a grammar per extension, so the two paths can disagree.
+
+**A mixed-language tree could not be scanned with a pattern that wasn't valid everywhere.** A pattern is only ever valid for *some* grammars — I measured it across the table, and 11 of the 12 patterns in it are refused by at least one of the 28:
+
+| Pattern | Refused by |
+|---|---|
+| `foo($A)` | — (the only universal one) |
+| `foo($A);` | python, bash, elixir, go, lua, nix, ruby, scala |
+| `color: $V;` | 10 languages |
+| `void main() { print($A); }` | 11 languages |
+
+`scan` propagated that per-file error, so **one** `.py` file in the tree made a C-style pattern return nothing at all. Before the `Pattern::try_new` fix in the previous cycle it didn't error, it panicked the process. That's not an edge case — a mixed repository is the normal case for a tool whose whole point is cross-repo codemods.
+
+A file whose language can't compile the pattern is now skipped and counted, and **the skip is visible** rather than silent:
+
+```
+$ tsift ast-grep search 'foo($A);'
+a.rs:2:4: foo(1);
+1 match(es) in 1 of 3 scanned file(s) [2 file(s) skipped: pattern does not parse as go, python]
+```
+
+`files_skipped_pattern_unsupported` and `pattern_unsupported_langs` are in the JSON envelope too. **When every scanned file was skipped that way, the scan is an error, not an empty result** — otherwise a typo'd pattern reports a confident `0 match(es)`, which is the worst possible answer. Exit 1 with `no scanned language could compile the pattern ... (tried: go, python, rust)`.
+
+**The file-scan rows drive the same 28-row table through the walk**, so the two paths can't drift: extension dispatch must resolve each fixture to its *own* language with the same match count the buffer search produced; non-source decoys (`notes.txt`, a nested `.log`) are never parsed; preview leaves every file byte-identical; and `--apply` on one named file changes that file and leaves all 27 other languages and both decoys untouched.
+
+**Verification.** `make check` exit 0, 1600 passed, 0 failed (was 1595). CI is green on both preceding commits (`4a93d7f`, `e7412d0`). Live on the installed binary: the three cases above, plus a universally-valid pattern reporting zero skips.
+
+Seven mutations, each caught:
+
+- propagate the per-file error again → 3 tests fail, which is the pre-fix behaviour reproducing
+- swallow the all-refused case as an empty result → the confident-zero test fails
+- preview writes to disk → `preview wrote to ... — the whole contract is that it does not`
+- apply writes the original source back → the apply test fails
+- walk forces one grammar instead of extension dispatch → 3 tests fail
+- drop the extension filter in the walk → `rust: notes.txt was parsed`
+- rename the decoy to a real source extension → `rust: notes.rs was parsed`
+
+One process note: I reverted `conformance.rs` with `git checkout` during the mutation sweep instead of restoring from the scratch backup I'd been using for every other file, which discarded the file-scan section I'd just written. Re-added it and re-verified. The mutation that prompted it was also a no-op — its replacement string never matched, so it "passed" without testing anything; I re-ran it properly and it does fail.
+
+Queue after this: `#astgrepexec` (still blocked on per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search`) and `release + publish`.
+<!-- agent:boundary:747b3850 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#extendcrosslanguage]
-- ~~⏭️ do [#crosslanguageconformance]~~
+- ~~do [#extendcrosslanguage]~~
+- ~~do [#crosslanguageconformance]~~
 - ~~do [#tsiftnavrunbook]~~
-- 🚧 do [#astgrepexec]
+- ⏭️ do [#astgrepexec]
 - release + publish
 <!-- /agent:queue -->
 <!--
@@ -245,8 +293,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#extendcrosslanguage] Extend cross-language conformance to the CLI file-scan path: tests/conformance.rs covers search_source/rewrite_source over in-memory buffers, but tsift-astgrep::scan/codemod (extension dispatch across a real directory, --apply budgets, preview byte-identity) is still only covered for a handful of languages. Reuse the same fixture table by writing each row to a temp tree
-- [ ] 🚧 [#astgrepexec] Register semantic-edit executors for languages that have an ast-grep grammar but no executor (kotlin and bash today, plus whatever #astgreplangs adds) so structural_rewrite and the symbol-resolved intent kinds reach them. Blocked on per-language tag queries + symbol extraction in tsift-graph/tsift-search
+- [ ] [#astgrepexec] Register semantic-edit executors for languages that have an ast-grep grammar but no executor (kotlin and bash today, plus whatever #astgreplangs adds) so structural_rewrite and the symbol-resolved intent kinds reach them. Blocked on per-language tag queries + symbol extraction in tsift-graph/tsift-search
 <!-- /agent:backlog -->
 
 ## Review

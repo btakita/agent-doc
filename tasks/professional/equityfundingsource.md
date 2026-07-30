@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: b96a27c0-6e09-4e42-8e4c-bd1b42787fcc
+resume: f5d143de-3505-4c48-afed-5a8e79ff3174
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -218,11 +218,68 @@ I stopped short of implementing these because you asked which column they belong
 ### One caveat on this session
 
 The document write path was wedged for most of this cycle — `session-check` reported editor-authority/disk divergence and preflight deferred on `delivery_pending` repeatedly, with the binary explicitly refusing a forced write. The installed `agent-doc` is stale (missing `f34a32d27`), and `src/agent-doc` holds an in-flight 0.35.98 whose changelog is precisely "retained editor delivery resumes from reactive state after controller replacement". I did **not** run `make install`, because that would have shipped another session's unfinished release. It cleared on its own and this response went through the normal path.
-<!-- agent:boundary:197af512 -->
+
+### Re: Correction on the TMO cron, and the denied-deals fix is landed — opus-5
+
+> **Queue prompt:**
+>
+> do [#noticedavailabledeals]
+
+Two things: I got something wrong in the previous response, and the pipeline fix is committed and pushed.
+
+### Correction: the roster failures are not confined to the full sweep
+
+I wrote that the seven failures are roster work only the full sweep performs, and that the next evidence would arrive around 17:15Z. **That is wrong.** The 04:30:51Z run — `driver delta`, on the new build `c50a9aaa` — failed one second later:
+
+```
+04:30:52Z lvl=error  [tmo-sync] LOS lender roster failed     at sp (index.js:3163:37)
+                         at async Gd (index.js:3150:12)
+                         at async Promise.all (index 1) ...
+```
+
+The 04:15:51Z delta run immediately before it was clean. So it is intermittent, roughly every other run, and I generalized from a single clean sample. Nothing to wait until 17:15Z for.
+
+Worse, **the read-error fix did not cover this path.** That line is exactly as unreadable as before: a bare minified stack, no reason. `tmo_read_error_message_` never returns an empty string, so the throw is not coming from one of the five patched read helpers — it reaches `console.error('[tmo-sync] LOS lender roster failed', err)` as something whose message renders empty. Filed as `#tmo-roster-error-still-silent`: stringify the error explicitly at those catch sites instead of trusting the platform's rendering of a second argument. Until that lands, `#tmo-sync-cron-failures` cannot be root-caused, and I rewrote that item to say so rather than leave the full-sweep theory sitting in the backlog.
+
+### Landed: `653fe3fe`, pushed to `main`
+
+You asked which column these belong in. Answer: the one you already have. No new column.
+
+| | |
+|---|---|
+| `column_id_for_status_` | falls back to `unassigned_column_id`, not `default_column_id` |
+| `TERMINAL_DENIED_LOAN_STATUSES` | `Denied` **and** `Application Declined`, both claimed by the Application Denied column |
+| `admin_deal_status_sync_by_loan_` | a denial closes the offering instead of hitting `ELSE status` |
+
+The fallback is the one that mattered. `default_column_id` for the loan pipeline is `application-received` — the column *labeled* "Available Deals" — so every status the code did not recognize was presented as an active fundable deal. That is why `Documents` (1560 Radnor, 1561 Quail/Gregory) was sitting there too, not just the declines. Unassigned already lives inside Parked, so unknown statuses are now visible and triage-able instead of misfiled into a sales lane. `DEAL_PIPELINE` declares no unassigned column, so its behaviour is byte-identical.
+
+`2143 pass / 0 fail`, `build` and `build:worker` clean. Five mutations, all caught:
+
+| mutation | caught by |
+|---|---|
+| fallback reverted to `default_column_id` | 3 tests |
+| `Application Declined` dropped from the alias list | 5 tests |
+| denial branch no-op'd to `THEN status` | 3 tests |
+| `closed_at` clobbers an existing value | 1 test |
+| `trim()` removed from `loan_status_is_denied_` | 1 test |
+
+Two existing assertions in `admin-pipeline.test.ts` changed, both deliberately. One asserted that an unknown status falls back to the active column — it encoded the bug, so I inverted it and annotated why. The other is the `#closed-step-decouple` source-grep, which sliced a fixed 800 bytes from the function start; my comment pushed the `Funded` arm past that window, so it now slices to the end of the function instead. A fixed byte count silently stops covering what it is meant to guard.
+
+### What I deliberately did not touch
+
+`tmo-sync.ts` carries its own copy of the deal-status sync, `investment_deal_status_sync_by_loan_`, and that is the path a TMO-sourced decline actually takes — so a decline arriving *from TMO* still will not unpublish a published deal. The fix is the same three lines, but that file holds the concurrent session's ~355 uncommitted lines, so I left it alone and filed `#tmo-sync-declined-unpublish`. When it lands, the better move is deleting the duplicate and having the sync call the `repo.ts` function; two copies of this rule is how the gap appeared.
+
+Not deployed — the preset is `#spec-test-commit-push`. Say the word and I will run it the same isolated way as the last one.
+
+### Backlog housekeeping
+
+The previous cycle's write landed its response body but dropped the tracked-work mutations — the canonical target was retained after the editor replica disappeared, then sat at `write_applied` with no terminal commit until `agent-doc commit` closed it. So `#prod-fix-deploy` is only being marked done now, along with the three pipeline items and `#noticedavailabledeals`.
+<!-- agent:boundary:24008afc -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- ⏭️ do [#noticedavailabledeals]
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
+- 🚧 do [#noticedavailabledeals]
+- Do we have a state for lenders who have filled out their requirements outside of the admin portal? Could we have a checkbox or a date when the requirements were met? Please research the annual requirements by law. Is it at the beginning of the year?
 - deploy to production: [#prod-fix-deploy]
 - do [#tmo-sync-cron-failures]
 <!-- /agent:queue -->
@@ -230,6 +287,8 @@ The document write path was wedged for most of this cycle — `session-check` re
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmo-sync-declined-unpublish] Port the denial branch into the TMO sync path. EFS 653fe3fe added the terminal-denied close to admin_deal_status_sync_by_loan_ (repo.ts), but tmo-sync.ts has its OWN copy, investment_deal_status_sync_by_loan_ (~line 772 at 29f27773), which still maps only Funded and lets every other status hit ELSE status. That is the path a TMO-sourced 'Application Declined' actually takes, so a decline arriving from TMO still will not unpublish a published deal. Add the same loan_status_is_denied_ branch plus closed_at COALESCE and a test. BLOCKED ON COORDINATION: app/equityfundingsource/lib/tmo-sync.ts holds ~355 uncommitted lines from a concurrent session; do not edit it until that lands. Better still, delete the duplicate and have the sync call the repo.ts function.
+- [ ] [#tmo-roster-error-still-silent] Make the roster catch sites say why. EFS 29f27773 patched the five LOS READ helpers, but the failure observed live on the new build (version c50a9aaa, 2026-07-30 04:30:52Z, driver=delta) still logs '[tmo-sync] LOS lender roster failed' followed by a bare minified stack and NO reason. The catch sites at tmo-sync.ts ~850-856 do console.error('...failed', err) and rely on the platform rendering err; whatever is thrown there renders with an empty message. Stringify explicitly (err instanceof Error ? err.message : String(err)) at each of the [tmo-sync] borrower roster / LOS lender roster / loan sync catch sites and assert the reason is present. Same file-coordination caveat as #tmo-sync-declined-unpublish.
 - [ ] [#pipeline-unknown-status-fallback] Stop routing unrecognized loan statuses into the Available Deals column. PipelineDefinition.column_id_for_status_ (app/equityfundingsource/lib/admin/repo.ts) returns default_column_id ('application-received', labeled Available Deals) for any status not listed in a column, so five production loans render as Available Deals cards today: 1005 Gallego, 1007 Quiroz, 1568 Elmalem (Application Declined) and 1560 Radnor, 1561 Quail/Gregory (Documents, a status removed from LOAN_STATUS_STEPS). Change the fallback to unassigned_column_id so an unknown status lands in Unassigned (already inside the Parked group) instead of an active sales lane, and add a test that asserts an unrecognized status never maps to application-received.
 - [ ] [#pipeline-declined-vocabulary] Teach EFS the TMO decline spelling. LOAN_STATUS_SPECIAL and the 'denied' pipeline column (label 'Application Denied') match only the literal 'Denied', which has ZERO rows in production D1, while production actually stores 'Application Declined' (3 loans). Accept 'Application Declined' as a denial everywhere 'Denied' is recognized (column statuses, loan_status_valid_, the stepper, denied_status/denied_reason meta) so declines land in the existing Application Denied column under Parked. Verify against prod: SELECT tmo_loan_status, COUNT(*) FROM loans GROUP BY 1 on D1 7f5c1518-48fe-4ba2-8829-ead63c2a1a3f.
 - [ ] [#deal-unpublish-on-denial] Make a denial unpublish the lender-facing deal. admin_deal_status_sync_by_loan_ (app/equityfundingsource/lib/admin/repo.ts) maps only Funded->funded and funded->published; every other loan status hits ELSE status, so a loan that is declined AFTER its deal is published keeps investment_deals.status='published' and deal_viewable_ keeps it on /lenders/available-deals. No production row is exposed today (all 3 declined loans have no investment_deals row), so this is a latent hole, not a live leak. Add the terminal-negative branch plus a test that a denial removes the deal from the investor feed.
@@ -352,3 +411,5 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 [#prod-fix-deploy] [operator-verify] Deploy the production fixes and verify them live. Production still runs the pre-fix code, so the anonymous realtime 401 loop (~6,500 requests/day) is still burning. Needs operator go for two reasons: the queue preset was #spec-test-commit-push, which excludes deploy; and a whole-tree deploy from src/equityfundingsource-dev would ship a concurrent session's ~355 uncommitted lines of TMO refactor. Deploy from a CLEAN checkout at EFS 29f27773 (see reference_efs_deploy_from_main_checkout_not_fresh_install_worktree), then verify: (a) GET accounts/67b0703bb39744866efbf765e1ebcf1c/workers/scripts/equityfundingsource-production/settings reports observability.enabled true; (b) the telemetry count for /api/public/messages/realtime/ws status 401 falls toward zero over 24h (baseline 6,576 of 11,787 app requests); (c) a fresh anonymous public tab opens NO realtime socket until the first message is sent, and one immediately after. Query recipe: src/equityfundingsource-dev/docs/deploy.md section 2.4b.
 - [ ] [#tmo-sync-cron-failures] [operator-verify] Root-cause the TMO sync cron failures. All 7 error-level lines in 24h of equityfundingsource-production logs are eventType=cron from the 15-minute sync: loan sync failed on 1012 and 1014, borrower roster failed (x2), LOS lender roster failed, and GetLoanFundings failed while building the lender roster on 1005 and 1009. Blocked on #prod-fix-deploy: until EFS 29f27773 is deployed those Errors carry an empty message, so the logs cannot say what LOS returned. After deploy, re-query per docs/deploy.md 2.4b filtering $metadata.level=error and fix what the endpoint plus ErrorNumber names. Coordinate first: app/equityfundingsource/lib/tmo-sync.ts currently holds ~355 uncommitted lines from a concurrent session.
 - [ ] 
+ what the endpoint plus ErrorNumber names. Coordinate first: app/equityfundingsource/lib/tmo-sync.ts currently holds ~355 uncommitted lines from a concurrent session.
+- [ ]

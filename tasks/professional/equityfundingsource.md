@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 254409c8-f6f5-4409-aa60-eb4818ff2208
+resume: dea692e2-1ac1-45dd-913a-f10bf6518b5f
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -307,19 +307,44 @@ One thing I did **not** do: `bin/tmo-backup.ts` and `bin/tmo-snapshot.ts` still 
 Housekeeping from the previous cycle: eleven lines of merge debris sat after `&lt;!-- /agent:done --&gt;`, outside every managed component. A struck prompt, a duplicate `#prod-fix-deploy` (four live copies plus one already archived), a superseded pre-correction copy of `#tmo-sync-cron-failures`, two bare `- [ ]` stubs, three orphaned UUIDs, and a truncated fragment of `#efs-dev-vars-secret-history` whose full text is live in the backlog.
 
 The stale `#tmo-sync-cron-failures` copy is why closeout tripped `session-check`'s shadow-backlog guard the moment the live item was completed — an open item that exists only outside `agent:backlog`. It would have blocked the next cycle's preflight too. I checked each line against the live document before dropping it; nothing unique was lost.
-<!-- agent:boundary:135c2e57 -->
+
+### Re: using my recommendations for §7 — opus-5
+
+All six §7 questions are answered as recommended, and the deliverables are built, tested, committed, and pushed (EFS `8df4f5d1`, `76102757`). **Nothing has been executed** — no TMO write, no D1 write, no purge, no export. Every tool is dry-run by default and the first apply is still an explicit operator step.
+
+**The answers, now defaults in code:** preserve `LoanNumber` (the staging↔sandbox join key); attachments → `placeholder`; purge the sandbox first; staging D1 → wipe-and-load; seed at `passage btak/equityfundingsource/anonymize_seed`; `.dev.vars.*` stays out of scope as `#efs-dev-vars-secret-history`. Each is overridable by a flag, so changing your mind later is not a code change.
+
+**One exception I made on my own:** an *encumbrance's* `LoanNumber` is a third party's account number at another lender, not the EFS join key, so it is always remapped regardless of Q1.
+
+**What shipped** — `lib/tmo-api/anonymize.ts` (pure transform + residual scan), `anonymize_field_allowlist.ts` (201 of 494 reviewed descriptions kept), `hmac.ts` (synchronous SHA-256/HMAC), `sandbox_clone.ts` (the five stage gates), `lib/staging_refresh.ts` (the D1 classifier), the three CLIs, `docs/TMO/anonymize.md`, and 86 offline tests.
+
+**Against the real 2026-07-22 production artifact:** 4,672 values replaced, 3,201 fields kept, 4,681 scrubbed, 7 attachments placeholdered — **0 residual findings**, including the check that none of the 485 tracked originals survives anywhere in the output. `make check` green.
+
+**The plan was wrong about four things, and the audit found all four — not me reading it.**
+
+- **`Employments[].Position` is not a job title.** In the real corpus it is the employer name repeated verbatim on 4 of 30 borrowers, so keeping it would have re-leaked the company `Name` had just anonymized.
+- **`1003 - Title held` carries a person's name**, not a vesting code. Dropped from the allowlist along with `1003 - Manner in which Title will be held`.
+- **§6a's `HMAC(seed, table + field + original)` defeated its own stated goal.** Keying on table and field gives the same person a *different* pseudonym in `funding.FullName` than in `users.full_name` — exactly the cross-system join the shared seed exists to preserve. It is keyed on the semantic kind now. Same class of bug: splitting names into given/family pools made `LastName: "Whitfield"` disagree with the "Whitfield" inside `FullName`.
+- **A substring-matching column classifier reads fine and is wrong.** In the staging refresh, `meeting_id` contains `tin`, `confirmed` contains `firm`, `citation` contains `city` — and `tax_id` was being kept as an identifier by the `_id$` rule.
+
+I also found `schedule` and `errors` spreading through the transform untouched. Nothing leaked — TMO exposes no schedule read, so `schedule` is empty on every capture today — but `#tmo-backup-schedule-inline` is about to fill it, and a pass-through would have made that a *silent* leak instead of a visible one. Fixed in `76102757`.
+
+**What the audit cannot do, stated rather than implied:** a scrubbed number is indistinguishable from an unscrubbed one by inspection. Non-allowlisted numerics are replaced with other numbers because TMO rejects text in a money field, and no scan of a finished file can tell those apart. Coverage there is scrub-by-default plus the tests, and a standalone `--audit` run says so in its own output. Separately, the artifact being clean does not prove TMO stored it clean — stage 5 rescans the re-capture.
+
+All six mutation probes reddened the suite: allowlist keeps everything, unknown staging table copied instead of dropped, target gate never refuses, structured PII columns passed through, HMAC inner pad wrong, attachment bytes untouched.
+
+**Before the first apply, you need to do one thing:** create `passage btak/equityfundingsource/anonymize_seed`. Both tools refuse to run without it, and it must never be regenerated afterwards — a new seed re-pseudonymizes everything and silently breaks the sandbox↔staging joins. I have left the apply as a gated review item rather than guessing at your go.
+<!-- agent:boundary:cc9fc0ec -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- 🚧 do [#tmo-sandbox-clone]
-- ~~do [#tmo-roster-error-still-silent]~~
-- ~~do [#tmo-sync-cron-failures]~~
+- 🚧 do [#tmo-sandbox-clone]: Use your recommendations for §7
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-backup-schedule-inline] Capture payment schedules in bin/tmo-backup.ts and bin/tmo-snapshot.ts. Both skip schedules with the note 'TMO exposes no schedule read endpoint' (docs/TMO/backup.md, snapshot.ts:22). True of the HTTP surface, false of the data: the schedule rides inline on the loan as a Fields[] entry keyed PaymentSchedule (docs/TMO/payment-schedule-field.md), and tmo-sync.ts now reads it via tmo_loan_payment_schedule_(loan) as of EFS 300b788d - 12 of 31 production loans have one. A restored artifact currently loses every schedule, and tmo-snapshot's complete=true does not mean complete. COORDINATION: this changes the backup artifact shape, which #tmo-sandbox-clone's plan (prds/tmo-sandbox-clone-and-staging-refresh-plan.md, EFS c484b0ee) describes section by section - sequence it after that plan is approved, or update the plan in the same change.
+- [ ] [#tmo-backup-schedule-inline] Capture payment schedules in bin/tmo-backup.ts and bin/tmo-snapshot.ts. Both skip schedules with the note 'TMO exposes no schedule read endpoint' (docs/TMO/backup.md, snapshot.ts:22). True of the HTTP surface, false of the data: the schedule rides inline on the loan as a Fields[] entry keyed PaymentSchedule (docs/TMO/payment-schedule-field.md), and tmo-sync.ts now reads it via tmo_loan_payment_schedule_(loan) as of EFS 300b788d - 12 of 31 production loans have one. A restored artifact currently loses every schedule, and tmo-snapshot's complete=true does not mean complete. UNBLOCKED 2026-07-30: the clone plan is approved and built (EFS 8df4f5d1), and anonymize.ts already scrubs the schedule rows by default (EFS 76102757) so populating them cannot leak silently. Still update prds/tmo-sandbox-clone-and-staging-refresh-plan.md sections 3 and 4 in the same change, since this alters the backup artifact shape that plan describes.
 - [ ] 🚧 [#tmo-sandbox-clone] Build the anonymized live->sandbox TMO clone + staging D1 refresh per src/equityfundingsource-dev/prds/tmo-sandbox-clone-and-staging-refresh-plan.md (EFS c484b0ee). BLOCKED ON OPERATOR: answer the six questions in plan section 7 (preserve LoanNumber, attachments placeholder-vs-drop, purge-vs-sync, staging wipe-vs-additive, pseudonym seed custody, whether amounts/rates are sensitive) before any apply. Deliverables: pure lib/tmo-api/anonymize.ts, offline bin/tmo-artifact-anonymize.ts with a fail-closed --audit residual-PII scan, bin/tmo-sandbox-clone.ts orchestrator (dry-run default, --simulate against lib/tmo-sim), bin/d1-staging-refresh.ts with a fail-closed 94-table classifier, plus offline tests mutation-checked. Nothing has been executed.
 - [ ] [#efs-dev-vars-secret-history] Confirm .dev.vars.production / .dev.vars.staging were never committed, and rotate if they were. Both hold cleartext AUTH_SECRET and ADMIN_GLOBAL_PASSWORD; .gitignore covered '.dev.vars' but NOT the per-environment variants, so they sat untracked-but-committable until EFS 292b52d6 added '.dev.vars.*'. Run: git -C src/equityfundingsource-dev log --all --diff-filter=A -- '.dev.vars*'. If any commit ever added one, rotate AUTH_SECRET (wrangler secret put AUTH_SECRET, both envs) and ADMIN_GLOBAL_PASSWORD, and purge from history. Audit the same gap in sibling repos that copied this .gitignore.
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.

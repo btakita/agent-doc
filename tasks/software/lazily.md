@@ -540,20 +540,61 @@ The guards prove a key was *consumed*. They do not prove it was *asserted*, and 
 - A key can be read and discarded. dart's `collections_extra_conformance_test.dart` `continue`s and `break`s past `sibling_a_cached` and `downstream_consumer_reran`, which counts as consumed because the loop reads them. Filed as `#lzconsumednotasserted`.
 
 Also filed `#lzcpptranscribedrunners`: cpp has three runners that hand-transcribe expectations and never open a fixture, so there is no block to guard. Its coverage script honestly reports those fixtures as uncovered, but the transcribed values can drift from the corpus forever while the tests keep passing — the same defect `c103070` just removed from zig's queue family.
-<!-- agent:boundary:79f185a5 -->
+
+### Re: do [#vnmr] — opus-5
+
+Done, `lazily-rs 79def33`. You asked for both gates rather than either, so absent evidence and stale evidence are now separate failures, and the skip path is deleted rather than made louder.
+
+#### The staleness signal, and why not the two obvious candidates
+
+A **sha256 content hash of the measured sources**, recorded in `target/lazily-benchmark-evidence.json` alongside the measurement — 87 files covering `src/`, `benches/`, `macros/src/`, `Cargo.toml`, `Cargo.lock`. Per-file hashes are stored, so the failure names exactly which files moved.
+
+I had suggested a recorded commit id over mtime. The agent rejected both, and it was right about the commit id for a reason I had not thought through: **a dirty worktree is the normal development state**, so a commit id calls every uncommitted edit "current" — which is precisely the rot being gated. mtime fails differently and worse: `git clone` and `git checkout` stamp "now" on files that did not change, `touch` moves it forward while the bytes do not, and restoring a backup moves it *backwards* while the bytes differ. That last case is not hypothetical — it is the same trap that made a mutation probe report a false green earlier in this session's zig work.
+
+A content hash is correct on a fresh clone, a dirty tree, and a CI runner alike. `tests/` and `docs/` are excluded on purpose: they cannot move a counter, and including them would invalidate evidence on every test edit.
+
+#### Three states, three exit codes
+
+| state | produced by | exit |
+|---|---|---|
+| evidence absent | moved `target/criterion` aside, deleted profile + manifest | **2** |
+| evidence stale | appended a line to `src/context.rs` *after* measuring | **3** |
+| present and current | `make benchmark-evidence` | **0** |
+
+Staleness was produced by editing source after measurement, not by hand-editing the evidence, so the probe exercises the real path. The stale message names the changed file: `1 of 87 measured source files changed since the measurement: M src/context.rs`.
+
+The guard's own tests were mutation-checked too — forcing `EXIT_EVIDENCE_ABSENT = 0` fails two of them, and disabling the fingerprint comparison fails the stale one.
+
+#### The cost you asked me to price: zero added wall-clock
+
+This was the open question about whether the strictness was affordable, and the answer is better than I expected.
+
+CI gets a **parallel** `benchmark-budgets` job — separate because it compiles under the bench profile and shares no artifacts with the dev-profile `test` job. It ran 3m02s inside a run whose critical path is the 14m27s `Rust` job. Run total 14m31s against a 14m48s baseline on the parent commit: within noise. The cost is roughly **3 runner-minutes, not wall-clock**. CI run `30562220233`, all four jobs green.
+
+Locally, `make benchmark-evidence` is **48.5s** warm — 46 Criterion benchmarks plus the instrumentation profile — and `make check` now runs it immediately before the gate.
+
+Quick mode is reduced *precision*, not reduced scope: the budgets are expressed in deterministic lock-acquisition counters from the instrumentation profile, which do not depend on sample count. The Criterion `--quick` pass supplies the p50/p95 rows.
+
+#### Two things worth knowing rather than discovering later
+
+**Staleness cannot fire inside `make check`.** Because `check` regenerates evidence immediately before the gate, the budgets are always measured against the current tree — which is the goal — but it means the stale path only guards standalone `benchmark-check`, CI, and the nightly. That is the right trade, and it is not what a reader would assume from "stale evidence fails."
+
+**One comparison was removed rather than strengthened.** `benchmark-check` dropped the `BENCHMARKS.md` wall-clock diff and is now budgets-only, because those timings are machine-specific and comparing them would redden the gate on every machine except whichever last recorded the table. A permanently-red gate is how the original skip got justified in the first place. In practice that comparison had never actually run, since the skip fired before it. `make benchmark-update` still owns the table.
+
+The agent also added `tests/benchmark_budget_gate.rs` beyond the literal ask, because the existing `spec_compliance.rs` guard was string-matching the old Makefile line and would have gone stale silently — the same failure class this whole run of items has been about.
+
+Full `make check` green in 3m20s, ending with `benchmark regression budgets ENFORCED and green against evidence recorded ... (mode=quick, sha256:2fcba4274c46)`.
+<!-- agent:boundary:3fb292d1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzassertunknownkeys]~~
-- ~~do [#lzrsbenchbudget]~~
-- ~~do [#lzktfixturefloor]~~
-- ~~do [#lzgoracegate]~~
-- ~~do [#lzcovallowlistrot]~~
-- do [#vnmr]
+- 🚧 do [#lzscenariocoverage]
+- do [#lzconsumednotasserted]
+- do [#lzcpptranscribedrunners]
+- ~~do [#vnmr]~~
 - do [#lzreactdtsgate]
-- ~~📌 Fix the red test suites in the lazily implementations.~~
 - 📌 do [#lzegress]
 - do [#lzqueuefamilyflavors]
 - do [#lzwqfixtureconfig]
@@ -565,11 +606,10 @@ Also filed `#lzcpptranscribedrunners`: cpp has three runners that hand-transcrib
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzscenariocoverage] A fixture with multiple named scenarios can be PARTIALLY replayed and nothing notices. Confirmed this cycle: liveness_orset_lww.json carries four scenarios; lazily-dart replays three, lazily-rs and lazily-go skip derived_live_doc_aggregate_converges_under_retry entirely, lazily-cs replays all four. Both existing guards are blind to it by construction — the coverage guard asks only whether the FILE was opened, and the new key-consumption guard only binds blocks a runner actually reaches, so an unreplayed scenario contributes no unconsumed key. The fixture is counted as covered and its scenario is never run. Add a per-scenario ledger: the runner declares which scenario ids it replayed, the guard compares that against the ids present in the fixture, and a missing id is an error unless explicitly excused with a reason. Same both-directions rule as the fixture allowlist, so an excuse for a scenario that IS replayed also fails. Mutation-check per binding by dropping one scenario from a runner and confirming the guard reddens.
+- [ ] 🚧 [#lzscenariocoverage] A fixture with multiple named scenarios can be PARTIALLY replayed and nothing notices. Confirmed this cycle: liveness_orset_lww.json carries four scenarios; lazily-dart replays three, lazily-rs and lazily-go skip derived_live_doc_aggregate_converges_under_retry entirely, lazily-cs replays all four. Both existing guards are blind to it by construction — the coverage guard asks only whether the FILE was opened, and the new key-consumption guard only binds blocks a runner actually reaches, so an unreplayed scenario contributes no unconsumed key. The fixture is counted as covered and its scenario is never run. Add a per-scenario ledger: the runner declares which scenario ids it replayed, the guard compares that against the ids present in the fixture, and a missing id is an error unless explicitly excused with a reason. Same both-directions rule as the fixture allowlist, so an excuse for a scenario that IS replayed also fails. Mutation-check per binding by dropping one scenario from a runner and confirming the guard reddens.
 - [ ] [#lzconsumednotasserted] Key CONSUMPTION is not key ASSERTION, and the guards landed under #lzassertunknownkeys only prove the former. A runner can read a key and then do nothing with it: lazily-dart collections_extra_conformance_test.dart lines 459 and 477 continue/break past sibling_a_cached and downstream_consumer_reran, which counts as consumed under the tracker because the loop reads them. The same shape appears wherever a value is read into a variable that is never compared. This is the next level down from the fixture-opened / key-consumed ladder and it is where a green suite can still assert nothing. Audit each binding for read-then-discard: named skips inside a consuming loop, values bound but never compared, and assertion arms whose comparison is against a literal rather than the fixture value. Prefer a structural fix where one exists (require every consumed key to reach a comparison), and where it does not, make the named skip an explicit declared exception with a reason so it is visible rather than silent.
 - [ ] [#lzcpptranscribedrunners] lazily-cpp has fully-decoupled runners that hand-transcribe expectations and never open a fixture at all: test_reliable_sync.cpp, test_family_sync.cpp and test_outbox_store.cpp. The #lzassertunknownkeys guard cannot touch them because there is no assertion block to guard — a transcription has no unconsumed key. The cpp coverage script already reports the corresponding fixtures as uncovered rather than claiming them, so the ledger is honest, but the transcribed values can silently diverge from the corpus forever and the tests keep passing against the old numbers. This is the same defect the zig queue-family runner had before c103070 replaced its transcriptions with a real replay. Convert each to replay the canonical fixtures, then confirm the runtime manifest count rises and remove the matching KNOWN_UNCOVERED entries. Also note the root-level IPC corpus in cpp has no runner at all and is excused the same way.
 - [ ] [#lzreactdtsgate] lazily-react ships src/*.d.ts and a `types` export but its `make check` is only `node --check` syntax validation plus `node --test` (18 tests), so nothing typechecks the declarations it publishes. Same hole that let lazily-js ship four TS2749 errors in transport.d.ts undetected until this cycle. Port the gate landed in lazily-js 553d840: a declaration-only tsconfig (include src/**/*.d.ts, noEmit, strict, skipLibCheck:false, allowJs:false), an npm typecheck script wired into both `make check` and CI, plus CI's non-empty-program assertion, since a gate whose include matches nothing also exits 0. Mutation-check by breaking one declaration and confirming a non-zero exit before the tests run.
-- [ ] [#vnmr] (originally filed as #lzrsbenchbudget; that id was lost to a text-corruption bug in this documents own backlog write, see below) lazily-rs "make check" never enforces benchmark budgets on a pruned target/: the benchmark-check step prints "SKIPPED: no benchmark evidence in this checkout (target/criterion does not exist)" followed by "NO BENCHMARK BUDGET WAS ENFORCED BY THIS RUN. This is not a pass - it is the absence of a measurement", and then exits 0. The banner is honest and the skip is documented, but a green "make check" still reads as budgets-verified to anyone who does not read the log, which is everyone most of the time. Either make the skip a hard failure when a budget file exists but the evidence does not, or have check depend on generating the evidence first, so a local closeout cannot claim a performance gate it never ran. Mutation-check whichever is chosen: prune target/criterion and confirm make check reddens instead of printing the skip banner and passing.
 - [ ] [#lzqueuefamilyflavors] Ship the thread-safe and async queue-family flavors in lazily-js, lazily-zig and lazily-cs - the 18 cells that coverage.json rows 17/18/20/21/23/24 show absent. IMPLEMENTATION HAS LANDED IN ALL THREE BINDINGS: lazily-js 67a0013, lazily-cs f056dd8, lazily-zig c103070 (the last one mutation-checked with 15 defects across the shared core and all six new shells, green on 0.15.2 787/791, 0.16.0 849/849 and master 849/849, CI 30523011815 green). Do NOT re-implement. What REMAINS is the ledger and the plumbing: flip rows 17/18/20/21/23/24 for the JS, Zig and C# columns in lazily-spec/coverage.json, regenerate the twelve README/doc coverage tables via sync-coverage.mjs (--check is the gate), fix lazily-zig README line ~92 which claims every spec row is shipped for the Zig column while the generated table still shows those six as absent, and bump the superproject gitlinks for lazily-js, lazily-cs and lazily-zig. Verify each mark against that binding's own 3x3 ledger and replayed corpus before flipping it, not against the commit message.
 - [ ] [#lzwqfixtureconfig] Put the WorkQueueCell lease configuration into the canonical workqueue_*.json fixtures' initial block: visibility_timeout and max_deliveries are absent, so every binding hardcodes them out of band (10, and max_deliveries 3 for competing_delivery vs 2 for lease_deadletter) and a new binding has to read lazily-go's runner to discover them. Add the fields to the fixture and the schema, then update the nine bindings' runners to read them, so a fixture change cannot silently mean something different in each binding.
 - [ ] [#lzegress] Design and implement the egress family as the mirror of ingress (#designimplementtransport): an EgressCore owning sequence assignment, the unacked window, the ack watermark, and retry budget, with sync + thread-safe + async shells exposing pending/inflight/acked_through/retry as Computeds and ONE Effect per attached transport as the sink attachment. An Effect alone cannot be the family — it has no delivery state — so the Effect attaches, the core decides. Reuse Outbox/RelayCell for conflation+backpressure and SpillStore/DurableOutbox for durability rather than reimplementing them; add a generation fence on the SEND side so a reconnected producer cannot replay under a stale incarnation. Spec + formal + conformance corpus alongside, as ingress did.

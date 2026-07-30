@@ -2,7 +2,7 @@
 
 use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_supervisor::route_runtime::SupervisorHealth;
-use agent_doc_turn::op_log::OpsLogEvent;
+use agent_doc_turn::{CyclePhase, op_log::OpsLogEvent};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
@@ -909,6 +909,44 @@ pub fn dispatch_only_starting_pane_actor_settled(
             && facts.ready_facts.actor_state == ActorDispatchState::Ready
             && facts.dispatch_eligible
             && recognized_pane_blocker)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyReadyProbeResolutionFacts {
+    pub historical_probe_required: bool,
+    pub authoritative_actor_settled: bool,
+}
+
+/// Resolve the startup-log projection against the current authoritative actor.
+///
+/// The session log is a useful ingress source for an actor that may still be
+/// starting, but it is historical. A current-generation actor that is already
+/// settled must win so dispatch does not spend the full startup timeout waiting
+/// on a state that has already advanced.
+pub const fn dispatch_only_effective_ready_probe_required(
+    facts: DispatchOnlyReadyProbeResolutionFacts,
+) -> bool {
+    facts.historical_probe_required && !facts.authoritative_actor_settled
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyRouteCycleStamp<'a> {
+    pub cycle_id: Option<&'a str>,
+    pub phase: Option<CyclePhase>,
+}
+
+/// A newer non-abandoned cycle for this document owns the operator's intent.
+///
+/// This is evaluated immediately before pane input. It prevents a route that
+/// was waiting for readiness from injecting or queueing a duplicate after the
+/// operator (or another ingress event) has already started the same document.
+pub fn dispatch_only_route_superseded_by_new_cycle(
+    baseline: DispatchOnlyRouteCycleStamp<'_>,
+    current: DispatchOnlyRouteCycleStamp<'_>,
+) -> bool {
+    current.cycle_id.is_some()
+        && current.cycle_id != baseline.cycle_id
+        && current.phase != Some(CyclePhase::Abandoned)
 }
 
 pub fn starting_actor_ready_log_line(
@@ -5080,6 +5118,64 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 requested_pane: "%42",
                 ready_facts: &ready_facts,
                 dispatch_eligible: false,
+            }
+        ));
+    }
+
+    #[test]
+    fn current_authoritative_actor_invalidates_historical_startup_probe() {
+        assert!(!dispatch_only_effective_ready_probe_required(
+            DispatchOnlyReadyProbeResolutionFacts {
+                historical_probe_required: true,
+                authoritative_actor_settled: true,
+            }
+        ));
+        assert!(dispatch_only_effective_ready_probe_required(
+            DispatchOnlyReadyProbeResolutionFacts {
+                historical_probe_required: true,
+                authoritative_actor_settled: false,
+            }
+        ));
+        assert!(!dispatch_only_effective_ready_probe_required(
+            DispatchOnlyReadyProbeResolutionFacts {
+                historical_probe_required: false,
+                authoritative_actor_settled: false,
+            }
+        ));
+    }
+
+    #[test]
+    fn newer_document_cycle_supersedes_waiting_route_before_pane_input() {
+        let baseline = DispatchOnlyRouteCycleStamp {
+            cycle_id: Some("cycle-old"),
+            phase: Some(CyclePhase::Committed),
+        };
+        assert!(dispatch_only_route_superseded_by_new_cycle(
+            baseline,
+            DispatchOnlyRouteCycleStamp {
+                cycle_id: Some("cycle-manual"),
+                phase: Some(CyclePhase::PreflightStarted),
+            }
+        ));
+        assert!(dispatch_only_route_superseded_by_new_cycle(
+            baseline,
+            DispatchOnlyRouteCycleStamp {
+                cycle_id: Some("cycle-manual"),
+                phase: Some(CyclePhase::Committed),
+            }
+        ));
+        assert!(!dispatch_only_route_superseded_by_new_cycle(
+            baseline,
+            DispatchOnlyRouteCycleStamp {
+                cycle_id: Some("cycle-old"),
+                phase: Some(CyclePhase::ResponseCaptured),
+            }
+        ));
+        assert!(!dispatch_only_route_superseded_by_new_cycle(
+            baseline,
+            DispatchOnlyRouteCycleStamp {
+                cycle_id: Some("cycle-failed"),
+                phase: Some(CyclePhase::Abandoned),
             }
         ));
     }

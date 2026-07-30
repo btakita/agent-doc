@@ -36,10 +36,12 @@ use crate::restart_handoff::wait_for_busy_restart_handoff;
 use crate::startup_ready::{pane_composer_draft, wait_for_agent_ready_outcome};
 use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
-    BusyPaneAutoFixOutcome, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyReopenDelivery,
+    BusyPaneAutoFixOutcome, DispatchOnlyBlockerRecoveryHintFacts,
+    DispatchOnlyReadyProbeResolutionFacts, DispatchOnlyReopenDelivery, DispatchOnlyRouteCycleStamp,
     DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneDraftMessageFacts,
     DispatchOnlyStartingPaneNotReadyMessageFacts, RoutedReopenGuardReason, StartingPaneBlocker,
     dispatch_only_blocked_guard_reason, dispatch_only_blocker_recovery_hint,
+    dispatch_only_effective_ready_probe_required, dispatch_only_route_superseded_by_new_cycle,
     dispatch_only_should_print_unproven_progress, dispatch_only_starting_pane_actor_settled,
     dispatch_only_starting_pane_draft_message, dispatch_only_starting_pane_not_ready_message,
     prompt_ready_barrier_failed_event,
@@ -210,18 +212,44 @@ pub fn dispatch_only_send_reopen(
     // instead of stacking an unsubmitted trigger.
     wait_for_dispatch_only_recycle_inflight_settle(file, file_path, pane, &harness.binary)?;
 
+    let route_start_closeout = agent_doc_cycle_state_io::load_closeout_projection(file)?;
     let mut dispatch_pane = pane.to_string();
     let mut log_status =
         agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
             .ok()
             .flatten();
     let mut recovery_attempts = 0usize;
-    let requires_ready_probe =
+    let historical_probe_required =
         agent_doc_supervisor::startup_miss::dispatch_only_requires_ready_probe(
             log_status.as_ref(),
             &dispatch_pane,
             &harness.binary,
         );
+    let authoritative_actor_settled = historical_probe_required
+        && dispatch_only_starting_pane_ready_via_authoritative_actor(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            &dispatch_pane,
+            harness,
+        );
+    let requires_ready_probe =
+        dispatch_only_effective_ready_probe_required(DispatchOnlyReadyProbeResolutionFacts {
+            historical_probe_required,
+            authoritative_actor_settled,
+        });
+    if historical_probe_required && !requires_ready_probe {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_historical_ready_probe_superseded file={} pane={} harness={} source=authoritative_actor",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+            ),
+        );
+    }
     let mut pre_dispatch_route_guard = Some(
         agent_doc_controller_io::project_controller::begin_route_submit_with_reason(
             file,
@@ -419,6 +447,42 @@ pub fn dispatch_only_send_reopen(
                 )),
             }
         }
+    }
+
+    let current_closeout = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    let route_start_stamp = DispatchOnlyRouteCycleStamp {
+        cycle_id: route_start_closeout
+            .as_ref()
+            .and_then(|projection| projection.cycle_id.as_deref()),
+        phase: route_start_closeout
+            .as_ref()
+            .and_then(|projection| projection.phase),
+    };
+    let current_stamp = DispatchOnlyRouteCycleStamp {
+        cycle_id: current_closeout
+            .as_ref()
+            .and_then(|projection| projection.cycle_id.as_deref()),
+        phase: current_closeout
+            .as_ref()
+            .and_then(|projection| projection.phase),
+    };
+    if dispatch_only_route_superseded_by_new_cycle(route_start_stamp, current_stamp) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_superseded_by_new_cycle file={} pane={} harness={} baseline_cycle={} current_cycle={} current_phase={} outcome=no_pane_input",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+                route_start_stamp.cycle_id.unwrap_or("none"),
+                current_stamp.cycle_id.unwrap_or("none"),
+                current_stamp
+                    .phase
+                    .map(agent_doc_turn::CyclePhase::as_str)
+                    .unwrap_or("none"),
+            ),
+        );
+        return Ok(dispatch_pane);
     }
 
     // Escapes preserved for the same reason as the recognized-blocker probe above.

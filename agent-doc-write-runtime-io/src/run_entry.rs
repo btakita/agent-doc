@@ -2497,6 +2497,15 @@ mod tests {
         let wrapped = timeout.context("write --commit failed");
         assert!(error_requests_retry_without_disk(&wrapped));
 
+        let zero_replica = anyhow::anyhow!(
+            "write: recovery=await_editor_replica_no_disk_write_then_session_check; {}",
+            agent_doc_document_realtime_io::RETAINED_FOR_RETRY_MARKER,
+        );
+        assert!(
+            error_requests_retry_without_disk(&zero_replica),
+            "a zero-replica retained write must retain its pending-only commit identity",
+        );
+
         // A genuine hard failure retains nothing and must stay unclassified,
         // or a real error would silently apply mutations it never earned.
         let hard = anyhow::anyhow!("finalize: refusing to mutate a non-git document");

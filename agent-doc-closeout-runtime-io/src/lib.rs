@@ -328,6 +328,33 @@ fn exact_legacy_pending_only_reap(
     Ok(projected == current_content)
 }
 
+fn infer_pending_only_commit_target_from_retained_projection(
+    head_content: &str,
+    phase: agent_doc_turn::CyclePhase,
+    recorded_target_hash: Option<&str>,
+    pending_done_ids: &[String],
+    pending: Option<(&str, &str)>,
+) -> Result<Option<String>> {
+    if recorded_target_hash.is_some()
+        || phase != agent_doc_turn::CyclePhase::Committed
+        || pending_done_ids.is_empty()
+    {
+        return Ok(None);
+    }
+    let Some((retained_target_hash, retained_target_content)) = pending else {
+        return Ok(None);
+    };
+    let target_hash = agent_doc_hash::content_hash(retained_target_content);
+    anyhow::ensure!(
+        retained_target_hash.eq_ignore_ascii_case(&target_hash),
+        "retained pending-only projection target hash does not match its content"
+    );
+    if !exact_legacy_pending_only_reap(head_content, retained_target_content, pending_done_ids)? {
+        return Ok(None);
+    }
+    Ok(Some(target_hash))
+}
+
 enum PendingOnlyCommitDecision {
     NotReady,
     Eligible {
@@ -472,16 +499,46 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
     }
 
     fn retained_document_write_blocks(&self, file: &Path) -> bool {
-        agent_doc_document_realtime_io::retained_write_blocks_new_cycle(
+        agent_doc_document_realtime_io::retained_write_blocks_session_closeout(
             file,
             agent_doc_document_realtime_io::RetainedWriteCycleBoundary::SessionCheck.gate_source(),
         )
     }
 
     fn resume_retained_pending_only_commit(&self, file: &Path) -> Result<bool> {
-        let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        let Some(mut state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
             return Ok(false);
         };
+        if state.pending_only_commit_target_hash.is_none()
+            && state.phase == agent_doc_turn::CyclePhase::Committed
+            && !state.pending_done_ids.is_empty()
+            && let Some(head_content) = agent_doc_git_io::revision::show_head(file)?
+        {
+            let pending = agent_doc_document_realtime_io::pending_document_write(file);
+            if let Some(target_hash) = infer_pending_only_commit_target_from_retained_projection(
+                &head_content,
+                state.phase,
+                state.pending_only_commit_target_hash.as_deref(),
+                &state.pending_done_ids,
+                pending.as_ref().map(|pending| {
+                    (
+                        pending.target_hash.as_str(),
+                        pending.target_content.as_str(),
+                    )
+                }),
+            )? {
+                agent_doc_cycle_state_io::record_pending_only_commit_target(file, &target_hash)?;
+                state.pending_only_commit_target_hash = Some(target_hash.clone());
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "pending_only_commit_continuation_inferred file={} target_hash={} proof=retained_exact_done_reap_with_atomic_queue_completion",
+                        file.display(),
+                        target_hash,
+                    ),
+                );
+            }
+        }
         let mut authority_content =
             agent_doc_document_realtime_io::try_resolve_current_document_content(
                 file,
@@ -1163,6 +1220,56 @@ mod tests {
         assert!(
             !exact_legacy_pending_only_reap(head, exact, &["keep".to_string()]).unwrap(),
             "the removed row must match the cycle's explicit done intent",
+        );
+    }
+
+    #[test]
+    fn retained_exact_pending_only_projection_recovers_missing_target_identity() {
+        let head = concat!(
+            "# Session\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#done]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#done] completed work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let target = concat!(
+            "# Session\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~~do [#done]~~\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let target_hash = agent_doc_hash::content_hash(target);
+        let done_ids = vec!["done".to_string()];
+
+        assert_eq!(
+            infer_pending_only_commit_target_from_retained_projection(
+                head,
+                CyclePhase::Committed,
+                None,
+                &done_ids,
+                Some((&target_hash, target)),
+            )
+            .unwrap(),
+            Some(target_hash),
+        );
+
+        let deletion_only = target.replace("- ~~do [#done]~~", "- do [#done]");
+        let deletion_only_hash = agent_doc_hash::content_hash(&deletion_only);
+        assert_eq!(
+            infer_pending_only_commit_target_from_retained_projection(
+                head,
+                CyclePhase::Committed,
+                None,
+                &done_ids,
+                Some((&deletion_only_hash, &deletion_only)),
+            )
+            .unwrap(),
+            None,
+            "a deletion-only retained projection must not gain commit authority",
         );
     }
 

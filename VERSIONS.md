@@ -4,6 +4,31 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.97
+
+_JetBrains plugin 0.2.323; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Zero-replica writes retain the exact downstream commit continuation.**
+  Every editor-delivery deferral now carries the common retained-for-retry
+  marker, so a late `write --commit --backlog-only --done <id>` preserves its
+  target identity and done intent when no editor replica is registered.
+- **Session-check fails closed without conflating recovery and preflight.**
+  Preflight may still proceed through an unobservable transport plane, while
+  session closeout derives a stricter policy from the same reactive settlement
+  verdict and cannot report success for an unobserved durable write.
+- **Undelivered editor-authoritative bases cannot supersede retained targets.**
+Recovery recognizes the journaled expected base as proof that delivery has
+not happened, infers a missing pending-only target only from the exact queue
+strike plus backlog-row deletion, and resumes that retained target after
+editor registration without another write submission or forced disk write.
+- **Run Agent Doc resolves startup history against the live actor before
+submitting.** A generation-matched authoritative actor that is already settled
+now invalidates the historical startup-ready probe, so JetBrains dispatch does
+not wait the 120-second slow-start allowance after the actor is ready. The route
+also rechecks the reactive closeout projection before pane input; if a newer
+same-document cycle started while the route waited, it exits without injecting
+or queueing a duplicate trigger.
+
 ## 0.35.93
 
 _JetBrains plugin 0.2.322; VS Code extension 0.2.62; Zed extension 0.1.0._

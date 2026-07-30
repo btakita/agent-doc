@@ -269,6 +269,14 @@ impl SettlementVerdict {
         matches!(self, Self::Unsettled { .. })
     }
 
+    /// The single question `session-check` asks before reporting a completed
+    /// closeout. Unlike preflight, closeout must fail closed when an intent is
+    /// known but a content plane is unobservable: absence of an observation is
+    /// not proof that the retained write settled.
+    pub fn blocks_session_closeout(&self) -> bool {
+        matches!(self, Self::Unobserved { .. } | Self::Unsettled { .. })
+    }
+
     /// The single question the settle effect asks.
     pub fn should_clear_intent(&self) -> bool {
         matches!(self, Self::Satisfied { .. })
@@ -888,6 +896,10 @@ mod tests {
                 "unobserved planes must not be reported as an outstanding write"
             );
             assert!(!verdict.blocks_new_cycle());
+            assert!(
+                verdict.blocks_session_closeout(),
+                "session-check must not report success without observing settlement",
+            );
             assert!(!verdict.should_clear_intent());
         }
     }

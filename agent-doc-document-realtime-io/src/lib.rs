@@ -2044,6 +2044,19 @@ pub fn retire_retained_projection_superseded_by_authority(
     {
         return Ok(false);
     }
+    if pending.expected_content.as_deref() == Some(canonical.as_str()) {
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "retained_projection_supersession_deferred file={} intent_id={} retained_target_hash={} authoritative_hash={} reason=authority_is_undelivered_expected_base",
+                path.display(),
+                pending.intent_id,
+                pending.target_hash,
+                agent_doc_hash::content_hash(&canonical),
+            ),
+        );
+        return Ok(false);
+    }
     clear_deferred_document_write_intent(path, &pending.target_hash, source)?;
     agent_doc_ops_log_io::log_op(
         path,
@@ -2887,7 +2900,7 @@ pub fn apply_canonical_replace_if_attached(
                                 let recycle_status = agent_doc_controller_io::project_controller::
                     schedule_stale_editor_replica_cp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor is the current authority, but no editor replica was registered with the relay; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
+                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor is the current authority, but no editor replica was registered with the relay; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; {RETAINED_FOR_RETRY_MARKER}",
                                     file.display(),
                                 )));
                             }
@@ -3001,7 +3014,7 @@ pub fn apply_canonical_replace_if_attached(
                                 let recycle_status = agent_doc_controller_io::project_controller::
                                     schedule_stale_editor_replica_cp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={retained_intent_id}), but the editor replica disappeared during delivery admission; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
+                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={retained_intent_id}), but the editor replica disappeared during delivery admission; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; {RETAINED_FOR_RETRY_MARKER}",
                                     file.display(),
                                 )));
                             }
@@ -7210,6 +7223,27 @@ pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
     verdict.blocks_new_cycle()
 }
 
+pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool {
+    let verdict = retained_write_settlement(file, source);
+    if matches!(
+        &verdict,
+        agent_doc_state_backbone::retained_write::SettlementVerdict::Unobserved { .. }
+            | agent_doc_state_backbone::retained_write::SettlementVerdict::Unsettled { .. }
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "retained_write_blocks_session_closeout file={} source={} intent_id={} verdict={:?}",
+                file.display(),
+                source,
+                verdict.intent_id().unwrap_or("none"),
+                verdict,
+            ),
+        );
+    }
+    verdict.blocks_session_closeout()
+}
+
 // `#retainedclearreactive`: there is deliberately no public
 // `settle_retained_write_through_derived_verdict` here any more. It was the
 // imperative form `#idlerevisionreactive` names — "a side effect that must be
@@ -9786,6 +9820,10 @@ mod tests {
             err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
                 .is_some()
         );
+        assert!(
+            format!("{err:#}").contains(RETAINED_FOR_RETRY_MARKER),
+            "zero-replica deferral must retain the surrounding closeout mutations",
+        );
 
         let (replacement_id, replacement_bootstrap) =
             test_support_register_replica_for_file(&file, identity)
@@ -10203,6 +10241,31 @@ mod tests {
         assert!(
             err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
                 .is_some()
+        );
+        assert!(
+            format!("{err:#}").contains(RETAINED_FOR_RETRY_MARKER),
+            "zero-replica deferral must retain the surrounding closeout mutations",
+        );
+        assert!(
+            retained_write_blocks_session_closeout(
+                &file,
+                "retained_non_capture_zero_replica_gate_test",
+            ),
+            "an undelivered exact target must keep session-check interrupted",
+        );
+        let retained_target_hash = agent_doc_hash::content_hash(normalized_target);
+        assert!(
+            !retire_retained_projection_superseded_by_authority(
+                &file,
+                &retained_target_hash,
+                "retained_non_capture_undelivered_base_test",
+            )
+            .unwrap(),
+            "the unchanged editor-authoritative base is not a newer superseding cut",
+        );
+        assert!(
+            pending_document_write(&file).is_some(),
+            "failed supersession must preserve the exact retained target",
         );
 
         let (replacement_id, replacement_bootstrap) =

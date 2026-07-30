@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 367579f8-dcd1-4120-820f-fd4f201c6bfd
+resume: b96a27c0-6e09-4e42-8e4c-bd1b42787fcc
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -136,19 +136,104 @@ Production is still running the old code, so the 401 loop is still burning ~6,50
 2. A whole-tree deploy from this checkout would ship that concurrent session's in-progress TMO refactor to production.
 
 The safe path is a deploy from a clean checkout at `29f27773`, not from this tree. Say go and I'll run it, then verify: worker settings reporting `observability.enabled: true`, the `/api/public/messages/realtime/ws` 401 count falling toward zero on the same telemetry query, and a fresh anonymous tab opening no socket until the first message is sent. Filed as the top backlog item with those checks written out.
-<!-- agent:boundary:78697291 -->
+
+### Re: Production deploy, the TMO cron, and denied deals in Available Deals — opus-5
+
+Deployed and verified. The pipeline question has a definite answer, and it is not the one the wording implies.
+
+### Deployed: EFS `29f27773` → `equityfundingsource-production`
+
+Version `c50a9aaa-9898-4129-a2a9-c2edf887e0c8`, deployed from an isolated detached worktree at `29f27773`, not from `src/equityfundingsource-dev`. The concurrent session's uncommitted TMO work never entered the build, and its working tree is untouched.
+
+Isolating that build needed one thing the existing recipe does not cover. Symlinking `node_modules` wholesale makes `@btakita/ui--*` resolve back through the *main* checkout's `lib/`, which would have shipped that session's uncommitted `tmo_contacts.tsx` and `tmo_los.tsx`. I mirrored `node_modules` entry-by-entry instead and rebuilt the three `@btakita` workspace links relative to the worktree, at both `app/equityfundingsource/node_modules/` and each `lib/*/node_modules/`. The proof it worked is the asset hashes below.
+
+Clean-tree verification before deploying: `bun test` **2115 pass / 0 fail**, `build:worker` clean, CSS bundle carrying `md:grid-cols-3` and `.efs-container` with `css_href` set.
+
+| check | result |
+|---|---|
+| `observability.enabled` in deployed settings | `false` → **`true`** |
+| worker bundle carries `no error detail returned by TMO`, `LOS.svc/GetLoansByTimestamp` | present |
+| live `/` references `index.browser-FORPQHRL.js` + `index.server-45257KN3_N5BJ5CUX.css` | byte-identical to the clean local build |
+| remote D1 migrations | `No migrations to apply!` — nothing schema-touching |
+
+That last hash match is the isolation proof: the served frontend is exactly what a clean checkout of `29f27773` builds.
+
+### The 401 loop: fixed, and proven directly rather than by the 24h count
+
+The 24h count would have been misleading. The loop had already stopped roughly an hour **before** the deploy, when whatever tab was driving it got closed:
+
+```
+ws-401 events 1440–720 min ago : 8050
+              720–360          : 1064
+              360–180          : 2942
+              180–120          : 1004
+              120–60           :   70
+               60–0            :    0   ← already zero pre-deploy
+```
+
+So I proved the fix directly instead. I launched a headless Chromium with a fresh profile — a true anonymous visitor, no guest cookie — and held `https://equityfundingsource.com/` open for 98 seconds. Client-side: **zero** requests to `/api/public/messages/realtime/ws`. Server-side over that exact window: **0** realtime/ws events, 2 `/api/public/messages/count` (200), 26 events total. The pre-fix build would have produced about 19 401s in that window on its 5-second reconnect. Production logs show the session line by line: `GET /`, `messages/count` 200, `/api/profile` 401 (pre-existing, one-shot), and no socket.
+
+The half I did **not** prove live is the reopen: that a guest connects once `guest_ready` flips. `ready: true` only comes back after a guest has sent a first message, so proving it means writing a real message and notification email into production. Your call whether that is worth doing. It is covered by tests — the dependency-list case (`[path, enabled]` → `[path]`) was mutation-checked and caught.
+
+### TMO cron: unblocked, and the failing path is not the one that runs every 15 minutes
+
+The 04:15:51Z sync ran on the new code. `driver delta`, finished clean in 27.1s, zero error lines. There are no error-level lines at all in the trailing 24h.
+
+That is not the fix working — it is the wrong sweep. Production runs `tmo_sync_interval_minutes=15` for delta, and `tmo_sync_full_interval_minutes=1440` for the full-book sweep. The seven failures are all roster-building work — borrower roster, LOS lender roster, `GetLoanFundings` for 1005 and 1009 — which the delta driver does not do. `tmo_sync_last_full_at` is `2026-07-29 17:15:51Z`, so **the next full sweep is around 2026-07-30 17:15Z**, and that is the run whose errors will finally say what LOS returned.
+
+One thing to know before you re-query: telemetry `groupBys` currently return 0 groups for every field I tried — `$metadata.message`, `$metadata.level`, `$workers.eventType`, `$workers.scriptName` — while `filters` and raw counts still work and `view: events` still shows those fields populated. The same group-by query returned 100 groups earlier this session. I cannot tell you whether flipping `observability.enabled` caused that or whether it is Cloudflare-side; I only know the ordering. Use `view: events` over a short window until it comes back.
+
+### Available Deals with an Application Denied flag
+
+**Lenders cannot see them.** Two different things share the name "Available Deals": the admin pipeline column, and the lender feed at `/lenders/available-deals`. The lender feed filters on `investment_deals.status` and never reads loan status at all. On production D1 right now, all three declined loans — 1005 Gallego, 1007 Quiroz, 1568 Elmalem — have **no `investment_deals` row**, so there is nothing on the lender side to hide.
+
+What you saw is an admin-pipeline bug, and it is worse than denials. `column_id_for_status_` ends with:
+
+```ts
+for (const col of this.columns) {
+    if (col.statuses.includes(normalized)) return col.id
+}
+return this.default_column_id     // 'application-received' — "Available Deals"
+```
+
+Any status no column claims silently lands in Available Deals. Two statuses in production are unclaimed. `Application Declined` is what TMO actually stores, but the denied column matches only the literal `'Denied'` — which has zero rows. And `Documents` was removed from `LOAN_STATUS_STEPS` but two loans still carry it. So five loans sit in Available Deals purely by fallback:
+
+| loan | status | why it is there |
+|---|---|---|
+| 1005 Gallego, 1007 Quiroz, 1568 Elmalem | `Application Declined` | column expects `Denied` |
+| 1560 Radnor, 1561 Quail/Gregory | `Documents` | status removed from the step list |
+
+Only 3 loans (59 Cassar, 60 Williams, 1011 Duncan) genuinely belong there.
+
+**My recommendation: do not create a new column.** Parked already groups `on-hold`, `unassigned`, and `denied`, and the `denied` column is already labeled "Application Denied". The vocabulary is what is broken, not the layout. Three items filed:
+
+- `#pipeline-unknown-status-fallback` — fall back to `unassigned`, not `application-received`. An unrecognized status should never appear in an active sales lane. This is the actual defect; it would have caught the other two on its own.
+- `#pipeline-declined-vocabulary` — recognize `Application Declined` as a denial so those three land in the existing column.
+- `#deal-unpublish-on-denial` — `admin_deal_status_sync_by_loan_` maps only `Funded`; everything else hits `ELSE status`. A loan declined *after* its deal is published would stay on the lender feed. Nothing is exposed today, but the guard you assumed exists does not.
+
+Worth knowing: the concurrent session's untracked `tmo-deal-sync.ts` already defers non-marketplace statuses at deal-*creation* time, which is why those three have no deal row. That is complementary — it does not touch the pipeline misroute or the unpublish path.
+
+I stopped short of implementing these because you asked which column they belong in, and `queue: stop` is set. Say the word on Parked and I will land all three.
+
+### One caveat on this session
+
+The document write path was wedged for most of this cycle — `session-check` reported editor-authority/disk divergence and preflight deferred on `delivery_pending` repeatedly, with the binary explicitly refusing a forced write. The installed `agent-doc` is stale (missing `f34a32d27`), and `src/agent-doc` holds an in-flight 0.35.98 whose changelog is precisely "retained editor delivery resumes from reactive state after controller replacement". I did **not** run `make install`, because that would have shipped another session's unfinished release. It cleared on its own and this response went through the normal path.
+<!-- agent:boundary:e75e4aba -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#prod-fix-deploy]
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
+- 🚧 do [#noticedavailabledeals]
+- deploy to production: [#prod-fix-deploy]
 - do [#tmo-sync-cron-failures]
-- 🚧 deploy to production
-- I noticed that some Available Deals had an Application Denied flag. Are these viewable to Lenders in the Available Deals? Denied Applications should not be available. What part of the pipeline do you recommend we place them in? Should they be in Parked or should we create another column for Denied Applications?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#pipeline-unknown-status-fallback] Stop routing unrecognized loan statuses into the Available Deals column. PipelineDefinition.column_id_for_status_ (app/equityfundingsource/lib/admin/repo.ts) returns default_column_id ('application-received', labeled Available Deals) for any status not listed in a column, so five production loans render as Available Deals cards today: 1005 Gallego, 1007 Quiroz, 1568 Elmalem (Application Declined) and 1560 Radnor, 1561 Quail/Gregory (Documents, a status removed from LOAN_STATUS_STEPS). Change the fallback to unassigned_column_id so an unknown status lands in Unassigned (already inside the Parked group) instead of an active sales lane, and add a test that asserts an unrecognized status never maps to application-received.
+- [ ] [#pipeline-declined-vocabulary] Teach EFS the TMO decline spelling. LOAN_STATUS_SPECIAL and the 'denied' pipeline column (label 'Application Denied') match only the literal 'Denied', which has ZERO rows in production D1, while production actually stores 'Application Declined' (3 loans). Accept 'Application Declined' as a denial everywhere 'Denied' is recognized (column statuses, loan_status_valid_, the stepper, denied_status/denied_reason meta) so declines land in the existing Application Denied column under Parked. Verify against prod: SELECT tmo_loan_status, COUNT(*) FROM loans GROUP BY 1 on D1 7f5c1518-48fe-4ba2-8829-ead63c2a1a3f.
+- [ ] [#deal-unpublish-on-denial] Make a denial unpublish the lender-facing deal. admin_deal_status_sync_by_loan_ (app/equityfundingsource/lib/admin/repo.ts) maps only Funded->funded and funded->published; every other loan status hits ELSE status, so a loan that is declined AFTER its deal is published keeps investment_deals.status='published' and deal_viewable_ keeps it on /lenders/available-deals. No production row is exposed today (all 3 declined loans have no investment_deals row), so this is a latent hole, not a live leak. Add the terminal-negative branch plus a test that a denial removes the deal from the investor feed.
+- [ ] 🚧 [#noticedavailabledeals] I noticed that some Available Deals had an Application Denied flag. Are these viewable to Lenders in the Available Deals? Denied Applications should not be available. What part of the pipeline do you recommend we place them in? Should they be in Parked or should we create another column for Denied Applications?
 - [ ] [#prod-fix-deploy] [operator-verify] Deploy the production fixes and verify them live. Production still runs the pre-fix code, so the anonymous realtime 401 loop (~6,500 requests/day) is still burning. Needs operator go for two reasons: the queue preset was #spec-test-commit-push, which excludes deploy; and a whole-tree deploy from src/equityfundingsource-dev would ship a concurrent session's ~355 uncommitted lines of TMO refactor. Deploy from a CLEAN checkout at EFS 29f27773 (see reference_efs_deploy_from_main_checkout_not_fresh_install_worktree), then verify: (a) GET accounts/67b0703bb39744866efbf765e1ebcf1c/workers/scripts/equityfundingsource-production/settings reports observability.enabled true; (b) the telemetry count for /api/public/messages/realtime/ws status 401 falls toward zero over 24h (baseline 6,576 of 11,787 app requests); (c) a fresh anonymous public tab opens NO realtime socket until the first message is sent, and one immediately after. Query recipe: src/equityfundingsource-dev/docs/deploy.md section 2.4b.
 - [ ] [#tmo-sync-cron-failures] [operator-verify] Root-cause the TMO sync cron failures. All 7 error-level lines in 24h of equityfundingsource-production logs are eventType=cron from the 15-minute sync: loan sync failed on 1012 and 1014, borrower roster failed (x2), LOS lender roster failed, and GetLoanFundings failed while building the lender roster on 1005 and 1009. Blocked on #prod-fix-deploy: until EFS 29f27773 is deployed those Errors carry an empty message, so the logs cannot say what LOS returned. After deploy, re-query per docs/deploy.md 2.4b filtering $metadata.level=error and fix what the endpoint plus ErrorNumber names. Coordinate first: app/equityfundingsource/lib/tmo-sync.ts currently holds ~355 uncommitted lines from a concurrent session.
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.

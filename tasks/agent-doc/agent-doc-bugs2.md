@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019fafe5-8be5-73d1-add0-f9314b2080a1
+resume: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -316,11 +316,41 @@ The Claude submission failure had a separate concrete cause: historical startup-
 The reactive policy is now explicit across editor authority, template validation, routing readiness, tmux synchronization, retry, and closeout. External ingress prefers event channels; polling/RPC remains valid only at a non-reactive boundary to update Sources; internal decisions are extracted into Computeds/Effects. The Lazily ingress-primitives plan remains scheduled once as `#designimplementtransport` after this build/test/install feedback.
 
 Verification passed: the focused regressions, route crate compilation, full `make check`, and `make install-full`. Source commit `f34a32d27` and superproject pointer commit `ec308f13d` are pushed with tag `v0.35.97`. CI and the GitHub Release workflow are in progress; project policy requires recording that state without polling. The fresh 0.35.97 controller is live, and the old route-owned supervisor has an idle-boundary recycle requested so this active turn is not interrupted. No operator action or document save is required.
-<!-- agent:boundary:1e9520d6 -->
+### Re: reactive actor authority and tmux autosync — gpt-5
+
+You were right: `ActorState` was in `agent-doc-sqlite` because the first actor registry API grew around its SQLite rows and the persistence representation became the accidental public model. That was an architecture inversion. SQLite is the durable adapter; it must not own actor lifecycle vocabulary.
+
+I also should have made the reactive refactor call before editing. I focused on removing the visible RPC/polling latency and initially treated an in-memory snapshot reloaded from SQLite as a “projection.” The dev-harness architecture-first rules explicitly require inventorying authority/readiness validators, extracting changing derived facts into lifecycle-scoped `Computed`s, and keeping I/O out of those computeds. I failed to apply that review gate early enough.
+
+That is now corrected and released:
+
+- `ActorState`, `ActorRecord`, `ActorLastTransition`, and accepted `ActorStoreWrite` events live in `agent-doc-controller::actor`. `agent-doc-sqlite` only serializes them and no longer defines or publicly re-exports them.
+- The controller owns a process-scoped Lazily actor `Source`; live actor bindings and pane-layout authority are `Computed` projections. A successful durable write publishes its typed event directly into the Source instead of reloading SQLite or asking callers to recompute.
+- The pane-layout computed is now a pure join over already-canonical ingress values. Filesystem canonicalization, SQLite reads, controller RPC, and tmux liveness probes do not run inside it.
+- Automatic exact-visible tmux sync receives controller-proven actor bindings directly and skips repeated content/frontmatter/registry authority resolution. Unsaved editor documents without a disk file remain valid because editor authority is preserved.
+- tmux-router `0.3.20` makes those caller-proven bindings outrank spare-pane geometry and defers redundant whole-server passive diagnostics. It is tested, committed, tagged, pushed, and published to crates.io.
+- The JetBrains native handoff now treats a residual closed Rust mapping retained by glibc as inert. It loads the replacement from a distinct shadow inode instead of reopening stale code.
+- The Lazily backlog plan is scheduled as `#lzingressadapters` after `#lzegress`. It incorporates the build lessons: event-channel-first ingress, snapshot-plus-event bootstrap, generation/cursor fencing, pure computed authority/readiness/validation, typed effect receipts, and RPC/polling only at external non-reactive boundaries.
+
+Verification and installation completed:
+
+- Full `make check` passed.
+- Focused reactive actor, model-ownership, tmux-router, and native-handoff regressions passed.
+- `make install-full` passed.
+- Installed CLI/controller: agent-doc `0.35.104`, stable and running the installed inode.
+- Installed JetBrains plugin: `0.2.327` in all four IDE targets.
+- Source commit/tag: `1b3e28186`, `v0.35.104`; superproject pointer commit `d47c7bdcb` is pushed.
+- tmux-router commit/tag: `02b91c0`, `v0.3.20`.
+- tmux-router CI is green; agent-doc CI was in progress at the required one-time observation and was not polled.
+- The user-owned Zed WASM and release archive remain untouched/untracked.
+
+One restart of IDEA is required now. The installed plugin is 0.2.327, but the current JVM still has the prior Kotlin plugin generation loaded and therefore rejects native 0.35.104 during version validation before the new handoff code can run. Restart IDEA to activate 0.2.327; do not save the document and do not rerun/finalize this response. After restart, the new reactive autosync and native handoff paths will be the live generation.
+<!-- agent:boundary:d07c8b38 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- tmux pane autosync is slow and unreliable. It takes ~30 seconds for the tmux pane switch to occur.
 <!-- /agent:queue -->
 
 ## Notes
@@ -330,7 +360,7 @@ Verification passed: the focused regressions, route crate compilation, full `mak
 
 ## Backlog
 
-<!-- agent:backlog priority priority queue -->
+<!-- agent:backlog priority queue -->
 <!-- /agent:backlog -->
 
 ## Review

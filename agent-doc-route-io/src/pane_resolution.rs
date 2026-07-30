@@ -1871,11 +1871,11 @@ pub fn retry_route_after_busy_pane_auto_fix(
 }
 
 pub fn controller_dispatch_actor_state(
-    actor_state: agent_doc_sqlite::state_store::ActorState,
+    actor_state: agent_doc_controller::actor::ActorState,
 ) -> DispatchActorState {
     match actor_state {
-        agent_doc_sqlite::state_store::ActorState::Ready => DispatchActorState::Ready,
-        agent_doc_sqlite::state_store::ActorState::Busy => DispatchActorState::Busy,
+        agent_doc_controller::actor::ActorState::Ready => DispatchActorState::Ready,
+        agent_doc_controller::actor::ActorState::Busy => DispatchActorState::Busy,
         _ => DispatchActorState::Other,
     }
 }

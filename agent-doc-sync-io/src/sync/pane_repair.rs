@@ -6,7 +6,7 @@ use agent_doc_run_context_io::AgentDocContextExt;
 #[derive(Default)]
 pub(crate) struct SyncProofCache {
     pub(crate) actor_records:
-        RefCell<HashMap<(PathBuf, String), Option<agent_doc_sqlite::state_store::ActorRecord>>>,
+        RefCell<HashMap<(PathBuf, String), Option<agent_doc_controller::actor::ActorRecord>>>,
     pub(crate) live_owner_matches: RefCell<HashMap<(PathBuf, String, String), bool>>,
     pub(crate) skip_authoritative_actor_lookup: bool,
 }
@@ -1005,15 +1005,15 @@ mod tests {
         let proof_cache = SyncProofCache::default();
         let file = Path::new("/tmp/agent-doc-cache-hit.md");
         let session_id = "cache-session";
-        let record = agent_doc_sqlite::state_store::ActorRecord {
+        let record = agent_doc_controller::actor::ActorRecord {
             document_id: file.display().to_string(),
             session_id: session_id.to_string(),
             generation: 42,
             pane_id: "%cached".to_string(),
             window_id: "@cached".to_string(),
             harness: "codex".to_string(),
-            state: agent_doc_sqlite::state_store::ActorState::Ready,
-            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "prefilled_cache".to_string(),
                 timestamp: 0,
@@ -1041,15 +1041,15 @@ mod tests {
     fn safe_passive_proof_cache_allows_only_controller_local_actor_lookup() {
         let file = Path::new("/tmp/agent-doc-cache-hit.md");
         let session_id = "cache-session";
-        let record = agent_doc_sqlite::state_store::ActorRecord {
+        let record = agent_doc_controller::actor::ActorRecord {
             document_id: file.display().to_string(),
             session_id: session_id.to_string(),
             generation: 42,
             pane_id: "%cached".to_string(),
             window_id: "@cached".to_string(),
             harness: "codex".to_string(),
-            state: agent_doc_sqlite::state_store::ActorState::Ready,
-            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "prefilled_cache".to_string(),
                 timestamp: 0,

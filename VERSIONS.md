@@ -4,6 +4,30 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.104
+
+_JetBrains plugin 0.2.327; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Actor authority is now a storage-independent reactive controller model.**
+  `ActorState`, `ActorRecord`, transitions, and accepted store-write events live
+  in `agent-doc-controller`, while SQLite only persists and cold-hydrates those
+  facts. Durable actor writes publish their accepted event directly into a
+  process-scoped Lazily `Source`; live bindings and pane-layout authority are
+  pure `Computed` projections, with no SQLite reload, controller RPC, or
+  filesystem canonicalization inside the computed path.
+- **Automatic tmux layout sync consumes controller-proven actor bindings
+  directly.** Exact-visible sync no longer re-resolves each already-owned
+  document through content/frontmatter/registry authority checks. The bundled
+  tmux-router 0.3.20 lets caller-proven bindings outrank spare geometry even
+  when an unsaved editor document has no disk file, and passive reconciliation
+  defers redundant whole-server tmux diagnostics. Ownership fallback reads the
+  editor-authoritative current document rather than assuming disk authority.
+- **JetBrains native handoff no longer reopens stale code when glibc retains an
+  inert Rust mapping after `dlclose`.** Once native work is quiesced, guarded
+  calls drain, owner threads terminate, and JNA closes the handle, the plugin
+  publishes the replacement from its distinct shadow inode. A residual closed
+  mapping may remain until process exit but cannot become the active generation.
+
 ## 0.35.103
 
 _JetBrains plugin 0.2.326; VS Code extension 0.2.62; Zed extension 0.1.0._

@@ -154,13 +154,13 @@ class LibMtimeChangedTest {
     }
 
     @Test
-    fun `retired generation transition restores old code when dlclose leaves it mapped`() {
+    fun `retired generation transition publishes distinct replacement when dlclose leaves inert mapping`() {
         assertEquals(
             NativeRetiredGenerationTransition.LoadReplacement,
             nativeRetiredGenerationTransition(oldGenerationUnmapped = true),
         )
         assertEquals(
-            NativeRetiredGenerationTransition.RestoreOldForRestart,
+            NativeRetiredGenerationTransition.LoadReplacementRetainingInertMapping,
             nativeRetiredGenerationTransition(oldGenerationUnmapped = false),
         )
     }

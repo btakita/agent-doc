@@ -5,7 +5,7 @@ use super::*;
 impl agent_doc_supervisor_process_io::SupervisorProcessIoState for SupervisorShared {
     fn transition_actor_ready_for_prompt(&self) {
         self.transition_actor_state(
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         );
@@ -90,12 +90,12 @@ impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorS
 
 impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorShared {
     fn actor_waiting_input(&self) -> bool {
-        *self.actor_state.lock() == Some(agent_doc_sqlite::state_store::ActorState::WaitingInput)
+        *self.actor_state.lock() == Some(agent_doc_controller::actor::ActorState::WaitingInput)
     }
 
     fn transition_actor_busy(&self, caller: &str, reason: &str) {
         self.transition_actor_state(
-            agent_doc_sqlite::state_store::ActorState::Busy,
+            agent_doc_controller::actor::ActorState::Busy,
             caller,
             reason,
         );
@@ -103,7 +103,7 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
 
     fn transition_actor_waiting_input(&self, caller: &str, reason: &str) {
         self.transition_actor_state(
-            agent_doc_sqlite::state_store::ActorState::WaitingInput,
+            agent_doc_controller::actor::ActorState::WaitingInput,
             caller,
             reason,
         );
@@ -372,7 +372,7 @@ mod tests {
             None,
             "claude",
             Some(runtime),
-            Some(agent_doc_sqlite::state_store::ActorState::Ready),
+            Some(agent_doc_controller::actor::ActorState::Ready),
             None,
         ));
         let written = Arc::new(Mutex::new(Vec::new()));
@@ -445,7 +445,7 @@ mod tests {
             None,
             "codex",
             Some(runtime),
-            Some(agent_doc_sqlite::state_store::ActorState::Busy),
+            Some(agent_doc_controller::actor::ActorState::Busy),
             None,
         ));
         let written = Arc::new(Mutex::new(Vec::new()));
@@ -485,7 +485,7 @@ mod tests {
         );
         assert_eq!(
             *shared.actor_state.lock(),
-            Some(agent_doc_sqlite::state_store::ActorState::Busy),
+            Some(agent_doc_controller::actor::ActorState::Busy),
             "steering must not finish or restart the active turn"
         );
         ipc.stop();

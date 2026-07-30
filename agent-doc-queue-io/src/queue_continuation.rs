@@ -144,11 +144,11 @@ fn is_foreign_owned_marker<F>(
     actor_binding: &F,
 ) -> bool
 where
-    F: Fn(&Path, &Path) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>>,
+    F: Fn(&Path, &Path) -> Result<Option<agent_doc_controller::actor::ActorRecord>>,
 {
     match actor_binding(root, doc) {
         Ok(Some(record))
-            if record.state != agent_doc_sqlite::state_store::ActorState::Closed
+            if record.state != agent_doc_controller::actor::ActorState::Closed
                 && !record.pane_id.trim().is_empty() =>
         {
             record.pane_id != current_pane
@@ -168,7 +168,7 @@ pub fn pending_marker_continuation_for_roots_with_actor_binding<F>(
     actor_binding: F,
 ) -> Result<Option<(PathBuf, queue_policy::QueueContinuation, ContinuationMarker)>>
 where
-    F: Fn(&Path, &Path) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>>,
+    F: Fn(&Path, &Path) -> Result<Option<agent_doc_controller::actor::ActorRecord>>,
 {
     scan_pending_marker_continuations_for_roots(roots, |root, doc, _marker| {
         // `#codex-stop-cross-doc-queue-continuation`: skip a marker owned by
@@ -204,6 +204,7 @@ mod tests {
     use crate::continuation_marker::{
         load_continuation_marker, record_continuation_requested_head,
     };
+    use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
     use agent_doc_queue::queue_continuation::{
         DrainScope, deferred_backlog_ids, deferred_head_count, drainable_head_count,
         extract_head_id, head_requires_clean_session_in, head_requires_context_reset_in,
@@ -212,7 +213,6 @@ mod tests {
         live_drainable_continuation_head, open_review_item_count, queue_stale_noise_lines,
         review_phase_routed, supervisor_deferred_backlog_ids,
     };
-    use agent_doc_sqlite::state_store::{ActorLastTransition, ActorRecord, ActorState};
 
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
         let queue_attrs = if has_auto { " auto go" } else { "" };

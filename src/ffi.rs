@@ -518,10 +518,10 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
 /// - Model any other state → no turn is running: `Committed` (idle).
 /// - Model unavailable (`None`, cold start) → the state-backbone projection.
 fn resolve_turn_phase(
-    model_state: Option<agent_doc_sqlite::state_store::ActorState>,
+    model_state: Option<agent_doc_controller::actor::ActorState>,
     projected_phase: agent_doc_turn::CyclePhase,
 ) -> agent_doc_turn::CyclePhase {
-    use agent_doc_sqlite::state_store::ActorState;
+    use agent_doc_controller::actor::ActorState;
     match model_state {
         Some(ActorState::Busy | ActorState::Blocked) => {
             if projected_phase.is_open() {
@@ -553,7 +553,7 @@ fn state_backbone_closeout_phase(file: &Path) -> Option<agent_doc_turn::CyclePha
 ///
 /// Reads WITHOUT creating the store (checks the path first), so a bare read from
 /// the editor plugin never materializes controller state as a side effect.
-fn document_model_actor_state(file: &Path) -> Option<agent_doc_sqlite::state_store::ActorState> {
+fn document_model_actor_state(file: &Path) -> Option<agent_doc_controller::actor::ActorState> {
     let root = agent_doc_project_root_io::project_root_containing(file)?;
     let db_path = agent_doc_sqlite::state_store::state_db_path(&root);
     if !db_path.exists() {
@@ -2879,6 +2879,7 @@ pub unsafe extern "C" fn agent_doc_sync_tmux_layout_json(
                 } else {
                     "manual".to_string()
                 },
+                actor_bindings: Vec::new(),
             },
         )
     })())
@@ -3320,7 +3321,7 @@ mod tests {
 
     #[test]
     fn resolve_turn_phase_makes_document_model_authoritative() {
-        use agent_doc_sqlite::state_store::ActorState;
+        use agent_doc_controller::actor::ActorState;
         use agent_doc_turn::CyclePhase;
         // Model Busy/Blocked + a terminal projection → in-flight; a lagging
         // terminal projection cannot hide a live turn.

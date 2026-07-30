@@ -287,7 +287,7 @@ pub fn route_via_authoritative_actor(
         );
         return Ok(dispatch_pane);
     }
-    if actor_state == agent_doc_sqlite::state_store::ActorState::Starting
+    if actor_state == agent_doc_controller::actor::ActorState::Starting
         && let Some(refreshed) = wait_for_authoritative_actor_ready(
             tmux,
             file,
@@ -325,7 +325,7 @@ pub fn route_via_authoritative_actor(
         }
     }
     let has_existing_inactive_queue_fallback = if dispatch_only
-        && actor_state == agent_doc_sqlite::state_store::ActorState::Busy
+        && actor_state == agent_doc_controller::actor::ActorState::Busy
         && prompt_context.is_none()
     {
         inactive_route_queue_head(file)?.is_some()
@@ -349,7 +349,7 @@ pub fn route_via_authoritative_actor(
     } else {
         None
     };
-    if actor_state == agent_doc_sqlite::state_store::ActorState::Ready
+    if actor_state == agent_doc_controller::actor::ActorState::Ready
         && let Some(cue) = active_turn_busy_cue.as_deref()
     {
         agent_doc_ops_log_io::log_op(
@@ -370,7 +370,7 @@ pub fn route_via_authoritative_actor(
             harness.binary,
             cue
         );
-        actor_state = agent_doc_sqlite::state_store::ActorState::Busy;
+        actor_state = agent_doc_controller::actor::ActorState::Busy;
     }
     if let Some(cue) = active_turn_busy_cue.as_deref() {
         agent_doc_ops_log_io::log_op(
@@ -438,7 +438,7 @@ pub fn route_via_authoritative_actor(
     }
 
     if actor_blocked_by_starting_timeout(StartingTimeoutActorFacts {
-        actor_blocked: actor.record.state == agent_doc_sqlite::state_store::ActorState::Blocked,
+        actor_blocked: actor.record.state == agent_doc_controller::actor::ActorState::Blocked,
         last_transition_reason: &actor.record.last_transition.reason,
         prompt_ready: false,
     }) {
@@ -504,7 +504,7 @@ pub fn route_via_authoritative_actor(
     // time. The pre-rescue Starting wait (line ~2952) may have timed out while the
     // pane was still parked. Re-promote and, if still Starting, re-attempt the
     // ready wait once on the freshly-visible pane before bailing out.
-    if rescued_from_stash && actor_state == agent_doc_sqlite::state_store::ActorState::Starting {
+    if rescued_from_stash && actor_state == agent_doc_controller::actor::ActorState::Starting {
         let runtime = query_supervisor_runtime(file, session_id);
         let (refreshed_record, refreshed_runtime) =
             promote_starting_authoritative_actor_if_dispatch_ready(
@@ -520,7 +520,7 @@ pub fn route_via_authoritative_actor(
             runtime: refreshed_runtime,
             pending_harness_switch: None,
         };
-        if refreshed.actor_state() == agent_doc_sqlite::state_store::ActorState::Ready {
+        if refreshed.actor_state() == agent_doc_controller::actor::ActorState::Ready {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -578,7 +578,7 @@ pub fn route_via_authoritative_actor(
     }
 
     let prompt_ready = active_turn_busy_cue.is_none()
-        && (actor_state == agent_doc_sqlite::state_store::ActorState::Ready
+        && (actor_state == agent_doc_controller::actor::ActorState::Ready
             || current_generation_ready_prompt_proven(tmux, &actor, harness));
 
     // Direct pane evidence repairs a stale busy projection (#snrun). The actor
@@ -605,7 +605,7 @@ pub fn route_via_authoritative_actor(
                 actor_state.as_str()
             ),
         );
-        actor_state = agent_doc_sqlite::state_store::ActorState::Ready;
+        actor_state = agent_doc_controller::actor::ActorState::Ready;
     }
 
     // Timeout-idle recovery: the wait loop exhausted its budget without finding
@@ -645,7 +645,7 @@ pub fn route_via_authoritative_actor(
                         .join(" | ")
                 ),
             );
-            actor_state = agent_doc_sqlite::state_store::ActorState::Ready;
+            actor_state = agent_doc_controller::actor::ActorState::Ready;
         } else {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -711,7 +711,7 @@ pub fn route_via_authoritative_actor(
                     .join(" | ")
             ),
         );
-        actor_state = agent_doc_sqlite::state_store::ActorState::Ready;
+        actor_state = agent_doc_controller::actor::ActorState::Ready;
     }
 
     let reopen_mode = if dispatch_only {

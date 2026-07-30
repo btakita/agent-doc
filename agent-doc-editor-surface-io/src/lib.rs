@@ -416,6 +416,7 @@ fn run_intent_via_controller(root: &Path, intent: &SurfaceIntent) -> Result<Stri
                     no_autostart: true,
                     exact_visible: true,
                     caller_kind: "automatic".to_string(),
+                    actor_bindings: Vec::new(),
                 },
             )?;
             serde_json::to_string(&receipt).context("serialize sync receipt")

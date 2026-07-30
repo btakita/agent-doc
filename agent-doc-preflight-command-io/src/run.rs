@@ -2278,15 +2278,15 @@ mod tests {
         let stale_doc = dir.path().join("tasks/stale-starting.md");
         std::fs::create_dir_all(stale_doc.parent().unwrap()).unwrap();
         std::fs::write(&stale_doc, "body").unwrap();
-        let stale_record = agent_doc_sqlite::state_store::ActorRecord {
+        let stale_record = agent_doc_controller::actor::ActorRecord {
             document_id: stale_doc.to_string_lossy().to_string(),
             session_id: "session-stale-starting".to_string(),
             generation: 1,
             pane_id: "%71".to_string(),
             window_id: "@7".to_string(),
             harness: "codex".to_string(),
-            state: agent_doc_sqlite::state_store::ActorState::Starting,
-            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+            state: agent_doc_controller::actor::ActorState::Starting,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
                 caller: "start".to_string(),
                 reason: "session_start".to_string(),
                 timestamp: 1,
@@ -2311,7 +2311,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             updated.state,
-            agent_doc_sqlite::state_store::ActorState::Closed
+            agent_doc_controller::actor::ActorState::Closed
         );
         assert_eq!(updated.last_transition.caller, "preflight");
         assert_eq!(updated.last_transition.reason, "stale_starting_actor");

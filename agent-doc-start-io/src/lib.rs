@@ -41,7 +41,7 @@ pub struct StartRuntime {
     pub harness: agent_doc_harness::HarnessConfig,
     pub pane_id: String,
     pub supervisor_instance_id: String,
-    pub actor_record: agent_doc_sqlite::state_store::ActorRecord,
+    pub actor_record: agent_doc_controller::actor::ActorRecord,
     pub post_start_document_model_ensure: bool,
 }
 
@@ -965,7 +965,7 @@ fn publish_start_supervisor_registry(input: StartSupervisorRegistryPublication<'
 
 fn start_controller_session(
     input: StartControllerSessionInput<'_>,
-) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
+) -> Result<agent_doc_controller::actor::ActorRecord> {
     let StartControllerSessionInput {
         file,
         canonical,

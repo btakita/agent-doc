@@ -515,6 +515,7 @@ pub fn run_in_project_root(
         AutoStartMode::Full,
         false,
         true,
+        &[],
         &Tmux::default_server(),
     )
 }
@@ -533,6 +534,7 @@ pub fn run_provision_only_in_project_root(
         AutoStartMode::Full,
         false,
         false,
+        &[],
         &Tmux::default_server(),
     )
 }
@@ -562,6 +564,7 @@ fn run_with_options_at_root(
         auto_start_mode,
         false,
         false,
+        &[],
         &Tmux::default_server(),
     )
 }
@@ -678,6 +681,22 @@ pub fn run_layout_only_exact_visible_in_project_root(
     window: Option<&str>,
     focus: Option<&str>,
 ) -> Result<()> {
+    run_layout_only_exact_visible_with_actor_bindings_in_project_root(
+        project_root,
+        col_args,
+        window,
+        focus,
+        &[],
+    )
+}
+
+pub fn run_layout_only_exact_visible_with_actor_bindings_in_project_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+) -> Result<()> {
     run_with_options_internal_at_root(
         project_root,
         col_args,
@@ -686,6 +705,7 @@ pub fn run_layout_only_exact_visible_in_project_root(
         AutoStartMode::SafePassive,
         true,
         false,
+        actor_bindings,
         &Tmux::default_server(),
     )
 }
@@ -711,7 +731,22 @@ fn load_live_authoritative_actor_record_uncached(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
-) -> Option<agent_doc_sqlite::state_store::ActorRecord> {
+) -> Option<agent_doc_controller::actor::ActorRecord> {
+    let record = load_live_authoritative_actor_record_for_file_uncached(tmux, file)?;
+    (record.session_id == session_id).then_some(record)
+}
+
+/// Resolve the controller's hot file→actor projection without first reading
+/// document frontmatter.
+///
+/// The actor binding is keyed by the canonical document path and already
+/// carries the session id. Requiring a caller to rediscover that id from disk
+/// before consulting the actor would invert editor authority for unsaved
+/// buffers and add an avoidable content RPC to every exact-visible tab switch.
+fn load_live_authoritative_actor_record_for_file_uncached(
+    tmux: &Tmux,
+    file: &Path,
+) -> Option<agent_doc_controller::actor::ActorRecord> {
     let canonical = file
         .canonicalize()
         .ok()
@@ -722,7 +757,7 @@ fn load_live_authoritative_actor_record_uncached(
     )
     .ok()
     .flatten()?;
-    if record.session_id != session_id || !tmux.pane_alive(&record.pane_id) {
+    if !tmux.pane_alive(&record.pane_id) {
         return None;
     }
     Some(record)
@@ -733,7 +768,7 @@ fn load_live_authoritative_actor_record_cached(
     file: &Path,
     session_id: &str,
     proof_cache: &SyncProofCache,
-) -> Option<agent_doc_sqlite::state_store::ActorRecord> {
+) -> Option<agent_doc_controller::actor::ActorRecord> {
     if proof_cache.skip_authoritative_actor_lookup {
         return None;
     }
@@ -1934,6 +1969,7 @@ fn run_with_options_internal(
         auto_start_mode,
         exact_visible_projection,
         route_created_panes,
+        &[],
         tmux,
     )
 }
@@ -2016,6 +2052,7 @@ fn run_with_options_internal_at_root(
     auto_start_mode: AutoStartMode,
     exact_visible_projection: bool,
     route_created_panes: bool,
+    reactive_actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
     tmux: &Tmux,
 ) -> Result<()> {
     let window = agent_doc_sync::normalize_scope_arg(window);
@@ -2449,6 +2486,10 @@ fn run_with_options_internal_at_root(
     let safe_passive_resolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
     // Cross-root pane ownership stays with the nested controller. The parent
     // sync carries only controller-proven, in-memory bindings into tmux-router.
+    let reactive_actor_bindings: HashMap<PathBuf, _> = reactive_actor_bindings
+        .iter()
+        .map(|binding| (PathBuf::from(&binding.document_path), binding))
+        .collect();
     let mut pre_resolved_panes: HashMap<PathBuf, String> = HashMap::new();
 
     let resolve_file = |path: &Path| -> Option<FileResolution> {
@@ -2618,13 +2659,52 @@ fn run_with_options_internal_at_root(
         for file_path in &all_files {
             let mut seg_mark = Instant::now();
             let _ = &seg_mark;
-            if !file_path.exists() {
+
+            // Exact editor-visible navigation has a generation-fenced actor
+            // projection in this controller for the healthy/common case. That
+            // projection is the hot-path ownership fact: publish it directly
+            // into tmux-router and avoid re-reading frontmatter, the startup
+            // ledger, and the durable registry merely to reconstruct the same
+            // file→pane relationship. Missing/ambiguous actors still fall
+            // through to the full fail-closed proof path below.
+            if skip_autostart_diagnostics
+                && let Some(binding) = reactive_actor_bindings.get(file_path)
+                && tmux.pane_alive(&binding.pane_id)
+            {
+                sync_log(&format!(
+                    "safe_passive_actor_projection_reused file={} pane={} generation={}",
+                    file_path.display(),
+                    binding.pane_id,
+                    binding.generation
+                ));
+                safe_passive_managed_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
+                safe_passive_resolved_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
+                session_files
+                    .borrow_mut()
+                    .push((binding.session_id.clone(), file_path.to_path_buf()));
+                pre_resolved_panes.insert(file_path.to_path_buf(), binding.pane_id.clone());
+                reserve_sync_pane(&claimed_sync_panes, &binding.pane_id, file_path);
+                sa += seg_mark.elapsed();
                 continue;
             }
+
             let is_cross_root = !document_belongs_to_sync_root(file_path, &sync_project_root);
-            let content = match std::fs::read_to_string(file_path) {
-                Ok(c) => c,
-                Err(_) => continue,
+            let content = match crate::runtime_effects().and_then(|effects| {
+                effects.resolve_current_document(file_path, "sync_ownership_authority")
+            }) {
+                Ok(content) => content,
+                Err(error) => {
+                    eprintln!(
+                        "[sync] warning: current editor-authoritative content unavailable for {}: {}",
+                        file_path.display(),
+                        error
+                    );
+                    continue;
+                }
             };
             let (fm, _) = match parse_frontmatter_for_sync(&content, file_path, "auto-start") {
                 Ok(r) => r,
@@ -4974,7 +5054,7 @@ pub fn pane_owned_document_other_than(
             .ok()
             .flatten()
             .filter(|record| {
-                record.state != agent_doc_sqlite::state_store::ActorState::Closed
+                record.state != agent_doc_controller::actor::ActorState::Closed
                     && tmux.pane_alive(&record.pane_id)
             })
             .map(|record| record.pane_id)
@@ -7432,7 +7512,7 @@ mod tests {
         agent_doc_controller_io::project_controller::store_actor_record(
             root,
             Some(0),
-            &agent_doc_sqlite::state_store::ActorRecord {
+            &agent_doc_controller::actor::ActorRecord {
                 document_id: agent_doc_session_actor_io::canonical_document_id_in(
                     root,
                     &stale_doc.to_string_lossy(),
@@ -7442,8 +7522,8 @@ mod tests {
                 pane_id: stale_pane.clone(),
                 window_id: active_window.clone(),
                 harness: "codex".to_string(),
-                state: agent_doc_sqlite::state_store::ActorState::Starting,
-                last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+                state: agent_doc_controller::actor::ActorState::Starting,
+                last_transition: agent_doc_controller::actor::ActorLastTransition {
                     caller: "sync".to_string(),
                     reason: "stale_starting_sibling_test".to_string(),
                     timestamp: 1,

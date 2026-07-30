@@ -44,6 +44,7 @@
 //!   each produce a live pane in the correct session.
 
 use crate as session_registry_io;
+use agent_doc_controller::actor::ActorRecord;
 use agent_doc_session_registry as session_registry;
 use agent_doc_sqlite::state_store;
 use agent_doc_supervisor::{
@@ -548,10 +549,7 @@ fn log_stale_registry_keys(stale_keys: &[String], pane_id: &str) {
     }
 }
 
-pub fn load_actor_record(
-    project_root: &Path,
-    document_id: &str,
-) -> Result<Option<state_store::ActorRecord>> {
+pub fn load_actor_record(project_root: &Path, document_id: &str) -> Result<Option<ActorRecord>> {
     Ok(
         agent_doc_session_actor_io::load_all_records_in(project_root)?
             .get(document_id)
@@ -733,6 +731,7 @@ fn chrono_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_controller::actor::{ActorLastTransition, ActorState};
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -1208,15 +1207,15 @@ mod tests {
         session_registry_io::save_in(dir.path(), &reg).unwrap();
 
         let mut conn = state_store::open_state_db(dir.path()).unwrap();
-        let record = state_store::ActorRecord {
+        let record = ActorRecord {
             document_id: new_key.clone(),
             session_id: "new-session".to_string(),
             generation: 7,
             pane_id: "%19".to_string(),
             window_id: "@3".to_string(),
             harness: "codex".to_string(),
-            state: state_store::ActorState::Ready,
-            last_transition: state_store::ActorLastTransition {
+            state: ActorState::Ready,
+            last_transition: ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "seed".to_string(),
                 timestamp: 1,

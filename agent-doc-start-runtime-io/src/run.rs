@@ -710,7 +710,7 @@ pub fn run_with_reap_policy_and_resume(
         launch_binary_identity,
         &harness.binary,
         Some(actor_runtime),
-        Some(agent_doc_sqlite::state_store::ActorState::Starting),
+        Some(agent_doc_controller::actor::ActorState::Starting),
         Some(pane_id.clone()),
     ));
     let mut capability_proof_thread = configure_managed_capability_proof_for_spec(
@@ -744,7 +744,7 @@ pub fn run_with_reap_policy_and_resume(
             generation: actor_record.generation,
             supervisor_pid: std::process::id(),
             supervisor_socket,
-            runtime_state: agent_doc_sqlite::state_store::ActorState::Starting
+            runtime_state: agent_doc_controller::actor::ActorState::Starting
                 .as_str()
                 .to_string(),
         },
@@ -960,7 +960,7 @@ pub fn run_with_reap_policy_and_resume(
                 "restart_continue_spawn"
             };
             shared.transition_actor_state(
-                agent_doc_sqlite::state_store::ActorState::Busy,
+                agent_doc_controller::actor::ActorState::Busy,
                 "supervisor",
                 restart_reason,
             );
@@ -1147,7 +1147,7 @@ pub fn run_with_reap_policy_and_resume(
                 );
                 if harness.binary == "codex" {
                     shared.transition_actor_state(
-                        agent_doc_sqlite::state_store::ActorState::WaitingInput,
+                        agent_doc_controller::actor::ActorState::WaitingInput,
                         "supervisor",
                         "exact_session_id_unavailable",
                     );
@@ -1576,7 +1576,7 @@ pub fn run_with_reap_policy_and_resume(
                     &format!("ipc_stop_agent restart_count={}", restart_count),
                 );
                 shared.transition_actor_state(
-                    agent_doc_sqlite::state_store::ActorState::WaitingInput,
+                    agent_doc_controller::actor::ActorState::WaitingInput,
                     "supervisor",
                     "stop_agent_prompt",
                 );
@@ -1766,7 +1766,7 @@ pub fn run_with_reap_policy_and_resume(
                 )) {
                     SupervisorCleanExitResolution::PromptUser => {
                         shared.transition_actor_state(
-                            agent_doc_sqlite::state_store::ActorState::WaitingInput,
+                            agent_doc_controller::actor::ActorState::WaitingInput,
                             "supervisor",
                             "clean_exit_prompt",
                         );
@@ -1821,7 +1821,7 @@ pub fn run_with_reap_policy_and_resume(
                         ) {
                             SupervisorRestartContinueExitStrategy::CtrlCPromptUser => {
                                 shared.transition_actor_state(
-                                    agent_doc_sqlite::state_store::ActorState::WaitingInput,
+                                    agent_doc_controller::actor::ActorState::WaitingInput,
                                     "supervisor",
                                     "ctrl_c_prompt",
                                 );
@@ -1850,7 +1850,7 @@ pub fn run_with_reap_policy_and_resume(
                             }
                             SupervisorRestartContinueExitStrategy::CtrlDPromptUser => {
                                 shared.transition_actor_state(
-                                    agent_doc_sqlite::state_store::ActorState::WaitingInput,
+                                    agent_doc_controller::actor::ActorState::WaitingInput,
                                     "supervisor",
                                     "ctrl_d_prompt",
                                 );
@@ -1879,7 +1879,7 @@ pub fn run_with_reap_policy_and_resume(
                             }
                             SupervisorRestartContinueExitStrategy::PromptUser => {
                                 shared.transition_actor_state(
-                                    agent_doc_sqlite::state_store::ActorState::WaitingInput,
+                                    agent_doc_controller::actor::ActorState::WaitingInput,
                                     "supervisor",
                                     "resume_failure_prompt",
                                 );
@@ -1994,7 +1994,7 @@ pub fn run_with_reap_policy_and_resume(
             }
             RestartAction::Halt => {
                 shared.transition_actor_state(
-                    agent_doc_sqlite::state_store::ActorState::Blocked,
+                    agent_doc_controller::actor::ActorState::Blocked,
                     "supervisor",
                     "supervisor_halted",
                 );
@@ -2024,7 +2024,7 @@ pub fn run_with_reap_policy_and_resume(
     }
     ipc.stop();
     shared.transition_actor_state(
-        agent_doc_sqlite::state_store::ActorState::Closed,
+        agent_doc_controller::actor::ActorState::Closed,
         "supervisor",
         supervisor_exit_reason,
     );
@@ -2711,7 +2711,7 @@ mod tests {
             None,
             "claude",
             None,
-            Some(agent_doc_sqlite::state_store::ActorState::Ready),
+            Some(agent_doc_controller::actor::ActorState::Ready),
             Some(pane.clone()),
         ));
         let shared_for_ipc = shared.clone();

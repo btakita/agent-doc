@@ -253,11 +253,12 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         let routes_created_panes = invocation.routes_created_panes();
         let sync_result = if invocation.no_autostart {
             if invocation.exact_visible {
-                agent_doc_sync_io::sync::run_layout_only_exact_visible_in_project_root(
+                agent_doc_sync_io::sync::run_layout_only_exact_visible_with_actor_bindings_in_project_root(
                     project_root,
                     &invocation.columns,
                     invocation.window.as_deref(),
                     invocation.focus.as_deref(),
+                    &invocation.actor_bindings,
                 )
             } else {
                 agent_doc_sync_io::sync::run_layout_only_in_project_root(

@@ -1,11 +1,9 @@
 //! Project-controller SQLite state store.
 //!
 //! This module owns every `rusqlite::Connection` interaction for the project
-//! controller's durable actor/lease/dispatch/diagnostic/layout state, plus the
-//! storage and status types those queries read and write. It deliberately
-//! depends only on `rusqlite`, `serde_json`, and `std` so that
-//! `agent-doc-orchestration` can call into it without pulling the bundled
-//! SQLite C build into its own compile graph.
+//! controller's durable actor/lease/dispatch/diagnostic/layout state, plus
+//! storage-specific status records. Actor lifecycle vocabulary comes from
+//! `agent-doc-controller`; this crate only serializes it.
 //!
 //! Orchestration glue (ops-log, layout projection emission, `read_bootstrap`,
 //! drift verification) stays in
@@ -24,66 +22,7 @@ const STATE_DB_FILE: &str = "state.db";
 const STATE_DB_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 const STATE_DB_SCHEMA_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
-// ---------------------------------------------------------------------------
-// Storage types (moved from agent-doc-orchestration::session_actor).
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ActorState {
-    Starting,
-    Ready,
-    Busy,
-    WaitingInput,
-    Closed,
-    Blocked,
-}
-
-impl ActorState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Starting => "starting",
-            Self::Ready => "ready",
-            Self::Busy => "busy",
-            Self::WaitingInput => "waiting_input",
-            Self::Closed => "closed",
-            Self::Blocked => "blocked",
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw {
-            "starting" => Some(Self::Starting),
-            "ready" => Some(Self::Ready),
-            "busy" => Some(Self::Busy),
-            "waiting_input" => Some(Self::WaitingInput),
-            "closed" => Some(Self::Closed),
-            "blocked" => Some(Self::Blocked),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActorLastTransition {
-    pub caller: String,
-    pub reason: String,
-    pub timestamp: u64,
-    pub prior_generation: u64,
-    pub new_generation: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActorRecord {
-    pub document_id: String,
-    pub session_id: String,
-    pub generation: u64,
-    pub pane_id: String,
-    pub window_id: String,
-    pub harness: String,
-    pub state: ActorState,
-    pub last_transition: ActorLastTransition,
-}
+use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState, ActorStoreWrite};
 
 // ---------------------------------------------------------------------------
 // Status types (moved from agent-doc-orchestration::project_controller).
@@ -3807,7 +3746,7 @@ pub fn store_actor_record_tx(
     record: &ActorRecord,
     launch_mode: Option<String>,
     controller_epoch: Option<i64>,
-) -> Result<Vec<String>> {
+) -> Result<ActorStoreWrite> {
     // This transaction reads the current actor generation before writing the
     // replacement record. A deferred SQLite transaction can let two starters
     // acquire read snapshots and then fail one read-to-write upgrade with
@@ -3854,7 +3793,10 @@ pub fn store_actor_record_tx(
     let transition_id = insert_actor_transition(&tx, previous.as_ref(), record)?;
     upsert_actor_document(&tx, record, transition_id, launch_mode, controller_epoch)?;
     tx.commit()?;
-    Ok(evicted_document_ids)
+    Ok(ActorStoreWrite {
+        record: record.clone(),
+        evicted_document_ids,
+    })
 }
 
 /// `#actorprune`: hard-delete a dead actor record and its history/lease rows.

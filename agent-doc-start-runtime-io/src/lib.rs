@@ -583,7 +583,7 @@ fn route_owned_live_pane_busy_reason(
     if shared
         .actor_state
         .lock()
-        .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
+        .is_some_and(|state| state == agent_doc_controller::actor::ActorState::Ready)
     {
         return None;
     }
@@ -694,7 +694,7 @@ fn auto_trigger_inject_command(
         agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Untracked => None,
     };
     shared.transition_actor_state(
-        agent_doc_sqlite::state_store::ActorState::Busy,
+        agent_doc_controller::actor::ActorState::Busy,
         "dispatch",
         "auto_trigger_inject",
     );
@@ -799,7 +799,7 @@ fn auto_trigger_clear_command(
         return AutoTriggerOutcome::Cancelled;
     }
     shared.transition_actor_state(
-        agent_doc_sqlite::state_store::ActorState::Busy,
+        agent_doc_controller::actor::ActorState::Busy,
         "operator",
         "auto_trigger_clear",
     );
@@ -1568,7 +1568,7 @@ fn spawn_managed_capability_proof_thread(
                                     return;
                                 }
                                 shared.transition_actor_state(
-                                    agent_doc_sqlite::state_store::ActorState::Blocked,
+                                    agent_doc_controller::actor::ActorState::Blocked,
                                     "supervisor",
                                     &format!("{}_capability_proof_failed", harness_binary),
                                 );
@@ -1735,10 +1735,10 @@ struct SessionActorRuntime {
 impl SessionActorRuntime {
     fn transition(
         &self,
-        state: agent_doc_sqlite::state_store::ActorState,
+        state: agent_doc_controller::actor::ActorState,
         caller: &str,
         reason: &str,
-    ) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
+    ) -> Result<agent_doc_controller::actor::ActorRecord> {
         agent_doc_controller_io::project_controller::mark_lifecycle(
             &self.project_root,
             agent_doc_controller_io::project_controller::LifecycleRequest {
@@ -1767,7 +1767,7 @@ pub(crate) struct SupervisorShared {
     /// Authoritative actor lifecycle context for this pane generation.
     actor_runtime: Option<SessionActorRuntime>,
     /// Best-known actor lifecycle state for IPC `state` responses.
-    actor_state: Mutex<Option<agent_doc_sqlite::state_store::ActorState>>,
+    actor_state: Mutex<Option<agent_doc_controller::actor::ActorState>>,
     /// PID of the long-lived `agent-doc start` supervisor process.
     supervisor_pid: u32,
     /// Stable identity for this supervisor process across child restarts.
@@ -1870,7 +1870,7 @@ impl SupervisorShared {
         launch_binary_identity: Option<agent_doc_controller::status::ControllerBinaryIdentity>,
         harness_binary: &str,
         actor_runtime: Option<SessionActorRuntime>,
-        actor_state: Option<agent_doc_sqlite::state_store::ActorState>,
+        actor_state: Option<agent_doc_controller::actor::ActorState>,
         inject_pane: Option<String>,
     ) -> Self {
         Self {
@@ -2145,7 +2145,7 @@ impl SupervisorShared {
 
     fn transition_actor_state(
         &self,
-        state: agent_doc_sqlite::state_store::ActorState,
+        state: agent_doc_controller::actor::ActorState,
         caller: &str,
         reason: &str,
     ) {
@@ -2155,7 +2155,7 @@ impl SupervisorShared {
         match runtime.transition(state, caller, reason) {
             Ok(record) => {
                 *self.actor_state.lock() = Some(record.state);
-                if record.state == agent_doc_sqlite::state_store::ActorState::Ready {
+                if record.state == agent_doc_controller::actor::ActorState::Ready {
                     *self.prompt_dispatch_projection.lock() = None;
                 }
             }
@@ -2212,21 +2212,21 @@ impl agent_doc_supervisor_io::detection::SupervisorDetectionState for Supervisor
     fn actor_known_non_ready(&self) -> bool {
         self.actor_state
             .lock()
-            .is_some_and(|state| state != agent_doc_sqlite::state_store::ActorState::Ready)
+            .is_some_and(|state| state != agent_doc_controller::actor::ActorState::Ready)
     }
 
     fn actor_ready(&self) -> bool {
         self.actor_state
             .lock()
-            .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
+            .is_some_and(|state| state == agent_doc_controller::actor::ActorState::Ready)
     }
 
     fn actor_busy_or_starting(&self) -> bool {
         self.actor_state.lock().is_some_and(|state| {
             matches!(
                 state,
-                agent_doc_sqlite::state_store::ActorState::Busy
-                    | agent_doc_sqlite::state_store::ActorState::Starting
+                agent_doc_controller::actor::ActorState::Busy
+                    | agent_doc_controller::actor::ActorState::Starting
             )
         })
     }
@@ -2502,7 +2502,7 @@ mod tests {
     fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = agent_doc_harness::HarnessConfig::claude();
-        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Ready);
         record_recent_output(&shared, b"turn committed, renderer tail has no composer\n");
 
         assert!(
@@ -2519,7 +2519,7 @@ mod tests {
     fn idle_queue_prompt_visible_keeps_blocker_over_ready_actor() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = agent_doc_harness::HarnessConfig::claude();
-        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Ready);
         record_recent_output(
             &shared,
             concat!(
@@ -2556,7 +2556,7 @@ mod tests {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = agent_doc_harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
-        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Ready);
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(&shared, b"Working...\n");
         record_recent_output(
@@ -2572,7 +2572,7 @@ mod tests {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = agent_doc_harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
-        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Ready);
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(&shared, b"tab to queue message\n");
         record_recent_output(
@@ -2668,7 +2668,7 @@ mod tests {
     fn prompt_visible_requires_ready_transition_after_busy_dispatch() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         shared.prompt_visible_once.store(true, Ordering::Relaxed);
-        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Busy);
+        *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Busy);
         assert!(
             prompt_visible_requires_ready_transition(&shared),
             "a busy actor that surfaces the prompt again must return to ready"
@@ -2882,7 +2882,7 @@ mod tests {
             None,
             "claude",
             None,
-            Some(agent_doc_sqlite::state_store::ActorState::Ready),
+            Some(agent_doc_controller::actor::ActorState::Ready),
             Some("%owner".to_string()),
         );
         let mut session_log = None;
@@ -2916,7 +2916,7 @@ mod tests {
             None,
             "codex",
             None,
-            Some(agent_doc_sqlite::state_store::ActorState::Ready),
+            Some(agent_doc_controller::actor::ActorState::Ready),
             Some("%owner".to_string()),
         );
         let mut session_log = None;
@@ -2947,7 +2947,7 @@ mod tests {
             None,
             "codex",
             None,
-            Some(agent_doc_sqlite::state_store::ActorState::Busy),
+            Some(agent_doc_controller::actor::ActorState::Busy),
             Some("%owner".to_string()),
         );
         let mut session_log = None;
@@ -2978,7 +2978,7 @@ mod tests {
             None,
             "codex",
             None,
-            Some(agent_doc_sqlite::state_store::ActorState::Ready),
+            Some(agent_doc_controller::actor::ActorState::Ready),
             Some("%owner".to_string()),
         );
         let mut session_log = None;

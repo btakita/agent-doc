@@ -2,19 +2,21 @@
 //!
 //! ## Spec
 //! - Freezes the phase-1 single-owner session-actor contract while introducing
-//!   the phase-2 durable actor store.
+//!   the phase-2 durable actor projection.
 //! - Ownership generations are monotonic per document session and start at `1`.
 //! - A new authoritative generation is recorded whenever a new `agent-doc start`
 //!   session begins or an existing document session is rebound to a different pane.
 //! - Legacy generation inference is delegated to the pure supervisor lifecycle
 //!   API, which remains backward-compatible with logs that only have
 //!   `session_start` lines and no explicit generation markers.
-//! - The durable actor store lives behind the Project Controller's SQLite state,
-//!   keyed by canonical document path. Legacy JSON actor/session projections are
-//!   not read as bootstrap authority.
+//! - The Project Controller owns the live actor Source, keyed by canonical
+//!   document path. SQLite hydrates that Source on cold start and durably records
+//!   accepted transitions. Legacy JSON actor/session projections are not read as
+//!   bootstrap authority.
 //!
 //! ## Agentic Contracts
-//! - The actor store is authoritative for the latest generation once present.
+//! - The controller actor Source is authoritative for the latest generation
+//!   while the controller is live.
 //! - Store updates must be monotonic and fail closed on generation regressions.
 //! - Legacy logs with at least one `session_start` but no explicit generation
 //!   markers infer the current generation from the number of starts.
@@ -29,7 +31,8 @@ use agent_doc_supervisor::{OwnershipGeneration, infer_latest_generation_from_con
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
-use agent_doc_sqlite::state_store::{self, ActorLastTransition, ActorRecord, ActorState};
+use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
+use agent_doc_sqlite::state_store;
 
 type ActorStore = std::collections::BTreeMap<String, ActorRecord>;
 

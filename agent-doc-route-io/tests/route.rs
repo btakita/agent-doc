@@ -449,16 +449,16 @@ use tmux_router::IsolatedTmux;
 // --- Stash rescue tests ---
 // --- split_before positional target tests ---
 #[cfg(test)]
-pub(crate) fn test_actor_record(pane_id: &str) -> agent_doc_sqlite::state_store::ActorRecord {
-    agent_doc_sqlite::state_store::ActorRecord {
+pub(crate) fn test_actor_record(pane_id: &str) -> agent_doc_controller::actor::ActorRecord {
+    agent_doc_controller::actor::ActorRecord {
         document_id: "test-doc".to_string(),
         session_id: "test-session".to_string(),
         generation: 1,
         pane_id: pane_id.to_string(),
         window_id: "@1".to_string(),
         harness: "codex".to_string(),
-        state: agent_doc_sqlite::state_store::ActorState::Ready,
-        last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+        state: agent_doc_controller::actor::ActorState::Ready,
+        last_transition: agent_doc_controller::actor::ActorLastTransition {
             caller: "test".to_string(),
             reason: "test".to_string(),
             timestamp: 0,
@@ -667,13 +667,13 @@ mod tests {
     fn authoritative_actor_optimistic_queue_excludes_starting_state() {
         assert!(
             authoritative_actor_dispatch_can_queue_optimistically(
-                agent_doc_sqlite::state_store::ActorState::Busy
+                agent_doc_controller::actor::ActorState::Busy
             ),
             "busy actors may still accept a supervisor-owned queued reopen"
         );
         assert!(
             !authoritative_actor_dispatch_can_queue_optimistically(
-                agent_doc_sqlite::state_store::ActorState::Starting
+                agent_doc_controller::actor::ActorState::Starting
             ),
             "starting actors must become ready before route submits a reopen"
         );
@@ -681,27 +681,27 @@ mod tests {
     #[test]
     fn authoritative_actor_start_wait_terminal_state_only_for_terminal_states() {
         assert!(authoritative_actor_start_wait_terminal_state(
-            agent_doc_sqlite::state_store::ActorState::Closed
+            agent_doc_controller::actor::ActorState::Closed
         ));
         assert!(authoritative_actor_start_wait_terminal_state(
-            agent_doc_sqlite::state_store::ActorState::Blocked
+            agent_doc_controller::actor::ActorState::Blocked
         ));
         assert!(!authoritative_actor_start_wait_terminal_state(
-            agent_doc_sqlite::state_store::ActorState::Starting
+            agent_doc_controller::actor::ActorState::Starting
         ));
         assert!(!authoritative_actor_start_wait_terminal_state(
-            agent_doc_sqlite::state_store::ActorState::Busy
+            agent_doc_controller::actor::ActorState::Busy
         ));
         assert!(!authoritative_actor_start_wait_terminal_state(
-            agent_doc_sqlite::state_store::ActorState::WaitingInput
+            agent_doc_controller::actor::ActorState::WaitingInput
         ));
         assert!(!authoritative_actor_start_wait_terminal_state(
-            agent_doc_sqlite::state_store::ActorState::Ready
+            agent_doc_controller::actor::ActorState::Ready
         ));
     }
     #[test]
     fn authoritative_actor_ready_poll_requires_ready_state_and_prompt_proof() {
-        use agent_doc_sqlite::state_store::ActorState;
+        use agent_doc_controller::actor::ActorState;
 
         let schedule = [
             (ActorState::Starting, false, true),
@@ -741,7 +741,7 @@ mod tests {
     }
     #[test]
     fn authoritative_actor_ready_poll_surfaces_terminal_states() {
-        use agent_doc_sqlite::state_store::ActorState;
+        use agent_doc_controller::actor::ActorState;
 
         assert_eq!(
             classify_prompt_ready_barrier(PromptReadyBarrierFacts {
@@ -3357,7 +3357,7 @@ mod tests {
     #[test]
     fn authoritative_actor_state_preserves_terminal_record_over_runtime_starting() {
         let mut blocked_record = test_actor_record("%42");
-        blocked_record.state = agent_doc_sqlite::state_store::ActorState::Blocked;
+        blocked_record.state = agent_doc_controller::actor::ActorState::Blocked;
         blocked_record.last_transition.reason = STARTING_ACTOR_TIMEOUT_REASON.to_string();
         let blocked_actor = AuthoritativeActorDispatchTarget {
             record: blocked_record,
@@ -3370,13 +3370,13 @@ mod tests {
         };
         assert_eq!(
             blocked_actor.actor_state(),
-            agent_doc_sqlite::state_store::ActorState::Blocked,
+            agent_doc_controller::actor::ActorState::Blocked,
             "a route-owned blocked record should remain a durable terminal gate even if stale supervisor IPC still reports starting"
         );
         assert!(
             actor_blocked_by_starting_timeout(StartingTimeoutActorFacts {
                 actor_blocked: blocked_actor.record.state
-                    == agent_doc_sqlite::state_store::ActorState::Blocked,
+                    == agent_doc_controller::actor::ActorState::Blocked,
                 last_transition_reason: &blocked_actor.record.last_transition.reason,
                 prompt_ready: false,
             }),
@@ -3384,7 +3384,7 @@ mod tests {
         );
 
         let mut starting_record = test_actor_record("%43");
-        starting_record.state = agent_doc_sqlite::state_store::ActorState::Starting;
+        starting_record.state = agent_doc_controller::actor::ActorState::Starting;
         let ready_actor = AuthoritativeActorDispatchTarget {
             record: starting_record,
             runtime: SupervisorRuntime {
@@ -3396,14 +3396,14 @@ mod tests {
         };
         assert_eq!(
             ready_actor.actor_state(),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "non-terminal records should still accept fresher supervisor runtime state"
         );
     }
     #[test]
     fn starting_timeout_blocked_actor_recovery_requires_prompt_ready_proof() {
         let mut blocked_record = test_actor_record("%42");
-        blocked_record.state = agent_doc_sqlite::state_store::ActorState::Blocked;
+        blocked_record.state = agent_doc_controller::actor::ActorState::Blocked;
         blocked_record.last_transition.reason = STARTING_ACTOR_TIMEOUT_REASON.to_string();
         let blocked_actor = AuthoritativeActorDispatchTarget {
             record: blocked_record,
@@ -3418,7 +3418,7 @@ mod tests {
         assert!(
             starting_timeout_blocked_actor_can_recover(StartingTimeoutActorFacts {
                 actor_blocked: blocked_actor.record.state
-                    == agent_doc_sqlite::state_store::ActorState::Blocked,
+                    == agent_doc_controller::actor::ActorState::Blocked,
                 last_transition_reason: &blocked_actor.record.last_transition.reason,
                 prompt_ready: true,
             }),
@@ -3427,7 +3427,7 @@ mod tests {
         assert!(
             !starting_timeout_blocked_actor_can_recover(StartingTimeoutActorFacts {
                 actor_blocked: blocked_actor.record.state
-                    == agent_doc_sqlite::state_store::ActorState::Blocked,
+                    == agent_doc_controller::actor::ActorState::Blocked,
                 last_transition_reason: &blocked_actor.record.last_transition.reason,
                 prompt_ready: false,
             }),
@@ -3437,7 +3437,7 @@ mod tests {
         assert!(
             !starting_timeout_blocked_actor_can_recover(StartingTimeoutActorFacts {
                 actor_blocked: degraded_actor.record.state
-                    == agent_doc_sqlite::state_store::ActorState::Blocked,
+                    == agent_doc_controller::actor::ActorState::Blocked,
                 last_transition_reason: &degraded_actor.record.last_transition.reason,
                 prompt_ready: true,
             }),

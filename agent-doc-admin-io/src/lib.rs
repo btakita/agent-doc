@@ -1,12 +1,13 @@
 //! Admin command IO host for controller/fleet operations.
 
+use agent_doc_controller::actor::ActorRecord;
 use agent_doc_controller::fleet::{
     ActorListRecord, ActorListRegistryBinding, AdminReceiptLine, build_admin_actor_list,
     detect_admin_findings, format_admin_receipt_line,
 };
 use agent_doc_controller::status::{ControllerFreshnessStatus, controller_freshness_summary};
 use agent_doc_sqlite::state_store::{
-    ActorRecord, AdminOperationStatus, DispatchAttemptStatus, ProjectionDiagnosticStatus,
+    AdminOperationStatus, DispatchAttemptStatus, ProjectionDiagnosticStatus,
     QueueBackpressureStatus, QueueControlStatus, QueueHeadStatus, SupervisorLeaseStatus,
 };
 use anyhow::Result;

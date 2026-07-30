@@ -197,7 +197,7 @@ fn test_cli_admin_json_receipts_and_inspection_cover_controller_paths() {
         "session-cli-admin",
         "%51",
         Some(1),
-        agent_doc_sqlite::state_store::ActorState::Ready,
+        agent_doc_controller::actor::ActorState::Ready,
         "supervisor",
         "prompt_ready",
     )
@@ -390,7 +390,7 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
         "session-cli-bulk-reap",
         "%999999",
         Some(1),
-        agent_doc_sqlite::state_store::ActorState::Ready,
+        agent_doc_controller::actor::ActorState::Ready,
         "supervisor",
         "prompt_ready",
     )
@@ -427,14 +427,14 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
     if reaped == 1 {
         assert_eq!(
             current.state,
-            agent_doc_sqlite::state_store::ActorState::Closed
+            agent_doc_controller::actor::ActorState::Closed
         );
         assert_eq!(current.pane_id, "");
         assert_eq!(current.window_id, "");
     } else {
         assert_eq!(
             current.state,
-            agent_doc_sqlite::state_store::ActorState::Ready
+            agent_doc_controller::actor::ActorState::Ready
         );
         assert_eq!(current.pane_id, "%999999");
     }
@@ -2476,7 +2476,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
     );
     assert_eq!(
         tmux_router.get("version").and_then(toml::Value::as_str),
-        Some("0.3.19")
+        Some("0.3.20")
     );
 }
 
@@ -14555,7 +14555,7 @@ fn test_editor_hot_path_has_no_filesystem_sidecar_or_reload_broadcast_transport(
 }
 
 #[test]
-fn test_session_actor_has_no_sqlite_state_facade() {
+fn test_actor_domain_types_live_in_the_controller_model() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let session_actor_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-actor-io/src/lib.rs")).unwrap();
@@ -14571,15 +14571,28 @@ fn test_session_actor_has_no_sqlite_state_facade() {
         "orchestration must not expose a session_actor facade module"
     );
     assert!(
-        !session_actor_source.contains("pub use agent_doc_sqlite::state_store"),
-        "agent-doc-session-actor-io must not re-export SQLite actor storage types"
+        session_actor_source.contains(
+            "use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};"
+        ),
+        "agent-doc-session-actor-io should import actor domain types from the controller model"
     );
     assert!(
-        session_actor_source.contains(
-            "use agent_doc_sqlite::state_store::{self, ActorLastTransition, ActorRecord, ActorState};"
-        ),
-        "agent-doc-session-actor-io should import SQLite actor storage types privately"
+        !session_actor_source.contains("agent_doc_sqlite::state_store::Actor"),
+        "the session actor adapter must not treat SQLite as the owner of actor semantics"
     );
+    let sqlite_state_store =
+        fs::read_to_string(manifest_dir.join("agent-doc-sqlite/src/state_store.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub enum ActorState",
+        "pub struct ActorRecord",
+        "pub struct ActorLastTransition",
+        "pub use agent_doc_controller::actor",
+    ] {
+        assert!(
+            !sqlite_state_store.contains(forbidden_snippet),
+            "agent-doc-sqlite must serialize actor domain types without defining or re-exporting them: {forbidden_snippet}"
+        );
+    }
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(dir).unwrap() {
@@ -14598,13 +14611,12 @@ fn test_session_actor_has_no_sqlite_state_facade() {
         let source = fs::read_to_string(&path).unwrap();
         let relative = path.strip_prefix(manifest_dir).unwrap().display();
         for forbidden_snippet in [
-            "session_actor::ActorState",
-            "session_actor::ActorRecord",
-            "session_actor::ActorLastTransition",
+            "agent_doc_sqlite::state_store::Actor",
+            "agent_doc_sqlite::Actor",
         ] {
             assert!(
                 !source.contains(forbidden_snippet),
-                "{relative} must import actor storage types from agent_doc_sqlite::state_store directly: {forbidden_snippet}"
+                "{relative} must import actor domain types from agent_doc_controller::actor: {forbidden_snippet}"
             );
         }
     }

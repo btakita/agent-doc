@@ -19,12 +19,16 @@ Rust per-replica lock. A call that times out before it starts is cancelled
 without poisoning the generation; only a call that actually ran beyond the
 lease disables it. Reload stops and joins every CRDT/listener worker, drains
 calls, asks the old cdylib to quiesce replicas, terminates all owner threads so
-Rust TLS destructors run, closes the old handle, and verifies `/proc/self/maps`
-no longer contains it before loading the replacement. Controller launch from
-the cdylib uses a short-lived external helper, so no child-reaper thread pins
-the old mapping. Failure at any drain, unmap, or ABI boundary loads no second
-generation and requires restart; a replacement-load failure restores the old
-named shadow only after its prior mapping is gone. Durable reliable-sync
+Rust TLS destructors run, and closes the old handle. If glibc retains that
+closed Rust cdylib mapping because another JVM thread once acquired Rust TLS,
+the mapping is inert and remains on disk until process exit; it does not cause
+the plugin to reopen stale code. The replacement loads from a distinct
+per-install shadow path/inode and becomes the only published generation.
+Controller launch from the cdylib uses a short-lived external helper, so no
+child-reaper thread retains active old-generation work. Failure at any quiesce,
+drain, owner-thread, close, replacement ABI, or replacement-load boundary
+publishes no second generation and requires restart; a replacement-load
+failure may restore the old named shadow. Durable reliable-sync
 outboxes live in the project controller; the reloadable cdylib sends typed
 controller RPCs and retains no SQLite connection.
 

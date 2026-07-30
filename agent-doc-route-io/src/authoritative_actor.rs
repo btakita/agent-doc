@@ -44,7 +44,7 @@ pub struct PendingHarnessSwitch {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthoritativeActorDispatchTarget {
-    pub record: agent_doc_sqlite::state_store::ActorRecord,
+    pub record: agent_doc_controller::actor::ActorRecord,
     pub runtime: SupervisorRuntime,
     /// An explicit frontmatter harness change is waiting for the live
     /// supervisor's safe boundary. A target carrying this marker may be focused
@@ -53,7 +53,7 @@ pub struct AuthoritativeActorDispatchTarget {
 }
 
 impl AuthoritativeActorDispatchTarget {
-    pub fn actor_state(&self) -> agent_doc_sqlite::state_store::ActorState {
+    pub fn actor_state(&self) -> agent_doc_controller::actor::ActorState {
         sqlite_actor_state_from_route(effective_authoritative_actor_state(
             route_actor_state_from_sqlite(self.record.state),
             self.runtime.actor_state,
@@ -66,53 +66,51 @@ impl AuthoritativeActorDispatchTarget {
 }
 
 pub fn route_actor_state_from_sqlite(
-    state: agent_doc_sqlite::state_store::ActorState,
+    state: agent_doc_controller::actor::ActorState,
 ) -> RouteActorState {
     match state {
-        agent_doc_sqlite::state_store::ActorState::Starting => RouteActorState::Starting,
-        agent_doc_sqlite::state_store::ActorState::Ready => RouteActorState::Ready,
-        agent_doc_sqlite::state_store::ActorState::Busy => RouteActorState::Busy,
-        agent_doc_sqlite::state_store::ActorState::WaitingInput => RouteActorState::WaitingInput,
-        agent_doc_sqlite::state_store::ActorState::Closed => RouteActorState::Closed,
-        agent_doc_sqlite::state_store::ActorState::Blocked => RouteActorState::Blocked,
+        agent_doc_controller::actor::ActorState::Starting => RouteActorState::Starting,
+        agent_doc_controller::actor::ActorState::Ready => RouteActorState::Ready,
+        agent_doc_controller::actor::ActorState::Busy => RouteActorState::Busy,
+        agent_doc_controller::actor::ActorState::WaitingInput => RouteActorState::WaitingInput,
+        agent_doc_controller::actor::ActorState::Closed => RouteActorState::Closed,
+        agent_doc_controller::actor::ActorState::Blocked => RouteActorState::Blocked,
     }
 }
 
 pub fn sqlite_actor_state_from_route(
     state: RouteActorState,
-) -> agent_doc_sqlite::state_store::ActorState {
+) -> agent_doc_controller::actor::ActorState {
     match state {
-        RouteActorState::Starting => agent_doc_sqlite::state_store::ActorState::Starting,
-        RouteActorState::Ready => agent_doc_sqlite::state_store::ActorState::Ready,
-        RouteActorState::Busy => agent_doc_sqlite::state_store::ActorState::Busy,
-        RouteActorState::WaitingInput => agent_doc_sqlite::state_store::ActorState::WaitingInput,
-        RouteActorState::Closed => agent_doc_sqlite::state_store::ActorState::Closed,
-        RouteActorState::Blocked => agent_doc_sqlite::state_store::ActorState::Blocked,
+        RouteActorState::Starting => agent_doc_controller::actor::ActorState::Starting,
+        RouteActorState::Ready => agent_doc_controller::actor::ActorState::Ready,
+        RouteActorState::Busy => agent_doc_controller::actor::ActorState::Busy,
+        RouteActorState::WaitingInput => agent_doc_controller::actor::ActorState::WaitingInput,
+        RouteActorState::Closed => agent_doc_controller::actor::ActorState::Closed,
+        RouteActorState::Blocked => agent_doc_controller::actor::ActorState::Blocked,
     }
 }
 
-pub fn actor_dispatch_state(
-    state: agent_doc_sqlite::state_store::ActorState,
-) -> ActorDispatchState {
+pub fn actor_dispatch_state(state: agent_doc_controller::actor::ActorState) -> ActorDispatchState {
     match state {
-        agent_doc_sqlite::state_store::ActorState::Ready => ActorDispatchState::Ready,
-        agent_doc_sqlite::state_store::ActorState::Starting => ActorDispatchState::Starting,
-        agent_doc_sqlite::state_store::ActorState::Busy => ActorDispatchState::Busy,
-        agent_doc_sqlite::state_store::ActorState::WaitingInput => ActorDispatchState::WaitingInput,
-        agent_doc_sqlite::state_store::ActorState::Blocked => ActorDispatchState::Blocked,
-        agent_doc_sqlite::state_store::ActorState::Closed => ActorDispatchState::Closed,
+        agent_doc_controller::actor::ActorState::Ready => ActorDispatchState::Ready,
+        agent_doc_controller::actor::ActorState::Starting => ActorDispatchState::Starting,
+        agent_doc_controller::actor::ActorState::Busy => ActorDispatchState::Busy,
+        agent_doc_controller::actor::ActorState::WaitingInput => ActorDispatchState::WaitingInput,
+        agent_doc_controller::actor::ActorState::Blocked => ActorDispatchState::Blocked,
+        agent_doc_controller::actor::ActorState::Closed => ActorDispatchState::Closed,
     }
 }
 
 pub fn authoritative_actor_dispatch_recovery_hint(
-    state: agent_doc_sqlite::state_store::ActorState,
+    state: agent_doc_controller::actor::ActorState,
     file: &Path,
 ) -> String {
     actor_recovery_hint(actor_dispatch_state(state), &file.display().to_string())
 }
 
 pub fn authoritative_actor_dispatch_can_queue_optimistically(
-    state: agent_doc_sqlite::state_store::ActorState,
+    state: agent_doc_controller::actor::ActorState,
 ) -> bool {
     agent_doc_controller::dispatch::actor_can_queue_optimistically(actor_dispatch_state(state))
 }
@@ -469,13 +467,10 @@ pub fn promote_starting_authoritative_actor_if_dispatch_ready(
     tmux: &Tmux,
     file: &Path,
     file_path: &str,
-    record: agent_doc_sqlite::state_store::ActorRecord,
+    record: agent_doc_controller::actor::ActorRecord,
     mut runtime: SupervisorRuntime,
     harness: &HarnessConfig,
-) -> (
-    agent_doc_sqlite::state_store::ActorRecord,
-    SupervisorRuntime,
-) {
+) -> (agent_doc_controller::actor::ActorRecord, SupervisorRuntime) {
     let effective_state = effective_authoritative_actor_state(
         route_actor_state_from_sqlite(record.state),
         runtime.actor_state,
@@ -503,7 +498,7 @@ pub fn promote_starting_authoritative_actor_if_dispatch_ready(
             session_id: record.session_id.clone(),
             pane_id: record.pane_id.clone(),
             generation: record.generation,
-            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            state: agent_doc_controller::actor::ActorState::Ready,
             caller: "route".to_string(),
             reason: "dispatch_ready_prompt".to_string(),
         },
@@ -778,7 +773,7 @@ pub fn poll_starting_timeout_blocked_actor_dispatch_ready(
     harness: &HarnessConfig,
 ) -> bool {
     if !actor_blocked_by_starting_timeout(StartingTimeoutActorFacts {
-        actor_blocked: actor.record.state == agent_doc_sqlite::state_store::ActorState::Blocked,
+        actor_blocked: actor.record.state == agent_doc_controller::actor::ActorState::Blocked,
         last_transition_reason: &actor.record.last_transition.reason,
         prompt_ready: false,
     }) {
@@ -789,7 +784,7 @@ pub fn poll_starting_timeout_blocked_actor_dispatch_ready(
     loop {
         let prompt_ready = current_generation_ready_prompt_proven(tmux, actor, harness);
         if starting_timeout_blocked_actor_can_recover(StartingTimeoutActorFacts {
-            actor_blocked: actor.record.state == agent_doc_sqlite::state_store::ActorState::Blocked,
+            actor_blocked: actor.record.state == agent_doc_controller::actor::ActorState::Blocked,
             last_transition_reason: &actor.record.last_transition.reason,
             prompt_ready,
         }) {
@@ -821,7 +816,7 @@ pub fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
             session_id: actor.record.session_id.clone(),
             pane_id: actor.record.pane_id.clone(),
             generation: actor.record.generation,
-            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            state: agent_doc_controller::actor::ActorState::Ready,
             caller: "route".to_string(),
             reason: "dispatch_ready_prompt".to_string(),
         },
@@ -1119,7 +1114,7 @@ pub fn dispatch_only_can_use_degraded_authoritative_actor(
 }
 
 pub fn authoritative_actor_start_wait_terminal_state(
-    state: agent_doc_sqlite::state_store::ActorState,
+    state: agent_doc_controller::actor::ActorState,
 ) -> bool {
     agent_doc_controller::dispatch::actor_start_wait_terminal_state(actor_dispatch_state(state))
 }
@@ -1155,7 +1150,7 @@ pub fn mark_starting_actor_timeout_blocked(
             session_id: session_id.to_string(),
             pane_id: facts.pane_id.clone(),
             generation: facts.generation,
-            state: agent_doc_sqlite::state_store::ActorState::Blocked,
+            state: agent_doc_controller::actor::ActorState::Blocked,
             caller: "route".to_string(),
             reason: STARTING_ACTOR_TIMEOUT_REASON.to_string(),
         },
@@ -1214,16 +1209,16 @@ mod tests {
         }
     }
 
-    fn test_actor_record(pane_id: &str) -> agent_doc_sqlite::state_store::ActorRecord {
-        agent_doc_sqlite::state_store::ActorRecord {
+    fn test_actor_record(pane_id: &str) -> agent_doc_controller::actor::ActorRecord {
+        agent_doc_controller::actor::ActorRecord {
             document_id: "test-doc".to_string(),
             session_id: "test-session".to_string(),
             generation: 1,
             pane_id: pane_id.to_string(),
             window_id: "@1".to_string(),
             harness: "codex".to_string(),
-            state: agent_doc_sqlite::state_store::ActorState::Ready,
-            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "test".to_string(),
                 timestamp: 0,

@@ -2,7 +2,8 @@
 //!
 //! The controller is the live authority for document session actor lookup,
 //! generation changes, lifecycle reports, and routed dispatch acceptance.
-//! Tmux state remains a layout input; ownership state is stored in SQLite.
+//! Tmux state remains a layout input. Actor ownership is a controller-lifetime
+//! Lazily projection; SQLite hydrates and durably records that model.
 
 use crate::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_controller::dispatch::{
@@ -30,9 +31,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 // The SQLite state layer (the only `rusqlite::Connection` surface) lives in
-// `agent-doc-sqlite::state_store`. Keep its storage/status types private to
-// this orchestration module; callers that need to name them should import the
-// focused crate directly.
+// `agent-doc-sqlite::state_store`. Keep persistence types private to this
+// orchestration module. Domain/controller vocabulary belongs to the model
+// crates even when SQLite serializes it.
 use parking_lot::{Condvar, Mutex};
 #[cfg(test)]
 use state_store::state_db_path;
@@ -205,6 +206,21 @@ pub struct ControllerTmuxLayoutSyncInvocation {
     pub exact_visible: bool,
     #[serde(default)]
     pub caller_kind: String,
+    /// Controller-local actor bindings joined reactively with `columns`.
+    ///
+    /// This is never accepted from or serialized to an RPC caller. The
+    /// controller's pane-layout effect fills it from the process-scoped actor
+    /// projection immediately before crossing the tmux boundary.
+    #[serde(skip)]
+    pub actor_bindings: Vec<ControllerTmuxActorBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControllerTmuxActorBinding {
+    pub document_path: String,
+    pub session_id: String,
+    pub pane_id: String,
+    pub generation: u64,
 }
 
 impl ControllerTmuxLayoutSyncInvocation {
@@ -455,6 +471,125 @@ pub(crate) trait PaneLayoutProjectionSink: Send + Sync + 'static {
     fn reconcile(&self, desired: PaneLayoutDesired);
 }
 
+type ControllerActorStore = BTreeMap<String, agent_doc_controller::actor::ActorRecord>;
+
+/// Process-scoped reactive actor authority.
+///
+/// SQLite hydrates `records` at controller start and receives transition
+/// effects for durability, but hot-path readers observe `live_bindings`.
+/// Filtering closed/empty bindings once in this `Computed` replaces the
+/// repeated imperative actor checks that previously re-entered controller RPC.
+struct ControllerActorGraph {
+    ctx: ThreadSafeContext,
+    records: Source<ControllerActorStore>,
+    live_bindings: Computed<ControllerActorStore>,
+}
+
+impl ControllerActorGraph {
+    fn new_in(scope: &agent_doc_state_scope::ProcessScope, initial: ControllerActorStore) -> Self {
+        let ctx = scope.ctx().clone();
+        let records = ctx.source(initial);
+        let live_bindings = ctx.computed(move |ctx| {
+            ctx.get(&records)
+                .into_iter()
+                .filter(|(_, record)| {
+                    record.state != agent_doc_controller::actor::ActorState::Closed
+                        && !record.pane_id.trim().is_empty()
+                })
+                .collect()
+        });
+        Self {
+            ctx,
+            records,
+            live_bindings,
+        }
+    }
+
+    fn set(&self, records: ControllerActorStore) {
+        self.ctx.set(&self.records, records);
+    }
+
+    fn apply_store_write(&self, write: &agent_doc_controller::actor::ActorStoreWrite) {
+        let mut records = self.ctx.get(&self.records);
+        let mut evicted_document_ids = write
+            .evicted_document_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        if write.record.state != agent_doc_controller::actor::ActorState::Closed
+            && !write.record.pane_id.trim().is_empty()
+        {
+            evicted_document_ids.extend(records.values().filter_map(|record| {
+                (record.document_id != write.record.document_id
+                    && record.pane_id == write.record.pane_id)
+                    .then_some(record.document_id.clone())
+            }));
+        }
+        for document_id in evicted_document_ids {
+            let Some(record) = records.get_mut(&document_id) else {
+                continue;
+            };
+            record.state = agent_doc_controller::actor::ActorState::Closed;
+            record.pane_id.clear();
+            record.window_id.clear();
+            record.last_transition = agent_doc_controller::actor::ActorLastTransition {
+                caller: write.record.last_transition.caller.clone(),
+                reason: format!(
+                    "evicted_cross_document_pane owner={} pane={}",
+                    write.record.document_id, write.record.pane_id
+                ),
+                timestamp: write.record.last_transition.timestamp,
+                prior_generation: record.generation,
+                new_generation: record.generation,
+            };
+        }
+        records.insert(write.record.document_id.clone(), write.record.clone());
+        self.ctx.set(&self.records, records);
+    }
+
+    fn record(&self, document_id: &str) -> Option<agent_doc_controller::actor::ActorRecord> {
+        self.ctx.get(&self.records).get(document_id).cloned()
+    }
+
+    fn records(&self) -> ControllerActorStore {
+        self.ctx.get(&self.records)
+    }
+
+    fn live_bindings_handle(&self) -> Computed<ControllerActorStore> {
+        self.live_bindings
+    }
+}
+
+fn derive_layout_actor_bindings(
+    desired: Option<&PaneLayoutDesired>,
+    actors: &ControllerActorStore,
+) -> Vec<ControllerTmuxActorBinding> {
+    let Some(desired) = desired else {
+        return Vec::new();
+    };
+    desired
+        .invocation
+        .columns
+        .iter()
+        .flat_map(|column| column.split(','))
+        .map(str::trim)
+        .filter(|document| !document.is_empty())
+        .filter_map(|document| {
+            // The ingress adapter canonicalizes desired document IDs before
+            // publishing this Source. Keep this Computed a pure join over
+            // already-published values: no filesystem canonicalization, RPC,
+            // SQLite reads, or tmux probes belong here.
+            let record = actors.get(document)?;
+            Some(ControllerTmuxActorBinding {
+                document_path: document.to_string(),
+                session_id: record.session_id.clone(),
+                pane_id: record.pane_id.clone(),
+                generation: record.generation,
+            })
+        })
+        .collect()
+}
+
 /// Controller-lifetime Lazily graph for the pane layout projection.
 ///
 /// IDE observations set `desired`; tmux observations set `observed`; the
@@ -466,6 +601,7 @@ pub(crate) trait PaneLayoutProjectionSink: Send + Sync + 'static {
 struct ControllerPaneLayoutGraph {
     ctx: ThreadSafeContext,
     desired: Source<Option<PaneLayoutDesired>>,
+    actor_bindings: Computed<Vec<ControllerTmuxActorBinding>>,
     observed: Source<Option<PaneLayoutObservation>>,
     receipt: Source<PaneLayoutEffectReceipt>,
     applicable_receipt: Computed<Option<PaneLayoutEffectReceipt>>,
@@ -478,7 +614,11 @@ struct ControllerPaneLayoutGraph {
 }
 
 impl ControllerPaneLayoutGraph {
-    fn new_in(scope: &agent_doc_state_scope::ProcessScope, persisted_columns: Vec<String>) -> Self {
+    fn new_in(
+        scope: &agent_doc_state_scope::ProcessScope,
+        persisted_columns: Vec<String>,
+        live_actor_bindings: Computed<ControllerActorStore>,
+    ) -> Self {
         let ctx = scope.ctx().clone();
         let initial_desired = (!persisted_columns.is_empty()).then(|| PaneLayoutDesired {
             generation: 1,
@@ -490,9 +630,16 @@ impl ControllerPaneLayoutGraph {
                 no_autostart: false,
                 exact_visible: true,
                 caller_kind: "projection".to_string(),
+                actor_bindings: Vec::new(),
             },
         });
         let desired = ctx.source(initial_desired);
+        let desired_for_actor_bindings = desired;
+        let actor_bindings = ctx.computed(move |ctx| {
+            let desired = ctx.get(&desired_for_actor_bindings);
+            let actors = ctx.get(&live_actor_bindings);
+            derive_layout_actor_bindings(desired.as_ref(), &actors)
+        });
         let observed = ctx.source(None);
         let receipt = ctx.source(PaneLayoutEffectReceipt::default());
         let applicable_receipt = ctx.computed(move |ctx| {
@@ -512,11 +659,16 @@ impl ControllerPaneLayoutGraph {
         });
         let sink: Arc<OnceLock<Arc<dyn PaneLayoutProjectionSink>>> = Arc::new(OnceLock::new());
         let projection_for_effect = projection;
+        let actor_bindings_for_effect = actor_bindings;
         let sink_for_effect = Arc::clone(&sink);
         let effect = ctx.effect(move |ctx| {
             let PaneLayoutProjection::NeedsEffect(desired) = ctx.get(&projection_for_effect) else {
                 return;
             };
+            // Subscribe the effect to actor authority as well as layout
+            // applicability. A late actor event wakes the same retained effect;
+            // no caller-owned retry or actor RPC is needed.
+            let _ = ctx.get(&actor_bindings_for_effect);
             if let Some(sink) = sink_for_effect.get() {
                 sink.reconcile(desired);
             }
@@ -524,6 +676,7 @@ impl ControllerPaneLayoutGraph {
         Self {
             ctx,
             desired,
+            actor_bindings,
             observed,
             receipt,
             applicable_receipt,
@@ -575,6 +728,10 @@ impl ControllerPaneLayoutGraph {
         });
         self.waiters.notify_all();
         desired
+    }
+
+    fn actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
+        self.ctx.get(&self.actor_bindings)
     }
 
     fn desired(&self) -> Option<PaneLayoutDesired> {
@@ -1171,7 +1328,6 @@ pub struct ControllerBootstrap {
 
 #[derive(Debug)]
 struct ControllerMemoryState {
-    actor_store: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
     state_ledger: agent_doc_state_backbone::EventLedger,
     /// Durable high-water captured from the exact rows folded into
     /// `state_ledger`. This must travel with the in-memory snapshot: reading a
@@ -1183,23 +1339,26 @@ struct ControllerMemoryState {
 }
 
 impl ControllerMemoryState {
-    fn load(project_root: &Path) -> Result<Self> {
+    fn load(project_root: &Path) -> Result<(Self, ControllerActorStore)> {
         let (state_ledger, state_document_versions) =
             load_state_event_ledger_with_versions(project_root)?;
         let state_projection = state_ledger.project();
-        Ok(Self {
-            actor_store: load_actor_store(project_root)?,
-            state_ledger,
-            state_document_versions,
-            state_projection,
-            map_backend: "std_btree_map",
-        })
+        Ok((
+            Self {
+                state_ledger,
+                state_document_versions,
+                state_projection,
+                map_backend: "std_btree_map",
+            },
+            load_actor_store(project_root)?,
+        ))
     }
 }
 
 pub(crate) struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
     memory: Mutex<ControllerMemoryState>,
+    actor_graph: ControllerActorGraph,
     coordination_graph: ControllerCoordinationGraph,
     supervisor_recycle_graph: ControllerSupervisorRecycleGraph,
     state_plane_graph: ControllerStatePlaneGraph,
@@ -2019,8 +2178,9 @@ impl ControllerRuntime {
         ) {
             recover_controller_after_restart(&bootstrap)?;
         }
-        let memory = ControllerMemoryState::load(&bootstrap.project_root)?;
+        let (memory, actor_store) = ControllerMemoryState::load(&bootstrap.project_root)?;
         let scope = agent_doc_state_scope::ProcessScope::new();
+        let actor_graph = ControllerActorGraph::new_in(&scope, actor_store);
         let persisted_layout = load_layout_state(&bootstrap.project_root).unwrap_or_default();
         let supervisor_recycle_graph = ControllerSupervisorRecycleGraph::new_in(
             &scope,
@@ -2032,13 +2192,18 @@ impl ControllerRuntime {
             &scope,
             state_plane_first_version(bootstrap.controller_generation),
         );
-        let pane_layout_graph = ControllerPaneLayoutGraph::new_in(&scope, persisted_layout);
+        let pane_layout_graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            persisted_layout,
+            actor_graph.live_bindings_handle(),
+        );
         for (document_hash, projection) in &memory.state_projection.documents {
             document_graphs.set_projection(document_hash, Some(projection.clone()));
         }
         Ok(Self {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
+            actor_graph,
             coordination_graph,
             supervisor_recycle_graph,
             state_plane_graph,
@@ -2111,12 +2276,16 @@ impl ControllerRuntime {
     fn actor_record(
         &self,
         document_id: &str,
-    ) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
-        Ok(self.memory.lock().actor_store.get(document_id).cloned())
+    ) -> Result<Option<agent_doc_controller::actor::ActorRecord>> {
+        Ok(self.actor_graph.record(document_id))
     }
 
-    fn actor_store_snapshot(&self) -> BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> {
-        self.memory.lock().actor_store.clone()
+    fn actor_store_snapshot(&self) -> BTreeMap<String, agent_doc_controller::actor::ActorRecord> {
+        self.actor_graph.records()
+    }
+
+    fn apply_actor_store_write(&self, write: &agent_doc_controller::actor::ActorStoreWrite) {
+        self.actor_graph.apply_store_write(write);
     }
 
     fn install_state_plane_sink(&self, channel: &str, sink: Arc<dyn ControllerStatePlaneSink>) {
@@ -2194,6 +2363,10 @@ impl ControllerRuntime {
         self.pane_layout_graph.effect_file_panes(generation)
     }
 
+    fn pane_layout_actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
+        self.pane_layout_graph.actor_bindings()
+    }
+
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     fn await_pane_layout_generation(
         &self,
@@ -2214,13 +2387,14 @@ impl ControllerRuntime {
 
     fn refresh_memory(&self) -> Result<()> {
         let project_root = self.bootstrap_snapshot()?.project_root;
-        let next = ControllerMemoryState::load(&project_root)?;
+        let (next, next_actor_store) = ControllerMemoryState::load(&project_root)?;
         let recycle = next.state_projection.project_supervisor_recycle();
         let next_documents = next.state_projection.documents.clone();
         let mut memory = self.memory.lock();
         let previous_documents = memory.state_projection.documents.clone();
         *memory = next;
         drop(memory);
+        self.actor_graph.set(next_actor_store);
         self.supervisor_recycle_graph.set(recycle);
         for document_hash in previous_documents
             .keys()
@@ -2521,7 +2695,7 @@ impl ControllerRuntime {
     fn memory_categories(&self) -> Result<BTreeMap<String, usize>> {
         let memory = self.memory.lock();
         Ok(agent_doc_controller::status::status_categories([
-            ("actor_records", memory.actor_store.len()),
+            ("actor_records", self.actor_graph.records().len()),
             ("coordination_claims", self.coordination_graph.claim_count()),
             (
                 "state_backbone_documents",
@@ -2531,7 +2705,8 @@ impl ControllerRuntime {
                 "map_backend_std_btree_map",
                 usize::from(memory.map_backend == "std_btree_map"),
             ),
-            ("write_through_sqlite", 1),
+            ("reactive_actor_source", 1),
+            ("durable_sqlite_sink", 1),
         ]))
     }
 }
@@ -2685,12 +2860,12 @@ fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<C
 
 fn reconcile_supervisor_leases_after_restart(
     conn: &Connection,
-    store: &BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
+    store: &BTreeMap<String, agent_doc_controller::actor::ActorRecord>,
     stats: &mut CrashRecoveryStats,
 ) -> Result<()> {
     let now = timestamp_secs();
     for record in store.values() {
-        if record.state == agent_doc_sqlite::state_store::ActorState::Closed {
+        if record.state == agent_doc_controller::actor::ActorState::Closed {
             continue;
         }
         let Some(lease) =
@@ -2931,7 +3106,7 @@ pub struct LifecycleRequest {
     pub session_id: String,
     pub pane_id: String,
     pub generation: u64,
-    pub state: agent_doc_sqlite::state_store::ActorState,
+    pub state: agent_doc_controller::actor::ActorState,
     pub caller: String,
     pub reason: String,
 }
@@ -2959,7 +3134,7 @@ pub struct DispatchRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchAuthorization {
-    pub record: agent_doc_sqlite::state_store::ActorRecord,
+    pub record: agent_doc_controller::actor::ActorRecord,
     pub accepted_stage: String,
     pub receipt: ControllerDispatchReceipt,
 }
@@ -2973,7 +3148,7 @@ pub struct SupervisorReplacementRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SupervisorReplacementReceipt {
-    pub record: agent_doc_sqlite::state_store::ActorRecord,
+    pub record: agent_doc_controller::actor::ActorRecord,
     pub accepted_stage: String,
     pub operator_receipt: ControllerDispatchReceipt,
     pub background_started: bool,
@@ -3009,7 +3184,7 @@ pub struct ControllerActorInspection {
     #[serde(default)]
     pub document_id: Option<String>,
     #[serde(default)]
-    pub record: Option<agent_doc_sqlite::state_store::ActorRecord>,
+    pub record: Option<agent_doc_controller::actor::ActorRecord>,
     #[serde(default)]
     pub supervisor_lease: Option<SupervisorLeaseStatus>,
     #[serde(default)]
@@ -3041,7 +3216,7 @@ pub struct ControllerTmuxFocusState {
     #[serde(default)]
     pub document_id: Option<String>,
     #[serde(default)]
-    pub record: Option<agent_doc_sqlite::state_store::ActorRecord>,
+    pub record: Option<agent_doc_controller::actor::ActorRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -3075,7 +3250,7 @@ pub enum ActorBindingStatus {
 pub struct ActorBindingResponse {
     pub status: ActorBindingStatus,
     #[serde(default)]
-    pub record: Option<agent_doc_sqlite::state_store::ActorRecord>,
+    pub record: Option<agent_doc_controller::actor::ActorRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3305,7 +3480,7 @@ fn actor_document_bootstrap_columns(project_root: &Path) -> Result<(Option<Strin
 
 fn upsert_supervisor_lease(
     project_root: &Path,
-    record: &agent_doc_sqlite::state_store::ActorRecord,
+    record: &agent_doc_controller::actor::ActorRecord,
     supervisor_pid: Option<u32>,
     supervisor_socket: Option<&str>,
     runtime_state: &str,
@@ -3548,7 +3723,7 @@ pub fn clear_editor_transport_health(project_root: &Path, document_hash: &str) -
 
 pub fn load_actor_store(
     project_root: &Path,
-) -> Result<BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>> {
+) -> Result<BTreeMap<String, agent_doc_controller::actor::ActorRecord>> {
     let conn = open_state_db(project_root)?;
     load_actor_store_from_db(&conn)
 }
@@ -3556,7 +3731,7 @@ pub fn load_actor_store(
 pub fn load_actor_record(
     project_root: &Path,
     document_id: &str,
-) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
+) -> Result<Option<agent_doc_controller::actor::ActorRecord>> {
     let conn = open_state_db(project_root)?;
     load_actor_record_from_db(&conn, document_id)
 }
@@ -3564,19 +3739,25 @@ pub fn load_actor_record(
 pub fn store_actor_record(
     project_root: &Path,
     expected_prior_generation: Option<u64>,
-    record: &agent_doc_sqlite::state_store::ActorRecord,
-) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
+    record: &agent_doc_controller::actor::ActorRecord,
+) -> Result<agent_doc_controller::actor::ActorRecord> {
+    Ok(store_actor_record_write(project_root, expected_prior_generation, record)?.record)
+}
+
+fn store_actor_record_write(
+    project_root: &Path,
+    expected_prior_generation: Option<u64>,
+    record: &agent_doc_controller::actor::ActorRecord,
+) -> Result<agent_doc_controller::actor::ActorStoreWrite> {
     let mut conn = open_state_db(project_root)?;
     let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
-    let _evicted_document_ids = state_store::store_actor_record_tx(
+    state_store::store_actor_record_tx(
         &mut conn,
         expected_prior_generation,
         record,
         launch_mode,
         controller_epoch,
-    )?;
-
-    Ok(record.clone())
+    )
 }
 
 /// Default staleness window for the cross-document supervisor-lease guard
@@ -3654,7 +3835,7 @@ pub fn close_stale_starting_actors_for_caller(
     let mut kept = 0;
 
     for record in store.values() {
-        if record.state != agent_doc_sqlite::state_store::ActorState::Starting {
+        if record.state != agent_doc_controller::actor::ActorState::Starting {
             continue;
         }
         let age = now.saturating_sub(record.last_transition.timestamp);
@@ -3691,8 +3872,8 @@ pub fn close_stale_starting_actors_for_caller(
         }
 
         let mut next = record.clone();
-        next.state = agent_doc_sqlite::state_store::ActorState::Closed;
-        next.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
+        next.state = agent_doc_controller::actor::ActorState::Closed;
+        next.last_transition = agent_doc_controller::actor::ActorLastTransition {
             caller: caller.to_string(),
             reason: "stale_starting_actor".to_string(),
             timestamp: now,
@@ -3755,7 +3936,7 @@ where
     let mut kept = 0;
 
     for record in store.values() {
-        if record.state == agent_doc_sqlite::state_store::ActorState::Closed
+        if record.state == agent_doc_controller::actor::ActorState::Closed
             || record.pane_id.is_empty()
         {
             continue;
@@ -3781,10 +3962,10 @@ where
         }
 
         let mut next = record.clone();
-        next.state = agent_doc_sqlite::state_store::ActorState::Closed;
+        next.state = agent_doc_controller::actor::ActorState::Closed;
         next.pane_id.clear();
         next.window_id.clear();
-        next.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
+        next.last_transition = agent_doc_controller::actor::ActorLastTransition {
             caller: caller.to_string(),
             reason: reason.to_string(),
             timestamp: now,
@@ -3887,7 +4068,7 @@ pub fn prune_dead_actors_for_caller(
     let mut kept = 0;
 
     for record in store.values() {
-        if record.state != agent_doc_sqlite::state_store::ActorState::Closed {
+        if record.state != agent_doc_controller::actor::ActorState::Closed {
             kept += 1;
             continue;
         }
@@ -4329,10 +4510,10 @@ pub fn evict_cross_document_pane_bindings(
             continue;
         }
         let mut next = record.clone();
-        next.state = agent_doc_sqlite::state_store::ActorState::Closed;
+        next.state = agent_doc_controller::actor::ActorState::Closed;
         next.pane_id.clear();
         next.window_id.clear();
-        next.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
+        next.last_transition = agent_doc_controller::actor::ActorLastTransition {
             caller: caller.to_string(),
             reason: format!("evicted_cross_document_pane owner={owner_document_id} pane={pane_id}"),
             timestamp: now,
@@ -4643,6 +4824,7 @@ mod tests {
                 no_autostart,
                 exact_visible: true,
                 caller_kind: caller_kind.to_string(),
+                actor_bindings: Vec::new(),
             };
 
         assert!(invocation("manual", false).routes_created_panes());
@@ -4662,8 +4844,88 @@ mod tests {
                 no_autostart: false,
                 exact_visible: true,
                 caller_kind: "projection".to_string(),
+                actor_bindings: Vec::new(),
             },
         }
+    }
+
+    fn actor_record_for_test(
+        document_id: &str,
+        pane_id: &str,
+        state: agent_doc_controller::actor::ActorState,
+    ) -> agent_doc_controller::actor::ActorRecord {
+        agent_doc_controller::actor::ActorRecord {
+            document_id: document_id.to_string(),
+            session_id: format!("session-{pane_id}"),
+            generation: 7,
+            pane_id: pane_id.to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "reactive projection".to_string(),
+                timestamp: 1,
+                prior_generation: 6,
+                new_generation: 7,
+            },
+        }
+    }
+
+    #[test]
+    fn pane_layout_actor_authority_is_a_reactive_join() {
+        let root = tempfile::TempDir::new().unwrap();
+        let document = root.path().join("tasks/one.md");
+        let document_string = document.display().to_string();
+        let document_id =
+            agent_doc_session_actor_io::canonical_document_id_in(root.path(), &document_string);
+        let ready = actor_record_for_test(
+            &document_id,
+            "%41",
+            agent_doc_controller::actor::ActorState::Ready,
+        );
+
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actor_graph =
+            ControllerActorGraph::new_in(&scope, BTreeMap::from([(document_id.clone(), ready)]));
+        let pane_graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            Vec::new(),
+            actor_graph.live_bindings_handle(),
+        );
+        pane_graph.set_desired(
+            ControllerTmuxLayoutSyncInvocation {
+                columns: vec![document_string.clone()],
+                window: Some("@1".to_string()),
+                focus: Some(document_string.clone()),
+                no_autostart: true,
+                exact_visible: true,
+                caller_kind: "automatic".to_string(),
+                actor_bindings: Vec::new(),
+            },
+            None,
+        );
+
+        assert_eq!(
+            pane_graph.actor_bindings(),
+            vec![ControllerTmuxActorBinding {
+                document_path: document_string,
+                session_id: "session-%41".to_string(),
+                pane_id: "%41".to_string(),
+                generation: 7,
+            }]
+        );
+
+        let closed = actor_record_for_test(
+            &document_id,
+            "%41",
+            agent_doc_controller::actor::ActorState::Closed,
+        );
+        actor_graph.set(BTreeMap::from([(document_id, closed)]));
+        assert!(
+            pane_graph.actor_bindings().is_empty(),
+            "closing the actor Source must invalidate the pane-layout authority Computed"
+        );
     }
 
     #[test]
@@ -4752,7 +5014,12 @@ mod tests {
     #[test]
     fn pane_layout_status_correlates_to_the_exact_desired_plane_version() {
         let scope = agent_doc_state_scope::ProcessScope::new();
-        let graph = ControllerPaneLayoutGraph::new_in(&scope, Vec::new());
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            Vec::new(),
+            actor_graph.live_bindings_handle(),
+        );
         let desired = pane_layout_desired_for_test(1);
         graph.set_desired(desired.invocation, Some(73));
 
@@ -4764,7 +5031,12 @@ mod tests {
     #[test]
     fn pane_layout_effect_assignment_is_fenced_by_desired_generation() {
         let scope = agent_doc_state_scope::ProcessScope::new();
-        let graph = ControllerPaneLayoutGraph::new_in(&scope, Vec::new());
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            Vec::new(),
+            actor_graph.live_bindings_handle(),
+        );
         let first = graph.set_desired(pane_layout_desired_for_test(1).invocation, Some(81));
         let first_assignment = vec![("tasks/primary.md".to_string(), "%1".to_string())];
         graph.record_receipt(PaneLayoutEffectReceipt {
@@ -4981,7 +5253,7 @@ mod tests {
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
         let mut record = actor_record(&document_id, "%41", "@1");
-        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
+        record.state = agent_doc_controller::actor::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
         let summary =
@@ -5014,7 +5286,7 @@ mod tests {
         let document_id = doc.to_string_lossy().to_string();
         seed_reliable_sync_editor_open(&doc, "jetbrains-test-deferred");
         let mut record = actor_record(&document_id, "%41", "@1");
-        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
+        record.state = agent_doc_controller::actor::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
         let summary =
@@ -5039,7 +5311,7 @@ mod tests {
         let document_id = doc.to_string_lossy().to_string();
         seed_reliable_sync_editor_open(&doc, "jetbrains-test-recycle");
         let mut record = actor_record(&document_id, "%41", "@1");
-        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
+        record.state = agent_doc_controller::actor::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
         let recycled = recycle_controller_force(dir.path(), false).unwrap();
@@ -5065,7 +5337,7 @@ mod tests {
             .unwrap()
             .expect("editor-attached register should allocate model");
         let mut record = actor_record(&document_id, "%41", "@1");
-        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
+        record.state = agent_doc_controller::actor::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
         let summary =
@@ -5114,16 +5386,16 @@ mod tests {
         document_id: &str,
         pane: &str,
         window: &str,
-    ) -> agent_doc_sqlite::state_store::ActorRecord {
-        agent_doc_sqlite::state_store::ActorRecord {
+    ) -> agent_doc_controller::actor::ActorRecord {
+        agent_doc_controller::actor::ActorRecord {
             document_id: document_id.to_string(),
             session_id: "session-1".to_string(),
             generation: 1,
             pane_id: pane.to_string(),
             window_id: window.to_string(),
             harness: "codex".to_string(),
-            state: agent_doc_sqlite::state_store::ActorState::Starting,
-            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+            state: agent_doc_controller::actor::ActorState::Starting,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
                 caller: "start".to_string(),
                 reason: "session_start".to_string(),
                 timestamp: 10,
@@ -5135,16 +5407,16 @@ mod tests {
     fn closed_actor_record(
         document_id: &str,
         timestamp: u64,
-    ) -> agent_doc_sqlite::state_store::ActorRecord {
-        agent_doc_sqlite::state_store::ActorRecord {
+    ) -> agent_doc_controller::actor::ActorRecord {
+        agent_doc_controller::actor::ActorRecord {
             document_id: document_id.to_string(),
             session_id: "session-clear".to_string(),
             generation: 1,
             pane_id: String::new(),
             window_id: String::new(),
             harness: "codex".to_string(),
-            state: agent_doc_sqlite::state_store::ActorState::Closed,
-            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+            state: agent_doc_controller::actor::ActorState::Closed,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
                 caller: "session".to_string(),
                 reason: "session-clear".to_string(),
                 timestamp,
@@ -5281,9 +5553,9 @@ mod tests {
         let dead_id = dead_doc.to_string_lossy().to_string();
         let live_id = live_doc.to_string_lossy().to_string();
         let mut dead = actor_record(&dead_id, "%dead", "@1");
-        dead.state = agent_doc_sqlite::state_store::ActorState::Ready;
+        dead.state = agent_doc_controller::actor::ActorState::Ready;
         let mut live = actor_record(&live_id, "%live", "@1");
-        live.state = agent_doc_sqlite::state_store::ActorState::Busy;
+        live.state = agent_doc_controller::actor::ActorState::Busy;
         store_actor_record(dir.path(), Some(0), &dead).unwrap();
         store_actor_record(dir.path(), Some(0), &live).unwrap();
 
@@ -5301,7 +5573,7 @@ mod tests {
         let closed_record = load_actor_record(dir.path(), &dead_id).unwrap().unwrap();
         assert_eq!(
             closed_record.state,
-            agent_doc_sqlite::state_store::ActorState::Closed
+            agent_doc_controller::actor::ActorState::Closed
         );
         assert_eq!(closed_record.pane_id, "");
         assert_eq!(closed_record.window_id, "");
@@ -5314,7 +5586,7 @@ mod tests {
         let live_record = load_actor_record(dir.path(), &live_id).unwrap().unwrap();
         assert_eq!(
             live_record.state,
-            agent_doc_sqlite::state_store::ActorState::Busy
+            agent_doc_controller::actor::ActorState::Busy
         );
         assert_eq!(live_record.pane_id, "%live");
     }
@@ -5327,7 +5599,7 @@ mod tests {
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
         let mut record = actor_record(&document_id, "%dead", "@1");
-        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
+        record.state = agent_doc_controller::actor::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
         let (closed, kept) = close_stale_dead_pane_actors_for_caller(
@@ -5346,7 +5618,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             current.state,
-            agent_doc_sqlite::state_store::ActorState::Ready
+            agent_doc_controller::actor::ActorState::Ready
         );
         assert_eq!(current.pane_id, "%dead");
     }
@@ -5748,13 +6020,13 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
         let record = envelope.data.unwrap();
         assert_eq!(
             record.state,
-            agent_doc_sqlite::state_store::ActorState::Starting
+            agent_doc_controller::actor::ActorState::Starting
         );
         agent_doc_supervisor_io::startup_miss::record_startup_miss(
             &doc,
@@ -5787,7 +6059,7 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
 
@@ -5812,14 +6084,11 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
         let record = envelope.data.unwrap();
-        assert_eq!(
-            record.state,
-            agent_doc_sqlite::state_store::ActorState::Ready
-        );
+        assert_eq!(record.state, agent_doc_controller::actor::ActorState::Ready);
         assert_eq!(record.last_transition.reason, "prompt_ready");
         assert!(
             agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
@@ -5870,13 +6139,13 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
         let record = envelope.data.unwrap();
         assert_eq!(
             record.state,
-            agent_doc_sqlite::state_store::ActorState::Closed
+            agent_doc_controller::actor::ActorState::Closed
         );
         assert!(
             agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
@@ -5911,7 +6180,7 @@ mod tests {
             "session-heartbeat",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -5983,7 +6252,7 @@ mod tests {
             "session-old",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -6015,7 +6284,7 @@ mod tests {
             "session-old",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Closed,
+            agent_doc_controller::actor::ActorState::Closed,
             "supervisor",
             "user_quit_clean_exit",
         )
@@ -6046,10 +6315,7 @@ mod tests {
         assert_eq!(record.session_id, "session-new");
         assert_eq!(record.generation, 2);
         assert_eq!(record.pane_id, "%41");
-        assert_eq!(
-            record.state,
-            agent_doc_sqlite::state_store::ActorState::Ready
-        );
+        assert_eq!(record.state, agent_doc_controller::actor::ActorState::Ready);
 
         let conn = open_state_db(dir.path()).unwrap();
         let effective = state_store::load_effective_queue_control_from_db(
@@ -6093,7 +6359,7 @@ mod tests {
             "session-old",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Closed,
+            agent_doc_controller::actor::ActorState::Closed,
             "supervisor",
             "user_quit_clean_exit",
         )
@@ -6202,7 +6468,7 @@ mod tests {
             "session-reboot",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -6333,7 +6599,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             updated.state,
-            agent_doc_sqlite::state_store::ActorState::Closed
+            agent_doc_controller::actor::ActorState::Closed
         );
         assert_eq!(updated.last_transition.caller, "gc");
         assert_eq!(updated.last_transition.reason, "stale_starting_actor");
@@ -6384,7 +6650,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             updated.state,
-            agent_doc_sqlite::state_store::ActorState::Starting
+            agent_doc_controller::actor::ActorState::Starting
         );
     }
     #[test]
@@ -6440,7 +6706,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             updated.state,
-            agent_doc_sqlite::state_store::ActorState::Closed
+            agent_doc_controller::actor::ActorState::Closed
         );
         assert_eq!(updated.last_transition.reason, "stale_starting_actor");
     }
@@ -6487,7 +6753,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             updated.state,
-            agent_doc_sqlite::state_store::ActorState::Closed
+            agent_doc_controller::actor::ActorState::Closed
         );
         assert_eq!(updated.last_transition.caller, "preflight");
         assert_eq!(updated.last_transition.reason, "stale_starting_actor");
@@ -6545,7 +6811,7 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(!envelope.ok);
         assert!(envelope.error.unwrap().contains("no longer current"));
@@ -6601,7 +6867,7 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(
             envelope.ok,
@@ -6610,7 +6876,7 @@ mod tests {
         );
         assert_eq!(
             envelope.data.unwrap().state,
-            agent_doc_sqlite::state_store::ActorState::Ready
+            agent_doc_controller::actor::ActorState::Ready
         );
     }
     #[test]
@@ -6639,7 +6905,7 @@ mod tests {
             "session-route",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -6896,7 +7162,7 @@ mod tests {
             "session-queue",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -7142,7 +7408,7 @@ mod tests {
             "session-reopen",
             "%42",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -7287,7 +7553,7 @@ mod tests {
             "session-preset",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -7406,7 +7672,7 @@ mod tests {
             "session-preset",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -7534,7 +7800,7 @@ mod tests {
             "session-preset",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -7650,7 +7916,7 @@ mod tests {
                 "session-jbr",
                 "%52",
                 Some(1),
-                agent_doc_sqlite::state_store::ActorState::Ready,
+                agent_doc_controller::actor::ActorState::Ready,
                 "supervisor",
                 "prompt_ready",
             )
@@ -7790,7 +8056,7 @@ mod tests {
             "session-admin-control",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -7881,7 +8147,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             record.state,
-            agent_doc_sqlite::state_store::ActorState::Closed
+            agent_doc_controller::actor::ActorState::Closed
         );
         assert!(record.pane_id.is_empty());
     }
@@ -8097,15 +8363,15 @@ agent:queue\n\
             &doc.to_string_lossy(),
         );
         let mut conn = open_state_db(dir.path()).unwrap();
-        let record = agent_doc_sqlite::state_store::ActorRecord {
+        let record = agent_doc_controller::actor::ActorRecord {
             document_id: document_id.clone(),
             session_id: "session-restart-flood".to_string(),
             generation: 1,
             pane_id: "%88".to_string(),
             window_id: "@8".to_string(),
             harness: "codex".to_string(),
-            state: agent_doc_sqlite::state_store::ActorState::Ready,
-            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "seed".to_string(),
                 timestamp: 1,
@@ -8195,7 +8461,7 @@ agent:queue\n\
             "session-closed-clear",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Closed,
+            agent_doc_controller::actor::ActorState::Closed,
             "supervisor",
             "cycle_committed",
         )
@@ -8282,7 +8548,7 @@ agent:queue\n\
             "session-blocked-clear",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Blocked,
+            agent_doc_controller::actor::ActorState::Blocked,
             "route",
             "starting_actor_timeout",
         )
@@ -8437,7 +8703,7 @@ agent:queue\n\
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
         let record = envelope.data.unwrap();
@@ -8493,7 +8759,7 @@ agent:queue\n\
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
 
@@ -8519,12 +8785,12 @@ agent:queue\n\
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok, "mark_lifecycle with relative path failed");
         assert_eq!(
             envelope.data.unwrap().state,
-            agent_doc_sqlite::state_store::ActorState::Ready
+            agent_doc_controller::actor::ActorState::Ready
         );
     }
     // ── Stuck-`Preparing` controller reaper (#kqr6 / #sjwm / #stuckhandoff) ──
@@ -8619,15 +8885,21 @@ agent:queue\n\
             state_projection.project_supervisor_recycle(),
         );
         let coordination_graph = ControllerCoordinationGraph::new_in(&scope);
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let pane_layout_graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            Vec::new(),
+            actor_graph.live_bindings_handle(),
+        );
         ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(ControllerMemoryState {
-                actor_store: BTreeMap::new(),
                 state_ledger,
                 state_document_versions: BTreeMap::new(),
                 state_projection,
                 map_backend: "std_btree_map",
             }),
+            actor_graph,
             supervisor_recycle_graph,
             coordination_graph,
             supervisor_recycle_waiters: Condvar::new(),
@@ -8636,7 +8908,7 @@ agent:queue\n\
             document_graphs: ControllerDocumentGraphs::new_in(&scope),
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
-            pane_layout_graph: ControllerPaneLayoutGraph::new_in(&scope, Vec::new()),
+            pane_layout_graph,
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
@@ -9042,7 +9314,7 @@ agent:queue\n\
             "session-m2",
             "%41",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -9136,7 +9408,7 @@ agent:queue\n\
             "session-idle",
             "%61",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )
@@ -9208,7 +9480,7 @@ agent:queue\n\
             "session-sb",
             "%51",
             Some(1),
-            agent_doc_sqlite::state_store::ActorState::Ready,
+            agent_doc_controller::actor::ActorState::Ready,
             "supervisor",
             "prompt_ready",
         )

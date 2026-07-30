@@ -1656,9 +1656,7 @@ pub fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String 
     )
 }
 
-fn actor_record_for_file(
-    file: &Path,
-) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
+fn actor_record_for_file(file: &Path) -> Result<Option<agent_doc_controller::actor::ActorRecord>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         return Ok(None);

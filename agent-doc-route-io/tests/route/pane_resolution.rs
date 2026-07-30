@@ -2221,7 +2221,7 @@ mod tests {
         agent_doc_controller_io::project_controller::store_actor_record(
             dir.path(),
             None,
-            &agent_doc_sqlite::state_store::ActorRecord {
+            &agent_doc_controller::actor::ActorRecord {
                 document_id: agent_doc_session_actor_io::canonical_document_id_in(
                     dir.path(),
                     &file_path,
@@ -2231,8 +2231,8 @@ mod tests {
                 pane_id: actor_pane.clone(),
                 window_id: window.clone(),
                 harness: "codex".to_string(),
-                state: agent_doc_sqlite::state_store::ActorState::Starting,
-                last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+                state: agent_doc_controller::actor::ActorState::Starting,
+                last_transition: agent_doc_controller::actor::ActorLastTransition {
                     caller: "start".to_string(),
                     reason: "session_start".to_string(),
                     timestamp: 1,

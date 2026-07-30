@@ -33,14 +33,14 @@ internal enum class NativeReloadTransition {
 
 internal enum class NativeRetiredGenerationTransition {
     LoadReplacement,
-    RestoreOldForRestart,
+    LoadReplacementRetainingInertMapping,
 }
 
 internal fun nativeRetiredGenerationTransition(oldGenerationUnmapped: Boolean): NativeRetiredGenerationTransition =
     if (oldGenerationUnmapped) {
         NativeRetiredGenerationTransition.LoadReplacement
     } else {
-        NativeRetiredGenerationTransition.RestoreOldForRestart
+        NativeRetiredGenerationTransition.LoadReplacementRetainingInertMapping
     }
 
 internal fun nativeReloadTransition(
@@ -1125,13 +1125,17 @@ interface AgentDocLib : Library {
         instance = null
         when (nativeRetiredGenerationTransition(nativeGenerationIsUnmapped(old.loadTarget))) {
             NativeRetiredGenerationTransition.LoadReplacement -> Unit
-            NativeRetiredGenerationTransition.RestoreOldForRestart -> {
-                return restoreRetiredGenerationForRestart(
-                    oldLoadTarget = old.loadTarget,
-                    canonicalPath = path,
-                    oldMtime = oldMtime,
-                    targetMtime = targetMtime,
-                    reason = "old native generation remains mapped after worker exit and dlclose",
+            NativeRetiredGenerationTransition.LoadReplacementRetainingInertMapping -> {
+                // glibc may retain a Rust cdylib mapping after dlclose because
+                // another JVM thread once acquired Rust TLS. That is not a live
+                // generation: native quiesce stopped its listeners/replicas,
+                // the guarded calls drained, its owner pool terminated, and
+                // JNA closed the handle. The replacement has a distinct shadow
+                // path/inode, so publish it and retain this inert mapping until
+                // process exit instead of reopening stale code.
+                LOG.info(
+                    "[native] retired generation remains inertly mapped after dlclose; " +
+                        "continuing distinct-inode replacement handoff",
                 )
             }
         }
@@ -1168,37 +1172,6 @@ interface AgentDocLib : Library {
                     "after quiesce/close handoff",
             )
         return NativeReloadOutcome.Reloaded(targetMtime)
-    }
-
-    private fun restoreRetiredGenerationForRestart(
-        oldLoadTarget: String,
-        canonicalPath: String,
-        oldMtime: Long,
-        targetMtime: Long,
-        reason: String,
-    ): NativeReloadOutcome {
-        val restored = try {
-            loadValidatedGeneration(oldLoadTarget, canonicalPath)
-        } catch (restoreError: Throwable) {
-            LOG.warn("[native] failed to reopen retired generation for restart fallback", restoreError)
-            return markRestartRequired(
-                "$reason; prior generation restore failed (${restoreError.message})",
-            )
-        }
-        if (!restored.resumeNativeAfterFailure()) {
-            try {
-                restored.retireAndClose(NATIVE_QUIESCE_TIMEOUT_MS)
-            } catch (_: Throwable) {
-            }
-            return markRestartRequired("$reason; prior generation could not resume")
-        }
-        publishGeneration(restored, canonicalPath, oldMtime)
-        failedReloadMtime = targetMtime
-        LOG.warn(
-            "[native] IDE restart required; restored prior generation at mtime=$oldMtime " +
-                "after failed unload: $reason",
-        )
-        return NativeReloadOutcome.RestartRequired("$reason; retained prior generation")
     }
 
         @Synchronized

@@ -1690,7 +1690,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     STALE_BUSY_RECONCILE_TICKS,
                 ) {
                     shared.transition_actor_state(
-                        agent_doc_sqlite::state_store::ActorState::Ready,
+                        agent_doc_controller::actor::ActorState::Ready,
                         "supervisor",
                         "idle_pane_reconcile",
                     );

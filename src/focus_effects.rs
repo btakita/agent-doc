@@ -55,8 +55,8 @@ impl agent_doc_focus_io::FocusEffects for CliFocusEffects {
         if record.session_id != session_id
             || matches!(
                 record.state,
-                agent_doc_sqlite::state_store::ActorState::Closed
-                    | agent_doc_sqlite::state_store::ActorState::Blocked
+                agent_doc_controller::actor::ActorState::Closed
+                    | agent_doc_controller::actor::ActorState::Blocked
             )
             || !tmux.pane_alive(&record.pane_id)
         {

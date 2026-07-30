@@ -345,12 +345,35 @@ Verification and installation completed:
 - The user-owned Zed WASM and release archive remain untouched/untracked.
 
 One restart of IDEA is required now. The installed plugin is 0.2.327, but the current JVM still has the prior Kotlin plugin generation loaded and therefore rejects native 0.35.104 during version validation before the new handoff code can run. Restart IDEA to activate 0.2.327; do not save the document and do not rerun/finalize this response. After restart, the new reactive autosync and native handoff paths will be the live generation.
-<!-- agent:boundary:d07c8b38 -->
+
+### Re: IDEA cold-start auto-sync and `equityfundingsource.md` CRDT churn — gpt-5
+
+> **Queue prompt:**
+>
+> The tmux pane auto-sync is performing better after an initial period of time after Idea starts. But when Idea starts and the project loads, there is ~30-60 seconds where the tmux pane auto-sync is non-responsive.
+
+The 30–60 second cold-start gap is real, but the tmux sync path itself is no longer the slow part. After this IDEA restart, the `equityfundingsource.md` safe-passive sync recorded 0 ms lock wait, 10 ms window resolution, 21 ms ownership resolution, 37 ms in the tmux router, and 1.063 seconds total; the pane layout was converged on the next observation. Once its state inputs exist, auto-sync is responsive.
+
+The startup blocker is controller/CRDT authority convergence. `equityfundingsource.md` provides a clean proof:
+
+- Preflight recognized the exact 2× editor projection and logged a semantic recovery intent at 10:30:04 EDT.
+- Two minutes later, the live editor and controller still served 105,388 characters with hash `5336d564…`, exactly twice the 52,694-character baseline, rather than the intended recovered hash `661ab229…`.
+- The same window logged `missing_relay_model`, then deferred the durable checkpoint because the process was `not_hub_owner`.
+- JetBrains repeatedly entered `ack-recovery-missing-controller-replica`; one re-registration reopened a 4.78 MB retained CRDT payload before materializing the document again.
+
+So the recovery was declared before it had converged in the live authority, and the missing controller replica/hub ownership let re-registration keep the stale doubled lineage alive. That recovery traffic explains why the pane surface appears inert during project startup even though the eventual tmux reconciliation is fast.
+
+The exact 2× proof makes a semantic collapse safe, but only through the fenced live-editor repair path. A manual replica-state clear, direct overwrite from disk, component merge, or `--force-disk` would bypass editor authority. A legitimate “rebuild from disk” operation must actually mean: prove both copies equal committed HEAD, create one retained target, deliver it through the live editor/CRDT endpoint, and verify the controller and editor both report the target hash before retiring the old lineage.
+
+I added `#jbcoldstartcrdtowner` at the top of the actionable backlog. It links this recurrence to `#zq8e`, `#7n20`, and `#editormodelmissing`, and requires a restart regression that keeps pane focus/layout sync under two seconds while CRDT recovery proceeds independently and exactly once.
+
+Proof: `.codex/skills/agent-doc/SKILL.md` was auto-updated to the installed `0.35.104` workflow; no source implementation was changed. I used the binary admission/plan path, bounded tsift context and log digests, and focused IDEA/ops-log windows. Full `make check` passed, including all 8,413 agent-doc tests and the formal models. The latest `src/agent-doc` CI run (`30523153338`) is green. Confidence is high in the cold-start classification and failed semantic-settlement proof; the exact ordering between relay-model loss and hub-ownership loss still needs the new regression/instrumentation. No escalation or direct mutation of `equityfundingsource.md` was performed.
+<!-- agent:boundary:7800a946 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- tmux pane autosync is slow and unreliable. It takes ~30 seconds for the tmux pane switch to occur.
+- The tmux pane auto-sync is performing better after an initial period of time after Idea starts. But when Idea starts and the project loads, there is ~30-60 seconds where the tmux pane auto-sync is non-responsive.
 <!-- /agent:queue -->
 
 ## Notes
@@ -361,6 +384,7 @@ One restart of IDEA is required now. The installed plugin is 0.2.327, but the cu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jbcoldstartcrdtowner] #agent-doc-bug Fix IDEA cold-start controller/CRDT authority convergence without blocking pane auto-sync. Live 2026-07-30 proof on equityfundingsource.md: the safe-passive sync path itself converged in 1.063s (window resolution 10ms, tmux router 37ms), but after an exact 2x live projection was classified and `preflight_response_replay_dedup_concatenated_editor_generations_recovered` logged, the controller still served 105388 chars versus the 52694-char baseline, reported `missing_relay_model`, deferred checkpoints as `not_hub_owner`, and the JetBrains plugin repeatedly re-registered `ack-recovery-missing-controller-replica` with a 4.78MB retained bootstrap. Related: #zq8e, #7n20, #editormodelmissing. Make controller-generation startup establish one authoritative hub/model from the live editor before accepting current state; emit semantic-recovery success only after the live projection matches the target hash; fence superseded/doubled retained lineage so re-registration cannot restore it; keep EditorSurface focus/layout projection on an independent fast lane; add restart/SimWorld coverage proving first pane sync under 2s and exactly-once convergence from a doubled editor projection without disk fallback or force-disk.
 <!-- /agent:backlog -->
 
 ## Review

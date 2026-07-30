@@ -406,16 +406,74 @@ lazily-kt has no per-fixture excuse list — a `MIN_FIXTURES` floor plus `REQUIR
 Its excuse ledger lives in the test instead: `EXPECTED_SKIPS` in `ReactiveGraphConformanceTest.kt`, enforced by `assertEquals(EXPECTED_SKIPS, observed)` — **exact set equality**. A fixture that becomes replayable leaves the observed skip set and the equality fails. That is precisely the property the other eight allowlists lacked, arrived at by a different route. Probed: adding a provably-replayed fixture to `EXPECTED_SKIPS` fails the suite; restored, green.
 
 What kt does have is a floor at 117 while 131 replay, so ~14 fixtures could go dark with the build green. It cannot conceal a *named* fixture and `REQUIRED_AREAS` still catches an area going dark, so it is slack rather than rot — but it is the same understating family. Filed as `#lzktfixturefloor` rather than folded in, because raising the floor is a policy call about how the number is maintained.
-<!-- agent:boundary:0b2ccd9c -->
+
+### Re: do [#lzktfixturefloor] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzktfixturefloor]
+
+
+Done, `lazily-kt 12832a5`. The item offered two fixes; the real one was available, so the floor is gone rather than raised.
+
+#### What replaced it
+
+lazily-kt's recorder already writes **corpus-relative** ids, which is exactly the attribution per-fixture accounting needs — so nothing structural was blocking the family shape. The guard now enumerates `../lazily-spec/conformance` and requires every fixture to be opened-or-excused, with all three rot directions from the start: an unopened fixture is an error, an excuse naming no corpus file is an error, and an excuse the suite DID open is an error. It also took lazily-go's self-guarding evidence channel, where every manifest id must resolve to a real file under the corpus root.
+
+| | opened | total | excused |
+|---|---|---|---|
+| before | 131 | 134 | 0 — floor of 117, no ledger |
+| after | **132** | 134 | 2 |
+
+The two survivors are `reliable-sync/coalesce_bounds_outbox.json` and `reliable-sync/liveness_lease_eviction.json`, excused in every other binding for the same reason: no runner drives outbox-coalescing or lease-eviction anywhere.
+
+#### The mutation that justifies the whole item
+
+Drop `ingress_backpressure.json` from its runner list, so a fixture silently stops being replayed:
+
+| gate | exit |
+|---|---|
+| the test suite itself | **0** — did not notice |
+| old `MIN_FIXTURES` floor | 131 ≥ 117, would have stayed **green** |
+| new guard | **1**, names `ingress/ingress_backpressure.json` |
+
+That is the failure the floor was built to tolerate: 14 fixtures of headroom meant 14 fixtures could go dark with everything green. I re-ran the stale-excuse arm myself rather than trusting the report — injecting a manifest-present fixture gives exit 1 with `KNOWN_UNCOVERED lists '...', but the suite DID open it`; reverted, exit 0 at 132/134.
+
+#### A gap that became a fix instead of an excuse
+
+Turning the guard on immediately caught `delta_zero_copy_arrow.json` as never replayed. The lazy move was to excuse it — and kt would have been the *only* binding excusing it. But `ShmBlobRef` already implements the `backend` discriminator the fixture exists to validate, so the gap was closeable, and the agent closed it.
+
+The part worth extracting is what it found on the way in. `assertAssertions` **silently ignores unknown keys**, so simply adding the fixture to the runner would have round-tripped it, reported it green, and never checked the one field it exists for. An explicit `first_op_payload_backend` arm was required. That is the vacuous-green shape this corpus exists to prevent, one level below where we have been looking: not "is the fixture replayed" but "having replayed it, is the assertion actually consumed."
+
+That is a per-runner property and there is no reason to think kt is unique. Filed as `#lzassertunknownkeys` — a corpus key no binding implements would today be invisibly skipped in all nine, which is exactly the class of thing the ingress projection had to write into the spec as contract rather than leave as implementation detail.
+
+#### `REQUIRED_AREAS` kept, retargeted
+
+As a *manifest* check it is now strictly redundant, and the tempting move was to delete it. Asserted against the **corpus** it covers the one blind spot enumeration has: if the lazily-spec sibling is stale or partially cloned, whole areas vanish from the enumeration and the guard passes over a fraction of the real corpus while reporting a proud `N/N`. That silent-shrink case was the only legitimate job the floor did, and area names do it without a number that rots. It is now documented as a corpus-shape tripwire so nobody mistakes it for coverage.
+
+#### Why the two ledgers stay separate
+
+kt has a second ledger in the test — `EXPECTED_SKIPS`, enforced by exact set equality — and merging it into the script would be a category error in both directions:
+
+- `KNOWN_UNCOVERED` answers **were the bytes read at all**.
+- `EXPECTED_SKIPS` answers **having read them, did we assert on them** — the six merge-feed fixtures are read and parsed, so they count as OPENED, and their replay then stops at a named unsupported op (`merge_cell`, `drain_exhausted`).
+
+Merge them and the script starts excusing fixtures it did read, while the test loses its op-level precision. `EXPECTED_SKIPS` was already rot-proof and is untouched.
+
+With this, all nine bindings now account for the canonical corpus the same way, and every one of them can fail on a stale excuse. CI on `12832a5` was queued at the single check; recorded, not polled.
+<!-- agent:boundary:f5131fb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lzassertunknownkeys]
+- ~~do [#lzrsbenchbudget]~~
+- ~~do [#lzktfixturefloor]~~
 - ~~do [#lzgoracegate]~~
 - ~~do [#lzcovallowlistrot]~~
+- do [#vnmr]
 - do [#lzreactdtsgate]
-- do [#lzrsbenchbudget]
 - ~~📌 Fix the red test suites in the lazily implementations.~~
 - 📌 do [#lzegress]
 - do [#lzqueuefamilyflavors]
@@ -428,9 +486,9 @@ What kt does have is a floor at 117 while 131 replay, so ~14 fixtures could go d
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzktfixturefloor] lazily-kt's conformance guard has no per-fixture excuse list at all — it is a MIN_FIXTURES floor plus REQUIRED_AREAS — and that floor is pinned at 117 while 131 fixtures actually replay. So roughly 14 fixtures could stop replaying with the build staying green. It cannot conceal a NAMED fixture the way a stale excuse can, and REQUIRED_AREAS still catches a whole area going dark, so this is slack rather than rot — but it is slack in the same understating family as #lzcovallowlistrot. Either raise the floor to the observed count and keep it raised (the number then has to move deliberately, which is the point), or give the binding a real per-fixture ledger like the other eight. Mutation-check whichever is chosen: drop one replayed fixture and confirm the guard reddens rather than absorbing it into the slack.
+- [ ] [#lzassertunknownkeys] A conformance runner that silently IGNORES unknown assertion keys reports a fixture as replayed while never checking the field the fixture exists for — a fixture can round-trip, pass, and prove nothing. Found in lazily-kt while closing #lzktfixturefloor: assertAssertions ignored delta_zero_copy_arrow.json's backend discriminator, so adding the fixture to the runner would have gone green without ever asserting the one thing it tests; an explicit first_op_payload_backend arm was needed. This is a per-runner property and almost certainly is NOT unique to kt. Audit every binding's fixture-assertion dispatch for the same silent-ignore path, then make an unconsumed or unrecognized assertion key a HARD ERROR rather than a no-op, so a corpus key no binding implements fails loudly instead of being invisibly skipped in all nine. Mutation-check per binding: introduce an assertion key the runner does not know and confirm the suite reddens rather than passing.
 - [ ] [#lzreactdtsgate] lazily-react ships src/*.d.ts and a `types` export but its `make check` is only `node --check` syntax validation plus `node --test` (18 tests), so nothing typechecks the declarations it publishes. Same hole that let lazily-js ship four TS2749 errors in transport.d.ts undetected until this cycle. Port the gate landed in lazily-js 553d840: a declaration-only tsconfig (include src/**/*.d.ts, noEmit, strict, skipLibCheck:false, allowJs:false), an npm typecheck script wired into both `make check` and CI, plus CI's non-empty-program assertion, since a gate whose include matches nothing also exits 0. Mutation-check by breaking one declaration and confirming a non-zero exit before the tests run.
-- [ enforces benchmark budgets on a pruned target/: benchmark-check prints "SKIPPED: no benchmark evidence in this checkout (target/criterion does not exist)" plus "NO BENCHMARK BUDGET WAS ENFORCED BY THIS RUN. This is not a pass - it is the absence of a measurement" and exits 0. The banner is honest and the skip is documented, but a green `make check` still reads as budgets-verified to anyone not reading the log. Either make the skip a hard failure when a budget file exists but evidence does not, or have check depend on generating evidence first, so local closeout cannot claim a performance gate it did not run.
+- [ ] [#vnmr] [ enforces benchmark budgets on a pruned target/: benchmark-check prints "SKIPPED: no benchmark evidence in this checkout (target/criterion does not exist)" plus "NO BENCHMARK BUDGET WAS ENFORCED BY THIS RUN. This is not a pass - it is the absence of a measurement" and exits 0. The banner is honest and the skip is documented, but a green `make check` still reads as budgets-verified to anyone not reading the log. Either make the skip a hard failure when a budget file exists but evidence does not, or have check depend on generating evidence first, so local closeout cannot claim a performance gate it did not run.
 - [ ] [#lzqueuefamilyflavors] Ship the thread-safe and async queue-family flavors in lazily-js, lazily-zig and lazily-cs - the 18 cells that coverage.json rows 17/18/20/21/23/24 show absent. IMPLEMENTATION HAS LANDED IN ALL THREE BINDINGS: lazily-js 67a0013, lazily-cs f056dd8, lazily-zig c103070 (the last one mutation-checked with 15 defects across the shared core and all six new shells, green on 0.15.2 787/791, 0.16.0 849/849 and master 849/849, CI 30523011815 green). Do NOT re-implement. What REMAINS is the ledger and the plumbing: flip rows 17/18/20/21/23/24 for the JS, Zig and C# columns in lazily-spec/coverage.json, regenerate the twelve README/doc coverage tables via sync-coverage.mjs (--check is the gate), fix lazily-zig README line ~92 which claims every spec row is shipped for the Zig column while the generated table still shows those six as absent, and bump the superproject gitlinks for lazily-js, lazily-cs and lazily-zig. Verify each mark against that binding's own 3x3 ledger and replayed corpus before flipping it, not against the commit message.
 - [ ] [#lzwqfixtureconfig] Put the WorkQueueCell lease configuration into the canonical workqueue_*.json fixtures' initial block: visibility_timeout and max_deliveries are absent, so every binding hardcodes them out of band (10, and max_deliveries 3 for competing_delivery vs 2 for lease_deadletter) and a new binding has to read lazily-go's runner to discover them. Add the fields to the fixture and the schema, then update the nine bindings' runners to read them, so a fixture change cannot silently mean something different in each binding.
 - [ ] [#lzegress] Design and implement the egress family as the mirror of ingress (#designimplementtransport): an EgressCore owning sequence assignment, the unacked window, the ack watermark, and retry budget, with sync + thread-safe + async shells exposing pending/inflight/acked_through/retry as Computeds and ONE Effect per attached transport as the sink attachment. An Effect alone cannot be the family — it has no delivery state — so the Effect attaches, the core decides. Reuse Outbox/RelayCell for conflation+backpressure and SpillStore/DurableOutbox for durability rather than reimplementing them; add a generation fence on the SEND side so a reconnected producer cannot replay under a stale incarnation. Spec + formal + conformance corpus alongside, as ingress did.

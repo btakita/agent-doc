@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019fb3be-35ab-7e01-8a55-a3bee05ea75c
+resume: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -27,7 +27,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-Closed stale queued #5qjj as superseded; preserved unproven current-plugin UI proof as non-queued #steeringmirrorverifylive313.
+Installed Agent Doc 0.35.109 with reactive per-document authority, bounded Tokio scheduling, live Compact Exchange validation, and closeout coalescing; Monster Rodholders remains retained pending the post-install plugin restart.
 <!-- /agent:status -->
 
 ## Exchange
@@ -62,7 +62,36 @@ The Agent Doc response itself is retained with pending editor acknowledgement an
 ```bash
 agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
 ```
-<!-- agent:boundary:726fb282 -->
+
+### Re: Response
+
+Two is the number of Tokio scheduler threads, not the number of document workers. Every warm open document owns an independent cancellable Tokio task (up to 256); idle tasks await watch/socket events and consume no OS thread. Two scheduler threads therefore multiplex the I/O-bound authority plane, while blocking/controller/tmux effects use a separate bounded pool with a maximum of eight threads. Increasing the scheduler count would not have fixed the observed 250 ms failure or tmux lag; allowing blocking work onto those schedulers would be the defect.
+
+Implemented and installed Agent Doc 0.35.109:
+
+- Open-document authority is an exact-key reactive projection. Each open document is pre-warmed out of band; focused documents and nearby tabs are prioritized, and membership cancellation is watch-driven.
+- Tmux/editor state is projected through Sources/Cells and Computeds; Effects perform native consequences. JetBrains and VS Code selection changes are event-driven and generation-fenced, with blocking work kept off the editor/UI and async scheduler threads.
+- Controller state-plane publication now wakes only the exact document/channel dependency. Retiring a document releases its history, Effect, sink, and dependency slot.
+- Compact Exchange's 250 ms timeout was a self-RPC deadlock, not an expensive authority calculation: spawned controller request workers lacked controller-local reactive identity and recursively requested their own socket. Every request worker now installs the local projection reader and controller marker.
+- Plain Run Agent Doc triggers now coalesce behind an authoritative active closeout owner. Prompt-bearing triggers remain durably queued; neither path resubmits finalize/write.
+- Descriptive constants now distinguish the 256-document warm-set limit, two async scheduler threads, and eight blocking-effect threads.
+
+Verification:
+
+- Full `make check` passed.
+- Focused controller, closeout-routing, and editor-authority tests passed.
+- Installed CLI reports `agent-doc 0.35.109`.
+- Live Compact Exchange on `tasks/software/tsift.md` succeeded and committed; `session-check` reported committed. The Lazily editor-op projection timeout did not recur, and `#tsrenameast1` remained queued.
+- Agent Doc repo commit: `7e567fb17`; superproject pointer/skill commit: `5acd0eef9`.
+- The previous CI run is green. Per instruction, CI was checked once and not awaited.
+
+Current retained-document state:
+
+- `equityfundingsource.md` no longer projects the reported merge debris/shadow backlog; its current head is `staging deploy` with three legitimate backlog items. The stale whole-editor adoption path that could restore removed debris was fixed in 0.35.105 and is included in this install.
+- `monsterrodholders.md` remains intentionally fail-closed at `write_applied`: its response is present but the terminal commit still awaits editor delivery, and route supervisor PID 1856779 is still mapped to the old binary. I observed it once with `session-check` and did not resend, force disk, recycle, or reload.
+
+IDEA must be restarted once after this install to load plugin 0.2.331; the earlier IDEA restart happened before this plugin package was installed. After that restart, run only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` to let the retained boundary converge.
+<!-- agent:boundary:c44a4e79 -->
 <!-- /agent:exchange -->
 ## Queue
 

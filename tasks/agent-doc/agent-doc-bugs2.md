@@ -40,7 +40,7 @@ Closed stale queued #5qjj as superseded; preserved unproven current-plugin UI pr
 Compacted content:
 - Archived 21 response topic(s): Response; Response; `#5qjj` operator verification: restart confirmed, aggregate UI proof still pending; 18 more
 - Prior summary/context: prior compacted content: Archived 30 response topic(s): Live Sync Tmux Layout crash verification; #60ev and Compact E...
-
+****
 ### Re: equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors. — gpt-5
 
 Implemented and installed the remaining fixes. The stale Equity Funding Source queue copy was not a strike-parser failure: the first cleanup changed only the disk replica, while the editor/CRDT canonical still contained the eleven-line tail below `&lt;!-- /agent:done --&gt;`; the next authoritative write therefore restored it. Older releases had guards that detected the resulting shadow backlog, but they did not automatically remove proven-redundant terminal debris through the authoritative convergence path.
@@ -69,7 +69,7 @@ Validation completed:
 Created `tasks/software/plan-lazily-dependency-reactive-availability.md` and added/pushed Lazily backlog item `#lzdependencyavailability` for a first-class per-key dependency-reactive availability primitive across the single-threaded, thread-safe, async, and binding surfaces.
 
 Committed and pushed Agent Doc as `dea58f229` (`fix: make document authority event driven`). Committed and pushed the superproject pointer and Lazily plan as `e819466be`.
-<!-- agent:boundary:0f88a9ca -->
+<!-- agent:boundary:be4133cb -->
 <!-- /agent:exchange -->
 ## Queue
 

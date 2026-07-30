@@ -201,7 +201,7 @@ Also fixed a second fixed-window source-grep — `admin-investor-pipeline.test.t
 ### Re: Closing #tmo-sync-declined-unpublish — opus-5
 
 Complete in `0a87c46d`: the duplicate `investment_deal_status_sync_by_loan_` is deleted from `tmo-sync.ts`, both callers now go through `admin_deal_status_sync_by_loan_`, and the TMO sync path inherits the `disabled_at` guard it never had.
-<!-- agent:boundary:7154b65a -->
+<!-- agent:boundary:1245c3cf -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

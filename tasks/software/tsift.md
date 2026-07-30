@@ -34,13 +34,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 
 <!-- agent:exchange patch=append -->
 
-<!-- agent:boundary:6b27b943 -->
+<!-- agent:boundary:5ad06fbf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Should we integrate ast-grep to support code search + refactor + editing code across many different languages? Should asg-grep be the core to convert code to ast or should we stick with the existing tsift as
 - Should we integrate ast-grep to support code search + refactor + editing code across many different languages? Should asg-grep be the core to convert code to ast or should we stick with the existing tsift ast bindings? I need to add more languages.
 <!-- /agent:queue -->
 <!--

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 019fb36c-ad2b-7491-bd1c-b5990e4f42f6
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -368,13 +368,37 @@ The exact 2× proof makes a semantic collapse safe, but only through the fenced 
 I added `#jbcoldstartcrdtowner` at the top of the actionable backlog. It links this recurrence to `#zq8e`, `#7n20`, and `#editormodelmissing`, and requires a restart regression that keeps pane focus/layout sync under two seconds while CRDT recovery proceeds independently and exactly once.
 
 Proof: `.codex/skills/agent-doc/SKILL.md` was auto-updated to the installed `0.35.104` workflow; no source implementation was changed. I used the binary admission/plan path, bounded tsift context and log digests, and focused IDEA/ops-log windows. Full `make check` passed, including all 8,413 agent-doc tests and the formal models. The latest `src/agent-doc` CI run (`30523153338`) is green. Confidence is high in the cold-start classification and failed semantic-settlement proof; the exact ordering between relay-model loss and hub-ownership loss still needs the new regression/instrumentation. No escalation or direct mutation of `equityfundingsource.md` was performed.
-<!-- agent:boundary:7a87de9a -->
+
+### Re: cold-start CRDT owner + doubled retained lineage — gpt-5
+
+> **Queue prompt:**
+>
+> do [#jbcoldstartcrdtowner]
+
+
+The “RPC” is the controller’s replica-registration transport: the editor sends its replica identity/frontier and bootstrap state through the register endpoint. It is useful ingress, but it should not be the authority clock.
+
+I changed that boundary to reactive state projection. Each document hub now publishes `live_authority_established`, and each replica member has an `authoritative_full_state_required` projection. After controller restart, either update-first or registration-first traffic can restore liveness, but retained incremental frames remain quarantined. Only the editor’s requested full-state publication establishes the generation’s authority, replaces canonical state, and rebases the member mirror. The EditorSurface focus/layout lane remains independent.
+
+I also folded the live `equityfundingsource.md` evidence from `#doubledtargetwedge` into this fix:
+
+- exact-2× authority recovery now retires all redundant `DocumentWriteDeferred` intents through convergence events before the integrity gate, never by editing `state.db`;
+- retirement requires disk to be the exact valid single-copy target and every retained payload to contain no text outside that target; text-bearing intents fail closed;
+- the repair write is compare-and-swap against the observed doubled authority, and success is logged only after re-reading the exact target hash;
+- newly retained targets are structurally validated at capture;
+- `reset --force-disk` now really uses the audited raw disk path and retires the superseded ordinary lineage;
+- `escaped_template_patch` can no longer mask visible projection corruption when escaped-marker prose is already present in unchanged HEAD.
+
+Regression coverage includes the observed four retained intents, update-first and registration-first restarts, repeated-frame quarantine, exactly-once doubled recovery, no disk fallback/force-disk in automatic recovery, and first pane sync under 2 seconds.
+
+Verification passed: all affected crate suites, SimWorld cold-start coverage, full `make check`, and `make install-full`. The installed `/home/brian/.cargo/bin/agent-doc` is 0.35.104 and contains the new retirement path. Latest CI is green.
+
+Committed as `ee6c76c9a` in `src/agent-doc` and parent pointer `4730cfba5`.
+<!-- agent:boundary:b28b2205 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~The tmux pane auto-sync is performing better after an initial period of time after Idea starts. But when Idea starts and the project loads, there is ~30-60 seconds where the tmux pane auto-sync is non-responsive.~~
-- ⏭️ do [#jbcoldstartcrdtowner]
 <!-- /agent:queue -->
 
 ## Notes
@@ -385,7 +409,6 @@ Proof: `.codex/skills/agent-doc/SKILL.md` was auto-updated to the installed `0.3
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jbcoldstartcrdtowner] #agent-doc-bug Fix IDEA cold-start controller/CRDT authority convergence without blocking pane auto-sync. Live 2026-07-30 proof on equityfundingsource.md: the safe-passive sync path itself converged in 1.063s (window resolution 10ms, tmux router 37ms), but after an exact 2x live projection was classified and `preflight_response_replay_dedup_concatenated_editor_generations_recovered` logged, the controller still served 105388 chars versus the 52694-char baseline, reported `missing_relay_model`, deferred checkpoints as `not_hub_owner`, and the JetBrains plugin repeatedly re-registered `ack-recovery-missing-controller-replica` with a 4.78MB retained bootstrap. Related: #zq8e, #7n20, #editormodelmissing. Make controller-generation startup establish one authoritative hub/model from the live editor before accepting current state; emit semantic-recovery success only after the live projection matches the target hash; fence superseded/doubled retained lineage so re-registration cannot restore it; keep EditorSurface focus/layout projection on an independent fast lane; add restart/SimWorld coverage proving first pane sync under 2s and exactly-once convergence from a doubled editor projection without disk fallback or force-disk.
 <!-- /agent:backlog -->
 
 ## Review

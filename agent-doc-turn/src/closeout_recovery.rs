@@ -532,7 +532,7 @@ pub fn classify_closeout_recovery_state_from_input(
         CyclePhase::Committed => {}
     }
 
-    if input.head_has_escaped_template_patch {
+    if input.head_has_escaped_template_patch && input.snapshot_head_drift.is_some() {
         return CloseoutRecoveryState::EscapedTemplatePatch;
     }
     if input.missing_captured_response_body
@@ -1379,6 +1379,19 @@ mod tests {
                 ..CloseoutRecoveryStateInput::default()
             }),
             CloseoutRecoveryState::DirectResponsePatchback
+        );
+    }
+
+    #[test]
+    fn escaped_marker_in_unchanged_head_does_not_mask_visible_projection_corruption() {
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(committed_cycle()),
+                head_has_escaped_template_patch: true,
+                snapshot_visible_drift: Some(CloseoutRecoveryDrift::Content),
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::UnsafeUserContentDrift,
         );
     }
 

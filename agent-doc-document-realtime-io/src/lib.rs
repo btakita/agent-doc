@@ -3407,7 +3407,7 @@ pub fn normalize_recoverable_response_replay_duplication_for_file(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "{source}_concatenated_editor_generations_recovered file={} intent_id={} observed_hash={} recovered_hash={} strategy=pending_intent_semantic_rebase",
+                "{source}_concatenated_editor_generations_candidate_prepared file={} intent_id={} observed_hash={} target_hash={} strategy=pending_intent_semantic_rebase",
                 file.display(),
                 pending.intent_id,
                 agent_doc_hash::content_hash(content),
@@ -3417,6 +3417,71 @@ pub fn normalize_recoverable_response_replay_duplication_for_file(
         return Ok(Some(recovered));
     }
     Ok(normalize_recoverable_response_replay_duplication(content))
+}
+
+/// Retire legacy whole-document reconnect intents only when the current
+/// authority is an exact repetition of a trusted, structurally valid target
+/// and every retained payload is itself only that target (or repetitions of
+/// it). This is the event-backed escape hatch for historical
+/// `document_write_deferred` rows: it never edits state.db directly and it
+/// refuses to discard an intent containing text absent from the trusted cut.
+pub fn retire_redundant_doubled_document_write_intents(
+    file: &Path,
+    observed: &str,
+    trusted_target: &str,
+    source: &str,
+) -> Result<usize> {
+    validate_canonical_document_target(file, trusted_target, source)?;
+    anyhow::ensure!(
+        !trusted_target.is_empty()
+            && observed.len() == trusted_target.len() * 2
+            && observed
+                .strip_prefix(trusted_target)
+                .is_some_and(|suffix| suffix == trusted_target),
+        "{source}: refusing deferred-intent retirement for {} without an exact 2x trusted projection (observed_hash={}, trusted_hash={})",
+        file.display(),
+        agent_doc_hash::content_hash(observed),
+        agent_doc_hash::content_hash(trusted_target),
+    );
+
+    let journal = pending_document_write_journal(file);
+    for intent in &journal {
+        anyhow::ensure!(
+            agent_doc_hash::content_hash(&intent.target_content)
+                .eq_ignore_ascii_case(&intent.target_hash),
+            "{source}: refusing to retire deferred document write {} for {} because its retained payload hash is invalid",
+            intent.intent_id,
+            file.display(),
+        );
+        let target_is_redundant = intent.target_content == trusted_target
+            || (intent.target_content.len() == trusted_target.len() * 2
+                && intent
+                    .target_content
+                    .strip_prefix(trusted_target)
+                    .is_some_and(|suffix| suffix == trusted_target));
+        anyhow::ensure!(
+            target_is_redundant,
+            "{source}: refusing to retire deferred document write {} for {} because its payload contains content outside the trusted target (intent_hash={}, trusted_hash={})",
+            intent.intent_id,
+            file.display(),
+            intent.target_hash,
+            agent_doc_hash::content_hash(trusted_target),
+        );
+    }
+
+    let retired = journal.len();
+    clear_all_deferred_document_write_intents(file, source)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_redundant_doubled_intents_retired file={} retired_intents={} observed_hash={} trusted_hash={} proof=exact_2x_no_unique_payload_text",
+            file.display(),
+            retired,
+            agent_doc_hash::content_hash(observed),
+            agent_doc_hash::content_hash(trusted_target),
+        ),
+    );
+    Ok(retired)
 }
 
 fn validate_canonical_document_target(file: &Path, content: &str, source: &str) -> Result<()> {
@@ -4417,6 +4482,11 @@ fn retain_force_disk_reconnect_intent(file: &Path, content: &str) -> Result<()> 
     if !agent_doc_document_realtime::write_authority::is_visible_document(file) {
         return Ok(());
     }
+    // `--force-disk` is an explicit authority replacement, so an older
+    // delivery/reconnect lineage must not be replayed over the operator's
+    // chosen disk target. Retire it through convergence events before
+    // retaining the new disk-vs-editor decision; never mutate state.db.
+    clear_all_deferred_document_write_intents(file, "force_disk_override")?;
     let pre_force_disk = std::fs::read_to_string(file).unwrap_or_default();
     if pre_force_disk == content {
         return Ok(());
@@ -7731,6 +7801,117 @@ mod tests {
         assert!(normalized.contains("agent:boundary:latest"));
         assert!(normalized.contains("❯ operator prompt"));
         assert!(normalized.contains("Retained response."));
+    }
+
+    #[test]
+    fn exact_doubled_projection_retires_only_redundant_deferred_lineage() {
+        let trusted = concat!(
+            "---\nagent_doc_session: doubled-retirement\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:trusted -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (dir, file, _) = temp_doc(trusted);
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        for index in 0..4 {
+            let event = agent_doc_state_backbone::StateEvent::new(
+                format!("legacy-delivery-failed-to-all-{index}"),
+                agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                    document_hash: document_hash.clone(),
+                    intent_id: format!("legacy-intent-{index}"),
+                    expected_hash: agent_doc_hash::content_hash(trusted),
+                    expected_content: Some(trusted.to_string()),
+                    target_hash: agent_doc_hash::content_hash(trusted),
+                    target_content: trusted.to_string(),
+                    source: agent_doc_state_backbone::DocumentWriteSource::from(
+                        "legacy_delivery_failed_to_all",
+                    ),
+                    reason: DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+                },
+            );
+            agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event)
+                .unwrap();
+        }
+        assert_eq!(pending_document_write_journal(&file).len(), 4);
+        let doubled = format!("{trusted}{trusted}");
+
+        assert_eq!(
+            retire_redundant_doubled_document_write_intents(
+                &file,
+                &doubled,
+                trusted,
+                "test_doubled_retirement",
+            )
+            .unwrap(),
+            4,
+        );
+        assert!(pending_document_write_journal(&file).is_empty());
+    }
+
+    #[test]
+    fn doubled_projection_retirement_preserves_intent_with_unique_text() {
+        let trusted = concat!(
+            "---\nagent_doc_session: doubled-retirement-refusal\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:trusted -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let target_with_unique_text = trusted.replace(
+            "❯ operator prompt",
+            "❯ operator prompt\n\nUnique retained response.",
+        );
+        let (_dir, file, _) = temp_doc(trusted);
+        retain_deferred_document_write_target(
+            &file,
+            trusted,
+            &target_with_unique_text,
+            "text_bearing_retained_intent",
+            DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+        )
+        .unwrap();
+        let doubled = format!("{trusted}{trusted}");
+
+        let error = retire_redundant_doubled_document_write_intents(
+            &file,
+            &doubled,
+            trusted,
+            "test_doubled_retirement_refusal",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("content outside the trusted target")
+        );
+        assert_eq!(pending_document_write_journal(&file).len(), 1);
+    }
+
+    #[test]
+    fn structurally_invalid_document_target_is_rejected_before_retention() {
+        let trusted = concat!(
+            "---\nagent_doc_session: invalid-retention\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:trusted -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _) = temp_doc(trusted);
+        let doubled = format!("{trusted}{trusted}");
+
+        assert!(
+            retain_deferred_document_write_target(
+                &file,
+                trusted,
+                &doubled,
+                "invalid_retention_test",
+                DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+            )
+            .is_err()
+        );
+        assert!(pending_document_write_journal(&file).is_empty());
     }
 
     #[test]

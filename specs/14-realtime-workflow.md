@@ -1171,6 +1171,32 @@ observation schedules one bounded repair before the zero-replica backoff;
   re-registration requests for the same open document within one bounded
   interval and asks the existing replica to drain urgently; only failure to
   publish the targeted recovery event may fall back to supervisor recycle;
+- after controller restart, an incremental update arriving before replica
+  registration may restore membership but must not union-apply the retained
+  editor lineage to a disk-seeded canonical. Every update from that member stays
+  fenced until a requested authoritative full-state frame replaces canonical
+  and rebases the hub-side mirror; repeated frames and a retained exact-2×
+  projection therefore converge to exactly one live target without disk
+  fallback or `force-disk`;
+- every `DocumentWriteDeferred` target passes the shared structural validator
+  before its event is appended. A legacy exact-2× whole-document projection may
+  retire retained intents before the integrity gate only when disk is the exact
+  structurally valid single-copy target and every retained payload is that
+  target (or its exact repetition). Retirement appends convergence events,
+  never edits `state.db`, and refuses any payload containing text absent from
+  the trusted target. The subsequent authority replacement is compare-and-swap
+  against the observed doubled cut;
+- explicit `--force-disk` is a true recovery override: it reads the disk cut,
+  retires superseded ordinary retained-write lineage for that document, and
+  writes through the audited raw disk path instead of re-entering live CRDT
+  convergence. `escaped_template_patch` diagnosis applies only when HEAD itself
+  drifted from the durable baseline; escaped-marker prose in an unchanged HEAD
+  must not mask a doubled or otherwise corrupt visible projection;
+- response-replay semantic normalization emits only a candidate-prepared event.
+  Recovery success is emitted exactly once after re-reading live authority and
+  observing the exact target content/hash. The JetBrains EditorSurface
+  focus/layout lane remains independent of document-authority recovery and its
+  first pane sync must complete in less than two seconds;
 - `#crdtpushdrain`: the editor's no-op drain backoff gates only *speculative*
   polling (file-watcher, editor-event, and self-rescheduled drains that have no
   evidence of pending work). A controller-published CRDT remote event is positive

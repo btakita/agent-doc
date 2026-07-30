@@ -166,8 +166,37 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             "preflight_response_replay_dedup",
         )?
     {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, &normalized)?;
+        let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "preflight_response_replay_dedup_trusted_disk",
+        )?;
+        let exact_doubled_disk_projection = normalized == disk
+            && !disk.is_empty()
+            && content.len() == disk.len() * 2
+            && content
+                .strip_prefix(&disk)
+                .is_some_and(|suffix| suffix == disk);
+        if exact_doubled_disk_projection {
+            agent_doc_document_realtime_io::retire_redundant_doubled_document_write_intents(
+                file,
+                &content,
+                &disk,
+                "preflight_response_replay_dedup",
+            )?;
+        }
+        agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+            file,
+            &normalized,
+            &content,
+            "preflight_response_replay_dedup",
+        )?;
         content = resolve_current_preflight_document(file, "after_response_replay_dedup")?;
+        anyhow::ensure!(
+            content == normalized,
+            "response-replay semantic recovery did not converge live authority to the exact target (target_hash={}, observed_hash={})",
+            agent_doc_hash::content_hash(&normalized),
+            agent_doc_hash::content_hash(&content),
+        );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -5920,5 +5949,50 @@ mod tests {
         assert!(current.contains("agent:boundary:latest"));
         assert!(current.contains("❯ operator prompt"));
         assert!(current.contains("Retained response."));
+    }
+
+    #[test]
+    fn preflight_retires_redundant_intent_before_exact_doubled_recovery() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let clean = concat!(
+            "---\nagent_doc_session: exact-doubled-preflight\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:clean -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let doubled = format!("{clean}{clean}");
+        std::fs::write(&doc, clean).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            clean,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &doc,
+            clean,
+            clean,
+            "legacy_delivery_failed_to_all",
+            agent_doc_state_backbone::DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+        )
+        .unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "preflight-exact-doubled-retirement",
+            &doubled,
+        );
+
+        run_with_options(&doc, PreflightOptions { probe: true }).unwrap();
+
+        let current =
+            resolve_current_preflight_document(&doc, "test_exact_doubled_retirement").unwrap();
+        assert_eq!(current, clean);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), clean);
+        assert!(
+            agent_doc_document_realtime_io::pending_document_write_journal(&doc).is_empty(),
+            "the redundant retained lineage must be retired through state events",
+        );
     }
 }

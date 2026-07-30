@@ -79,6 +79,214 @@ mod pane_layout_projection_model {
     }
 }
 
+/// `#jbcoldstartcrdtowner` reference model. Pane focus/layout sync is an
+/// independent fast lane while a replacement controller fences a retained
+/// editor lineage, requests full state, and waits for exact target convergence.
+mod cold_start_crdt_authority_model {
+    use agent_doc_crdt_relay_io::{
+        ColdStartReplicaUpdateDecision, cold_start_registration_requires_authoritative_full_state,
+        decide_cold_start_replica_update,
+    };
+
+    const OBSERVED_PANE_SYNC_MS: u64 = 1_063;
+    const PANE_SYNC_BUDGET_MS: u64 = 2_000;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Projection {
+        DiskSeed,
+        DoubledRetained,
+        Target,
+    }
+
+    #[derive(Clone, Copy)]
+    enum Action {
+        Restart,
+        RetainedRegistration,
+        RetainedIncrementalUpdate,
+        FullState { target_hash_matches: bool },
+        PaneSync,
+    }
+
+    const ACTIONS: [Action; 6] = [
+        Action::Restart,
+        Action::RetainedRegistration,
+        Action::RetainedIncrementalUpdate,
+        Action::FullState {
+            target_hash_matches: false,
+        },
+        Action::FullState {
+            target_hash_matches: true,
+        },
+        Action::PaneSync,
+    ];
+
+    #[derive(Clone)]
+    struct World {
+        registered: bool,
+        awaiting_authoritative_full_state: bool,
+        authority: Projection,
+        retained_editor: Projection,
+        full_state_requests: usize,
+        semantic_recovery_successes: usize,
+        pane_sync_ms: Option<u64>,
+        disk_fallbacks: usize,
+        force_disk_repairs: usize,
+    }
+
+    impl Default for World {
+        fn default() -> Self {
+            Self {
+                registered: true,
+                awaiting_authoritative_full_state: false,
+                authority: Projection::Target,
+                retained_editor: Projection::DoubledRetained,
+                full_state_requests: 0,
+                semantic_recovery_successes: 0,
+                pane_sync_ms: None,
+                disk_fallbacks: 0,
+                force_disk_repairs: 0,
+            }
+        }
+    }
+
+    impl World {
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::Restart => {
+                    self.registered = false;
+                    self.awaiting_authoritative_full_state = false;
+                    self.authority = Projection::DiskSeed;
+                    self.semantic_recovery_successes = 0;
+                }
+                Action::RetainedRegistration => {
+                    self.registered = true;
+                    if cold_start_registration_requires_authoritative_full_state(
+                        self.authority == Projection::Target,
+                        true,
+                    ) {
+                        self.awaiting_authoritative_full_state = true;
+                        self.full_state_requests += 1;
+                    }
+                }
+                Action::RetainedIncrementalUpdate => {
+                    match decide_cold_start_replica_update(
+                        self.registered,
+                        self.authority == Projection::Target,
+                        self.awaiting_authoritative_full_state,
+                    ) {
+                        ColdStartReplicaUpdateDecision::Relay => {
+                            // Once full-state convergence established the shared
+                            // lineage, an incremental frame advances that one
+                            // projection; it never resurrects the retained 2× state.
+                            debug_assert_eq!(self.authority, Projection::Target);
+                        }
+                        ColdStartReplicaUpdateDecision::AwaitAuthoritativeFullState => {
+                            self.registered = true;
+                            self.awaiting_authoritative_full_state = true;
+                            self.full_state_requests += 1;
+                        }
+                    }
+                }
+                Action::FullState {
+                    target_hash_matches,
+                } => {
+                    // A recovery candidate is not a success receipt. Publish
+                    // success only after the live authority equals the target
+                    // hash, and make replay of that receipt idempotent.
+                    if self.awaiting_authoritative_full_state && target_hash_matches {
+                        self.authority = Projection::Target;
+                        self.retained_editor = Projection::Target;
+                        self.awaiting_authoritative_full_state = false;
+                        self.semantic_recovery_successes += 1;
+                    }
+                }
+                Action::PaneSync => {
+                    self.pane_sync_ms = Some(OBSERVED_PANE_SYNC_MS);
+                }
+            }
+            self.assert_invariants();
+        }
+
+        fn assert_invariants(&self) {
+            assert_ne!(
+                self.authority,
+                Projection::DoubledRetained,
+                "the retained 2× lineage must never become controller authority"
+            );
+            assert!(
+                self.semantic_recovery_successes <= 1,
+                "target convergence has exactly one semantic success receipt"
+            );
+            assert_eq!(self.disk_fallbacks, 0);
+            assert_eq!(self.force_disk_repairs, 0);
+            if let Some(elapsed_ms) = self.pane_sync_ms {
+                assert!(
+                    elapsed_ms < PANE_SYNC_BUDGET_MS,
+                    "pane sync stays on the focus/layout fast lane"
+                );
+            }
+        }
+    }
+
+    fn explore(world: World, depth: usize) {
+        world.assert_invariants();
+        if depth == 0 {
+            return;
+        }
+        for action in ACTIONS {
+            let mut next = world.clone();
+            next.step(action);
+            explore(next, depth - 1);
+        }
+    }
+
+    #[test]
+    fn restart_fences_doubled_lineage_and_recovers_exactly_once_off_the_pane_fast_lane() {
+        let mut world = World::default();
+        world.step(Action::Restart);
+        world.step(Action::RetainedIncrementalUpdate);
+        world.step(Action::RetainedIncrementalUpdate);
+        world.step(Action::PaneSync);
+        world.step(Action::FullState {
+            target_hash_matches: false,
+        });
+        assert_eq!(world.semantic_recovery_successes, 0);
+        world.step(Action::FullState {
+            target_hash_matches: true,
+        });
+        world.step(Action::FullState {
+            target_hash_matches: true,
+        });
+
+        assert_eq!(world.authority, Projection::Target);
+        assert_eq!(world.semantic_recovery_successes, 1);
+        assert_eq!(world.pane_sync_ms, Some(OBSERVED_PANE_SYNC_MS));
+        assert!(world.full_state_requests >= 1);
+    }
+
+    #[test]
+    fn registration_arriving_first_cannot_promote_the_retained_lineage() {
+        let mut world = World::default();
+        world.step(Action::Restart);
+        world.step(Action::RetainedRegistration);
+        world.step(Action::RetainedIncrementalUpdate);
+        assert_eq!(world.authority, Projection::DiskSeed);
+        assert!(world.awaiting_authoritative_full_state);
+
+        world.step(Action::FullState {
+            target_hash_matches: true,
+        });
+        world.step(Action::RetainedIncrementalUpdate);
+        assert_eq!(world.authority, Projection::Target);
+        assert_eq!(world.semantic_recovery_successes, 1);
+    }
+
+    #[test]
+    fn bounded_restart_orderings_preserve_single_authority_and_fast_pane_sync() {
+        explore(World::default(), 7);
+    }
+}
+
 /// Cross-root pane identity reference model. The sync effect owns exact
 /// file-to-pane evidence for one desired generation; the observer must use
 /// that evidence instead of re-inferring a nested document from a partial

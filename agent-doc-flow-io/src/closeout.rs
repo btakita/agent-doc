@@ -2042,7 +2042,6 @@ pub fn classify_closeout_recovery_state_for_file(
     let observed_evidence = load_current_observed_closeout_recovery_evidence(file, effects)
         .ok()
         .flatten();
-    input.head_has_escaped_template_patch = head_exchange_has_escaped_markers(file);
     // A captured body that never materialized in HEAD, or a committed
     // response-write turn with no capture at all, are both the missing-body
     // shape recovered by `write --commit`.
@@ -2074,6 +2073,12 @@ pub fn classify_closeout_recovery_state_for_file(
         .as_ref()
         .and_then(|evidence| evidence.snapshot_head_drift)
     {
+        // Escaped template markers are a recovery cause only when the
+        // committed HEAD itself moved away from the durable baseline. A
+        // marker already present in both baseline and HEAD is ordinary
+        // response prose and must not mask a separate visible-authority
+        // failure such as a doubled CRDT projection.
+        input.head_has_escaped_template_patch = head_exchange_has_escaped_markers(file);
         input.snapshot_head_drift = Some(snapshot_head_drift);
         return classify_closeout_recovery_state_from_input(input);
     }
@@ -2084,6 +2089,7 @@ pub fn classify_closeout_recovery_state_for_file(
     if let (Some(snapshot), Some(head)) = (snapshot.as_deref(), head.as_deref())
         && snapshot != head
     {
+        input.head_has_escaped_template_patch = head_exchange_has_escaped_markers(file);
         input.snapshot_head_drift = Some(classify_snapshot_head_drift(snapshot, head));
         return classify_closeout_recovery_state_from_input(input);
     }

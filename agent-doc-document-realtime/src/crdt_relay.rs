@@ -276,6 +276,15 @@ pub struct RelayHub {
     /// `RebuiltFromDisk`; drained by the caller which delivers the replace and
     /// calls [`Self::clear_rebootstrap`].
     pending_rebootstrap: HashSet<u64>,
+    /// Members carrying retained state into a restarted relay, whether
+    /// registration or update arrives first. Their retained CRDT lineage cannot
+    /// be union-merged with a canonical freshly seeded from disk: both lineages
+    /// may encode the complete visible document, which would concatenate it.
+    /// Updates remain fenced until an authoritative full-state adopt replaces
+    /// canonical and rebases their hub-side mirrors. This is a reactive
+    /// source-map projection joined to the hub graph, not state inferred from
+    /// RPC arrival order.
+    authoritative_full_state_required: ThreadSafeSourceMap<u64, bool>,
     /// Optional live per-node document projection. It shares this hub's
     /// [`ThreadSafeContext`] and is updated at every canonical mutation boundary.
     /// Default-off; see [`CELL_DOC_TREE_CUTOVER_ENV`].
@@ -285,6 +294,10 @@ pub struct RelayHub {
     /// reactive handle stored here must be `Send`; [`ThreadSafeContext`] and the
     /// `Arc`-based [`ThreadSafeSourceMap`]/[`Source`]/[`Computed`] all qualify.
     ctx: ThreadSafeContext,
+    /// False for a hub reconstructed from disk/recovery state; true only after a
+    /// live editor establishes the shared authority lineage. This reactive fact
+    /// prevents command arrival order from selecting authority.
+    live_authority_established: Source<bool>,
     /// Per-member liveness as a keyed reactive family (keyed by `client_id`). This is
     /// the **single** source of truth for whether a member is connected — the former
     /// `Member.live` field is gone. The present set only grows (deferral, not
@@ -324,6 +337,8 @@ pub struct RelayHub {
 struct LivenessCore {
     ctx: ThreadSafeContext,
     liveness: ThreadSafeSourceMap<u64, bool>,
+    authoritative_full_state_required: ThreadSafeSourceMap<u64, bool>,
+    live_authority_established: Source<bool>,
     membership_epoch: Source<u64>,
     live_editor_count: Computed<usize>,
     delivery_epoch: Source<u64>,
@@ -457,9 +472,12 @@ impl RelayHub {
         let ctx = ThreadSafeContext::new();
         let membership_epoch = ctx.source(0u64);
         let delivery_epoch = ctx.source(0u64);
+        let live_authority_established = ctx.source(false);
         // Cells materialize on `register`; the factory value (`true` = live-on-register)
         // only applies before the explicit `set` in `set_live`.
         let liveness: ThreadSafeSourceMap<u64, bool> = ThreadSafeSourceMap::new(&ctx);
+        let authoritative_full_state_required: ThreadSafeSourceMap<u64, bool> =
+            ThreadSafeSourceMap::new(&ctx);
         let delivery_subscription = DeliveryConvergenceSubscription::new(&ctx);
         let live_editor_count = {
             let liveness = liveness.clone();
@@ -477,6 +495,8 @@ impl RelayHub {
         LivenessCore {
             ctx,
             liveness,
+            authoritative_full_state_required,
+            live_authority_established,
             membership_epoch,
             live_editor_count,
             delivery_epoch,
@@ -590,6 +610,8 @@ impl RelayHub {
         let LivenessCore {
             ctx,
             liveness,
+            authoritative_full_state_required,
+            live_authority_established,
             membership_epoch,
             live_editor_count,
             delivery_epoch,
@@ -606,8 +628,10 @@ impl RelayHub {
             awareness: AwarenessChannel::new(),
             last_committed_text: None,
             pending_rebootstrap: HashSet::new(),
+            authoritative_full_state_required,
             live_document_projection,
             ctx,
+            live_authority_established,
             liveness,
             membership_epoch,
             live_editor_count,
@@ -773,6 +797,33 @@ impl RelayHub {
         Ok(())
     }
 
+    /// Fence a member whose first contact with this hub was an incremental
+    /// update from a retained editor generation.
+    pub fn require_authoritative_full_state(&mut self, client_id: u64) {
+        self.authoritative_full_state_required
+            .set(&self.ctx, client_id, true);
+    }
+
+    /// Whether this controller generation has established canonical authority
+    /// from a live editor rather than merely reconstructing a recovery seed.
+    pub fn live_authority_established(&self) -> bool {
+        self.ctx.get(&self.live_authority_established)
+    }
+
+    /// Publish that canonical and the live editor now share one authoritative
+    /// lineage.
+    pub fn establish_live_authority(&self) {
+        self.ctx.set(&self.live_authority_established, true);
+    }
+
+    /// Whether additive updates from `client_id` must remain quarantined until
+    /// a replace-capable full-state adopt establishes the shared lineage.
+    pub fn awaits_authoritative_full_state(&self, client_id: u64) -> bool {
+        self.authoritative_full_state_required
+            .observe(&self.ctx, &client_id)
+            .unwrap_or(false)
+    }
+
     /// Deregister an editor replica: drop its hub-side mirror AND expire its
     /// ephemeral awareness/presence entry. The awareness channel never outlives a
     /// connection (it is not persisted and not committed).
@@ -781,6 +832,8 @@ impl RelayHub {
         let removed = self.members.remove(&client_id).is_some();
         if removed {
             self.pending_rebootstrap.remove(&client_id);
+            self.authoritative_full_state_required
+                .set(&self.ctx, client_id, false);
             // The cell stays present-but-false (deferral, not de-allocation) so it is
             // no longer counted; a later re-register flips the same cell back to true.
             self.set_live(client_id, false);
@@ -1011,7 +1064,13 @@ impl RelayHub {
         // (so the canonical never accretes the editor's tombstone bloat), no broadcast, no
         // rebootstrap. Only a genuine text divergence (real drift to correct) proceeds.
         let before_text = self.canonical.text();
-        if adopted.text() == before_text {
+        let awaiting_authoritative_members: Vec<u64> = self
+            .authoritative_full_state_required
+            .present_keys()
+            .into_iter()
+            .filter(|client_id| self.awaits_authoritative_full_state(*client_id))
+            .collect();
+        if adopted.text() == before_text && awaiting_authoritative_members.is_empty() {
             return Ok(BroadcastPacket {
                 origin: self.canonical_id,
                 update: Vec::new(),
@@ -1020,6 +1079,21 @@ impl RelayHub {
         }
         let before = self.canonical.state_vector();
         self.canonical = adopted;
+        self.establish_live_authority();
+        // A cold-start member was cloned from the disk-seeded canonical before
+        // we knew the retained editor lineage. Rebase that hub-side mirror onto
+        // the adopted lineage before accepting any later incremental update;
+        // otherwise the mirror would re-introduce the independent disk lineage
+        // on its next diff even though the visible full-state adopt succeeded.
+        let adopted_state = self.canonical.encode_state();
+        for client_id in awaiting_authoritative_members {
+            if let Some(member) = self.members.get_mut(&client_id) {
+                member.replica = ReplicaState::from_encoded(client_id, &adopted_state)?;
+                member.pending.clear();
+            }
+            self.authoritative_full_state_required
+                .set(&self.ctx, client_id, false);
+        }
         let after_text = self.canonical.text();
         self.sync_live_document_projection(&before_text, &after_text);
         self.rotate_lineage();

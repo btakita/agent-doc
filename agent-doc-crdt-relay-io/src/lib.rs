@@ -87,6 +87,38 @@ pub enum CrdtReplicaEventReason {
     AckRecoveryForceRefresh,
 }
 
+/// Decision at the controller cold-start boundary for an incoming editor
+/// update. A retained editor can send an incremental frame before its
+/// registration event is projected by the replacement controller. The wire
+/// ingress is an RPC, but authority is the relay's reactive membership/full-state
+/// projection. The new hub's disk seed and retained editor state are independent
+/// CRDT lineages, so they must never be union-applied merely because both contain
+/// the same visible document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColdStartReplicaUpdateDecision {
+    Relay,
+    AwaitAuthoritativeFullState,
+}
+
+pub const fn decide_cold_start_replica_update(
+    registered: bool,
+    live_authority_established: bool,
+    awaiting_authoritative_full_state: bool,
+) -> ColdStartReplicaUpdateDecision {
+    if registered && live_authority_established && !awaiting_authoritative_full_state {
+        ColdStartReplicaUpdateDecision::Relay
+    } else {
+        ColdStartReplicaUpdateDecision::AwaitAuthoritativeFullState
+    }
+}
+
+pub const fn cold_start_registration_requires_authoritative_full_state(
+    live_authority_established: bool,
+    retained_frontier_present: bool,
+) -> bool {
+    retained_frontier_present && !live_authority_established
+}
+
 impl CrdtReplicaEventReason {
     pub const fn token(self) -> &'static str {
         match self {
@@ -1667,50 +1699,37 @@ fn register_replica_for_file_incremental_with_liveness(
     // generation update racing the remainder of registration can safely exercise
     // the existing idempotent reattach path against the same client id.
     record_replica_identity(&document_hash, client_id, identity, &retired_client_ids)?;
-    let (bootstrap, canonical_state_vector, incremental, replacement_projection) =
-        with_hub_seeded_from_file(file, |hub| {
-            for retired_client_id in &retired_client_ids {
-                hub.deregister(*retired_client_id);
-            }
-            if !superseded_client_ids.is_empty() {
-                hub.fence_replica_generation();
-            }
-            if hub.is_registered(client_id) {
-                // Idempotent re-register (e.g. an editor reconnect that re-announces
-                // the same stable identity): reconnect/sync the existing mirror, then
-                // derive the response from the current canonical frontier.
-                hub.reconnect(client_id)?;
-            } else {
-                hub.register(client_id)?;
-            }
-            let canonical_state_vector = hub.canonical_state_vector();
-            let (bootstrap, incremental) = match retained_state_vector {
-                Some(state_vector) => match hub.canonical_covers_state_vector(state_vector) {
-                    Ok(true) => match hub.canonical_diff(state_vector) {
-                        Ok(delta) => (delta, true),
-                        Err(error) => {
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "crdt_replica_register_incremental_fallback file={} client_id={} reason=invalid_state_vector error={error}",
-                                    file.display(),
-                                    client_id,
-                                ),
-                            );
-                            (hub.canonical_encoded_state(), false)
-                        }
-                    },
-                    Ok(false) => {
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "crdt_replica_register_incremental_fallback file={} client_id={} reason=retained_frontier_ahead_of_canonical",
-                                file.display(),
-                                client_id,
-                            ),
-                        );
-                        (hub.canonical_encoded_state(), false)
-                    }
+    let (
+        bootstrap,
+        canonical_state_vector,
+        incremental,
+        replacement_projection,
+        request_authoritative_full_state,
+    ) = with_hub_seeded_from_file(file, |hub| {
+        let cold_start_with_retained_frontier =
+            cold_start_registration_requires_authoritative_full_state(
+                hub.live_authority_established(),
+                retained_state_vector.is_some(),
+            );
+        for retired_client_id in &retired_client_ids {
+            hub.deregister(*retired_client_id);
+        }
+        if !superseded_client_ids.is_empty() {
+            hub.fence_replica_generation();
+        }
+        if hub.is_registered(client_id) {
+            // Idempotent re-register (e.g. an editor reconnect that re-announces
+            // the same stable identity): reconnect/sync the existing mirror, then
+            // derive the response from the current canonical frontier.
+            hub.reconnect(client_id)?;
+        } else {
+            hub.register(client_id)?;
+        }
+        let canonical_state_vector = hub.canonical_state_vector();
+        let (bootstrap, incremental) = match retained_state_vector {
+            Some(state_vector) => match hub.canonical_covers_state_vector(state_vector) {
+                Ok(true) => match hub.canonical_diff(state_vector) {
+                    Ok(delta) => (delta, true),
                     Err(error) => {
                         agent_doc_ops_log_io::log_op(
                             file,
@@ -1723,17 +1742,48 @@ fn register_replica_for_file_incremental_with_liveness(
                         (hub.canonical_encoded_state(), false)
                     }
                 },
-                None => (hub.canonical_encoded_state(), false),
-            };
-            let replacement_projection = (!superseded_client_ids.is_empty())
-                .then(|| (hub.canonical_encoded_state(), hub.lineage().to_string()));
-            Ok::<_, anyhow::Error>((
-                bootstrap,
-                canonical_state_vector,
-                incremental,
-                replacement_projection,
-            ))
-        })??;
+                Ok(false) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "crdt_replica_register_incremental_fallback file={} client_id={} reason=retained_frontier_ahead_of_canonical",
+                            file.display(),
+                            client_id,
+                        ),
+                    );
+                    (hub.canonical_encoded_state(), false)
+                }
+                Err(error) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "crdt_replica_register_incremental_fallback file={} client_id={} reason=invalid_state_vector error={error}",
+                            file.display(),
+                            client_id,
+                        ),
+                    );
+                    (hub.canonical_encoded_state(), false)
+                }
+            },
+            None => (hub.canonical_encoded_state(), false),
+        };
+        if cold_start_with_retained_frontier {
+            hub.require_authoritative_full_state(client_id);
+        } else if retained_state_vector.is_none() {
+            // A new editor accepted this controller generation's canonical
+            // bootstrap, establishing the live authority lineage.
+            hub.establish_live_authority();
+        }
+        let replacement_projection = (!superseded_client_ids.is_empty())
+            .then(|| (hub.canonical_encoded_state(), hub.lineage().to_string()));
+        Ok::<_, anyhow::Error>((
+            bootstrap,
+            canonical_state_vector,
+            incremental,
+            replacement_projection,
+            hub.awaits_authoritative_full_state(client_id),
+        ))
+    })??;
     if let Some((projection, lineage)) = replacement_projection {
         save_crdt_projection_with_lineage(file, &projection, &lineage)?;
     }
@@ -1745,6 +1795,18 @@ fn register_replica_for_file_incremental_with_liveness(
     // `ensure_document_model` uses this as liveness proof to extend its otherwise
     // very short missing-replica window — see `note_replica_registration`.
     note_replica_registration(file);
+    if request_authoritative_full_state
+        && let Err(err) =
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::RequestFullState, 0)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_event_signal_failed file={} reason=request_full_state source=replica_register error={err}",
+                file.display(),
+            ),
+        );
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1886,27 +1948,33 @@ pub fn relay_replica_update_for_file(
             canonical_len,
         }));
     }
-    // Zero-member relay auto-heal: after a
-    // controller/supervisor recycle (`#statedbgc`), the in-process `hub_registry`
-    // restarts empty and the hub is rebuilt from the durable `.yrs` projection with
-    // ONLY the canonical replica (`live_count() == 0`). The editor is genuinely
-    // still open — its FFI replica keeps shipping `replica_update`s for its stable
-    // client-id — but the hub no longer knows that client, so the relay used to
-    // hard-fail with "replica {id} is not registered", leaving the editor a phantom
-    // (zero live replicas) forever until it was re-opened. Since the caller proved
-    // `editor_attached()` and provided the editor's stable `identity`, re-register
-    // the dropped replica (seeded from the recovered canonical) before relaying. The
-    // editor's update — encoded as "everything a fresh peer is missing" — then
-    // integrates idempotently and `live_count()` returns to 1, healing the phantom
-    // on the editor's next edit with no plugin round-trip.
-    let mut reattached = false;
-    let packet = with_hub_seeded_from_file(file, |hub| {
-        if !hub.is_registered(client_id) {
-            hub.register(client_id)?;
-            reattached = true;
-        }
-        hub.relay_update(client_id, update)
-    })??;
+    // A replacement controller may receive an incremental update before the
+    // editor's registration event reaches the reactive relay projection.
+    // Reattach the live member so liveness heals, but do not union its retained
+    // whole-state lineage into the disk-seeded hub. Keep every additive update
+    // fenced until the editor answers the full-state request; the adopt path then
+    // replaces canonical and rebases the mirror.
+    let (packet, reattached, awaiting_authoritative_full_state) =
+        with_hub_seeded_from_file(file, |hub| -> Result<_> {
+            let registered = hub.is_registered(client_id);
+            let decision = decide_cold_start_replica_update(
+                registered,
+                hub.live_authority_established(),
+                hub.awaits_authoritative_full_state(client_id),
+            );
+            match decision {
+                ColdStartReplicaUpdateDecision::Relay => {
+                    Ok((Some(hub.relay_update(client_id, update)?), false, false))
+                }
+                ColdStartReplicaUpdateDecision::AwaitAuthoritativeFullState => {
+                    if !registered {
+                        hub.register(client_id)?;
+                    }
+                    hub.require_authoritative_full_state(client_id);
+                    Ok((None, !registered, true))
+                }
+            }
+        })??;
     // An editor update proves the doc is open → keep the reactive open-docs authority
     // truthful (also re-seeds it after a recycle-driven phantom-heal reattach).
     mark_editor_open_docs_open(file);
@@ -1934,19 +2002,22 @@ pub fn relay_replica_update_for_file(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_replica_reattach_on_update file={} authority=multi_replica client_id={} recovery=reregister_dropped_replica dead_members_pruned={}",
+                "crdt_replica_reattach_on_update file={} authority=multi_replica client_id={} recovery=await_authoritative_full_state dead_members_pruned={}",
                 file.display(),
                 client_id,
                 dead_client_ids.len(),
             ),
         );
-        // `#reattach-adopt`: the member was just re-seeded from the recovered canonical,
-        // which may carry drift the operator already deleted (`#sy71`) that this
-        // incremental update's union-merge cannot remove. Ask the editor to re-announce
-        // its FULL authoritative state (adopt frame) so the controller REPLACES the
-        // drifted canonical. Additive + regression-safe: the union-merge above already
-        // kept the editor's edits; the adopt corrects the drift when it lands, and once
-        // the canonical is clean subsequent updates fold onto it with nothing to re-add.
+    }
+    if awaiting_authoritative_full_state {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_update_quarantined file={} authority=multi_replica client_id={} recovery=request_authoritative_full_state",
+                file.display(),
+                client_id,
+            ),
+        );
         if let Err(err) =
             signal_crdt_replica_event(file, CrdtReplicaEventReason::RequestFullState, 0)
         {
@@ -1961,10 +2032,13 @@ pub fn relay_replica_update_for_file(
     }
     let canonical_len =
         with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
-    if !packet.targets.is_empty()
-        && !packet.update.is_empty()
+    let (origin, update, targets) = packet
+        .map(|packet| (packet.origin, packet.update, packet.targets))
+        .unwrap_or_else(|| (client_id, Vec::new(), Vec::new()));
+    if !targets.is_empty()
+        && !update.is_empty()
         && let Err(err) =
-            signal_crdt_replica_event(file, CrdtReplicaEventReason::Fanout, packet.targets.len())
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::Fanout, targets.len())
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1979,16 +2053,16 @@ pub fn relay_replica_update_for_file(
         &format!(
             "crdt_replica_fanout file={} authority=multi_replica origin={} targets={} update_bytes={} canonical_len={}",
             file.display(),
-            packet.origin,
-            packet.targets.len(),
-            packet.update.len(),
+            origin,
+            targets.len(),
+            update.len(),
             canonical_len,
         ),
     );
     Ok(Some(FanOut {
-        origin: packet.origin,
-        update: packet.update,
-        targets: packet.targets,
+        origin,
+        update,
+        targets,
         canonical_len,
     }))
 }
@@ -4872,15 +4946,13 @@ mod tests {
     }
 
     #[test]
-    fn relay_update_reattaches_dropped_replica_after_recycle() {
-        // Phantom-editor heal: a JB editor was open (durable fact + live replica), then the
-        // controller/supervisor recycled (`#statedbgc`). The in-process hub restarts
-        // empty and is rebuilt from the durable projection with ONLY the canonical
-        // replica (`live_count()==0`) — but the editor is still open and its FFI
-        // replica keeps shipping `replica_update`s for its stable client-id. The relay
-        // must re-register the dropped replica (not hard-fail "not registered"), apply
-        // the editor's update, and return `live_count()` to 1 — healing the phantom on
-        // the editor's next edit with no plugin round-trip.
+    fn relay_update_after_recycle_waits_for_full_state_without_concatenating_lineages() {
+        // A JB editor was open, then the controller recycled. The replacement
+        // process rebuilds its hub from disk under a fresh CRDT lineage while the
+        // editor still retains the prior lineage. Union-applying that editor update
+        // before registration concatenates both complete documents. The first
+        // update must establish membership and request an authoritative full-state
+        // adoption without integrating the stale-lineage update.
         let (_dir, doc) = temp_doc("relay-reattach.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
@@ -4900,10 +4972,11 @@ mod tests {
             "\n### Re: after recycle — gpt-5\n\nEDITOR EDIT\n",
         );
         let editor_update = replica.encode_state();
+        let editor_text = replica.text();
 
-        // Model the recycle: persist the durable projection, then evict the live hub
-        // so the next hub access recovers a canonical-only hub with zero live editors.
-        checkpoint_durable_projection_for_file(&doc, "test_reattach").unwrap();
+        // Model a cold controller generation: the in-process hub is gone, so the
+        // next event seeds a canonical-only hub from the correct disk text under a
+        // different lineage.
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         assert!(
             hub_registry().lock().remove(&hash).is_some(),
@@ -4911,19 +4984,95 @@ mod tests {
         );
 
         let fan_out = relay_replica_update_for_file(&doc, identity, &editor_update)
-            .expect("a dropped-replica update must re-register and relay, not fail closed")
-            .expect("editor-attached authority must relay the reattached update");
+            .expect("a dropped-replica update must establish recovery membership")
+            .expect("editor-attached authority must return a fenced recovery result");
         assert_eq!(fan_out.origin, client_id);
+        assert!(fan_out.update.is_empty());
+        assert!(fan_out.targets.is_empty());
+        let disk_text = std::fs::read_to_string(&doc).unwrap();
         with_hub(&doc, |hub| {
             assert_eq!(
                 hub.live_count(),
                 1,
-                "re-registering the dropped replica must restore one live editor"
+                "the recovery fence must restore one live editor membership"
             );
-            assert!(
-                hub.canonical_text().contains("EDITOR EDIT"),
-                "the editor's post-recycle edit must integrate into the canonical text"
+            assert_eq!(
+                hub.canonical_text(),
+                disk_text,
+                "the pre-registration update must not union-apply an independent lineage"
             );
+        })
+        .unwrap();
+
+        // A second incremental frame can race the requested full-state response.
+        // It must stay behind the same fence instead of exploiting the membership
+        // established by the first frame.
+        let repeated = relay_replica_update_for_file(&doc, identity, &editor_update)
+            .unwrap()
+            .expect("the repeated frame should remain a successful quarantined no-op");
+        assert!(repeated.update.is_empty());
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), disk_text)).unwrap();
+
+        assert_eq!(
+            adopt_editor_full_state_for_file(&doc, &editor_update).unwrap(),
+            Some(true),
+            "the requested full-state frame must become the live authority"
+        );
+        with_hub(&doc, |hub| {
+            assert_eq!(
+                hub.canonical_text(),
+                editor_text,
+                "full-state recovery must converge to exactly one editor projection"
+            );
+        })
+        .unwrap();
+
+        // The adopt must also rebase the hub-side member mirror. Otherwise its next
+        // legitimate delta would pull the independent disk seed back into canonical.
+        let next_offset = replica.text().chars().count() as u32;
+        replica.apply_local_edit(next_offset, 0, "\nNEXT EDIT\n");
+        let next_update = replica.encode_state();
+        relay_replica_update_for_file(&doc, identity, &next_update)
+            .unwrap()
+            .expect("post-adopt updates should relay normally");
+        with_hub(&doc, |hub| {
+            assert_eq!(
+                hub.canonical_text(),
+                replica.text(),
+                "post-adopt updates must advance exactly one retained editor lineage"
+            );
+        })
+        .unwrap();
+
+        // Exercise the opposite arrival order on another controller generation:
+        // registration lands first with a retained frontier, then its update.
+        // The reactive generation projection—not the RPC order—must still hold
+        // the member behind the full-state fence.
+        assert!(hub_registry().lock().remove(&hash).is_some());
+        let registration =
+            register_replica_for_file_incremental(&doc, identity, Some(&replica.state_vector()))
+                .unwrap()
+                .expect("retained registration should establish fenced membership");
+        assert_eq!(registration.client_id, client_id);
+        with_hub(&doc, |hub| {
+            assert!(!hub.live_authority_established());
+            assert!(hub.awaits_authoritative_full_state(client_id));
+            assert_eq!(hub.canonical_text(), disk_text);
+        })
+        .unwrap();
+
+        let registration_first_update = relay_replica_update_for_file(&doc, identity, &next_update)
+            .unwrap()
+            .expect("registration-first update should be quarantined");
+        assert!(registration_first_update.update.is_empty());
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), disk_text)).unwrap();
+        assert_eq!(
+            adopt_editor_full_state_for_file(&doc, &next_update).unwrap(),
+            Some(true),
+        );
+        with_hub(&doc, |hub| {
+            assert!(hub.live_authority_established());
+            assert_eq!(hub.canonical_text(), replica.text());
         })
         .unwrap();
     }

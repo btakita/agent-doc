@@ -61,6 +61,16 @@ pub fn run(
             "reset_command_document",
         )?
     };
+    if force_disk {
+        // An explicit disk-authority reset supersedes every retained ordinary
+        // document-write lineage for this file. Leave external disk/editor
+        // decision state to the force-disk write path, but prevent an older
+        // whole-document payload from replaying over the selected disk cut.
+        agent_doc_document_realtime_io::clear_all_deferred_document_write_intents(
+            file,
+            "reset_force_disk_override",
+        )?;
+    }
     if preserve_session {
         if !force_disk {
             let disk_content =
@@ -135,7 +145,7 @@ pub fn run(
     fm.resume = None;
     let updated = frontmatter::write(&fm, body)?;
     if force_disk {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated)?;
+        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(file, &updated)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -267,6 +277,15 @@ mod tests {
         let doc = dir.path().join("session.md");
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: old\n---\n\nBody\n";
         std::fs::write(&doc, current).unwrap();
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &doc,
+            current,
+            current,
+            "legacy_delivery_failed_to_all",
+            agent_doc_state_backbone::DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+        )
+        .unwrap();
+        assert!(!agent_doc_document_realtime_io::pending_document_write_journal(&doc).is_empty());
 
         run(&doc, true, false, true).unwrap();
 
@@ -288,6 +307,10 @@ mod tests {
                 && ops_log.contains("transport=disk_force")
                 && ops_log.contains("reason=force_disk"),
             "reset must record the explicit no-listener force-disk write, got:\n{ops_log}"
+        );
+        assert!(
+            agent_doc_document_realtime_io::pending_document_write_journal(&doc).is_empty(),
+            "explicit force-disk reset must retire the superseded retained lineage",
         );
     }
 

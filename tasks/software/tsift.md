@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 58222ddc-00f2-4e31-8e88-84e967cd8f65
+resume: b5bbdb48-a7cb-4525-ba78-a6682b3a5eb6
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -274,17 +274,53 @@ Seven mutations, each caught:
 One process note: I reverted `conformance.rs` with `git checkout` during the mutation sweep instead of restoring from the scratch backup I'd been using for every other file, which discarded the file-scan section I'd just written. Re-added it and re-verified. The mutation that prompted it was also a no-op — its replacement string never matched, so it "passed" without testing anything; I re-ran it properly and it does fail.
 
 Queue after this: `#astgrepexec` (still blocked on per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search`) and `release + publish`.
-<!-- agent:boundary:747b3850 -->
+
+### Re: do [#astgrepexec] — opus-5
+
+Done — `tsift@bff3f7a`, superproject `8e200a09e`. **Kotlin and Bash are semantic-edit executors now.** The recorded blocker was only half true, and checking it was most of the work.
+
+**The item said this was blocked on per-language tag queries and symbol extraction. For Kotlin and Bash it wasn't** — both have had graph symbol extraction the whole time, and both have ast-grep grammars. The blocker is real for the 20 structural-only languages added by `#astgreplangs`; it never applied to these two.
+
+**They're registered as a structural-only family.** `structural_rewrite` is dispatched ahead of the per-family split and needs only a grammar to match with and a grammar to reparse the result — so a language doesn't need per-kind rewriting to be a useful executor. Kotlin and Bash get the whole planner contract for pattern-driven codemods: patch proposal, bounded diff preview, `expected_content_hash` conflict detection, `--verify` in a detached temp worktree, batch rollback. Their recognized-intent set is `structural_rewrite` alone; `rename_symbol`, `replace_function_body`, and `insert_import` stay unrecognized because their implementations are genuinely language-specific and no family implements them for these two.
+
+**Registering them exposed a fall-through that mattered more than the feature.** The family split routes anything that is neither markdown nor script to the **Rust** implementations. So a Kotlin `rename_symbol` went to `replace_rust_identifier`, and on a trivial case it produced *plausible output*:
+
+```
+"status":"applied", "language":"kotlin",
+"diff":"-fun main() {\n+fun main2() {",
+"message":"applied rename_symbol intent through the Kotlin semantic edit executor"
+```
+
+That is Rust identifier rules rewriting a Kotlin file while claiming to be the Kotlin executor. Worse than a refusal, because it looks right. The catch-all further down even hardcodes "not supported by the **Rust** executor yet", so the one case that did refuse named the wrong language. An executor that does not recognize a kind is now refused *before* the split, naming the executor and its actual supported set.
+
+**Verification.** `make check` exit 0, 1601 passed, 0 failed. CI green on the preceding commit (`942656e`). Live on the installed binary:
+
+```
+$ tsift edit-intents --apply  # structural_rewrite on Main.kt
+  eintent-ee7d3077fa applied structural_rewrite ... through the Kotlin semantic edit executor
+  fun main() { bar(1); bar(2) }
+
+$ tsift edit-intents --apply  # rename_symbol on the same file
+  Error: ... "rename_symbol" is not supported by the Kotlin executor (supported: structural_rewrite)
+  # file unchanged
+```
+
+Three mutations, each caught: removing the Kotlin contract, giving Kotlin the full Rust kind set, and deleting the fall-through guard — that last one failed with the silent Rust-rules rewrite above, which is the whole reason the guard exists.
+
+One correction worth recording: my first attempt at that third mutation edited the wrong occurrence — there are two `!executor.recognized_intents().contains(&kind)` sites and the naive replace hit the older one in `semantic_edit_kind_apply_supported`, where it is benign. It "passed", which would have read as the guard being untested. Retargeted at the real guard, it fails. Same class of mistake as the no-op mutation last cycle; I'm now matching on the surrounding block, not the predicate line.
+
+I also added a contract-exhaustiveness guard: every registered executor must appear in the contract test, so the next language added can't arrive with no coverage.
+
+**What's left is genuinely blocked**, and I filed it that way: the 20 structural-only languages need per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search` first, because `parse_semantic_edit_source` validates through `executor.graph_lang()`. Once a language has graph support, registering it is a contract row plus a conformance fixture — it unblocks one language at a time rather than as one big step.
+
+Queue after this: `release + publish`.
+<!-- agent:boundary:613e2b4b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#extendcrosslanguage]~~
-- ~~do [#crosslanguageconformance]~~
-- ~~do [#tsiftnavrunbook]~~
-- ⏭️ do [#astgrepexec]
-- release + publish
+- do [#givestructuralast]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -293,7 +329,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#astgrepexec] Register semantic-edit executors for languages that have an ast-grep grammar but no executor (kotlin and bash today, plus whatever #astgreplangs adds) so structural_rewrite and the symbol-resolved intent kinds reach them. Blocked on per-language tag queries + symbol extraction in tsift-graph/tsift-search
+- [ ] [#givestructuralast] Give the 20 structural-only ast-grep languages (go, cpp, csharp, dart, java, swift, ruby, php, scala, lua, elixir, haskell, nix, solidity, css, html, json, yaml, hcl, c) semantic-edit executors. Genuinely blocked: each needs per-language tag queries + symbol extraction in tsift-graph/tsift-search first, because parse_semantic_edit_source validates through executor.graph_lang(). Unblocks one language at a time as its graph support lands — the executor registration itself is then a contract row plus a conformance fixture
 <!-- /agent:backlog -->
 
 ## Review

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 365f6d6d-4dbc-4e55-9728-ad06701fde34
+resume: b0f96715-edb5-4915-9fc6-3055e131ec68
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -34,12 +34,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 
 <!-- agent:exchange patch=append -->
 
-<!-- agent:boundary:5b796c03 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+- 🚧 do [#astgrepstructural]
 - Should we integrate ast-grep to support code search + refactor + editing code across many different languages? Should asg-grep be the core to convert code to ast or should we stick with the existing tsift ast bindings? I need to add more languages.
 <!-- /agent:queue -->
 <!--
@@ -49,7 +49,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#astgrepstructural] Add an ast-grep structural intent kind to `tsift edit-intents` so a pattern-driven codemod runs through the existing temp-worktree `--verify` path (spec: src/tsift/specs/structural-patterns.md)
+- [ ] 🚧 [#astgrepstructural] Add an ast-grep structural intent kind to `tsift edit-intents` so a pattern-driven codemod runs through the existing temp-worktree `--verify` path (spec: src/tsift/specs/structural-patterns.md)
 <!-- /agent:backlog -->
 
 ## Review

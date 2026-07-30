@@ -2008,6 +2008,96 @@ Done.\n\
         }
     }
 
+    /// A Stop hook can commit the captured response before the agent supplies a
+    /// late tracked-work outcome. `write --commit --backlog-only --done` uses
+    /// best-effort commit mode, but it still crosses a commit boundary and must
+    /// publish the done archive and row removal as one projection. Leaving an
+    /// intermediate `[x]` row makes the command fail its own
+    /// `guard_completed_pending_reap` and incorrectly requires another
+    /// preflight/repair cycle.
+    #[test]
+    fn hook_committed_response_accepts_late_backlog_only_done_in_one_closeout() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let original = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Explain the outside-activity clause.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#late-done] Confirm the outside-activity interpretation.\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: concat!(
+                "<!-- patch:exchange -->\n",
+                "### Re: outside-activity clause — gpt-5\n\n",
+                "The clause reaches paid and unpaid outside activity.\n",
+                "<!-- /patch:exchange -->\n"
+            )
+            .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        agent_doc_capture_io::latest_committed(&doc)
+            .unwrap()
+            .expect("Stop hook should commit the captured response");
+
+        let mut options = agent_doc_write_command_io::CommandOptions::repair_replay(
+            &doc,
+            false,
+            false,
+            false,
+            &[],
+        );
+        options.pending_only = true;
+        options.pending_done = vec!["late-done".to_string()];
+        agent_doc_write_runtime_io::run_command_with_response(
+            options,
+            agent_doc_write_command_io::CommitMode::BestEffort,
+            String::new(),
+        )
+        .expect("late backlog-only --done should reap and commit without repair");
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            !content.contains("- [ ] [#late-done]") && !content.contains("- [x] [#late-done]"),
+            "late done must not leave an open or intermediate completed row:\n{content}"
+        );
+        assert!(
+            content.contains("<!-- agent:done -->") && content.contains("[#late-done]"),
+            "late done should archive the completed row in the same projection:\n{content}"
+        );
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("late done should need no preflight/repair cycle, got {other:?}"),
+        }
+    }
+
     #[test]
     fn stop_auto_closes_active_session_post_commit_drift() {
         let dir = setup_project();

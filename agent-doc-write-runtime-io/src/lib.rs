@@ -1662,7 +1662,7 @@ fn run_command_inner(
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
-            commit_mode == CommitMode::Required,
+            commit_mode != CommitMode::None,
         )?;
         complete_queue_prompts_for_pending_only_done(
             file,
@@ -1919,7 +1919,7 @@ fn run_command_inner(
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
-            write_result.is_ok() && commit_mode == CommitMode::Required,
+            write_result.is_ok() && commit_mode != CommitMode::None,
         )
         .with_context(|| {
             if response_write_retained {

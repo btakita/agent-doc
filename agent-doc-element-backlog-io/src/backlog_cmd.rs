@@ -413,7 +413,7 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
 
 /// Complete and reap tracked-work ids through one authoritative document target.
 ///
-/// Commit-required closeouts use this operation so `--done` never exposes an
+/// Committing closeouts use this operation so `--done` never exposes an
 /// intermediate `[x]` row that a later maintenance write must rediscover. The
 /// removed items are archived and top-backlog status is reconciled before the
 /// single editor/disk projection. Non-committing `write --done` continues to use

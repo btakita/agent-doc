@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-prompt-context"
-version = "0.35.94"
+version = "0.35.95"
 edition = "2024"
 description = "Pure prompt context rendering helpers for agent-doc"
 license = "MIT"
@@ -11,12 +11,12 @@ publish = false
 name = "agent_doc_prompt_context"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.94" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.94" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.94" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.94" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.94" }
-agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.94" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.95" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.95" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.95" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.95" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.95" }
+agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.95" }
 lazily = "0.53.0"
 serde = { version = "1", features = ["derive"] }
 

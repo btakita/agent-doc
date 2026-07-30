@@ -1880,7 +1880,19 @@ pub fn settle_retained_non_capture_projection_through_authority(
         .filter(|expected| {
             !write_policy::buffer_presents_reference_response(&pending.target_content, expected)
         });
-    if !exact_projection_reason && semantic_response_base.is_none() {
+    let target_hash = agent_doc_hash::content_hash(&pending.target_content);
+    // A reconnect can merge a typed post-delivery rebase target into the live
+    // editor before settlement reobserves the intent. Byte-exact canonical
+    // content plus the journaled target hash is sufficient to enter the
+    // existing live-editor, delivery, and native-save verification below; it
+    // does not itself clear the intent or write the document. Unknown semantic
+    // rebase intents still require operator-cut lineage.
+    let exact_target_proof = matches!(
+        &pending.source,
+        agent_doc_state_backbone::DocumentWriteSource::SerializedAtomicWriteProjectionRebase
+    ) && canonical == pending.target_content
+        && pending.target_hash.eq_ignore_ascii_case(&target_hash);
+    if !exact_projection_reason && semantic_response_base.is_none() && !exact_target_proof {
         agent_doc_ops_log_io::log_op(
             path,
             &format!(
@@ -1960,7 +1972,6 @@ pub fn settle_retained_non_capture_projection_through_authority(
         return Ok(true);
     }
 
-    let target_hash = agent_doc_hash::content_hash(&pending.target_content);
     if canonical != pending.target_content
         || !pending.target_hash.eq_ignore_ascii_case(&target_hash)
     {
@@ -10208,6 +10219,75 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), normalized_target);
+    }
+
+    #[test]
+    fn merged_editor_cut_exact_target_requests_native_save_then_settles() {
+        let editor_base = "# Session\n\n<!-- agent:queue -->\nold\n<!-- /agent:queue -->\n";
+        let merged_target =
+            "# Session\n\n<!-- agent:queue -->\nmerged target\n<!-- /agent:queue -->\n";
+        let (dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-merged-editor-cut-exact-target";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let replica_text = replica.text();
+        replica.apply_local_edit(0, replica_text.len() as u32, merged_target);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &file,
+            identity,
+            &replica.encode_state(),
+        )
+        .unwrap()
+        .expect("editor should publish the exact merged target");
+
+        ensure_deferred_document_write_intent(
+            &file,
+            editor_base,
+            merged_target,
+            "serialized_atomic_write_projection_rebase",
+            DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+        )
+        .unwrap();
+        assert!(matches!(
+            pending_document_write(&file)
+                .expect("typed post-delivery rebase intent should be retained")
+                .source,
+            agent_doc_state_backbone::DocumentWriteSource::SerializedAtomicWriteProjectionRebase
+        ));
+        assert_eq!(
+            try_resolve_current_document_content(&file, "merged_editor_cut_exact_target_current",)
+                .unwrap(),
+            merged_target,
+        );
+
+        assert!(
+            !settle_retained_non_capture_projection_through_authority(
+                &file,
+                "merged_editor_cut_before_native_save",
+            )
+            .unwrap(),
+            "the retained target must wait for the editor's native save effect",
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("native_editor_save_pending"));
+        assert!(!log.contains("proof=missing_operator_cut_lineage"));
+        assert!(pending_document_write(&file).is_some());
+
+        std::fs::write(&file, merged_target).expect("simulate the editor's native save effect");
+        assert!(
+            settle_retained_non_capture_projection_through_authority(
+                &file,
+                "merged_editor_cut_after_native_save",
+            )
+            .unwrap(),
+            "the exact merged reconnect target should settle from reactive authority proof",
+        );
+        assert!(pending_document_write(&file).is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), merged_target);
     }
 
     #[test]

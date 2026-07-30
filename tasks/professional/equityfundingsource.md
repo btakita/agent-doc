@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 93980072-a559-45d3-8fe5-98e2d0180fc4
+resume: 54dd188b-646d-44d7-82c4-c11f5b148696
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -144,13 +144,67 @@ Bookkeeping that three earlier writes dropped; the substance is in the responses
 `#tmo-sync-declined-unpublish` rewritten — its concurrent-session coordination block is gone now that `292b52d6` committed the whole tree, so the better fix (delete the duplicate, call the `repo.ts` function) is unblocked.
 
 One thing worth cleaning up: there is debris below `agent:backlog` near line 268 — orphaned `- [ ]` fragments of the `#prod-fix-deploy` and `#tmo-sync-cron-failures` text plus three bare id lines (`410dfec2`, `cf2d65db-…`, `93980072-…`). That is fallout from this session's partial writes, and it is what `session-check` flags as a shadowed backlog item. It sits outside every `agent:` component, so I left it rather than hand-edit the document mid-cycle.
+### Re: Requirements met-date, and one deal-status sync instead of two — opus-5
+
+> **Queue prompt:**
+>
+> do [#recommendedcapturesepara]
+
+> **Queue prompt:**
+>
+> do [#tmo-sync-declined-unpublish]
+
+Both landed in `0a87c46d`, pushed to `main`. Not deployed — the preset is `#spec-test-commit-push`.
+
+### `#recommendedcapturesepara` — separate the met-date from the entry date
+
+The backlog note called this low priority because the current behaviour only ever extends validity. That is true, and it is also the bug: **the annual cycle drifts later every time a decision is recorded late.** `verified_at` was stamped `now`, `expires_at` derived from it, so a lender who satisfied Requirements in March but got entered in June silently earned a fresh year from June. Nothing was wrong in a way that would fail an audit; the dates just were not the dates.
+
+| | |
+|---|---|
+| migration `0144` | `lender_accreditation_verifications.requirements_met_at`, backfilled from `verified_at` on decided rows |
+| `investor_accreditation_decision_` | optional met-date; `expires_at` anchors to it. `verified_at` keeps its meaning — when the admin recorded it — so nothing that reads it changes. Omit the argument and behaviour is identical |
+| `accreditation_requirements_met_at_parse_` | `YYYY-MM-DD` (UTC midnight) or unix seconds |
+| admin PUT + Review Requirements panel | date input capped at today, blank means today, expiry consequence stated inline |
+
+The parse function distinguishes **"not supplied"** (`undefined` → default to now) from **"supplied but unusable"** (`null` → the route 400s). That distinction is the whole point: a typo'd date quietly becoming "today" would reintroduce the drift the field exists to remove. Future dates are rejected, with one day of slack for timezone skew between the admin's calendar day and UTC. The date is stored and read back in UTC, so the input does not show a day earlier west of Greenwich.
+
+One visible payoff: recording a decision from 400 days ago now reads back as **expired** rather than freshly valid. There is a test for exactly that.
+
+### `#tmo-sync-declined-unpublish` — deleted the duplicate rather than patching it
+
+`tmo-sync.ts` carried its own copy of the loan-status → deal-status sync, and the copies had drifted. `653fe3fe` taught the admin one to close the offering on a denial and to skip `disabled_at` rows; this one still mapped only `Funded`. Since TMO stores `Application Declined`, a decline arriving *from TMO* — the common path — left the deal `published` and on the lender feed.
+
+Patching the copy would have restored parity and left the next drift in place, so the copy is gone. One implementation, `admin_deal_status_sync_by_loan_`, now serves both callers. The sync path also inherits the `disabled_at` guard it never had, so a TMO sync can no longer reanimate a disabled deal row. No import cycle — `admin/repo.ts` does not import `tmo-sync`.
+
+### Verification
+
+`2162 pass / 0 fail` across 194 files; `build` and `build:worker` clean. Ten mutations, all caught:
+
+| | |
+|---|---|
+| expiry anchored to `now` instead of the met-date | 2 tests |
+| met-date ignored entirely | 3 |
+| future date accepted | 1 |
+| blank treated as unusable | 1 |
+| `YYYY-MM-DD` parsed as today | 1 |
+| route accepts an unusable date | 1 |
+| blank posted as `''` instead of omitted | 1 |
+| date input unbounded | 1 |
+| sync stops calling the shared function | 1 |
+| duplicate reintroduced into `tmo-sync.ts` | 1 |
+
+Worth flagging how the first mutation run went: my harness passed the two test paths as a single quoted argument, so `bun test` matched nothing and every mutation reported "0 fail". Eight clean passes, all vacuous. I caught it because a run that tests nothing should not print zero failures for a mutation that removes the entire feature. Every run above asserts `Ran 125 tests` alongside the failure count.
+
+Also fixed a second fixed-window source-grep — `admin-investor-pipeline.test.ts` sliced 1800 bytes from the function start, and my comments pushed the calls it guards past that window. Same fix as `653fe3fe`: slice to the end of the function. That is twice in two cycles; a fixed byte count silently stops covering what it is meant to guard, and it fails as a test error rather than as a coverage gap, which is the only reason it was noticed.
 <!-- agent:boundary:47ba74ff -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- 🚧 do [#recommendedcapturesepara]
+- do [#recommendedcapturesepara]
 - do [#tmo-sync-declined-unpublish]
-- do [#tmo-sync-cron-failures]
+- do [#tmo-roster-error-still-silent]
+- ⏭️ do [#tmo-sync-cron-failures]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -282,3 +336,5 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 410dfec2
 cf2d65db-105b-472b-9d1e-de6638dc2eb6
 93980072-a559-45d3-8fe5-98e2d0180fc4
+.vars.*'. Run: git -C src/equityfundingsource-dev log --all --diff-filter=A -- '.dev.vars*'. If any commit ever added one, rotate AUTH_SECRET (wrangler secret put AUTH_SECRET, both envs) and ADMIN_GLOBAL_PASSWORD, and purge from history. Audit the same gap in sibling repos that copied this .gitignore.
+- [ ] 🚧

@@ -132,13 +132,13 @@ Superproject gitlink bumped to `292b52d6`.
 `#tmo-sync-declined-unpublish` — `tmo-sync.ts` carries its own copy of the deal-status sync, `investment_deal_status_sync_by_loan_`, which still maps only `Funded`. That is the path a TMO-sourced decline takes, so a decline arriving *from TMO* still will not unpublish a published deal. Now that the tree is committed the coordination block is gone; the better fix is deleting the duplicate and calling the `repo.ts` function, since two copies of this rule is how the gap appeared.
 
 Neither commit is deployed. The preset is `#spec-test-commit-push`; say the word and I will deploy the same isolated way as the last one.
-<!-- agent:boundary:1e778fa2 -->
+<!-- agent:boundary:17dcd734 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority start -->
 - ~~do [#noticedavailabledeals]~~
 - ~~Do we have a state for lenders who have filled out their requirements outside of the admin portal? Could we have a checkbox or a date when the requirements were met? Please research the annual requirements by law. Is it at the beginning of the year?~~
-- do [#tmo-sync-cron-failures]
+- ⏭️ do [#tmo-sync-cron-failures]
 - ~~deploy to production: [#prod-fix-deploy]~~
 <!-- /agent:queue -->
 

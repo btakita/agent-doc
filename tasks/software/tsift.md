@@ -360,7 +360,7 @@ One honest gap. The executor-level refusal of `rename_symbol` is asserted per la
 CI run `30577467047` is queued on `cd95daa` at the time of writing; the two preceding commits are green and the above is local evidence.
 
 Queue after this: `release + publish`.
-<!-- agent:boundary:66e766db -->
+<!-- agent:boundary:c3f5613f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -375,7 +375,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] 🚧 [#givestructuralast] Give the 20 structural-only ast-grep languages (go, cpp, csharp, dart, java, swift, ruby, php, scala, lua, elixir, haskell, nix, solidity, css, html, json, yaml, hcl, c) semantic-edit executors. Genuinely blocked: each needs per-language tag queries + symbol extraction in tsift-graph/tsift-search first, because parse_semantic_edit_source validates through executor.graph_lang(). Unblocks one language at a time as its graph support lands — the executor registration itself is then a contract row plus a conformance fixture
 <!-- /agent:backlog -->
 
 ## Review

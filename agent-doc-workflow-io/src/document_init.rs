@@ -29,6 +29,55 @@ pub fn ensure_initialized(
     Ok(uuid_assigned || migrated || snapshot_created)
 }
 
+/// Initialize from the caller's editor-authoritative document projection.
+///
+/// The returned string is the exact projection that should be used by the
+/// caller for subsequent template/session resolution. No content is reopened
+/// from disk. This keeps initialization, validation, pane ownership, and the
+/// eventual commit on one canonical value.
+pub fn ensure_initialized_with_content(
+    doc: &Path,
+    content: &str,
+    mut write: impl FnMut(&Path, &str) -> Result<()>,
+    commit: impl FnOnce(&Path) -> Result<bool>,
+    logger: impl FnMut(&Path, &str),
+) -> Result<(String, bool)> {
+    let (frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(content)?;
+    let (resolved, uuid_assigned) = if frontmatter.format.is_some() && frontmatter.session.is_none()
+    {
+        let (updated, session_id) = agent_doc_frontmatter::frontmatter::ensure_session(content)?;
+        eprintln!(
+            "[init] assigning session UUID to {} from current authority projection",
+            doc.display()
+        );
+        eprintln!("[init] assigned session UUID: {}", session_id);
+        write(doc, &updated)?;
+        (updated, true)
+    } else {
+        (content.to_string(), false)
+    };
+
+    let migrated = agent_doc_snapshot_io::try_migrate_renamed(doc)?;
+    let snapshot_created = if migrated {
+        false
+    } else {
+        agent_doc_snapshot_io::ensure_initial_snapshot_with_content(
+            doc,
+            &resolved,
+            agent_doc_element_exchange::strip_exchange_content,
+            logger,
+        )?
+    };
+    if snapshot_created {
+        // The commit effect owns native-save convergence and exact staging.
+        // Pre-staging here could capture stale disk beneath a live editor.
+        if let Err(error) = commit(doc) {
+            eprintln!("[init] warning: failed to commit after init: {error}");
+        }
+    }
+    Ok((resolved, uuid_assigned || migrated || snapshot_created))
+}
+
 /// Assign a session UUID to an agent-doc formatted file that lacks one.
 pub fn ensure_session_uuid(doc: &Path) -> Result<bool> {
     let result = agent_doc_frontmatter_io::session::ensure_session_uuid_for_formatted_file(doc)?;
@@ -132,5 +181,55 @@ mod tests {
 
         assert!(!initialized);
         assert!(!committed.get());
+    }
+
+    #[test]
+    fn authority_projection_drives_snapshot_instead_of_stale_disk() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let stale_disk =
+            "---\nagent_doc_session: stale-disk\nagent_doc_format: template\n---\n\nDisk\n";
+        let editor =
+            "---\nagent_doc_session: live-editor\nagent_doc_format: template\n---\n\nEditor\n";
+        fs::write(&doc, stale_disk).unwrap();
+
+        let wrote = Rc::new(Cell::new(false));
+        let did_write = wrote.clone();
+        let committed = Rc::new(Cell::new(false));
+        let did_commit = committed.clone();
+        let (resolved, initialized) = ensure_initialized_with_content(
+            &doc,
+            editor,
+            move |_, _| {
+                did_write.set(true);
+                Ok(())
+            },
+            move |_| {
+                did_commit.set(true);
+                Ok(true)
+            },
+            noop_log,
+        )
+        .unwrap();
+
+        assert_eq!(resolved, editor);
+        assert!(initialized);
+        assert!(
+            !wrote.get(),
+            "existing editor session must remain unchanged"
+        );
+        assert!(committed.get());
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            editor
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            stale_disk,
+            "initialization must not overwrite the editor's unsaved buffer through disk"
+        );
     }
 }

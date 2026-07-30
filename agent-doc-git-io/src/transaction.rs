@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use agent_doc_document::commit_normalization::canonicalize_answered_prompt_prefixes;
@@ -163,7 +163,33 @@ pub fn stage_and_commit_once(
     snapshot_content: Option<&str>,
     msg: &str,
 ) -> std::result::Result<Output, CommitTransactionError> {
+    stage_and_commit_exact_paths_once(git_root, resolved, snapshot_content, &[], msg)
+}
+
+/// Commit the session document and its explicitly typed binary-owned side
+/// effects from one private index.
+///
+/// `additional_paths` must never be populated from generic repository status:
+/// callers identify the exact files their mutation owns (for example the
+/// configured external done archive). This preserves unrelated staged and
+/// working-tree changes while keeping one logical closeout atomic.
+pub fn stage_and_commit_exact_paths_once(
+    git_root: &Path,
+    resolved: &Path,
+    snapshot_content: Option<&str>,
+    additional_paths: &[PathBuf],
+    msg: &str,
+) -> std::result::Result<Output, CommitTransactionError> {
     let (blob_hash, rel_path) = staged_blob_for_commit(git_root, resolved, snapshot_content)?;
+    let mut cacheinfos = vec![format!("100644,{blob_hash},{rel_path}")];
+    for path in additional_paths {
+        let (side_effect_hash, side_effect_rel_path) =
+            staged_blob_for_commit(git_root, path, None)?;
+        if side_effect_rel_path == rel_path {
+            continue;
+        }
+        cacheinfos.push(format!("100644,{side_effect_hash},{side_effect_rel_path}"));
+    }
     let base_output = Command::new("git")
         .current_dir(git_root)
         .args(["rev-parse", "--verify", "HEAD"])
@@ -197,16 +223,17 @@ pub fn stage_and_commit_once(
         "read-tree",
     )?;
 
-    let cacheinfo = format!("100644,{blob_hash},{rel_path}");
-    git_output_or_transaction_error(
-        Command::new("git")
-            .current_dir(git_root)
-            .env("GIT_INDEX_FILE", &temp_index)
-            .args(["update-index", "--add", "--cacheinfo", &cacheinfo])
-            .output()
-            .map_err(|err| CommitTransactionError::Fatal(err.into()))?,
-        "update-index",
-    )?;
+    for cacheinfo in &cacheinfos {
+        git_output_or_transaction_error(
+            Command::new("git")
+                .current_dir(git_root)
+                .env("GIT_INDEX_FILE", &temp_index)
+                .args(["update-index", "--add", "--cacheinfo", cacheinfo])
+                .output()
+                .map_err(|err| CommitTransactionError::Fatal(err.into()))?,
+            "update-index",
+        )?;
+    }
     let tree_output = git_output_or_transaction_error(
         Command::new("git")
             .current_dir(git_root)
@@ -253,17 +280,19 @@ pub fn stage_and_commit_once(
         return git_output_or_transaction_error(update_ref, "update-ref");
     }
 
-    // Advance only the session document's entry in the real index to the new
-    // committed blob. Every unrelated staged entry remains byte-for-byte intact.
-    match crate::index::update_index_cacheinfo(git_root, &cacheinfo) {
-        Ok(output) if output.status.success() => {}
-        Ok(output) => eprintln!(
-            "[commit] warning: committed exact path but could not align its real-index entry: {}",
-            render_git_process_output(&output)
-        ),
-        Err(err) => eprintln!(
-            "[commit] warning: committed exact path but could not align its real-index entry: {err}"
-        ),
+    // Advance only the typed transaction paths in the real index to their new
+    // committed blobs. Every unrelated staged entry remains byte-for-byte intact.
+    for cacheinfo in &cacheinfos {
+        match crate::index::update_index_cacheinfo(git_root, cacheinfo) {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => eprintln!(
+                "[commit] warning: committed exact path but could not align its real-index entry: {}",
+                render_git_process_output(&output)
+            ),
+            Err(err) => eprintln!(
+                "[commit] warning: committed exact path but could not align its real-index entry: {err}"
+            ),
+        }
     }
     Ok(update_ref)
 }

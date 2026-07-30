@@ -707,6 +707,8 @@ mod tests {
             "{cmd}"
         );
         assert!(!cmd.contains("--baseline-file"), "{cmd}");
+        assert!(!cmd.contains("agent-doc finalize"), "{cmd}");
+        assert!(!cmd.contains("agent-doc write"), "{cmd}");
     }
 
     #[test]

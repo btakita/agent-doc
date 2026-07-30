@@ -806,6 +806,22 @@ pub fn load_document_disk_write(
     )
 }
 
+/// Load the exact target hash of the newest converged binary-owned pending write.
+///
+/// Commit recovery uses this durable state-plane proof when an older binary
+/// settled a retained editor delivery before it learned to preserve
+/// `pending_only_commit_target_hash`. The projection is controller-live when
+/// available and cold-replayed only at the actorless boundary.
+pub fn load_latest_converged_pending_write_hash(file: &Path) -> Result<Option<String>> {
+    Ok(load_document_projection(file)?
+        .and_then(|projection| projection.document.latest_converged_write)
+        .and_then(|write| {
+            (write.source
+                == agent_doc_state_backbone::write_source::DocumentWriteSource::PendingWrite)
+                .then_some(write.target_hash)
+        }))
+}
+
 pub fn apply_closeout_projection_to_cycle_state(
     state: &mut CycleState,
     projection: &ProjectedCloseoutState,

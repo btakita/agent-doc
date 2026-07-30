@@ -1950,8 +1950,16 @@ pub(crate) fn error_requests_retry_without_disk(err: &anyhow::Error) -> bool {
         let message = cause.to_string();
         message.contains("retry_without_disk_write")
             || message.contains("disk is not consulted until the editor is detached")
-            || message.contains("disk is not consulted as a fallback")
-            || message.contains("disk remained non-authoritative")
+                || message.contains("disk is not consulted as a fallback")
+                || message.contains("disk remained non-authoritative")
+                // 0.35.100's zero-member barrier retained the canonical
+                // editor target but omitted the common retry marker from its
+                // typed error text. Classify that exact fail-closed invariant
+                // as retained as well so mixed-generation callers preserve
+                // the downstream commit continuation.
+                || (message.contains("retained canonical target")
+                    && message.contains("zero-member delivery convergence is not visible-write proof")
+                    && message.contains("disk was not written"))
             // `#fzmutloss`: any failure that retains its change for retry must
             // also retain the same closeout's backlog/status mutations. A CRDT
             // convergence timeout says exactly that and used to fall through
@@ -2504,6 +2512,16 @@ mod tests {
         assert!(
             error_requests_retry_without_disk(&zero_replica),
             "a zero-replica retained write must retain its pending-only commit identity",
+        );
+
+        let zero_member_035100 = anyhow::anyhow!(
+            "pending_write: retained canonical target for /tmp/session.md after its editor replica \
+             disappeared (content_hash=abc): zero-member delivery convergence is not \
+             visible-write proof; disk was not written; recycle_status=request_skipped"
+        );
+        assert!(
+            error_requests_retry_without_disk(&zero_member_035100),
+            "the 0.35.100 zero-member barrier must preserve its requested commit across build skew",
         );
 
         // A genuine hard failure retains nothing and must stay unclassified,

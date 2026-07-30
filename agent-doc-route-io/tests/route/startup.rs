@@ -3933,6 +3933,48 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "first-column file should produce leftmost pane (split_before=true)"
         );
     }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn layout_owned_provisioning_does_not_focus_intermediate_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let tasks = dir.path().join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let file = tasks.join("focus-neutral.md");
+        std::fs::write(&file, "# Focus neutral\n").unwrap();
+
+        let iso = IsolatedTmux::new("route-layout-focus-neutral");
+        let session = "test";
+        let operator_pane = iso.auto_start(session, dir.path()).unwrap();
+        let window = iso.pane_window(&operator_pane).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
+        iso.select_pane(&operator_pane).unwrap();
+
+        let provisioned = {
+            let _focus_guard =
+                agent_doc_route_io::invocation::DeferStartupFocusToLayoutGuard::set(true);
+            agent_doc_route_io::startup::provision_pane(
+                &iso,
+                &file,
+                "route-layout-focus-neutral-session",
+                &file.to_string_lossy(),
+                Some(session),
+                &[file.to_string_lossy().to_string()],
+                route_startup_effects(),
+            )
+            .unwrap()
+        };
+
+        assert_ne!(provisioned, operator_pane);
+        assert_eq!(
+            iso.active_pane(session).unwrap(),
+            operator_pane,
+            "layout transaction must remain focus-neutral until reconciliation places the pane"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn provision_pane_second_col_splits_right() {

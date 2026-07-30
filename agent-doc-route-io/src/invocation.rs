@@ -21,7 +21,13 @@ thread_local! {
     /// It must never rescue a stashed pane into the visible layout, select an
     /// alternate pane, or cold-start a replacement. Foreground editor routes
     /// leave this false and retain the normal routing behavior.
-    static BACKGROUND_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
+static BACKGROUND_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
+/// Layout reconciliation owns the final visible pane and focus projection.
+///
+/// Pane provisioning performed inside that transaction must remain
+/// focus-neutral until tmux-router has placed every pane. Standalone route
+/// startup leaves this false and retains its immediate-focus behavior.
+static DEFER_STARTUP_FOCUS_TO_LAYOUT: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn wait_for_ready_override() -> Option<Duration> {
@@ -37,6 +43,10 @@ pub fn force_disk_route_writes() -> bool {
 
 pub fn background_existing_pane_only() -> bool {
     BACKGROUND_EXISTING_PANE_ONLY.with(Cell::get)
+}
+
+pub fn defer_startup_focus_to_layout() -> bool {
+    DEFER_STARTUP_FOCUS_TO_LAYOUT.with(Cell::get)
 }
 
 pub struct WaitForReadyOverrideGuard {
@@ -90,6 +100,23 @@ impl BackgroundExistingPaneOnlyGuard {
 impl Drop for BackgroundExistingPaneOnlyGuard {
     fn drop(&mut self) {
         BACKGROUND_EXISTING_PANE_ONLY.with(|cell| cell.set(self.previous));
+    }
+}
+
+pub struct DeferStartupFocusToLayoutGuard {
+    previous: bool,
+}
+
+impl DeferStartupFocusToLayoutGuard {
+    pub fn set(value: bool) -> Self {
+        let previous = DEFER_STARTUP_FOCUS_TO_LAYOUT.with(|cell| cell.replace(value));
+        Self { previous }
+    }
+}
+
+impl Drop for DeferStartupFocusToLayoutGuard {
+    fn drop(&mut self) {
+        DEFER_STARTUP_FOCUS_TO_LAYOUT.with(|cell| cell.set(self.previous));
     }
 }
 

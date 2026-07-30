@@ -2064,6 +2064,170 @@ Duplicate replay should stay live.
     }
 
     #[test]
+    fn commit_absorbs_exact_retained_pending_only_target_when_snapshot_matches_head() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#old]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#old] finish old work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=\"session.done.md\" -->\n",
+            "<!-- completed work archived in session.done.md -->\n",
+            "<!-- /agent:done -->\n"
+        );
+        commit_file(root, "session.md", committed, "add doc");
+        commit_file(
+            root,
+            "session.done.md",
+            "# Agent Doc Completed Work\n\n- old archive entry\n",
+            "add done archive",
+        );
+        commit_file(root, "unrelated.md", "operator baseline\n", "add unrelated");
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let retained_target = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#next] follow-up work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=\"session.done.md\" -->\n",
+            "<!-- completed work archived in session.done.md -->\n",
+            "<!-- /agent:done -->\n"
+        );
+        fs::write(&doc, retained_target).unwrap();
+        fs::write(
+            root.join("session.done.md"),
+            "# Agent Doc Completed Work\n\n- old archive entry\n- retained completion\n",
+        )
+        .unwrap();
+        fs::write(root.join("unrelated.md"), "operator staged edit\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "unrelated.md"])
+            .output()
+            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(retained_target))
+            .unwrap();
+        let target_hash = agent_doc_hash::content_hash(retained_target);
+        agent_doc_cycle_state_io::record_pending_only_commit_target(&doc, &target_hash).unwrap();
+
+        let did_commit = commit(&doc).expect("exact retained target should commit");
+        assert!(did_commit);
+        let committed_target = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            committed_target.contains("- [ ] [#next] follow-up work")
+                && !committed_target.contains("- [ ] [#old] finish old work"),
+            "committed blob should contain the retained tracked-work target:\n{committed_target}"
+        );
+        let committed_archive =
+            agent_doc_git_io::revision::show_head(&root.join("session.done.md"))
+                .unwrap()
+                .unwrap();
+        assert!(
+            committed_archive.contains("- retained completion"),
+            "the binary-owned archive must land in the same closeout commit:\n{committed_archive}"
+        );
+        let committed_paths = Command::new("git")
+            .current_dir(root)
+            .args(["show", "--pretty=format:", "--name-only", "HEAD"])
+            .output()
+            .unwrap();
+        let committed_paths = String::from_utf8_lossy(&committed_paths.stdout);
+        assert!(committed_paths.lines().any(|line| line == "session.md"));
+        assert!(
+            committed_paths
+                .lines()
+                .any(|line| line == "session.done.md")
+        );
+        assert!(
+            !committed_paths.lines().any(|line| line == "unrelated.md"),
+            "unrelated staged work must stay outside the private closeout commit:\n{committed_paths}"
+        );
+        let staged_unrelated = Command::new("git")
+            .current_dir(root)
+            .args(["diff", "--cached", "--", "unrelated.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&staged_unrelated.stdout).contains("operator staged edit"),
+            "the operator's unrelated staged edit must remain staged"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("reason=pending_only_exact_target"),
+            "commit should record the exact retained-target authority:\n{log}"
+        );
+        assert!(
+            log.contains("commit_binary_owned_side_effects") && log.contains("session.done.md"),
+            "commit should record the typed archive side effect:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_rejects_unproved_typed_component_drift_when_snapshot_matches_head() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#old]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#old] finish old work\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        commit_file(root, "session.md", committed, "add doc");
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let unproved = committed.replace(
+            "- [ ] [#old] finish old work",
+            "- [ ] [#old] silently changed work",
+        );
+        fs::write(&doc, unproved).unwrap();
+
+        let err = commit(&doc).expect_err("unproved typed-component drift must fail closed");
+        assert!(
+            err.to_string()
+                .contains("without an exact binary-owned retained-target proof"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
     fn commit_blocks_head_current_noop_with_uncommitted_response_body_append() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();

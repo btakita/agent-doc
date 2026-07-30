@@ -2416,23 +2416,41 @@ fn is_safe_out_of_band_pending_mutation(snapshot_content: &str, file_content: &s
     if snap_prelude.trim() != file_prelude.trim() || snap_postlude.trim() != file_postlude.trim() {
         return false;
     }
-    if file_items.is_empty() {
+
+    let mut snap_ids = HashSet::new();
+    if snap_items
+        .iter()
+        .filter(|item| !item.id.is_empty())
+        .any(|item| !snap_ids.insert(item.id.as_str()))
+    {
         return false;
     }
 
-    let file_ids: HashSet<&str> = file_items
+    let mut file_ids = HashSet::new();
+    if file_items
         .iter()
         .filter(|item| !item.id.is_empty())
-        .map(|item| item.id.as_str())
-        .collect();
-    if file_ids.is_empty() {
+        .any(|item| !file_ids.insert(item.id.as_str()))
+    {
         return false;
     }
 
-    snap_items
+    let retained_file_items = file_items
         .iter()
-        .filter(|item| !item.id.is_empty())
-        .all(|item| file_ids.contains(item.id.as_str()))
+        .filter(|item| item.id.is_empty() || snap_ids.contains(item.id.as_str()))
+        .collect::<Vec<_>>();
+    if retained_file_items.len() != snap_items.len()
+        || snap_items
+            .iter()
+            .zip(retained_file_items)
+            .any(|(snapshot, current)| snapshot != current)
+    {
+        return false;
+    }
+
+    file_items
+        .iter()
+        .any(|item| !item.id.is_empty() && !snap_ids.contains(item.id.as_str()))
 }
 
 pub fn detect_reintroduced_reaped_pending_ids(
@@ -3968,6 +3986,27 @@ Working.
         assert_eq!(
             classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
             Some("exchange+pending")
+        );
+    }
+
+    #[test]
+    fn classify_safe_out_of_band_pending_rejects_existing_item_mutation() {
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] [#a1b2] existing\n",
+            "<!-- /agent:pending -->\n"
+        );
+        let file = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] [#a1b2] silently changed\n",
+            "<!-- /agent:pending -->\n"
+        );
+
+        assert_eq!(
+            classify_safe_out_of_band_agent_doc_mutation(snapshot, file),
+            None
         );
     }
 

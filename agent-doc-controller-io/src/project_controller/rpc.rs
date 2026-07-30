@@ -374,9 +374,16 @@ struct CapturedFinalizeWakeSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapturedFinalizeWakeSubscription {
+    pub controller_generation: u64,
     pub latest_version: u64,
     pub timed_out: bool,
     pub wakes: Vec<CapturedFinalizeWakeProjection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ControllerStatePlaneCursor {
+    pub controller_generation: u64,
+    pub plane_version: u64,
 }
 
 /// Await controller-published captured-finalize state edges. The RPC is only a
@@ -384,7 +391,7 @@ pub struct CapturedFinalizeWakeSubscription {
 /// manufacture convergence by repeatedly invoking finalize/session-check.
 pub fn subscribe_captured_finalize_wakes_for_file(
     file: &Path,
-    after_version: u64,
+    after: Option<ControllerStatePlaneCursor>,
     timeout: Duration,
 ) -> Result<CapturedFinalizeWakeSubscription> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
@@ -392,7 +399,8 @@ pub fn subscribe_captured_finalize_wakes_for_file(
     let timeout = timeout.min(STATE_PLANE_SUBSCRIBE_MAX);
     let invocation = ControllerStatePlaneSubscribeInvocation {
         channel: CAPTURED_FINALIZE_WAKE_STATE_CHANNEL.to_string(),
-        after_version,
+        after_controller_generation: after.map(|cursor| cursor.controller_generation),
+        after_version: after.map(|cursor| cursor.plane_version).unwrap_or(0),
         timeout_ms: timeout.as_millis().min(u64::MAX as u128) as u64,
     };
     let request = ControllerRequest {
@@ -431,6 +439,7 @@ pub fn subscribe_captured_finalize_wakes_for_file(
         .flat_map(|snapshot| snapshot.wakes.into_values())
         .collect();
     Ok(CapturedFinalizeWakeSubscription {
+        controller_generation: subscription.controller_generation,
         latest_version: subscription.latest_version,
         timed_out: subscription.timed_out,
         wakes,
@@ -6560,34 +6569,23 @@ fn handle_crdt_replica_rpc(
         None
     };
     let data = controller_crdt_replica_data(&canonical, method_name, identity, &payload)?;
-    if method_name == "replica_ack"
-        && replica_ack_reached_delivery_edge(
-            data.get("acknowledged")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
-            agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
-                &canonical, authority,
-            )
-            .ok()
-            .is_some_and(|current| {
-                matches!(
-                    current,
-                    agent_doc_crdt_relay_io::CurrentText::Current {
-                        delivery_converged: true,
-                        ..
-                    }
-                )
-            }),
-        )
+    if replica_method_changes_delivery_frontier(method_name)
         && let Some(runtime) = runtime
+        && let Err(error) =
+            observe_retained_delivery_after_replica_event(runtime, &canonical, authority)
     {
-        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-        if let Ok(Some(projection)) = runtime.document_state_projection(&document_hash) {
-            // Delivery ACK is the Source edge that enables the editor-native
-            // save Effect. Wake the retained closeout worker exactly here;
-            // timer ticks must never synthesize another finalize attempt.
-            publish_captured_finalize_wake(runtime, &projection, "editor_delivery_converged");
-        }
+        // The replica event is already accepted. This ingress only projects
+        // its resulting relay frontier into the controller's reactive graph;
+        // the next replica event reconstructs the same Source if observation
+        // was transiently unavailable.
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "retained_delivery_observation_deferred file={} method={} reason={error:#}",
+                canonical.display(),
+                method_name,
+            ),
+        );
     }
     if method_name == "replica_update"
         && let Some(runtime) = runtime
@@ -6640,17 +6638,45 @@ fn handle_crdt_replica_rpc(
     Ok(data)
 }
 
-fn replica_ack_reached_delivery_edge(acknowledged: bool, delivery_converged: bool) -> bool {
-    acknowledged && delivery_converged
+fn replica_method_changes_delivery_frontier(method_name: &str) -> bool {
+    matches!(
+        method_name,
+        "replica_register"
+            | "replica_deregister"
+            | "replica_update"
+            | "replica_pull"
+            | "replica_ack"
+    )
 }
 
-#[cfg(test)]
-#[test]
-fn captured_closeout_wakes_only_on_acknowledged_delivery_convergence() {
-    assert!(!replica_ack_reached_delivery_edge(false, false));
-    assert!(!replica_ack_reached_delivery_edge(true, false));
-    assert!(!replica_ack_reached_delivery_edge(false, true));
-    assert!(replica_ack_reached_delivery_edge(true, true));
+fn observe_retained_delivery_after_replica_event(
+    runtime: &ControllerRuntime,
+    canonical: &Path,
+    authority: agent_doc_document_realtime::crdt_authority::CrdtAuthority,
+) -> Result<()> {
+    let observation =
+        match agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
+            canonical, authority,
+        )? {
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                live_editors,
+                delivery_converged,
+                delivery_version,
+                semantics: _,
+            } => Some(RetainedDeliveryObservation {
+                content_hash: agent_doc_hash::content_hash(&text),
+                live_editors,
+                delivery_converged,
+                delivery_version,
+            }),
+            agent_doc_crdt_relay_io::CurrentText::Detached
+            | agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => None,
+        };
+    let document_hash = agent_doc_hash::document_id_for_path(canonical);
+    runtime.document_retained_write_observe_delivery(&document_hash, observation);
+    Ok(())
 }
 
 fn observe_realtime_steering_after_replica_update(
@@ -15731,7 +15757,12 @@ pub(crate) fn handle_state_plane_subscribe(
         "state-plane subscribe channel is empty"
     );
     let timeout = Duration::from_millis(invocation.timeout_ms).min(STATE_PLANE_SUBSCRIBE_MAX);
-    Ok(runtime.subscribe_state_plane(&invocation.channel, invocation.after_version, timeout))
+    Ok(runtime.subscribe_state_plane(
+        &invocation.channel,
+        invocation.after_controller_generation,
+        invocation.after_version,
+        timeout,
+    ))
 }
 
 #[derive(Default)]
@@ -16381,14 +16412,124 @@ fn current_document_session_id(
     actor_record: Option<&agent_doc_sqlite::state_store::ActorRecord>,
     registry_entry: Option<&tmux_router::RegistryEntry>,
 ) -> Option<String> {
-    let frontmatter_session = std::fs::read_to_string(canonical).ok().and_then(|content| {
-        let (frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(&content).ok()?;
-        frontmatter.session
-    });
-    frontmatter_session
-        .or_else(|| registry_entry.map(|entry| entry.session_id.clone()))
-        .or_else(|| actor_record.map(|record| record.session_id.clone()))
-        .filter(|session_id| !session_id.trim().is_empty())
+    // This runs inside the controller that owns the relay; consume its
+    // in-memory source directly. An attached editor with no settled replica is
+    // an unresolved source, not permission to fall back to stale disk.
+    let current = agent_doc_crdt_relay_io::current_text_for_file_nonblocking(canonical)
+        .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending);
+    let disk_content = matches!(&current, agent_doc_crdt_relay_io::CurrentText::Detached)
+        .then(|| std::fs::read_to_string(canonical).ok())
+        .flatten();
+    current_document_session_id_from_authority(
+        &current,
+        disk_content.as_deref(),
+        actor_record.map(|record| record.session_id.as_str()),
+        registry_entry.map(|entry| entry.session_id.as_str()),
+    )
+}
+
+fn current_document_session_id_from_authority(
+    current: &agent_doc_crdt_relay_io::CurrentText,
+    detached_disk_content: Option<&str>,
+    actor_session_id: Option<&str>,
+    registry_session_id: Option<&str>,
+) -> Option<String> {
+    fn nonempty(value: Option<&str>) -> Option<String> {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    }
+
+    fn session_from_content(content: &str) -> Option<String> {
+        let (frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(content).ok()?;
+        nonempty(frontmatter.session.as_deref())
+    }
+
+    let authority_session = match current {
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => session_from_content(text),
+        agent_doc_crdt_relay_io::CurrentText::Detached => {
+            detached_disk_content.and_then(session_from_content)
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => None,
+    };
+    authority_session
+        .or_else(|| nonempty(registry_session_id))
+        .or_else(|| nonempty(actor_session_id))
+}
+
+#[cfg(test)]
+mod current_document_session_tests {
+    use super::*;
+
+    fn current(text: &str) -> agent_doc_crdt_relay_io::CurrentText {
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text: text.to_string(),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 1,
+            semantics: None,
+        }
+    }
+
+    #[test]
+    fn editor_projection_wins_over_stale_disk_and_durable_rows() {
+        let editor = current("---\nagent_doc_session: editor-session\n---\n");
+        let disk = "---\nagent_doc_session: disk-session\n---\n";
+        assert_eq!(
+            current_document_session_id_from_authority(
+                &editor,
+                Some(disk),
+                Some("actor-session"),
+                Some("registry-session"),
+            )
+            .as_deref(),
+            Some("editor-session")
+        );
+    }
+
+    #[test]
+    fn attached_missing_replica_never_uses_disk_as_authority() {
+        let current = agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica;
+        let disk = "---\nagent_doc_session: stale-disk-session\n---\n";
+        assert_eq!(
+            current_document_session_id_from_authority(
+                &current,
+                Some(disk),
+                Some("actor-session"),
+                Some("registry-session"),
+            )
+            .as_deref(),
+            Some("registry-session")
+        );
+    }
+
+    #[test]
+    fn detached_document_may_use_disk_and_empty_rows_do_not_mask_fallbacks() {
+        let detached = agent_doc_crdt_relay_io::CurrentText::Detached;
+        let disk = "---\nagent_doc_session: disk-session\n---\n";
+        assert_eq!(
+            current_document_session_id_from_authority(
+                &detached,
+                Some(disk),
+                Some("actor-session"),
+                Some(""),
+            )
+            .as_deref(),
+            Some("disk-session")
+        );
+        assert_eq!(
+            current_document_session_id_from_authority(
+                &agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+                Some(disk),
+                Some("actor-session"),
+                Some(" "),
+            )
+            .as_deref(),
+            Some("actor-session")
+        );
+    }
 }
 
 fn process_tree_exactly_owns_document(

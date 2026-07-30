@@ -410,6 +410,23 @@ pub fn ensure_initial_snapshot(
     project_content: impl FnOnce(&str) -> String,
     logger: impl FnMut(&Path, &str),
 ) -> Result<bool> {
+    let Ok(content) = std::fs::read_to_string(doc) else {
+        return Ok(false);
+    };
+    ensure_initial_snapshot_with_content(doc, &content, project_content, logger)
+}
+
+/// Create the initial baseline from an already-resolved authority projection.
+///
+/// Editor-owned documents may contain unsaved text that is newer than disk.
+/// Callers that already crossed that authority boundary must pass the resolved
+/// projection through instead of reopening the file.
+pub fn ensure_initial_snapshot_with_content(
+    doc: &Path,
+    content: &str,
+    project_content: impl FnOnce(&str) -> String,
+    logger: impl FnMut(&Path, &str),
+) -> Result<bool> {
     if load_document_baseline(doc)?.is_some() {
         return Ok(false);
     }
@@ -417,10 +434,8 @@ pub fn ensure_initial_snapshot(
         "[init] creating document baseline for {} (none found)",
         doc.display()
     );
-    if let Ok(content) = std::fs::read_to_string(doc) {
-        let snapshot_content = project_content(&content);
-        checkpoint_document_baseline(doc, &snapshot_content, logger)?;
-    }
+    let snapshot_content = project_content(content);
+    checkpoint_document_baseline(doc, &snapshot_content, logger)?;
     Ok(true)
 }
 

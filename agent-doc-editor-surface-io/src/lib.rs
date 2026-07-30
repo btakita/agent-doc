@@ -57,44 +57,60 @@ pub struct SurfaceObservationReceipt {
 /// The tmux consequence of a derived intent.
 pub type IntentRunner = Arc<dyn Fn(&Path, &SurfaceIntent) -> Result<String> + Send + Sync>;
 
-/// The controller's half of the mirror, pulled for one editor observation.
+/// The controller's half of the mirror, sampled after one editor observation.
 ///
 /// `observe_tmux` is the push form: the controller notices drift and writes it.
 /// A plugin process holds its own registry, and no controller writes into it, so
 /// its tmux side would stay unobserved forever and proven drift would never
 /// reconcile — the plugin would emit `Focus` for a layout tmux no longer shows.
-/// This is the pull form of the same fact. It is still the *controller's*
-/// observation, which is the property that matters: the editor never reports
-/// whether tmux agrees with it.
+/// This is the boundary probe for the same fact. The deferred adapter runs it
+/// asynchronously only after publishing the editor Source, then writes the
+/// result into the tmux Source. It is still the *controller's* observation,
+/// which is the property that matters: the editor never reports whether tmux
+/// agrees with it.
 ///
 /// `None` means "not asked, or no answer" — deliberately distinct from "tmux
 /// matches" and from "tmux drifted" (`#idlerevisionreactive`).
 pub type TmuxLayoutProbe = Arc<dyn Fn(&Path, &EditorSurface) -> Option<TmuxLayout> + Send + Sync>;
 
-type SurfaceObserver = Arc<dyn Fn(&Path, EditorSurface) + Send + Sync>;
+/// Publish the editor observation immediately and report whether the unchanged
+/// surface merits an asynchronous controller probe.
+type SurfaceObserver = Arc<dyn Fn(&Path, EditorSurface) -> bool + Send + Sync>;
+type TmuxObserver = Arc<dyn Fn(&Path, Option<TmuxLayout>) + Send + Sync>;
 
 #[derive(Default)]
 struct DeferredRoot {
-    latest: Option<EditorSurface>,
+    latest: Option<(u64, EditorSurface)>,
     running: bool,
+    generation: u64,
 }
 
 /// Per-root latest-wins dispatcher for editor observations.
 ///
 /// Controller probes and tmux consequences can block on a route-owned actor.
 /// They must therefore never run inside an editor's native-call lease. One
-/// worker per active root preserves that root's observation order while a
-/// newer queued surface replaces any superseded surface that has not started.
+/// ingress worker per active root preserves that root's editor-observation
+/// order while a newer queued surface replaces any superseded surface that has
+/// not started. Each RPC probe runs separately behind a generation fence, so it
+/// cannot serialize newer editor ingress or publish a stale tmux observation.
 struct DeferredSurfaceDispatcher {
     roots: Mutex<HashMap<PathBuf, DeferredRoot>>,
     observe: SurfaceObserver,
+    probe_tmux: TmuxLayoutProbe,
+    observe_tmux: TmuxObserver,
 }
 
 impl DeferredSurfaceDispatcher {
-    fn new(observe: SurfaceObserver) -> Arc<Self> {
+    fn new(
+        observe: SurfaceObserver,
+        probe_tmux: TmuxLayoutProbe,
+        observe_tmux: TmuxObserver,
+    ) -> Arc<Self> {
         Arc::new(Self {
             roots: Mutex::new(HashMap::new()),
             observe,
+            probe_tmux,
+            observe_tmux,
         })
     }
 
@@ -106,7 +122,8 @@ impl DeferredSurfaceDispatcher {
         let should_start = {
             let mut roots = self.roots();
             let entry = roots.entry(root.clone()).or_default();
-            entry.latest = Some(surface);
+            entry.generation = entry.generation.saturating_add(1);
+            entry.latest = Some((entry.generation, surface));
             if entry.running {
                 false
             } else {
@@ -135,25 +152,55 @@ impl DeferredSurfaceDispatcher {
         Ok(())
     }
 
-    fn run_root(&self, root: PathBuf) {
+    fn run_root(self: &Arc<Self>, root: PathBuf) {
         loop {
-            let Some(surface) = ({
+            let Some((generation, surface)) = ({
                 let mut roots = self.roots();
                 let Some(entry) = roots.get_mut(&root) else {
                     return;
                 };
                 match entry.latest.take() {
-                    Some(surface) => Some(surface),
+                    Some(pending) => Some(pending),
                     None => {
-                        roots.remove(&root);
+                        entry.running = false;
                         None
                     }
                 }
             }) else {
                 return;
             };
-            (self.observe)(&root, surface);
+            let should_probe = (self.observe)(&root, surface.clone());
+            if should_probe {
+                self.spawn_probe(root.clone(), generation, surface);
+            }
         }
+    }
+
+    fn spawn_probe(self: &Arc<Self>, root: PathBuf, generation: u64, surface: EditorSurface) {
+        let dispatcher = Arc::clone(self);
+        let root_display = root.display().to_string();
+        let spawn = thread::Builder::new()
+            .name("agent-doc-editor-surface-probe".to_string())
+            .spawn(move || {
+                let layout = (dispatcher.probe_tmux)(&root, &surface);
+                let is_current = dispatcher
+                    .roots()
+                    .get(&root)
+                    .is_some_and(|entry| entry.generation == generation);
+                if is_current {
+                    (dispatcher.observe_tmux)(&root, layout);
+                }
+            });
+        if let Err(error) = spawn {
+            eprintln!(
+                "[editor-surface] failed to spawn tmux-observation worker for {}: {error}",
+                root_display
+            );
+        }
+    }
+
+    fn forget(&self, root: &Path) {
+        self.roots().remove(root);
     }
 }
 
@@ -212,22 +259,37 @@ impl Registry {
         project_root: &Path,
         surface: EditorSurface,
     ) -> SurfaceObservationReceipt {
-        let should_probe = {
-            let roots = self.roots();
-            roots
-                .get(project_root)
-                .is_some_and(|entry| entry.state.fold().tracking.requires_tmux_probe(&surface))
-        };
-        // A first or changed layout already derives Sync, so publish it without
-        // paying for a controller read first. Repeated layouts retain the probe
-        // that detects tmux-only drift. Never hold the registry lock across that
-        // round trip: one slow root must not serialize the others.
+        let should_probe = self.requires_tmux_probe(project_root, &surface);
         let tmux = should_probe
-            .then(|| (self.probe_tmux)(project_root, &surface))
+            .then(|| self.probe_tmux(project_root, &surface))
             .flatten();
         self.with_entry(project_root, move |entry| {
             entry.state.observe_with_tmux(surface, tmux)
         })
+    }
+
+    /// Publish editor ingress before any controller probe. The deferred plugin
+    /// adapter uses this path so an RPC boundary can never hold a newer editor
+    /// observation behind an older probe.
+    fn observe_editor(
+        &self,
+        project_root: &Path,
+        surface: EditorSurface,
+    ) -> SurfaceObservationReceipt {
+        self.with_entry(project_root, move |entry| entry.state.observe(surface))
+    }
+
+    fn requires_tmux_probe(&self, project_root: &Path, surface: &EditorSurface) -> bool {
+        {
+            let roots = self.roots();
+            roots
+                .get(project_root)
+                .is_some_and(|entry| entry.state.fold().tracking.requires_tmux_probe(surface))
+        }
+    }
+
+    fn probe_tmux(&self, project_root: &Path, surface: &EditorSurface) -> Option<TmuxLayout> {
+        (self.probe_tmux)(project_root, surface)
     }
 
     /// Record what tmux is showing at `project_root`.
@@ -426,9 +488,17 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
 });
 
 static DEFERRED_SURFACES: LazyLock<Arc<DeferredSurfaceDispatcher>> = LazyLock::new(|| {
-    DeferredSurfaceDispatcher::new(Arc::new(|root, surface| {
-        let _ = REGISTRY.observe(root, surface);
-    }))
+    DeferredSurfaceDispatcher::new(
+        Arc::new(|root, surface| {
+            let should_probe = REGISTRY.requires_tmux_probe(root, &surface);
+            let _ = REGISTRY.observe_editor(root, surface);
+            should_probe
+        }),
+        Arc::new(probe_tmux_via_controller),
+        Arc::new(|root, layout| {
+            let _ = REGISTRY.observe_tmux(root, layout);
+        }),
+    )
 });
 
 /// Record an editor-surface observation for the process-wide registry.
@@ -464,6 +534,7 @@ pub fn observe_json(project_root: &Path, surface_json: &str) -> Result<String> {
 
 /// Forget a project root in the process-wide registry.
 pub fn forget(project_root: &Path) -> bool {
+    DEFERRED_SURFACES.forget(project_root);
     REGISTRY.forget(project_root)
 }
 
@@ -784,16 +855,21 @@ mod tests {
         let release_first = Arc::new((Mutex::new(false), Condvar::new()));
         let dispatcher = {
             let release_first = Arc::clone(&release_first);
-            DeferredSurfaceDispatcher::new(Arc::new(move |_, surface| {
-                seen_tx.send(surface.focused.clone()).unwrap();
-                if surface.focused == "/one.md" {
-                    let (released, wake) = &*release_first;
-                    drop(
-                        wake.wait_while(released.lock().unwrap(), |released| !*released)
-                            .unwrap(),
-                    );
-                }
-            }))
+            DeferredSurfaceDispatcher::new(
+                Arc::new(move |_, surface| {
+                    seen_tx.send(surface.focused.clone()).unwrap();
+                    if surface.focused == "/one.md" {
+                        let (released, wake) = &*release_first;
+                        drop(
+                            wake.wait_while(released.lock().unwrap(), |released| !*released)
+                                .unwrap(),
+                        );
+                    }
+                    false
+                }),
+                Arc::new(|_, _| None),
+                Arc::new(|_, _| {}),
+            )
         };
 
         dispatcher
@@ -822,6 +898,75 @@ mod tests {
         assert!(
             seen_rx.recv_timeout(Duration::from_millis(50)).is_err(),
             "the superseded middle surface must never run",
+        );
+    }
+
+    #[test]
+    fn a_blocked_tmux_probe_cannot_delay_newer_editor_ingress() {
+        let (seen_tx, seen_rx) = mpsc::channel();
+        let (probe_started_tx, probe_started_rx) = mpsc::channel();
+        let (tmux_tx, tmux_rx) = mpsc::channel();
+        let release_first_probe = Arc::new((Mutex::new(false), Condvar::new()));
+        let dispatcher = {
+            let release_first_probe = Arc::clone(&release_first_probe);
+            DeferredSurfaceDispatcher::new(
+                Arc::new(move |_, surface| {
+                    seen_tx.send(surface.focused).unwrap();
+                    true
+                }),
+                Arc::new(move |_, surface| {
+                    if surface.focused == "/one.md" {
+                        probe_started_tx.send(()).unwrap();
+                        let (released, wake) = &*release_first_probe;
+                        drop(
+                            wake.wait_while(released.lock().unwrap(), |released| !*released)
+                                .unwrap(),
+                        );
+                    }
+                    Some(TmuxLayout {
+                        columns: vec![SurfaceColumn::new([surface.focused.clone()])],
+                    })
+                }),
+                Arc::new(move |_, layout| {
+                    let focused = layout
+                        .and_then(|layout| layout.columns.into_iter().next())
+                        .and_then(|column| column.files.into_iter().next())
+                        .unwrap_or_default();
+                    tmux_tx.send(focused).unwrap();
+                }),
+            )
+        };
+
+        dispatcher
+            .enqueue(PathBuf::from("/p"), surface("/one.md", &[&["/one.md"]]))
+            .unwrap();
+        assert_eq!(
+            seen_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "/one.md"
+        );
+        probe_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+
+        dispatcher
+            .enqueue(PathBuf::from("/p"), surface("/two.md", &[&["/two.md"]]))
+            .unwrap();
+        assert_eq!(
+            seen_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "/two.md",
+            "the newer editor Source must publish while the prior RPC probe is blocked"
+        );
+        assert_eq!(
+            tmux_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "/two.md"
+        );
+
+        let (released, wake) = &*release_first_probe;
+        *released.lock().unwrap() = true;
+        wake.notify_all();
+        assert!(
+            tmux_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "the superseded probe result must not overwrite the newer tmux Source"
         );
     }
 }

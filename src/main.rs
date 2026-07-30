@@ -432,6 +432,8 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         route_after_start: bool,
     ) -> anyhow::Result<String> {
         let effects = agent_doc_route_io::runtime_effects::route_startup_effects();
+        let _focus_guard =
+            agent_doc_route_io::invocation::DeferStartupFocusToLayoutGuard::set(true);
         if route_after_start {
             agent_doc_route_io::startup::provision_and_route_pane(
                 tmux,

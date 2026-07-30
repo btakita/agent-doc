@@ -475,7 +475,7 @@ pub fn open_cycle_recovery_command(
 ) -> String {
     let Some(state) = state else {
         return format!(
-            "finish the response, then `agent-doc finalize {document}` (or `agent-doc write --commit {document}` to absorb an already-visible response)"
+            "the active closeout already owns {document}; keep the new route queued until its durable checkpoint reaches a terminal commit, without resubmitting finalize or write"
         );
     };
     let phase = state.phase.as_str();
@@ -494,8 +494,22 @@ pub fn open_cycle_recovery_command(
         .as_deref()
         .map(|capture_id| format!(" capture_id={capture_id}"))
         .unwrap_or_default();
+    let continuation = match state.phase {
+        CyclePhase::PreflightStarted => {
+            "the active response has not been captured yet; keep the new route queued behind its owner"
+        }
+        CyclePhase::ResponseCaptured => {
+            "the response is already captured; retained write and commit recovery own the continuation"
+        }
+        CyclePhase::WriteApplied => {
+            "the canonical write is already applied; retained commit recovery owns the terminal boundary"
+        }
+        CyclePhase::Committed | CyclePhase::Abandoned => {
+            "the checkpoint is terminal; refresh the state projection instead of resubmitting response commands"
+        }
+    };
     format!(
-        "resume durable checkpoint cycle={} phase={phase}{target}{pending}{capture}; finish the response, then `agent-doc finalize {document}` (or `agent-doc write --commit {document}` to absorb an already-visible response)",
+        "resume durable checkpoint cycle={} phase={phase}{target}{pending}{capture}; {continuation}; do not resubmit finalize or write for {document}",
         state.cycle_id
     )
 }
@@ -1150,7 +1164,7 @@ mod tests {
             None
         );
         for (state, name, needle) in [
-            (OpenCycle, "open_cycle", "agent-doc finalize"),
+            (OpenCycle, "open_cycle", "keep the new route queued"),
             (
                 MissingResponseBody,
                 "missing_response_body",
@@ -1232,6 +1246,27 @@ mod tests {
         assert!(cmd.contains("pending_mutations=true"), "{cmd}");
         assert!(cmd.contains("capture_id=capture-123"), "{cmd}");
         assert!(!cmd.contains("--baseline-file"), "{cmd}");
+        assert!(!cmd.contains("agent-doc finalize"), "{cmd}");
+        assert!(!cmd.contains("agent-doc write"), "{cmd}");
+    }
+
+    #[test]
+    fn write_applied_recovery_never_recommends_resubmission() {
+        let cmd = open_cycle_recovery_command(
+            "tasks/doc.md",
+            Some(&OpenCycleRecoveryCommandInput {
+                cycle_id: "cycle-write-applied".to_string(),
+                phase: CyclePhase::WriteApplied,
+                target: Some("#noticedavailabledeals".to_string()),
+                has_pending_mutations: true,
+                capture_id: Some("cycle-write-applied".to_string()),
+            }),
+        );
+        assert!(cmd.contains("canonical write is already applied"), "{cmd}");
+        assert!(cmd.contains("retained commit recovery"), "{cmd}");
+        assert!(cmd.contains("pending_mutations=true"), "{cmd}");
+        assert!(!cmd.contains("agent-doc finalize"), "{cmd}");
+        assert!(!cmd.contains("agent-doc write"), "{cmd}");
     }
 
     #[test]

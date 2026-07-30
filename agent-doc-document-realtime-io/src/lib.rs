@@ -2565,7 +2565,7 @@ pub fn apply_canonical_replace_if_attached(
                                 let recycle_status = agent_doc_controller_io::project_controller::
                                         schedule_stale_editor_replica_cp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: retained canonical target for {} after its editor replica disappeared (content_hash={}): zero-member delivery convergence is not visible-write proof; disk was not written; recycle_status={recycle_status}",
+                                    "{source}: retained canonical target for {} after its editor replica disappeared (content_hash={}): zero-member delivery convergence is not visible-write proof; disk was not written; recycle_status={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; {RETAINED_FOR_RETRY_MARKER}",
                                     file.display(),
                                     relay_write.content_hash,
                                 )));

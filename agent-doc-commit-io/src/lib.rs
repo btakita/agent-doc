@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts;
@@ -18,7 +18,9 @@ use agent_doc_git::{
 };
 use agent_doc_git_io::{
     dirs::{narrow_to_submodule, resolve_to_git_root},
-    transaction::{CommitTransactionError, stage_and_commit_once, update_parent_submodule_pointer},
+    transaction::{
+        CommitTransactionError, stage_and_commit_exact_paths_once, update_parent_submodule_pointer,
+    },
 };
 use agent_doc_queue_io::queue_consume;
 use anyhow::{Context, Result};
@@ -51,6 +53,46 @@ thread_local! {
 pub struct CommitOutcome {
     pub did_commit: bool,
     pub vcs_refresh_signaled: Option<bool>,
+}
+
+fn retained_pending_commit_proof(
+    current_hash: &str,
+    pending_only_target_hash: Option<&str>,
+    latest_converged_pending_write_hash: Option<&str>,
+) -> Option<&'static str> {
+    if pending_only_target_hash.is_some_and(|target| target.eq_ignore_ascii_case(current_hash)) {
+        Some("pending_only_exact_target")
+    } else if latest_converged_pending_write_hash
+        .is_some_and(|target| target.eq_ignore_ascii_case(current_hash))
+    {
+        Some("converged_pending_write_exact_target")
+    } else {
+        None
+    }
+}
+
+fn binary_owned_commit_side_effects(file: &Path, content: &str) -> Result<Vec<PathBuf>> {
+    let Some(archive) =
+        agent_doc_element_backlog_io::done_archive::configured_external_done_archive(
+            file, content,
+        )?
+    else {
+        return Ok(Vec::new());
+    };
+    let worktree = match std::fs::read_to_string(&archive) {
+        Ok(content) => Some(content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!(
+                    "failed to read binary-owned done archive {}",
+                    archive.display()
+                )
+            });
+        }
+    };
+    let head = agent_doc_git_io::revision::show_head(&archive)?;
+    Ok((worktree != head).then_some(archive).into_iter().collect())
 }
 
 pub struct CommitCoordinatorPorts<
@@ -985,6 +1027,8 @@ where
     };
 
     let cycle_state_for_commit = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let latest_converged_pending_write_hash =
+        agent_doc_cycle_state_io::load_latest_converged_pending_write_hash(file)?;
     let ipc_snapshot_adoption_blocked = cycle_state_for_commit
         .as_ref()
         .is_some_and(|state| state.ipc_snapshot_adoption_blocked);
@@ -1019,7 +1063,14 @@ where
         );
     }
     let reintroduced_reaped_ids = cycle_state_for_commit
-        .map(|state| state.reaped_pending_ids.into_iter().collect::<HashSet<_>>())
+        .as_ref()
+        .map(|state| {
+            state
+                .reaped_pending_ids
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>()
+        })
         .map(|ids| detect_reintroduced_reaped_pending_ids(&file_content, &ids))
         .transpose()?
         .unwrap_or_default();
@@ -1049,6 +1100,14 @@ where
             || normalize_transient_agent_doc_markers(snapshot)
                 == normalize_transient_agent_doc_markers(&file_content)
     });
+    let current_file_hash = agent_doc_hash::content_hash(&file_content);
+    let retained_pending_commit_reason = retained_pending_commit_proof(
+        &current_file_hash,
+        cycle_state_for_commit
+            .as_ref()
+            .and_then(|state| state.pending_only_commit_target_hash.as_deref()),
+        latest_converged_pending_write_hash.as_deref(),
+    );
 
     if !repaired_committed_historical
         && !snapshot_matches_current_file
@@ -1085,6 +1144,32 @@ where
         );
     }
 
+    if !authoritative_compaction_commit_enabled()
+        && let Some(ref snapshot) = snapshot_content
+        && snapshot != &file_content
+        && let Some(reason) = retained_pending_commit_reason
+    {
+        eprintln!(
+            "[commit] adopting exact binary-owned retained target for {} ({reason})",
+            file.display()
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "snapshot_absorb file={} reason={} target_hash={} old_snap_len={} new_snap_len={}",
+                file.display(),
+                reason,
+                current_file_hash,
+                snap_len,
+                file_len
+            ),
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &file_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        snapshot_content = Some(file_content.clone());
     // `#jb-compact-commit-left-uncommitted`: same authoritative-compaction guard as
     // the historical-drift repair above. If the reliable-sync plane is still frozen
     // at the pre-compact canonical (fail-open `adopt_authoritative_text_for_file`
@@ -1092,7 +1177,7 @@ where
     // still read pre-compact. Absorbing that into the authoritative compacted
     // snapshot would revert the commit surface, so skip the out-of-band absorb under
     // the compaction scope and let `verify_compact_head_landed` fail closed instead.
-    if !authoritative_compaction_commit_enabled()
+    } else if !authoritative_compaction_commit_enabled()
         && let Some(ref snapshot) = snapshot_content
         && snapshot != &file_content
         && !(repaired_committed_historical
@@ -1404,7 +1489,8 @@ where
         snapshot_content = Some(file_content.clone());
     }
 
-    if snapshot_matches_head {
+    let mut binary_owned_side_effects = binary_owned_commit_side_effects(file, &file_content)?;
+    if snapshot_matches_head && binary_owned_side_effects.is_empty() {
         agent_doc_git_io::capture_materialization_guard::ensure_active_capture_materialized_for_head_current_noop(
             ports.capture_materialization_guard,
             file,
@@ -1435,6 +1521,21 @@ where
                 did_commit: false,
                 vcs_refresh_signaled: None,
             });
+        }
+        if let Some(head) = head_doc.as_deref()
+            && has_blocking_non_exchange_component_drift(head, &file_content, None)
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "commit_blocked_unproved_head_current_component_drift file={} basis=head",
+                    file.display()
+                ),
+            );
+            anyhow::bail!(
+                "refusing to close {} as already committed: the staged snapshot matches HEAD, but the editor-authoritative document has uncommitted queue, backlog, status, or other typed-component drift without an exact binary-owned retained-target proof",
+                file.display()
+            );
         }
         eprintln!(
             "[commit] staged snapshot already matches HEAD for {} - closing cycle as already committed",
@@ -1537,6 +1638,21 @@ where
         snapshot_content.as_deref().or(Some(file_content.as_str())),
         "staged",
     )?;
+    binary_owned_side_effects = binary_owned_commit_side_effects(file, &file_content)?;
+    if !binary_owned_side_effects.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_binary_owned_side_effects file={} paths={}",
+                file.display(),
+                binary_owned_side_effects
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        );
+    }
     let elapsed_reposition = t_reposition.elapsed().as_millis();
     if elapsed_reposition > 0 {
         eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
@@ -1547,7 +1663,13 @@ where
     let commit_output = {
         loop {
             let t_staging = std::time::Instant::now();
-            match stage_and_commit_once(&git_root, &resolved, snapshot_content.as_deref(), &msg) {
+            match stage_and_commit_exact_paths_once(
+                &git_root,
+                &resolved,
+                snapshot_content.as_deref(),
+                &binary_owned_side_effects,
+                &msg,
+            ) {
                 Ok(out) => {
                     let elapsed_staging = t_staging.elapsed().as_millis();
                     if elapsed_staging > 0 {
@@ -1953,6 +2075,22 @@ mod controller_commit_scope_tests {
         assert_eq!(content.as_deref(), Some("authoritative compacted text"));
         assert_eq!(
             controller_local_relay_text(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending),
+            None
+        );
+    }
+
+    #[test]
+    fn retained_pending_commit_proof_accepts_current_and_migration_targets() {
+        assert_eq!(
+            retained_pending_commit_proof("abc", Some("ABC"), None),
+            Some("pending_only_exact_target")
+        );
+        assert_eq!(
+            retained_pending_commit_proof("abc", None, Some("ABC")),
+            Some("converged_pending_write_exact_target")
+        );
+        assert_eq!(
+            retained_pending_commit_proof("abc", Some("def"), Some("ghi")),
             None
         );
     }

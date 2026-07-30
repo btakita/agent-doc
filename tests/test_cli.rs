@@ -25475,9 +25475,7 @@ fn test_agent_doc_commit_io_marks_capture_committed_from_resolved_current_conten
         .find("commit_current_document_content(file, \"commit_initial_current\")")
         .expect("commit should resolve initial current document content");
     let stage_commit_idx = commit_source
-        .find(
-            "match stage_and_commit_once(&git_root, &resolved, snapshot_content.as_deref(), &msg)",
-        )
+        .find("match stage_and_commit_exact_paths_once(")
         .expect("commit should run a git stage/commit transaction");
     assert!(
         initial_current_idx < stage_commit_idx,
@@ -26477,8 +26475,10 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub fn update_parent_submodule_pointer(",
         "pub enum CommitTransactionError",
         "pub fn stage_and_commit_once(",
+        "pub fn stage_and_commit_exact_paths_once(",
         "crate::index::hash_object(git_root, &staged_content)",
-        "crate::index::update_index_cacheinfo(git_root, &cacheinfo)",
+        "for cacheinfo in &cacheinfos",
+        ".args([\"update-index\", \"--add\", \"--cacheinfo\", cacheinfo])",
         "GIT_INDEX_FILE",
         "\"commit-tree\"",
         "\"update-ref\", \"HEAD\"",
@@ -28267,7 +28267,7 @@ fn test_commit_lifecycle_policy_has_single_owner() {
         "commit_blocked_reintroduced_reaped_pending file=",
         "snapshot_resync_blocked file=",
         "commit_frontmatter_self_heal file=",
-        "stage_and_commit_once(",
+        "stage_and_commit_exact_paths_once(",
     ] {
         assert!(
             commit_io.contains(required),

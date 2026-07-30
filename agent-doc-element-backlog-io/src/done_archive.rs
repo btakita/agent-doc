@@ -94,6 +94,23 @@ pub fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<S
     Ok(ids)
 }
 
+/// Resolve the binary-owned external done archive configured by the document.
+///
+/// Commit closeout uses this typed path to keep the session document and the
+/// archive mutation in the same private-index transaction. Returning `None`
+/// means the document uses its inline `agent:done` body instead.
+pub fn configured_external_done_archive(file: &Path, content: &str) -> Result<Option<PathBuf>> {
+    let components = agent_doc_element::element::parse(content)?;
+    let Some(archive_path) = components
+        .into_iter()
+        .find(|component| agent_doc_element::element::is_backlog_done_component(&component.name))
+        .and_then(|component| component.attrs.get("archive").cloned())
+    else {
+        return Ok(None);
+    };
+    resolve_done_archive_target(file, &archive_path).map(Some)
+}
+
 fn resolve_done_archive_target(file: &Path, archive_path: &str) -> Result<PathBuf> {
     if archive_path.trim().is_empty() {
         bail!("agent:done archive= must not be empty");

@@ -712,8 +712,20 @@ pub fn auto_start_in_session_with_lock_mode(
     register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
     drop(startup_locks);
 
-    // Focus the new pane immediately so the user sees Claude starting
-    if let Err(e) = tmux.select_pane(&new_pane) {
+    // Standalone route startup owns focus. Provisioning inside a layout
+    // transaction does not: the pane can still be in a temporary stash/new
+    // window here, and selecting it steals the operator's window before
+    // tmux-router places the canonical layout.
+    if crate::invocation::defer_startup_focus_to_layout() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_startup_focus_deferred_to_layout file={} pane={}",
+                file.display(),
+                new_pane
+            ),
+        );
+    } else if let Err(e) = tmux.select_pane(&new_pane) {
         eprintln!("[route] warning: failed to focus pane {}: {}", new_pane, e);
     }
 
@@ -1168,6 +1180,21 @@ fn resubmit_stranded_fresh_start_trigger(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layout_focus_defer_guard_is_scoped_and_nested() {
+        assert!(!crate::invocation::defer_startup_focus_to_layout());
+        {
+            let _outer = crate::invocation::DeferStartupFocusToLayoutGuard::set(true);
+            assert!(crate::invocation::defer_startup_focus_to_layout());
+            {
+                let _inner = crate::invocation::DeferStartupFocusToLayoutGuard::set(false);
+                assert!(!crate::invocation::defer_startup_focus_to_layout());
+            }
+            assert!(crate::invocation::defer_startup_focus_to_layout());
+        }
+        assert!(!crate::invocation::defer_startup_focus_to_layout());
+    }
 
     #[test]
     fn editor_origin_startup_is_keep_alive() {

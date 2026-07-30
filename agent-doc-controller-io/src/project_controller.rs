@@ -271,6 +271,7 @@ pub const PANE_LAYOUT_STATUS_STATE_CHANNEL: &str = "agent-doc/pane-layout/status
 const STATE_PLANE_MAX_CHANNELS: usize = 256;
 const STATE_PLANE_MAX_RETAINED_FRAMES_PER_CHANNEL: usize = 1_024;
 const STATE_PLANE_MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+const STATE_PLANE_VERSION_NAMESPACE_BITS: u32 = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerStatePlanePublishInvocation {
@@ -304,6 +305,10 @@ pub struct ControllerStatePlanePublishReceipt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerStatePlaneSubscribeInvocation {
     pub channel: String,
+    /// The controller incarnation that owns `after_version`. A changed
+    /// generation makes the version cursor cold immediately.
+    #[serde(default)]
+    pub after_controller_generation: Option<u64>,
     #[serde(default)]
     pub after_version: u64,
     #[serde(default)]
@@ -313,6 +318,10 @@ pub struct ControllerStatePlaneSubscribeInvocation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerStatePlaneSubscription {
     pub channel: String,
+    /// Cursor namespace. `latest_version` is meaningful only within this
+    /// controller generation.
+    #[serde(default)]
+    pub controller_generation: u64,
     pub latest_version: u64,
     pub timed_out: bool,
     /// A covering Snapshot followed by any causally-applicable Deltas, or only
@@ -718,7 +727,15 @@ struct ControllerStatePlaneGraph {
 }
 
 impl ControllerStatePlaneGraph {
+    #[cfg(test)]
     fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
+        Self::new_in_with_first_version(scope, 1)
+    }
+
+    fn new_in_with_first_version(
+        scope: &agent_doc_state_scope::ProcessScope,
+        first_plane_version: u64,
+    ) -> Self {
         let ctx = scope.ctx().clone();
         let histories = ctx.source(BTreeMap::<String, Vec<ControllerStatePlaneFrame>>::new());
         let sink_kick = ctx.source(0_u64);
@@ -746,7 +763,7 @@ impl ControllerStatePlaneGraph {
             sink_kick,
             effect: Mutex::new(Some(effect)),
             sinks,
-            next_plane_version: AtomicU64::new(1),
+            next_plane_version: AtomicU64::new(first_plane_version.max(1)),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
         }
@@ -854,6 +871,7 @@ impl ControllerStatePlaneGraph {
         &self,
         channel: &str,
         after_version: u64,
+        reset_generationless_ahead_cursor: bool,
         timeout: Duration,
     ) -> ControllerStatePlaneSubscription {
         let deadline = Instant::now() + timeout;
@@ -862,19 +880,35 @@ impl ControllerStatePlaneGraph {
             let histories = self.ctx.get(&self.histories);
             let history = histories.get(channel).cloned().unwrap_or_default();
             let latest_version = history.last().map(|frame| frame.plane_version).unwrap_or(0);
-            if latest_version > after_version || Instant::now() >= deadline {
-                let frames = if after_version == 0 {
+            // A legacy subscriber cannot name the controller generation. If
+            // its cursor is ahead of a replacement controller's non-empty
+            // channel frontier, it is necessarily outside this cursor
+            // namespace: plane versions are monotonic within one controller.
+            // Cold replay now. Returning an empty timeout and lowering the
+            // client cursor would skip the state edge that resumes the exact
+            // retained operation.
+            let effective_after_version = if reset_generationless_ahead_cursor
+                && latest_version > 0
+                && after_version > latest_version
+            {
+                0
+            } else {
+                after_version
+            };
+            if latest_version > effective_after_version || Instant::now() >= deadline {
+                let frames = if effective_after_version == 0 {
                     history
                 } else {
                     history
                         .into_iter()
-                        .filter(|frame| frame.plane_version > after_version)
+                        .filter(|frame| frame.plane_version > effective_after_version)
                         .collect()
                 };
                 return ControllerStatePlaneSubscription {
                     channel: channel.to_string(),
+                    controller_generation: 0,
                     latest_version,
-                    timed_out: latest_version <= after_version,
+                    timed_out: latest_version <= effective_after_version,
                     frames,
                 };
             }
@@ -883,6 +917,26 @@ impl ControllerStatePlaneGraph {
                 deadline.saturating_duration_since(Instant::now()),
             );
         }
+    }
+}
+
+/// Give pre-generation-aware subscribers a monotonic compatibility cursor
+/// across controller replacement. New subscribers also carry the generation
+/// explicitly, so this namespace is a rolling-upgrade bridge rather than the
+/// sole correctness proof.
+fn state_plane_first_version(controller_generation: u64) -> u64 {
+    let generation = controller_generation.min(u32::MAX as u64);
+    (generation << STATE_PLANE_VERSION_NAMESPACE_BITS).saturating_add(1)
+}
+
+fn state_plane_effective_after_version(
+    after_controller_generation: Option<u64>,
+    after_version: u64,
+    controller_generation: u64,
+) -> u64 {
+    match after_controller_generation {
+        Some(observed) if observed != controller_generation => 0,
+        _ => after_version,
     }
 }
 
@@ -1258,6 +1312,10 @@ struct ControllerDocumentGraphs {
         String,
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     >,
+    /// External CRDT/editor delivery ingress. Replica RPCs project their
+    /// post-event relay state into this Source; retained closeout wake
+    /// eligibility is derived from it beside the durable document projection.
+    retained_delivery: lazily::ThreadSafeSourceMap<String, Option<RetainedDeliveryObservation>>,
     /// Controller-generation activation edge. A reconstructed graph first
     /// hydrates its durable inputs, then the sink installation advances this
     /// Source so already-satisfied effects rerun with a live durable sink.
@@ -1266,6 +1324,15 @@ struct ControllerDocumentGraphs {
         String,
         agent_doc_state_backbone::retained_write::SettlementVerdict,
     >,
+    /// Exact captured-closeout identity that may resume now. Delivery ingress
+    /// and durable intent/capture state are Sources; this is the shared
+    /// decision plane, not an ACK callback.
+    retained_resume: lazily::ThreadSafeComputedMap<String, Option<RetainedResumeSignal>>,
+    /// Controller-local receipt for an applied wake signal. Effects may update
+    /// other Lazily state while projecting a wake, so this Source makes
+    /// application one-shot for an exact delivery frontier instead of relying
+    /// on an effect scheduler's global drain behavior.
+    retained_resume_applied: lazily::ThreadSafeSourceMap<String, Option<RetainedResumeSignal>>,
     /// `#preflightreactive`: per-document read observations and the shared
     /// Computed projection consumed by the short-lived preflight CLI process.
     preflight_facts: lazily::ThreadSafeSourceMap<
@@ -1283,6 +1350,10 @@ struct ControllerDocumentGraphs {
     /// map for its values. Minting is idempotent, so the effect exists from the
     /// first verdict query onward and fires whenever the slot changes.
     settle_effects: Mutex<BTreeMap<String, lazily::Effect>>,
+    /// One retained-closeout wake Effect per document. Held for the controller
+    /// lifetime so later replica events and controller activation invalidate
+    /// the same subscription.
+    retained_resume_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// Where a `Satisfied` verdict's clear is written.
     ///
     /// Installed once, after the runtime is in its `Arc` — the effect must reach
@@ -1302,6 +1373,25 @@ struct ControllerDocumentGraphs {
 struct RetainedWriteSettleSink {
     project_root: PathBuf,
     runtime: std::sync::Weak<ControllerRuntime>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RetainedDeliveryObservation {
+    content_hash: String,
+    live_editors: usize,
+    delivery_converged: bool,
+    delivery_version: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RetainedResumeSignal {
+    intent_id: String,
+    target_hash: String,
+    cycle_id: String,
+    capture_id: String,
+    response_sha256: String,
+    delivery_version: u64,
+    controller_generation: u64,
 }
 
 impl RetainedWriteSettleSink {
@@ -1341,6 +1431,36 @@ impl RetainedWriteSettleSink {
             eprintln!("[controller] retained-write settle apply failed for {document_hash}: {e}");
         }
     }
+
+    /// Project an exact derived resume identity into the existing
+    /// captured-finalize state-plane channel.
+    fn resume(&self, document_hash: &str, signal: &RetainedResumeSignal) {
+        let Some(runtime) = self.runtime.upgrade() else {
+            // A replacement controller will reconstruct the same Computed
+            // signal after replica registration; retain the durable intent.
+            return;
+        };
+        let Ok(Some(projection)) = runtime.document_state_projection(document_hash) else {
+            return;
+        };
+        if !retained_resume_signal_matches_projection(signal, &projection) {
+            // The durable projection advanced between derivation and effect
+            // application. The new projection will invalidate the Computed.
+            return;
+        }
+        rpc::publish_captured_finalize_wake(&runtime, &projection, "retained_delivery_reactive");
+        agent_doc_ops_log_io::log_op(
+            &self.project_root,
+            &format!(
+                "retained_closeout_woken_from_derived_delivery document_hash={document_hash} intent_id={} target_hash={} cycle_id={} capture_id={} controller_generation={}",
+                signal.intent_id,
+                signal.target_hash,
+                signal.cycle_id,
+                signal.capture_id,
+                signal.controller_generation,
+            ),
+        );
+    }
 }
 
 impl ControllerDocumentGraphs {
@@ -1355,11 +1475,15 @@ impl ControllerDocumentGraphs {
             pending: lazily::ThreadSafeComputedMap::new(&ctx),
             authority: lazily::ThreadSafeSourceMap::new(&ctx),
             disk: lazily::ThreadSafeSourceMap::new(&ctx),
+            retained_delivery: lazily::ThreadSafeSourceMap::new(&ctx),
             settle_generation: lazily::ThreadSafeSourceMap::new(&ctx),
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
+            retained_resume: lazily::ThreadSafeComputedMap::new(&ctx),
+            retained_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
             preflight_facts: lazily::ThreadSafeSourceMap::new(&ctx),
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
             settle_effects: Mutex::new(BTreeMap::new()),
+            retained_resume_effects: Mutex::new(BTreeMap::new()),
             settle_sink: Arc::new(OnceLock::new()),
             ctx,
         }
@@ -1436,6 +1560,7 @@ impl ControllerDocumentGraphs {
             // installation advances `settle_generation` once the runtime is
             // safely inside its Arc.
             self.current_verdict(document_hash);
+            self.current_retained_resume(document_hash);
         }
     }
 
@@ -1544,6 +1669,19 @@ impl ControllerDocumentGraphs {
         self.current_verdict(document_hash)
     }
 
+    /// Publish the post-event CRDT delivery frontier. This is the only write
+    /// into the retained-resume delivery Source; the wake decision remains a
+    /// Computed over this ingress and the durable projection.
+    fn observe_retained_delivery(
+        &self,
+        document_hash: &str,
+        observation: Option<RetainedDeliveryObservation>,
+    ) -> Option<RetainedResumeSignal> {
+        self.retained_delivery
+            .set(&self.ctx, document_hash.to_string(), observation);
+        self.current_retained_resume(document_hash)
+    }
+
     fn current_verdict(
         &self,
         document_hash: &str,
@@ -1585,6 +1723,43 @@ impl ControllerDocumentGraphs {
         // fired from the `set` above. Either way no caller decides to settle.
         self.ensure_settle_effect(document_hash);
         verdict
+    }
+
+    fn current_retained_resume(&self, document_hash: &str) -> Option<RetainedResumeSignal> {
+        let projection = self.projection.clone();
+        let delivery = self.retained_delivery.clone();
+        let settle_generation = self.settle_generation.clone();
+        let applied = self.retained_resume_applied.clone();
+        let signal = self.retained_resume.get_or_insert_with(
+            &self.ctx,
+            document_hash.to_string(),
+            move |ctx, key| {
+                // `observe` is intentionally non-minting, so an absent keyed
+                // Source has no value edge yet. Subscribe to membership as
+                // well: replica delivery may precede the first durable
+                // projection, or the retained intent may precede the first
+                // replica event.
+                let _projection_present = projection.contains_key(ctx, key);
+                let _delivery_present = delivery.contains_key(ctx, key);
+                let _generation_present = settle_generation.contains_key(ctx, key);
+                let _applied_present = applied.contains_key(ctx, key);
+                let candidate = retained_resume_signal(
+                    projection.observe(ctx, key).flatten().as_ref(),
+                    delivery.observe(ctx, key).flatten().as_ref(),
+                    settle_generation.observe(ctx, key).unwrap_or_default(),
+                );
+                match candidate {
+                    Some(candidate)
+                        if applied.observe(ctx, key).flatten().as_ref() != Some(&candidate) =>
+                    {
+                        Some(candidate)
+                    }
+                    _ => None,
+                }
+            },
+        );
+        self.ensure_retained_resume_effect(document_hash);
+        signal
     }
 
     /// Refresh this document's preflight read observations and return the
@@ -1684,6 +1859,108 @@ impl ControllerDocumentGraphs {
         }
         effects.insert(key, effect);
     }
+
+    /// Subscribe the closeout wake to exact retained-delivery eligibility.
+    ///
+    /// Replica RPCs are boundary ingress only. They never decide to resume a
+    /// closeout; updating the delivery Source invalidates this Computed and
+    /// this Effect applies the resulting exact identity.
+    fn ensure_retained_resume_effect(&self, document_hash: &str) {
+        if self
+            .retained_resume_effects
+            .lock()
+            .contains_key(document_hash)
+        {
+            return;
+        }
+        let key = document_hash.to_string();
+        let signal_map = self.retained_resume.clone();
+        let settle_generation = self.settle_generation.clone();
+        let applied = self.retained_resume_applied.clone();
+        let sink = self.settle_sink.clone();
+        let effect_key = key.clone();
+        let effect = self.ctx.effect(move |ctx| {
+            // Activation is independently observed so an equal logical signal
+            // is re-applied by a replacement controller after its sink exists.
+            let _generation_present = settle_generation.contains_key(ctx, &effect_key);
+            let _generation = settle_generation
+                .observe(ctx, &effect_key)
+                .unwrap_or_default();
+            let Some(signal) = signal_map.observe(ctx, &effect_key).flatten() else {
+                return;
+            };
+            let Some(sink) = sink.get() else {
+                return;
+            };
+            // Consume this exact frontier before projecting the wake. The wake
+            // itself updates another Lazily graph; acknowledging first makes
+            // the next effect drain observe `None` rather than re-emitting.
+            applied.set(ctx, effect_key.clone(), Some(signal.clone()));
+            sink.resume(&effect_key, &signal);
+        });
+        let mut effects = self.retained_resume_effects.lock();
+        if effects.contains_key(&key) {
+            drop(effects);
+            self.ctx.dispose_effect(&effect);
+            return;
+        }
+        effects.insert(key, effect);
+    }
+}
+
+fn retained_resume_signal(
+    projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    delivery: Option<&RetainedDeliveryObservation>,
+    controller_generation: u64,
+) -> Option<RetainedResumeSignal> {
+    if controller_generation == 0 {
+        return None;
+    }
+    let projection = projection?;
+    let intent = projection.document.pending_write.as_ref()?;
+    let capture = projection.closeout.captured_response.as_ref()?;
+    let cycle_id = projection.closeout.cycle_id.as_deref()?;
+    let delivery = delivery?;
+    if delivery.live_editors == 0
+        || !delivery.delivery_converged
+        || !delivery
+            .content_hash
+            .eq_ignore_ascii_case(&intent.target_hash)
+    {
+        return None;
+    }
+    Some(RetainedResumeSignal {
+        intent_id: intent.intent_id.clone(),
+        target_hash: intent.target_hash.clone(),
+        cycle_id: cycle_id.to_string(),
+        capture_id: capture.capture_id.clone(),
+        response_sha256: capture.response_sha256.clone(),
+        delivery_version: delivery.delivery_version,
+        controller_generation,
+    })
+}
+
+fn retained_resume_signal_matches_projection(
+    signal: &RetainedResumeSignal,
+    projection: &agent_doc_state_backbone::DocumentStateProjection,
+) -> bool {
+    projection
+        .document
+        .pending_write
+        .as_ref()
+        .is_some_and(|intent| {
+            intent.intent_id == signal.intent_id
+                && intent.target_hash.eq_ignore_ascii_case(&signal.target_hash)
+        })
+        && projection
+            .closeout
+            .captured_response
+            .as_ref()
+            .is_some_and(|capture| {
+                projection.closeout.cycle_id.as_deref() == Some(signal.cycle_id.as_str())
+                    && capture.capture_id == signal.capture_id
+                    && capture.response_sha256 == signal.response_sha256
+            })
 }
 
 /// Project a document's retained-write intent into the facts settlement needs.
@@ -1751,7 +2028,10 @@ impl ControllerRuntime {
         );
         let coordination_graph = ControllerCoordinationGraph::new_in(&scope);
         let document_graphs = ControllerDocumentGraphs::new_in(&scope);
-        let state_plane_graph = ControllerStatePlaneGraph::new_in(&scope);
+        let state_plane_graph = ControllerStatePlaneGraph::new_in_with_first_version(
+            &scope,
+            state_plane_first_version(bootstrap.controller_generation),
+        );
         let pane_layout_graph = ControllerPaneLayoutGraph::new_in(&scope, persisted_layout);
         for (document_hash, projection) in &memory.state_projection.documents {
             document_graphs.set_projection(document_hash, Some(projection.clone()));
@@ -1858,11 +2138,25 @@ impl ControllerRuntime {
     fn subscribe_state_plane(
         &self,
         channel: &str,
+        after_controller_generation: Option<u64>,
         after_version: u64,
         timeout: Duration,
     ) -> ControllerStatePlaneSubscription {
-        self.state_plane_graph
-            .subscribe(channel, after_version, timeout)
+        let controller_generation = self.bootstrap.lock().controller_generation;
+        let reset_generationless_ahead_cursor = after_controller_generation.is_none();
+        let after_version = state_plane_effective_after_version(
+            after_controller_generation,
+            after_version,
+            controller_generation,
+        );
+        let mut subscription = self.state_plane_graph.subscribe(
+            channel,
+            after_version,
+            reset_generationless_ahead_cursor,
+            timeout,
+        );
+        subscription.controller_generation = controller_generation;
+        subscription
     }
 
     fn set_pane_layout_desired(
@@ -2034,6 +2328,16 @@ impl ControllerRuntime {
         disk: agent_doc_state_backbone::retained_write::ContentObservation,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         self.document_graphs.observe_disk(document_hash, file, disk)
+    }
+
+    fn document_retained_write_observe_delivery(
+        &self,
+        document_hash: &str,
+        observation: Option<RetainedDeliveryObservation>,
+    ) {
+        let _ = self
+            .document_graphs
+            .observe_retained_delivery(document_hash, observation);
     }
 
     pub(crate) fn document_preflight_projection(
@@ -4525,7 +4829,7 @@ mod tests {
             .unwrap();
         assert!(!duplicate);
         assert_eq!(delta.plane_version, 2);
-        let replay = plane.subscribe("test/layout", 0, Duration::ZERO);
+        let replay = plane.subscribe("test/layout", 0, false, Duration::ZERO);
         assert_eq!(replay.frames, vec![snapshot, delta]);
 
         let error = plane
@@ -4552,14 +4856,84 @@ mod tests {
                 None,
             )
             .unwrap();
-        let cold_replay = plane.subscribe("test/layout", 0, Duration::ZERO);
+        let cold_replay = plane.subscribe("test/layout", 0, false, Duration::ZERO);
         assert_eq!(cold_replay.frames, vec![replacement.clone()]);
         assert_eq!(
             plane
-                .subscribe("test/layout", replacement.plane_version, Duration::ZERO)
+                .subscribe(
+                    "test/layout",
+                    replacement.plane_version,
+                    false,
+                    Duration::ZERO,
+                )
                 .timed_out,
             true
         );
+        let legacy_replacement_replay =
+            plane.subscribe("test/layout", u64::MAX, true, Duration::ZERO);
+        assert_eq!(legacy_replacement_replay.frames, vec![replacement]);
+        assert!(!legacy_replacement_replay.timed_out);
+    }
+
+    #[test]
+    fn state_plane_versions_advance_across_controller_generation_namespaces() {
+        let prior = state_plane_first_version(41);
+        let replacement = state_plane_first_version(42);
+        assert_eq!(prior, 41_u64 << STATE_PLANE_VERSION_NAMESPACE_BITS | 1);
+        assert_eq!(
+            replacement,
+            42_u64 << STATE_PLANE_VERSION_NAMESPACE_BITS | 1
+        );
+        assert!(
+            replacement > prior.saturating_add(u32::MAX as u64),
+            "a replacement controller must outrank every version in the prior generation"
+        );
+    }
+
+    #[test]
+    fn state_plane_subscription_resets_cursor_on_controller_replacement() {
+        assert_eq!(state_plane_effective_after_version(Some(41), 99, 42), 0);
+        assert_eq!(state_plane_effective_after_version(Some(42), 99, 42), 99);
+        assert_eq!(state_plane_effective_after_version(None, 99, 42), 99);
+    }
+
+    #[test]
+    fn controller_replacement_replays_current_state_below_a_stale_cursor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.controller_generation = 42;
+        let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
+        let (frame, duplicate) = runtime
+            .publish_state_plane_frame(
+                "test/replacement".to_string(),
+                "replacement-controller".to_string(),
+                r#"{"Snapshot":{"epoch":1}}"#.to_string(),
+                1,
+                None,
+            )
+            .unwrap();
+        assert!(!duplicate);
+
+        let replay =
+            runtime.subscribe_state_plane("test/replacement", Some(41), u64::MAX, Duration::ZERO);
+        assert_eq!(replay.controller_generation, 42);
+        assert_eq!(replay.frames, vec![frame.clone()]);
+        assert!(!replay.timed_out);
+
+        let legacy_replay =
+            runtime.subscribe_state_plane("test/replacement", None, u64::MAX, Duration::ZERO);
+        assert_eq!(legacy_replay.controller_generation, 42);
+        assert_eq!(legacy_replay.frames, vec![frame.clone()]);
+        assert!(!legacy_replay.timed_out);
+
+        let warm = runtime.subscribe_state_plane(
+            "test/replacement",
+            Some(42),
+            frame.plane_version,
+            Duration::ZERO,
+        );
+        assert!(warm.frames.is_empty());
+        assert!(warm.timed_out);
     }
 
     #[test]
@@ -9042,6 +9416,68 @@ agent:queue\n\
         )
     }
 
+    fn preflight_started_event(document_hash: &str) -> agent_doc_state_backbone::StateEvent {
+        agent_doc_state_backbone::StateEvent::new(
+            format!("preflight-started-{document_hash}"),
+            agent_doc_state_backbone::StateFact::PreflightStarted {
+                document_hash: document_hash.to_string(),
+                cycle_id: "cycle-1".to_string(),
+                session_id: None,
+                tracked_work_maintenance_required: None,
+            },
+        )
+    }
+
+    fn response_captured_event(document_hash: &str) -> agent_doc_state_backbone::StateEvent {
+        agent_doc_state_backbone::StateEvent::new(
+            format!("response-captured-{document_hash}"),
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.to_string(),
+                cycle_id: "cycle-1".to_string(),
+                capture_id: "capture-1".to_string(),
+                response_sha256: "response-1".to_string(),
+                response_body: Some("response body".to_string()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        )
+    }
+
+    fn capture_response(
+        runtime: &Arc<ControllerRuntime>,
+        project_root: &Path,
+        document_hash: &str,
+    ) {
+        for event in [
+            preflight_started_event(document_hash),
+            response_captured_event(document_hash),
+        ] {
+            append_state_event(project_root, &event).unwrap();
+            runtime.apply_state_event(&event).unwrap();
+        }
+        // ResponseCaptured deliberately wakes ordinary closeout processing.
+        // Clear that independent edge so retained-delivery tests observe only
+        // the derived resume signal under test.
+        rpc::clear_captured_finalize_wake(runtime, document_hash);
+    }
+
+    fn retained_resume_projection(
+        document_hash: &str,
+    ) -> agent_doc_state_backbone::DocumentStateProjection {
+        let mut projection = agent_doc_state_backbone::DocumentStateProjection::new(document_hash);
+        for event in [
+            preflight_started_event(document_hash),
+            response_captured_event(document_hash),
+            deferred_document_write_event(document_hash, "intent-1", "target"),
+        ] {
+            projection.apply_fact(&event.fact);
+        }
+        projection
+    }
+
     fn document_authority_event(
         document_hash: &str,
         authority: agent_doc_state_backbone::DocumentAuthority,
@@ -9367,5 +9803,192 @@ agent:queue\n\
                 ..
             } if intent_id == "intent-after-start"
         ));
+    }
+
+    #[test]
+    fn retained_resume_is_an_exact_computed_delivery_gate() {
+        let projection = retained_resume_projection("doc-retained-resume");
+        let exact = RetainedDeliveryObservation {
+            content_hash: "target".to_string(),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 7,
+        };
+
+        assert!(
+            retained_resume_signal(Some(&projection), Some(&exact), 0).is_none(),
+            "the pre-sink controller generation cannot apply an effect"
+        );
+        assert!(
+            retained_resume_signal(
+                Some(&projection),
+                Some(&RetainedDeliveryObservation {
+                    live_editors: 0,
+                    ..exact.clone()
+                }),
+                1,
+            )
+            .is_none(),
+            "zero-member convergence is not visible-write proof"
+        );
+        assert!(
+            retained_resume_signal(
+                Some(&projection),
+                Some(&RetainedDeliveryObservation {
+                    delivery_converged: false,
+                    ..exact.clone()
+                }),
+                1,
+            )
+            .is_none()
+        );
+        assert!(
+            retained_resume_signal(
+                Some(&projection),
+                Some(&RetainedDeliveryObservation {
+                    content_hash: "other".to_string(),
+                    ..exact.clone()
+                }),
+                1,
+            )
+            .is_none()
+        );
+
+        let signal = retained_resume_signal(Some(&projection), Some(&exact), 1).unwrap();
+        assert_eq!(signal.intent_id, "intent-1");
+        assert_eq!(signal.target_hash, "target");
+        assert_eq!(signal.cycle_id, "cycle-1");
+        assert_eq!(signal.capture_id, "capture-1");
+        assert!(retained_resume_signal_matches_projection(
+            &signal,
+            &projection
+        ));
+    }
+
+    #[test]
+    fn retained_resume_reacts_when_delivery_arrives_after_the_intent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+        capture_response(&runtime, dir.path(), &document_hash);
+        defer_document_write(
+            &runtime,
+            dir.path(),
+            &document_hash,
+            "intent-after-capture",
+            "target",
+        );
+
+        assert!(
+            !runtime
+                .captured_finalize_wakes
+                .lock()
+                .contains_key(&document_hash)
+        );
+        runtime.document_graphs.observe_retained_delivery(
+            &document_hash,
+            Some(RetainedDeliveryObservation {
+                content_hash: "target".to_string(),
+                live_editors: 1,
+                delivery_converged: true,
+                delivery_version: 1,
+            }),
+        );
+
+        let wakes = runtime.captured_finalize_wakes.lock();
+        let wake = wakes.get(&document_hash).unwrap();
+        assert_eq!(wake.reason, "retained_delivery_reactive");
+        assert_eq!(wake.capture_id, "capture-1");
+    }
+
+    #[test]
+    fn retained_resume_reacts_when_the_intent_arrives_after_delivery() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+        capture_response(&runtime, dir.path(), &document_hash);
+        runtime.document_retained_write_observe_delivery(
+            &document_hash,
+            Some(RetainedDeliveryObservation {
+                content_hash: "target".to_string(),
+                live_editors: 1,
+                delivery_converged: true,
+                delivery_version: 1,
+            }),
+        );
+        assert!(
+            !runtime
+                .captured_finalize_wakes
+                .lock()
+                .contains_key(&document_hash)
+        );
+
+        defer_document_write(
+            &runtime,
+            dir.path(),
+            &document_hash,
+            "intent-after-delivery",
+            "target",
+        );
+
+        assert_eq!(
+            runtime
+                .captured_finalize_wakes
+                .lock()
+                .get(&document_hash)
+                .map(|wake| wake.reason.as_str()),
+            Some("retained_delivery_reactive")
+        );
+    }
+
+    #[test]
+    fn controller_activation_replays_an_already_eligible_retained_resume() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+        for event in [
+            preflight_started_event(&document_hash),
+            response_captured_event(&document_hash),
+            deferred_document_write_event(
+                &document_hash,
+                "intent-before-controller-activation",
+                "target",
+            ),
+        ] {
+            append_state_event(dir.path(), &event).unwrap();
+        }
+
+        // Build the graph before its sink exists, then publish the external
+        // delivery edge. Generation zero must retain the signal without
+        // applying it.
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        runtime.document_retained_write_observe_delivery(
+            &document_hash,
+            Some(RetainedDeliveryObservation {
+                content_hash: "target".to_string(),
+                live_editors: 1,
+                delivery_converged: true,
+                delivery_version: 1,
+            }),
+        );
+        assert!(
+            !runtime
+                .captured_finalize_wakes
+                .lock()
+                .contains_key(&document_hash)
+        );
+
+        runtime
+            .document_graphs
+            .install_settle_sink(dir.path().to_path_buf(), &runtime);
+
+        assert_eq!(
+            runtime
+                .captured_finalize_wakes
+                .lock()
+                .get(&document_hash)
+                .map(|wake| wake.reason.as_str()),
+            Some("retained_delivery_reactive"),
+            "controller activation must apply the already-eligible Computed without another ACK"
+        );
     }
 }

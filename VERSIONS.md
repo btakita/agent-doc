@@ -4,6 +4,119 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.103
+
+_JetBrains plugin 0.2.326; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Editor-surface ingress no longer waits behind tmux RPC.** The deferred
+  adapter publishes each editor observation into its reactive Source before
+  starting the controller boundary probe. Probes run asynchronously behind a
+  per-root generation fence, so a slow older probe cannot delay a newer tab or
+  layout observation and its late result cannot overwrite the newer tmux
+  Source.
+- **External done archives commit atomically with their session document.**
+  Commit admission now derives the exact typed `agent:done archive=...` side
+  path and includes it in the same private-index transaction as the main
+  document. An already-current main document is no longer a no-op when that
+  binary-owned archive is dirty, while unrelated staged or dirty paths remain
+  outside the closeout commit.
+
+## 0.35.102
+
+_JetBrains plugin 0.2.325; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **A converged retained tracked-work target cannot close as an already-current
+  no-op.** Commit admission now joins the current editor-authoritative content
+  hash to either the cycle's exact pending-only target or the durable latest
+  `pending_write` convergence projection, checkpoints that proven target, and
+  commits it. The durable projection provides rolling-upgrade recovery for
+  targets settled by 0.35.100 before commit intent was preserved.
+- **Unproved typed-component drift fails closed at an already-current commit
+  boundary.** If the snapshot matches `HEAD` but queue, backlog, status, or
+  another structured component is still ahead without exact binary-owned
+  target proof, `agent-doc commit` returns an error instead of reporting
+  success while Git remains behind. Generic out-of-band backlog adoption is
+  now strictly additive: every existing item and its ordering must remain
+  unchanged, so an edited existing row cannot be mislabeled as a safe add.
+
+## 0.35.101
+
+_JetBrains plugin 0.2.325; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Zero-member delivery retains the requested Git continuation.** The
+  editor-disappeared barrier now carries the common retained-for-retry marker,
+  so a `write --commit --backlog-only` that lands after re-registration records
+  its exact downstream commit target instead of stopping after editor
+  convergence. Mixed-generation callers also structurally recognize the
+  0.35.100 zero-member error and preserve that commit intent.
+
+## 0.35.100
+
+_JetBrains plugin 0.2.325; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Tmux layout provisioning no longer selects an intermediate pane.** Pane
+  startup inside reconciliation is focus-neutral until tmux-router places the
+  complete visible projection; standalone Run Agent Doc retains deliberate
+  foreground focus. Safe-passive blocked layouts also preserve the operator's
+  current pane instead of reselecting a registry owner that may live in stash.
+- **Sync session and template state derive from editor authority.** The
+  reconciler resolves the live CRDT/editor projection once, then derives
+  scaffolding, initialization, validation, session ownership, and pane routing
+  from that value. Initial baselines accept the resolved projection directly;
+  no initialization read or pre-stage can substitute stale disk beneath an
+  attached editor.
+- **Focus recovery reads the controller's live document Source.** Current
+  frontmatter in an unsaved editor buffer wins over disk and durable actor or
+  registry fallbacks. An attached editor whose replica is not settled remains
+  unresolved and never grants permission to read stale disk; empty registry
+  identifiers no longer mask a valid actor fallback.
+- **Open closeout guidance preserves the incumbent continuation.** A routed
+  request blocked behind `response_captured` or `write_applied` now reports
+  that retained write/commit recovery owns the checkpoint and keeps the new
+  route queued. It never recommends another finalize or write for an already
+  captured response.
+
+## 0.35.99
+
+_JetBrains plugin 0.2.325; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **State-plane resume cursors are scoped to the controller generation.**
+Subscriptions now send and receive the generation alongside the plane version,
+so a replacement controller immediately cold-replays its covering snapshot
+instead of waiting forever for its reset counter to exceed the retired
+controller's cursor.
+- **Rolling upgrades wake old supervisors across controller replacement.**
+Plane versions are seeded into a monotonic controller-generation namespace, so
+an already-running pre-0.35.99 supervisor sees the replacement snapshot as a
+new edge even though it cannot yet send the typed generation cursor. If a
+legacy cursor is nevertheless ahead of the replacement channel's nonzero
+frontier, the controller cold-replays that covering snapshot instead of
+lowering the cursor on an empty timeout and silently skipping the edge.
+- **Captured-finalize recovery remains state-driven.** The supervisor carries
+the returned generation/version cursor between event subscriptions; generation
+change resets observation only and never resubmits finalize, session-check, or
+a document write.
+
+## 0.35.98
+
+_JetBrains plugin 0.2.324; VS Code extension 0.2.62; Zed extension 0.1.0._
+
+- **Retained editor delivery resumes from reactive state after controller
+  replacement.** Replica register, deregister, update, pull, and ACK events now
+  project the post-event delivery frontier into a controller-scoped Source. A
+  shared Computed joins that ingress to the exact retained intent, captured
+  response, live membership, matching target hash, and controller activation;
+  its Effect publishes the existing closeout wake without requiring another
+  finalize, session-check, save, or ACK edge.
+- **Keyed reactive joins subscribe to membership and value.** Retained delivery
+  remains reactive whether the intent or replica arrives first, including a
+  cold controller whose initial observation predates Source-map insertion. An
+  exact-frontier receipt makes wake projection one-shot while still rearming
+  for a newer delivery frontier or controller generation.
+- **Zero-member delivery remains explicitly ineligible.** A canonical CRDT
+  target with no live editor replica cannot prove an editor-visible write and
+  therefore remains retained for the next replica-registration ingress.
+
 ## 0.35.97
 
 _JetBrains plugin 0.2.323; VS Code extension 0.2.62; Zed extension 0.1.0._

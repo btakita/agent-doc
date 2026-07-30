@@ -211,9 +211,8 @@ use agent_doc_sync::{
     WindowIndexNormalizationPlan, auto_started_panes_summary,
     destructive_repair_throttle_state_key, effective_sync_columns, epoch_millis_now,
     is_file_rename, last_visible_excerpt, latency_budget_status, plan_window_index_normalization,
-    planned_stash_window_indices, preserved_layout_focus_marker, registry_relative_file_path,
-    rename_debounce_expired, reselect_visible_focus_pane_failed_warning, sanitize_excerpt,
-    sync_latency_message,
+    planned_stash_window_indices, registry_relative_file_path, rename_debounce_expired,
+    sanitize_excerpt, sync_latency_message,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -1461,42 +1460,6 @@ fn sync_log(msg: &str) {
     crate::append_sync_log(msg);
 }
 
-fn reselect_visible_focus_pane_if_present(
-    tmux: &Tmux,
-    window: Option<&str>,
-    focus: Option<&str>,
-    reason: &str,
-) -> Option<String> {
-    let focus_display = focus?;
-    let canonical_focus = canonicalize_sync_file(Path::new(focus_display))?;
-    let session_id = agent_doc_frontmatter_io::session::read_session_id(&canonical_focus)?;
-    let pane = find_normal_path_owner_pane(tmux, &canonical_focus, &session_id)?;
-    if let Some(target_window) = window {
-        let visible_panes = tmux.list_window_panes(target_window).unwrap_or_default();
-        if !visible_panes.iter().any(|candidate| candidate == &pane) {
-            return None;
-        }
-    }
-    match tmux.select_pane(&pane) {
-        Ok(()) => {
-            let message = preserved_layout_focus_marker(&pane, reason);
-            eprintln!("{}", message);
-            sync_log(&message);
-            Some(pane)
-        }
-        Err(err) => {
-            let warning = reselect_visible_focus_pane_failed_warning(
-                &pane,
-                &canonical_focus.display().to_string(),
-                &err.to_string(),
-            );
-            eprintln!("{}", warning);
-            sync_log(&warning);
-            None
-        }
-    }
-}
-
 /// Check the per-server-per-session destructive-repair throttle in the project
 /// state transaction. No filesystem stamp participates in the sync hot path.
 fn throttle_destructive_repair(project_root: &Path, tmux: &Tmux, session_name: &str) -> bool {
@@ -2489,70 +2452,78 @@ fn run_with_options_internal_at_root(
     let mut pre_resolved_panes: HashMap<PathBuf, String> = HashMap::new();
 
     let resolve_file = |path: &Path| -> Option<FileResolution> {
-        // Step 1: Auto-scaffold empty .md files BEFORE ensure_initialized().
-        // Must run first because ensure_initialized() writes minimal frontmatter
-        // (just agent_doc_session:) which prevents the full template scaffold.
-        // Per SPEC §8.5: empty files should be initialized as template documents.
-        if path.extension() == Some(std::ffi::OsStr::new("md")) {
-            let raw = std::fs::read_to_string(path).unwrap_or_default();
-            if agent_doc_document::claim_scaffold::should_scaffold_empty_markdown(
-                &raw,
+        // Resolve once through the editor-authority boundary. Every computed
+        // below (scaffold, initialization, template validation, session
+        // ownership, and pane routing) derives from this exact projection.
+        let effects = match crate::runtime_effects() {
+            Ok(effects) => effects,
+            Err(error) => {
+                eprintln!(
+                    "[sync] warning: current document authority unavailable for {}: {}",
+                    path.display(),
+                    error
+                );
+                return None;
+            }
+        };
+        let mut content = match effects
+            .resolve_current_document(path, "sync_resolve_file_authority")
+        {
+            Ok(content) => content,
+            Err(error) => {
+                eprintln!(
+                    "[sync] warning: could not resolve current editor-authoritative content for {}: {}",
+                    path.display(),
+                    error
+                );
+                return None;
+            }
+        };
+
+        // Step 1: Auto-scaffold empty .md projections before initialization.
+        // The edit is delivered through the authority plane; the operator is
+        // never required to save and disk is never used as a competing source.
+        if path.extension() == Some(std::ffi::OsStr::new("md"))
+            && agent_doc_document::claim_scaffold::should_scaffold_empty_markdown(
+                &content,
                 path.extension().and_then(|extension| extension.to_str()),
-            ) {
-                eprintln!("[sync] auto-scaffolding empty file: {}", path.display());
-                let session_id = uuid::Uuid::new_v4().to_string();
-                let scaffold =
-                    agent_doc_document::claim_scaffold::render_empty_template_scaffold(&session_id);
-                if let Err(e) = std::fs::write(path, &scaffold) {
-                    eprintln!(
-                        "[sync] warning: failed to scaffold {}: {}",
-                        path.display(),
-                        e
-                    );
-                    return Some(FileResolution::Unmanaged);
-                }
-                // Save snapshot BEFORE committing — git::commit() uses the snapshot
-                // to determine what to stage. Without this, the snapshot has stale
-                // content and the commit fails with a drift warning.
-                if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
-                    path,
-                    &scaffold,
-                    agent_doc_ops_log_io::log_op,
-                ) {
-                    eprintln!(
-                        "[sync] warning: failed to save scaffold snapshot for {}: {}",
-                        path.display(),
-                        e
-                    );
-                }
-                // Commit the scaffolded file immediately.
-                if let Err(e) = crate::runtime_effects().and_then(|effects| effects.commit(path)) {
-                    eprintln!(
-                        "[sync] warning: failed to commit scaffold for {}: {}",
-                        path.display(),
-                        e
-                    );
-                }
+            )
+        {
+            eprintln!("[sync] auto-scaffolding empty file: {}", path.display());
+            let session_id = uuid::Uuid::new_v4().to_string();
+            let scaffold =
+                agent_doc_document::claim_scaffold::render_empty_template_scaffold(&session_id);
+            if let Err(e) = effects.write_current_document(path, &scaffold) {
+                eprintln!(
+                    "[sync] warning: failed to scaffold {}: {}",
+                    path.display(),
+                    e
+                );
+                return Some(FileResolution::Unmanaged);
+            }
+            content = scaffold;
+        }
+
+        // Step 2: Ensure UUID/snapshot initialization from that same value.
+        // The commit effect owns native-save convergence and exact staging.
+        match agent_doc_workflow_io::document_init::ensure_initialized_with_content(
+            path,
+            &content,
+            |doc, updated| effects.write_current_document(doc, updated),
+            |doc| effects.commit(doc),
+            agent_doc_ops_log_io::log_op,
+        ) {
+            Ok((resolved, _changed)) => content = resolved,
+            Err(e) => {
+                eprintln!(
+                    "[sync] warning: authority-based initialization failed for {}: {}",
+                    path.display(),
+                    e
+                );
             }
         }
 
-        // Step 2: Ensure initialized (UUID + snapshot + git baseline).
-        // For scaffolded files, this creates the snapshot and git tracking.
-        // For files with agent_doc_format but no session, this assigns a UUID.
-        if let Err(e) = agent_doc_workflow_io::document_init::ensure_initialized(
-            path,
-            |doc| crate::runtime_effects()?.commit(doc),
-            agent_doc_ops_log_io::log_op,
-        ) {
-            eprintln!(
-                "[sync] warning: ensure_initialized failed for {}: {}",
-                path.display(),
-                e
-            );
-        }
-
-        // Step 3: Read content and resolve.
-        let content = std::fs::read_to_string(path).ok()?;
+        // Step 3: Resolve the reactive template/session projection.
         let (fm, _) = match parse_frontmatter_for_sync(&content, path, "resolve_file") {
             Ok(parsed) => parsed,
             Err(e) => {
@@ -3650,10 +3621,9 @@ fn run_with_options_internal_at_root(
             );
             eprintln!("{message}");
             mark_sync_layout_preserved(&message);
-            if !skip_autostart_diagnostics {
-                let _ =
-                    reselect_visible_focus_pane_if_present(tmux, window, focus, "blocked_files");
-            }
+            // Safe-passive reconciliation is focus-neutral. In particular,
+            // unresolved ownership must never turn a durable registry entry in
+            // the stash into a `select-pane` target.
             sync_log(&format!(
                 "safe_passive_layout_preserved blocked_files={}",
                 blocked_summary
@@ -8799,7 +8769,7 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn safe_passive_blocked_layout_preserve_still_reselects_visible_focus_pane() {
+    fn safe_passive_blocked_layout_preserve_keeps_operator_focus() {
         let root = tempfile::TempDir::new().unwrap();
         let subroot = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(root.path().join(".agent-doc/logs")).unwrap();
@@ -8911,8 +8881,8 @@ mod tests {
         );
         assert_eq!(
             iso.active_pane("test").unwrap(),
-            dev_pane,
-            "blocked passive sync should still reselect the already-visible focused pane"
+            bugs_pane,
+            "blocked passive sync must not move operator focus"
         );
     }
     #[test]

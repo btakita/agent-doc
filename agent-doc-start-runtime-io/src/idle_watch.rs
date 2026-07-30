@@ -175,15 +175,20 @@ fn spawn_captured_finalize_resume_signal_watch(
     std::thread::Builder::new()
         .name("captured-finalize-signal".into())
         .spawn(move || {
-            let mut after_version = 0;
+            let mut cursor = None;
             while !stop.load(Ordering::Relaxed) {
                 match agent_doc_controller_io::project_controller::subscribe_captured_finalize_wakes_for_file(
                     &file,
-                    after_version,
+                    cursor,
                     std::time::Duration::from_secs(30),
                 ) {
                     Ok(subscription) => {
-                        after_version = subscription.latest_version;
+                        cursor = Some(
+                            agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                                controller_generation: subscription.controller_generation,
+                                plane_version: subscription.latest_version,
+                            },
+                        );
                         if subscription
                             .wakes
                             .iter()

@@ -110,13 +110,14 @@ Queued as `#lzegress` with that shape written down, rather than started here —
 Phase 4 said "add cross-language conformance schedules … then project the contract into maintained Lazily bindings." The schedules are done — corpus authored, replayed, mutation-checked. The **projection into the other 8 bindings** is not, and it is 8 repos of real work rather than a remainder I should have folded in silently. It is queued as `#lzingressbindings` at the top of the backlog, actionable and unblocked, with the spec doc as its contract and the corpus as its gate. I closed the parent because everything the reference owes is landed and verified; say the word if you would rather I had left it gated.
 
 CI on `lazily-rs` was `in_progress` on `f7d83c2` when I checked — recorded, not waited on.
-<!-- agent:boundary:eb71409f -->
+<!-- agent:boundary:fff5637f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 do [#designimplementtransport]
+- 🚧 do [#lzingressbindings] using subagents
+- do [#lzegress]
 - do [#kny1]
 - Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
 <!-- /agent:queue -->

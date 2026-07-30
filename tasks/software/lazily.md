@@ -28,13 +28,13 @@ gated: npm security-key user presence required
 Compacted content:
 - Archived 16 response topic(s): #lazilyrenameinverted; #lzinteropcs; #lzstdlibbarrier; 13 more
 - Prior summary/context: prior compacted content: Archived 15 response topic(s): Response; do [#lzcstemporal]; do [#lzcscluster]; 12 more
-<!-- agent:boundary:b87b0b72 -->
+<!-- agent:boundary:99e7e0f9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#designimplementtransport]
+- 🚧 do [#designimplementtransport]
 - do [#kny1]
 - Research UniRx and if lazily can have an adapter
 <!-- /agent:queue -->
@@ -42,7 +42,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#designimplementtransport] Design and implement transport-agnostic reactive ingress primitives, phased as: (1) specify keyed lifecycle-scoped event Sources plus generation/sequence/freshness envelopes and accepted/dropped/error receipt Sources; (2) implement the Rust reference with event-channel-first adapters, reconnect/replay, stale rejection, merge/backpressure, and RPC-triggered or bounded-polling fallback only where event delivery is unavailable; (3) extract readiness, validation, authority, and retry decisions into Computeds/Effects instead of imperative refresh calls; (4) add cross-language conformance schedules for reorder, duplication, disconnect, backpressure, and build-skew generation handoff, then project the contract into maintained Lazily bindings.
+- [ ] 🚧 [#designimplementtransport] Design and implement transport-agnostic reactive ingress primitives, phased as: (1) specify keyed lifecycle-scoped event Sources plus generation/sequence/freshness envelopes and accepted/dropped/error receipt Sources; (2) implement the Rust reference with event-channel-first adapters, reconnect/replay, stale rejection, merge/backpressure, and RPC-triggered or bounded-polling fallback only where event delivery is unavailable; (3) extract readiness, validation, authority, and retry decisions into Computeds/Effects instead of imperative refresh calls; (4) add cross-language conformance schedules for reorder, duplication, disconnect, backpressure, and build-skew generation handoff, then project the contract into maintained Lazily bindings.
 - [ ] [#kny1] Please help me setup trusted publishing with npm.
 - [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
 <!-- /agent:backlog -->

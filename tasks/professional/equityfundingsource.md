@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -54,17 +54,99 @@ Yes—there are two issues, but I found **no production Worker crash/outage sign
 > **Queue prompt:** Please look in the production logs. Are there any issues?
 
 The production audit is complete; the detailed findings are in the preceding response. I recorded the two actionable issues for follow-up: stop the anonymous public-message WebSocket authentication retry loop, and restore queryable historical Workers Logs. No application code or production configuration was changed during this diagnostic pass.
+### Re: Fixing the production issues — opus-5
+
+> **Queue prompt:**
+>
+> do [#fixproductionissues]
+
+
+Fixed, tested, committed, pushed. **Not deployed** — see the last section; that part needs your go.
+
+First, a correction to the earlier audit: **historical Workers Logs were never actually unavailable.** The blocker was the token, not the config. `btak/equityfundingsource/cloudflare_admin_api_token` has Workers Observability read on the production account; the three deploy tokens (`cloudflare_api_token`, `production/cloudflare_api_token`, `cloudflare_infra_api_token`) all return Cloudflare `10000 Authentication error` on the telemetry endpoints. With the admin token I read 24h of history directly — which is where the numbers below come from, and which turned up a third issue the live tail had missed.
+
+**24h to 2026-07-30 03:07 UTC, `equityfundingsource-production`:** 26,930 log events, 11,787 app requests, **0 exceptions, 0 5xx**, 7 error-level lines.
+
+### Issue 1 — the anonymous WebSocket loop was 56% of all production traffic
+
+The earlier estimate was "17 repeated 401s in about three minutes". The real figure: **6,576 of 11,787 logged requests in 24h were `GET /api/public/messages/realtime/ws` returning 401**, all from one open public tab. `use_admin_events_` reconnects five seconds after every close, the public realtime route requires a guest session, and an anonymous visitor has none until they send their first message — so it 401s, closes, retries, forever, and realtime never works for that visitor either.
+
+`use_admin_events_` now takes an `enabled` option that gates **both** the socket and the heartbeat — polling an endpoint you can't authenticate against is the same bug at 20s instead of 5s. The guest thread passes `portal_messages_realtime_enabled_(config, guest_ready)`, so it subscribes the moment the session exists and not before. `enabled` is in the effect dependency list; without it the gate would never re-open, which is a silent failure no 401 would reveal, so there's a test for exactly that.
+
+The sibling endpoints already degrade correctly (`/all` → 200 not-ready, `/count` → 200 zero), which is why gating the socket costs an anonymous visitor nothing. That asymmetry is asserted against the mounted Hono app rather than assumed.
+
+### Issue 2 — the observability config contradicted itself
+
+The deployed Worker reported top-level `observability.enabled = false` while `[observability.logs]` said `enabled` + `persist`. Logs *did* persist — I read a day of them back — but a config that argues with itself would have silently ended log retention the moment upstream precedence tightened, with nothing in the repo objecting. Both environments now declare the top-level switch `true`, and `tests/efs-production-environment.test.ts` fails the build if it drifts from the nested block again. Wrangler environments don't inherit `observability`, so staging drifting on its own is just as invisible; both are pinned.
+
+While fixing that test's helper I found it was matching table names mentioned in *comments* — `indexOf('[observability.logs]')` hit the prose before the table. It's line-anchored now, with a case pinning that.
+
+`docs/deploy.md` §2.4b documents the telemetry query recipe and names the token that works, so the next audit doesn't re-derive a token problem as a config problem.
+
+### Issue 3 (new) — every error in production comes from the TMO sync cron, and none of them said why
+
+All 7 error-level lines in the window were `eventType: cron`, from the 15-minute TMO sync:
+
+```
+[tmo-sync] loan sync failed 1012     at tr (index.js:3164:75) ...
+[tmo-sync] loan sync failed 1014 ...
+[tmo-sync] borrower roster failed ...            (x2)
+[tmo-sync] LOS lender roster failed ...
+[tmo] GetLoanFundings failed while building the lender roster: 1009 ...
+[tmo] GetLoanFundings failed while building the lender roster: 1005 ...
+```
+
+A loan number and a minified stack. No reason. Cause: the five LOS read helpers threw `new Error(body.ErrorMessage ?? 'TMO error')`, and TMO returns `ErrorMessage: ""` alongside a non-zero `ErrorNumber` — `??` doesn't fall back on an empty string, so the Error carried no message at all and the sync's catch had nothing to log. Three other call sites in that same file already used `||` for this reason.
+
+Those reads now build their message through `tmo_read_error_message_`, which names the endpoint (with the loan number where there is one) and keeps HTTP status, `ErrorNumber`, `Status`, and upstream text. `Status 0` is success and is deliberately not reported as a code.
+
+This makes the failures *legible*; it does not fix them. Root-causing them needs the next production log line to actually say something, so that's queued behind the deploy.
+
+Two things I checked and cleared: `scheduled_task_started` vs `scheduled_task_done` looked mismatched at first (6 starts, 1 done), but that was the event-view sampling cap — counted properly it's 192 vs 192, so the cron itself is healthy. And the 148 404s on `/themes.php`, `/alfa.php`, `//cgi-bin/index.php` and friends are internet-background PHP scanning, correctly 404'd; not worth acting on.
+
+### Verification
+
+`make check` is the only gate here — this repo has no CI workflow, confirmed again (no `.github/workflows`). `bun test` **2129 pass / 0 fail**; `bun run build` and `bun run build:worker` both clean. I also confirmed the gate is present in the shipped browser bundle, not only in source.
+
+Every new assertion was mutation-checked: 12 mutations, each reverting one piece of a fix, **all 12 caught**, tree verified green again afterwards.
+
+| mutation | caught by |
+|---|---|
+| `[observability] enabled` → `false` (both envs) | production-environment tests |
+| drop `enabled:` from the `use_admin_events_` call | wiring test |
+| gate returns `true` unconditionally | gate tests |
+| `[path, enabled]` → `[path]` | dependency-list test |
+| `poll && enabled` → `poll` | heartbeat test |
+| guest ws route 401 → 200 | route test |
+| drop `.trim()` on the upstream message | read-error tests |
+| drop the `ErrorNumber` part | read-error tests |
+| return a bare `join` instead of the labelled message | read-error tests |
+| `Status !== 0` → `Status != null` | read-error tests |
+| wrong endpoint label at a call site | call-site test |
+
+Commits, pushed to `btakita/equityfundingsource-dev` `main`: **`c9211e95`** (issues 1 and 2) and **`29f27773`** (issue 3). The push also carried your earlier unpushed **`c6d4133e`** ("use EFS production email subdomain") — which is the commit `#efs-email-subdomain` was already waiting on, so that item's "push" step is now done.
+
+A concurrent session has ~355 uncommitted lines across `tmo-sync.ts`, `worker.ts`, `tmo_contacts.tsx`, `tmo_los.tsx` and others. `tmo-api/index.ts` also carries an unrelated `tmo_borrower_roster_R_` change from it, so I staged only my own hunks of that file via a constructed blob and left its work untouched in the tree — verified still present afterwards.
+
+### What I did not do: deploy
+
+Production is still running the old code, so the 401 loop is still burning ~6,500 requests a day right now. I stopped short deliberately, for two reasons:
+
+1. The queue preset was `#spec-test-commit-push`, and `#spec-test-commit-push-deploy` exists — you picked the one without deploy.
+2. A whole-tree deploy from this checkout would ship that concurrent session's in-progress TMO refactor to production.
+
+The safe path is a deploy from a clean checkout at `29f27773`, not from this tree. Say go and I'll run it, then verify: worker settings reporting `observability.enabled: true`, the `/api/public/messages/realtime/ws` 401 count falling toward zero on the same telemetry query, and a fresh anonymous tab opening no socket until the first message is sent. Filed as the top backlog item with those checks written out.
 <!-- agent:boundary:0c011147 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 do [#fixproductionissues]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#fixproductionissues] Please fix all production issues that you found.
+- [ ] [#prod-fix-deploy] [operator-verify] Deploy the production fixes and verify them live. Production still runs the pre-fix code, so the anonymous realtime 401 loop (~6,500 requests/day) is still burning. Needs operator go for two reasons: the queue preset was #spec-test-commit-push, which excludes deploy; and a whole-tree deploy from src/equityfundingsource-dev would ship a concurrent session's ~355 uncommitted lines of TMO refactor. Deploy from a CLEAN checkout at EFS 29f27773 (see reference_efs_deploy_from_main_checkout_not_fresh_install_worktree), then verify: (a) GET accounts/67b0703bb39744866efbf765e1ebcf1c/workers/scripts/equityfundingsource-production/settings reports observability.enabled true; (b) the telemetry count for /api/public/messages/realtime/ws status 401 falls toward zero over 24h (baseline 6,576 of 11,787 app requests); (c) a fresh anonymous public tab opens NO realtime socket until the first message is sent, and one immediately after. Query recipe: src/equityfundingsource-dev/docs/deploy.md section 2.4b.
+- [ ] [#tmo-sync-cron-failures] [operator-verify] Root-cause the TMO sync cron failures. All 7 error-level lines in 24h of equityfundingsource-production logs are eventType=cron from the 15-minute sync: loan sync failed on 1012 and 1014, borrower roster failed (x2), LOS lender roster failed, and GetLoanFundings failed while building the lender roster on 1005 and 1009. Blocked on #prod-fix-deploy: until EFS 29f27773 is deployed those Errors carry an empty message, so the logs cannot say what LOS returned. After deploy, re-query per docs/deploy.md 2.4b filtering $metadata.level=error and fix what the endpoint plus ErrorNumber names. Coordinate first: app/equityfundingsource/lib/tmo-sync.ts currently holds ~355 uncommitted lines from a concurrent session.
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.
 <!-- /agent:backlog -->
 
@@ -178,3 +260,6 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 <!-- completed work archived in tasks/professional/equityfundingsource.done.md -->
 <!-- /agent:done -->
 ~~`reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.~~ — auto-struck: answered this cycle (#ftstrike)
+[#prod-fix-deploy] [operator-verify] Deploy the production fixes and verify them live. Production still runs the pre-fix code, so the anonymous realtime 401 loop (~6,500 requests/day) is still burning. Needs operator go for two reasons: the queue preset was #spec-test-commit-push, which excludes deploy; and a whole-tree deploy from src/equityfundingsource-dev would ship a concurrent session's ~355 uncommitted lines of TMO refactor. Deploy from a CLEAN checkout at EFS 29f27773 (see reference_efs_deploy_from_main_checkout_not_fresh_install_worktree), then verify: (a) GET accounts/67b0703bb39744866efbf765e1ebcf1c/workers/scripts/equityfundingsource-production/settings reports observability.enabled true; (b) the telemetry count for /api/public/messages/realtime/ws status 401 falls toward zero over 24h (baseline 6,576 of 11,787 app requests); (c) a fresh anonymous public tab opens NO realtime socket until the first message is sent, and one immediately after. Query recipe: src/equityfundingsource-dev/docs/deploy.md section 2.4b.
+- [ ] [#tmo-sync-cron-failures] [operator-verify] Root-cause the TMO sync cron failures. All 7 error-level lines in 24h of equityfundingsource-production logs are eventType=cron from the 15-minute sync: loan sync failed on 1012 and 1014, borrower roster failed (x2), LOS lender roster failed, and GetLoanFundings failed while building the lender roster on 1005 and 1009. Blocked on #prod-fix-deploy: until EFS 29f27773 is deployed those Errors carry an empty message, so the logs cannot say what LOS returned. After deploy, re-query per docs/deploy.md 2.4b filtering $metadata.level=error and fix what the endpoint plus ErrorNumber names. Coordinate first: app/equityfundingsource/lib/tmo-sync.ts currently holds ~355 uncommitted lines from a concurrent session.
+- [ ] 

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: f582867a-d61e-41cd-aee2-c3d5b047f35f
+resume: cf2d65db-105b-472b-9d1e-de6638dc2eb6
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -76,6 +76,62 @@ Sources:
 - [SEC.gov — General solicitation, Rule 506(c)](https://www.sec.gov/resources-small-businesses/exempt-offerings/general-solicitation-rule-506c)
 - [SEC.gov — Assessing Accredited Investors under Regulation D](https://www.sec.gov/resources-small-businesses/capital-raising-building-blocks/assessing-accredited-investors-under-regulation-d)
 - [Gibson Dunn — SEC Provides Bright-Line Test for Investor Verification Under Rule 506(c)](https://www.gibsondunn.com/sec-provides-bright-line-test-for-investor-verification-under-rule-506c/)
+
+### Re: Correction on the TMO cron, the denied-deals fix, and committing the tree — opus-5
+
+> **Queue prompt:**
+>
+> do [#noticedavailabledeals]
+
+> **Queue prompt:**
+>
+> commit + push all equityfundingsource-dev files
+
+Three things: a correction to my previous response, the denied-deals fix, and the whole tree is now committed and pushed.
+
+### Correction: the roster failures are not confined to the full sweep
+
+I wrote that the seven failures are roster work only the full sweep performs, and that the next evidence would arrive around 17:15Z. **That is wrong.** The 04:30:51Z run — `driver delta`, on the new build `c50a9aaa` — failed one second later:
+
+```
+04:30:52Z lvl=error  [tmo-sync] LOS lender roster failed     at sp (index.js:3163:37)
+                         at async Gd (index.js:3150:12)
+                         at async Promise.all (index 1) ...
+```
+
+The 04:15:51Z delta run immediately before it was clean. So it is intermittent, roughly every other run, and I generalized from a single clean sample. Nothing to wait until 17:15Z for.
+
+Worse, **the read-error fix did not cover this path.** That line is exactly as unreadable as before: a bare minified stack, no reason. `tmo_read_error_message_` never returns an empty string, so the throw is not coming from one of the five patched read helpers — it reaches `console.error('[tmo-sync] LOS lender roster failed', err)` as something whose message renders empty. Filed as `#tmo-roster-error-still-silent`. Until that lands, `#tmo-sync-cron-failures` cannot be root-caused, and I rewrote that item rather than leave the full-sweep theory sitting in the backlog.
+
+### Denied deals: `653fe3fe`
+
+You asked which column these belong in. Answer: the one you already have. No new column.
+
+| | |
+|---|---|
+| `column_id_for_status_` | falls back to `unassigned_column_id`, not `default_column_id` |
+| `TERMINAL_DENIED_LOAN_STATUSES` | `Denied` **and** `Application Declined`, both claimed by the Application Denied column |
+| `admin_deal_status_sync_by_loan_` | a denial closes the offering instead of hitting `ELSE status` |
+
+The fallback is the one that mattered. `default_column_id` for the loan pipeline is `application-received` — the column *labeled* "Available Deals" — so every status the code did not recognize was presented as an active fundable deal. That is why `Documents` (1560 Radnor, 1561 Quail/Gregory) was sitting there too, not just the declines. Unassigned already lives inside Parked. `DEAL_PIPELINE` declares no unassigned column, so its behaviour is byte-identical.
+
+Five mutations, all caught: fallback reverted (3 tests), alias dropped (5), denial branch no-op'd (3), `closed_at` clobbered (1), `trim()` removed (1). Two existing assertions in `admin-pipeline.test.ts` changed on purpose — one encoded the bug, and the `#closed-step-decouple` source-grep now slices to the end of the function instead of a fixed 800 bytes my comment overran.
+
+Lenders were never exposed: the marketplace filters `investment_deals.status` and all three declined loans have no deal row.
+
+### Committed and pushed: `292b52d6`
+
+The full working tree, as asked — 14 files, ~1,036 insertions. Most of it is the concurrent session's in-progress TMO work: `tmo-deal-sync.ts` (+tests), `tmo-backup-scheduler.ts` (+tests), ~355 lines in `tmo-sync.ts`, and the `worker.ts` / `loan_management` / `tmo-api` / `tmo_contacts` / `tmo_los` call sites. Landed as one checkpoint rather than left uncommitted. Verified first: **2143 pass / 0 fail** across 193 files, `build` and `build:worker` clean.
+
+**Two files I did not commit.** `.dev.vars.production` and `.dev.vars.staging` hold cleartext `AUTH_SECRET` and `ADMIN_GLOBAL_PASSWORD`, and `.gitignore` covered `.dev.vars` but not the per-environment variants — so they were untracked but fully committable, one `git add -A` away from a public repo. They are now ignored via `.dev.vars.*`, along with the `.agent-doc/` and `.claude/` session directories. I scanned the staged diff for secret literals before committing; it was clean. If either file has ever been added in the past, those secrets need rotating — worth a `git log --all --diff-filter=A -- '.dev.vars*'` to confirm it never happened.
+
+Superproject gitlink bumped to `292b52d6`.
+
+### Still open
+
+`#tmo-sync-declined-unpublish` — `tmo-sync.ts` carries its own copy of the deal-status sync, `investment_deal_status_sync_by_loan_`, which still maps only `Funded`. That is the path a TMO-sourced decline takes, so a decline arriving *from TMO* still will not unpublish a published deal. Now that the tree is committed the coordination block is gone; the better fix is deleting the duplicate and calling the `repo.ts` function, since two copies of this rule is how the gap appeared.
+
+Neither commit is deployed. The preset is `#spec-test-commit-push`; say the word and I will deploy the same isolated way as the last one.
 <!-- agent:boundary:062a244e -->
 <!-- /agent:exchange -->
 
@@ -213,3 +269,4 @@ We have not cut over the DNS today. The current CF environment will be staging. 
  what the endpoint plus ErrorNumber names. Coordinate first: app/equityfundingsource/lib/tmo-sync.ts currently holds ~355 uncommitted lines from a concurrent session.
 - [ ]
 410dfec2
+cf2d65db-105b-472b-9d1e-de6638dc2eb6

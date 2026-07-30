@@ -174,6 +174,12 @@ pub struct CycleState {
     pub recycle_resume_consumed: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_done_ids: Vec<String>,
+    /// A tracked-work-only `write --commit` whose document projection was
+    /// retained before the git effect could run. The target hash is the
+    /// idempotency fence for resuming that exact commit after editor/disk
+    /// convergence; absence means no pending-only commit is authorized.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_only_commit_target_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_kept_open_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1204,6 +1210,7 @@ pub fn start_preflight_with_task(
         turn_id: turn_id.map(|s| s.to_string()),
         recycle_resume_consumed: false,
         pending_done_ids: Vec::new(),
+        pending_only_commit_target_hash: None,
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
         expect_done_or_gate_ids: Vec::new(),
@@ -1544,6 +1551,58 @@ pub fn record_pending_done_ids(file: &Path, ids: &[String]) -> Result<Option<Cyc
         save(file, &state)?;
     }
     Ok(Some(state))
+}
+
+pub fn record_pending_only_commit_target(
+    file: &Path,
+    target_hash: &str,
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let target_hash = target_hash.trim();
+    if target_hash.is_empty() {
+        anyhow::bail!("pending-only commit target hash must not be empty");
+    }
+    if state.pending_only_commit_target_hash.as_deref() != Some(target_hash) {
+        state.pending_only_commit_target_hash = Some(target_hash.to_string());
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+pub fn clear_pending_only_commit_target(file: &Path, expected_target_hash: &str) -> Result<bool> {
+    let Some(mut state) = load(file)? else {
+        return Ok(false);
+    };
+    if state.pending_only_commit_target_hash.as_deref() != Some(expected_target_hash) {
+        return Ok(false);
+    }
+    state.pending_only_commit_target_hash = None;
+    state.updated_at = now_secs();
+    save(file, &state)?;
+    Ok(true)
+}
+
+/// Retire the whole retained pending-only continuation after it either commits
+/// or is superseded by a newer editor-authoritative cut.
+///
+/// `pending_done_ids` belong to the target identity: retaining them after the
+/// target is rejected could re-authorize the same stale deletion through the
+/// legacy migration path.
+pub fn clear_pending_only_commit_intent(file: &Path, expected_target_hash: &str) -> Result<bool> {
+    let Some(mut state) = load(file)? else {
+        return Ok(false);
+    };
+    if state.pending_only_commit_target_hash.as_deref() != Some(expected_target_hash) {
+        return Ok(false);
+    }
+    state.pending_only_commit_target_hash = None;
+    state.pending_done_ids.clear();
+    state.updated_at = now_secs();
+    save(file, &state)?;
+    Ok(true)
 }
 
 pub fn record_pending_kept_open_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
@@ -3067,6 +3126,7 @@ fn synthetic_state_with_id(
         turn_id: None,
         recycle_resume_consumed: false,
         pending_done_ids: Vec::new(),
+        pending_only_commit_target_hash: None,
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
         expect_done_or_gate_ids: Vec::new(),
@@ -3589,6 +3649,21 @@ mod tests {
             load(&doc).unwrap().unwrap().pending_done_ids,
             vec!["abc1".to_string(), "z9".to_string()]
         );
+    }
+
+    #[test]
+    fn clearing_pending_only_commit_intent_retires_done_ids_with_target() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        record_pending_done_ids(&doc, &["done1".to_string()]).unwrap();
+        record_pending_only_commit_target(&doc, "target-hash").unwrap();
+
+        assert!(clear_pending_only_commit_intent(&doc, "target-hash").unwrap());
+        let state = load(&doc).unwrap().unwrap();
+        assert_eq!(state.pending_only_commit_target_hash, None);
+        assert!(state.pending_done_ids.is_empty());
     }
 
     #[test]

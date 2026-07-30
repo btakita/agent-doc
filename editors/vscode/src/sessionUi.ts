@@ -1,4 +1,4 @@
-export type SessionCommandName = 'status' | 'restart-supervisor' | 'stop-agent' | 'cancel-turn' | 'clear' | 'interrupt-clear' | 'doctor';
+export type SessionCommandName = 'status' | 'restart-supervisor' | 'restart-agent' | 'stop-agent' | 'cancel-turn' | 'clear' | 'interrupt-clear' | 'doctor';
 
 export interface OutputPresentation {
     title: string;
@@ -145,8 +145,10 @@ export function buildSessionSuccessHint(
     const trimmed = output.trim();
     if (trimmed) return trimmed;
     switch (command) {
-        case 'restart-supervisor':
-            return `Recycle requested for supervisor handling ${relativePath}`;
+    case 'restart-supervisor':
+        return `Recycle requested for supervisor handling ${relativePath}`;
+    case 'restart-agent':
+        return `Restart requested for agent handling ${relativePath}`;
         case 'stop-agent':
             return `Stopped agent for ${relativePath} (supervisor still running)`;
         case 'cancel-turn':

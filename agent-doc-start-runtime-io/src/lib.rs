@@ -2393,6 +2393,7 @@ mod th {
             turn_id: None,
             recycle_resume_consumed: false,
             pending_done_ids: Vec::new(),
+            pending_only_commit_target_hash: None,
             pending_kept_open_ids: Vec::new(),
             reaped_pending_ids: Vec::new(),
             expect_done_or_gate_ids: Vec::new(),

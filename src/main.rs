@@ -3599,6 +3599,18 @@ enum SessionAction {
         #[arg(long)]
         force: bool,
     },
+    /// Replace the harness agent child and re-resolve the current frontmatter
+    #[command(name = "restart-agent")]
+    RestartAgent {
+        /// Path to the session document
+        file: PathBuf,
+        /// Request a fresh restart instead of the default continue-mode restart
+        #[arg(long)]
+        fresh: bool,
+        /// Bypass stale busy-state refusal and request supervisor-mediated restart
+        #[arg(long)]
+        force: bool,
+    },
     /// Stop the harness agent child while keeping the supervisor alive at its
     /// restart-or-quit keepalive prompt (the operator can then restart the agent)
     #[command(name = "stop-agent")]
@@ -4942,6 +4954,17 @@ fn try_main() -> anyhow::Result<()> {
                 },
                 force,
             ),
+            Some(SessionAction::RestartAgent { file, fresh, force }) => {
+                session_actor_cmd::restart_agent(
+                    &file,
+                    if fresh {
+                        session_actor_cmd::RestartMode::Fresh
+                    } else {
+                        session_actor_cmd::RestartMode::Continue
+                    },
+                    force,
+                )
+            }
             Some(SessionAction::StopAgent { file, reason }) => {
                 session_actor_cmd::stop_agent(&file, reason)
             }

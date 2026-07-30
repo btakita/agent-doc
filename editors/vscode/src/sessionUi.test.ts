@@ -39,6 +39,13 @@ describe('sessionUi', () => {
         );
     });
 
+    it('builds session command args for agent restart routing', () => {
+        assert.deepStrictEqual(
+            buildSessionCommandArgs('restart-agent', 'tasks/agent-doc/agent-doc-bugs2.md'),
+            ['session', 'restart-agent', 'tasks/agent-doc/agent-doc-bugs2.md'],
+        );
+    });
+
     it('builds forced supervisor restart command args', () => {
         assert.deepStrictEqual(
             buildForcedRestartSupervisorCommandArgs('tasks/agent-doc/agent-doc-bugs2.md'),
@@ -202,6 +209,13 @@ describe('sessionUi', () => {
         assert.strictEqual(
             buildSessionSuccessHint('restart-supervisor', 'tasks/agent-doc/agent-doc-bugs2.md', ''),
             'Recycle requested for supervisor handling tasks/agent-doc/agent-doc-bugs2.md',
+        );
+    });
+
+    it('falls back to the agent restart success hint when the CLI returns no text', () => {
+        assert.strictEqual(
+            buildSessionSuccessHint('restart-agent', 'tasks/agent-doc/agent-doc-bugs2.md', ''),
+            'Restart requested for agent handling tasks/agent-doc/agent-doc-bugs2.md',
         );
     });
 

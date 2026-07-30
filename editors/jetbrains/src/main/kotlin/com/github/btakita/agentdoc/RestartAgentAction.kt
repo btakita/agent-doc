@@ -7,15 +7,10 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
 
 /**
- * #restartagentmenu (Phase 2 of the restart-agent feature): a "Restart Agent"
- * menu command that runs the same `agent-doc restart-supervisor` path as
- * [RestartSupervisorProcessAction]. After Phase 1 (#agentreloadrestart),
- * `restart-supervisor` re-resolves the harness from current frontmatter, so a
- * manual "Restart Agent" brings up a changed `agent:` harness.
- *
- * This is intentionally distinct from "Recycle Supervisor": they share
- * the same CLI today, but the operator-facing intent differs (restart the agent
- * harness child vs. restart the bound supervisor process).
+ * "Restart Agent" replaces the harness child and re-resolves the current
+ * `agent:` frontmatter. It is intentionally separate from
+ * [RestartSupervisorProcessAction], which recycles controller code while
+ * preserving the child.
  */
 class RestartAgentAction : AnAction() {
     private val log = Logger.getInstance(RestartAgentAction::class.java)
@@ -25,7 +20,7 @@ class RestartAgentAction : AnAction() {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
         log.warn("[restart-agent] Restart Agent invoked for ${file.path}")
         TerminalUtil.recordRestartAgentMenuInvoked(project, file)
-        TerminalUtil.restartSession(project, file)
+        TerminalUtil.restartAgentSession(project, file)
     }
 
     override fun update(e: AnActionEvent) {

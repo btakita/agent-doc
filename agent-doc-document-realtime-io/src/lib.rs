@@ -2017,6 +2017,47 @@ pub fn settle_retained_non_capture_projection_through_authority(
     Ok(true)
 }
 
+/// Retire one retained projection after a newer editor-authoritative cut has
+/// converged to disk.
+///
+/// This is a compare-and-retire operation: it never writes document bytes, and
+/// it refuses while authority/disk disagree or while the retained target is
+/// still current.
+pub fn retire_retained_projection_superseded_by_authority(
+    path: &Path,
+    expected_target_hash: &str,
+    source: &str,
+) -> Result<bool> {
+    let Some(pending) = pending_document_write(path) else {
+        return Ok(false);
+    };
+    if !pending
+        .target_hash
+        .eq_ignore_ascii_case(expected_target_hash)
+    {
+        return Ok(false);
+    }
+    let canonical = try_resolve_current_document_content(path, source)?;
+    let disk = resolve_disk_current_document_content(path, source)?;
+    if canonical != disk
+        || agent_doc_hash::content_hash(&canonical).eq_ignore_ascii_case(expected_target_hash)
+    {
+        return Ok(false);
+    }
+    clear_deferred_document_write_intent(path, &pending.target_hash, source)?;
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "retained_projection_superseded file={} intent_id={} retired_target_hash={} authoritative_hash={} authority=editor_crdt disk_exact=true",
+            path.display(),
+            pending.intent_id,
+            pending.target_hash,
+            agent_doc_hash::content_hash(&canonical),
+        ),
+    );
+    Ok(true)
+}
+
 fn retire_superseded_compact_projection_intents(
     path: &Path,
     canonical: &str,

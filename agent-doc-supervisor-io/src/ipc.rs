@@ -260,15 +260,29 @@ pub enum SupervisorInjectDeliveryOutcome {
     DuplicateSuppressed,
 }
 
+const RESTART_AGENT_MODE_PREFIX: &str = "agent:";
+
+fn decode_restart_intent(mode: String) -> (String, bool) {
+    match mode.strip_prefix(RESTART_AGENT_MODE_PREFIX) {
+        Some(mode) => (mode.to_string(), true),
+        None => (mode, false),
+    }
+}
+
 pub fn request_supervisor_restart<S>(state: &S, mode: String) -> Result<(), String>
 where
     S: SupervisorIpcLifecycleState + ?Sized,
 {
+    let (mode, restart_agent) = decode_restart_intent(mode);
     let waiting_input = state.actor_waiting_input();
     state.transition_actor_busy("supervisor", "ipc_restart_requested");
     state.set_restart_mode(mode);
     state.set_restart_requested(true);
-    let reexec = state.binary_stale();
+    // A controller-only recycle may preserve the live harness child across an
+    // in-place re-exec. An explicit Restart Agent intent may not: it exists to
+    // re-resolve frontmatter (including an `agent:` harness switch) and replace
+    // that child even when the serving supervisor binary is stale.
+    let reexec = state.binary_stale() && !restart_agent;
     state.set_restart_reexec(reexec);
     if !reexec {
         state.kill_child_for_ipc();
@@ -916,12 +930,17 @@ pub fn is_active(project_root: &Path, session_uuid: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use std::sync::atomic::AtomicU32;
 
     struct RestartLifecycleState {
         waiting_input: bool,
+        binary_stale: bool,
         restart_requested: AtomicBool,
+        restart_reexec: AtomicBool,
+        child_killed: AtomicBool,
         prompt_woken: AtomicBool,
+        restart_mode: Mutex<String>,
     }
 
     impl SupervisorIpcLifecycleState for RestartLifecycleState {
@@ -931,17 +950,23 @@ mod tests {
 
         fn transition_actor_busy(&self, _caller: &str, _reason: &str) {}
         fn transition_actor_waiting_input(&self, _caller: &str, _reason: &str) {}
-        fn set_restart_mode(&self, _mode: String) {}
+        fn set_restart_mode(&self, mode: String) {
+            *self.restart_mode.lock().unwrap() = mode;
+        }
         fn set_restart_requested(&self, requested: bool) {
             self.restart_requested.store(requested, Ordering::Relaxed);
         }
         fn binary_stale(&self) -> bool {
-            false
+            self.binary_stale
         }
-        fn set_restart_reexec(&self, _reexec: bool) {}
+        fn set_restart_reexec(&self, reexec: bool) {
+            self.restart_reexec.store(reexec, Ordering::Relaxed);
+        }
         fn set_stop_requested(&self, _requested: bool) {}
         fn set_stop_agent_requested(&self, _requested: bool) {}
-        fn kill_child_for_ipc(&self) {}
+        fn kill_child_for_ipc(&self) {
+            self.child_killed.store(true, Ordering::Relaxed);
+        }
         fn wake_restart_prompt(&self) -> Result<(), String> {
             self.prompt_woken.store(true, Ordering::Relaxed);
             Ok(())
@@ -952,14 +977,56 @@ mod tests {
     fn restart_request_wakes_waiting_supervisor_prompt() {
         let state = RestartLifecycleState {
             waiting_input: true,
+            binary_stale: false,
             restart_requested: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
         };
 
         request_supervisor_restart(&state, "fresh".to_string()).unwrap();
 
         assert!(state.restart_requested.load(Ordering::Relaxed));
         assert!(state.prompt_woken.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn restart_agent_replaces_child_even_when_supervisor_binary_is_stale() {
+        let state = RestartLifecycleState {
+            waiting_input: false,
+            binary_stale: true,
+            restart_requested: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
+        };
+
+        request_supervisor_restart(&state, "agent:continue".to_string()).unwrap();
+
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(!state.restart_reexec.load(Ordering::Relaxed));
+        assert!(state.child_killed.load(Ordering::Relaxed));
+        assert_eq!(*state.restart_mode.lock().unwrap(), "continue");
+    }
+
+    #[test]
+    fn controller_recycle_preserves_child_during_stale_binary_reexec() {
+        let state = RestartLifecycleState {
+            waiting_input: false,
+            binary_stale: true,
+            restart_requested: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
+        };
+
+        request_supervisor_restart(&state, "continue".to_string()).unwrap();
+
+        assert!(state.restart_reexec.load(Ordering::Relaxed));
+        assert!(!state.child_killed.load(Ordering::Relaxed));
     }
 
     fn start_echo_handler(root: &Path, uuid: &str) -> SupervisorIpc {

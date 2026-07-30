@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-session-registry-io"
-version = "0.35.95"
+version = "0.35.96"
 edition = "2024"
 description = "Session registry filesystem adapters for agent-doc"
 license = "MIT"
@@ -11,20 +11,20 @@ publish = false
 name = "agent_doc_session_registry_io"
 
 [dependencies]
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.95" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.95" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.95" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.95" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.95" }
-agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.95" }
-agent-doc-session-registry = { path = "../agent-doc-session-registry", version = "0.35.95" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.95" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.95" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.95" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.96" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.96" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.96" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.96" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.96" }
+agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.96" }
+agent-doc-session-registry = { path = "../agent-doc-session-registry", version = "0.35.96" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.96" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.96" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.96" }
 anyhow = "1"
 serde_json = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 
 [dev-dependencies]
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.95" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.96" }
 tempfile = "3"

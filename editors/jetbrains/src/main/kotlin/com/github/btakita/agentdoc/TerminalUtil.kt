@@ -809,6 +809,17 @@ object TerminalUtil {
         runRestartSupervisorCommand(project, file, force = false, onComplete = onComplete)
     }
 
+    fun restartAgentSession(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        runRestartCommand(
+            project = project,
+            file = file,
+            commandName = "restart-agent",
+            startedMessage = "Restarting agent for ${file.name}",
+            force = false,
+            onComplete = onComplete,
+        )
+    }
+
     private fun restartSupervisorAndResumePausedQueue(project: Project, file: VirtualFile) {
         runRestartSupervisorCommand(
             project = project,
@@ -1106,13 +1117,33 @@ object TerminalUtil {
         afterSuccess: (() -> Unit)? = null,
         onComplete: (() -> Unit)? = null,
     ) {
+        runRestartCommand(
+            project = project,
+            file = file,
+            commandName = "restart-supervisor",
+            startedMessage = "Restarting supervisor for ${file.name}",
+            force = force,
+            afterSuccess = afterSuccess,
+            onComplete = onComplete,
+        )
+    }
+
+    private fun runRestartCommand(
+        project: Project,
+        file: VirtualFile,
+        commandName: String,
+        startedMessage: String,
+        force: Boolean,
+        afterSuccess: (() -> Unit)? = null,
+        onComplete: (() -> Unit)? = null,
+    ) {
         val (telemetryCwd, _) = resolveProject(project, file)
         val telemetryStartLine = restartTelemetryOpsLogLineCount(telemetryCwd)
         runSessionCommand(
             project = project,
             file = file,
-            args = if (force) listOf("restart-supervisor", "--force") else listOf("restart-supervisor"),
-            startedMessage = "Restarting supervisor for ${file.name}",
+            args = if (force) listOf(commandName, "--force") else listOf(commandName),
+            startedMessage = startedMessage,
             onSuccess = { relativePath, output ->
                 val telemetry = readRestartSupervisorTelemetry(telemetryCwd, relativePath, telemetryStartLine)
                 val message = restartSessionSuccessMessage(relativePath, output, telemetry)

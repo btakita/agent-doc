@@ -1165,13 +1165,19 @@ pub(crate) fn guard_stale_snapshot_recovery_only(
     false
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct PendingStatusMutationOutcome {
+    queue_completion_projected: bool,
+}
+
 fn apply_pending_and_status_mutations(
     file: &Path,
     options: &CommandOptions,
     pending_kept_open_ids: &[String],
     has_pending_ops: bool,
     reap_done_in_same_write: bool,
-) -> Result<()> {
+) -> Result<PendingStatusMutationOutcome> {
+    let queue_completion_projected = std::cell::Cell::new(false);
     if has_pending_ops || options.status.is_some() {
         let current_content =
             agent_doc_document_realtime_io::try_resolve_current_doc_from_file_with_source(
@@ -1394,8 +1400,44 @@ fn apply_pending_and_status_mutations(
                         agent_doc_session_check_io::enforce_review_done_guard(file, id)?;
                     }
                     if !options.pending_done.is_empty() {
+                        let composed_queue_completion = std::cell::RefCell::new(None);
                         let reap_outcome = if reap_done_in_same_write {
-                            backlog_cmd::done_and_reap_many(file, &options.pending_done)?
+                            backlog_cmd::done_and_reap_many_with_target_projection(
+                                file,
+                                &options.pending_done,
+                                |content| {
+                                    let mut plan =
+                                queue_consume::plan_queue_prompt_consumption_with_snapshot_and_count(
+                                    file,
+                            content,
+                            None,
+                            &options.pending_done,
+                            1,
+                        )?;
+                                    let planned = plan
+                                        .as_ref()
+                                        .map(|plan| plan.new_document.as_str())
+                                        .unwrap_or(content);
+                                    let (projected, marked_count) =
+                                agent_doc_queue::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
+                                    planned,
+                                    &options.pending_done,
+                                )?;
+                                    let consumed_count = plan
+                                        .as_ref()
+                                        .map(|plan| plan.consumed_texts.len())
+                                        .unwrap_or(0);
+                                    if let Some(plan) = plan.as_mut() {
+                                        plan.new_document = projected.clone();
+                                    }
+                                    if consumed_count + marked_count > 0 {
+                                        queue_completion_projected.set(true);
+                                        composed_queue_completion
+                                            .replace(Some((plan, consumed_count + marked_count)));
+                                    }
+                                    Ok(projected)
+                                },
+                            )?
                         } else {
                             for id in &options.pending_done {
                                 backlog_cmd::done(file, id)?;
@@ -1405,6 +1447,28 @@ fn apply_pending_and_status_mutations(
                                 target_content: None,
                             }
                         };
+                        if let Some((plan, completed_count)) =
+                            composed_queue_completion.into_inner()
+                        {
+                            if let Some(plan) = plan {
+                                queue_consume::record_queue_consumption_proofs(
+                            file,
+                            &plan,
+                            agent_doc_queue_io::queue_consumption_proof::QueueConsumptionProofStage::AfterMutation,
+                        )?;
+                                eprintln!(
+                                    "[queue] consumed {} item(s): {:?} (remaining: {})",
+                                    completed_count, plan.consumed_texts, plan.remaining,
+                                );
+                                if plan.drained {
+                                    eprintln!("[queue] drained — cleared queue_active");
+                                }
+                            } else {
+                                eprintln!(
+                                    "[queue] marked {completed_count} done-backed item(s) completed in the atomic tracked-work target"
+                                );
+                            }
+                        }
                         if let Some(target_content) = reap_outcome.target_content.as_deref() {
                             // Response closeouts commit from the response snapshot. Refresh
                             // that same commit input after the one-target reap so HEAD
@@ -1452,7 +1516,9 @@ fn apply_pending_and_status_mutations(
         set_status_with_options(file, status_text, options.force_disk)?;
     }
 
-    Ok(())
+    Ok(PendingStatusMutationOutcome {
+        queue_completion_projected: queue_completion_projected.get(),
+    })
 }
 
 /// `#backlogqueuepopulation`: collapse every mutation that makes tracked work
@@ -1657,13 +1723,40 @@ fn run_command_inner(
     guard_historical_retained_write_before_new_capture(file, commit_mode, closeout_role)?;
 
     if options.pending_only {
-        apply_pending_and_status_mutations(
+        let mutation_result = apply_pending_and_status_mutations(
             file,
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
             commit_mode != CommitMode::None,
-        )?;
+        );
+        if let Err(error) = mutation_result {
+            // A tracked-work-only commit can retain its exact editor-owned
+            // target before reaching the git effect. Persist that downstream
+            // effect identity in cycle state so session-check resumes the same
+            // commit after reactive editor/disk convergence instead of
+            // requiring another write/preflight cycle.
+            if commit_mode != CommitMode::None
+                && error_requests_retry_without_disk(&error)
+                && let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
+            {
+                agent_doc_cycle_state_io::record_pending_only_commit_target(
+                    file,
+                    &pending.target_hash,
+                )
+                .context("failed to retain pending-only git commit continuation")?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "pending_only_commit_continuation_retained file={} target_hash={} intent_id={} retry=session_check_state_edge",
+                        file.display(),
+                        pending.target_hash,
+                        pending.intent_id,
+                    ),
+                );
+            }
+            return Err(error);
+        }
         complete_queue_prompts_for_pending_only_done(
             file,
             &options.pending_done,
@@ -1913,7 +2006,7 @@ fn run_command_inner(
     let response_write_retained =
         write_result.is_err() && write_outcome_retains_closeout_mutations(&write_result);
 
-    if write_outcome_retains_closeout_mutations(&write_result) {
+    let pending_mutation_outcome = if write_outcome_retains_closeout_mutations(&write_result) {
         apply_pending_and_status_mutations(
             file,
             &options,
@@ -1933,8 +2026,10 @@ fn run_command_inner(
                     file.display()
                 )
             }
-        })?;
-    }
+        })?
+    } else {
+        PendingStatusMutationOutcome::default()
+    };
 
     if write_result.is_ok() {
         agent_doc_session_check_io::run_closeout_pending_maintenance(
@@ -2011,18 +2106,28 @@ fn run_command_inner(
     // not advance the queue.
     if write_result.is_ok() {
         let response_body = active_capture_response_body_for_write(file)?;
-        let refreshed_current_content;
-        let current_content_for_queue = match current_content.as_deref() {
-            Some(content) => content,
-            None => {
-                refreshed_current_content = if options.force_disk {
+        // Pending/backlog mutations can project queue completion into the
+        // same editor-authoritative target as the response. Only that
+        // reactive fact invalidates the pre-write capture; ordinary response
+        // queue routing still needs its pre-write diff.
+        let current_content_for_queue: std::borrow::Cow<'_, str> =
+            if pending_mutation_outcome.queue_completion_projected {
+                let refreshed = if options.force_disk {
                     resolve_force_disk_document(file, "queue_consumption")?.into_content()
                 } else {
                     resolve_current_document(file, "queue_consumption")?.into_content()
                 };
-                refreshed_current_content.as_str()
-            }
-        };
+                std::borrow::Cow::Owned(refreshed)
+            } else if let Some(content) = current_content.as_deref() {
+                std::borrow::Cow::Borrowed(content)
+            } else {
+                let refreshed = if options.force_disk {
+                    resolve_force_disk_document(file, "queue_consumption")?.into_content()
+                } else {
+                    resolve_current_document(file, "queue_consumption")?.into_content()
+                };
+                std::borrow::Cow::Owned(refreshed)
+            };
         let mut queue_completion_ids = agent_doc_queue::queue_heads::explicit_queue_completion_ids(
             &options.pending_done,
             &options.pending_gate,
@@ -2043,7 +2148,7 @@ fn run_command_inner(
         let queue_consumption_allowed = queue_consumption_allowed_for_response(
             file,
             baseline.as_deref(),
-            current_content_for_queue,
+            current_content_for_queue.as_ref(),
             &response_body,
             &queue_completion_ids,
         )?;
@@ -2051,7 +2156,7 @@ fn run_command_inner(
             && let Some(head_id) = queue_targeted_completion_id_for_current_head(
                 file,
                 baseline.as_deref(),
-                current_content_for_queue,
+                current_content_for_queue.as_ref(),
                 &response_body,
                 &options.pending_done,
             )?

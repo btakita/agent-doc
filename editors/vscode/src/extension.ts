@@ -1332,15 +1332,14 @@ async function restartSessionAction(): Promise<void> {
     );
 }
 
-// #s81q: Restart Agent — runs the same `session restart-supervisor` path as
-// "Recycle Supervisor" but with a distinct operator-facing intent (bring
-// the agent harness back up, re-resolving a changed `agent:` frontmatter).
-// Mirrors the JetBrains RestartAgentAction.
+// Restart Agent replaces the harness child and re-resolves current `agent:`
+// frontmatter. Recycle Supervisor remains a controller-code refresh that
+// preserves the child.
 async function restartAgentAction(): Promise<void> {
     await runSessionCommandForActiveFile(
-        'restart-supervisor',
+        'restart-agent',
         (output, rel) => {
-            showHint(buildSessionSuccessHint('restart-supervisor', rel, output));
+            showHint(buildSessionSuccessHint('restart-agent', rel, output));
         },
         'agent restart failed',
     );

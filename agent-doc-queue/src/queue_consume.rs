@@ -989,6 +989,97 @@ pub fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result
     Ok(strip_in_progress_marker_from_struck_queue_items(&consumed))
 }
 
+/// Project completion of every live queue prompt matching `done_ids` into the
+/// supplied document bytes without performing IO.
+///
+/// Closeout composition uses this before a tracked-work reap is published so
+/// the queue strike and backlog removal share one editor-authoritative target.
+pub fn mark_queue_prompts_completed_by_done_ids_in_content(
+    content: &str,
+    done_ids: &[String],
+) -> Result<(String, usize)> {
+    if done_ids.is_empty() {
+        return Ok((content.to_string(), 0));
+    }
+    let done_ids = done_ids
+        .iter()
+        .map(|id| normalize_done_id(id))
+        .collect::<HashSet<_>>();
+    let components = element::parse(content)?;
+    if !components.iter().any(|component| component.name == "queue") {
+        return Ok((content.to_string(), 0));
+    }
+    let keys = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("queue done projection: failed to parse queue: {err}"))?
+        .into_iter()
+        .filter(|node| !node.item.struck)
+        .filter(|node| {
+            queue_prompt_done_id(&node.item.text).is_some_and(|id| done_ids.contains(&id))
+        })
+        .map(|node| node.node_key)
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return Ok((content.to_string(), 0));
+    }
+    let count = keys.len();
+    Ok((consume_queue_nodes_by_key(content, &keys)?, count))
+}
+
+/// Verify that every matching live queue prompt in `before` is completed in
+/// `after`. IDs that were not queued impose no queue transition requirement.
+pub fn done_ids_have_atomic_queue_completion(
+    before: &str,
+    after: &str,
+    done_ids: &[String],
+) -> Result<bool> {
+    if done_ids.is_empty() {
+        return Ok(true);
+    }
+    let done_ids = done_ids
+        .iter()
+        .map(|id| normalize_done_id(id))
+        .collect::<HashSet<_>>();
+    let states = |content: &str| -> Result<(HashSet<String>, HashSet<String>)> {
+        let components = element::parse(content)?;
+        let Some(queue) = components
+            .iter()
+            .find(|component| component.name == "queue")
+        else {
+            return Ok((HashSet::new(), HashSet::new()));
+        };
+        let mut live = HashSet::new();
+        let mut completed = HashSet::new();
+        for entry in document_queue::parse(queue.content(content))? {
+            match entry {
+                QueueEntry::Prompt(prompt) => {
+                    if let Some(id) = queue_prompt_done_id(&prompt.text)
+                        && done_ids.contains(&id)
+                    {
+                        live.insert(id);
+                    }
+                }
+                QueueEntry::Completed(prompt) => {
+                    if let Some(id) = queue_prompt_done_id(&prompt.text)
+                        && done_ids.contains(&id)
+                    {
+                        completed.insert(id);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok((live, completed))
+    };
+    let (before_live, _) = states(before)?;
+    if before_live.is_empty() {
+        return Ok(true);
+    }
+    let (after_live, after_completed) = states(after)?;
+    Ok(before_live
+        .iter()
+        .all(|id| !after_live.contains(id) && after_completed.contains(id)))
+}
+
 fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
     let Ok(components) = element::parse(content) else {
         return content.to_string();
@@ -1321,6 +1412,26 @@ mod tests {
 
     fn queue_doc(body: &str) -> String {
         format!("<!-- agent:queue -->\n{body}<!-- /agent:queue -->\n")
+    }
+
+    #[test]
+    fn pure_done_projection_strikes_matching_queue_prompts_only() {
+        let content = queue_doc("- do [#alpha]\n- do [#beta]\n");
+        let (updated, count) =
+            mark_queue_prompts_completed_by_done_ids_in_content(&content, &["alpha".to_string()])
+                .unwrap();
+
+        assert_eq!(count, 1);
+        assert!(updated.contains("- ~~do [#alpha]~~\n"));
+        assert!(updated.contains("- do [#beta]\n"));
+        assert!(
+            done_ids_have_atomic_queue_completion(&content, &updated, &["alpha".to_string()],)
+                .unwrap()
+        );
+        assert!(
+            !done_ids_have_atomic_queue_completion(&content, &content, &["alpha".to_string()],)
+                .unwrap()
+        );
     }
 
     #[test]

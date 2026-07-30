@@ -425,6 +425,22 @@ pub struct DoneAndReapOutcome {
 }
 
 pub fn done_and_reap_many(file: &Path, ids: &[String]) -> Result<DoneAndReapOutcome> {
+    done_and_reap_many_with_target_projection(file, ids, |content| Ok(content.to_string()))
+}
+
+/// Compose an additional pure document projection into the same write that
+/// archives and reaps completed tracked work.
+///
+/// This lets closeout include the matching queue strike in the exact target,
+/// so editor delivery can never expose or retain a backlog-only deletion.
+pub fn done_and_reap_many_with_target_projection<F>(
+    file: &Path,
+    ids: &[String],
+    project_target: F,
+) -> Result<DoneAndReapOutcome>
+where
+    F: FnOnce(&str) -> Result<String>,
+{
     if ids.is_empty() {
         return Ok(DoneAndReapOutcome {
             removed_ids: Vec::new(),
@@ -465,21 +481,25 @@ pub fn done_and_reap_many(file: &Path, ids: &[String]) -> Result<DoneAndReapOutc
         removed_items.push(item);
     }
 
-    if removed_items.is_empty() {
+    if !removed_items.is_empty() {
+        target = archive_pending_done(file, &target, &removed_items)
+            .context("failed to archive completed item(s) to agent:done")?
+            .context("failed to archive completed item(s) to agent:done")?;
+        if backlog_changed
+            && let Some(reconciled) =
+                agent_doc_document::status_projection::reconcile_top_backlog_status_content(
+                    &target,
+                )?
+        {
+            target = reconciled;
+        }
+    }
+    target = project_target(&target).context("failed to compose completed tracked-work target")?;
+    if target == full_content {
         return Ok(DoneAndReapOutcome {
             removed_ids: Vec::new(),
             target_content: None,
         });
-    }
-
-    target = archive_pending_done(file, &target, &removed_items)
-        .context("failed to archive completed item(s) to agent:done")?
-        .context("failed to archive completed item(s) to agent:done")?;
-    if backlog_changed
-        && let Some(reconciled) =
-            agent_doc_document::status_projection::reconcile_top_backlog_status_content(&target)?
-    {
-        target = reconciled;
     }
 
     persist_pending_write(file, &full_content, &target)?;

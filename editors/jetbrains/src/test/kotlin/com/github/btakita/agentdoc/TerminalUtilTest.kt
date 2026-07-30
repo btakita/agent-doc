@@ -121,7 +121,7 @@ class TerminalUtilTest {
         ).toFile().readText()
 
         assertTrue(source.contains("TerminalUtil.recordRestartAgentMenuInvoked(project, file)"))
-        assertTrue(source.indexOf("recordRestartAgentMenuInvoked") < source.indexOf("restartSession(project, file)"))
+        assertTrue(source.indexOf("recordRestartAgentMenuInvoked") < source.indexOf("restartAgentSession(project, file)"))
     }
 
     @Test
@@ -878,6 +878,23 @@ class TerminalUtilTest {
             TerminalUtil.buildSessionCommand(
                 "agent-doc",
                 listOf("restart-supervisor"),
+                "tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+        )
+    }
+
+    @Test
+    fun `restart agent uses explicit agent session command`() {
+        assertEquals(
+            listOf(
+                "agent-doc",
+                "session",
+                "restart-agent",
+                "tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+            TerminalUtil.buildSessionCommand(
+                "agent-doc",
+                listOf("restart-agent"),
                 "tasks/agent-doc/agent-doc-bugs2.md",
             ),
         )

@@ -278,6 +278,14 @@ pub trait SessionCheckEffects {
     fn retained_document_write_blocks(&self, _file: &Path) -> bool {
         false
     }
+    /// Resume the git effect of an exact tracked-work-only `write --commit`
+    /// after its retained editor projection has converged.
+    ///
+    /// Implementations must fence the operation to durable cycle intent and
+    /// exact authority/disk content. The default keeps fixtures inert.
+    fn resume_retained_pending_only_commit(&self, _file: &Path) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 /// CLI entry: check the end-of-cycle write invariant for `file`.
@@ -632,6 +640,10 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
     fn retained_document_write_blocks(&self, file: &Path) -> bool {
         self.inner.retained_document_write_blocks(file)
     }
+
+    fn resume_retained_pending_only_commit(&self, file: &Path) -> Result<bool> {
+        self.inner.resume_retained_pending_only_commit(file)
+    }
 }
 
 /// Operator-facing session check. It may read live authority, write
@@ -884,6 +896,16 @@ fn run_with_options_inner(
             &recovered_disk,
             effects,
         )?;
+    }
+    // A retained tracked-work-only write may have converged after its original
+    // `--commit` invocation returned at the editor boundary. The requested git
+    // effect is durable cycle state, so session-check resumes that exact
+    // continuation from the state edge instead of asking for another write or
+    // preflight cycle.
+    if crate::profile::timed("resume_retained_pending_only_commit", || {
+        effects.resume_retained_pending_only_commit(file)
+    })? {
+        crate::invalidate_current_document_pass(file);
     }
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log

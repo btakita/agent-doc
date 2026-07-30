@@ -50,18 +50,41 @@ mod platform {
     impl ResizeWatcher {
         /// Spawn a resize watcher thread.
         ///
-        /// `resize_fn` is called on each SIGWINCH with the new `PtySize`.
+        /// `resize_fn` is called once from the current terminal dimensions after
+        /// SIGWINCH registration, then on each subsequent SIGWINCH.
+        ///
+        /// Registering before the initial sample closes the spawn-time race where
+        /// tmux resizes the owning pane after the child launch size was captured
+        /// but before this watcher starts. A signal in that interval is queued,
+        /// while the initial sample already observes the newest dimensions.
         /// The callback runs on the watcher thread; callers that need to
         /// forward to a shared pty handle should use a `Mutex` or channel.
         pub fn spawn<F>(resize_fn: F) -> Result<Self>
         where
             F: Fn(PtySize) + Send + 'static,
         {
+            Self::spawn_with_initial_query(resize_fn, || query_terminal_size(libc::STDIN_FILENO))
+        }
+
+        pub(super) fn spawn_with_initial_query<F, Q>(resize_fn: F, initial_query: Q) -> Result<Self>
+        where
+            F: Fn(PtySize) + Send + 'static,
+            Q: FnOnce() -> Result<(u16, u16)>,
+        {
             let mut signals =
                 Signals::new([SIGWINCH]).context("failed to register SIGWINCH handler")?;
             let stop = Arc::new(AtomicBool::new(false));
             let stop_clone = stop.clone();
             let handle_ref = signals.handle();
+
+            if let Ok((rows, cols)) = initial_query() {
+                resize_fn(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
 
             let handle = thread::Builder::new()
                 .name("resize-watcher".into())
@@ -162,11 +185,18 @@ mod tests {
     fn watcher_construction_and_stop() {
         let called = Arc::new(AtomicBool::new(false));
         let called_clone = called.clone();
-        let mut watcher = ResizeWatcher::spawn(move |_size| {
-            called_clone.store(true, Ordering::Relaxed);
-        })
+        let mut watcher = ResizeWatcher::spawn_with_initial_query(
+            move |_size| {
+                called_clone.store(true, Ordering::Relaxed);
+            },
+            || Ok((53, 119)),
+        )
         .expect("spawn resize watcher");
 
+        assert!(
+            called.load(Ordering::Relaxed),
+            "watcher construction must project the current terminal size before waiting for SIGWINCH",
+        );
         watcher.stop();
     }
 

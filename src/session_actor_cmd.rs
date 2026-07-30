@@ -487,6 +487,25 @@ fn restart_targets_the_calling_pane(owner_pane: Option<&str>) -> bool {
 }
 
 pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
+    restart_with_target(file, mode, force, false)
+}
+
+/// Replace the harness child while keeping the session supervisor as the owner.
+///
+/// The wire prefix is deliberately understood by the supervisor rather than
+/// inferred from pane/process state. That keeps the operator's "Restart Agent"
+/// intent durable across controller transport and distinct from a controller
+/// recycle, including when the running supervisor notices build skew.
+pub fn restart_agent(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
+    restart_with_target(file, mode, force, true)
+}
+
+fn restart_with_target(
+    file: &Path,
+    mode: RestartMode,
+    force: bool,
+    restart_agent: bool,
+) -> Result<()> {
     let ctx = build_context(file)?;
     let tmux = Tmux::default_server();
     let owner_pane = ctx
@@ -515,17 +534,24 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
         guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Restart)?;
     }
     prepare_restart_live_busy_pane(&ctx, &tmux, force)?;
+    let replacement_mode = if restart_agent {
+        format!("agent:{}", mode.as_str())
+    } else {
+        mode.as_str().to_string()
+    };
     let receipt = agent_doc_controller_io::project_controller::request_supervisor_replacement(
         &ctx.base_dir,
         agent_doc_controller_io::project_controller::SupervisorReplacementRequest {
             file: ctx.canonical_file.clone(),
-            mode: mode.as_str().to_string(),
+            mode: replacement_mode,
             force,
         },
     )?;
+    let target = if restart_agent { "agent" } else { "supervisor" };
     println!(
-        "Requested {} supervisor replacement for {} via project controller (stage {}, receipt {}, background_started={}).",
+        "Requested {} {} replacement for {} via project controller (stage {}, receipt {}, background_started={}).",
         mode.as_str(),
+        target,
         ctx.canonical_file.display(),
         receipt.accepted_stage,
         receipt.operator_receipt.receipt_id,

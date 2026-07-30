@@ -283,6 +283,121 @@ fn cycle_event_is(state_event: &str, expected: &str) -> bool {
             .any(|field| field.strip_prefix("reason=") == Some(expected))
 }
 
+fn exact_legacy_pending_only_reap(
+    head_content: &str,
+    current_content: &str,
+    pending_done_ids: &[String],
+) -> Result<bool> {
+    if pending_done_ids.is_empty() || head_content == current_content {
+        return Ok(false);
+    }
+    let mut remaining = pending_done_ids
+        .iter()
+        .map(|id| id.trim().trim_start_matches('#').to_string())
+        .filter(|id| !id.is_empty())
+        .collect::<std::collections::HashSet<_>>();
+    if remaining.is_empty() {
+        return Ok(false);
+    }
+    let mut projected = String::with_capacity(head_content.len());
+    for line in head_content.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let matched = trimmed
+            .starts_with("- [ ]")
+            .then(|| {
+                remaining
+                    .iter()
+                    .find(|id| trimmed.contains(&format!("[#{id}]")))
+                    .cloned()
+            })
+            .flatten();
+        if let Some(id) = matched {
+            remaining.remove(&id);
+        } else {
+            projected.push_str(line);
+        }
+    }
+    if !remaining.is_empty() {
+        return Ok(false);
+    }
+    let (projected, _) =
+        agent_doc_queue::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
+            &projected,
+            pending_done_ids,
+        )?;
+    Ok(projected == current_content)
+}
+
+enum PendingOnlyCommitDecision {
+    NotReady,
+    Eligible {
+        target_hash: String,
+        migrated_legacy_intent: bool,
+    },
+    Superseded {
+        target_hash: String,
+    },
+    InvalidAtomicCompletion {
+        target_hash: String,
+    },
+}
+
+fn pending_only_commit_target(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+    authority_content: &str,
+    disk_content: &str,
+) -> Result<PendingOnlyCommitDecision> {
+    if authority_content != disk_content {
+        return Ok(PendingOnlyCommitDecision::NotReady);
+    }
+    let authority_hash = agent_doc_hash::content_hash(authority_content);
+    if let Some(target_hash) = state.pending_only_commit_target_hash.as_deref() {
+        if authority_hash != target_hash {
+            return Ok(PendingOnlyCommitDecision::Superseded {
+                target_hash: target_hash.to_string(),
+            });
+        }
+        if !state.pending_done_ids.is_empty() {
+            let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
+                return Ok(PendingOnlyCommitDecision::NotReady);
+            };
+            if !agent_doc_queue::queue_consume::done_ids_have_atomic_queue_completion(
+                &head_content,
+                authority_content,
+                &state.pending_done_ids,
+            )? {
+                return Ok(PendingOnlyCommitDecision::InvalidAtomicCompletion {
+                    target_hash: target_hash.to_string(),
+                });
+            }
+        }
+        return Ok(PendingOnlyCommitDecision::Eligible {
+            target_hash: target_hash.to_string(),
+            migrated_legacy_intent: false,
+        });
+    }
+    // 0.35.94/0.35.95 could settle a retained `--backlog-only --done`
+    // projection without persisting the downstream commit identity. Migrate
+    // only the exact historical shape: a committed cycle records the done ids,
+    // HEAD differs from the converged editor/disk cut solely by deleting those
+    // unchecked rows, and no additions or other removals are present.
+    if state.phase != agent_doc_turn::CyclePhase::Committed || state.pending_done_ids.is_empty() {
+        return Ok(PendingOnlyCommitDecision::NotReady);
+    }
+    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(PendingOnlyCommitDecision::NotReady);
+    };
+    if exact_legacy_pending_only_reap(&head_content, authority_content, &state.pending_done_ids)? {
+        Ok(PendingOnlyCommitDecision::Eligible {
+            target_hash: authority_hash,
+            migrated_legacy_intent: true,
+        })
+    } else {
+        Ok(PendingOnlyCommitDecision::NotReady)
+    }
+}
+
 pub fn session_check_effects() -> RuntimeSessionCheckEffects {
     RuntimeSessionCheckEffects
 }
@@ -361,6 +476,161 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             file,
             agent_doc_document_realtime_io::RetainedWriteCycleBoundary::SessionCheck.gate_source(),
         )
+    }
+
+    fn resume_retained_pending_only_commit(&self, file: &Path) -> Result<bool> {
+        let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+            return Ok(false);
+        };
+        let mut authority_content =
+            agent_doc_document_realtime_io::try_resolve_current_document_content(
+                file,
+                "pending_only_commit_resume_authority",
+            )?;
+        let mut disk_content =
+            agent_doc_document_realtime_io::resolve_disk_current_document_content(
+                file,
+                "pending_only_commit_resume_disk",
+            )?;
+        let (target_hash, migrated_legacy_intent) = match pending_only_commit_target(
+            file,
+            &state,
+            &authority_content,
+            &disk_content,
+        )? {
+            PendingOnlyCommitDecision::NotReady => return Ok(false),
+            PendingOnlyCommitDecision::Eligible {
+                target_hash,
+                migrated_legacy_intent,
+            } => (target_hash, migrated_legacy_intent),
+            PendingOnlyCommitDecision::Superseded { target_hash } => {
+                let retained_matches = agent_doc_document_realtime_io::pending_document_write(file)
+                    .is_some_and(|pending| pending.target_hash.eq_ignore_ascii_case(&target_hash));
+                if retained_matches
+                        && !agent_doc_document_realtime_io::retire_retained_projection_superseded_by_authority(
+                            file,
+                            &target_hash,
+                            "pending_only_commit_superseded",
+                        )?
+                    {
+                        return Ok(false);
+                    }
+                anyhow::ensure!(
+                    agent_doc_cycle_state_io::clear_pending_only_commit_intent(file, &target_hash,)?,
+                    "pending-only commit continuation for {} lost its superseded target identity before retirement",
+                    file.display(),
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "pending_only_commit_continuation_superseded file={} retired_target_hash={} authoritative_hash={} authority=editor_crdt disk_exact=true",
+                        file.display(),
+                        target_hash,
+                        agent_doc_hash::content_hash(&authority_content),
+                    ),
+                );
+                return Ok(true);
+            }
+            PendingOnlyCommitDecision::InvalidAtomicCompletion { target_hash } => {
+                let head_content =
+                        agent_doc_git_io::revision::show_head(file)?.ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "cannot roll back invalid pending-only completion for {} without readable HEAD content",
+                                file.display(),
+                            )
+                        })?;
+                agent_doc_document_realtime_io::settle_committed_projection_if_current_through_authority(
+                        file,
+                        &head_content,
+                        &authority_content,
+                        "pending_only_commit_invalid_atomic_completion_rollback",
+                    )?;
+                anyhow::ensure!(
+                    agent_doc_cycle_state_io::clear_pending_only_commit_intent(file, &target_hash,)?,
+                    "pending-only commit continuation for {} lost its invalid target identity before rollback retirement",
+                    file.display(),
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "pending_only_commit_invalid_atomic_completion_rolled_back file={} retired_target_hash={} restored_head_hash={} authority=editor_crdt reason=queue_not_completed_with_done_reap",
+                        file.display(),
+                        target_hash,
+                        agent_doc_hash::content_hash(&head_content),
+                    ),
+                );
+                return Ok(true);
+            }
+        };
+        if self.retained_document_write_blocks(file) {
+            let retained_target_matches =
+                agent_doc_document_realtime_io::pending_document_write(file)
+                    .is_some_and(|pending| pending.target_hash.eq_ignore_ascii_case(&target_hash));
+            if !retained_target_matches
+                || !agent_doc_document_realtime_io::settle_retained_non_capture_projection_through_authority(
+                    file,
+                    "pending_only_commit_resume_retained_projection",
+                )?
+                || self.retained_document_write_blocks(file)
+            {
+                return Ok(false);
+            }
+            authority_content =
+                agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    file,
+                    "pending_only_commit_resume_settled_authority",
+                )?;
+            disk_content = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+                file,
+                "pending_only_commit_resume_settled_disk",
+            )?;
+            anyhow::ensure!(
+                authority_content == disk_content
+                    && agent_doc_hash::content_hash(&authority_content) == target_hash,
+                "pending-only commit continuation for {} changed while its retained projection settled",
+                file.display(),
+            );
+        }
+        if migrated_legacy_intent {
+            agent_doc_cycle_state_io::record_pending_only_commit_target(file, &target_hash)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "pending_only_commit_continuation_migrated file={} target_hash={} proof=exact_recorded_done_row_deletions",
+                    file.display(),
+                    target_hash,
+                ),
+            );
+        }
+
+        let outcome = agent_doc_commit_io::commit_with_outcome(file)?;
+        let head_content = agent_doc_git_io::revision::show_head(file)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "pending-only commit continuation for {} completed without readable HEAD content",
+                file.display()
+            )
+        })?;
+        anyhow::ensure!(
+            agent_doc_hash::content_hash(&head_content) == target_hash,
+            "pending-only commit continuation for {} did not land its exact target in HEAD",
+            file.display(),
+        );
+        anyhow::ensure!(
+            agent_doc_cycle_state_io::clear_pending_only_commit_intent(file, &target_hash)?,
+            "pending-only commit continuation for {} lost its target identity before clear",
+            file.display(),
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "pending_only_commit_continuation_committed file={} target_hash={} did_commit={} migrated_legacy_intent={} authority=editor_crdt",
+                file.display(),
+                target_hash,
+                outcome.did_commit,
+                migrated_legacy_intent,
+            ),
+        );
+        Ok(true)
     }
 
     fn resume_captured_finalize(
@@ -854,6 +1124,47 @@ mod tests {
     use super::*;
     use agent_doc_session_check_io::{CapturedFinalizeResumeOutcome, SessionCheckEffects};
     use agent_doc_turn::CyclePhase;
+
+    #[test]
+    fn legacy_pending_only_commit_requires_atomic_queue_strike_and_done_row_deletion() {
+        let head = concat!(
+            "# Session\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#done]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep] keep this\n",
+            "- [ ] [#done] completed work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let exact = concat!(
+            "# Session\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~~do [#done]~~\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert!(exact_legacy_pending_only_reap(head, exact, &["done".to_string()],).unwrap());
+
+        let deletion_only = exact.replace("- ~~do [#done]~~", "- do [#done]");
+        assert!(
+            !exact_legacy_pending_only_reap(head, &deletion_only, &["done".to_string()]).unwrap(),
+            "an unstruck queue entry must make a retained backlog deletion ineligible",
+        );
+
+        let with_operator_edit = exact.replace("keep this", "operator changed this");
+        assert!(
+            !exact_legacy_pending_only_reap(head, &with_operator_edit, &["done".to_string()])
+                .unwrap(),
+            "legacy migration must not authorize a commit containing any untracked edit",
+        );
+        assert!(
+            !exact_legacy_pending_only_reap(head, exact, &["keep".to_string()]).unwrap(),
+            "the removed row must match the cycle's explicit done intent",
+        );
+    }
 
     /// `#deadlockhint` — when the recovery classifier finds nothing to recover
     /// there is no response body pending, so prescribing `write --commit` is a

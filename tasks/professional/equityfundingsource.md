@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -136,10 +136,13 @@ Production is still running the old code, so the 401 loop is still burning ~6,50
 2. A whole-tree deploy from this checkout would ship that concurrent session's in-progress TMO refactor to production.
 
 The safe path is a deploy from a clean checkout at `29f27773`, not from this tree. Say go and I'll run it, then verify: worker settings reporting `observability.enabled: true`, the `/api/public/messages/realtime/ws` 401 count falling toward zero on the same telemetry query, and a fresh anonymous tab opening no socket until the first message is sent. Filed as the top backlog item with those checks written out.
-<!-- agent:boundary:597d6e6d -->
+<!-- agent:boundary:78697291 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#prod-fix-deploy]
+- do [#tmo-sync-cron-failures]
+- 🚧 deploy to production
 - I noticed that some Available Deals had an Application Denied flag. Are these viewable to Lenders in the Available Deals? Denied Applications should not be available. What part of the pipeline do you recommend we place them in? Should they be in Parked or should we create another column for Denied Applications?
 <!-- /agent:queue -->
 

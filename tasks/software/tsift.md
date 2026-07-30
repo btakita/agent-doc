@@ -360,7 +360,7 @@ One honest gap. The executor-level refusal of `rename_symbol` is asserted per la
 CI run `30577467047` is queued on `cd95daa` at the time of writing; the two preceding commits are green and the above is local evidence.
 
 Queue after this: `release + publish`.
-<!-- agent:boundary:2640f259 -->
+<!-- agent:boundary:66e766db -->
 <!-- /agent:exchange -->
 
 ## Queue

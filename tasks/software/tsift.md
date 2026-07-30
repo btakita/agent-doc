@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -314,7 +314,7 @@ I also added a contract-exhaustiveness guard: every registered executor must app
 **What's left is genuinely blocked**, and I filed it that way: the 20 structural-only languages need per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search` first, because `parse_semantic_edit_source` validates through `executor.graph_lang()`. Once a language has graph support, registering it is a contract row plus a conformance fixture — it unblocks one language at a time rather than as one big step.
 
 Queue after this: `release + publish`.
-<!-- agent:boundary:613e2b4b -->
+<!-- agent:boundary:1f612323 -->
 <!-- /agent:exchange -->
 
 ## Queue

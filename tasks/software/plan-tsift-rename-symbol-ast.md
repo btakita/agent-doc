@@ -42,11 +42,17 @@ is a silent behaviour change: that value could be a serialization key, a config
 lookup, a log grep target, a database column. Reported as
 `applied=true conflicts=0`.
 
-### 2. The reported range does not describe the edit
+### 2. No field reports the extent of the edit
 
-The same run reports `range: 2-2` while the diff actually spans lines 1–9. The
-bounded diff preview, the reviewer reading the summary, and anything downstream
-keying off the range are all reading a number that is not the edit.
+The same run printed `range: 2-2` while the change spanned lines 1–9.
+
+**Correction to the first draft of this plan:** that number is not wrong — the
+field is `target_range`, the resolved symbol's *declaration* span, and it was
+doing its job. The defect is narrower and is a reporting gap rather than a bad
+value: there was no field describing what the edit actually touched, and the
+human printer labelled the declaration span `range:`, which reads as the extent
+of the change. Fixed in phase 1 by relabelling it `target range:` and adding an
+`edited_range` computed from the two revisions of the file.
 
 ### 3. Rename is per-file, so it breaks every caller
 
@@ -86,7 +92,7 @@ spans plus the language's identifier nodes — none of which needs new
 per-language prose, only a per-language *identifier node kind* set, which is one
 small table.
 
-### Phase 1 — `#tsrenameast1` — AST occurrence collection (single file)
+### Phase 1 — `#tsrenameast1` — AST occurrence collection (single file) — **DONE**
 
 Add `graph::rename::identifier_occurrences(lang, source, name) -> Vec<Span>`:
 walk the tree and yield only nodes whose kind is in that language's
@@ -102,6 +108,20 @@ Exit criteria: the defect-1 fixture renames the definition and the call site and
 leaves the doc comment, line comment, and string literal untouched. The
 regression test asserts each of those positions **individually** — a test that
 only counts replacements would pass on the wrong ones.
+
+**Landed.** `packages/tsift-graph/src/rename.rs` holds the walk and the
+per-language identifier-kind table; both scans in `semantic_edit.rs` now route
+through it. One risk was checked before committing to the design: tree-sitter
+parses Rust macro arguments as an opaque `token_tree`, so an identifier-node
+walk could have *lost* call sites inside `assert_eq!`/`format!` that the old
+substring scan found. A probe of the parse tree showed identifiers inside a
+`token_tree` are still named `identifier` nodes, so there is no regression — and
+that case now has its own test.
+
+Known limitation carried into phase 2: the Rust identifier set includes
+`field_identifier`, so renaming a function also renames an identically-named
+struct field. That matches the old scan's behaviour; narrowing it needs the
+graph-scoped resolution phase 2 introduces.
 
 ### Phase 2 — `#tsrenameast2` — cross-file rename via the call graph
 

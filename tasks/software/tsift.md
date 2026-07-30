@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: d79a5842-9e97-40fb-b514-ac9b71a82136
+resume: 765c7ea4-1760-4ae9-8ffa-b4daf4861a5b
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -105,8 +105,6 @@ I have not started either; they are queued in priority order, not gated. Say the
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#astgrepstructural]~~
-- ~~Should we integrate ast-grep to support code search + refactor + editing code across many different languages? Should asg-grep be the core to convert code to ast or should we stick with the existing tsift ast bindings? I need to add more languages.~~ — auto-struck: answered this cycle (#ftstrike)
 - Please extract tsift:code-navigation section into a runbook. If AGENTS.md + CLAUDE.md are used and CLAUDE.md uses `@AGENTS.md`, please do not add redundant instructions.
 - release + publish
 <!-- /agent:queue -->

@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -275,6 +275,11 @@ Verification passed: the focused positive reconnect regression, the negative arb
 
 ### Re: fully reactive agent-doc closeout, restart, and tmux recovery
 
+> **Queue prompt:**
+>
+> do [#unpaidoutsideactivity]
+
+
 You were right about `#unpaidoutsideactivity`: the backlog row had been removed only in an uncommitted retained projection. Your editor re-add was authoritative. The stale deletion was never committed, and the recovery policy now supersedes it instead of replaying it. The operator is not required to save the document.
 
 Released agent-doc 0.35.96 with JetBrains plugin 0.2.323:
@@ -300,12 +305,22 @@ Verification completed:
 - Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.96
 
 This closeout marks and reaps `#unpaidoutsideactivity` atomically through the fixed path.
-<!-- agent:boundary:a0516c0c -->
+### Re: Fully reactive recovery and Run Agent Doc routing — gpt-5
+
+Agent-doc 0.35.97 is implemented, verified, installed, committed, tagged, and pushed.
+
+The editor is now treated as authority even when its buffer is unsaved. Zero-replica delivery retains the exact target and downstream commit continuation; session-check fails closed when delivery is unobserved; the editor's undelivered expected base cannot falsely supersede that target; and reconnect resumes the original pending-only operation without a second write, forced disk write, or operator save. After the IDEA restart, JetBrains 0.2.323 registered live for this document, `equityfundingsource.md`, and `lazily.md`. The retained `#unpaidoutsideactivity` operation then settled atomically, and the live queue/backlog are empty.
+
+The Claude submission failure had a separate concrete cause: historical startup-log state outweighed a fresh generation-matched Ready actor, so Run Agent Doc entered the 120-second startup probe. When the prompt was submitted manually during that wait, the delayed route later queued a duplicate into the busy composer. The fix resolves startup history against current actor state and rechecks the reactive closeout projection immediately before pane input. A ready actor invalidates stale startup history, and a newer same-document cycle causes the delayed route to exit with no injection or queued duplicate.
+
+The reactive policy is now explicit across editor authority, template validation, routing readiness, tmux synchronization, retry, and closeout. External ingress prefers event channels; polling/RPC remains valid only at a non-reactive boundary to update Sources; internal decisions are extracted into Computeds/Effects. The Lazily ingress-primitives plan remains scheduled once as `#designimplementtransport` after this build/test/install feedback.
+
+Verification passed: the focused regressions, route crate compilation, full `make check`, and `make install-full`. Source commit `f34a32d27` and superproject pointer commit `ec308f13d` are pushed with tag `v0.35.97`. CI and the GitHub Release workflow are in progress; project policy requires recording that state without polling. The fresh 0.35.97 controller is live, and the old route-owned supervisor has an idle-boundary recycle requested so this active turn is not interrupted. No operator action or document save is required.
+<!-- agent:boundary:1e9520d6 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#unpaidoutsideactivity]
 <!-- /agent:queue -->
 
 ## Notes
@@ -316,7 +331,6 @@ This closeout marks and reaps `#unpaidoutsideactivity` atomically through the fi
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#unpaidoutsideactivity] #agent-doc-bug Make `--done`/backlog-only closeout atomically reap the completed tracked row before `guard_completed_pending_reap`; add a recovery regression proving a hook-captured committed response plus late `--done` does not require another preflight/repair cycle. Live recurrence: haiven.md `#unpaidoutsideactivity`.
 <!-- /agent:backlog -->
 
 ## Review

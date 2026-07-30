@@ -131,13 +131,53 @@ The other 16 match expression-level patterns directly.
 `make check` exit 0, 1580 passed, 0 failed. CI was green on the preceding commit. Live smoke on the installed binary across go, java, cpp, csharp, elixir, lua, php, ruby, swift, scala, haskell, nix, hcl, html, json, and yaml.
 
 `#astgrepexec` (executors for these languages) stays blocked where it was — it needs the graph/search tag-query work first, which is the same dependency that makes this tier structural-only.
-<!-- agent:boundary:8dbf441f -->
+
+### Re: do [#tsiftnavrunbook] — opus-5
+
+Done — `tsift@1ed8f68`, superproject `64bd291d5`. Both parts of the ask, and they turned out to be one change.
+
+**The duplication was worse than "repeated in both files."** tsift's own `CLAUDE.md` was `@AGENTS.md` followed by a verbatim copy of the ~4 KB block that `AGENTS.md` already carries — so a Claude Code session loaded it twice, and the second copy was the one that would drift. `tsift init` was the thing putting it there: it injected into `AGENTS.md`, then injected the same string into `CLAUDE.md` whenever that file existed, with no notion of one deferring to the other.
+
+**De-duplication is deference-aware, not unconditional**, because the two ways a `CLAUDE.md` can defer need opposite handling:
+
+| `CLAUDE.md` shape | What `init` does now |
+|---|---|
+| `@AGENTS.md` import | no section injected; an existing one is **removed** |
+| symlink to `AGENTS.md` | **left alone** |
+| standalone file | unchanged — still gets the section |
+
+The symlink row is the one worth stating. `.exists()` follows symlinks, so the old code happily opened `CLAUDE.md`, saw the section (it was reading `AGENTS.md`), and rewrote through the link. Under a naive "defers ⇒ strip the duplicate" rule that becomes *delete the canonical copy* — the superproject, where `CLAUDE.md → AGENTS.md`, would have lost its Code Navigation block entirely. There's a test asserting the section still appears in `AGENTS.md` exactly once after init through a symlink, and it fails if `SameFile` is routed to the removal path.
+
+**On extraction: the block is now a router, not a manual.** Session start, the envelope-over-raw-read substitutions, and the verification rule stay inline — those are what an agent needs before it has read anything. Budgets, `tsift workflow search`, `report.scale_guard` handling, the `tsift rewrite --run` path for harnesses without `PreToolUse` hooks, and the Codex/OpenCode install commands moved to a generated `runbooks/code-navigation.md`. The prompt-resident block roughly halves (4.2 KB → 2.1 KB).
+
+**This does not reopen the hazard that kept the block self-contained.** The earlier decision — "avoid a runbook-only install that breaks standalone checkouts" — assumed the runbook was something a repo might or might not ship. It isn't anymore: `tsift init` **writes** it, under its own `<!-- tsift:code-navigation-runbook v=X.Y.Z -->` markers, so the pair ships together in every initialized checkout. And `tsift status` now reports `instructions: stale` when the runbook is missing or its marker version differs, even if the block marker is current — so a repo initialized by an older tsift is repaired by the `tsift init` / `tsift status --fix` it already recommends, with no new operator step. Text outside the runbook markers is preserved, which is how the superproject keeps its local `gh run watch` closeout convention in the same file.
+
+**One latent bug found while building it.** `<!-- tsift:code-navigation-runbook` begins with the block's marker prefix, so `content.find(SECTION_MARKER_PREFIX)` matched the runbook's marker. The prefix now includes its trailing space (`<!-- tsift:code-navigation `), and a test pins that a runbook-marker-only file reads as `Missing`, not as a block.
+
+**Verification.** `make check` exit 0, 1587 passed, 0 failed (was 1580). 8 new unit tests, 1 new CLI integration test, and a new SimWorld step + coverage requirement (`status/missing_runbook`) so the staleness edge runs in the seeded corpora, not just the named trace.
+
+Mutation-checked rather than trusting green — six mutations, each caught by the test that claims to cover it:
+
+- ignore the `@AGENTS.md` import → both dedup unit tests and the CLI test fail
+- route symlinks through the removal path → the symlink test fails
+- never write the runbook → 5 tests fail, including the two pre-existing version checks
+- drop the runbook staleness downgrade → all 3 SimWorld tests fail with `missing runbook did not make instructions stale`
+- delete `tsift workflow search` from the runbook body → the handoff-detail test fails
+- drop the trailing space from the marker prefix → the collision test fails
+
+Live on the installed binary, not just the suite: `tsift init` on the tsift repo reduced `CLAUDE.md` to a single line (`@AGENTS.md`), created the runbook, and reports `deferred` on re-run; on the superproject it reported `deferred` for the symlinked `CLAUDE.md` and left it untouched. Both repos report `instructions: current`, and a second `init` is a no-op in each.
+
+CI is **in progress** on `1ed8f68` at the time of writing (run `30569395251`); the preceding commit was green, and the above is local evidence.
+
+`#astgrepexec` is unchanged — still blocked on per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search`, which is the same dependency that makes the 20 new grammars a structural-only tier.
+<!-- agent:boundary:5aef5cb4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- do [#tsiftnavrunbook]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go priority -->
+- 🚧 do [#crosslanguageconformance]
+- ~~do [#tsiftnavrunbook]~~
 - do [#astgrepexec]
 - release + publish
 <!-- /agent:queue -->
@@ -148,7 +188,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tsiftnavrunbook] Extract the generated tsift:code-navigation block into a runbook and de-duplicate it: AGENTS.md is canonical and CLAUDE.md uses @AGENTS.md, so the block should not be repeated in both. Re-filed because the original queue item was auto-struck during the #astgreplangs cycle without the work being done
+- [ ] 🚧 [#crosslanguageconformance] Please add a cross language conformance suite, to ensure consistent behavior across all supported languages.
 - [ ] [#astgrepexec] Register semantic-edit executors for languages that have an ast-grep grammar but no executor (kotlin and bash today, plus whatever #astgreplangs adds) so structural_rewrite and the symbol-resolved intent kinds reach them. Blocked on per-language tag queries + symbol extraction in tsift-graph/tsift-search
 <!-- /agent:backlog -->
 

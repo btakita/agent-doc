@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -368,12 +368,13 @@ The exact 2× proof makes a semantic collapse safe, but only through the fenced 
 I added `#jbcoldstartcrdtowner` at the top of the actionable backlog. It links this recurrence to `#zq8e`, `#7n20`, and `#editormodelmissing`, and requires a restart regression that keeps pane focus/layout sync under two seconds while CRDT recovery proceeds independently and exactly once.
 
 Proof: `.codex/skills/agent-doc/SKILL.md` was auto-updated to the installed `0.35.104` workflow; no source implementation was changed. I used the binary admission/plan path, bounded tsift context and log digests, and focused IDEA/ops-log windows. Full `make check` passed, including all 8,413 agent-doc tests and the formal models. The latest `src/agent-doc` CI run (`30523153338`) is green. Confidence is high in the cold-start classification and failed semantic-settlement proof; the exact ordering between relay-model loss and hub-ownership loss still needs the new regression/instrumentation. No escalation or direct mutation of `equityfundingsource.md` was performed.
-<!-- agent:boundary:7800a946 -->
+<!-- agent:boundary:7a87de9a -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- The tmux pane auto-sync is performing better after an initial period of time after Idea starts. But when Idea starts and the project loads, there is ~30-60 seconds where the tmux pane auto-sync is non-responsive.
+- ~~The tmux pane auto-sync is performing better after an initial period of time after Idea starts. But when Idea starts and the project loads, there is ~30-60 seconds where the tmux pane auto-sync is non-responsive.~~
+- ⏭️ do [#jbcoldstartcrdtowner]
 <!-- /agent:queue -->
 
 ## Notes

@@ -99,13 +99,47 @@ The cheap tier is worth taking soon and is directly useful to you: **go, cpp, c-
 The second tier — giving those languages semantic-edit executors so `structural_rewrite` and the symbol-resolved kinds reach them — is `#astgrepexec`, and it depends on the graph/search side, so it should not be started until the first lands.
 
 I have not started either; they are queued in priority order, not gated. Say the word on `#astgreplangs` and I will take it — it is mostly mechanical, and the drift guard I added this cycle will catch any executor that gets registered without a grammar.
-<!-- agent:boundary:5f4dbb23 -->
+
+### Re: do [#astgreplangs] — opus-5
+
+> **Queue prompt:**
+>
+> Please extract tsift:code-navigation section into a runbook. If AGENTS.md + CLAUDE.md are used and CLAUDE.md uses `@AGENTS.md`, please do not add redundant instructions.
+
+
+Done — `tsift@3f79b39`, superproject `9720f0d41`. `tsift ast-grep languages` now lists **28**, up from 8.
+
+Added: c, cpp, csharp, css, dart, elixir, go, haskell, hcl, html, java, json, lua, nix, php, ruby, scala, solidity, swift, yaml.
+
+**They are a structural-only tier, and the feature wiring is where that's enforced.** Their `lang-*` features fan out to `tsift-astgrep` *only*, never to `tsift-graph`/`tsift-search`. A tree-sitter grammar is enough to match and rewrite a shape; indexing additionally needs per-language tag queries and symbol extraction. So these languages are matchable and rewritable but not indexed, not searchable, and have no semantic-edit executor — which also means `structural_rewrite` **refuses** them, since it needs an executor to reparse and validate its output. There's a test pinning exactly that boundary: Go rewrites fine through `ast-grep rewrite`, and `edit-intents` refuses it without writing. `lang-zig` is the mirror image — indexable, no ast-grep grammar.
+
+**Probing each grammar live turned up four that don't behave like the rest.** I checked them individually rather than assuming the tier was uniform, and it's a good thing:
+
+| Language | Quirk | Workaround |
+|---|---|---|
+| **C** | `foo($A)` matches nothing — tree-sitter reads it as a *declaration*, not a call | trailing semicolon: `foo($A);` |
+| **CSS** | `color: $V` matches nothing | trailing semicolon: `color: $V;` |
+| **Dart** | expression/statement patterns match nothing however spelled | declaration granularity only: `void main() { print($A); }` |
+| **Solidity** | same as Dart | `function f() public { $$$B }` |
+
+The other 16 match expression-level patterns directly.
+
+**The Dart result is worth your attention**, because Dart was one of the five languages I put in the "first, for lazily-binding codemods" list. It does not deliver that: tree-sitter-dart can't parse a bare expression fragment, so there are no call-site codemods in Dart at all. Go, cpp, csharp, and java all work as intended. I added a companion test asserting those three still match call expressions directly, so a regression to Dart-like behaviour in the languages that actually motivated this work can't pass unnoticed.
+
+**Drift guards.** The enum now has four parallel `match` arms across 28 variants, so I added two. One asserts every listed language is reachable from some file extension — a language added to `all()`/`from_name` but missed in `from_path` would be advertised and `--lang`-selectable while every directory walk silently skipped its files. One asserts every variant maps to the correspondingly named `SupportLang`, since a mismap is a wrong-grammar parse: worse than a refusal, because it silently under-matches instead of erroring. Both mutation-checked, and the pre-existing name round-trip test stays green under those mutations — which is what shows the new guards reach arms it couldn't.
+
+`make check` exit 0, 1580 passed, 0 failed. CI was green on the preceding commit. Live smoke on the installed binary across go, java, cpp, csharp, elixir, lua, php, ruby, swift, scala, haskell, nix, hcl, html, json, and yaml.
+
+`#astgrepexec` (executors for these languages) stays blocked where it was — it needs the graph/search tag-query work first, which is the same dependency that makes this tier structural-only.
+<!-- agent:boundary:8dbf441f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- Please extract tsift:code-navigation section into a runbook. If AGENTS.md + CLAUDE.md are used and CLAUDE.md uses `@AGENTS.md`, please do not add redundant instructions.
+- ~~Please extract tsift:code-navigation section into a runbook. If AGENTS.md + CLAUDE.md are used and CLAUDE.md uses `@AGENTS.md`, please do not add redundant instructions.~~
+- ~~do [#astgreplangs]~~
+- do [#astgrepexec]
 - release + publish
 <!-- /agent:queue -->
 <!--
@@ -115,7 +149,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#astgreplangs] Widen tsift-astgrep to the unclaimed ast-grep grammars, structural-only (feature line + 3 match arms each): go, cpp, c-sharp, dart, java first for lazily-binding codemods, then swift/ruby/php/scala/lua/elixir/haskell/nix/solidity/css/html/json/yaml/hcl. No tsift-graph/tsift-search work — index support is #astgrepexec's dependency, not this item's
 - [ ] [#astgrepexec] Register semantic-edit executors for languages that have an ast-grep grammar but no executor (kotlin and bash today, plus whatever #astgreplangs adds) so structural_rewrite and the symbol-resolved intent kinds reach them. Blocked on per-language tag queries + symbol extraction in tsift-graph/tsift-search
 <!-- /agent:backlog -->
 

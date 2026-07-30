@@ -96,17 +96,17 @@ Nothing is written on a refusal — asserted, not assumed.
 12 rename tests now, each asserting renamed *and* untouched positions individually. I mutation-checked the new ones: disabling the cross-file branch reddens the cross-file test, disabling the ambiguity filter reddens the refusal test, and disabling the shadowing rule reddens the self-defining-caller test. All three fail on their mutant and pass on the real code.
 
 Remaining: `#tsrenameast3` (open rename to bash/zig/gdscript), `#tsrenameast4` (the structural-only refusal E2E), then `#wsdq` release.
-<!-- agent:boundary:de88208d -->
+<!-- agent:boundary:b3beaa47 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#wsdq]
-- do [#jzs7]
+- ⏭️ do [#wsdq]
+- 🚧 do [#jzs7]
 - ~~do [#w505]~~
 - ~~do [#tsrenameast1]~~
-- ~~⏭️ do [#tsrenameast2]~~
+- ~~do [#tsrenameast2]~~
 - do [#tsrenameast3]
 - do [#tsrenameast4]
 <!-- /agent:queue -->
@@ -119,8 +119,8 @@ https://github.com/chopratejas/headroom
 <!-- agent:backlog priority queue -->
 - [ ] [#tsrenameast3] #tsrenameast3 rename_symbol phase 3 — open rename_symbol to every indexed language (bash, zig, gdscript) via a per-language identifier-node-set entry plus conformance fixture rows asserting renamed AND untouched positions. Depends on #tsrenameast1. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
 - [ ] [#tsrenameast4] #tsrenameast4 rename_symbol phase 4 — add the end-to-end test for the structural-only rename_symbol refusal, reachable for the first time once an indexed language could otherwise fall through. Depends on #tsrenameast3. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
-- [ ] 🚧 [#wsdq] release + publish + install
-- [ ] [#jzs7] Plan and implement extract method refactoring
+- [ ] [#wsdq] release + publish + install
+- [ ] 🚧 [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->
 
 ## Review

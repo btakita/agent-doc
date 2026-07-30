@@ -67,9 +67,11 @@ projections, and tmux transcript inference.
   `agent-doc/pane-layout/desired/v1` carries the editor's desired columns/window/
   focus and `agent-doc/pane-layout/status/v1` carries the controller's derived
   desired/observed/effect state. Tmux reconciliation is a retained Lazily effect:
-  drift or an effect failure derives `retry_pending`, schedules bounded backoff,
-  re-observes tmux, and continues until the observed layout converges or a newer
-  desired generation supersedes it.
+drift or an effect failure derives `retry_pending`, schedules bounded backoff,
+re-observes tmux, and continues until the observed layout and requested focus
+converge or a newer desired generation supersedes it. Matching columns are not
+terminal proof when focus is present: the effect receipt must also prove the
+final generation-fenced pane selection.
 - Plugins publish desired pane state and subscribe to status; they do not retry
   imperative tmux operations. Status `phase` is a closed enum. `reason_code` is a
   stable enum and `reason_detail` is optional diagnostic text, so clients never

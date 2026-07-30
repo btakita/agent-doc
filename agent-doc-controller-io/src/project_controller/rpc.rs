@@ -16515,6 +16515,79 @@ fn pane_layout_retry_delay(attempt: u64) -> Duration {
         .min(PANE_LAYOUT_RETRY_MAX)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PaneLayoutFocusEffectReceipt {
+    required: bool,
+    applied: bool,
+    reason: String,
+}
+
+/// Apply the focus half of a pane-layout projection after its structural
+/// reconcile has made the requested pane visible.
+///
+/// The latest-generation mutex is held across the final effect. A newer editor
+/// observation therefore either supersedes this generation before
+/// `select-pane`, or is admitted immediately after it and deterministically
+/// follows it. This is the pane-layout counterpart of
+/// [`apply_async_editor_focus_effect`], keyed by reactive generation rather than
+/// by an imperative command id.
+fn apply_pane_layout_focus_effect(
+    worker_state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
+    generation: u64,
+    focus: Option<&str>,
+    focus_suppressed: bool,
+    file_panes: &[(String, String)],
+    select_pane: impl FnOnce(&str) -> Result<()>,
+) -> PaneLayoutFocusEffectReceipt {
+    let Some(focus) = focus else {
+        return PaneLayoutFocusEffectReceipt {
+            required: false,
+            applied: false,
+            reason: if focus_suppressed {
+                "focus_suppressed_desktop_editor_inactive".to_string()
+            } else {
+                "focus_not_requested".to_string()
+            },
+        };
+    };
+    let Some((_, pane)) = file_panes
+        .iter()
+        .find(|(document, _)| Path::new(document) == Path::new(focus))
+    else {
+        return PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: false,
+            reason: format!("focus_pane_not_found:{focus}"),
+        };
+    };
+
+    let state = worker_state.lock();
+    if state.is_superseded(generation) {
+        return PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: false,
+            reason: "focus_superseded_by_newer_layout_state".to_string(),
+        };
+    }
+    match select_pane(pane) {
+        Ok(()) => PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: true,
+            reason: format!("focus_applied:{focus}:{pane}"),
+        },
+        Err(error) => {
+            eprintln!(
+                "[controller] pane-layout focus effect failed for {focus} in {pane}: {error:#}"
+            );
+            PaneLayoutFocusEffectReceipt {
+                required: true,
+                applied: false,
+                reason: format!("focus_effect_failed:{error:#}"),
+            }
+        }
+    }
+}
+
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
@@ -16555,6 +16628,8 @@ fn pane_layout_effect_worker(
             phase: PaneLayoutEffectPhase::InFlight,
             reason: "tmux_effect_in_flight".to_string(),
             file_panes: Vec::new(),
+            focus_required: desired.invocation.focus.is_some(),
+            focus_applied: false,
         });
         publish_pane_layout_status(&runtime);
 
@@ -16567,10 +16642,11 @@ fn pane_layout_effect_worker(
         };
         let mut guarded_invocation = desired.invocation.clone();
         guarded_invocation.actor_bindings = runtime.pane_layout_actor_bindings();
-        if suppress_inactive_automatic_layout_focus(
+        let focus_suppressed = suppress_inactive_automatic_layout_focus(
             &mut guarded_invocation,
             desktop_editor_focus_state(),
-        ) {
+        );
+        if focus_suppressed {
             agent_doc_ops_log_io::log_op(
                 &bootstrap.project_root,
                 &format!(
@@ -16579,6 +16655,7 @@ fn pane_layout_effect_worker(
                 ),
             );
         }
+        let projected_focus = guarded_invocation.focus.clone();
         let effect_result = match runtime_effects() {
             Ok(effects) => effects.sync_tmux_layout(&bootstrap.project_root, guarded_invocation),
             Err(error) => Err(error),
@@ -16587,6 +16664,29 @@ fn pane_layout_effect_worker(
             .as_ref()
             .map(|receipt| receipt.file_panes.clone())
             .unwrap_or_default();
+        let focus_receipt = if effect_result.is_ok() {
+            let tmux = tmux_router::Tmux::default_server();
+            apply_pane_layout_focus_effect(
+                &state,
+                desired.generation,
+                projected_focus.as_deref(),
+                focus_suppressed,
+                &effect_file_panes,
+                |pane| tmux.select_pane(pane),
+            )
+        } else {
+            PaneLayoutFocusEffectReceipt {
+                required: projected_focus.is_some(),
+                applied: false,
+                reason: if focus_suppressed {
+                    "focus_suppressed_desktop_editor_inactive".to_string()
+                } else if projected_focus.is_some() {
+                    "layout_effect_failed_before_focus".to_string()
+                } else {
+                    "focus_not_requested".to_string()
+                },
+            }
+        };
         let report = tmux_layout_sync_state_for_invocation_with_effect_assignment(
             &bootstrap,
             &runtime,
@@ -16629,8 +16729,9 @@ fn pane_layout_effect_worker(
                 ),
             ),
         };
-        let synced = report.synced;
+        let synced = report.synced && (!focus_receipt.required || focus_receipt.applied);
         let observation_reason = report.reason.clone();
+        let focus_reason = focus_receipt.reason.clone();
         let logged_expected_documents = report.expected_documents.clone();
         let logged_actual_documents = report.actual_documents.clone();
         let logged_panes = report.panes.clone();
@@ -16647,22 +16748,25 @@ fn pane_layout_effect_worker(
                 PaneLayoutEffectPhase::RetryPending
             },
             reason: if synced {
-                "observed_convergence".to_string()
+                format!("observed_layout_and_focus_convergence; {focus_reason}")
             } else {
-                format!("{observation_reason}; {effect_reason}")
+                format!("{observation_reason}; {effect_reason}; {focus_reason}")
             },
             file_panes: effect_file_panes,
+            focus_required: focus_receipt.required,
+            focus_applied: focus_receipt.applied,
         });
         publish_pane_layout_status(&runtime);
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} expected={:?} actual={:?} panes={:?}",
+                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} focus={} expected={:?} actual={:?} panes={:?}",
                 desired.generation,
                 attempt,
                 if synced { "converged" } else { "retry_pending" },
                 observation_reason,
                 effect_reason,
+                focus_reason,
                 logged_expected_documents,
                 logged_actual_documents,
                 logged_panes,
@@ -17566,6 +17670,61 @@ mod pane_layout_projection_dispatch_tests {
         assert!(pane_layout_invocation_awaits_projection(&invocation(
             "manual", false,
         )));
+    }
+
+    #[test]
+    fn changed_left_document_focus_is_applied_after_layout_reconciliation() {
+        let state =
+            Mutex::new(agent_doc_controller::pane_layout::LatestProjectionWorkerState::default());
+        assert!(state.lock().schedule(7));
+        let file_panes = vec![
+            ("/tasks/new-left.md".to_string(), "%76".to_string()),
+            ("/tasks/right.md".to_string(), "%75".to_string()),
+        ];
+        let mut selected = None;
+
+        let receipt = apply_pane_layout_focus_effect(
+            &state,
+            7,
+            Some("/tasks/new-left.md"),
+            false,
+            &file_panes,
+            |pane| {
+                selected = Some(pane.to_string());
+                Ok(())
+            },
+        );
+
+        assert_eq!(selected.as_deref(), Some("%76"));
+        assert!(receipt.required);
+        assert!(receipt.applied);
+    }
+
+    #[test]
+    fn newer_layout_generation_cancels_stale_focus_before_select_pane() {
+        let state =
+            Mutex::new(agent_doc_controller::pane_layout::LatestProjectionWorkerState::default());
+        assert!(state.lock().schedule(7));
+        assert!(!state.lock().schedule(8));
+        let file_panes = vec![("/tasks/old-left.md".to_string(), "%72".to_string())];
+        let mut selected = false;
+
+        let receipt = apply_pane_layout_focus_effect(
+            &state,
+            7,
+            Some("/tasks/old-left.md"),
+            false,
+            &file_panes,
+            |_| {
+                selected = true;
+                Ok(())
+            },
+        );
+
+        assert!(!selected, "a superseded focus effect must not reach tmux");
+        assert!(receipt.required);
+        assert!(!receipt.applied);
+        assert_eq!(receipt.reason, "focus_superseded_by_newer_layout_state");
     }
 }
 

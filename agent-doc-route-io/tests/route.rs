@@ -2436,11 +2436,11 @@ mod tests {
         let low_level_reason = "captured response baseline no longer matches current document";
 
         let (decision, dispatch_decision) = super::classify_route_closeout_block(
-        &doc,
-        low_level_reason.to_string(),
-        true,
-        false,
-        super::route_closeout_drain_effects(super::route_repair_closeout),
+            &doc,
+            low_level_reason.to_string(),
+            true,
+            false,
+            super::route_closeout_drain_effects(super::route_repair_closeout),
         );
         match dispatch_decision {
             CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout => {
@@ -2470,11 +2470,11 @@ mod tests {
         let low_level_reason = "captured response baseline no longer matches current document";
 
         let (decision, dispatch_decision) = super::classify_route_closeout_block(
-        &doc,
-        low_level_reason.to_string(),
-        false,
-        false,
-        super::route_closeout_drain_effects(super::route_repair_closeout),
+            &doc,
+            low_level_reason.to_string(),
+            false,
+            false,
+            super::route_closeout_drain_effects(super::route_repair_closeout),
         );
         match dispatch_decision {
             CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head } => {
@@ -2504,11 +2504,11 @@ mod tests {
         let low_level_reason = "captured response baseline no longer matches current document";
 
         let (decision, dispatch_decision) = super::classify_route_closeout_block(
-        &doc,
-        low_level_reason.to_string(),
-        false,
-        false,
-        super::route_closeout_drain_effects(super::route_repair_closeout),
+            &doc,
+            low_level_reason.to_string(),
+            false,
+            false,
+            super::route_closeout_drain_effects(super::route_repair_closeout),
         );
         match dispatch_decision {
             CloseoutBlockDispatchDecision::FailClosed => {

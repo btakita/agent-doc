@@ -379,6 +379,11 @@ pub(crate) struct PaneLayoutEffectReceipt {
     pub phase: PaneLayoutEffectPhase,
     pub reason: String,
     pub file_panes: Vec<(String, String)>,
+    /// Whether this generation still required a pane-selection consequence
+    /// after desktop-focus policy was applied.
+    pub focus_required: bool,
+    /// Receipt from the final, generation-fenced `select-pane` consequence.
+    pub focus_applied: bool,
 }
 
 impl Default for PaneLayoutEffectReceipt {
@@ -389,6 +394,8 @@ impl Default for PaneLayoutEffectReceipt {
             phase: PaneLayoutEffectPhase::Idle,
             reason: "idle".to_string(),
             file_panes: Vec::new(),
+            focus_required: false,
+            focus_applied: false,
         }
     }
 }
@@ -452,9 +459,13 @@ fn derive_pane_layout_projection(
     let Some(desired) = desired else {
         return PaneLayoutProjection::Absent;
     };
-    if observed
-        .as_ref()
-        .is_some_and(|observed| observed.generation == desired.generation && observed.report.synced)
+    let focus_converged = desired.invocation.focus.is_none()
+        || (receipt.generation == desired.generation
+            && (!receipt.focus_required || receipt.focus_applied));
+    if focus_converged
+        && observed.as_ref().is_some_and(|observed| {
+            observed.generation == desired.generation && observed.report.synced
+        })
     {
         return PaneLayoutProjection::Converged(desired);
     }
@@ -5680,6 +5691,8 @@ mod tests {
                     phase: PaneLayoutEffectPhase::InFlight,
                     reason: "applying".to_string(),
                     file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: false,
                 },
             ),
             PaneLayoutProjection::Applying(desired.clone())
@@ -5709,6 +5722,8 @@ mod tests {
                     phase: PaneLayoutEffectPhase::RetryPending,
                     reason: "retry_scheduled".to_string(),
                     file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: false,
                 },
             ),
             PaneLayoutProjection::RetryPending(desired.clone())
@@ -5731,10 +5746,35 @@ mod tests {
         assert_eq!(
             derive_pane_layout_projection(
                 Some(desired.clone()),
-                Some(converged),
-                PaneLayoutEffectReceipt::default(),
+                Some(converged.clone()),
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    attempt: 1,
+                    phase: PaneLayoutEffectPhase::RetryPending,
+                    reason: "focus_pane_not_found".to_string(),
+                    file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: false,
+                },
             ),
-            PaneLayoutProjection::Converged(desired)
+            PaneLayoutProjection::RetryPending(desired.clone()),
+            "matching columns alone must not retire the projection while the newly selected document is still unfocused",
+        );
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                Some(converged),
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    attempt: 2,
+                    phase: PaneLayoutEffectPhase::Converged,
+                    reason: "observed_layout_and_focus_convergence".to_string(),
+                    file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: true,
+                },
+            ),
+            PaneLayoutProjection::Converged(desired),
         );
     }
 
@@ -5772,6 +5812,8 @@ mod tests {
             phase: PaneLayoutEffectPhase::Converged,
             reason: "observed_convergence".to_string(),
             file_panes: first_assignment.clone(),
+            focus_required: true,
+            focus_applied: true,
         });
         assert_eq!(graph.effect_file_panes(first.generation), first_assignment);
 
@@ -5782,6 +5824,8 @@ mod tests {
             phase: PaneLayoutEffectPhase::Converged,
             reason: "late_prior_generation".to_string(),
             file_panes: vec![("tasks/primary.md".to_string(), "%1".to_string())],
+            focus_required: true,
+            focus_applied: true,
         });
 
         assert!(

@@ -183,6 +183,13 @@ project root; a foreign-root owner remains unbound for that controller.
 targets share one focus idempotency key with supersession enabled, so a burst of
 selection events coalesces to the newest document instead of replaying older
 pane selections after it.
+- A surface change that replaces a visible document and changes focus is one
+retained pane-layout projection with two consequences: reconcile columns, then
+select the requested pane. Column observation alone must not mark that
+projection converged. Its typed effect receipt must also prove the final
+`select-pane`, and the latest-generation worker mutex fences that effect so a
+newer surface either supersedes it before selection or deterministically follows
+it.
 - Default focus defers stash promotion (`#jb-nav-3pane-promote-swap`): `agent-doc
 focus <FILE>` selects the resolved pane when it is already visible, but skips
   additive `join-pane` promotion when the pane is parked in a `stash` window.

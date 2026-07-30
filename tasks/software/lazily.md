@@ -461,7 +461,81 @@ kt has a second ledger in the test — `EXPECTED_SKIPS`, enforced by exact set e
 Merge them and the script starts excusing fixtures it did read, while the test loses its op-level precision. `EXPECTED_SKIPS` was already rot-proof and is untouched.
 
 With this, all nine bindings now account for the canonical corpus the same way, and every one of them can fail on a stale excuse. CI on `12832a5` was queued at the single check; recorded, not polled.
-<!-- agent:boundary:167f735d -->
+
+### Re: do [#lzassertunknownkeys] — opus-5
+
+Done across all nine bindings, nine commits. I filed this expecting to find kt's problem repeated a few times. What it found is that **no binding was enforcing the property, including the reference**, and that the corpus has been asserting far less than its green suites implied.
+
+#### Nine commits
+
+| Binding | Commit | Unread keys found | All implemented? |
+|---|---|---|---|
+| rs | `0490af7` | ~64 keys, incl. **all 7** of `crdt_tree_laws` | yes, 2 declared exceptions |
+| py | `eb9b912` | **115 blocks** with an unchecked key | yes, zero allowlisted |
+| go | `7870b99` | ~30 keys across 19 runners | yes, prose only |
+| js | `e69ee32` | **76 keys** | yes, except 21 already in `EXPECTED_SKIPS` |
+| kt | `21a4390` | **39 keys never mentioned in kt source at all** | yes |
+| dart | `0729325` | 15 keys | yes, zero allowlisted |
+| cs | `75e83ce` | 11 groups | yes, zero allowlisted |
+| cpp | `8f84172` | 2 keys | yes |
+| zig | `ef4a34f` | 3 keys | yes |
+
+Across nine bindings, **not one unread key had to be allowlisted as unimplementable** — bar a handful of genuine capability gaps (rs cannot assert a signalling *server* it does not ship; js's parked `merge_cell` fixtures). Every other key was within the binding's existing reach and simply had no reader. That is the finding: this was never a capability problem.
+
+#### The reference binding had the hole too
+
+`lazily-rs` has **zero `deny_unknown_fields` anywhere**, and its IPC runner carried hardcoded literals shadowing the fixture — `has_opaque_node`, `first_node_state_kind`, `is_sequential`, `has_all_op_variants`, all of `arena_blob.json`'s assertions. So this is not drift in the ports. The reference never asserted these either, and every binding was measured against it.
+
+#### The corpus was carrying its own anti-vacuous-green guards, unread
+
+The sharpest single finding, from go: stdlib fixtures ship `scenario_floor`, `assertion_floor` and `mutation_floor` — the fixture's own "did you actually check anything" floors. **All three were ignored.** The instrument designed to catch under-testing was itself being skipped.
+
+Close behind, and repeated in five bindings independently: `multi_epoch_delta.json`'s root `assertions` block — `fold_equivalent`, `atomic_advance`, `equivalent_unit_fold`, which are the file's entire point — was unread in rs, go, js, cs and dart. py's case was worse than unread: `test_reliable_sync.py` replayed deltas with their **ops stripped** (`Delta.new(base, epoch, [])`), making `state_after` and `converged_nodes` structurally *unreachable* rather than merely unasserted.
+
+#### One finding needed library code, and it is the pointed one
+
+`expected.elements` had no reader on the thread-safe or async queue flavor in rs, and none on any of the four queue runners in cs. So the total-FIFO claim went unasserted **on exactly the two flavors where it is hardest to get right**, while the single-threaded flavor — where it is easy — was the only one checked. `ThreadSafeQueueCell::elements`, `AsyncQueueCell::elements` and cs's `IQueueRunner.Elements()` were added to close it. `len` plus `head` is satisfied by a queue that reordered its tail.
+
+#### Three parser excuses that turned out not to exist
+
+I briefed each agent on its language's silent-drop mechanism, expecting those to be the obstacle. They mostly were not:
+
+- **zig** never parses into a typed struct anywhere — every parse is `parseFromSlice(std.json.Value, …)` and `ignore_unknown_fields` appears zero times. Fail-open was a design choice.
+- **cs** binds no assertion block to a POCO at all; every runner walks `JsonDocument` by hand, so `JsonUnmappedMemberHandling.Disallow` would have closed nothing. Its three `Deserialize<T>` sites round-trip self-produced JSON or go through converters that already reject additional properties.
+- **cpp**'s JSON structs already expose objects as an ordered vector.
+
+Only **go** actually needed the language mechanism, and it needed *two*: `DisallowUnknownFields` for the struct-decoding runners, plus a map-shaped `consumeKeys` counterpart for the four decoding to `map[string]any`, where `DisallowUnknownFields` does nothing.
+
+#### What makes the guard catch what per-runner switches cannot
+
+js's mutation table states it exactly. A bogus key in a fixture whose runner has a local `switch` with a failing `default` → suite exit 1. The same bogus key in a fixture whose runner has no such switch (`windowing/tumbling_count.json`) → **suite exit 0**, and only the corpus-wide guard exits 1. Per-runner exhaustiveness protects the fixtures someone already thought about; the guard protects the rest.
+
+Two design choices worth keeping, both arrived at independently:
+
+- py and rs instrument at the **loader** with read-through tracking, so a runner that *stops* reading a block is caught too — not only one that never started. An allowlist records what a runner claims to evaluate; a tracker records what it did.
+- js could not use a `Proxy` because runners `structuredClone` fixtures and a Proxy is not structured-cloneable, so it used accessors. And `"x" in block` deliberately does **not** count as consumption: checking for a key is not asserting on it.
+
+js now reports `471/492 fixture assertion keys CONSUMED (6 declared unconsumed)` as a first-class number beside fixture coverage.
+
+#### Verified rather than accepted
+
+Six agents, nine repos, no two in the same tree. All nine commit SHAs confirmed at HEAD, all trees clean apart from the two pre-existing edits I told them to leave. `lazily-spec` verified untouched at `326f25e` with no probe keys anywhere in the corpus. Then I ran go's guard self-tests myself rather than trusting the report — `TestConsumeKeysRejectsUnconsumedKey` and `TestStrictJSONRejectsUnconsumedKey` both pass, so the guards can fail.
+
+#### An operational hazard this exposed
+
+A zig `make check` failed on `bogus_unimplemented_key` in `presence/presence.json` — a probe key that agent never wrote, gone by the time it looked. All nine bindings resolve fixtures from the **single** `../lazily-spec/conformance` sibling; there is no per-binding copy. A probe written there, even for seconds, reddens whichever other suites are mid-run, naming a fixture and key that reader has never seen. That reads as a regression in their binding.
+
+Nothing persisted, but my dispatch briefs should have said: copy the corpus to scratch and point the runner at it via `LAZILY_SPEC_CONFORMANCE_DIR`, never edit in place — the window does the damage, not the residue.
+
+#### Two levels below this that are still open
+
+The guards prove a key was *consumed*. They do not prove it was *asserted*, and they cannot see a scenario that was never replayed.
+
+- `liveness_orset_lww.json` has four scenarios. dart replays three; rs and go skip `derived_live_doc_aggregate_converges_under_retry` entirely; cs replays all four. Both guards are blind by construction — the coverage guard asks only whether the *file* was opened, and an unreplayed scenario contributes no unconsumed key. Filed as `#lzscenariocoverage`.
+- A key can be read and discarded. dart's `collections_extra_conformance_test.dart` `continue`s and `break`s past `sibling_a_cached` and `downstream_consumer_reran`, which counts as consumed because the loop reads them. Filed as `#lzconsumednotasserted`.
+
+Also filed `#lzcpptranscribedrunners`: cpp has three runners that hand-transcribe expectations and never open a fixture, so there is no block to guard. Its coverage script honestly reports those fixtures as uncovered, but the transcribed values can drift from the corpus forever while the tests keep passing — the same defect `c103070` just removed from zig's queue family.
+<!-- agent:boundary:815ace05 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -486,6 +560,9 @@ With this, all nine bindings now account for the canonical corpus the same way, 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzscenariocoverage] A fixture with multiple named scenarios can be PARTIALLY replayed and nothing notices. Confirmed this cycle: liveness_orset_lww.json carries four scenarios; lazily-dart replays three, lazily-rs and lazily-go skip derived_live_doc_aggregate_converges_under_retry entirely, lazily-cs replays all four. Both existing guards are blind to it by construction — the coverage guard asks only whether the FILE was opened, and the new key-consumption guard only binds blocks a runner actually reaches, so an unreplayed scenario contributes no unconsumed key. The fixture is counted as covered and its scenario is never run. Add a per-scenario ledger: the runner declares which scenario ids it replayed, the guard compares that against the ids present in the fixture, and a missing id is an error unless explicitly excused with a reason. Same both-directions rule as the fixture allowlist, so an excuse for a scenario that IS replayed also fails. Mutation-check per binding by dropping one scenario from a runner and confirming the guard reddens.
+- [ ] [#lzconsumednotasserted] Key CONSUMPTION is not key ASSERTION, and the guards landed under #lzassertunknownkeys only prove the former. A runner can read a key and then do nothing with it: lazily-dart collections_extra_conformance_test.dart lines 459 and 477 continue/break past sibling_a_cached and downstream_consumer_reran, which counts as consumed under the tracker because the loop reads them. The same shape appears wherever a value is read into a variable that is never compared. This is the next level down from the fixture-opened / key-consumed ladder and it is where a green suite can still assert nothing. Audit each binding for read-then-discard: named skips inside a consuming loop, values bound but never compared, and assertion arms whose comparison is against a literal rather than the fixture value. Prefer a structural fix where one exists (require every consumed key to reach a comparison), and where it does not, make the named skip an explicit declared exception with a reason so it is visible rather than silent.
+- [ ] [#lzcpptranscribedrunners] lazily-cpp has fully-decoupled runners that hand-transcribe expectations and never open a fixture at all: test_reliable_sync.cpp, test_family_sync.cpp and test_outbox_store.cpp. The #lzassertunknownkeys guard cannot touch them because there is no assertion block to guard — a transcription has no unconsumed key. The cpp coverage script already reports the corresponding fixtures as uncovered rather than claiming them, so the ledger is honest, but the transcribed values can silently diverge from the corpus forever and the tests keep passing against the old numbers. This is the same defect the zig queue-family runner had before c103070 replaced its transcriptions with a real replay. Convert each to replay the canonical fixtures, then confirm the runtime manifest count rises and remove the matching KNOWN_UNCOVERED entries. Also note the root-level IPC corpus in cpp has no runner at all and is excused the same way.
 - [ ] [#lzassertunknownkeys] A conformance runner that silently IGNORES unknown assertion keys reports a fixture as replayed while never checking the field the fixture exists for — a fixture can round-trip, pass, and prove nothing. Found in lazily-kt while closing #lzktfixturefloor: assertAssertions ignored delta_zero_copy_arrow.json's backend discriminator, so adding the fixture to the runner would have gone green without ever asserting the one thing it tests; an explicit first_op_payload_backend arm was needed. This is a per-runner property and almost certainly is NOT unique to kt. Audit every binding's fixture-assertion dispatch for the same silent-ignore path, then make an unconsumed or unrecognized assertion key a HARD ERROR rather than a no-op, so a corpus key no binding implements fails loudly instead of being invisibly skipped in all nine. Mutation-check per binding: introduce an assertion key the runner does not know and confirm the suite reddens rather than passing.
 - [ ] [#lzreactdtsgate] lazily-react ships src/*.d.ts and a `types` export but its `make check` is only `node --check` syntax validation plus `node --test` (18 tests), so nothing typechecks the declarations it publishes. Same hole that let lazily-js ship four TS2749 errors in transport.d.ts undetected until this cycle. Port the gate landed in lazily-js 553d840: a declaration-only tsconfig (include src/**/*.d.ts, noEmit, strict, skipLibCheck:false, allowJs:false), an npm typecheck script wired into both `make check` and CI, plus CI's non-empty-program assertion, since a gate whose include matches nothing also exits 0. Mutation-check by breaking one declaration and confirming a non-zero exit before the tests run.
 - [ ] [#vnmr] (originally filed as #lzrsbenchbudget; that id was lost to a text-corruption bug in this documents own backlog write, see below) lazily-rs "make check" never enforces benchmark budgets on a pruned target/: the benchmark-check step prints "SKIPPED: no benchmark evidence in this checkout (target/criterion does not exist)" followed by "NO BENCHMARK BUDGET WAS ENFORCED BY THIS RUN. This is not a pass - it is the absence of a measurement", and then exits 0. The banner is honest and the skip is documented, but a green "make check" still reads as budgets-verified to anyone who does not read the log, which is everyone most of the time. Either make the skip a hard failure when a budget file exists but the evidence does not, or have check depend on generating the evidence first, so a local closeout cannot claim a performance gate it never ran. Mutation-check whichever is chosen: prune target/criterion and confirm make check reddens instead of printing the skip banner and passing.

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: b4dc4816-4b5b-4aa4-8087-41605766e4b7
+resume: 254409c8-f6f5-4409-aa60-eb4818ff2208
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -228,18 +228,50 @@ Also converted the fixed-window source-grep over the decision handler in `admin-
 `bun test` 2174 pass / 0 fail across 195 files; `build` and `build:worker` clean. Three mutations checked — dropping the met-date argument, dropping the 400 guard, and restoring the permanent disable each redden the new tests.
 
 One residue: the staging fixture user `VERIFY-LENDER-1` could not be deleted (the `users` soft-delete trigger refuses `DELETE`), so it is suspended and disabled with a reason naming it as a fixture. It is staging-only and inert.
-<!-- agent:boundary:c938ebf8 -->
+
+### Re: plan for the anonymized live → sandbox TMO clone and staging refresh — opus-5
+
+> **Queue prompt:**
+>
+> Please plan into a file: Copy of the most recent live TMO data backup into the sandbox TMO. Please anonymize the lender + property records. Any PII should be anonymous. Create a script to copy live TMO into the sandbox TMO. Please also ensure the staging db is refreshed. Make sure you do not do any destructive operations on the production db or live TMO account. Do not execute any operations until I look at the plan and approve.
+
+Plan written to `src/equityfundingsource-dev/prds/tmo-sandbox-clone-and-staging-refresh-plan.md`, committed and pushed as EFS `c484b0ee`. **Nothing was executed** — no TMO write, no purge, no D1 write, no export. The only calls I made were reads: production `platform_settings` for the backup pointer, `sqlite_master` for the table list, and the local artifact already on disk.
+
+**The only thing actually missing is the anonymizer.** Everything else is already built: `bin/tmo-backup.ts` captures a restorable live artifact with attachment bytes and per-file sha256, the scheduled job writes one to R2 daily, `--restore --allow-production-source --apply` *is* the live→sandbox replay path, and `bin/tmo-sandbox-purge.ts` clears the sandbox behind a protected keep-list. `grep -rl 'anonymi\|redact\|scrub\|pseudonym'` over the whole repo returns nothing.
+
+The most recent live backup, read from production `platform_settings`:
+
+```
+tmo_backup_last_key       tmo-backups/2026-07-30/2026-07-30T17-00-51-000Z.json
+tmo_backup_last_status    complete
+tmo_backup_last_checksum  e984d11c…9557
+```
+
+**I measured the PII surface against the real production artifact rather than guessing** (field names only, no values read out). Fundings *are* the lender record — `Account`, `TIN`, `DOB`, `FullName`, address, four phone numbers, `LegalVesting`. Borrowers appear twice, top-level and embedded in each loan, and only the embedded copy is what `NewLoan` actually writes. `Collaterals` carries the property plus `Encumbrances[].Beneficiary*`. And then `loan.Fields[]`: **~230 opaque keys per loan across ~250 distinct descriptions**, including `Guarantor - TIN`, `Guarantor - Birthday`, the whole `Broker *` / `Broker Rep *` / `Referring Broker *` sets, `1003 - Loan Originator - Email`, escrow/title/trustee contacts, `Deed of Trust - Mail to - Name`, `Liens - Lienholder's Name`, and `Loan Application Login (Email Address)`.
+
+That last surface is why the plan specifies the anonymizer **allowlist-driven, scrub-by-default**. A blocklist over keys named `F1971.43` and `F9092.1.4` leaks the first time TMO adds a field, and some descriptions are the empty string.
+
+Two things I would not paper over:
+
+- **PDF bytes cannot be reliably redacted.** Text layers, embedded images, XMP metadata, and incremental-update history all carry PII. Default is a generated placeholder PDF keeping the same `doc_type`, the verified `TabName: ''` contract, and a fresh sha256. Shipping the real bytes is not an option; `drop` is the alternative.
+- **The staging D1 classifier fails closed over all 94 production tables.** Anything the classifier does not recognize is dropped, so a table added later shows up as *missing staging data*, never *leaked staging data*.
+
+Deliverables specified: a pure `lib/tmo-api/anonymize.ts`, an offline `bin/tmo-artifact-anonymize.ts` (with an `--audit` residual-PII scan that exits non-zero), the orchestrator `bin/tmo-sandbox-clone.ts` (dry-run default, `--simulate` against `lib/tmo-sim` for a zero-risk rehearsal), and `bin/d1-staging-refresh.ts`. The clone verifies by re-capturing the sandbox and scanning **what TMO actually stored**, not just the file that was sent.
+
+**Six questions need your answer before any apply** (§7 of the plan): preserve `LoanNumber` (I recommend yes — it is the staging↔sandbox join key), attachments placeholder vs drop, purge-first vs sync-onto-existing (I recommend purge — `NewLoan`'s duplicate-`LoanNumber` behaviour is unverified), staging wipe-and-load vs additive, where the pseudonym seed lives, and whether loan amounts/rates count as sensitive (the plan deliberately preserves them, since anonymizing them removes the reason to clone live data at all).
+<!-- agent:boundary:f9dcbc66 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- 🚧 Please plan into a file: Copy of the most recent live TMO data backup into the sandbox TMO. Please anonymize the lender + property records. Any PII should be anonymous. Create a script to copy live TMO into the sandbox TMO. Please also ensure the staging db is refreshed. Make sure you do not do any destructive operations on the production db or live TMO account. Do not execute any operations until I look at the plan and approve.
-- ⏭️ do [#tmo-roster-error-still-silent]
+- ~~Please plan into a file: Copy of the most recent live TMO data backup into the sandbox TMO. Please anonymize the lender + property records. Any PII should be anonymous. Create a script to copy live TMO into the sandbox TMO. Please also ensure the staging db is refreshed. Make sure you do not do any destructive operations on the production db or live TMO account. Do not execute any operations until I look at the plan and approve.~~
+- do [#tmo-roster-error-still-silent]
 - do [#tmo-sync-cron-failures]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmo-sandbox-clone] Build the anonymized live->sandbox TMO clone + staging D1 refresh per src/equityfundingsource-dev/prds/tmo-sandbox-clone-and-staging-refresh-plan.md (EFS c484b0ee). BLOCKED ON OPERATOR: answer the six questions in plan section 7 (preserve LoanNumber, attachments placeholder-vs-drop, purge-vs-sync, staging wipe-vs-additive, pseudonym seed custody, whether amounts/rates are sensitive) before any apply. Deliverables: pure lib/tmo-api/anonymize.ts, offline bin/tmo-artifact-anonymize.ts with a fail-closed --audit residual-PII scan, bin/tmo-sandbox-clone.ts orchestrator (dry-run default, --simulate against lib/tmo-sim), bin/d1-staging-refresh.ts with a fail-closed 94-table classifier, plus offline tests mutation-checked. Nothing has been executed.
 - [ ] [#efs-dev-vars-secret-history] Confirm .dev.vars.production / .dev.vars.staging were never committed, and rotate if they were. Both hold cleartext AUTH_SECRET and ADMIN_GLOBAL_PASSWORD; .gitignore covered '.dev.vars' but NOT the per-environment variants, so they sat untracked-but-committable until EFS 292b52d6 added '.dev.vars.*'. Run: git -C src/equityfundingsource-dev log --all --diff-filter=A -- '.dev.vars*'. If any commit ever added one, rotate AUTH_SECRET (wrangler secret put AUTH_SECRET, both envs) and ADMIN_GLOBAL_PASSWORD, and purge from history. Audit the same gap in sibling repos that copied this .gitignore.
 - [ ] [#tmo-roster-error-still-silent] Make the roster catch sites say why. EFS 29f27773 patched the five LOS READ helpers, but the failure observed live on the new build (version c50a9aaa, 2026-07-30 04:30:52Z, driver=delta) still logs '[tmo-sync] LOS lender roster failed' followed by a bare minified stack and NO reason. The catch sites at tmo-sync.ts ~850-856 do console.error('...failed', err) and rely on the platform rendering err; whatever is thrown there renders with an empty message. Stringify explicitly (err instanceof Error ? err.message : String(err)) at each of the [tmo-sync] borrower roster / LOS lender roster / loan sync catch sites and assert the reason is present. Same file-coordination caveat as #tmo-sync-declined-unpublish.
 - [ ] [#tmo-sync-cron-failures] Root-cause the TMO sync cron failures. UNBLOCKED on deploy: EFS 29f27773 is live (version c50a9aaa). CORRECTION 2026-07-30: these failures are NOT confined to the nightly full sweep - the 04:30:51Z run with driver=delta failed at 04:30:52Z with '[tmo-sync] LOS lender roster failed'. The 04:15:51Z delta run just before it was clean, so it is intermittent, roughly one run in two. Now BLOCKED ON #tmo-roster-error-still-silent: the read-error fix did not cover this path and the log still carries a bare minified stack with no reason. Production cadence: interval 15 min, full sweep every 1440 min, last full 2026-07-29 17:15:51Z. QUERY NOTE: telemetry groupBys currently return 0 groups for every field while filters and plain counts still work - use view:events over a short window, not the docs/deploy.md 2.4b group-by recipe.

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: dea692e2-1ac1-45dd-913a-f10bf6518b5f
+resume: 5dd67d4f-d29e-47e9-86e5-37012664f25e
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -334,18 +334,46 @@ I also found `schedule` and `errors` spreading through the transform untouched. 
 All six mutation probes reddened the suite: allowlist keeps everything, unknown staging table copied instead of dropped, target gate never refuses, structured PII columns passed through, HMAC inner pad wrong, attachment bytes untouched.
 
 **Before the first apply, you need to do one thing:** create `passage btak/equityfundingsource/anonymize_seed`. Both tools refuse to run without it, and it must never be regenerated afterwards — a new seed re-pseudonymizes everything and silently breaks the sandbox↔staging joins. I have left the apply as a gated review item rather than guessing at your go.
-<!-- agent:boundary:a57da434 -->
+
+### Re: #tmo-backup-schedule-inline — payment schedules are captured now — opus-5
+
+Done, EFS `20d7a416`, pushed. `make check` green (2282 pass, 0 fail, build + worker build clean).
+
+**The premise was right.** Both sweeps hard-coded `loans[].schedule = []` and cited the verified 404 on every `GetPaymentSchedule` name. That is a fact about the HTTP surface, not about the data — TMO carries the schedule on the loan as a `Fields[]` entry keyed `PaymentSchedule`, which both sweeps had *already fetched* and were discarding. `tmo_loan_payment_schedule_()` was sitting right there, used only by the Worker sync.
+
+**What changed**
+
+- `tmo_loan_payment_schedule_` moved out of `tmo-api/index.ts` into its own pure `payment_schedule.ts`. It had to: `index.ts` imports the D1 cache, and `backup.ts` is the offline layer. `index.ts` re-exports it, so `tmo-sync.ts` and the loan-detail UI are untouched.
+- `backup_capture_` and the snapshot sweep both derive `schedule` from the loan record they already hold.
+- The snapshot sweep *moved into the library*. It was ~50 lines of untestable fetch-and-shape sitting in `bin/tmo-snapshot.ts`, duplicating `backup_capture_`. It is now `snapshot_capture_` in `lib/tmo-api/snapshot.ts` behind an injected GET port, and the bin only supplies `fetch` and prints. That is what made the change testable at all rather than assertable by comment.
+
+**Three things I made sure of, because each is a way this could have been quietly wrong**
+
+1. *No new request.* A test captures every path the port is asked for and asserts none matches `/schedule/i`. This is the exact regression `#tmo-sync-cron-failures` was: 28 404s per 15-minute batch, invisible because the XHTML body threw a JSON `SyntaxError` before the status check. Deriving the schedule must not resurrect it, and now cannot.
+2. *Absence is not failure.* 19 of 31 production loans carry no schedule. An empty array leaves `complete=true`; only a real read error makes a capture incomplete. Otherwise this change would have flipped two-thirds of every sweep to `complete=false`.
+3. *The rows are a new PII surface.* `Notes` is servicing free text — the field the sample doc shows as `-20 days @ $178.0822`, and whatever a servicer typed. `76102757` already routed `schedule` through the default scrub in anticipation, but nothing had ever exercised it against *real* rows. There is now an end-to-end test: `backup_capture_` against `lib/tmo-sim` → `anonymize_backup_` → assert the columns survive, the `Notes` text does not, and `residual_pii_scan_` returns empty.
+
+**Mutation-checked, both directions.** Reverting either sweep to `[]` reddens 4 tests. Spreading the schedule rows past the anonymizer's scrub reddens 2 — including the `Notes` assertion, which catches the leak by name.
+
+**Restore is unchanged, and the wording is now honest about which half.** TMO has no schedule *write* endpoint, so the rows come back as evidence, not as state. The `restore_unrestorable_` gap used to read "neither captured nor restored", which would now send you looking for rows the artifact holds. It now says captured, not writable — with a test asserting that distinction stays in the text.
+
+**Docs + plan.** `docs/TMO/backup.md` and `docs/TMO/snapshot.md` both had "payment schedules are not captured" as a standing claim; both now say missing endpoints are not missing data and point at `payment-schedule-field.md`. The 2026-07-18 verification block showing `schedule_rows=0` is kept — it is a real run record — with a note that it predates this change. Plan §3 and §4 updated as the item asked: §3 records the artifact-shape change, §4 gains a `4d-2` inventorying the schedule columns and naming `Notes` as the leak surface.
+
+**One thing worth your attention on the clone.** The recorded `tmo_backup_last_key` (`2026-07-30T17-00-51Z`) predates this commit, so that artifact has no schedule rows. The next daily scheduled backup will. I have appended that to `#tmo-clone-apply` so the clone is not rehearsed off a pre-change source — it does not block anything, it just means "use a fresh capture" rather than "reuse the one already noted in the plan".
+
+Superproject gitlink bumped (`e1bcfa6`).
+<!-- agent:boundary:c5ad2122 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- 🚧 do [#tmo-sandbox-clone]: Use your recommendations for §7
+- do [#tmo-backup-schedule-inline]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-backup-schedule-inline] Capture payment schedules in bin/tmo-backup.ts and bin/tmo-snapshot.ts. Both skip schedules with the note 'TMO exposes no schedule read endpoint' (docs/TMO/backup.md, snapshot.ts:22). True of the HTTP surface, false of the data: the schedule rides inline on the loan as a Fields[] entry keyed PaymentSchedule (docs/TMO/payment-schedule-field.md), and tmo-sync.ts now reads it via tmo_loan_payment_schedule_(loan) as of EFS 300b788d - 12 of 31 production loans have one. A restored artifact currently loses every schedule, and tmo-snapshot's complete=true does not mean complete. UNBLOCKED 2026-07-30: the clone plan is approved and built (EFS 8df4f5d1), and anonymize.ts already scrubs the schedule rows by default (EFS 76102757) so populating them cannot leak silently. Still update prds/tmo-sandbox-clone-and-staging-refresh-plan.md sections 3 and 4 in the same change, since this alters the backup artifact shape that plan describes.
-- [ ] 🚧 [#tmo-sandbox-clone] Build the anonymized live->sandbox TMO clone + staging D1 refresh per src/equityfundingsource-dev/prds/tmo-sandbox-clone-and-staging-refresh-plan.md (EFS c484b0ee). BLOCKED ON OPERATOR: answer the six questions in plan section 7 (preserve LoanNumber, attachments placeholder-vs-drop, purge-vs-sync, staging wipe-vs-additive, pseudonym seed custody, whether amounts/rates are sensitive) before any apply. Deliverables: pure lib/tmo-api/anonymize.ts, offline bin/tmo-artifact-anonymize.ts with a fail-closed --audit residual-PII scan, bin/tmo-sandbox-clone.ts orchestrator (dry-run default, --simulate against lib/tmo-sim), bin/d1-staging-refresh.ts with a fail-closed 94-table classifier, plus offline tests mutation-checked. Nothing has been executed.
+- [/] [#tmo-clone-apply] [operator-verify] Execute the anonymized live-to-sandbox TMO clone and the staging D1 refresh per prds/tmo-sandbox-clone-and-staging-refresh-plan.md section 8. Blocked on two operator actions: (1) create passage btak/equityfundingsource/anonymize_seed, which must be stable forever because regenerating it re-pseudonymizes everything and breaks the sandbox-to-staging joins; (2) an explicit go for the destructive steps, which delete sandbox loans and wipe-and-load staging D1. Everything else is built and green as of EFS 76102757: rehearse with tmo-sandbox-clone.ts --simulate, then --from-r2 dry run, then --from-r2 --apply, then d1-staging-refresh.ts dry run and --apply. Coordinate with #tmo-sandbox-purge-apply, which gates the same purge.
+- [ ] [#tmo-backup-schedule-inline] Capture payment schedules in bin/tmo-backup.ts and bin/tmo-snapshot.ts. Both skip schedules with the note 'TMO exposes no schedule read endpoint' (docs/TMO/backup.md, snapshot.ts:22). True of the HTTP surface, false of the data: the schedule rides inline on the loan as a Fields[] entry keyed PaymentSchedule  (docs/TMO/payment-schedule-field.md), and tmo-sync.ts now reads it via tmo_loan_payment_schedule_(loan) as of EFS 300b788d - 12 of 31 production loans have one. A restored artifact currently loses every schedule, and tmo-snapshot's complete=true does not mean complete. UNBLOCKED 2026-07-30: the clone plan is approved and built (EFS 8df4f5d1), and anonymize.ts already scrubs the schedule rows by default (EFS 76102757) so populating them cannot leak silently. Still update prds/tmo-sandbox-clone-and-staging-refresh-plan.md sections 3 and 4 in the same change, since this alters the backup artifact shape that plan describes.
 - [ ] [#efs-dev-vars-secret-history] Confirm .dev.vars.production / .dev.vars.staging were never committed, and rotate if they were. Both hold cleartext AUTH_SECRET and ADMIN_GLOBAL_PASSWORD; .gitignore covered '.dev.vars' but NOT the per-environment variants, so they sat untracked-but-committable until EFS 292b52d6 added '.dev.vars.*'. Run: git -C src/equityfundingsource-dev log --all --diff-filter=A -- '.dev.vars*'. If any commit ever added one, rotate AUTH_SECRET (wrangler secret put AUTH_SECRET, both envs) and ADMIN_GLOBAL_PASSWORD, and purge from history. Audit the same gap in sibling repos that copied this .gitignore.
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.
 <!-- /agent:backlog -->

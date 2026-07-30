@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 765c7ea4-1760-4ae9-8ffa-b4daf4861a5b
+resume: 58222ddc-00f2-4e31-8e88-84e967cd8f65
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -138,8 +138,6 @@ The other 16 match expression-level patterns directly.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - do [#tsiftnavrunbook]
-- ~~Please extract tsift:code-navigation section into a runbook. If AGENTS.md + CLAUDE.md are used and CLAUDE.md uses `@AGENTS.md`, please do not add redundant instructions.~~
-- ~~do [#astgreplangs]~~
 - do [#astgrepexec]
 - release + publish
 <!-- /agent:queue -->

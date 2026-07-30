@@ -62,6 +62,45 @@ class CrdtReplicaAckFrontierTest {
         assertTrue(shouldStartRemoteDrainUtil(backoffScheduled = false))
     }
 
+    @Test
+    fun `retained canonical projection blocks stale whole editor adoption`() {
+        assertFalse(
+            shouldAdoptEditorTextUtil(
+                hasUnsyncedOperatorEdit = true,
+                canonicalProjectionRetained = true,
+            ),
+        )
+        assertFalse(
+            shouldAdoptEditorTextUtil(
+                hasUnsyncedOperatorEdit = false,
+                canonicalProjectionRetained = false,
+            ),
+        )
+        assertTrue(
+            shouldAdoptEditorTextUtil(
+                hasUnsyncedOperatorEdit = true,
+                canonicalProjectionRetained = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `remote projection is retained before op capture fencing can fail`() {
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val manager = Files.readString(managerPath)
+        val queueBody = manager
+            .substringAfter("private fun queueRemoteTextApply(")
+            .substringBefore("private fun recoverRejectedRemoteCanonical(")
+
+        assertTrue(
+            queueBody.indexOf("retainedCanonicalProjectionPaths.add(filePath)") <
+                queueBody.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)"),
+        )
+    }
+
     /**
      * #crdtpushdrain: a controller-published frontier is positive evidence of pending
      * work, so it must drain urgently rather than sit behind the speculative no-op

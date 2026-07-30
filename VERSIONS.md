@@ -4,6 +4,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.105
+
+_JetBrains plugin 0.2.329; VS Code extension 0.2.63; Zed extension 0.1.0._
+
+- **A retained canonical editor projection can no longer be replaced by stale
+  whole-editor recovery text.** The shared CRDT relay projects a typed adoption
+  decision from its live delivery frontier and rejects request-full-state
+  adoption until the controller-authored target has a visible-content receipt.
+  This keeps Compact Exchange canonical even when native op-capture fencing
+  times out behind another controller operation.
+- **JetBrains and VS Code now retain canonical projection authority across the
+  editor-apply boundary.** JetBrains records the retained target before its
+  native fence while keeping retry scheduling independent; both adapters refuse
+  reattach text adoption until the target is visible. Rust, Kotlin, and
+  TypeScript regressions cover the stale-editor race and retry-safe parity.
+
 ## 0.35.104
 
 _JetBrains plugin 0.2.327; VS Code extension 0.2.62; Zed extension 0.1.0._

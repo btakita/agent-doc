@@ -386,6 +386,56 @@ it('applies peer remote updates but suppresses self echoes', () => {
         }]);
     });
 
+    it('retained canonical projection blocks stale whole editor adoption', async () => {
+        const node = new FakeNode('base');
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        let editorText = 'base';
+        let projectionStarted!: () => void;
+        let releaseProjection!: () => void;
+        const started = new Promise<void>((resolve) => {
+            projectionStarted = resolve;
+        });
+        const projectionGate = new Promise<void>((resolve) => {
+            releaseProjection = resolve;
+        });
+        transport.pending = [{
+            patchId: 'crdt:1:42:4',
+            origin: 1,
+            target: 42,
+            generation: 4,
+            expectedContentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+            update: Buffer.from([9]),
+        }];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => node,
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async (_file, text) => {
+                projectionStarted();
+                await projectionGate;
+                editorText = text;
+                return true;
+            },
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        const drain = manager.drainRemoteUpdates();
+        await started;
+        await manager.handleReattachRequest(filePath, true);
+        assert.deepStrictEqual(
+            transport.textAdopts,
+            [],
+            'an unsynced-edit flag cannot supersede a retained canonical projection',
+        );
+        releaseProjection();
+        await drain;
+        manager.dispose();
+    });
+
     it('retains a failed ACK frontier and does not pull or decode the delivery again', async () => {
         const node = new FakeNode('base');
         const transport = new FakeTransport();

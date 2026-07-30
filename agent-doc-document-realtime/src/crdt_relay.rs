@@ -247,6 +247,18 @@ pub enum DocumentOpDeltaOutcome {
     LegacyQuarantined,
 }
 
+/// Shared authority decision for a bounded whole-editor text adoption.
+///
+/// A retained controller projection owns the document until every live target
+/// has produced a visible-content receipt. An editor's coarse "unsynced edit"
+/// fact does not prove that its whole buffer descends from that newer target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EditorTextAdoptionDecision {
+    AlreadyCurrent,
+    AdoptEditorText,
+    RetainCanonicalProjection,
+}
+
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
 pub struct RelayHub {
     /// The CP-owned canonical replica (the hub / git-checkpoint authority).
@@ -1024,14 +1036,22 @@ impl RelayHub {
     /// lineage. Self-echo guarded: a no-op when the canonical already shows this text (so a
     /// repeated push can't pump a feedback loop). Any other live members rebootstrap.
     pub fn adopt_editor_text(&mut self, text: &str) -> Result<BroadcastPacket> {
-        let before_text = self.canonical.text();
-        if before_text == text {
-            return Ok(BroadcastPacket {
-                origin: self.canonical_id,
-                update: Vec::new(),
-                targets: Vec::new(),
-            });
+        match self.editor_text_adoption_decision(text) {
+            EditorTextAdoptionDecision::AlreadyCurrent => {
+                return Ok(BroadcastPacket {
+                    origin: self.canonical_id,
+                    update: Vec::new(),
+                    targets: Vec::new(),
+                });
+            }
+            EditorTextAdoptionDecision::RetainCanonicalProjection => {
+                return Err(anyhow!(
+                    "editor text adoption deferred: retained canonical projection awaits visible-content receipt"
+                ));
+            }
+            EditorTextAdoptionDecision::AdoptEditorText => {}
         }
+        let before_text = self.canonical.text();
         let before = self.canonical.state_vector();
         self.canonical = ReplicaState::from_text(self.canonical_id, text);
         self.sync_live_document_projection(&before_text, text);
@@ -1053,6 +1073,21 @@ impl RelayHub {
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
+    }
+
+    /// Project whether a whole-editor buffer may replace canonical right now.
+    ///
+    /// Delivery convergence is the reactive live-cut projection backed by
+    /// `delivery_epoch`; pending controller fan-out therefore wins over a stale
+    /// request-full-state recovery without consulting SQLite or RPC ordering.
+    pub fn editor_text_adoption_decision(&self, text: &str) -> EditorTextAdoptionDecision {
+        if self.canonical.text() == text {
+            EditorTextAdoptionDecision::AlreadyCurrent
+        } else if self.delivery_converged() {
+            EditorTextAdoptionDecision::AdoptEditorText
+        } else {
+            EditorTextAdoptionDecision::RetainCanonicalProjection
+        }
     }
 
     pub fn adopt_editor_full_state(&mut self, full_state: &[u8]) -> Result<BroadcastPacket> {
@@ -2369,6 +2404,43 @@ mod tests {
         );
         assert!(hub.delivery_converged());
         assert!(hub.pending_rebootstrap_members().is_empty());
+    }
+
+    #[test]
+    fn retained_compact_projection_rejects_stale_whole_editor_adoption_until_visible_ack() {
+        let expanded =
+            "<!-- agent:exchange -->\noperator\nassistant response\n<!-- /agent:exchange -->\n";
+        let compacted = "<!-- agent:exchange -->\n[compacted exchange]\n<!-- /agent:exchange -->\n";
+        let mut hub = RelayHub::from_text(1, expanded);
+        hub.register(2).unwrap();
+
+        hub.apply_canonical_replace(expanded, compacted).unwrap();
+        assert_eq!(
+            hub.editor_text_adoption_decision(expanded),
+            EditorTextAdoptionDecision::RetainCanonicalProjection,
+        );
+        let error = hub.adopt_editor_text(expanded).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("retained canonical projection awaits visible-content receipt")
+        );
+        assert_eq!(hub.canonical_text(), compacted);
+
+        let pending = hub.pending_updates(2).unwrap().pop().unwrap();
+        assert!(
+            hub.ack_delivery_with_content_hash(
+                2,
+                &pending.patch_id,
+                pending.generation,
+                Some(&pending.expected_content_hash),
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            hub.editor_text_adoption_decision(expanded),
+            EditorTextAdoptionDecision::AdoptEditorText,
+        );
     }
 
     #[test]

@@ -722,6 +722,7 @@ export class CrdtReplicaManager {
         this.replicaRetryFailureCounts.clear();
         this.templateGuardRecovering.clear();
         this.pendingRemoteAcks.clear();
+        this.applyingRemote.clear();
         for (const forwarder of this.forwarders.values()) {
             void forwarder.deregister();
         }
@@ -1021,6 +1022,11 @@ export class CrdtReplicaManager {
     /** Full text adopt is allowed only to recover a proven unsynced user edit. */
     async handleReattachRequest(filePath: string, hasUnsyncedOperatorEdit = false): Promise<void> {
         if (this.reattachRecovering.has(filePath)) return;
+        if (this.applyingRemote.has(filePath)) {
+            this.logger.warn(`[crdt-replica] refused full editor text adopt for ${filePath}; retained canonical projection owns the visible frontier`);
+            this.requestRemoteDrain(filePath);
+            return;
+        }
         if (!hasUnsyncedOperatorEdit) {
             this.logger.warn(`[crdt-replica] refused full editor text adopt for ${filePath}; no unsynced operator edit proves editor-origin content`);
             this.requestRemoteDrain(filePath);

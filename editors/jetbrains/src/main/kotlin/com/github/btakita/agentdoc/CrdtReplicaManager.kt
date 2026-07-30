@@ -128,6 +128,16 @@ internal fun shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount: Int): B
 internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !backoffScheduled
 
 /**
+ * Whole-editor adoption is a recovery authority transition, not a retry.
+ * A retained controller projection wins even when the editor has an unsynced
+ * operator edit because that boolean does not prove the whole buffer's lineage.
+ */
+internal fun shouldAdoptEditorTextUtil(
+    hasUnsyncedOperatorEdit: Boolean,
+    canonicalProjectionRetained: Boolean,
+): Boolean = hasUnsyncedOperatorEdit && !canonicalProjectionRetained
+
+/**
  * `#crdtpushdrain`: a controller-published CRDT remote event is positive evidence
  * that the CP already holds a frontier for this document, so it must bypass the
  * speculative no-op drain backoff instead of being suppressed by it.
@@ -451,6 +461,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         KeyedCoalescingRelay<String, PendingRemoteEditorApply>(REMOTE_EDITOR_APPLY_MERGE)
     private val remoteEditorApplyScheduled = AtomicBoolean(false)
     private val remoteEditorApplyPaths = ConcurrentHashMap.newKeySet<String>()
+    private val retainedCanonicalProjectionPaths = ConcurrentHashMap.newKeySet<String>()
     // An editor apply and its controller ACK cross two different queues (EDT ->
     // replica worker -> controller socket). Keep the ACK as Lazily-style retained
     // state until the controller accepts the exact current editor-content proof.
@@ -484,6 +495,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         pendingLocalEdits.clear()
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
+        retainedCanonicalProjectionPaths.clear()
         remoteEditorEffectGenerations.clear()
         pendingRemoteAckReplays.clear()
         staleBaselineRecoveryTasks.clear()
@@ -952,8 +964,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     if (disposed.get() || staleBaselineRecoveryTasks[filePath] !== scheduled) {
                         return@Runnable
                     }
-                val editorText = tryReadDocumentText(document)
-                    ?: run {
+                    if (retainedCanonicalProjectionPaths.contains(filePath)) {
+                        requestRemoteDrain(filePath, "stale-baseline-canonical-projection-retained")
+                        return@Runnable
+                    }
+                    val editorText = tryReadDocumentText(document)
+                        ?: run {
                         scheduleStaleBaselineRecovery(filePath, document)
                         return@Runnable
                     }
@@ -1072,10 +1088,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      */
     fun requestTextAdopt(filePath: String) {
         documentWorkers.forDocument(filePath).execute {
-            if (!TypingTracker.hasUnsyncedOperatorEdits(filePath)) {
+            val hasUnsyncedOperatorEdit = TypingTracker.hasUnsyncedOperatorEdits(filePath)
+            val canonicalProjectionRetained = retainedCanonicalProjectionPaths.contains(filePath)
+            if (!shouldAdoptEditorTextUtil(hasUnsyncedOperatorEdit, canonicalProjectionRetained)) {
                 log.info(
                     "[reattach-adopt] refused full editor text adopt for ${File(filePath).name}; " +
-                        "no unsynced operator edit proves editor-origin content",
+                        if (canonicalProjectionRetained) {
+                            "retained canonical projection owns the visible frontier"
+                        } else {
+                            "no unsynced operator edit proves editor-origin content"
+                        },
                 )
                 requestRemoteDrain(filePath, "reattach-cp-projection-only")
                 return@execute
@@ -1481,6 +1503,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 remoteState = remoteState,
             )
         }
+        // Retain authority before the native op-capture fence. That fence may
+        // time out behind a compact/write RPC, but the already-pulled canonical
+        // target must still block request-full-state and stale-baseline adoption.
+        retainedCanonicalProjectionPaths.add(filePath)
         if (!prepareNonOperatorEditorMutationOnWorker(filePath)) {
             log.warn("[crdt-replica] remote editor apply retained because native op-capture fencing failed for $filePath")
             scheduleTemplateGuardRecoveryRetry(filePath, "remote-editor-apply-op-epoch")
@@ -1934,10 +1960,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "[crdt-replica] remote editor apply completed for ${File(pending.filePath).name}; " +
                             "visible=$projectionVisible disk_persisted=${outcome.diskPersisted} acked=$acked coalesced_updates=${pending.acknowledgements.size}",
                     )
-                } finally {
-                    remoteEditorApplyPaths.remove(pending.filePath)
-                    if (projectionVisible) {
-                        consecutiveNoOpReschedules.set(0)
+            } finally {
+                remoteEditorApplyPaths.remove(pending.filePath)
+                if (projectionVisible) {
+                    retainedCanonicalProjectionPaths.remove(pending.filePath)
+                    consecutiveNoOpReschedules.set(0)
                         requestRemoteDrain(pending.filePath, "remote-editor-apply-complete")
                     } else {
                         val delayMs = nextNoOpRescheduleBackoffMs()
@@ -1951,6 +1978,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
         } catch (_: RejectedExecutionException) {
             remoteEditorApplyPaths.remove(pending.filePath)
+            if (projectionVisible) {
+                retainedCanonicalProjectionPaths.remove(pending.filePath)
+            }
         }
     }
 

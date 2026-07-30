@@ -334,7 +334,7 @@ I also found `schedule` and `errors` spreading through the transform untouched. 
 All six mutation probes reddened the suite: allowlist keeps everything, unknown staging table copied instead of dropped, target gate never refuses, structured PII columns passed through, HMAC inner pad wrong, attachment bytes untouched.
 
 **Before the first apply, you need to do one thing:** create `passage btak/equityfundingsource/anonymize_seed`. Both tools refuse to run without it, and it must never be regenerated afterwards — a new seed re-pseudonymizes everything and silently breaks the sandbox↔staging joins. I have left the apply as a gated review item rather than guessing at your go.
-<!-- agent:boundary:cc9fc0ec -->
+<!-- agent:boundary:a57da434 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

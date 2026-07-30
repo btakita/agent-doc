@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: b5bbdb48-a7cb-4525-ba78-a6682b3a5eb6
+resume: f81f81a1-f2aa-4dee-910a-835965b1a074
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -314,7 +314,53 @@ I also added a contract-exhaustiveness guard: every registered executor must app
 **What's left is genuinely blocked**, and I filed it that way: the 20 structural-only languages need per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search` first, because `parse_semantic_edit_source` validates through `executor.graph_lang()`. Once a language has graph support, registering it is a contract row plus a conformance fixture — it unblocks one language at a time rather than as one big step.
 
 Queue after this: `release + publish`.
-<!-- agent:boundary:644a8b80 -->
+### Re: do [#givestructuralast] — opus-5
+
+> **Queue prompt:**
+>
+> do [#givestructuralast]
+
+
+Done — `tsift@cd95daa`, superproject `b526d61c7`. All 20 are executors. **The blocker I recorded was wrong, and it was wrong in a way worth naming.**
+
+The item said each language needed per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search` first, *because* `parse_semantic_edit_source` validates through `executor.graph_lang()`. The second half of that sentence is true and the first half does not follow from it. Reparsing a rewritten buffer needs a **parser**. Tag queries and symbol extraction are what *indexing* needs. Routing the reparse through `graph::Lang` made a navigation capability a precondition for a write capability that never depended on it — and because the coupling was in the type, the obstacle read as a property of the languages rather than of one field.
+
+`graph_lang` is now `Option<graph::Lang>`, and the reparse grammar resolves in two steps:
+
+| Executor | Reparse grammar |
+|---|---|
+| has a `tsift-graph` binding | that binding's grammar |
+| structural-only | the ast-grep grammar its pattern matched against |
+
+`AstGrepLang::tree_sitter_language()` exposes the second. An executor with neither is a registration bug, refused by name rather than parsed with some other language's rules. **29 registered executors, up from 9**, each with the whole planner contract — patch proposal, bounded diff preview, `expected_content_hash` conflict detection, `--verify` in a detached temp worktree, batch rollback.
+
+**What this does not change is the tier.** These languages are still unindexed, unsearchable, and ungraphable; `structural_rewrite` is still their entire recognized set, and the symbol-resolved kinds are still refused before the family split — which is the guard that keeps a Go `rename_symbol` from being rewritten by Rust identifier rules. Indexing buys navigation, not rewriting. That is the distinction the old item collapsed.
+
+**The load-bearing fact I found while building it, which no test was holding.** My first mutation — delete the `graph_lang` branch so *everything* reparses with the ast-grep grammar — **passed**. It shouldn't have been able to; the two grammars are supposed to be able to differ. So I measured them, and for all nine indexed executors they are byte-for-byte the same grammar: same ABI, same node-kind table. Even Kotlin, where ast-grep's feature is spelled `tree-sitter-kotlin` and `tsift-graph` uses `tree-sitter-kotlin-ng` — cargo resolves both to the `-ng` grammar. That is exactly the pair that produced the silent zero-call-edge defect two cycles ago, and nothing was asserting they still agree. A grammar bump that splits them would have the planner validating output against a grammar the matcher never used and the indexer will not use either, silently. There is now a test that compares every node-kind id across both and fails at that moment.
+
+**Coverage is one conformance fixture per registered executor, exhaustive in both directions** — an executor with no fixture is registered but never exercised; a fixture with no executor has outlived what it covered. Each row drives the real planner path for all 29 languages, and the suite compares the sum of replacements *the planner returned* against the sum the table declares, so a runner counting its own iterations cannot report green over a table that rewrote nothing. Grammar quirks stay row data: C and CSS need the statement terminator, Dart and Solidity match only whole declarations, HCL only as an attribute, JSON needs both sides metavariable-shaped.
+
+The one CLI test that pinned the old boundary — "Go rewrites via `ast-grep` but is refused by `edit-intents`" — is inverted rather than deleted, and now also asserts the apply actually lands and that a symbol-resolved kind still fails without writing.
+
+**Verification.** `make check` exit 0, 1608 passed, 0 failed (was 1601). Eight mutations, each caught by the test that claims to cover it:
+
+- drop the `graph_lang` branch → **survived**, which is the finding above; the new grammar-agreement guard now catches the case it was hiding
+- remove the Go contract row → 4 tests fail
+- give Go the full Rust kind set → the contract test and the structural-refusal test fail
+- structural executors reparse with the Rust grammar → 3 tests fail
+- truncate the fixture table to the original nine → 4 tests fail
+- no-match becomes an empty plan instead of a refusal → 2 tests fail
+- the grammar-agreement guard compares against Rust instead of the executor → it fails
+- `AstGrepLang::tree_sitter_language` returns one constant grammar → the pairwise-distinct guard fails
+
+Live on the installed binary, not just the suite: Java and CSS codemods applied through their named executors; a Go dry run reports `apply_supported=true` and writes nothing; `--verify` on Go reaches `temp_applied_total=1`, `reindexed=true`, `changed_symbols=0` (right — Go has no index) with the real tree untouched.
+
+One honest gap. The executor-level refusal of `rename_symbol` is asserted per language in the unit suite, but it is currently **unreachable end to end**: an unindexed language has no symbol to resolve, so the index layer refuses first. It is a guard for the moment one of these languages gains graph support, not a path in use today.
+
+CI run `30577467047` is queued on `cd95daa` at the time of writing; the two preceding commits are green and the above is local evidence.
+
+Queue after this: `release + publish`.
+<!-- agent:boundary:2640f259 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -329,7 +375,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#givestructuralast] Give the 20 structural-only ast-grep languages (go, cpp, csharp, dart, java, swift, ruby, php, scala, lua, elixir, haskell, nix, solidity, css, html, json, yaml, hcl, c) semantic-edit executors. Genuinely blocked: each needs per-language tag queries + symbol extraction in tsift-graph/tsift-search first, because parse_semantic_edit_source validates through executor.graph_lang(). Unblocks one language at a time as its graph support lands — the executor registration itself is then a contract row plus a conformance fixture
+- [x] 🚧 [#givestructuralast] Give the 20 structural-only ast-grep languages (go, cpp, csharp, dart, java, swift, ruby, php, scala, lua, elixir, haskell, nix, solidity, css, html, json, yaml, hcl, c) semantic-edit executors. Genuinely blocked: each needs per-language tag queries + symbol extraction in tsift-graph/tsift-search first, because parse_semantic_edit_source validates through executor.graph_lang(). Unblocks one language at a time as its graph support lands — the executor registration itself is then a contract row plus a conformance fixture
 <!-- /agent:backlog -->
 
 ## Review

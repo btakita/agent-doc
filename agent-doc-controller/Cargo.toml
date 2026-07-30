@@ -10,6 +10,11 @@ publish = false
 [lib]
 name = "agent_doc_controller"
 
+[[example]]
+name = "pane_layout_projection_benchmark"
+test = false
+bench = false
+
 [dependencies]
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.109" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.109" }

@@ -71,7 +71,12 @@ drift or an effect failure derives `retry_pending`, schedules bounded backoff,
 re-observes tmux, and continues until the observed layout and requested focus
 converge or a newer desired generation supersedes it. Matching columns are not
 terminal proof when focus is present: the effect receipt must also prove the
-final generation-fenced pane selection.
+final generation-fenced pane selection. Desired publication is last-write-wins:
+an identical value retains its generation, pending stale generations collapse to
+the newest value, and supersession is checked before and immediately after an
+unavoidable in-flight structural effect. A focus-only change reuses the latest
+structurally converged file-to-pane assignment, selects the pane first, and does
+not serialize behind another full layout reconciliation.
 - Plugins publish desired pane state and subscribe to status; they do not retry
   imperative tmux operations. Status `phase` is a closed enum. `reason_code` is a
   stable enum and `reason_detail` is optional diagnostic text, so clients never

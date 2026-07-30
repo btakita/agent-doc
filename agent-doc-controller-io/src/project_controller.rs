@@ -364,6 +364,32 @@ pub(crate) struct PaneLayoutObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct PaneLayoutStructure {
+    columns: Vec<String>,
+    window: Option<String>,
+    no_autostart: bool,
+    exact_visible: bool,
+}
+
+impl From<&ControllerTmuxLayoutSyncInvocation> for PaneLayoutStructure {
+    fn from(invocation: &ControllerTmuxLayoutSyncInvocation) -> Self {
+        Self {
+            columns: invocation.columns.clone(),
+            window: invocation.window.clone(),
+            no_autostart: invocation.no_autostart,
+            exact_visible: invocation.exact_visible,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PaneLayoutStructuralReceipt {
+    structure: PaneLayoutStructure,
+    pub report: Option<ControllerTmuxLayoutSyncStateReport>,
+    pub file_panes: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 pub(crate) enum PaneLayoutEffectPhase {
     Idle,
@@ -661,6 +687,7 @@ struct ControllerPaneLayoutGraph {
     actor_bindings: Computed<Vec<ControllerTmuxActorBinding>>,
     observed: Source<Option<PaneLayoutObservation>>,
     receipt: Source<PaneLayoutEffectReceipt>,
+    structural_receipt: Source<Option<PaneLayoutStructuralReceipt>>,
     applicable_receipt: Computed<Option<PaneLayoutEffectReceipt>>,
     projection: Computed<PaneLayoutProjection>,
     effect: Mutex<Option<lazily::Effect>>,
@@ -699,6 +726,7 @@ impl ControllerPaneLayoutGraph {
         });
         let observed = ctx.source(None);
         let receipt = ctx.source(PaneLayoutEffectReceipt::default());
+        let structural_receipt = ctx.source(None);
         let applicable_receipt = ctx.computed(move |ctx| {
             let desired = ctx.get(&desired)?;
             let receipt = ctx.get(&receipt);
@@ -736,6 +764,7 @@ impl ControllerPaneLayoutGraph {
             actor_bindings,
             observed,
             receipt,
+            structural_receipt,
             applicable_receipt,
             projection,
             effect: Mutex::new(Some(effect)),
@@ -763,10 +792,23 @@ impl ControllerPaneLayoutGraph {
         mut invocation: ControllerTmuxLayoutSyncInvocation,
         source_plane_version: Option<u64>,
     ) -> PaneLayoutDesired {
-        let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
         if invocation.caller_kind.is_empty() {
             invocation.caller_kind = "projection".to_string();
         }
+        if let Some(mut current) = self.ctx.get(&self.desired)
+            && current.invocation == invocation
+        {
+            if source_plane_version > current.source_plane_version {
+                current.source_plane_version = source_plane_version;
+            }
+            // Republish the identical value without manufacturing a generation.
+            // A converged Computed stays inert; a retained NeedsEffect projection
+            // can restart its worker if an earlier adapter thread exited.
+            self.ctx.set(&self.desired, Some(current.clone()));
+            self.waiters.notify_all();
+            return current;
+        }
+        let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
         let desired = PaneLayoutDesired {
             generation,
             source_plane_version,
@@ -866,6 +908,13 @@ impl ControllerPaneLayoutGraph {
     }
 
     fn record_observation(&self, observation: PaneLayoutObservation) {
+        if !observation.report.synced
+            && self
+                .desired()
+                .is_some_and(|desired| desired.generation == observation.generation)
+        {
+            self.ctx.set(&self.structural_receipt, None);
+        }
         self.ctx.set(&self.observed, Some(observation));
         self.waiters.notify_all();
     }
@@ -882,6 +931,35 @@ impl ControllerPaneLayoutGraph {
             .filter(|receipt| receipt.generation == generation)
             .map(|receipt| receipt.file_panes)
             .unwrap_or_default()
+    }
+
+    fn reusable_structural_receipt(
+        &self,
+        desired: &PaneLayoutDesired,
+    ) -> Option<PaneLayoutStructuralReceipt> {
+        self.ctx.get(&self.structural_receipt).filter(|receipt| {
+            receipt.structure == PaneLayoutStructure::from(&desired.invocation)
+                && !receipt.file_panes.is_empty()
+        })
+    }
+
+    fn record_structural_assignment(
+        &self,
+        desired: &PaneLayoutDesired,
+        report: Option<ControllerTmuxLayoutSyncStateReport>,
+        file_panes: Vec<(String, String)>,
+    ) {
+        if file_panes.is_empty() {
+            return;
+        }
+        self.ctx.set(
+            &self.structural_receipt,
+            Some(PaneLayoutStructuralReceipt {
+                structure: PaneLayoutStructure::from(&desired.invocation),
+                report: report.filter(|report| report.synced),
+                file_panes,
+            }),
+        );
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -2923,6 +3001,23 @@ impl ControllerRuntime {
 
     fn pane_layout_effect_file_panes(&self, generation: u64) -> Vec<(String, String)> {
         self.pane_layout_graph.effect_file_panes(generation)
+    }
+
+    fn reusable_pane_layout_structure(
+        &self,
+        desired: &PaneLayoutDesired,
+    ) -> Option<PaneLayoutStructuralReceipt> {
+        self.pane_layout_graph.reusable_structural_receipt(desired)
+    }
+
+    fn record_pane_layout_structural_assignment(
+        &self,
+        desired: &PaneLayoutDesired,
+        report: Option<ControllerTmuxLayoutSyncStateReport>,
+        file_panes: Vec<(String, String)>,
+    ) {
+        self.pane_layout_graph
+            .record_structural_assignment(desired, report, file_panes);
     }
 
     fn pane_layout_actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
@@ -5796,6 +5891,68 @@ mod tests {
     }
 
     #[test]
+    fn identical_pane_layout_desired_is_deduplicated_without_resetting_projection() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            Vec::new(),
+            actor_graph.live_bindings_handle(),
+        );
+        let invocation = pane_layout_desired_for_test(1).invocation;
+        let first = graph.set_desired(invocation.clone(), Some(81));
+        let duplicate = graph.set_desired(invocation, Some(82));
+
+        assert_eq!(duplicate.generation, first.generation);
+        assert_eq!(duplicate.source_plane_version, Some(82));
+        assert_eq!(
+            graph.state_projection().unwrap().source_plane_version,
+            Some(82)
+        );
+    }
+
+    #[test]
+    fn structurally_converged_layout_is_reused_for_a_focus_only_generation() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            Vec::new(),
+            actor_graph.live_bindings_handle(),
+        );
+        let first = graph.set_desired(pane_layout_desired_for_test(1).invocation, Some(81));
+        let assignment = vec![
+            ("tasks/one.md".to_string(), "%1".to_string()),
+            ("tasks/two.md".to_string(), "%2".to_string()),
+        ];
+        let report = ControllerTmuxLayoutSyncStateReport {
+            synced: true,
+            reason: "synced".to_string(),
+            expected_documents: first.invocation.columns.clone(),
+            actual_documents: first.invocation.columns.clone(),
+            panes: vec!["%1".to_string(), "%2".to_string()],
+            session_name: Some("agent-doc".to_string()),
+            window_id: Some("@1".to_string()),
+            window_name: Some("agent-doc".to_string()),
+            focus: first.invocation.focus.clone(),
+        };
+        graph.record_structural_assignment(&first, Some(report.clone()), assignment.clone());
+
+        let mut focus_only = first.invocation.clone();
+        focus_only.focus = Some("tasks/one.md".to_string());
+        let second = graph.set_desired(focus_only, Some(82));
+        let reusable = graph.reusable_structural_receipt(&second).unwrap();
+
+        assert_eq!(reusable.file_panes, assignment);
+        assert_eq!(reusable.report, Some(report));
+
+        let mut structural_change = second.invocation.clone();
+        structural_change.columns.reverse();
+        let third = graph.set_desired(structural_change, Some(83));
+        assert!(graph.reusable_structural_receipt(&third).is_none());
+    }
+
+    #[test]
     fn pane_layout_effect_assignment_is_fenced_by_desired_generation() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
@@ -5817,7 +5974,9 @@ mod tests {
         });
         assert_eq!(graph.effect_file_panes(first.generation), first_assignment);
 
-        let second = graph.set_desired(pane_layout_desired_for_test(2).invocation, Some(82));
+        let mut second_invocation = pane_layout_desired_for_test(2).invocation;
+        second_invocation.focus = Some("tasks/one.md".to_string());
+        let second = graph.set_desired(second_invocation, Some(82));
         graph.record_receipt(PaneLayoutEffectReceipt {
             generation: first.generation,
             attempt: 2,

@@ -16621,22 +16621,17 @@ fn pane_layout_effect_worker(
             attempt = 0;
             continue;
         }
+        if state.lock().is_superseded(desired.generation) {
+            attempt = 0;
+            continue;
+        }
         attempt = attempt.saturating_add(1);
-        runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
-            generation: desired.generation,
-            attempt,
-            phase: PaneLayoutEffectPhase::InFlight,
-            reason: "tmux_effect_in_flight".to_string(),
-            file_panes: Vec::new(),
-            focus_required: desired.invocation.focus.is_some(),
-            focus_applied: false,
-        });
-        publish_pane_layout_status(&runtime);
 
         let bootstrap = match runtime.bootstrap_snapshot() {
             Ok(bootstrap) => bootstrap,
             Err(error) => {
                 eprintln!("[controller] pane-layout bootstrap observation failed: {error:#}");
+                state.lock().deactivate();
                 return;
             }
         };
@@ -16656,6 +16651,101 @@ fn pane_layout_effect_worker(
             );
         }
         let projected_focus = guarded_invocation.focus.clone();
+        let reusable_structure = runtime.reusable_pane_layout_structure(&desired);
+        let reusable_file_panes = reusable_structure
+            .as_ref()
+            .map(|receipt| receipt.file_panes.clone())
+            .unwrap_or_default();
+        runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
+            generation: desired.generation,
+            attempt,
+            phase: PaneLayoutEffectPhase::InFlight,
+            reason: if reusable_structure.is_some() {
+                "reusable_layout_focus_effect_in_flight".to_string()
+            } else {
+                "tmux_effect_in_flight".to_string()
+            },
+            file_panes: reusable_file_panes,
+            focus_required: projected_focus.is_some(),
+            focus_applied: false,
+        });
+        publish_pane_layout_status(&runtime);
+
+        if let Some(mut reusable) = reusable_structure {
+            let tmux = tmux_router::Tmux::default_server();
+            let focus_receipt = apply_pane_layout_focus_effect(
+                &state,
+                desired.generation,
+                projected_focus.as_deref(),
+                focus_suppressed,
+                &reusable.file_panes,
+                |pane| tmux.select_pane(pane),
+            );
+            if focus_receipt.reason == "focus_superseded_by_newer_layout_state" {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "pane_layout_projection_cancelled generation={} phase=before_structural_effect reason={}",
+                        desired.generation, focus_receipt.reason
+                    ),
+                );
+                attempt = 0;
+                continue;
+            }
+            if (!focus_receipt.required || focus_receipt.applied)
+                && let Some(mut report) = reusable.report.take()
+            {
+                report.focus = projected_focus.clone();
+                let focus_reason = focus_receipt.reason.clone();
+                let logged_expected_documents = report.expected_documents.clone();
+                let logged_actual_documents = report.actual_documents.clone();
+                let logged_panes = report.panes.clone();
+                runtime.record_pane_layout_observation(PaneLayoutObservation {
+                    generation: desired.generation,
+                    report,
+                });
+                runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
+                    generation: desired.generation,
+                    attempt,
+                    phase: PaneLayoutEffectPhase::Converged,
+                    reason: format!("reused_structural_layout; {focus_reason}"),
+                    file_panes: reusable.file_panes,
+                    focus_required: focus_receipt.required,
+                    focus_applied: focus_receipt.applied,
+                });
+                publish_pane_layout_status(&runtime);
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "pane_layout_projection generation={} attempt={} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?}",
+                        desired.generation,
+                        attempt,
+                        focus_reason,
+                        logged_expected_documents,
+                        logged_actual_documents,
+                        logged_panes,
+                    ),
+                );
+                if pane_layout_effect_worker_retire_if_current(&runtime, &state, desired.generation)
+                {
+                    return;
+                }
+                attempt = 0;
+                continue;
+            }
+        }
+
+        if state.lock().is_superseded(desired.generation) {
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "pane_layout_projection_cancelled generation={} phase=before_structural_effect reason=superseded",
+                    desired.generation
+                ),
+            );
+            attempt = 0;
+            continue;
+        }
         let effect_result = match runtime_effects() {
             Ok(effects) => effects.sync_tmux_layout(&bootstrap.project_root, guarded_invocation),
             Err(error) => Err(error),
@@ -16664,6 +16754,24 @@ fn pane_layout_effect_worker(
             .as_ref()
             .map(|receipt| receipt.file_panes.clone())
             .unwrap_or_default();
+        if effect_result.is_ok() {
+            runtime.record_pane_layout_structural_assignment(
+                &desired,
+                None,
+                effect_file_panes.clone(),
+            );
+        }
+        if state.lock().is_superseded(desired.generation) {
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "pane_layout_projection_cancelled generation={} phase=after_structural_effect reason=superseded",
+                    desired.generation
+                ),
+            );
+            attempt = 0;
+            continue;
+        }
         let focus_receipt = if effect_result.is_ok() {
             let tmux = tmux_router::Tmux::default_server();
             apply_pane_layout_focus_effect(
@@ -16735,6 +16843,13 @@ fn pane_layout_effect_worker(
         let logged_expected_documents = report.expected_documents.clone();
         let logged_actual_documents = report.actual_documents.clone();
         let logged_panes = report.panes.clone();
+        if report.synced {
+            runtime.record_pane_layout_structural_assignment(
+                &desired,
+                Some(report.clone()),
+                effect_file_panes.clone(),
+            );
+        }
         runtime.record_pane_layout_observation(PaneLayoutObservation {
             generation: desired.generation,
             report,

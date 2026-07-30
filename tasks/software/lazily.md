@@ -242,12 +242,12 @@ Twelve repos committed and pushed, superproject gitlinks bumped in `8b0eb2831` +
 The corrected table now shows **18 honestly-absent cells**: js, zig and cs ship no thread-safe or async queue-family flavor. That gap was previously masked — three cells by a false green and six by unexplained partials — and it is the same projection work `#lzingressbindings` just did for ingress. Queued as `#lzqueuefamilyflavors`. The work-queue fixture's missing lease configuration is `#lzwqfixtureconfig`; it is small, but every binding independently hardcoding the same two numbers is a corpus gap, not a binding quirk.
 
 zig still lists 24 known-uncovered fixtures. Those are whole families with no runner (lossless-tree, message-passing, seqcrdt/textcrdt) rather than transcriptions masquerading as replays, so they are a different and larger piece of work than this item.
-<!-- agent:boundary:ebcb72e4 -->
+<!-- agent:boundary:26c2b3c2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - 🚧 📌 Fix the red test suites in the lazily implementations.
 - 📌 do [#lzegress]
 - do [#lzqueuefamilyflavors]

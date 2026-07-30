@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 5dd67d4f-d29e-47e9-86e5-37012664f25e
+resume: bac73049-47a1-42bc-b46b-7ef4283cbdb6
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -362,16 +362,39 @@ Done, EFS `20d7a416`, pushed. `make check` green (2282 pass, 0 fail, build + wor
 **One thing worth your attention on the clone.** The recorded `tmo_backup_last_key` (`2026-07-30T17-00-51Z`) predates this commit, so that artifact has no schedule rows. The next daily scheduled backup will. I have appended that to `#tmo-clone-apply` so the clone is not rehearsed off a pre-change source — it does not block anything, it just means "use a fresh capture" rather than "reuse the one already noted in the plan".
 
 Superproject gitlink bumped (`e1bcfa6`).
-<!-- agent:boundary:f55ec2b1 -->
+
+### Re: staging deploy — opus-5
+
+> **Queue prompt:**
+>
+> staging deploy
+
+Live on staging: version `410b3c74-4c9b-4c6d-89b5-d3037201242b`, deployed 2026-07-30T23:18:08Z from `20d7a416` (repo in sync with origin/main, 0 ahead / 0 behind). `EFS_ENVIRONMENT="staging"`, D1 `equityfundingsource`, `https://equityfundingsource.brian-takita.workers.dev` → 200. Production untouched.
+
+Pre-deploy checklist per `runbooks/deployment.md`: `make check` green (2282 pass, 0 fail, build + worker build clean); **no migrations pending** on staging D1 before or after, so this was code-only; Time Travel bookmark present (`00001063-00000070-000050b8-...`).
+
+One note on the runbook, since it misled me for a minute: §TL;DR says `make deploy` applies migrations to the **production** database. It doesn't. `make deploy` → `deploy:worker` → `cf:d1:migrate:remote`, which targets `equityfundingsource` — the *staging* D1. Production is the separate `deploy:worker:production` / `cf:d1:migrate:remote:production` pair against `equityfundingsource-production`. The wrapper confirms it out loud (`[cf-wrangler] env=staging (top-level)`). The runbook text predates the production env being split out.
+
+**The deploy is verified functionally, not just by version id.** Grepping the worker bundle was a dead end — `restore_unrestorable_` is tree-shaken out of it (CLI-only), and the strings that *are* in there (`PaymentSchedule`, `System.Data.DataTable`) have been since `300b788d`, so they prove nothing about this build. So I ran the capture against the **real TMO sandbox** instead:
+
+```
+[tmo-backup] loans=26 fundings=0 schedule_rows=34 attachments=0/7 lenders=0 borrowers=30
+```
+
+**34 schedule rows across 11 of 26 loans.** That number was structurally 0 on every capture ever taken before this change — the sweep hard-coded an empty array. No sweep errors, no per-loan read errors. `complete=false` is the `--no-content` flag doing its documented job (7 attachments listed as `skipped (--no-content)`); I used it to keep the run read-light. The artifact was written outside the repo and deleted.
+
+Worth knowing where this leaves the two environments: staging's scheduled TMO backup will now write schedule-bearing artifacts, **production's will not** — it still runs the prior build, and its daily job keeps producing `schedule_rows=0`. That matters for `#tmo-clone-apply`, which wants a schedule-bearing source. Filed as `#efs-prod-deploy-20d7a416` rather than doing it, since you asked for staging.
+<!-- agent:boundary:3133dc06 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- do [#tmo-backup-schedule-inline]
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
+- staging deploy
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#efs-prod-deploy-20d7a416] [recommended] Deploy EFS 20d7a416 (the inline payment-schedule capture, #tmo-backup-schedule-inline) to production. Staging is live on version 410b3c74-4c9b-4c6d-89b5-d3037201242b as of 2026-07-30T23:18Z and verified against the real TMO sandbox at 34 schedule rows over 26 loans. Production still runs the prior build, so its daily scheduled TMO backup keeps writing artifacts with zero schedule rows, and #tmo-clone-apply needs a schedule-bearing source. Run make deploy in a production checkout via deploy:worker:production; no D1 migration is pending on either environment, so this is code-only.
 - [/] [#tmo-clone-apply] [operator-verify] Execute the anonymized live-to-sandbox TMO clone and the staging D1 refresh per prds/tmo-sandbox-clone-and-staging-refresh-plan.md section 8. Blocked on two operator actions: (1) create passage btak/equityfundingsource/anonymize_seed, which must be stable forever because regenerating it re-pseudonymizes everything and breaks the sandbox-to-staging joins; (2) an explicit go for the destructive steps, which delete sandbox loans and wipe-and-load staging D1. Everything else is built and green as of EFS 20d7a416: rehearse with tmo-sandbox-clone.ts --simulate, then --from-r2 dry run, then --from-r2 --apply, then d1-staging-refresh.ts dry run and --apply. Use a backup captured AFTER EFS 20d7a416 - the recorded tmo_backup_last_key from 2026-07-30T17:00 predates #tmo-backup-schedule-inline and carries no payment-schedule rows; the next daily scheduled backup does. Coordinate with #tmo-sandbox-purge-apply, which gates the same purge.
 - [ ] [#efs-dev-vars-secret-history] Confirm .dev.vars.production / .dev.vars.staging were never committed, and rotate if they were. Both hold cleartext AUTH_SECRET and ADMIN_GLOBAL_PASSWORD; .gitignore covered '.dev.vars' but NOT the per-environment variants, so they sat untracked-but-committable until EFS 292b52d6 added '.dev.vars.*'. Run: git -C src/equityfundingsource-dev log --all --diff-filter=A -- '.dev.vars*'. If any commit ever added one, rotate AUTH_SECRET (wrangler secret put AUTH_SECRET, both envs) and ADMIN_GLOBAL_PASSWORD, and purge from history. Audit the same gap in sibling repos that copied this .gitignore.
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.

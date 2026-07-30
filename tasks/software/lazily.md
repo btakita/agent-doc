@@ -161,13 +161,96 @@ CI at hand-off: spec, kt, js, dart, go, cpp and cs green; rs still running its R
 #### One thing I found that is worse than it looks
 
 While flipping the coverage marks I checked the neighbouring rows. **Rows 21, 23 and 24 — async `TopicCell`, thread-safe and async `WorkQueueCell` — read `—` for every binding but Rust, yet py, kt and dart demonstrably ship those types**, and their own conformance ledgers claim all nine cells. This is ledger rot running backwards: the table understates what exists rather than overstating it, so nobody notices, and a "project this family into the bindings" task reads as unstarted work that is in fact partly done. Filed as `#lzcoverageaudit` rather than fixed inline, because clearing it honestly means proving per binding that each shipped flavour is actually *replayed* against the corpus — the same work ingress just did, not a mark flip.
-<!-- agent:boundary:92e5fab2 -->
+
+### Re: do [#lzcoverageaudit] + do [#lzzig0152] — opus-5
+
+Both done. The audit found the table wrong in **both directions at once**, and the Zig 0.15.2 job turned out to have four faults rather than the two the item knew about — including one that says something about the engine, not the toolchain.
+
+I also closed out `#lzingressbindings`. Its response is committed at HEAD but its queue head and backlog entry were never struck — last cycle's closeout was interrupted mid-write, so the item read as unstarted work that was in fact landed. Exactly the failure mode the audit is about, one layer up.
+
+#### The audit: 33 cells corrected, in both directions
+
+`lazily-spec 326f25e`. Columns are rs / py / kt / js / dart / zig / go / cpp / cs.
+
+| Row | Was | Now | What was wrong |
+|---|---|---|---|
+| 16, 19, 22 — single-threaded queue / topic / work-queue | js `~`, zig `~` | ✅ | partial with **no recorded reason** |
+| 17, 18 — thread-safe + async `QueueCell` | js ✅ | `—` | **overstated — js ships neither type** |
+| 17, 18 | go `—`, cpp `—` | ✅ | understated |
+| 20 — thread-safe `TopicCell` | js ✅ | `—` | **overstated** |
+| 20 | go `—`, cpp `—` | ✅ | understated |
+| 21 — async `TopicCell` | py/kt/dart/go/cpp `—` | ✅ | understated |
+| 23, 24 — thread-safe + async `WorkQueueCell` | py/kt/dart/go/cpp `—` | ✅ | understated |
+
+**24 understated, 3 overstated, 6 unexplained partials.** The understated direction is the more dangerous one, and it is worth naming why: nobody files a bug about coverage they are told they lack. lazily-go has shipped `async_queue_family.go`, `thread_safe_queue_family.go` and a 43K `queue_family_conformance_test.go` that replays all three primitives against all three flavors — with an enforced 3×3 capability ledger — while six of its cells read absent. A "project this family into the bindings" task reads as unstarted work that is already done.
+
+**The 3 overstated cells are the ones I would want to know about first.** lazily-js was recorded as shipping the thread-safe and async `QueueCell` and the thread-safe `TopicCell`. It ships none of them. Its own ledger records all three as `shipped: false` and greps `src/` in both directions to keep that honest — so the binding was actively asserting the opposite of what the canonical table claimed, and the table won by default because nothing compares them.
+
+**On the 6 `~` marks: lazily-cs is the control case that settles them.** I could not recover what "partial" was supposed to encode — no note, no schema field for one. The tempting reading is "ships 1 of 3 flavors," but cs also ships only the single-threaded flavor and reads ✅ on exactly those three rows. So `~` on js and zig was drift, not a family-level annotation, and the fix is to make them read like cs.
+
+#### How each cell was proved
+
+Not by reading ledgers — by running each binding's suite this cycle:
+
+| Binding | Evidence |
+|---|---|
+| py | `test_queue_family_conformance.py` 35 passed; ledger asserts 3×3 all shipped |
+| kt | `QueueFamilyConformanceTest` green; `Flavor.entries` × `Primitive` exhaustive, zero staged skips |
+| dart | 10 passed — named `(single-threaded)` / `(thread-safe)` / `(async)` per primitive |
+| go | `TestQueueCell/TopicCell/WorkQueueCellCorpusAllFlavors` — 31 / 29 / 18 steps asserted per flavor |
+| cpp | 4 ctest targets pass; ledger prints "9 shipped flavors, 11 fixtures read" |
+| js, cs, zig | single-threaded replays green; absence proved by each ledger **plus** a `src/` grep for the type |
+
+The absence direction matters as much as the presence direction: a row cannot claim a flavor whose type does not exist, and a type cannot exist unreplayed. Both directions are enforced inside the bindings.
+
+#### lazily-zig needed the replay written before its rows could move
+
+This is the case the item's rule was written for. zig ships `TopicCell` and `WorkQueueCell`, and had tests *named* after the canonical fixtures — `test "WorkQueueCell competing delivery fixture"` — whose expected values were **transcribed into the source**. The six fixtures sat in `KNOWN_UNCOVERED` with the reason "No runner at all in this binding." Accurate, and unnoticeable: a transcription cannot fail when the corpus changes upstream.
+
+So `lazily-zig bbb3a24` adds `src/lazily/queue_family_conformance.zig` — all six fixtures replayed against the real cells, asserting full expected state, every return value, and the `invalidates` matrix **per reader kind in both directions**, so over-invalidation is as visible as under-. Each entry point returns its step count and the tests assert the totals (29 topic, 18 work-queue), because a runner that opens every fixture and drives none of their steps reports the same "ok" as a real one. The runtime manifest went 104 → **110/134 fixtures opened**; those bytes were really read.
+
+Mutation-checked both primitives, and the first attempt taught me something: bumping the topic reader *after* `advance`'s no-op early return is unreachable for the steps that matter, so it passed. Moving the bump *before* the early return produces `topiccell_offline_tail_bounds step 3 (advance): subscriber worker invalidates want=false got=true`. On the other side, making `push` always dirty `is_empty` reddens `workqueue_competing_delivery` step 1 *and* the probe-discrimination test.
+
+Two places the corpus is thinner than the code, recorded rather than papered over: `WorkQueueCell`'s visibility timeout and `max_deliveries` are not in the fixture `initial`, so I used lazily-go's values rather than tuning until zig passed; and `restart` carries a `subscriber` the observable contract never uses.
+
+#### Zig 0.15.2: four faults, and the interesting one is not a toolchain quirk
+
+`lazily-zig 4438486`. The item knew about `b.graph.environ_map` and the `cell.zig` dependency loop. Behind those:
+
+1. **`b.graph.environ_map`** is a *rename* — 0.15.2 spells it `env_map` — so `buildEnvVar` asks the compiler which field the toolchain declares. Confirming the item's warning: `std.process.getEnvVarOwned` does not exist on 0.16/master, so that shim trades one red job for two.
+
+2. **The graph mutex gate was backwards, and this is the real finding.** `context.zig` picked `std.Thread.Mutex` below 0.16 and the vendored `ReentrantMutex` above. But `Slot.initKeyed` calls user `valueFn` *while holding the graph lock*, and a `valueFn` re-enters via `cell()`/`slot()` — reentrancy is a **requirement of the engine**, introduced deliberately (releasing the lock before `valueFn` opened a use-after-free). The 0.15 arm kept a non-reentrant lock, so it deadlocked the moment a compute touched a second cell; 0.15.2's Mutex detects the re-acquire and panics "Deadlock detected", while the newer toolchains never executed that path at all. The version split wasn't protecting 0.15 — it was hiding that 0.15 had a different, broken concurrency contract. The vendored lock compiles there unchanged, so the gate is gone and all three versions now share one lock.
+
+3. **`cell.zig` dependency loop** — a field typed `?DeinitFn` makes field resolution depend on a container decl naming `*Self`. Spelling the pointer inline is the same type with no decl edge. Fixing fault 4 first also made this error stop cascading, which is why it looked like two problems.
+
+4. **`Compute.tryGet` declared `error{StaleCompute}!@TypeOf(handle.get())`.** When the handle's read is itself fallible — `TopicCell.Reader.get` is — that asks for a *nested* error union. 0.15.2 refuses the coercion; later toolchains happen to accept it. `TryGetResult` merges the error sets into one flat union with the same reachable errors.
+
+Plus two genuinely version-absent std surfaces: `mmap`'s `prot` is a `u32` bitmask on 0.15.x and a packed struct after, and `std.Io` on 0.15.2 is only the Reader/Writer namespaces — so `FileOutboxStore` is *unbuildable* there rather than untested. Its two tests skip visibly; nothing else in `reliable_sync.zig` is downgraded.
+
+**I walked into the exact trap the item warned about.** My first `mmap` fix reflected on the function signature to avoid naming either `prot` form — and `Type.Fn` spells its parameter list `params` on 0.16 and `param_types` on master, so the reflection needed the same version gate the argument did. master went red. The lesson the item recorded about verifying on one toolchain applies to the *fix* as much as to the code.
+
+All three pinned toolchains, before and after the new conformance file: **0.15.2 768/772 (4 skipped), 0.16.0 830/830, master 441/441** — each up exactly 3 from the new tests. `make check` green including the coverage guard. Mutation-checked that 0.15.2 discriminates rather than passing by omission: dropping the closed-reader bump in `QueueCell.close` turns `queuecell_closure_lifecycle` red *there*.
+
+#### CI, and one more thing the item implied
+
+The zig CI run on `bbb3a24` is green on all four jobs — **including `Zig 0.15.2`**. But the job carried `continue-on-error`, so it could not have failed the build either way. A job that cannot fail is indistinguishable from a job that passes, which is the same shape as a suite reporting green while testing nothing; keeping the gap "visible" only works if someone reads a green checkmark as red. `1ec2a45` removes it, so 0.15.2 gates again. That is what "restore the job" has to mean.
+
+Twelve repos committed and pushed, superproject gitlinks bumped in `8b0eb2831` + `d20c8e4`. The nine binding README bumps are generated by `sync-coverage.mjs`; CI's `--check` fails on drift, so they are not hand edits.
+
+#### What this leaves, filed rather than folded in
+
+The corrected table now shows **18 honestly-absent cells**: js, zig and cs ship no thread-safe or async queue-family flavor. That gap was previously masked — three cells by a false green and six by unexplained partials — and it is the same projection work `#lzingressbindings` just did for ingress. Queued as `#lzqueuefamilyflavors`. The work-queue fixture's missing lease configuration is `#lzwqfixtureconfig`; it is small, but every binding independently hardcoding the same two numbers is a corpus gap, not a binding quirk.
+
+zig still lists 24 known-uncovered fixtures. Those are whole families with no runner (lossless-tree, message-passing, seqcrdt/textcrdt) rather than transcriptions masquerading as replays, so they are a different and larger piece of work than this item.
+<!-- agent:boundary:a737cc29 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - do [#lzingressbindings] using subagents
+- do [#lzcoverageaudit]
+- do [#lzzig0152]
 - Fix the red test suites in the lazily implementations.
 - do [#lzegress]
 - do [#kny1]
@@ -183,6 +266,8 @@ While flipping the coverage marks I checked the neighbouring rows. **Rows 21, 23
 - [ ] [#lzegress] Design and implement the egress family as the mirror of ingress (#designimplementtransport): an EgressCore owning sequence assignment, the unacked window, the ack watermark, and retry budget, with sync + thread-safe + async shells exposing pending/inflight/acked_through/retry as Computeds and ONE Effect per attached transport as the sink attachment. An Effect alone cannot be the family — it has no delivery state — so the Effect attaches, the core decides. Reuse Outbox/RelayCell for conflation+backpressure and SpillStore/DurableOutbox for durability rather than reimplementing them; add a generation fence on the SEND side so a reconnected producer cannot replay under a stale incarnation. Spec + formal + conformance corpus alongside, as ingress did.
 - [ ] [#kny1] Please help me setup trusted publishing with npm.
 - [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
+- [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.
+- [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 <!-- /agent:backlog -->
 
 ## Review

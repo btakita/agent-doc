@@ -170,13 +170,70 @@ Live on the installed binary, not just the suite: `tsift init` on the tsift repo
 CI is **in progress** on `1ed8f68` at the time of writing (run `30569395251`); the preceding commit was green, and the above is local evidence.
 
 `#astgrepexec` is unchanged — still blocked on per-language tag queries and symbol extraction in `tsift-graph`/`tsift-search`, which is the same dependency that makes the 20 new grammars a structural-only tier.
-<!-- agent:boundary:16802cce -->
+
+### Re: do [#crosslanguageconformance] — opus-5
+
+Done — `tsift@4a93d7f`, superproject `56a018138`. Two suites, and they found two defects before I finished writing them.
+
+**The gap wasn't missing tests, it was tests that couldn't miss anything.** Both language tiers already had per-language coverage: `test_extract_rust_symbols`, `test_extract_python_symbols`, a `grammar_quirk_tests` module. Every one of them proves that the language *someone remembered to write a test for* works. None of them notices a new grammar arriving with no test, and none checked the invariants that must hold identically everywhere — span validity, ordering, empty input, broken input.
+
+So the unit of coverage is now the **table**, not the language:
+
+| Suite | Rows | Guard |
+|---|---|---|
+| `tsift-astgrep/tests/conformance.rs` | 28 (one per `AstGrepLang`) | fixture set **==** `AstGrepLang::all()` |
+| `tsift-graph/tests/conformance.rs` | 10 (one per `Lang`) | fixture set **==** `Lang::all()` |
+
+Adding a grammar without a fixture row now fails. Grammar quirks are row data (`granularity`, `known_non_matching`), not prose — so when an ast-grep bump makes Dart parse expression fragments, the suite fails instead of leaving that table in the spec quietly wrong.
+
+**Three things stop it reporting green over nothing**, which is the specific way conformance suites rot: every row must declare `expected_matches > 0`; the runner sums the matches *the library actually returned* and asserts they equal what the table declares (not a loop counter); and an empty table is itself a failure. That last one was a live hole — `tsift-astgrep`'s own `default` feature set is empty, so `cargo test -p tsift-astgrep` compiled zero grammars and the exhaustiveness guard passed vacuously. It now says so and exits non-zero.
+
+**Defect 1 — an unparseable pattern aborted the process, on every language.**
+
+```
+$ tsift ast-grep search 'foo(1); foo(2);' --lang rust
+thread 'main' panicked at ast-grep-core-0.44.1/src/matcher/pattern.rs:356:30:
+called `Result::unwrap()` on an `Err` value: MultipleNode("foo(1); foo(2);")
+```
+
+`ast-grep-core`'s `&str`-as-matcher path builds the pattern with `Pattern::new`, which `unwrap()`s the parse. A pattern that is *merely invalid for the selected grammar* — two statements, or `"a": $V` in JSON — killed the CLI. The pattern comes straight from the user, so this is a crash on ordinary bad input, and it was not JSON-specific: rust, python, go, java and bash all did it. `search_source`/`rewrite_source` now compile with `Pattern::try_new` up front and surface the grammar's own message. Same four languages now exit 1 with `invalid structural pattern for rust: Multiple AST nodes are detected...`.
+
+**Defect 2 — Kotlin call edges were silently always empty.** `call_query()` named `simple_identifier`, a node type from the older `tree-sitter-kotlin` grammar; `tree-sitter-kotlin-ng` calls it `identifier`. `Query::new` failed, the indexer downgraded that to a warning, and every Kotlin file produced zero call edges. `graph --callers`, `graph --callees`, and `explain` returned nothing for Kotlin and nothing ever failed. Compiling the call query is the invariant that caught it — no per-language test did, because none of them called `call_query` for Kotlin at all.
+
+Live on the installed binary, on a real indexed Kotlin file:
+
+```
+$ tsift graph main --callees
+Callees of `main`:
+  helper (Main.kt:2)
+  method (Main.kt:3)
+```
+
+Both direct and `obj.method()` navigation calls now resolve.
+
+**Two pattern quirks also came out of the sweep** and are in the spec table: HCL has no expression statements, so a call only matches as `$K = foo($A)`; JSON needs both sides metavariable-shaped (`$K: $V`), since a literal key with a metavariable value parses to two nodes — which is exactly the input that used to panic.
+
+**Verification.** `make check` exit 0, 1595 passed, 0 failed (was 1587). Seven mutations, each caught by the test that claims to cover it:
+
+- delete one fixture row → both exhaustiveness guards fail
+- revert the Kotlin query to `simple_identifier` → the graph conformance suite *and* the new behavioural test fail
+- revert `compile_pattern` to `Pattern::new` → `an_unparseable_pattern_is_refused_on_every_language` panics rather than fails, which is the defect reproducing
+- reverse the sort in `extract_symbols` → `rust: symbols are not line-ordered`
+- drop one extension from `from_path` → the structural contract fails on that row
+- truncate the rewrite edit list to one → `rust: rewrote 1 match(es), expected 2`
+- widen a body span by one byte → `rust: symbol main body ends past the symbol`
+
+CI on the preceding commit (`1ed8f68`, the runbook split) came back **green**; the conformance run is still in progress at the time of writing.
+
+I filed the one real gap left: the tables drive `search_source`/`rewrite_source` over in-memory buffers, but the CLI's `scan`/`codemod` path — extension dispatch across a real directory, `--apply` budgets, preview byte-identity — is still only covered for a handful of languages. Same fixture table, written to a temp tree.
+<!-- agent:boundary:9b40909f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#crosslanguageconformance]
+- do [#extendcrosslanguage]
+- ~~⏭️ do [#crosslanguageconformance]~~
 - ~~do [#tsiftnavrunbook]~~
 - 🚧 do [#astgrepexec]
 - release + publish
@@ -188,7 +245,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#crosslanguageconformance] Please add a cross language conformance suite, to ensure consistent behavior across all supported languages.
+- [ ] [#extendcrosslanguage] Extend cross-language conformance to the CLI file-scan path: tests/conformance.rs covers search_source/rewrite_source over in-memory buffers, but tsift-astgrep::scan/codemod (extension dispatch across a real directory, --apply budgets, preview byte-identity) is still only covered for a handful of languages. Reuse the same fixture table by writing each row to a temp tree
 - [ ] 🚧 [#astgrepexec] Register semantic-edit executors for languages that have an ast-grep grammar but no executor (kotlin and bash today, plus whatever #astgreplangs adds) so structural_rewrite and the symbol-resolved intent kinds reach them. Blocked on per-language tag queries + symbol extraction in tsift-graph/tsift-search
 <!-- /agent:backlog -->
 

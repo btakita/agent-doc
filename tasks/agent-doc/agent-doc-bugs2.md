@@ -91,7 +91,33 @@ Current retained-document state:
 - `monsterrodholders.md` remains intentionally fail-closed at `write_applied`: its response is present but the terminal commit still awaits editor delivery, and route supervisor PID 1856779 is still mapped to the old binary. I observed it once with `session-check` and did not resend, force disk, recycle, or reload.
 
 IDEA must be restarted once after this install to load plugin 0.2.331; the earlier IDEA restart happened before this plugin package was installed. After that restart, run only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` to let the retained boundary converge.
-<!-- agent:boundary:c44a4e79 -->
+
+### Re: Response
+
+Implemented and installed the reactive recovery and latest-wins focus work.
+
+For the ACK question: retained closeout is now explicitly state-driven. The existing Lazily `Computed` joins the durable intent, current editor authority, replica membership, and delivery frontier; its Effect publishes the target once. A transport ACK remains evidence fed back into those reactives, but it no longer owns retry/progress or authorizes settlement. Settlement requires the recomputed current-authority projection to equal the target.
+
+The lazily.md wedge was not merely a delayed ACK. Its editor-authoritative text had a valid document through the terminal `agent:done` close followed by duplicated replay debris, including an unmatched `agent:backlog` close. The old repair required the entire corrupt document to parse, so it could never reach the safe debris-pruning seam. The repair now finds a structurally valid terminal prefix and removes the tail only when every meaningful line is provably redundant with managed content. Unique text still fails closed. Retained-capture settlement projects that repair through editor authority and then continues from the same durable response; it does not resubmit or force disk.
+
+Post-install, one permitted `session-check` reported lazily.md cycle `cycle-1785446694319` committed successfully and repaired the historical committed-capture snapshot drift. The response was not resubmitted. Its ready queue head `#lzbenchbudgetheadroom` remains untouched.
+
+The earlier tmux focus change is also installed: identical desired states coalesce, focus-only switches reuse the retained structural assignment, and stale generations are fenced before expensive layout work. The deterministic projection benchmark is available as `cargo run --release -p agent-doc-controller --example pane_layout_projection_benchmark`.
+
+Verification:
+- agent-doc element repair tests: 13 passed
+- realtime authority tests: 111 passed
+- full `make check`: passed
+- latest completed GitHub Actions CI run: green
+- install: succeeded; native reload reached 2/2 available editor endpoints, no editor restart required
+
+Commits:
+- `b7f96c567` — latest-wins pane focus projection
+- `631febbd5` — reactive retained terminal repair
+- root pointers `ddfd806f8` and `5b2a807e7`
+
+The installer marked route supervisors/controllers for safe idle replacement; I did not force-restart or disturb any retained owner.
+<!-- agent:boundary:196dc1b5 -->
 <!-- /agent:exchange -->
 ## Queue
 

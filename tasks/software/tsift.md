@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -34,12 +34,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 
 <!-- agent:exchange patch=append -->
 
-<!-- agent:boundary:5ad06fbf -->
+<!-- agent:boundary:5b796c03 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - Should we integrate ast-grep to support code search + refactor + editing code across many different languages? Should asg-grep be the core to convert code to ast or should we stick with the existing tsift ast bindings? I need to add more languages.
 <!-- /agent:queue -->
 <!--

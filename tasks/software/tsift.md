@@ -67,14 +67,46 @@ Live, on the exact repro from last cycle:
 Verification: `make check` green (clippy + full suite, exit 0), 7 new regression tests asserting each renamed *and* each untouched position individually per language — Rust, Python, TypeScript. I mutation-checked them: adding `string_content`/`line_comment` to the Rust identifier set reddens the Rust test (exit 101), so they drive real behaviour rather than counting replacements. A test that only counted replacements would have passed while renaming the wrong three positions.
 
 Next head is `#tsrenameast2` — cross-file rename via the call graph, the defect where a rename silently leaves every caller broken.
-<!-- agent:boundary:2c4fd517 -->
+
+### Re: do [#tsrenameast2] — opus-5
+
+Phase 2 landed. tsift `784a6cf`, gitlink `0f23f4d54`, pushed. `make check` green (exit 0, clippy clean).
+
+A rename now resolves its extent from the indexed call graph and rewrites every referencing file in one all-or-nothing buffer set. On the defect-3 repro, `caller.rs` gets both its `use crate::gadget_count;` and its call site renamed, and **the resulting tree compiles** (`cargo check` exit 0) — which it did not before.
+
+**On your sequencing call:** `#wsdq` is reordered behind the rename phases and `#w505` is reaped as an exact duplicate of it. Release comes after `#tsrenameast4`.
+
+**Two safety rules came out of a red suite, not out of design.** Both are worth recording because they falsify the tidy story in the plan.
+
+`callers_of(name)` and `symbol_info(name)` are matched **by name, not by resolved binding**. My first cut scoped only by file, so:
+
+1. A Python `beta` blocked renaming a JavaScript `beta` — and would have had the rename rewrite the unrelated Python file. Scoping is now per executor family, which keeps `.ts`/`.tsx`/`.js`/`.jsx` together since they genuinely call each other.
+2. Family scoping alone still failed: a file that defines its **own** `beta` and calls it looks like a caller of ours. Its own definition shadows any import, so it is calling itself — renaming there rewrites an unrelated function. Those files are now excluded.
+
+Both were caught by the pre-existing `edit_intents_apply_mutates_javascript_executor_intents` suite. I would not have found either from the fixtures I wrote myself; each now has a dedicated regression test naming the suite that caught it.
+
+**Refusal is narrower than I planned.** The plan said refuse whenever a second definition of the name exists. That is wrong — two independent modules each with their own `beta` is ordinary, and with no cross-file reference to attribute, the rename never leaves the declaring file. So the refusal fires only when there is a cross-file caller **and** a competing same-family definition, and it names both:
+
+    rename_symbol refuses "widget_count": it is referenced from src/caller.rs, and the
+    index holds another definition of that name in src/other.rs; a call edge cannot say
+    which definition those references belong to
+
+Nothing is written on a refusal — asserted, not assumed.
+
+12 rename tests now, each asserting renamed *and* untouched positions individually. I mutation-checked the new ones: disabling the cross-file branch reddens the cross-file test, disabling the ambiguity filter reddens the refusal test, and disabling the shadowing rule reddens the self-defining-caller test. All three fail on their mutant and pass on the real code.
+
+Remaining: `#tsrenameast3` (open rename to bash/zig/gdscript), `#tsrenameast4` (the structural-only refusal E2E), then `#wsdq` release.
+<!-- agent:boundary:de88208d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~⏭️ do [#tsrenameast1]~~
-- 🚧 do [#tsrenameast2]
+- 🚧 do [#wsdq]
+- do [#jzs7]
+- ~~do [#w505]~~
+- ~~do [#tsrenameast1]~~
+- ~~⏭️ do [#tsrenameast2]~~
 - do [#tsrenameast3]
 - do [#tsrenameast4]
 <!-- /agent:queue -->
@@ -85,12 +117,10 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#tsrenameast2] #tsrenameast2 rename_symbol phase 2 — cross-file rename via the call graph: resolve referencing files from call edges and emit one all-or-nothing multi-file patch; refuse (naming the site) where the graph cannot prove the reference is the same symbol. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
 - [ ] [#tsrenameast3] #tsrenameast3 rename_symbol phase 3 — open rename_symbol to every indexed language (bash, zig, gdscript) via a per-language identifier-node-set entry plus conformance fixture rows asserting renamed AND untouched positions. Depends on #tsrenameast1. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
 - [ ] [#tsrenameast4] #tsrenameast4 rename_symbol phase 4 — add the end-to-end test for the structural-only rename_symbol refusal, reachable for the first time once an indexed language could otherwise fall through. Depends on #tsrenameast3. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
-- [ ] [#wsdq] release + publish + install
+- [ ] 🚧 [#wsdq] release + publish + install
 - [ ] [#jzs7] Plan and implement extract method refactoring
-- [ ] [#w505] release + publish + install
 <!-- /agent:backlog -->
 
 ## Review

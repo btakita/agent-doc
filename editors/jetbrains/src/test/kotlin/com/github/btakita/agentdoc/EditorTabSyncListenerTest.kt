@@ -298,7 +298,7 @@ class EditorTabSyncListenerTest {
                 .substringAfter("fun onEditorFocusGained(project: Project, file: VirtualFile)")
                 .substringBefore("fun onEditorLayoutChanged")
         assertTrue(focusGained.contains("requestObservation("))
-        assertTrue(focusGained.contains("delayMs = 0L"))
+        assertFalse(focusGained.contains("delayMs"))
     }
 
     @Test
@@ -331,8 +331,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `automatic layout observations use short coalescing windows`() {
-        assertTrue(EditorTabSyncListener.SURFACE_COALESCE_MS in 1L..50L)
+    fun `structural layout detection uses one short event coalescing window`() {
         assertTrue(LayoutChangeDetector.STRUCTURAL_COALESCE_MS in 1L..75L)
     }
 
@@ -355,13 +354,19 @@ class EditorTabSyncListenerTest {
                 .substringBefore("override fun fileClosed")
         val report =
             source
-                .substringAfter("private fun reportLatestSurface()")
-                .substringBefore("private fun captureSurfaceOnEditorThread")
+                .substringAfter(
+                    "private fun projectLatestSurfaceOnEditorThread(requestedGeneration: Long)"
+                )
+                .substringBefore("private fun captureSurface(")
 
         assertTrue(layoutChange.contains("latestSurfaceObservation.get()"))
         assertTrue(layoutChange.contains("it.preferredFile != null"))
-        assertTrue(layoutChange.contains("SURFACE_COALESCE_MS"))
+        assertFalse(layoutChange.contains("delayMs"))
+        assertTrue(report.contains("ApplicationManager.getApplication().invokeLater"))
         assertTrue(report.contains("compareAndSet(observation, null)"))
+        assertFalse(report.contains("requestObservation("))
+        assertFalse(report.contains("invokeAndWait"))
+        assertFalse(report.contains("schedule("))
     }
 
     @Test
@@ -378,11 +383,14 @@ class EditorTabSyncListenerTest {
                 .first { Files.exists(it) }
         val reportBody =
             Files.readString(listenerPath)
-                .substringAfter("private fun reportLatestSurface()")
-                .substringBefore("private fun captureSurfaceOnEditorThread")
+                .substringAfter(
+                    "private fun projectLatestSurfaceOnEditorThread(requestedGeneration: Long)"
+                )
+                .substringBefore("private fun captureSurface(")
 
         assertTrue(reportBody.contains("NativeAdminControls.editorSurfaceEnqueue("))
-        assertTrue(reportBody.contains("requestObservation(observation, SURFACE_COALESCE_MS)"))
+        assertTrue(reportBody.contains("nativeDeliveryExecutor.execute"))
+        assertFalse(reportBody.contains("requestObservation("))
         assertFalse(reportBody.contains("editorSurfaceObserve("))
         assertFalse(reportBody.contains("syncHintFromReceipt("))
     }

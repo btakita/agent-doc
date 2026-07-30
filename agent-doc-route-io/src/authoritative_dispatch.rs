@@ -199,6 +199,7 @@ pub fn route_via_authoritative_actor(
                 file,
                 reason,
                 prompt_context.is_some(),
+                plain_trigger && prompt_context.is_none(),
                 effects.closeout_drain_effects,
             );
             match dispatch_decision {
@@ -253,6 +254,23 @@ pub fn route_via_authoritative_actor(
                         route_closeout_user_outcome_fields(
                             blocked_closeout_recovery_command(&decision).as_deref(),
                         )
+                    );
+                    return Ok(dispatch_pane);
+                }
+                CloseoutBlockDispatchDecision::CoalescePlainTriggerBehindCloseoutOwner => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_drain_closeout_plain_trigger_coalesced file={} pane={}",
+                            file.display(),
+                            dispatch_pane
+                        ),
+                    );
+                    eprintln!(
+                        "[route] active closeout for {} already owns pane {}; accepted the plain Run Agent Doc trigger behind that owner {}",
+                        file.display(),
+                        dispatch_pane,
+                        route_closeout_user_outcome_fields(None),
                     );
                     return Ok(dispatch_pane);
                 }

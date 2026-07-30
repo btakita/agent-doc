@@ -11,7 +11,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -28,8 +27,8 @@ import java.util.concurrent.atomic.AtomicReference
  * The plugin therefore holds no plan, no previous-signature field, and no retry ladder: an
  * observation identical to the last one is idle and costs nothing, so repeat events need no dedup
  * here. What remains is event-storm handling that is genuinely the editor's: a 40ms debounce plus a
- * generation guard so a burst reports only its final state, and an off-EDT executor so the derived
- * command never blocks the UI thread.
+ * generation guard so a burst reports only its final state. Capture is projected by the next EDT
+ * event; native delivery remains off the EDT, so neither side waits on the other.
  *
  * Focus and layout are both projections of the same selected-document Source. There is no direct
  * focus command lane for an older selection to occupy: the native graph receives only the latest
@@ -52,12 +51,11 @@ class EditorTabSyncListener : FileEditorManagerListener {
      */
     private val generation = AtomicLong(0)
 
-    private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "agent-doc-editor-tab-sync").apply { isDaemon = true }
+    private val nativeDeliveryExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "agent-doc-editor-surface-delivery").apply { isDaemon = true }
     }
 
     companion object {
-        internal const val SURFACE_COALESCE_MS = 40L
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
         private val GSON = com.google.gson.Gson()
 
@@ -227,7 +225,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
     private fun requestObservation(
         observation: PendingSurfaceObservation,
-        delayMs: Long = SURFACE_COALESCE_MS,
     ) {
         while (true) {
             val current = latestSurfaceObservation.get()
@@ -248,62 +245,55 @@ class EditorTabSyncListener : FileEditorManagerListener {
             if (latestSurfaceObservation.compareAndSet(current, observation)) break
         }
         val requested = generation.incrementAndGet()
-        executor.schedule(
-            observe@{
-                try {
-                    if (generation.get() != requested) {
-                        log("debounce: superseded gen=$requested")
-                        return@observe
-                    }
-                    reportLatestSurface()
-                } catch (e: Exception) {
-                    LOG.warn("[layout-sync] observation failed: ${e.message}")
-                }
-            },
-            delayMs.coerceAtLeast(0L),
-            TimeUnit.MILLISECONDS,
-        )
+        projectLatestSurfaceOnEditorThread(requested)
     }
 
-    private fun reportLatestSurface() {
-        val observation = latestSurfaceObservation.get() ?: return
-        val pending =
-            captureSurfaceOnEditorThread(
-                project = observation.project,
-                preferredFile = observation.preferredFile,
-                forceReconcile = observation.forceReconcile,
-            )
-                ?: run {
-                    log("observe: awaiting selected document in stable editor surface")
-                    if (observation.preferredFile != null) {
-                        requestObservation(observation, SURFACE_COALESCE_MS)
-                    }
-                    return
+    private fun projectLatestSurfaceOnEditorThread(requestedGeneration: Long) {
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                if (generation.get() != requestedGeneration) {
+                    log("editor projection: superseded gen=$requestedGeneration")
+                    return@invokeLater
                 }
-        observedRoots.add(pending.projectRoot)
-        val accepted =
-            NativeAdminControls.editorSurfaceEnqueue(
-                projectRoot = pending.projectRoot,
-                surfaceJson = pending.surfaceJson,
-            )
-        if (!accepted) {
-            LOG.warn("[layout-sync] surface observation unavailable for ${pending.relativePath}")
-            return
+                val observation = latestSurfaceObservation.get() ?: return@invokeLater
+                val pending =
+                    captureSurface(
+                        project = observation.project,
+                        preferredFile = observation.preferredFile,
+                        forceReconcile = observation.forceReconcile,
+                    )
+                        ?: run {
+                            // The selection event can precede IDEA's visible-editor
+                            // projection. Retain the selected-document Source and
+                            // wait for the next real selection/layout/focus event;
+                            // a timer retry would repeatedly block the EDT.
+                            log("observe: retained until editor-surface dependency changes")
+                            return@invokeLater
+                        }
+                nativeDeliveryExecutor.execute {
+                    if (generation.get() != requestedGeneration) {
+                        log("native delivery: superseded gen=$requestedGeneration")
+                        return@execute
+                    }
+                    observedRoots.add(pending.projectRoot)
+                    val accepted =
+                        NativeAdminControls.editorSurfaceEnqueue(
+                            projectRoot = pending.projectRoot,
+                            surfaceJson = pending.surfaceJson,
+                        )
+                    if (!accepted) {
+                        LOG.warn(
+                            "[layout-sync] surface observation unavailable for ${pending.relativePath}",
+                        )
+                        return@execute
+                    }
+                    latestSurfaceObservation.compareAndSet(observation, null)
+                    log("observe: queued file=${pending.relativePath}")
+                }
+            } catch (e: Exception) {
+                LOG.warn("[layout-sync] observation failed: ${e.message}")
+            }
         }
-        latestSurfaceObservation.compareAndSet(observation, null)
-        log("observe: queued file=${pending.relativePath}")
-    }
-
-    private fun captureSurfaceOnEditorThread(
-        project: Project,
-        preferredFile: VirtualFile?,
-        forceReconcile: Boolean,
-    ): PendingSurface? {
-        var captured: PendingSurface? = null
-        ApplicationManager.getApplication().invokeAndWait {
-            captured = captureSurface(project, preferredFile, forceReconcile)
-        }
-        return captured
     }
 
     private fun captureSurface(
@@ -400,7 +390,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
     }
 
     private fun shutdown() {
-        executor.shutdownNow()
+        nativeDeliveryExecutor.shutdownNow()
         val roots = observedRoots.toList()
         observedRoots.clear()
         latestSurfaceObservation.set(null)
@@ -438,7 +428,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 forceReconcile = false,
                 authority = ObservationAuthority.DocumentSelection,
             ),
-            delayMs = 0L,
         )
         TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
     }
@@ -466,7 +455,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 forceReconcile = false,
                 authority = ObservationAuthority.ComponentFocus,
             ),
-            delayMs = 0L,
         )
         TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
         log("focusGained: file=${file.name}")
@@ -492,7 +480,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     forceReconcile = false,
                     authority = ObservationAuthority.Layout,
                 ),
-            delayMs = if (pendingSelection == null) 0L else SURFACE_COALESCE_MS,
         )
     }
 

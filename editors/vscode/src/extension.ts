@@ -1829,12 +1829,11 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
 // change and the reactive graph behind `agent_doc_editor_surface_observe_json`
 // derives focus-vs-sync, dedups repeats, and drives the Project Controller
 // command. What is left here is event-storm handling that is genuinely the
-// editor's: a debounce plus a generation guard so a burst reports only its
-// final state.
+// editor's: one event-loop projection plus a generation guard so a burst
+// reports only its final state without a polling or timer lane.
 
-let surfaceDebounceTimer: ReturnType<typeof setTimeout> | undefined;
-let surfaceReportRunning = false;
-const SURFACE_DEBOUNCE_MS = 100;
+let surfaceProjectionQueued = false;
+let surfaceProjectionActive = false;
 let latestSurfaceGeneration = 0;
 /** Every project root observed this session, released on deactivate. */
 const observedSurfaceRoots = new Set<string>();
@@ -1933,37 +1932,27 @@ function captureCurrentSurface(forceReconcile: boolean): PendingSurfaceObservati
     return { root, relativePath: relativePath(root, activeFsPath), surface };
 }
 
-function requestSurfaceObservation(delayMs = SURFACE_DEBOUNCE_MS): number {
+function requestSurfaceObservation(): number {
     const requestedGeneration = ++latestSurfaceGeneration;
-    if (surfaceDebounceTimer) clearTimeout(surfaceDebounceTimer);
-    surfaceDebounceTimer = setTimeout(() => {
-        surfaceDebounceTimer = undefined;
-        reportCurrentSurface(requestedGeneration);
-    }, delayMs);
+    if (surfaceProjectionQueued) return requestedGeneration;
+    surfaceProjectionQueued = true;
+    queueMicrotask(() => {
+        surfaceProjectionQueued = false;
+        if (!surfaceProjectionActive) return;
+        reportCurrentSurface(latestSurfaceGeneration);
+    });
     return requestedGeneration;
 }
 
 function reportCurrentSurface(requestedGeneration: number): void {
     if (requestedGeneration !== latestSurfaceGeneration) return;
-    if (surfaceReportRunning) return;
-    surfaceReportRunning = true;
-    try {
-        const pending = captureCurrentSurface(false);
-        if (pending === null) return;
-        observedSurfaceRoots.add(pending.root);
-        const accepted = native.editorSurfaceEnqueueJson({
-            projectRoot: pending.root,
-            surfaceJson: JSON.stringify(pending.surface),
-        });
-        if (!accepted) return;
-    } finally {
-        surfaceReportRunning = false;
-        // A change that arrived while we were reporting has already bumped the
-        // generation; report the newer state rather than dropping it.
-        if (latestSurfaceGeneration !== requestedGeneration && !surfaceDebounceTimer) {
-            requestSurfaceObservation(0);
-        }
-    }
+    const pending = captureCurrentSurface(false);
+    if (pending === null) return;
+    observedSurfaceRoots.add(pending.root);
+    native.editorSurfaceEnqueueJson({
+        projectRoot: pending.root,
+        surfaceJson: JSON.stringify(pending.surface),
+    });
 }
 
 /** Release every observed root's surface graph. */
@@ -3113,6 +3102,7 @@ let syntaxDecorationController: SyntaxDecorationController | undefined;
 // ---------------------------------------------------------------------------
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    surfaceProjectionActive = true;
     // #lzsync 3B clean split: the generic lazily GraphView is a plain statically
     // imported class (esbuild inlines it; tsc require()s it), so per-document views
     // construct synchronously — no async constructor preload is needed.
@@ -3221,7 +3211,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
         vscode.window.onDidChangeVisibleTextEditors(() => onTabChanged())
     );
-    requestSurfaceObservation(0);
+    requestSurfaceObservation();
 
     // Feature: File Rename Handling
     // When a session document is renamed/moved, trigger a sync so the Rust
@@ -3276,11 +3266,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-    // Clean up the editor-surface debounce
-    if (surfaceDebounceTimer) {
-        clearTimeout(surfaceDebounceTimer);
-        surfaceDebounceTimer = undefined;
-    }
+    // Invalidate any editor-surface projection still queued in the event loop.
+    surfaceProjectionActive = false;
+    surfaceProjectionQueued = false;
+    latestSurfaceGeneration++;
     // Release each observed root's surface graph: its reconciled-layout history
     // must not outlive the editor that produced it.
     forgetObservedSurfaces();

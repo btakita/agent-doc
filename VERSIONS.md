@@ -4,6 +4,41 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.109
+
+_JetBrains plugin 0.2.331; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Controller request workers now read the local reactive document projection.**
+  Spawned request workers inherit controller identity and the in-process
+  projection reader, so Compact Exchange cannot recursively call its own
+  controller and time out behind the state transition it is handling.
+- **A plain Run Agent Doc trigger now coalesces behind the active closeout
+  owner.** Explicit prompt payloads remain durably queued, while a payload-free
+  trigger no longer competes with or fails against an authoritative response
+  that is already converging.
+- **Per-document authority uses one cancellable Tokio task per warm document,
+  not one OS thread.** Those tasks share two asynchronous scheduler threads and
+  a separate bounded blocking-effect pool; descriptive pool names now make the
+  execution boundary explicit.
+
+## 0.35.108
+
+_JetBrains plugin 0.2.331; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Open-document authority and state-plane delivery now invalidate only their
+  exact reactive keys.** Actor transitions no longer recompute every warm
+  document, and a state-plane publication no longer clones all channel
+  histories or wakes every socket subscriber. Retiring a document releases its
+  history, Effect, sink, and dependency slot.
+- **JetBrains editor selection projects from editor events without a polling
+  retry or coalescing delay.** The selected document remains authoritative
+  across IDEA's interstitial layout state, queued stale projections are
+  generation-fenced, and native delivery stays off the EDT.
+- **Native editor boundary work now uses a bounded Tokio blocking pool.** Tmux
+  probes and surface ingress can no longer create unbounded OS threads during
+  document churn; superseded probe results remain inert behind the latest
+  generation fence.
+
 ## 0.35.107
 
 _JetBrains plugin 0.2.330; VS Code extension 0.2.63; Zed extension 0.1.0._

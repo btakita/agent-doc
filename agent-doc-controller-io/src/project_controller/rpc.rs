@@ -9258,6 +9258,18 @@ fn install_local_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
     });
 }
 
+/// Install the controller-local reactive projection context on the thread that
+/// will execute a controller request.
+///
+/// Both the marker and the projection reader are thread-local. Installing them
+/// only on the accept loop leaves spawned request workers looking like external
+/// clients; an internal projection read then self-RPCs through the controller
+/// socket and can wait behind the state transition that issued the read.
+fn install_controller_request_thread_context(runtime: &Arc<ControllerRuntime>) {
+    agent_doc_cycle_state_io::set_in_controller_request(true);
+    install_local_document_projection_reader(runtime);
+}
+
 #[cfg(feature = "test-support")]
 pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTestHandle> {
     let sock = socket_path(project_root);
@@ -9283,8 +9295,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     let thread_stop = Arc::clone(&should_stop);
     let actor_root = project_root.to_path_buf();
     let thread = std::thread::spawn(move || {
-        agent_doc_cycle_state_io::set_in_controller_request(true);
-        install_local_document_projection_reader(&runtime);
+        install_controller_request_thread_context(&runtime);
         while !thread_stop.load(Ordering::SeqCst) && actor_root.is_dir() {
             match listener.accept() {
                 Ok(stream) => {
@@ -10644,6 +10655,7 @@ pub(crate) fn serve_client(
     should_stop: &AtomicBool,
     sock: &Path,
 ) -> Result<()> {
+    install_controller_request_thread_context(runtime);
     stream
         .set_recv_timeout(Some(CONTROLLER_IDLE_CLIENT_TIMEOUT))
         .context("failed to set project controller client read timeout")?;
@@ -24833,6 +24845,31 @@ mod tests {
             Arc::ptr_eq(&installed, &runtime),
             "the embedded relay must not drop rolling-upgrade recovery to runtime=None"
         );
+    }
+
+    #[test]
+    fn spawned_controller_request_worker_uses_the_local_reactive_projection() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let expected = Arc::clone(&runtime);
+
+        std::thread::spawn(move || {
+            install_controller_request_thread_context(&runtime);
+
+            assert!(
+                agent_doc_state_wire::in_controller_request(),
+                "a spawned request worker must retain controller-local identity"
+            );
+            let installed =
+                local_controller_runtime().expect("request worker must see its controller runtime");
+            assert!(Arc::ptr_eq(&installed, &expected));
+            assert!(
+                agent_doc_state_wire::local_document_projection("missing-document").is_some(),
+                "controller-local reads must use the reactive projection instead of self-RPC"
+            );
+        })
+        .join()
+        .expect("request worker");
     }
 
     #[test]

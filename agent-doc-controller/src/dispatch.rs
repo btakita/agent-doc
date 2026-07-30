@@ -2802,12 +2802,18 @@ pub enum RouteCloseoutDrainOutcome {
 pub struct CloseoutBlockDispatchFacts {
     pub recovery_queues_prompt_for_after_closeout: bool,
     pub active_queue_head: Option<String>,
+    /// A plain Run Agent Doc trigger carries no new prompt body. When the
+    /// authoritative actor already owns an unresolved closeout, accepting that
+    /// trigger means coalescing it behind the owner rather than failing a
+    /// second route that has no additional work to preserve.
+    pub plain_trigger_without_prompt: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CloseoutBlockDispatchDecision {
     EnqueuePromptForAfterCloseout,
     WaitForActiveQueueHead { head: String },
+    CoalescePlainTriggerBehindCloseoutOwner,
     FailClosed,
 }
 
@@ -2819,6 +2825,9 @@ pub fn classify_closeout_block_dispatch(
     }
     if let Some(head) = facts.active_queue_head {
         return CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head };
+    }
+    if facts.plain_trigger_without_prompt {
+        return CloseoutBlockDispatchDecision::CoalescePlainTriggerBehindCloseoutOwner;
     }
     CloseoutBlockDispatchDecision::FailClosed
 }
@@ -5739,10 +5748,11 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn closeout_block_dispatch_prefers_queued_prompt_context() {
         assert_eq!(
-            classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
-                recovery_queues_prompt_for_after_closeout: true,
-                active_queue_head: Some("existing-head".to_string()),
-            }),
+        classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
+            recovery_queues_prompt_for_after_closeout: true,
+            active_queue_head: Some("existing-head".to_string()),
+            plain_trigger_without_prompt: true,
+        }),
             CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout
         );
     }
@@ -5750,10 +5760,11 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn closeout_block_dispatch_waits_on_existing_active_queue() {
         assert_eq!(
-            classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
-                recovery_queues_prompt_for_after_closeout: false,
-                active_queue_head: Some("queue-head".to_string()),
-            }),
+        classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
+            recovery_queues_prompt_for_after_closeout: false,
+            active_queue_head: Some("queue-head".to_string()),
+            plain_trigger_without_prompt: true,
+        }),
             CloseoutBlockDispatchDecision::WaitForActiveQueueHead {
                 head: "queue-head".to_string(),
             }
@@ -5763,13 +5774,26 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn closeout_block_dispatch_fails_closed_without_prompt_or_queue() {
         assert_eq!(
-            classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
-                recovery_queues_prompt_for_after_closeout: false,
-                active_queue_head: None,
-            }),
+        classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
+            recovery_queues_prompt_for_after_closeout: false,
+            active_queue_head: None,
+            plain_trigger_without_prompt: false,
+        }),
             CloseoutBlockDispatchDecision::FailClosed
         );
-    }
+}
+
+#[test]
+fn closeout_block_dispatch_coalesces_a_plain_trigger_behind_the_owner() {
+    assert_eq!(
+        classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
+            recovery_queues_prompt_for_after_closeout: false,
+            active_queue_head: None,
+            plain_trigger_without_prompt: true,
+        }),
+        CloseoutBlockDispatchDecision::CoalescePlainTriggerBehindCloseoutOwner,
+    );
+}
 
     #[test]
     fn route_closeout_user_outcome_surfaces_unblocker_for_stuck_cycle() {

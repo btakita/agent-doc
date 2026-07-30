@@ -33,6 +33,16 @@ describe('editor surface reporting wiring', () => {
         assert.ok(tabChangedBody.includes('requestSurfaceObservation()'));
     });
 
+    it('projects the latest editor event without a polling timer', () => {
+        const start = source.indexOf('function requestSurfaceObservation');
+        assert.ok(start >= 0);
+        const body = source.slice(start, source.indexOf('function reportCurrentSurface', start));
+        assert.ok(body.includes('queueMicrotask'));
+        assert.ok(body.includes('latestSurfaceGeneration'));
+        assert.ok(!body.includes('setTimeout'));
+        assert.ok(!body.includes('setInterval'));
+    });
+
     it('no longer chooses between focus and sync itself', () => {
         assert.ok(
             !source.includes('buildTabChangeCommand'),

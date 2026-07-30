@@ -171,6 +171,7 @@ pub fn classify_route_closeout_block(
     file: &Path,
     reason: String,
     has_prompt_context: bool,
+    plain_trigger_without_prompt: bool,
     effects: RouteCloseoutDrainEffects,
 ) -> (CloseoutRecoveryDecision, CloseoutBlockDispatchDecision) {
     let recovery_decision = (effects.decide_closeout_recovery)(
@@ -198,6 +199,7 @@ pub fn classify_route_closeout_block(
     let dispatch_decision = classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
         recovery_queues_prompt_for_after_closeout,
         active_queue_head,
+        plain_trigger_without_prompt,
     });
     (recovery_decision, dispatch_decision)
 }

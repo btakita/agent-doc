@@ -28,7 +28,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::thread;
 
 use agent_doc_editor_surface::{
     CurrentDocumentAuthority, DocumentAuthority, DocumentAuthorityReadiness, EditorSurface,
@@ -80,16 +79,19 @@ pub type TmuxLayoutProbe = Arc<dyn Fn(&Path, &EditorSurface) -> Option<TmuxLayou
 type SurfaceObserver = Arc<dyn Fn(&Path, EditorSurface) -> bool + Send + Sync>;
 type TmuxObserver = Arc<dyn Fn(&Path, Option<TmuxLayout>) + Send + Sync>;
 const DOCUMENT_AUTHORITY_WARM_SET_LIMIT: usize = 256;
-const DOCUMENT_AUTHORITY_ASYNC_THREADS: usize = 2;
-const DOCUMENT_AUTHORITY_BLOCKING_THREADS: usize = 4;
-static DOCUMENT_AUTHORITY_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+/// Scheduler threads multiplex lightweight per-document async authority tasks.
+/// Documents own tasks, not OS threads; idle subscriptions consume no worker.
+const DOCUMENT_AUTHORITY_ASYNC_SCHEDULER_THREADS: usize = 2;
+/// Bounded lane for the comparatively rare blocking native/controller effects.
+const DOCUMENT_AUTHORITY_BLOCKING_EFFECT_THREADS: usize = 8;
+static EDITOR_REACTIVE_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(DOCUMENT_AUTHORITY_ASYNC_THREADS)
-        .max_blocking_threads(DOCUMENT_AUTHORITY_BLOCKING_THREADS)
-        .thread_name("agent-doc-document-authority")
+        .worker_threads(DOCUMENT_AUTHORITY_ASYNC_SCHEDULER_THREADS)
+        .max_blocking_threads(DOCUMENT_AUTHORITY_BLOCKING_EFFECT_THREADS)
+        .thread_name("agent-doc-editor-reactive")
         .enable_all()
         .build()
-        .expect("build document-authority async runtime")
+        .expect("build editor reactive runtime")
 });
 
 #[derive(Default)]
@@ -265,7 +267,7 @@ impl DeferredDocumentAuthorityDispatcher {
         );
 
         let dispatcher = Arc::clone(self);
-        DOCUMENT_AUTHORITY_RUNTIME.spawn(async move {
+        EDITOR_REACTIVE_RUNTIME.spawn(async move {
             dispatcher.run_document(root, document, membership).await;
         });
     }
@@ -417,19 +419,7 @@ impl DeferredSurfaceDispatcher {
         }
 
         let dispatcher = Arc::clone(self);
-        let worker_root = root.clone();
-        if let Err(error) = thread::Builder::new()
-            .name("agent-doc-editor-surface".to_string())
-            .spawn(move || dispatcher.run_root(worker_root))
-        {
-            if let Some(entry) = self.roots().get_mut(&root) {
-                entry.running = false;
-            }
-            anyhow::bail!(
-                "spawn editor-surface worker for {}: {error}",
-                root.display()
-            );
-        }
+        EDITOR_REACTIVE_RUNTIME.spawn_blocking(move || dispatcher.run_root(root));
         Ok(())
     }
 
@@ -459,25 +449,16 @@ impl DeferredSurfaceDispatcher {
 
     fn spawn_probe(self: &Arc<Self>, root: PathBuf, generation: u64, surface: EditorSurface) {
         let dispatcher = Arc::clone(self);
-        let root_display = root.display().to_string();
-        let spawn = thread::Builder::new()
-            .name("agent-doc-editor-surface-probe".to_string())
-            .spawn(move || {
-                let layout = (dispatcher.probe_tmux)(&root, &surface);
-                let is_current = dispatcher
-                    .roots()
-                    .get(&root)
-                    .is_some_and(|entry| entry.generation == generation);
-                if is_current {
-                    (dispatcher.observe_tmux)(&root, layout);
-                }
-            });
-        if let Err(error) = spawn {
-            eprintln!(
-                "[editor-surface] failed to spawn tmux-observation worker for {}: {error}",
-                root_display
-            );
-        }
+        EDITOR_REACTIVE_RUNTIME.spawn_blocking(move || {
+            let layout = (dispatcher.probe_tmux)(&root, &surface);
+            let is_current = dispatcher
+                .roots()
+                .get(&root)
+                .is_some_and(|entry| entry.generation == generation);
+            if is_current {
+                (dispatcher.observe_tmux)(&root, layout);
+            }
+        });
     }
 
     fn forget(&self, root: &Path) {

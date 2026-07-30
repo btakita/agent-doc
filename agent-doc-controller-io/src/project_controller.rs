@@ -488,11 +488,23 @@ struct ControllerActorGraph {
     ctx: ThreadSafeContext,
     records: Source<ControllerActorStore>,
     live_bindings: Computed<ControllerActorStore>,
+    /// Per-document actor state used by document-authority projections.
+    ///
+    /// `records` remains the process-wide durable mirror for consumers that
+    /// genuinely need the whole actor store. Authority needs only one
+    /// document's model state, so a keyed Source prevents an unrelated actor
+    /// heartbeat from invalidating every warm document.
+    document_model_states:
+        lazily::ThreadSafeSourceMap<String, Option<agent_doc_controller::actor::ActorState>>,
 }
 
 impl ControllerActorGraph {
     fn new_in(scope: &agent_doc_state_scope::ProcessScope, initial: ControllerActorStore) -> Self {
         let ctx = scope.ctx().clone();
+        let document_model_states = lazily::ThreadSafeSourceMap::new(&ctx);
+        for (document_id, record) in &initial {
+            document_model_states.set(&ctx, document_id.clone(), Some(record.state));
+        }
         let records = ctx.source(initial);
         let live_bindings = ctx.computed(move |ctx| {
             ctx.get(&records)
@@ -507,10 +519,24 @@ impl ControllerActorGraph {
             ctx,
             records,
             live_bindings,
+            document_model_states,
         }
     }
 
     fn set(&self, records: ControllerActorStore) {
+        let document_ids = self
+            .document_model_states
+            .present_keys()
+            .into_iter()
+            .chain(records.keys().cloned())
+            .collect::<std::collections::BTreeSet<_>>();
+        for document_id in document_ids {
+            self.document_model_states.set(
+                &self.ctx,
+                document_id.clone(),
+                records.get(&document_id).map(|record| record.state),
+            );
+        }
         self.ctx.set(&self.records, records);
     }
 
@@ -530,6 +556,7 @@ impl ControllerActorGraph {
                     .then_some(record.document_id.clone())
             }));
         }
+        let mut changed_document_ids = evicted_document_ids.clone();
         for document_id in evicted_document_ids {
             let Some(record) = records.get_mut(&document_id) else {
                 continue;
@@ -548,7 +575,15 @@ impl ControllerActorGraph {
                 new_generation: record.generation,
             };
         }
+        changed_document_ids.insert(write.record.document_id.clone());
         records.insert(write.record.document_id.clone(), write.record.clone());
+        for document_id in changed_document_ids {
+            self.document_model_states.set(
+                &self.ctx,
+                document_id.clone(),
+                records.get(&document_id).map(|record| record.state),
+            );
+        }
         self.ctx.set(&self.records, records);
     }
 
@@ -564,8 +599,10 @@ impl ControllerActorGraph {
         self.live_bindings
     }
 
-    fn records_handle(&self) -> Source<ControllerActorStore> {
-        self.records
+    fn document_model_states_handle(
+        &self,
+    ) -> lazily::ThreadSafeSourceMap<String, Option<agent_doc_controller::actor::ActorState>> {
+        self.document_model_states.clone()
     }
 }
 
@@ -883,13 +920,35 @@ pub(crate) trait ControllerStatePlaneSink: Send + Sync + 'static {
 /// valid replay base and lets warm subscribers resume from `plane_version`.
 struct ControllerStatePlaneGraph {
     ctx: ThreadSafeContext,
-    histories: Source<BTreeMap<String, Vec<ControllerStatePlaneFrame>>>,
-    sink_kick: Source<u64>,
-    effect: Mutex<Option<lazily::Effect>>,
+    /// Per-channel retained history. A subscriber to one authority document
+    /// must never clone or depend on every other channel's frames.
+    histories: lazily::ThreadSafeSourceMap<String, Vec<ControllerStatePlaneFrame>>,
+    channel_effects: Mutex<BTreeMap<String, lazily::Effect>>,
+    channel_dependencies: Arc<Mutex<BTreeMap<String, Arc<ControllerStatePlaneChannelDependency>>>>,
     sinks: Arc<Mutex<BTreeMap<String, Arc<dyn ControllerStatePlaneSink>>>>,
     next_plane_version: AtomicU64,
-    waiters: Condvar,
-    wait_lock: Mutex<()>,
+}
+
+struct ControllerStatePlaneChannelDependency {
+    changed: Condvar,
+    change_lock: Mutex<()>,
+    revision: AtomicU64,
+}
+
+impl ControllerStatePlaneChannelDependency {
+    fn new() -> Self {
+        Self {
+            changed: Condvar::new(),
+            change_lock: Mutex::new(()),
+            revision: AtomicU64::new(0),
+        }
+    }
+
+    fn project_change(&self) {
+        let _guard = self.change_lock.lock();
+        self.revision.fetch_add(1, Ordering::SeqCst);
+        self.changed.notify_all();
+    }
 }
 
 impl ControllerStatePlaneGraph {
@@ -903,49 +962,97 @@ impl ControllerStatePlaneGraph {
         first_plane_version: u64,
     ) -> Self {
         let ctx = scope.ctx().clone();
-        let histories = ctx.source(BTreeMap::<String, Vec<ControllerStatePlaneFrame>>::new());
-        let sink_kick = ctx.source(0_u64);
-        let histories_for_effect = histories;
-        let sink_kick_for_effect = sink_kick;
+        let histories = lazily::ThreadSafeSourceMap::new(&ctx);
         let sinks: Arc<Mutex<BTreeMap<String, Arc<dyn ControllerStatePlaneSink>>>> =
             Arc::new(Mutex::new(BTreeMap::new()));
-        let sinks_for_effect = Arc::clone(&sinks);
-        let effect = ctx.effect(move |ctx| {
-            let _ = ctx.get(&sink_kick_for_effect);
-            let histories = ctx.get(&histories_for_effect);
-            for (channel, frames) in histories {
-                let Some(frame) = frames.last().cloned() else {
-                    continue;
-                };
-                let sink = sinks_for_effect.lock().get(&channel).cloned();
-                if let Some(sink) = sink {
-                    sink.project(frame);
-                }
-            }
-        });
         Self {
             ctx,
             histories,
-            sink_kick,
-            effect: Mutex::new(Some(effect)),
+            channel_effects: Mutex::new(BTreeMap::new()),
+            channel_dependencies: Arc::new(Mutex::new(BTreeMap::new())),
             sinks,
             next_plane_version: AtomicU64::new(first_plane_version.max(1)),
-            waiters: Condvar::new(),
-            wait_lock: Mutex::new(()),
         }
     }
 
     fn install_sink(&self, channel: &str, sink: Arc<dyn ControllerStatePlaneSink>) {
         self.sinks.lock().insert(channel.to_string(), sink);
-        let next = self.ctx.get(&self.sink_kick).saturating_add(1);
-        self.ctx.set(&self.sink_kick, next);
+        let channel = channel.to_string();
+        let mut effects = self.channel_effects.lock();
+        if effects.contains_key(&channel) {
+            drop(effects);
+            if let Some(frame) = self
+                .histories
+                .observe(&self.ctx, &channel)
+                .and_then(|frames| frames.last().cloned())
+                && let Some(sink) = self.sinks.lock().get(&channel).cloned()
+            {
+                sink.project(frame);
+            }
+            return;
+        }
+        let history = self
+            .histories
+            .get_or_insert_handle(&self.ctx, channel.clone(), |_, _| Vec::new());
+        let dependency = self.channel_dependency(&channel);
+        let sinks = Arc::clone(&self.sinks);
+        let effect_channel = channel.clone();
+        let effect = self.ctx.effect(move |ctx| {
+            let frame = ctx.get(&history).last().cloned();
+            dependency.project_change();
+            let Some(frame) = frame else {
+                return;
+            };
+            let sink = sinks.lock().get(&effect_channel).cloned();
+            if let Some(sink) = sink {
+                sink.project(frame);
+            }
+        });
+        effects.insert(channel, effect);
+    }
+
+    fn channel_dependency(&self, channel: &str) -> Arc<ControllerStatePlaneChannelDependency> {
+        self.channel_dependencies
+            .lock()
+            .entry(channel.to_string())
+            .or_insert_with(|| Arc::new(ControllerStatePlaneChannelDependency::new()))
+            .clone()
+    }
+
+    fn ensure_channel_effect(&self, channel: &str) {
+        let channel = channel.to_string();
+        let mut effects = self.channel_effects.lock();
+        if effects.contains_key(&channel) {
+            return;
+        }
+        let history = self
+            .histories
+            .get_or_insert_handle(&self.ctx, channel.clone(), |_, _| Vec::new());
+        let dependency = self.channel_dependency(&channel);
+        let sinks = Arc::clone(&self.sinks);
+        let effect_channel = channel.clone();
+        let effect = self.ctx.effect(move |ctx| {
+            let frame = ctx.get(&history).last().cloned();
+            dependency.project_change();
+            let Some(frame) = frame else {
+                return;
+            };
+            if let Some(sink) = sinks.lock().get(&effect_channel).cloned() {
+                sink.project(frame);
+            }
+        });
+        effects.insert(channel, effect);
     }
 
     fn retire_channel(&self, channel: &str) {
-        let mut histories = self.ctx.get(&self.histories);
-        if histories.remove(channel).is_some() {
-            self.ctx.set(&self.histories, histories);
-            self.waiters.notify_all();
+        if let Some(effect) = self.channel_effects.lock().remove(channel) {
+            self.ctx.dispose_effect(&effect);
+        }
+        self.sinks.lock().remove(channel);
+        let channel_key = channel.to_string();
+        self.histories.remove(&self.ctx, &channel_key);
+        if let Some(dependency) = self.channel_dependencies.lock().remove(channel) {
+            dependency.project_change();
         }
     }
 
@@ -969,11 +1076,12 @@ impl ControllerStatePlaneGraph {
             STATE_PLANE_MAX_MESSAGE_BYTES
         );
 
-        let mut histories = self.ctx.get(&self.histories);
-        if !histories.contains_key(&channel) {
+        if !self.histories.is_present(&channel) {
             let authority_channel = channel.starts_with(DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX);
-            let used = histories
-                .keys()
+            let used = self
+                .histories
+                .present_keys()
+                .into_iter()
                 .filter(|existing| {
                     existing.starts_with(DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX)
                         == authority_channel
@@ -994,7 +1102,10 @@ impl ControllerStatePlaneGraph {
                 }
             );
         }
-        let history = histories.entry(channel.clone()).or_default();
+        let mut history = self
+            .histories
+            .observe(&self.ctx, &channel)
+            .unwrap_or_default();
         anyhow::ensure!(
             base_epoch.is_none() || history.len() < STATE_PLANE_MAX_RETAINED_FRAMES_PER_CHANNEL,
             "state-plane delta retention capacity reached; publish a covering Snapshot"
@@ -1056,8 +1167,7 @@ impl ControllerStatePlaneGraph {
             message_json,
         };
         history.push(frame.clone());
-        self.ctx.set(&self.histories, histories);
-        self.waiters.notify_all();
+        self.histories.set(&self.ctx, channel, history);
         Ok((frame, false))
     }
 
@@ -1069,10 +1179,14 @@ impl ControllerStatePlaneGraph {
         timeout: Duration,
     ) -> ControllerStatePlaneSubscription {
         let deadline = Instant::now() + timeout;
-        let mut guard = self.wait_lock.lock();
+        self.ensure_channel_effect(channel);
+        let dependency = self.channel_dependency(channel);
+        let mut guard = dependency.change_lock.lock();
         loop {
-            let histories = self.ctx.get(&self.histories);
-            let history = histories.get(channel).cloned().unwrap_or_default();
+            let history = self
+                .histories
+                .observe(&self.ctx, &channel.to_string())
+                .unwrap_or_default();
             let latest_version = history.last().map(|frame| frame.plane_version).unwrap_or(0);
             // A legacy subscriber cannot name the controller generation. If
             // its cursor is ahead of a replacement controller's non-empty
@@ -1106,7 +1220,7 @@ impl ControllerStatePlaneGraph {
                     frames,
                 };
             }
-            self.waiters.wait_for(
+            dependency.changed.wait_for(
                 &mut guard,
                 deadline.saturating_duration_since(Instant::now()),
             );
@@ -1136,8 +1250,8 @@ fn state_plane_effective_after_version(
 
 impl Drop for ControllerStatePlaneGraph {
     fn drop(&mut self) {
-        if let Some(effect) = self.effect.get_mut().take() {
-            self.ctx.dispose_effect(&effect);
+        for effect in self.channel_effects.get_mut().values() {
+            self.ctx.dispose_effect(effect);
         }
     }
 }
@@ -1580,7 +1694,8 @@ struct DocumentAuthorityKey {
 /// polling nor SQLite reads participate in the hot path.
 struct ControllerDocumentAuthorityGraph {
     ctx: ThreadSafeContext,
-    actor_records: Source<ControllerActorStore>,
+    document_model_states:
+        lazily::ThreadSafeSourceMap<String, Option<agent_doc_controller::actor::ActorState>>,
     document_projections: lazily::ThreadSafeSourceMap<
         String,
         Option<agent_doc_state_backbone::DocumentStateProjection>,
@@ -1597,7 +1712,10 @@ struct ControllerDocumentAuthorityGraph {
 impl ControllerDocumentAuthorityGraph {
     fn new_in(
         scope: &agent_doc_state_scope::ProcessScope,
-        actor_records: Source<ControllerActorStore>,
+        document_model_states: lazily::ThreadSafeSourceMap<
+            String,
+            Option<agent_doc_controller::actor::ActorState>,
+        >,
         document_projections: lazily::ThreadSafeSourceMap<
             String,
             Option<agent_doc_state_backbone::DocumentStateProjection>,
@@ -1605,7 +1723,7 @@ impl ControllerDocumentAuthorityGraph {
     ) -> Self {
         Self {
             ctx: scope.ctx().clone(),
-            actor_records,
+            document_model_states,
             document_projections,
             projections: lazily::ThreadSafeComputedMap::new(scope.ctx()),
             effects: Mutex::new(BTreeMap::new()),
@@ -1614,11 +1732,11 @@ impl ControllerDocumentAuthorityGraph {
         }
     }
 
-    fn projection(
+    fn projection_handle(
         &self,
         document_hash: &str,
         document_id: &str,
-    ) -> agent_doc_turn::cp_projection::TurnProjection {
+    ) -> Computed<agent_doc_turn::cp_projection::TurnProjection> {
         // Materialize the dependency reactive itself before the authority
         // Computed. `None` is the explicit unavailable state; the first real
         // projection is then an ordinary Source transition on this exact key.
@@ -1627,19 +1745,23 @@ impl ControllerDocumentAuthorityGraph {
             document_hash.to_string(),
             |_, _| None,
         );
-        let actor_records = self.actor_records;
+        self.document_model_states.get_or_insert_with(
+            &self.ctx,
+            document_id.to_string(),
+            |_, _| None,
+        );
+        let document_model_states = self.document_model_states.clone();
         let document_projections = self.document_projections.clone();
-        self.projections.get_or_insert_with(
+        self.projections.get_or_insert_handle(
             &self.ctx,
             DocumentAuthorityKey {
                 document_hash: document_hash.to_string(),
                 document_id: document_id.to_string(),
             },
             move |ctx, key| {
-                let model_state = ctx
-                    .get(&actor_records)
-                    .get(&key.document_id)
-                    .map(|record| record.state);
+                let model_state = document_model_states
+                    .observe(ctx, &key.document_id)
+                    .flatten();
                 let closeout = document_projections
                     .observe(ctx, &key.document_hash)
                     .flatten()
@@ -1648,6 +1770,16 @@ impl ControllerDocumentAuthorityGraph {
                 project_document_turn_authority(model_state, &closeout)
             },
         )
+    }
+
+    #[cfg(test)]
+    fn projection(
+        &self,
+        document_hash: &str,
+        document_id: &str,
+    ) -> agent_doc_turn::cp_projection::TurnProjection {
+        self.ctx
+            .get(&self.projection_handle(document_hash, document_id))
     }
 
     fn install_runtime(&self, runtime: &Arc<ControllerRuntime>) {
@@ -1666,29 +1798,12 @@ impl ControllerDocumentAuthorityGraph {
             *subscribers = subscribers.saturating_add(1);
             return;
         }
-        let _ = self.projection(document_hash, document_id);
-        let projections = self.projections.clone();
-        let actor_records = self.actor_records;
-        let document_projections = self.document_projections.clone();
+        let projection = self.projection_handle(document_hash, document_id);
         let runtime = Arc::clone(&self.runtime);
         let next_epoch = Arc::clone(&self.next_epoch);
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
-            let actor_records_for_projection = actor_records;
-            let document_projections_for_projection = document_projections.clone();
-            let projection =
-                projections.get_or_insert_with(ctx, effect_key.clone(), move |ctx, key| {
-                    let model_state = ctx
-                        .get(&actor_records_for_projection)
-                        .get(&key.document_id)
-                        .map(|record| record.state);
-                    let closeout = document_projections_for_projection
-                        .observe(ctx, &key.document_hash)
-                        .flatten()
-                        .map(|document| document.closeout)
-                        .unwrap_or_default();
-                    project_document_turn_authority(model_state, &closeout)
-                });
+            let projected_turn = ctx.get(&projection);
             let Some(runtime) = runtime.get().and_then(std::sync::Weak::upgrade) else {
                 return;
             };
@@ -1697,7 +1812,7 @@ impl ControllerDocumentAuthorityGraph {
                 &runtime,
                 &effect_key.document_hash,
                 epoch,
-                &projection,
+                &projected_turn,
             );
         });
         effects.insert(key, (effect, 1));
@@ -2609,7 +2724,7 @@ impl ControllerRuntime {
         let document_graphs = ControllerDocumentGraphs::new_in(&scope);
         let document_authority_graph = ControllerDocumentAuthorityGraph::new_in(
             &scope,
-            actor_graph.records_handle(),
+            actor_graph.document_model_states_handle(),
             document_graphs.projection_handle(),
         );
         let state_plane_graph = ControllerStatePlaneGraph::new_in_with_first_version(
@@ -5224,6 +5339,14 @@ mod tests {
     use rusqlite::params;
     use std::collections::BTreeMap;
 
+    struct CountingStatePlaneSink(Arc<AtomicUsize>);
+
+    impl ControllerStatePlaneSink for CountingStatePlaneSink {
+        fn project(&self, _frame: ControllerStatePlaneFrame) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     struct TestPipelineFrontmatterEffects;
 
     impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
@@ -5383,7 +5506,7 @@ mod tests {
         let document_graphs = ControllerDocumentGraphs::new_in(&scope);
         let authority_graph = ControllerDocumentAuthorityGraph::new_in(
             &scope,
-            actor_graph.records_handle(),
+            actor_graph.document_model_states_handle(),
             document_graphs.projection_handle(),
         );
         let document_hash = "authority-reactive";
@@ -5430,13 +5553,93 @@ mod tests {
     }
 
     #[test]
+    fn document_turn_authority_does_not_recompute_for_an_unrelated_actor() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let document_a = "document-authority-a";
+        let document_b = "document-authority-b";
+        let actor_graph = ControllerActorGraph::new_in(
+            &scope,
+            BTreeMap::from([
+                (
+                    document_a.to_string(),
+                    actor_record_for_test(
+                        document_a,
+                        "%41",
+                        agent_doc_controller::actor::ActorState::Ready,
+                    ),
+                ),
+                (
+                    document_b.to_string(),
+                    actor_record_for_test(
+                        document_b,
+                        "%42",
+                        agent_doc_controller::actor::ActorState::Ready,
+                    ),
+                ),
+            ]),
+        );
+        let document_graphs = ControllerDocumentGraphs::new_in(&scope);
+        let authority_graph = ControllerDocumentAuthorityGraph::new_in(
+            &scope,
+            actor_graph.document_model_states_handle(),
+            document_graphs.projection_handle(),
+        );
+        let projection_a = authority_graph.projection_handle("authority-a", document_a);
+        let projection_b = authority_graph.projection_handle("authority-b", document_b);
+        let runs_a = Arc::new(AtomicUsize::new(0));
+        let runs_b = Arc::new(AtomicUsize::new(0));
+        let _effect_a = {
+            let runs = Arc::clone(&runs_a);
+            scope.ctx().effect(move |ctx| {
+                let _ = ctx.get(&projection_a);
+                runs.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        let _effect_b = {
+            let runs = Arc::clone(&runs_b);
+            scope.ctx().effect(move |ctx| {
+                let _ = ctx.get(&projection_b);
+                runs.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        assert_eq!(runs_a.load(Ordering::SeqCst), 1);
+        assert_eq!(runs_b.load(Ordering::SeqCst), 1);
+
+        actor_graph.set(BTreeMap::from([
+            (
+                document_a.to_string(),
+                actor_record_for_test(
+                    document_a,
+                    "%41",
+                    agent_doc_controller::actor::ActorState::Busy,
+                ),
+            ),
+            (
+                document_b.to_string(),
+                actor_record_for_test(
+                    document_b,
+                    "%42",
+                    agent_doc_controller::actor::ActorState::Ready,
+                ),
+            ),
+        ]));
+
+        assert_eq!(runs_a.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            runs_b.load(Ordering::SeqCst),
+            1,
+            "one actor transition must not invalidate another document's authority",
+        );
+    }
+
+    #[test]
     fn document_turn_authority_effect_is_shared_and_released_with_last_stream() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
         let document_graphs = ControllerDocumentGraphs::new_in(&scope);
         let authority_graph = ControllerDocumentAuthorityGraph::new_in(
             &scope,
-            actor_graph.records_handle(),
+            actor_graph.document_model_states_handle(),
             document_graphs.projection_handle(),
         );
 
@@ -5669,6 +5872,77 @@ mod tests {
             plane.subscribe("test/layout", u64::MAX, true, Duration::ZERO);
         assert_eq!(legacy_replacement_replay.frames, vec![replacement]);
         assert!(!legacy_replacement_replay.timed_out);
+    }
+
+    #[test]
+    fn state_plane_channel_update_projects_only_that_channel() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let plane = ControllerStatePlaneGraph::new_in(&scope);
+        let channel_a_runs = Arc::new(AtomicUsize::new(0));
+        let channel_b_runs = Arc::new(AtomicUsize::new(0));
+        plane.install_sink(
+            "test/channel-a",
+            Arc::new(CountingStatePlaneSink(Arc::clone(&channel_a_runs))),
+        );
+        plane.install_sink(
+            "test/channel-b",
+            Arc::new(CountingStatePlaneSink(Arc::clone(&channel_b_runs))),
+        );
+        let channel_a_dependency = plane.channel_dependency("test/channel-a");
+        let channel_b_dependency = plane.channel_dependency("test/channel-b");
+        let channel_a_revision = channel_a_dependency.revision.load(Ordering::SeqCst);
+        let channel_b_revision = channel_b_dependency.revision.load(Ordering::SeqCst);
+
+        plane
+            .publish(
+                "test/channel-a".to_string(),
+                "producer-a".to_string(),
+                r#"{"Snapshot":{"epoch":1}}"#.to_string(),
+                1,
+                None,
+            )
+            .unwrap();
+        assert_eq!(channel_a_runs.load(Ordering::SeqCst), 1);
+        assert_eq!(channel_b_runs.load(Ordering::SeqCst), 0);
+        assert!(channel_a_dependency.revision.load(Ordering::SeqCst) > channel_a_revision);
+        assert_eq!(
+            channel_b_dependency.revision.load(Ordering::SeqCst),
+            channel_b_revision,
+            "publishing one channel must not wake another channel's subscribers",
+        );
+
+        let channel_a_revision = channel_a_dependency.revision.load(Ordering::SeqCst);
+        plane
+            .publish(
+                "test/channel-b".to_string(),
+                "producer-b".to_string(),
+                r#"{"Snapshot":{"epoch":1}}"#.to_string(),
+                1,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            channel_a_runs.load(Ordering::SeqCst),
+            1,
+            "publishing one channel must not replay every other sink",
+        );
+        assert_eq!(
+            channel_a_dependency.revision.load(Ordering::SeqCst),
+            channel_a_revision,
+            "publishing one channel must not wake another channel's subscribers",
+        );
+        assert_eq!(channel_b_runs.load(Ordering::SeqCst), 1);
+
+        plane.retire_channel("test/channel-a");
+        assert!(!plane.histories.is_present(&"test/channel-a".to_string()));
+        assert!(!plane.channel_effects.lock().contains_key("test/channel-a"));
+        assert!(
+            !plane
+                .channel_dependencies
+                .lock()
+                .contains_key("test/channel-a")
+        );
+        assert!(!plane.sinks.lock().contains_key("test/channel-a"));
     }
 
     #[test]
@@ -9413,7 +9687,7 @@ agent:queue\n\
         let document_graphs = ControllerDocumentGraphs::new_in(&scope);
         let document_authority_graph = ControllerDocumentAuthorityGraph::new_in(
             &scope,
-            actor_graph.records_handle(),
+            actor_graph.document_model_states_handle(),
             document_graphs.projection_handle(),
         );
         let pane_layout_graph = ControllerPaneLayoutGraph::new_in(

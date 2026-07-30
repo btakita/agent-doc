@@ -304,13 +304,61 @@ None of these is currently red, and none is a stall dressed up as a finding: eac
 Since its implementation landed mid-audit, I rewrote that backlog item so the next cycle does not re-implement it. All three bindings have the code (`js 67a0013`, `cs f056dd8`, `zig c103070`). What remains is the ledger and the plumbing: coverage.json rows 17/18/20/21/23/24 still read `—` for the JS, Zig and C# columns, the twelve generated coverage tables need regenerating, `lazily-zig`'s README still claims every Zig row is shipped while its own table shows six absent, and three superproject gitlinks are unbumped.
 
 I did not touch `lazily-zig` beyond reading it once its agent had committed, and I did not bump any gitlink, since that is that item's closeout rather than this one's.
-<!-- agent:boundary:21419ac8 -->
+
+### Re: do [#lzgoracegate] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzgoracegate]
+
+
+Done, `lazily-go 6ae14e5`. One line of Makefile, and the probe that proves it earns its place.
+
+#### What was actually missing
+
+Half of what the item claimed. CI already had a gating `race (cgo)` step at `.github/workflows/ci.yml:100` with no `continue-on-error`, so the remote side was never open. The hole was local only: `check: fmt-check vet build test test-interop-peer conformance-coverage` ran the library suite unraced, and the one race-instrumented thing in it was `test-interop-peer`, which exercises the FFI peer rather than the graph.
+
+`race` now sits between `test` and `test-interop-peer`. Ordering is deliberate and commented: `test` truncates the conformance manifest and `race` never writes it, so the fixture union the coverage guard audits stays the one `test` recorded. No new toolchain requirement either, since `check` already needed cgo for the interop peer.
+
+#### The probe took two attempts, and the first attempt is the interesting one
+
+My first mutation was the obvious one: delete the lock from `Read` entirely. It went red, and it proved nothing about the new step. Plain `go test ./...` also failed, because unsynchronized map access trips Go's own runtime `concurrent map writes` panic in `TestAsyncEffectRerunsAcrossTwoWrites`. A defect the existing gate already catches cannot demonstrate that a new gate was needed.
+
+So the probe had to be race-*only*: a graph read off the lock that corrupts nothing and fails no assertion.
+
+```go
+func Read[T any](t *ThreadSafeContext, fn func(ctx *Context) T) T {
+	_ = t.ctx.cachedCount // MUTATION PROBE: graph read off the lock
+	t.lock.Lock()
+```
+
+`cachedCount` is a plain `int` the cascade writes while readers read it. Result:
+
+| gate | exit | signal |
+|---|---|---|
+| `go test ./...` | **0** | nothing — green, sees no defect |
+| `make check` | **2** | **13 × `WARNING: DATA RACE`** |
+
+That is the discrimination the item is about, in one table: the pre-existing gate is green on a defect the new one catches thirteen times. The first race pair reported is `markClean()` at `core.go:691` against a concurrent read, which is precisely the v0.23.2 shape — a *read* mutating graph state.
+
+Reverted with an mtime bump, `make check` green: 125/134 fixtures, interop peer ok, `lazily-go: check OK`, exit 0.
+
+#### One thing this does not fix
+
+`race` runs `go test -race ./...` without `LAZILY_CONFORMANCE_MANIFEST`, so the raced pass records no fixture reads. That is correct for the manifest's sake, but it does mean the *conformance corpus* is replayed unraced while the unit suite is replayed both ways. If a fixture replay ever grows concurrency, that gap reopens. Not worth a second manifest today; worth knowing it is there.
+
+CI run on `6ae14e5` was `in_progress` at my single check. Recorded, not polled.
+<!-- agent:boundary:3ed3a1c0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~📌 Fix the red test suites in the lazily implementations.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#lzgoracegate]~~
+- do [#lzcovallowlistrot]
+- do [#lzreactdtsgate]
+- do [#lzrsbenchbudget]
+- ~~📌 Fix the red test suites in the lazily implementations.~~
 - 📌 do [#lzegress]
 - do [#lzqueuefamilyflavors]
 - do [#lzwqfixtureconfig]
@@ -322,7 +370,6 @@ I did not touch `lazily-zig` beyond reading it once its agent had committed, and
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgoracegate] lazily-go's `make check` runs the library suite WITHOUT `-race`: check: is `fmt-check vet build test test-interop-peer conformance-coverage`, and only test-interop-peer (`go run -race`) is race-instrumented. Measured this cycle: `CGO_ENABLED=1 go test -race -count=1 ./...` is green, so the gap is the gate, not the code. That is the exact hole the v0.23.2 map data race fell through (every READ ran off the context lock; a Get mutates the graph), and it was caught by CI rather than locally. Add the raced library suite to the gated path locally and in CI, then mutation-check it: drop one context lock acquisition, confirm `make check` goes red on a DATA RACE rather than passing, revert, confirm green.
 - [ ] [#lzcovallowlistrot] The conformance coverage guards cannot fail on a STALE EXCUSE, so KNOWN_UNCOVERED allowlists are silently over-excusing fixtures that are actually being replayed: py 6 stale of 10 entries (130 covered + 10 excused > 134), go ~6 of 15, dart 7 of 13 (the 7 are collections/topiccell_*, collections/workqueue_* and signaling/frames.json). Each script only checks that an allowlisted fixture still EXISTS in the corpus, never that it is still uncovered. This produces no false green today, but it is ledger rot in the understating direction that #lzcoverageaudit just corrected one layer up in coverage.json, and nobody files a bug about coverage they are told they lack. Make each guard fail when the runtime manifest shows an allowlisted fixture was opened, then prune the excuses that fires on, per binding. Mutation-check by re-adding one covered fixture to the allowlist and confirming the guard reddens.
 - [ ] [#lzreactdtsgate] lazily-react ships src/*.d.ts and a `types` export but its `make check` is only `node --check` syntax validation plus `node --test` (18 tests), so nothing typechecks the declarations it publishes. Same hole that let lazily-js ship four TS2749 errors in transport.d.ts undetected until this cycle. Port the gate landed in lazily-js 553d840: a declaration-only tsconfig (include src/**/*.d.ts, noEmit, strict, skipLibCheck:false, allowJs:false), an npm typecheck script wired into both `make check` and CI, plus CI's non-empty-program assertion, since a gate whose include matches nothing also exits 0. Mutation-check by breaking one declaration and confirming a non-zero exit before the tests run.
 - [ ] [#lzrsbenchbudget] lazily-rs `make check` never enforces benchmark budgets on a pruned target/: benchmark-check prints "SKIPPED: no benchmark evidence in this checkout (target/criterion does not exist)" plus "NO BENCHMARK BUDGET WAS ENFORCED BY THIS RUN. This is not a pass - it is the absence of a measurement" and exits 0. The banner is honest and the skip is documented, but a green `make check` still reads as budgets-verified to anyone not reading the log. Either make the skip a hard failure when a budget file exists but evidence does not, or have check depend on generating evidence first, so local closeout cannot claim a performance gate it did not run.

@@ -53,6 +53,42 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `transient opposite editor focus cannot replace a pending document selection`() {
+        assertFalse(
+            EditorTabSyncListener.ObservationProjection.shouldReplace(
+                currentAuthority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
+                currentFile = "/repo/left-next.md",
+                incomingAuthority = EditorTabSyncListener.ObservationAuthority.ComponentFocus,
+                incomingFile = "/repo/right.md",
+            ),
+        )
+    }
+
+    @Test
+    fun `a later component focus replaces a completed surface projection`() {
+        assertTrue(
+            EditorTabSyncListener.ObservationProjection.shouldReplace(
+                currentAuthority = null,
+                currentFile = null,
+                incomingAuthority = EditorTabSyncListener.ObservationAuthority.ComponentFocus,
+                incomingFile = "/repo/right.md",
+            ),
+        )
+    }
+
+    @Test
+    fun `newer document selection replaces every older observation authority`() {
+        assertTrue(
+            EditorTabSyncListener.ObservationProjection.shouldReplace(
+                currentAuthority = EditorTabSyncListener.ObservationAuthority.ComponentFocus,
+                currentFile = "/repo/right.md",
+                incomingAuthority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
+                incomingFile = "/repo/left-next.md",
+            ),
+        )
+    }
+
+    @Test
     fun `surface projection waits while the selected document is absent`() {
         assertEquals(
             EditorTabSyncListener.SurfaceReport.ProjectionReadiness.AwaitingSelectedDocument,

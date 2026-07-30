@@ -641,14 +641,13 @@ fn run_intent_via_controller(root: &Path, intent: &SurfaceIntent) -> Result<Stri
     match intent {
         SurfaceIntent::Idle => Ok(String::new()),
         SurfaceIntent::Focus { document } => {
-            let receipt = agent_doc_controller_io::project_controller::focus_document_pane(
+            agent_doc_controller_io::project_controller::enqueue_document_pane_focus(
                 root,
                 Path::new(document),
-            )?;
-            serde_json::to_string(&receipt).context("serialize focus receipt")
+            )
         }
         SurfaceIntent::Sync { columns, document } => {
-            let receipt = agent_doc_controller_io::project_controller::sync_tmux_layout(
+            agent_doc_controller_io::project_controller::enqueue_tmux_layout_sync(
                 root,
                 agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncInvocation {
                     // The controller's column wire format is one comma-joined
@@ -667,8 +666,7 @@ fn run_intent_via_controller(root: &Path, intent: &SurfaceIntent) -> Result<Stri
                     caller_kind: "automatic".to_string(),
                     actor_bindings: Vec::new(),
                 },
-            )?;
-            serde_json::to_string(&receipt).context("serialize sync receipt")
+            )
         }
     }
 }

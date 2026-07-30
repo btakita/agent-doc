@@ -4,6 +4,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.106
+
+_JetBrains plugin 0.2.330; VS Code extension 0.2.63; Zed extension 0.1.0._
+
+- **Editor document selection now remains authoritative across split-editor tab
+  replacement.** The JetBrains observation projection distinguishes explicit
+  document selection, component focus, and layout events. A transient focus
+  event from the opposite split cannot replace a pending selection, while a
+  later genuine focus change still projects normally.
+- **Tmux focus and layout effects no longer wait for terminal controller work.**
+  The shared native editor-surface Effect publishes through asynchronous
+  command-plane admission, where a newer focus generation immediately fences
+  stale work before `select-pane`. Focus candidate lookup consumes the
+  controller's in-memory actor Source instead of opening SQLite on the hot
+  path. JetBrains and VS Code share this native consequence behavior.
+
 ## 0.35.105
 
 _JetBrains plugin 0.2.329; VS Code extension 0.2.63; Zed extension 0.1.0._

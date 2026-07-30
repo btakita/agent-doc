@@ -1646,6 +1646,43 @@ pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<Controlle
     }
 }
 
+/// Publish the desired editor-document focus and return after command-plane admission.
+///
+/// The controller's generation fence owns cancellation. This keeps a stale pane lookup or
+/// session recovery out of the editor-surface projection's hot path.
+pub fn enqueue_document_pane_focus(project_root: &Path, file: &Path) -> Result<String> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        serde_json::to_string(&focus_document_pane(project_root, file)?)
+            .context("serialize focus receipt")
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        if !command_plane_enabled() {
+            return serde_json::to_string(&focus_document_pane(project_root, file)?)
+                .context("serialize focus receipt");
+        }
+        let payload = FocusDocumentPaneCommandPayload {
+            project_root: Some(project_root.display().to_string()),
+            document_path: file.display().to_string(),
+            no_promotion: true,
+            active_window_guard: true,
+            missing_pane_policy: MissingFocusPanePolicy::ResumeLatest,
+        };
+        let accepted: serde_json::Value = request_command_submit_payload_async(
+            project_root,
+            Some(file.to_path_buf()),
+            "focus_document_pane",
+            "agent-doc.focus_document_pane.v1",
+            &format!("{}:selected-document-focus", project_root.display()),
+            CONTROLLER_RPC_TIMEOUT,
+            &payload,
+        )?;
+        serde_json::to_string(&accepted).context("serialize accepted focus intent")
+    }
+}
+
 pub fn sync_tmux_layout(
     project_root: &Path,
     invocation: ControllerTmuxLayoutSyncInvocation,
@@ -1736,6 +1773,49 @@ pub fn sync_tmux_layout(
     }
 }
 
+/// Publish the desired editor layout and return after command-plane admission.
+pub fn enqueue_tmux_layout_sync(
+    project_root: &Path,
+    invocation: ControllerTmuxLayoutSyncInvocation,
+) -> Result<String> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        serde_json::to_string(&sync_tmux_layout(project_root, invocation)?)
+            .context("serialize tmux layout sync receipt")
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        if !command_plane_enabled() {
+            return serde_json::to_string(&sync_tmux_layout(project_root, invocation)?)
+                .context("serialize tmux layout sync receipt");
+        }
+        let payload = SyncTmuxLayoutCommandPayload {
+            project_root: project_root.display().to_string(),
+            columns: invocation.columns.clone(),
+            window: invocation.window.clone(),
+            focus: invocation.focus.clone(),
+            no_autostart: invocation.no_autostart,
+            exact_visible: invocation.exact_visible,
+            caller_kind: if invocation.no_autostart {
+                "automatic".to_string()
+            } else {
+                "manual".to_string()
+            },
+        };
+        let accepted: serde_json::Value = request_command_submit_payload_async(
+            project_root,
+            invocation.focus.as_ref().map(PathBuf::from),
+            "sync_tmux_layout",
+            "agent-doc.sync_tmux_layout.v1",
+            &format!("{}:sync", project_root.display()),
+            CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
+            &payload,
+        )?;
+        serde_json::to_string(&accepted).context("serialize accepted tmux layout intent")
+    }
+}
+
 /// Ask the controller what tmux is showing, given the layout the caller sees.
 ///
 /// The read half of the layout mirror (`#tmuxsyncstate`). `actual_documents` is
@@ -1809,6 +1889,60 @@ where
     T: DeserializeOwned,
     P: Serialize,
 {
+    request_command_submit_payload_via(
+        project_root,
+        file,
+        name,
+        payload_type,
+        idempotency_key,
+        timeout,
+        payload,
+        "editor_command_submit",
+    )
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn request_command_submit_payload_async<T, P>(
+    project_root: &Path,
+    file: Option<PathBuf>,
+    name: &str,
+    payload_type: &str,
+    idempotency_key: &str,
+    timeout: Duration,
+    payload: &P,
+) -> Result<T>
+where
+    T: DeserializeOwned,
+    P: Serialize,
+{
+    request_command_submit_payload_via(
+        project_root,
+        file,
+        name,
+        payload_type,
+        idempotency_key,
+        timeout,
+        payload,
+        "editor_command_submit_async",
+    )
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+#[allow(clippy::too_many_arguments)]
+fn request_command_submit_payload_via<T, P>(
+    project_root: &Path,
+    file: Option<PathBuf>,
+    name: &str,
+    payload_type: &str,
+    idempotency_key: &str,
+    timeout: Duration,
+    payload: &P,
+    controller_command: &str,
+) -> Result<T>
+where
+    T: DeserializeOwned,
+    P: Serialize,
+{
     let payload_json = serde_json::to_string(payload)
         .with_context(|| format!("failed to serialize {name} command payload"))?;
     let payload_hash = agent_doc_hash::content_hash(&payload_json);
@@ -1846,7 +1980,7 @@ where
     let response: serde_json::Value = request_controller_with_timeout(
         project_root,
         ControllerRequest {
-            command: "editor_command_submit".to_string(),
+            command: controller_command.to_string(),
             file,
             session_id: None,
             pane_id: None,
@@ -7823,6 +7957,7 @@ fn dispatch_command_submit_payload(
             focus_request.file = Some(PathBuf::from(payload.document_path));
             match handle_focus_document_pane_with_policy(
                 bootstrap,
+                Some(runtime),
                 focus_request,
                 payload.missing_pane_policy,
                 focus_fence,
@@ -16986,6 +17121,7 @@ pub(crate) fn handle_focus_document_pane(
 ) -> Result<ControllerTmuxFocusReceipt> {
     handle_focus_document_pane_with_policy(
         bootstrap,
+        None,
         request,
         MissingFocusPanePolicy::ResumeLatest,
         None,
@@ -16994,6 +17130,7 @@ pub(crate) fn handle_focus_document_pane(
 
 fn handle_focus_document_pane_with_policy(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
     missing_pane_policy: MissingFocusPanePolicy,
     focus_fence: Option<&AsyncEditorFocusFence>,
@@ -17004,8 +17141,7 @@ fn handle_focus_document_pane_with_policy(
         &bootstrap.project_root,
         &canonical.to_string_lossy(),
     );
-    let conn = open_state_db(&bootstrap.project_root)?;
-    let actor_record = load_actor_record_from_db(&conn, &document_id)?;
+    let actor_record = actor_record_from_authority(bootstrap, runtime, &document_id)?;
     let registry_entry =
         agent_doc_session_registry_io::lookup_file_entry_in(&bootstrap.project_root, &canonical)?;
     let tmux = tmux_router::Tmux::default_server();

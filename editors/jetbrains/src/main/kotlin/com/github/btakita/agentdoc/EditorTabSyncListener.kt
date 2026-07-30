@@ -72,6 +72,29 @@ class EditorTabSyncListener : FileEditorManagerListener {
         }
     }
 
+    internal enum class ObservationAuthority {
+        Layout,
+        ComponentFocus,
+        DocumentSelection,
+    }
+
+    internal object ObservationProjection {
+        fun shouldReplace(
+            currentAuthority: ObservationAuthority?,
+            currentFile: String?,
+            incomingAuthority: ObservationAuthority,
+            incomingFile: String?,
+        ): Boolean {
+            if (
+                currentAuthority == ObservationAuthority.DocumentSelection &&
+                incomingAuthority == ObservationAuthority.ComponentFocus
+            ) {
+                return currentFile == incomingFile
+            }
+            return true
+        }
+    }
+
     /** One column of the reported split layout. Wire shape of Rust `SurfaceColumn`. */
     internal data class SurfaceColumnPayload(val files: List<String>)
 
@@ -94,6 +117,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         val project: Project,
         val preferredFile: VirtualFile?,
         val forceReconcile: Boolean,
+        val authority: ObservationAuthority,
     )
 
     private data class PendingSurface(
@@ -205,7 +229,24 @@ class EditorTabSyncListener : FileEditorManagerListener {
         observation: PendingSurfaceObservation,
         delayMs: Long = SURFACE_COALESCE_MS,
     ) {
-        latestSurfaceObservation.set(observation)
+        while (true) {
+            val current = latestSurfaceObservation.get()
+            if (
+                !ObservationProjection.shouldReplace(
+                    currentAuthority = current?.authority,
+                    currentFile = current?.preferredFile?.path,
+                    incomingAuthority = observation.authority,
+                    incomingFile = observation.preferredFile?.path,
+                )
+            ) {
+                log(
+                    "observe: retained ${current?.authority} file=${current?.preferredFile?.name} " +
+                        "over ${observation.authority} file=${observation.preferredFile?.name}",
+                )
+                return
+            }
+            if (latestSurfaceObservation.compareAndSet(current, observation)) break
+        }
         val requested = generation.incrementAndGet()
         executor.schedule(
             observe@{
@@ -279,6 +320,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 candidate.name.endsWith(".md") &&
                 openMarkdownFiles.any { it.path == candidate.path }
         }
+        if (preferredFile != null && preferredMarkdownFile == null) return null
         if (
             SurfaceReport.projectionReadiness(
                 preferredActiveFile = preferredMarkdownFile?.path,
@@ -394,8 +436,11 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 project = project,
                 preferredFile = file,
                 forceReconcile = false,
-            )
+                authority = ObservationAuthority.DocumentSelection,
+            ),
+            delayMs = 0L,
         )
+        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
     }
 
     /**
@@ -419,9 +464,11 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 project = project,
                 preferredFile = file,
                 forceReconcile = false,
+                authority = ObservationAuthority.ComponentFocus,
             ),
             delayMs = 0L,
         )
+        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
         log("focusGained: file=${file.name}")
     }
 
@@ -433,7 +480,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
     fun onEditorLayoutChanged(project: Project) {
         val pendingSelection =
             latestSurfaceObservation.get()?.takeIf {
-                it.project === project && it.preferredFile != null
+                it.project === project &&
+                    it.authority == ObservationAuthority.DocumentSelection &&
+                    it.preferredFile != null
             }
         requestObservation(
             pendingSelection
@@ -441,6 +490,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     project = project,
                     preferredFile = null,
                     forceReconcile = false,
+                    authority = ObservationAuthority.Layout,
                 ),
             delayMs = if (pendingSelection == null) 0L else SURFACE_COALESCE_MS,
         )

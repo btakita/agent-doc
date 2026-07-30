@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: f5d143de-3505-4c48-afed-5a8e79ff3174
+resume: 777c716d-8334-4195-a2c1-bdf76060bb06
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -38,7 +38,15 @@ complete
 Compacted content:
 - Archived 5 response topic(s): Production logs; Production logs follow-up; Fixing the production issues; 2 more
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): TMO sandbox purge authorization; EFS production route token
-<!-- agent:boundary:410dfec2 -->
+
+### Re: cycle check — sonnet-5
+
+Nothing new to act on this cycle. The only change vs. baseline was a stray bare `410dfec2` line appended past `&lt;!-- /agent:done --&gt;` — that's the exchange boundary hash leaking out as literal text from an earlier interrupted commit cycle, not a new prompt. It sits outside every managed component block, so it doesn't affect `exchange`/`queue`/`backlog`/`review` content.
+
+Queue status: `queue_drainable_head_count: 0` — nothing is in-session-drainable right now. The two open queue heads with real work (`#prod-fix-deploy`, `#tmo-sync-cron-failures`) are both `[operator-verify]`: the deploy needs an explicit operator go (current queue preset `#spec-test-commit-push` excludes deploy, and a whole-tree deploy would ship a concurrent session's ~355 uncommitted `tmo-sync.ts` lines), and the cron-failure root-cause is blocked on that same deploy landing first. `#noticedavailabledeals` and the lender-annual-requirements research question remain queued but aren't flagged drainable either.
+
+One thing worth your attention, not acted on: preflight surfaced 4 "semantic completion" candidates suggesting some `agent:review` items may duplicate resolved `.done.md` entries. I checked one (`#tmo-orphan-as-fundings` vs `#tmo-orphan-cache`) and it's a false positive — the done entry says #tmo-orphan-cache was *superseded by* #tmo-orphan-as-fundings, not that the latter is resolved. I didn't auto-close any of the 4; they need a human look before treating them as done.
+<!-- agent:boundary:c0f0daba -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
@@ -177,3 +185,4 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 - [ ] 
  what the endpoint plus ErrorNumber names. Coordinate first: app/equityfundingsource/lib/tmo-sync.ts currently holds ~355 uncommitted lines from a concurrent session.
 - [ ]
+410dfec2

@@ -8,7 +8,7 @@ Call-graph extraction via tree-sitter. Runs during `tsift index` and stores edge
 
 - `extract_call_sites(lang, source)` — parse source, find all function/method/macro calls
 - `resolve_edges(symbols, call_sites)` — match call sites to enclosing functions (innermost wins)
-- Supported: Rust (direct, method, scoped, macros), Python, TypeScript/TSX, JavaScript/JSX, Kotlin
+- Supported: Rust (direct, method, scoped, macros), Python, TypeScript/TSX, JavaScript/JSX, Kotlin, GDScript (direct, `attribute_call` member calls, `base_call` super calls)
 - Skipped: Zig, Bash, Markdown (no meaningful call patterns)
 - `detect_communities(edges)` — Louvain phase 1 modularity optimization, returns communities sorted by size
 - `shortest_path(edges, from, to)` — BFS over undirected call graph, returns path + hop count

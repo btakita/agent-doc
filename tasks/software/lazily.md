@@ -348,14 +348,72 @@ Reverted with an mtime bump, `make check` green: 125/134 fixtures, interop peer 
 `race` runs `go test -race ./...` without `LAZILY_CONFORMANCE_MANIFEST`, so the raced pass records no fixture reads. That is correct for the manifest's sake, but it does mean the *conformance corpus* is replayed unraced while the unit suite is replayed both ways. If a fixture replay ever grows concurrency, that gap reopens. Not worth a second manifest today; worth knowing it is there.
 
 CI run on `6ae14e5` was `in_progress` at my single check. Recorded, not polled.
-<!-- agent:boundary:3ed3a1c0 -->
+
+### Re: do [#lzcovallowlistrot] — opus-5
+
+Done across all nine bindings, eight commits. The item was right that the allowlists had rotted, but it undersold what the missing check was actually protecting.
+
+#### What a stale excuse really costs
+
+I filed this as tidiness: over-excusing makes the real gaps unreadable. That is true and it is the smaller half. The `lazily-rs` pass found the other half, and it changes the severity.
+
+A stale excuse **re-arms the drift the guard exists to catch**. If a fixture is both replayed and allowlisted, and its replay later breaks, the excuse silently absorbs the failure — the guard reports an honestly-uncovered fixture instead of a regression. So the 19 stale entries across py, go and dart were 19 fixtures whose coverage guard could not have failed if their replays stopped working.
+
+The `lazily-cpp` and `lazily-js` passes independently named why it was undetectable: a fixture that is opened *and* excused takes the `covered` branch and `continue`s before `KNOWN_UNCOVERED` is ever consulted. There was no code path that could observe the contradiction. Invisible by construction, not merely unchecked.
+
+#### Results
+
+| Binding | Stale found | Allowlist | Commit |
+|---|---|---|---|
+| py | **6** | 10 → 4 | `e62904d` |
+| go | **6** | 15 → 9 | `868f8cc` |
+| dart | **7** | 13 → 6 | `7f71fa8` |
+| rs | 0 | 5 | `7fd89d5` |
+| js | 0 | 3 | `569cf3b` |
+| cpp | 0 | 10 | `bd045de` |
+| zig | 0 | 24 | `727adec` |
+| cs | 0 | 0 (empty) | `a5e56ae` |
+| kt | n/a | different guard shape | no change |
+
+py, go and dart now reconcile exactly: covered + excused = 134 in each. Before, py claimed 130 + 10 against a corpus of 134, which is arithmetically impossible and had been sitting there in the green output.
+
+The three that rotted rotted on the **same six fixtures** — the four `collections/topiccell_*` and two `collections/workqueue_*` — plus `signaling/frames.json` in dart. That is the expected shape: the queue-family conformance work made those covered in every binding at once, and no allowlist was touched.
+
+#### Two predictions of mine that the measurements killed
+
+**zig was going to be the worst, and it was clean.** I reasoned that 24 excuses plus a large new queue-family runner in `c103070` meant obvious rot. Its allowlist is exactly the complement of the opened set — `comm` empty in both directions, and 110 + 24 = 134 with `missing=0` forces a partition. `c103070` stranded nothing because all eleven queue fixtures were *already* opened; what that commit raised was replay depth, each fixture now opened 5× across three flavors, not the manifest count. I read "large new runner" as new coverage when it was deeper coverage.
+
+**cpp was going to be dirty, and it was clean too.** Its ten excuses are genuinely unread, including the five `reliable-sync` fixtures that `test_reliable_sync.cpp` hand-transcribes. That is the interesting part: the hand-transcription problem is real, and the ledger reports those as uncovered rather than claiming them. The excuse list is honest about the thing the binding is worst at.
+
+#### On not deleting what the manifest merely opened
+
+Every agent was told that an entry which is *opened* but not *replayed* must not be deleted, since that would mean the manifest records opens rather than replays — a worse defect than a stale excuse. Each traced its stale entries to a real replay before removing them: py through `TOPIC_FIXTURES`/`WORK_QUEUE_FIXTURES` parametrization with a `steps > 0 and matrices == steps` vacuity guard, go through `replayTopicFixture`/`replayWorkQueueFixture` with hard per-flavor step totals, dart through `_replayTopic`/`_replayWork` with the same. Nothing was deleted on the manifest's word alone.
+
+go's is the cleanest case: it has a test that reads those fixtures via bare `os.ReadFile`, bypassing the recorder entirely, so it contributes no false opens. dart is cleanest structurally — its manifest deliberately excludes its one non-replaying read site, so a recorded open comes from a replaying suite by construction.
+
+#### Verified rather than accepted
+
+Eight agents, one repo each, no two in the same tree. I checked their claims rather than their reports: every commit SHA present at HEAD, every working tree clean apart from the two pre-existing edits I told them to leave (`lazily-py`'s `.claude/worktrees`, `lazily-zig`'s `AGENTS.md`), every script carrying the new check, every allowlist count matching what was claimed.
+
+Then I ran the probe myself in `lazily-go` rather than trusting its report: injecting `agent-doc/delta_agent_doc_state.json` — a fixture in that binding's manifest — gives exit **1** with `KNOWN_UNCOVERED lists '...', but the suite DID open it. The excuse is stale`. Reverted, exit **0** at 125/134. Working tree clean after.
+
+Every binding's new check reuses its own covered-check comparison verbatim (`grep -qxF "$known" <<< "$OPENED"`), which is the point: if the two spellings ever diverged, one fixture could read as covered by one branch and uncovered by the other in the same run.
+
+#### kt is a different animal, and it already had the property
+
+lazily-kt has no per-fixture excuse list — a `MIN_FIXTURES` floor plus `REQUIRED_AREAS`. So there was nothing to attach the check to, and the agent correctly changed nothing rather than inventing a mechanism.
+
+Its excuse ledger lives in the test instead: `EXPECTED_SKIPS` in `ReactiveGraphConformanceTest.kt`, enforced by `assertEquals(EXPECTED_SKIPS, observed)` — **exact set equality**. A fixture that becomes replayable leaves the observed skip set and the equality fails. That is precisely the property the other eight allowlists lacked, arrived at by a different route. Probed: adding a provably-replayed fixture to `EXPECTED_SKIPS` fails the suite; restored, green.
+
+What kt does have is a floor at 117 while 131 replay, so ~14 fixtures could go dark with the build green. It cannot conceal a *named* fixture and `REQUIRED_AREAS` still catches an area going dark, so it is slack rather than rot — but it is the same understating family. Filed as `#lzktfixturefloor` rather than folded in, because raising the floor is a policy call about how the number is maintained.
+<!-- agent:boundary:0b2ccd9c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzgoracegate]~~
-- do [#lzcovallowlistrot]
+- ~~do [#lzcovallowlistrot]~~
 - do [#lzreactdtsgate]
 - do [#lzrsbenchbudget]
 - ~~📌 Fix the red test suites in the lazily implementations.~~
@@ -370,9 +428,9 @@ CI run on `6ae14e5` was `in_progress` at my single check. Recorded, not polled.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcovallowlistrot] The conformance coverage guards cannot fail on a STALE EXCUSE, so KNOWN_UNCOVERED allowlists are silently over-excusing fixtures that are actually being replayed: py 6 stale of 10 entries (130 covered + 10 excused > 134), go ~6 of 15, dart 7 of 13 (the 7 are collections/topiccell_*, collections/workqueue_* and signaling/frames.json). Each script only checks that an allowlisted fixture still EXISTS in the corpus, never that it is still uncovered. This produces no false green today, but it is ledger rot in the understating direction that #lzcoverageaudit just corrected one layer up in coverage.json, and nobody files a bug about coverage they are told they lack. Make each guard fail when the runtime manifest shows an allowlisted fixture was opened, then prune the excuses that fires on, per binding. Mutation-check by re-adding one covered fixture to the allowlist and confirming the guard reddens.
+- [ ] [#lzktfixturefloor] lazily-kt's conformance guard has no per-fixture excuse list at all — it is a MIN_FIXTURES floor plus REQUIRED_AREAS — and that floor is pinned at 117 while 131 fixtures actually replay. So roughly 14 fixtures could stop replaying with the build staying green. It cannot conceal a NAMED fixture the way a stale excuse can, and REQUIRED_AREAS still catches a whole area going dark, so this is slack rather than rot — but it is slack in the same understating family as #lzcovallowlistrot. Either raise the floor to the observed count and keep it raised (the number then has to move deliberately, which is the point), or give the binding a real per-fixture ledger like the other eight. Mutation-check whichever is chosen: drop one replayed fixture and confirm the guard reddens rather than absorbing it into the slack.
 - [ ] [#lzreactdtsgate] lazily-react ships src/*.d.ts and a `types` export but its `make check` is only `node --check` syntax validation plus `node --test` (18 tests), so nothing typechecks the declarations it publishes. Same hole that let lazily-js ship four TS2749 errors in transport.d.ts undetected until this cycle. Port the gate landed in lazily-js 553d840: a declaration-only tsconfig (include src/**/*.d.ts, noEmit, strict, skipLibCheck:false, allowJs:false), an npm typecheck script wired into both `make check` and CI, plus CI's non-empty-program assertion, since a gate whose include matches nothing also exits 0. Mutation-check by breaking one declaration and confirming a non-zero exit before the tests run.
-- [ ] [#lzrsbenchbudget] lazily-rs `make check` never enforces benchmark budgets on a pruned target/: benchmark-check prints "SKIPPED: no benchmark evidence in this checkout (target/criterion does not exist)" plus "NO BENCHMARK BUDGET WAS ENFORCED BY THIS RUN. This is not a pass - it is the absence of a measurement" and exits 0. The banner is honest and the skip is documented, but a green `make check` still reads as budgets-verified to anyone not reading the log. Either make the skip a hard failure when a budget file exists but evidence does not, or have check depend on generating evidence first, so local closeout cannot claim a performance gate it did not run.
+- [ enforces benchmark budgets on a pruned target/: benchmark-check prints "SKIPPED: no benchmark evidence in this checkout (target/criterion does not exist)" plus "NO BENCHMARK BUDGET WAS ENFORCED BY THIS RUN. This is not a pass - it is the absence of a measurement" and exits 0. The banner is honest and the skip is documented, but a green `make check` still reads as budgets-verified to anyone not reading the log. Either make the skip a hard failure when a budget file exists but evidence does not, or have check depend on generating evidence first, so local closeout cannot claim a performance gate it did not run.
 - [ ] [#lzqueuefamilyflavors] Ship the thread-safe and async queue-family flavors in lazily-js, lazily-zig and lazily-cs - the 18 cells that coverage.json rows 17/18/20/21/23/24 show absent. IMPLEMENTATION HAS LANDED IN ALL THREE BINDINGS: lazily-js 67a0013, lazily-cs f056dd8, lazily-zig c103070 (the last one mutation-checked with 15 defects across the shared core and all six new shells, green on 0.15.2 787/791, 0.16.0 849/849 and master 849/849, CI 30523011815 green). Do NOT re-implement. What REMAINS is the ledger and the plumbing: flip rows 17/18/20/21/23/24 for the JS, Zig and C# columns in lazily-spec/coverage.json, regenerate the twelve README/doc coverage tables via sync-coverage.mjs (--check is the gate), fix lazily-zig README line ~92 which claims every spec row is shipped for the Zig column while the generated table still shows those six as absent, and bump the superproject gitlinks for lazily-js, lazily-cs and lazily-zig. Verify each mark against that binding's own 3x3 ledger and replayed corpus before flipping it, not against the commit message.
 - [ ] [#lzwqfixtureconfig] Put the WorkQueueCell lease configuration into the canonical workqueue_*.json fixtures' initial block: visibility_timeout and max_deliveries are absent, so every binding hardcodes them out of band (10, and max_deliveries 3 for competing_delivery vs 2 for lease_deadletter) and a new binding has to read lazily-go's runner to discover them. Add the fields to the fixture and the schema, then update the nine bindings' runners to read them, so a fixture change cannot silently mean something different in each binding.
 - [ ] [#lzegress] Design and implement the egress family as the mirror of ingress (#designimplementtransport): an EgressCore owning sequence assignment, the unacked window, the ack watermark, and retry budget, with sync + thread-safe + async shells exposing pending/inflight/acked_through/retry as Computeds and ONE Effect per attached transport as the sink attachment. An Effect alone cannot be the family — it has no delivery state — so the Effect attaches, the core decides. Reuse Outbox/RelayCell for conflation+backpressure and SpillStore/DurableOutbox for durability rather than reimplementing them; add a generation fence on the SEND side so a reconnected producer cannot replay under a stale incarnation. Spec + formal + conformance corpus alongside, as ingress did.

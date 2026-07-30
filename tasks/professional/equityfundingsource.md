@@ -228,12 +228,12 @@ Also converted the fixed-window source-grep over the decision handler in `admin-
 `bun test` 2174 pass / 0 fail across 195 files; `build` and `build:worker` clean. Three mutations checked — dropping the met-date argument, dropping the 400 guard, and restoring the permanent disable each redden the new tests.
 
 One residue: the staging fixture user `VERIFY-LENDER-1` could not be deleted (the `users` soft-delete trigger refuses `DELETE`), so it is suspended and disabled with a reason naming it as a fixture. It is staging-only and inert.
-<!-- agent:boundary:bcd3663c -->
+<!-- agent:boundary:c938ebf8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- ~~In https://equityfundingsource.com/admin/lender-pipeline?tab=pipeline&dialog_user_id=5cdcb0dd-76e9-4d63-b57e-dd29ecce359e&dialog=lender, please allow the admin to set the date of the last verification. This will enable previously questioned lenders to have a schedule as to when the next date will occur. Test + deploy on staging first. If it works, then deploy to production.~~
-- do [#tmo-roster-error-still-silent]
+- 🚧 Please plan into a file: Copy of the most recent live TMO data backup into the sandbox TMO. Please anonymize the lender + property records. Any PII should be anonymous. Create a script to copy live TMO into the sandbox TMO. Please also ensure the staging db is refreshed. Make sure you do not do any destructive operations on the production db or live TMO account. Do not execute any operations until I look at the plan and approve.
+- ⏭️ do [#tmo-roster-error-still-silent]
 - do [#tmo-sync-cron-failures]
 <!-- /agent:queue -->
 

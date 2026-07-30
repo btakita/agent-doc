@@ -47,20 +47,10 @@ pub struct TerminalDebrisPrune {
 /// Unique trailing text is left untouched so the structural guard can fail
 /// closed instead of silently discarding it.
 pub fn prune_proven_redundant_terminal_debris(document: &str) -> Option<TerminalDebrisPrune> {
-    let components = element::parse(document).ok()?;
-    let done = components
-        .iter()
-        .filter(|component| DESCRIPTOR.matches_name(&component.name))
-        .max_by_key(|component| component.close_end)?;
-    if components
-        .iter()
-        .any(|component| component.open_start >= done.close_end)
-    {
-        return None;
-    }
+    let done_end = terminal_done_prefix_end(document)?;
 
-    let managed = &document[..done.close_end];
-    let trailing = &document[done.close_end..];
+    let managed = &document[..done_end];
+    let trailing = &document[done_end..];
     let meaningful = trailing
         .lines()
         .map(str::trim)
@@ -78,6 +68,37 @@ pub fn prune_proven_redundant_terminal_debris(document: &str) -> Option<Terminal
         content: managed.to_string(),
         removed_line_count: trailing.lines().count(),
     })
+}
+
+fn terminal_done_prefix_end(document: &str) -> Option<usize> {
+    const DONE_CLOSE: &str = "<!-- /agent:done -->";
+
+    document
+        .match_indices(DONE_CLOSE)
+        .map(|(start, _)| {
+            let marker_end = start + DONE_CLOSE.len();
+            if document[marker_end..].starts_with("\r\n") {
+                marker_end + 2
+            } else if document[marker_end..].starts_with('\n') {
+                marker_end + 1
+            } else {
+                marker_end
+            }
+        })
+        .filter_map(|prefix_end| {
+            let prefix = &document[..prefix_end];
+            let components = element::parse(prefix).ok()?;
+            let done = components
+                .iter()
+                .filter(|component| DESCRIPTOR.matches_name(&component.name))
+                .max_by_key(|component| component.close_end)?;
+            (done.close_end == prefix_end
+                && !components
+                    .iter()
+                    .any(|component| component.open_start >= done.close_end))
+            .then_some(prefix_end)
+        })
+        .last()
 }
 
 fn terminal_debris_line_is_redundant(managed: &str, line: &str) -> bool {
@@ -291,6 +312,52 @@ mod tests {
             "<!-- agent:done -->\n",
             "<!-- /agent:done -->\n",
             "Unique operator note that appears nowhere else.\n",
+        );
+
+        assert_eq!(prune_proven_redundant_terminal_debris(content), None);
+    }
+
+    #[test]
+    fn prunes_redundant_structurally_invalid_debris_below_valid_done_prefix() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#queue-family] Add queue-family reactive flavors\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "queue-family reactive flavors\n",
+            "- [ ] [#queue-family] Add queue-family reactive flavors\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        assert!(element::structural_corruption_reason(content).is_some());
+
+        let pruned = prune_proven_redundant_terminal_debris(content).unwrap();
+
+        assert_eq!(
+            pruned.content,
+            concat!(
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#queue-family] Add queue-family reactive flavors\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:done -->\n",
+                "<!-- /agent:done -->\n",
+            )
+        );
+        assert_eq!(pruned.removed_line_count, 3);
+        assert!(element::structural_corruption_reason(&pruned.content).is_none());
+    }
+
+    #[test]
+    fn does_not_treat_done_marker_inside_fence_as_terminal_prefix() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "```\n",
+            "<!-- /agent:done -->\n",
+            "```\n",
         );
 
         assert_eq!(prune_proven_redundant_terminal_debris(content), None);

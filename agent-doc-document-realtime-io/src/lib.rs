@@ -1652,12 +1652,48 @@ pub fn settle_retained_captured_projection_through_authority(
         return Ok(false);
     }
 
-    // The retained target was composed against an older authority cut.  A live
-    // editor may have advanced before its ACK, or the operator may have saved
-    // that newer cut before asynchronous recovery resumed.  Replay the same
-    // retained journal over the current canonical text; never require Ctrl+S,
-    // preflight repair, recapture, or a force-disk reset to make progress.
+    // The retained target was composed against an older authority cut. A live
+    // editor may have advanced before its delivery projection converged, or the
+    // operator may have saved that newer cut before asynchronous recovery
+    // resumed. Replay the same retained journal over the current canonical text;
+    // never require Ctrl+S, preflight repair, recapture, or a force-disk reset to
+    // make progress.
     let mut canonical = try_resolve_current_document_content(path, source)?;
+    if let Some(pruned) = agent_doc_element_done::prune_proven_redundant_terminal_debris(&canonical)
+    {
+        validate_canonical_document_target(
+            path,
+            &pruned.content,
+            "retained_captured_terminal_debris_projection",
+        )?;
+        let Some(_) = apply_canonical_replace_if_attached(
+            path,
+            &canonical,
+            &pruned.content,
+            "retained_captured_terminal_debris_projection",
+        )?
+        else {
+            return Ok(false);
+        };
+        let projected = try_resolve_current_document_content(path, source)?;
+        if projected != pruned.content {
+            // The effect receipt is only evidence. The Lazily projection of
+            // current authority is the settlement gate and will recompute when
+            // replica state advances.
+            return Ok(false);
+        }
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "retained_captured_terminal_debris_projected file={} source={} removed_line_count={} projected_hash={}",
+                path.display(),
+                source,
+                pruned.removed_line_count,
+                agent_doc_hash::content_hash(&projected),
+            ),
+        );
+        canonical = projected;
+    }
     // A newer authority cut that already contains the durable response is the
     // desired semantic result. Replaying an older incomplete intent over it can
     // only regress the closeout and may discard newer operator-owned edits.
@@ -4303,6 +4339,18 @@ pub fn deferred_document_write_reconnect_content(
     // touches only binary-owned scaffolding.
     let mut merged =
         heal_welded_boundary(editor_content).unwrap_or_else(|| editor_content.to_string());
+    if let Some(pruned) = agent_doc_element_done::prune_proven_redundant_terminal_debris(&merged) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_reconnect_terminal_debris_projected file={} removed_line_count={} projected_hash={}",
+                file.display(),
+                pruned.removed_line_count,
+                agent_doc_hash::content_hash(&pruned.content),
+            ),
+        );
+        merged = pruned.content;
+    }
     for (intent_index, intent) in pending_journal.iter().enumerate() {
         let merge_base = intent
             .expected_content
@@ -10307,6 +10355,73 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file).unwrap(), replayed_target);
         assert!(replayed_target.contains("operator-owned current head"));
         assert!(!replayed_target.contains("stale prior head"));
+    }
+
+    #[test]
+    fn retained_capture_projects_redundant_terminal_debris_repair_from_authority_state() {
+        let captured_response = "### Re: investigate\n\nThe retained response is durable.\n";
+        let valid = format!(
+            concat!(
+                "# Session\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#reactive] Retain queue reactive projection\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:exchange -->\n",
+                "{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:done -->\n",
+                "<!-- /agent:done -->\n",
+            ),
+            captured_response,
+        );
+        let invalid = format!(
+            concat!(
+                "{}",
+                "queue reactive projection\n",
+                "- [ ] [#reactive] Retain queue reactive projection\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            valid,
+        );
+        assert!(agent_doc_element::element::structural_corruption_reason(&invalid).is_some());
+        let (_dir, file, _canonical) = temp_doc(&invalid);
+        let identity = "test-retained-capture-terminal-debris-projection";
+        seed_reliable_sync_open(&file, identity);
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach to the invalid authority cut");
+        ensure_deferred_document_write_intent(
+            &file,
+            &invalid,
+            &valid,
+            "retained_capture_terminal_debris_projection_test",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .expect("the valid retained target should remain durable");
+        std::fs::write(&file, &valid).expect("simulate disk already holding the valid projection");
+
+        let delivery = ack_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_terminal_debris_projection_test",
+            )
+            .unwrap(),
+            "the authority projection should prune proven debris and settle the retained capture",
+        );
+        delivery.join().unwrap();
+
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_capture_terminal_debris_projection_current",
+            )
+            .unwrap(),
+            valid,
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), valid);
+        assert!(pending_document_write(&file).is_none());
     }
 
     #[test]

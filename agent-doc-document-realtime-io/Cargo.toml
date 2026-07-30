@@ -27,6 +27,7 @@ agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.109" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.109" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.109" }
+agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.35.109" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.109" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.109" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.109" }

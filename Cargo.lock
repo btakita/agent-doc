@@ -703,6 +703,7 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
+ "agent-doc-element-done",
  "agent-doc-flow",
  "agent-doc-flow-io",
  "agent-doc-frontmatter",

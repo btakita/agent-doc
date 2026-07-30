@@ -17,9 +17,15 @@ _JetBrains plugin 0.2.331; VS Code extension 0.2.64; Zed extension 0.1.0._
   trigger no longer competes with or fails against an authoritative response
   that is already converging.
 - **Per-document authority uses one cancellable Tokio task per warm document,
-  not one OS thread.** Those tasks share two asynchronous scheduler threads and
-  a separate bounded blocking-effect pool; descriptive pool names now make the
-  execution boundary explicit.
+not one OS thread.** Those tasks share two asynchronous scheduler threads and
+a separate bounded blocking-effect pool; descriptive pool names now make the
+execution boundary explicit.
+- **Retained closeout settlement projects from authority state rather than
+transport acknowledgement control flow.** A receipt remains supporting
+evidence, while the Lazily projection of the durable target, current authority,
+and replica state decides convergence. Proven duplicate terminal debris is
+repaired through that same authority effect; unique trailing text still fails
+closed.
 
 ## 0.35.108
 

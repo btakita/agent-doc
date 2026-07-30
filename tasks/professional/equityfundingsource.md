@@ -301,7 +301,7 @@ The number worth sitting with is the schedule count. Production has 31 loans and
 One thing I did **not** do: `bin/tmo-backup.ts` and `bin/tmo-snapshot.ts` still say "TMO exposes no payment-schedule read" and skip schedules entirely. That is true of the HTTP surface and false of the data — the schedule is on the loan, and the sync now reads it. Backlogged as `#tmo-backup-schedule-inline` rather than folded in here, because it changes the backup artifact shape, and that artifact is exactly what `#tmo-sandbox-clone` is describing in a plan you are currently reviewing. I would rather not move that target while you are looking at it.
 
 `#tmo-sandbox-clone` stays open and untouched — it is still waiting on your answers to the six questions in §7.
-<!-- agent:boundary:f815b19c -->
+<!-- agent:boundary:b3c77020 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
@@ -428,3 +428,14 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 
 <!-- completed work archived in tasks/professional/equityfundingsource.done.md -->
 <!-- /agent:done -->
+~~`reply@efs.briantakita.me` must not be used in production. The equityfundingsource automated email subdomain must be used.~~ — auto-struck: answered this cycle (#ftstrike)
+[#prod-fix-deploy] [operator-verify] Deploy the production fixes and verify them live. Production still runs the pre-fix code, so the anonymous realtime 401 loop (~6,500 requests/day) is still burning. Needs operator go for two reasons: the queue preset was #spec-test-commit-push, which excludes deploy; and a whole-tree deploy from src/equityfundingsource-dev would ship a concurrent session's ~355 uncommitted lines of TMO refactor. Deploy from a CLEAN checkout at EFS 29f27773 (see reference_efs_deploy_from_main_checkout_not_fresh_install_worktree), then verify: (a) GET accounts/67b0703bb39744866efbf765e1ebcf1c/workers/scripts/equityfundingsource-production/settings reports observability.enabled true; (b) the telemetry count for /api/public/messages/realtime/ws status 401 falls toward zero over 24h (baseline 6,576 of 11,787 app requests); (c) a fresh anonymous public tab opens NO realtime socket until the first message is sent, and one immediately after. Query recipe: src/equityfundingsource-dev/docs/deploy.md section 2.4b.
+- [ ] [#tmo-sync-cron-failures] [operator-verify] Root-cause the TMO sync cron failures. All 7 error-level lines in 24h of equityfundingsource-production logs are eventType=cron from the 15-minute sync: loan sync failed on 1012 and 1014, borrower roster failed (x2), LOS lender roster failed, and GetLoanFundings failed while building the lender roster on 1005 and 1009. Blocked on #prod-fix-deploy: until EFS 29f27773 is deployed those Errors carry an empty message, so the logs cannot say what LOS returned. After deploy, re-query per docs/deploy.md 2.4b filtering $metadata.level=error and fix what the endpoint plus ErrorNumber names. Coordinate first: app/equityfundingsource/lib/tmo-sync.ts currently holds ~355 uncommitted lines from a concurrent session.
+- [ ] 
+ what the endpoint plus ErrorNumber names. Coordinate first: app/equityfundingsource/lib/tmo-sync.ts currently holds ~355 uncommitted lines from a concurrent session.
+- [ ]
+410dfec2
+cf2d65db-105b-472b-9d1e-de6638dc2eb6
+93980072-a559-45d3-8fe5-98e2d0180fc4
+.vars.*'. Run: git -C src/equityfundingsource-dev log --all --diff-filter=A -- '.dev.vars*'. If any commit ever added one, rotate AUTH_SECRET (wrangler secret put AUTH_SECRET, both envs) and ADMIN_GLOBAL_PASSWORD, and purge from history. Audit the same gap in sibling repos that copied this .gitignore.
+- [ ] 🚧

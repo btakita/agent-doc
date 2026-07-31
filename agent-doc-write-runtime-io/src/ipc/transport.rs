@@ -1660,14 +1660,14 @@ mod late_fallback_patch_guard_tests {
         doc
     }
 
-    struct TsiftDuplicateContentFixture {
+    struct DuplicateResponseBodyRedeliveryFixture {
         bad_state_before_live_typing: &'static str,
         repaired_snapshot: &'static str,
         live_buffer_after_typing: &'static str,
     }
 
-    fn tsift_md_duplicate_content_corruption_fixture() -> TsiftDuplicateContentFixture {
-        TsiftDuplicateContentFixture {
+    fn duplicate_response_body_redelivery_fixture() -> DuplicateResponseBodyRedeliveryFixture {
+        DuplicateResponseBodyRedeliveryFixture {
             bad_state_before_live_typing: concat!(
                 "---\n",
                 "agent_doc_session: tsift-v0.1\n",
@@ -2289,7 +2289,7 @@ mod late_fallback_patch_guard_tests {
     }
 
     #[test]
-    fn tsift_md_duplicate_content_fixture_skips_stale_full_document_redelivery() {
+    fn stale_full_document_redelivery_does_not_overwrite_live_typing() {
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -2303,7 +2303,7 @@ mod late_fallback_patch_guard_tests {
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
-        let fixture = tsift_md_duplicate_content_corruption_fixture();
+        let fixture = duplicate_response_body_redelivery_fixture();
         let doc = tmp.path().join("tasks/software/tsift.md");
         fs::create_dir_all(doc.parent().unwrap()).unwrap();
         fs::write(&doc, fixture.live_buffer_after_typing).unwrap();

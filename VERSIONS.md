@@ -40,6 +40,11 @@ from the controller.** Registration forces a full canonical bootstrap while a
 durable write awaits visibility, transfers an exact-hash receipt to the
 replacement replica identity, and withholds stale whole-buffer publication
 until that bootstrap is visible and saved.
+- **Repair reconstructs a lossy editor projection from durable operations.**
+  Consumed editor-operation checkpoints remain available as historical
+  evidence; when an exact merge-base replay explains a truncated response
+  capture, repair restores the complete operator edit before materializing the
+  retained response and preserves newer frontmatter metadata.
 - **Dogfood mode is configurable per session document.** Set
   `agent_doc_dogfood: true` in frontmatter to append a stable, actionable
   Agent Doc repair prompt to terminal failures such as wedges and projection

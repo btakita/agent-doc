@@ -1763,6 +1763,7 @@ dependencies = [
  "agent-doc-git",
  "agent-doc-git-io",
  "agent-doc-hash",
+ "agent-doc-op-capture-io",
  "agent-doc-ops-log-io",
  "agent-doc-preflight-io",
  "agent-doc-project-root-io",

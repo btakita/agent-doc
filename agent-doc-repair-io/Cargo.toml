@@ -32,6 +32,7 @@ agent-doc-git = { path = "../agent-doc-git", version = "0.35.109" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.109" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.109" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.109" }
+agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.35.109" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.109" }
 agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.35.109" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.109" }

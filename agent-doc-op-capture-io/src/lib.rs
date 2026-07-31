@@ -116,38 +116,65 @@ fn event_nonce() -> String {
     )
 }
 
-fn capture_from_document_projection(
+fn decode_capture(
+    capture: &agent_doc_state_backbone::EditorOpCaptureProjection,
+) -> Result<OpCaptureState> {
+    let ops = serde_json::from_str::<Vec<EditorOp>>(&capture.ops_json)
+        .context("decode Lazily editor-op epoch")?;
+    Ok(OpCaptureState {
+        epoch: capture.epoch,
+        base_hash: capture.base_hash.clone(),
+        ops,
+        updated_ms: capture.updated_ms,
+    })
+}
+
+fn captures_from_document_projection(
     document: Option<&agent_doc_state_backbone::DocumentStateProjection>,
-) -> Result<(u64, Option<OpCaptureState>)> {
+) -> Result<(u64, Option<OpCaptureState>, Option<OpCaptureState>)> {
     let generation = document
         .map(|document| document.document.editor_op_capture_generation)
         .unwrap_or_default();
-    let Some(capture) = document.and_then(|document| document.document.editor_op_capture.as_ref())
-    else {
-        return Ok((generation, None));
-    };
-    let ops = serde_json::from_str::<Vec<EditorOp>>(&capture.ops_json)
-        .context("decode Lazily editor-op epoch")?;
     Ok((
         generation,
-        Some(OpCaptureState {
-            epoch: capture.epoch,
-            base_hash: capture.base_hash.clone(),
-            ops,
-            updated_ms: capture.updated_ms,
-        }),
+        document
+            .and_then(|document| document.document.editor_op_capture.as_ref())
+            .map(decode_capture)
+            .transpose()?,
+        document
+            .and_then(|document| document.document.last_editor_op_capture.as_ref())
+            .map(decode_capture)
+            .transpose()?,
     ))
 }
 
-fn load_projected_capture(
+fn load_cold_projected_captures(
+    project_root: &Path,
+    document_hash: &str,
+) -> Result<(u64, Option<OpCaptureState>, Option<OpCaptureState>)> {
+    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    let rows =
+        agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(document_hash))?;
+    let mut ledger = agent_doc_state_backbone::EventLedger::new();
+    for row in rows {
+        let event: agent_doc_state_backbone::StateEvent =
+            serde_json::from_str(&row.payload_json)
+                .with_context(|| format!("decode state event {}", row.event_id))?;
+        ledger.append(event);
+    }
+    let projection = ledger.project();
+    captures_from_document_projection(projection.document(document_hash))
+}
+
+fn load_projected_captures(
     doc: &Path,
     project_root: &Path,
     document_hash: &str,
-) -> Result<(u64, Option<OpCaptureState>)> {
+) -> Result<(u64, Option<OpCaptureState>, Option<OpCaptureState>)> {
     if agent_doc_state_wire::in_controller_request()
         && let Some(document) = agent_doc_state_wire::local_document_projection(document_hash)
     {
-        return capture_from_document_projection(document.as_ref());
+        return captures_from_document_projection(document.as_ref());
     }
     let controller_socket = agent_doc_controller::paths::socket_path(project_root);
     if controller_socket.exists() && !agent_doc_state_wire::in_controller_request() {
@@ -175,7 +202,7 @@ fn load_projected_capture(
                         envelope.error.as_deref().unwrap_or("unknown error")
                     );
                 }
-                return capture_from_document_projection(envelope.data.as_ref());
+                return captures_from_document_projection(envelope.data.as_ref());
             }
             Err(agent_doc_state_wire::ActorRequestError::Connect(_))
             | Err(agent_doc_state_wire::ActorRequestError::Timeout(_))
@@ -189,18 +216,7 @@ fn load_projected_capture(
         }
     }
 
-    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
-    let rows =
-        agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(document_hash))?;
-    let mut ledger = agent_doc_state_backbone::EventLedger::new();
-    for row in rows {
-        let event: agent_doc_state_backbone::StateEvent =
-            serde_json::from_str(&row.payload_json)
-                .with_context(|| format!("decode state event {}", row.event_id))?;
-        ledger.append(event);
-    }
-    let projection = ledger.project();
-    capture_from_document_projection(projection.document(document_hash))
+    load_cold_projected_captures(project_root, document_hash)
 }
 
 /// Load the operation epoch for `doc`, if present.
@@ -209,7 +225,22 @@ fn load_projected_capture(
 /// missing; the former bespoke table is never read or imported.
 pub fn load_op_capture(doc: &Path) -> Result<Option<OpCaptureState>> {
     let (project_root, document_hash, _) = state_db_identity(doc)?;
-    load_projected_capture(doc, &project_root, &document_hash).map(|(_, capture)| capture)
+    load_projected_captures(doc, &project_root, &document_hash).map(|(_, active, _)| active)
+}
+
+/// Load the newest durable operation checkpoint, including an epoch that has
+/// already been consumed and cleared.
+///
+/// A controller running an older native library may omit the retained field
+/// from its wire projection. In that transition case, the append-only ledger is
+/// replayed directly; it remains the durable authority for historical evidence.
+pub fn load_last_op_capture(doc: &Path) -> Result<Option<OpCaptureState>> {
+    let (project_root, document_hash, _) = state_db_identity(doc)?;
+    let (_, _, retained) = load_projected_captures(doc, &project_root, &document_hash)?;
+    if retained.is_some() {
+        return Ok(retained);
+    }
+    load_cold_projected_captures(&project_root, &document_hash).map(|(_, _, retained)| retained)
 }
 
 /// True when there are **pending** captured editor ops for `doc` — live
@@ -300,11 +331,11 @@ pub fn record_editor_ops(doc: &Path, base_hash: &str, ops: Vec<EditorOp>) -> Res
         EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
     )?;
     let local_current = agent_doc_state_wire::in_controller_request()
-        .then(|| load_projected_capture(doc, &project_root, &document_hash))
+        .then(|| load_projected_captures(doc, &project_root, &document_hash))
         .transpose()?;
     let tx = conn.transaction()?;
     let (generation, existing) = match local_current {
-        Some(current) => current,
+        Some((generation, active, _)) => (generation, active),
         None => {
             let rows = agent_doc_sqlite::state_store::load_state_events_from_db(
                 &tx,
@@ -315,7 +346,9 @@ pub fn record_editor_ops(doc: &Path, base_hash: &str, ops: Vec<EditorOp>) -> Res
                 ledger.append(serde_json::from_str(&row.payload_json)?);
             }
             let projection = ledger.project();
-            capture_from_document_projection(projection.document(&document_hash))?
+            let (generation, active, _) =
+                captures_from_document_projection(projection.document(&document_hash))?;
+            (generation, active)
         }
     };
     let (epoch, mut complete_ops) = match existing {
@@ -409,6 +442,21 @@ pub fn editor_ops_for_base(doc: &Path, base_text: &str) -> Result<Option<Vec<Edi
     }
 }
 
+/// Replay the newest durable editor operation checkpoint when, and only when,
+/// it was captured against `base_text` exactly.
+pub fn last_editor_text_for_base(doc: &Path, base_text: &str) -> Result<Option<String>> {
+    let Some(capture) = load_last_op_capture(doc)? else {
+        return Ok(None);
+    };
+    if capture.ops.is_empty() || capture.base_hash != content_hash(base_text) {
+        return Ok(None);
+    }
+    Ok(agent_doc_merge::crdt::replay_editor_ops(
+        base_text,
+        &capture.ops,
+    ))
+}
+
 /// Clear the active Lazily op-capture epoch. Idempotent at the public boundary:
 /// clearing an absent epoch succeeds while retaining a monotonic clear marker.
 pub fn clear_op_capture(doc: &Path) -> Result<()> {
@@ -457,9 +505,9 @@ pub fn clear_op_capture(doc: &Path) -> Result<()> {
         EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
     )?;
     let local_generation = agent_doc_state_wire::in_controller_request()
-        .then(|| load_projected_capture(doc, &project_root, &document_hash))
+        .then(|| load_projected_captures(doc, &project_root, &document_hash))
         .transpose()?
-        .map(|(generation, _)| generation);
+        .map(|(generation, _, _)| generation);
     let tx = conn.transaction()?;
     let generation = match local_generation {
         Some(generation) => generation,
@@ -822,7 +870,26 @@ mod tests {
         assert!(load_op_capture(&doc).unwrap().is_some());
         clear_op_capture(&doc).unwrap();
         assert!(load_op_capture(&doc).unwrap().is_none());
+        let retained = load_last_op_capture(&doc)
+            .unwrap()
+            .expect("cleared checkpoint remains durable recovery evidence");
+        assert_eq!(retained.base_hash, h);
+        assert_eq!(
+            last_editor_text_for_base(&doc, "b\n").unwrap(),
+            Some("\n".to_string())
+        );
+        assert!(
+            last_editor_text_for_base(&doc, "different\n")
+                .unwrap()
+                .is_none(),
+            "retained operations must not replay onto a different base"
+        );
         clear_op_capture(&doc).unwrap();
+        assert_eq!(
+            load_last_op_capture(&doc).unwrap(),
+            Some(retained),
+            "later idempotent clears must not erase retained evidence"
+        );
     }
 
     #[test]

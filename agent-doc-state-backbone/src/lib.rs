@@ -1511,13 +1511,15 @@ impl DocumentStateProjection {
             } => {
                 if *epoch >= self.document.editor_op_capture_generation {
                     self.document.editor_op_capture_generation = *epoch;
-                    self.document.editor_op_capture = Some(EditorOpCaptureProjection {
+                    let capture = EditorOpCaptureProjection {
                         epoch: *epoch,
                         canonical_path: canonical_path.clone(),
                         base_hash: base_hash.clone(),
                         ops_json: ops_json.clone(),
                         updated_ms: *updated_ms,
-                    });
+                    };
+                    self.document.last_editor_op_capture = Some(capture.clone());
+                    self.document.editor_op_capture = Some(capture);
                 } else {
                     self.reject_stale(StateDomain::Document, StateOwner::DocumentWriter);
                 }
@@ -2822,6 +2824,11 @@ pub struct DocumentProjection {
     /// Active editor-op epoch captured against one exact merge base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editor_op_capture: Option<EditorOpCaptureProjection>,
+    /// Newest durable editor-op checkpoint, retained after the active epoch is
+    /// consumed so lossy editor projections can be reconstructed from their
+    /// exact merge base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_editor_op_capture: Option<EditorOpCaptureProjection>,
     /// Monotonic checkpoint/clear generation retained after consumption.
     #[serde(default)]
     pub editor_op_capture_generation: u64,
@@ -8836,6 +8843,13 @@ mod tests {
             .expect("newest epoch remains active");
         assert_eq!(active.epoch, 2);
         assert_eq!(active.base_hash, "base-b");
+        let retained = projection
+            .document
+            .last_editor_op_capture
+            .as_ref()
+            .expect("newest checkpoint remains retained");
+        assert_eq!(retained.epoch, 2);
+        assert_eq!(retained.base_hash, "base-b");
         assert_eq!(projection.document.editor_op_capture_generation, 2);
         assert_eq!(projection.rejected_stale_events.len(), 1);
     }
@@ -8858,6 +8872,13 @@ mod tests {
         });
 
         assert!(projection.document.editor_op_capture.is_none());
+        let retained = projection
+            .document
+            .last_editor_op_capture
+            .as_ref()
+            .expect("consumed editor operations remain recovery evidence");
+        assert_eq!(retained.epoch, 4);
+        assert_eq!(retained.base_hash, "base");
         assert_eq!(projection.document.editor_op_capture_generation, 5);
         assert_eq!(projection.closeout.phase, Some(CyclePhase::Abandoned));
     }

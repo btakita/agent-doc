@@ -24,6 +24,108 @@ struct StructuralHistoryRecovery {
     observed_response_lines: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LossyEditorProjectionRecovery {
+    content: String,
+    checkpoint_sequence: u64,
+    checkpoint_capture_id: String,
+    checkpoint_response_sha256: String,
+}
+
+fn replace_frontmatter_from_current(rebuilt: &str, current: &str) -> Option<String> {
+    let rebuilt_yaml = agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(rebuilt)?;
+    let current_yaml = agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(current)?;
+    if rebuilt_yaml == current_yaml {
+        return Some(rebuilt.to_string());
+    }
+    let rebuilt_suffix = rebuilt.get("---\n".len() + rebuilt_yaml.len()..)?;
+    Some(format!("---\n{current_yaml}{rebuilt_suffix}"))
+}
+
+fn current_projection_is_explained_by_recovery(current: &str, recovered: &str) -> bool {
+    let normalize = |content: &str| {
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content)
+    };
+    let current = normalize(current);
+    let recovered = normalize(recovered);
+    let allowed_lines = recovered
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let exact_lines = allowed_lines.iter().copied().collect::<HashSet<_>>();
+    current
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .all(|line| {
+            exact_lines.contains(line)
+                || (line.len() >= 16
+                    && allowed_lines
+                        .iter()
+                        .any(|allowed| allowed.len() > line.len() && allowed.contains(line)))
+        })
+}
+
+fn select_lossy_editor_projection_recovery(
+    current: &str,
+    operator_projection: &str,
+    history: &[agent_doc_cycle_state_io::CapturedResponseCheckpoint],
+) -> Option<LossyEditorProjectionRecovery> {
+    for checkpoint in history {
+        let Some(captured_baseline) = checkpoint.baseline_content.as_deref() else {
+            continue;
+        };
+        let captured_baseline_hash = agent_doc_capture_io::replay_file_hash(captured_baseline);
+        if checkpoint.file_hash.as_deref() != Some(captured_baseline_hash.as_str())
+            || !corrupted_materialization_is_explained_by_checkpoint(
+                current,
+                captured_baseline,
+                &checkpoint.response_body,
+            )
+            || !agent_doc_turn::response_replay::response_materialized_in_content(
+                &checkpoint.response_body,
+                current,
+            )
+            || agent_doc_turn::response_replay::response_materialized_in_content(
+                &checkpoint.response_body,
+                operator_projection,
+            )
+        {
+            continue;
+        }
+        let Some(rebuilt) =
+            agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+                operator_projection,
+                &checkpoint.response_body,
+            )
+        else {
+            continue;
+        };
+        let Some(content) = replace_frontmatter_from_current(&rebuilt, current) else {
+            continue;
+        };
+        if content.len() <= current.len()
+            || content == current
+            || agent_doc_element::element::structural_corruption_reason(&content).is_some()
+            || !agent_doc_turn::response_replay::response_materialized_in_content(
+                &checkpoint.response_body,
+                &content,
+            )
+            || !current_projection_is_explained_by_recovery(current, &content)
+        {
+            continue;
+        }
+        return Some(LossyEditorProjectionRecovery {
+            content,
+            checkpoint_sequence: checkpoint.sequence,
+            checkpoint_capture_id: checkpoint.capture_id.clone(),
+            checkpoint_response_sha256: checkpoint.response_sha256.clone(),
+        });
+    }
+    None
+}
+
 fn select_structural_history_recovery(
     current: &str,
     active: &agent_doc_cycle_state_io::ProjectedCapturedResponse,
@@ -465,8 +567,52 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             doc_content = recovery.content;
         }
     }
+    if force_disk_override != Some(true)
+        && let Some(merge_baseline) = agent_doc_snapshot_io::load_document_baseline(&canonical)?
+        && let Some(operator_projection) =
+            agent_doc_op_capture_io::last_editor_text_for_base(&canonical, &merge_baseline)?
+        && operator_projection != doc_content
+    {
+        let history = agent_doc_cycle_state_io::load_recent_captured_response_checkpoints(
+            &canonical,
+            STRUCTURAL_CAPTURE_HISTORY_LIMIT,
+        )?;
+        if let Some(recovery) =
+            select_lossy_editor_projection_recovery(&doc_content, &operator_projection, &history)
+        {
+            let prior_content = doc_content;
+            agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+                &canonical,
+                &recovery.content,
+                &prior_content,
+                "repair_lossy_editor_projection",
+            )?;
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &canonical,
+                &recovery.content,
+                agent_doc_ops_log_io::log_op,
+            )?;
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "repair_lossy_editor_projection_reconciled file={} checkpoint_sequence={} checkpoint_capture_id={} checkpoint_response_sha256={} prior_hash={} recovered_hash={} authority=editor_ops_plus_response_history",
+                    canonical.display(),
+                    recovery.checkpoint_sequence,
+                    recovery.checkpoint_capture_id,
+                    recovery.checkpoint_response_sha256,
+                    agent_doc_hash::content_hash(&prior_content),
+                    agent_doc_hash::content_hash(&recovery.content),
+                ),
+            );
+            doc_content = recovery.content;
+        }
+    }
     let has_active_capture_evidence = capture.is_some() || projected_capture.is_some();
-    log_slow_repair_phase(&canonical, "structural_history", &mut phase_started);
+    log_slow_repair_phase(
+        &canonical,
+        "structural_and_lossy_projection_history",
+        &mut phase_started,
+    );
     let historical_capture = if !has_pending_response && !has_active_capture_evidence {
         historical_committed_capture_replay(&canonical, &doc_content)?
     } else {
@@ -2977,6 +3123,96 @@ mod tests {
         let (current, active, history, _) =
             structural_history_fixture(Some("operator note must survive"));
         assert!(select_structural_history_recovery(&current, &active, &history).is_none());
+    }
+
+    fn lossy_editor_projection_fixture() -> (
+        String,
+        String,
+        Vec<agent_doc_cycle_state_io::CapturedResponseCheckpoint>,
+        String,
+    ) {
+        let full_prompt = "- do [#fresh-project-supervisor-log]: agent-doc start should auto-create a configurable path to the supervisor-stderr.log. The default should be PROJECT_ROOT/.agent-doc/logs/supervisor-stderr.log. Auto-create directory structure. The agent-doc start command should not redirect stderr to the file.";
+        let truncated_prompt = "- do [#fresh-project-supervisor-log]: agent-doc start should auto-create a configurable path";
+        let padding = "stable operator-authored context ".repeat(24);
+        let document = |resume: &str, exchange: &str, queue: &str| {
+            format!(
+                "---\nagent_doc_session: test\nresume: {resume}\nagent_doc_format: template\n---\n{padding}\n<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#fresh-project-supervisor-log] Preserve supervisor logging.\n<!-- /agent:backlog -->\n\n<!-- agent:review -->\n<!-- /agent:review -->\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n<!-- agent:done -->\n<!-- /agent:done -->\n"
+            )
+        };
+        let operator_projection = document(
+            "old-resume",
+            "Earlier exchange content must survive.\n\n",
+            full_prompt,
+        );
+        let captured_baseline = document("new-resume", "", truncated_prompt);
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: Response\n\n",
+            "The convergence fix is installed. Please restart IDEA.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let current = agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+            &captured_baseline,
+            response,
+        )
+        .expect("captured response should materialize");
+        let history = vec![agent_doc_cycle_state_io::CapturedResponseCheckpoint {
+            sequence: 42,
+            cycle_id: "cycle-old".to_string(),
+            capture_id: "capture-old".to_string(),
+            response_sha256: agent_doc_hash::content_hash(response),
+            response_body: response.to_string(),
+            file_hash: Some(agent_doc_capture_io::replay_file_hash(&captured_baseline)),
+            snapshot_hash: None,
+            baseline_content: Some(captured_baseline),
+        }];
+        (
+            current,
+            operator_projection,
+            history,
+            full_prompt.to_string(),
+        )
+    }
+
+    #[test]
+    fn lossy_editor_projection_replays_ops_then_retained_response() {
+        let (current, operator_projection, history, full_prompt) =
+            lossy_editor_projection_fixture();
+        let recovered =
+            select_lossy_editor_projection_recovery(&current, &operator_projection, &history)
+                .expect("lossy editor projection should be recoverable");
+        assert_eq!(recovered.checkpoint_sequence, 42);
+        assert!(recovered.content.contains(&full_prompt));
+        assert!(
+            recovered
+                .content
+                .contains("Earlier exchange content must survive.")
+        );
+        assert!(recovered.content.contains("resume: new-resume"));
+        assert!(!recovered.content.contains("resume: old-resume"));
+        assert_eq!(
+            recovered
+                .content
+                .matches("The convergence fix is installed.")
+                .count(),
+            1
+        );
+        assert!(
+            agent_doc_element::element::structural_corruption_reason(&recovered.content).is_none()
+        );
+    }
+
+    #[test]
+    fn lossy_editor_projection_rejects_post_capture_operator_text() {
+        let (current, operator_projection, history, _) = lossy_editor_projection_fixture();
+        let current = current.replace(
+            "<!-- agent:queue -->",
+            "<!-- agent:queue -->\noperator note must survive",
+        );
+        assert!(
+            select_lossy_editor_projection_recovery(&current, &operator_projection, &history)
+                .is_none()
+        );
     }
 
     #[test]

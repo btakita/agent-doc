@@ -16,8 +16,6 @@ codex_args: -s danger-full-access
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Re: Contact for Mary Ellen Zellerbach — opus-5
-
 Created. She was already all over the mail corpus, so I pulled the context out of it rather than leaving a stub.
 
 **What was created**
@@ -45,7 +43,8 @@ Please create a contact for mary-ellen-zellerbach:
 - cmz2970@sbcglobal.net
 
 I did client services for her at Martin Investments.
-<!-- agent:boundary:25453ba3 -->
+### Re: Contact for Mary Ellen Zellerbach — opus-5
+<!-- agent:boundary:9c69ab34 -->
 <!-- /agent:exchange -->
 
 ## Queue

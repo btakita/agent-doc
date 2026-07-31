@@ -384,11 +384,10 @@ One note on the runbook, since it misled me for a minute: §TL;DR says `make dep
 **34 schedule rows across 11 of 26 loans.** That number was structurally 0 on every capture ever taken before this change — the sweep hard-coded an empty array. No sweep errors, no per-loan read errors. `complete=false` is the `--no-content` flag doing its documented job (7 attachments listed as `skipped (--no-content)`); I used it to keep the run read-light. The artifact was written outside the repo and deleted.
 
 Worth knowing where this leaves the two environments: staging's scheduled TMO backup will now write schedule-bearing artifacts, **production's will not** — it still runs the prior build, and its daily job keeps producing `schedule_rows=0`. That matters for `#tmo-clone-apply`, which wants a schedule-bearing source. Filed as `#efs-prod-deploy-20d7a416` rather than doing it, since you asked for staging.
-<!-- agent:boundary:3133dc06 -->
+<!-- agent:boundary:e92898a3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
-- staging deploy
 <!-- /agent:queue -->
 
 ## Backlog

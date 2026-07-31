@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 019fb5dd-1fc3-7fb2-801c-02dadc03b1af
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -202,12 +202,28 @@ The `tsift.md` and `lazily.md` reports are retained controller-owned closeouts, 
 ### Re: Fresh-project supervisor logging — gpt-5
 
 The shell currently evaluates `2>> project/.agent-doc/logs/supervisor-stderr.log` before Agent Doc starts, so a fresh project can fail before the binary can create its state directory. The follow-up is queued after the pending installation boundary: Agent Doc should create and open the project-local supervisor log itself, with a deterministic fallback directory when project-local initialization is unavailable, rather than requiring caller-owned shell redirection.
-<!-- agent:boundary:6fc34e2d -->
+
+### Re: Fix all contributing factors to prompt truncation and editor/disk convergence — Codex
+
+Fixed the full truncation/convergence chain and restored the deleted queue prompt exactly.
+
+- `agent-doc start` now owns the configurable supervisor stderr-log path, creates its directory tree, and does not redirect the start command's own stderr into that file.
+- JetBrains typing capture now computes each operation from the stable pre-edit snapshot, preventing progressive prefix loss. Restarted IDEA generations bootstrap from unsettled canonical authority instead of publishing a stale whole buffer.
+- Consumed editor-operation captures remain available for exact-base recovery; repair reconstructs a truncated projection only when durable operations and captured-response history prove every line, and fails closed when the historical operation stream or newer text is not explainable.
+- Repair now heals legacy welded queue targets and proven duplicated editor suffixes before component parsing, including the live duplicated `icebox`/`done` tail plus its torn comment-terminator bytes. Novel trailing text is never discarded.
+- One-line `agent-doc patch` arguments, stdin, hook output, append, and prepend now retain a newline before the component close marker, preventing a repair edit from creating another welded/truncated boundary.
+- IDEA restarted with JetBrains plugin `0.2.332`; the installed native/CLI build is `0.35.109`, and live-library reload reached the editor endpoint.
+
+The restored queue item is:
+
+> do [#fresh-project-supervisor-log]: agent-doc start should auto-create a configurable path to the supervisor-stderr.log. The default should be PROJECT_ROOT/.agent-doc/logs/supervisor-stderr.log. Auto-create directory structure. The agent-doc start command should not redirect stderr to the file.
+
+Verification completed: the targeted positive and fail-closed regressions pass; the full `make check` gate passed after each final code change; the structural repair converged through editor authority; `agent-doc read` and disk compare exactly; and the document commit boundary completed. Implementation is committed through agent-doc `bbe856cba` and root `469cccf38`.
+<!-- agent:boundary:fdaa57e6 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#fresh-project-supervisor-log]: agent-doc start should auto-create a configurable path to the supervisor-stderr.log. The default should be PROJECT_ROOT/.agent-doc/logs/supervisor-stderr.log. Auto-create directory structure. The agent-doc start command should not redirect stderr to the file.
 <!-- /agent:queue -->
 
 ## Notes

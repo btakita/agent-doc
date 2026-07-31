@@ -410,19 +410,60 @@ pub(super) fn document_turn_authority_channel(document_hash: &str) -> String {
 /// The client writes one subscription declaration. The controller then pushes a
 /// frame whenever the Computed changes. `keep_open` supplies editor membership,
 /// so closing a tab drops the stream without waiting for a heartbeat.
-pub async fn observe_document_turn_authority_stream(
-    project_root: &Path,
+#[derive(Debug, Default)]
+struct DocumentTurnAuthorityReconnectGuard {
+    cursor: Option<ControllerStatePlaneCursor>,
+    advanced_on_connection: bool,
+    consecutive_stalled_disconnects: u8,
+}
+
+impl DocumentTurnAuthorityReconnectGuard {
+    fn begin_connection(&mut self) {
+        self.advanced_on_connection = false;
+    }
+
+    fn observe(&mut self, subscription: &ControllerStatePlaneSubscription) -> bool {
+        let next = ControllerStatePlaneCursor {
+            controller_generation: subscription.controller_generation,
+            plane_version: subscription.latest_version,
+        };
+        let advanced = match self.cursor {
+            None => true,
+            Some(current) if next.controller_generation != current.controller_generation => true,
+            Some(current) => next.plane_version > current.plane_version,
+        };
+        if advanced {
+            self.cursor = Some(next);
+            self.advanced_on_connection = true;
+            self.consecutive_stalled_disconnects = 0;
+        }
+        advanced
+    }
+
+    /// Permit one immediate compatibility reconnect when a stale controller
+    /// closes a subscription without advancing its reactive cursor. A second
+    /// identical close is proof that no dependency changed; stop the task
+    /// instead of turning unavailable authority into a CPU-bound poll loop.
+    fn should_reconnect_after_disconnect(&mut self) -> bool {
+        if self.advanced_on_connection {
+            self.consecutive_stalled_disconnects = 0;
+            return true;
+        }
+        self.consecutive_stalled_disconnects =
+            self.consecutive_stalled_disconnects.saturating_add(1);
+        self.consecutive_stalled_disconnects <= 1
+    }
+}
+
+fn document_turn_authority_stream_request(
     file: &Path,
-    mut observe: impl FnMut(agent_doc_turn::cp_projection::TurnProjection) + Send,
-    mut membership: tokio::sync::watch::Receiver<bool>,
-) -> Result<()> {
-    let authority_root = agent_doc_project_root_io::project_root_containing(file)
-        .unwrap_or_else(|| project_root.to_path_buf());
-    let document_hash = agent_doc_hash::document_id_for_path(file);
+    channel: &str,
+    cursor: Option<ControllerStatePlaneCursor>,
+) -> Result<(ControllerRequest, String)> {
     let invocation = ControllerStatePlaneSubscribeInvocation {
-        channel: document_turn_authority_channel(&document_hash),
-        after_controller_generation: None,
-        after_version: 0,
+        channel: channel.to_string(),
+        after_controller_generation: cursor.map(|value| value.controller_generation),
+        after_version: cursor.map(|value| value.plane_version).unwrap_or(0),
         timeout_ms: STATE_PLANE_SUBSCRIBE_MAX.as_millis() as u64,
     };
     let request = ControllerRequest {
@@ -449,19 +490,46 @@ pub async fn observe_document_turn_authority_stream(
     }
     let mut raw = serde_json::to_string(&request_value)?;
     raw.push('\n');
+    Ok((request, raw))
+}
+
+pub async fn observe_document_turn_authority_stream(
+    project_root: &Path,
+    file: &Path,
+    mut observe: impl FnMut(agent_doc_turn::cp_projection::TurnProjection) + Send,
+    mut membership: tokio::sync::watch::Receiver<bool>,
+) -> Result<()> {
+    let authority_root = agent_doc_project_root_io::project_root_containing(file)
+        .unwrap_or_else(|| project_root.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    let channel = document_turn_authority_channel(&document_hash);
+    let mut reconnect = DocumentTurnAuthorityReconnectGuard::default();
 
     while *membership.borrow() {
+        let (request, raw) =
+            document_turn_authority_stream_request(file, &channel, reconnect.cursor)?;
         let stream = connect_or_launch_async(&authority_root, LaunchMode::Lazy).await?;
+        reconnect.begin_connection();
         let (reader_half, mut writer_half) = tokio::io::split(stream);
         if let Err(error) = writer_half.write_all(raw.as_bytes()).await {
             if document_authority_transport_interrupted(&error) {
-                continue;
+                if reconnect.should_reconnect_after_disconnect() {
+                    continue;
+                }
+                anyhow::bail!(
+                    "document-authority stream repeatedly disconnected before its reactive cursor advanced"
+                );
             }
             return Err(error).context("write document-authority stream declaration");
         }
         if let Err(error) = writer_half.flush().await {
             if document_authority_transport_interrupted(&error) {
-                continue;
+                if reconnect.should_reconnect_after_disconnect() {
+                    continue;
+                }
+                anyhow::bail!(
+                    "document-authority stream repeatedly disconnected before its reactive cursor advanced"
+                );
             }
             return Err(error).context("flush document-authority stream declaration");
         }
@@ -489,24 +557,30 @@ pub async fn observe_document_turn_authority_stream(
             }
             let subscription: ControllerStatePlaneSubscription =
                 decode_controller_response(&authority_root, &request, response.trim())?;
-            if let Some(projection) = subscription
-                .frames
-                .last()
-                .map(|frame| {
-                    let message: lazily::IpcMessage = serde_json::from_str(&frame.message_json)
-                        .context("decode document-turn authority state-plane message")?;
-                    let payload = state_plane_snapshot_payload(
-                        &message,
-                        &invocation.channel,
-                        DOCUMENT_TURN_AUTHORITY_TYPE_TAG,
-                    )?;
-                    serde_json::from_slice(&payload)
-                        .context("decode document-turn authority projection")
-                })
-                .transpose()?
+            if reconnect.observe(&subscription)
+                && let Some(projection) = subscription
+                    .frames
+                    .last()
+                    .map(|frame| {
+                        let message: lazily::IpcMessage = serde_json::from_str(&frame.message_json)
+                            .context("decode document-turn authority state-plane message")?;
+                        let payload = state_plane_snapshot_payload(
+                            &message,
+                            &channel,
+                            DOCUMENT_TURN_AUTHORITY_TYPE_TAG,
+                        )?;
+                        serde_json::from_slice(&payload)
+                            .context("decode document-turn authority projection")
+                    })
+                    .transpose()?
             {
                 observe(projection);
             }
+        }
+        if !reconnect.should_reconnect_after_disconnect() {
+            anyhow::bail!(
+                "document-authority stream repeatedly closed without advancing its reactive cursor"
+            );
         }
     }
     Ok(())
@@ -19398,6 +19472,75 @@ mod tests {
 
     fn test_controller_runtime(bootstrap: &ControllerBootstrap) -> Arc<ControllerRuntime> {
         ControllerRuntime::new_arc(bootstrap.clone()).unwrap()
+    }
+
+    fn document_turn_authority_subscription(
+        controller_generation: u64,
+        latest_version: u64,
+    ) -> ControllerStatePlaneSubscription {
+        ControllerStatePlaneSubscription {
+            channel: "agent-doc/document-turn-authority/test".to_string(),
+            controller_generation,
+            latest_version,
+            timed_out: false,
+            frames: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn document_turn_authority_reconnect_resumes_from_the_last_reactive_cursor() {
+        let file = Path::new("/project/tasks/session.md");
+        let channel = "agent-doc/document-turn-authority/test";
+        let cursor = ControllerStatePlaneCursor {
+            controller_generation: 7,
+            plane_version: 41,
+        };
+
+        let (request, _) =
+            document_turn_authority_stream_request(file, channel, Some(cursor)).unwrap();
+        let invocation: ControllerStatePlaneSubscribeInvocation =
+            serde_json::from_str(request.diagnostic_payload.as_deref().unwrap()).unwrap();
+
+        assert_eq!(invocation.channel, channel);
+        assert_eq!(invocation.after_controller_generation, Some(7));
+        assert_eq!(invocation.after_version, 41);
+    }
+
+    #[test]
+    fn repeated_disconnect_without_authority_progress_stops_reconnect_churn() {
+        let mut reconnect = DocumentTurnAuthorityReconnectGuard::default();
+        reconnect.begin_connection();
+        assert!(reconnect.observe(&document_turn_authority_subscription(7, 41)));
+        assert!(reconnect.should_reconnect_after_disconnect());
+
+        reconnect.begin_connection();
+        assert!(!reconnect.observe(&document_turn_authority_subscription(7, 41)));
+        assert!(reconnect.should_reconnect_after_disconnect());
+
+        reconnect.begin_connection();
+        assert!(!reconnect.observe(&document_turn_authority_subscription(7, 41)));
+        assert!(
+            !reconnect.should_reconnect_after_disconnect(),
+            "an unchanged dependency cursor must become unavailable, not a CPU-bound retry loop"
+        );
+    }
+
+    #[test]
+    fn controller_generation_change_reactivates_document_authority_subscription() {
+        let mut reconnect = DocumentTurnAuthorityReconnectGuard::default();
+        reconnect.begin_connection();
+        assert!(reconnect.observe(&document_turn_authority_subscription(7, 41)));
+        assert!(reconnect.should_reconnect_after_disconnect());
+
+        reconnect.begin_connection();
+        assert!(reconnect.observe(&document_turn_authority_subscription(8, 1)));
+        assert_eq!(
+            reconnect.cursor,
+            Some(ControllerStatePlaneCursor {
+                controller_generation: 8,
+                plane_version: 1,
+            })
+        );
     }
 
     #[test]

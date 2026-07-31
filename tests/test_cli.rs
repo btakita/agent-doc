@@ -17208,7 +17208,9 @@ fn test_jetbrains_run_agent_doc_uses_cp_editor_route_rpc() {
         "project controller editor_route must not shell out to the route CLI"
     );
     assert!(
-        route_client.contains("request.addProperty(\"command\", \"editor_route\")")
+        route_client
+            .contains("request.addProperty(\"command\", EditorCommandName.EditorRoute.token)")
+            && route_client.contains("EditorRoute(\"editor_route\")")
             && route_client
                 .contains("request.addProperty(\"diagnostic_payload\", payload.toString())")
             && route_client.contains("File(projectRoot, \".agent-doc/controller.sock\")")

@@ -28,8 +28,6 @@ object TerminalUtil {
     private const val UI_OUTCOME_QUEUED_BEHIND_OWNER = "queued_behind_owner"
     private const val UI_OUTCOME_RECOVERED_AND_RETRIED = "recovered_and_retried"
     private const val SUPERVISOR_RESTART_REDIRECT_MARKER = "supervisor_restart_redirect"
-    internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 2
-    private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(500L)
     private val BUSY_CLEAR_REFUSAL_HEADER_REGEX = Regex(
         """session_clear refused for (.+?) because pane (\S+) is (?:alive-busy|active_agent_doc|busy)""",
         RegexOption.DOT_MATCHES_ALL,
@@ -240,7 +238,7 @@ object TerminalUtil {
 
     internal enum class RunAgentDocRouteFailureKind {
         PERSISTENT,
-        RETRYABLE_STARTING,
+        STARTUP_NOT_READY,
         BUSY_RUNNING,
         QUEUED_PENDING,
         QUEUE_PAUSED,
@@ -510,118 +508,89 @@ object TerminalUtil {
                 var finalError: String? = null
                 var routeGeneration: Long? = null
                 try {
-                    var routeAttempt = 1
-                    while (!handle.wasCanceled() && routeAttempt <= STARTING_ACTOR_ROUTE_MAX_ATTEMPTS) {
-                        attempt?.recordIfCurrent("route_start", command = cmd)
-                        if (routeGeneration == null) {
-                            routeGeneration = StateProjectionBridge.recordRouteDispatchStarted(documentPath, routeKey)
-                        }
-                        val routeResult = CpRouteClient.runEditorRoute(
-                            projectRoot = cwd,
-                            filePath = documentPath,
+                    attempt?.recordIfCurrent("route_start", command = cmd)
+                    routeGeneration =
+                        StateProjectionBridge.recordRouteDispatchStarted(documentPath, routeKey)
+                    val routeResult = CpRouteClient.runEditorRoute(
+                        projectRoot = cwd,
+                        filePath = documentPath,
+                        relativePath = relativePath,
+                        layoutArgs = layoutArgs,
+                        waitForReadySeconds = RUN_ROUTE_WAIT_FOR_READY_SECONDS,
+                        attemptId = attempt?.id,
+                        routeKey = attempt?.routeKey,
+                    )
+                    val output = routeResult.output
+                    val exitCode = routeResult.exitCode
+                    val elapsed = formatElapsedMillis(System.currentTimeMillis() - startedAt)
+                    val failureKind = classifyRunAgentDocRouteFailure(output)
+                    if (handle.wasCanceled()) {
+                        LOG.warn("[route] superseded route exited after replacement for $relativePath")
+                        finalStage = "route_superseded"
+                        finalError = "route handle was canceled"
+                    } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.BUSY_RUNNING) {
+                        LOG.warn("[route] busy/running for $relativePath: $output")
+                        clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        notifyRunAgentDocStillRunning(project, relativePath, output)
+                        finalStage = "route_busy_running"
+                        finalError = routeAttemptError(exitCode, failureKind, output)
+                    } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.STARTUP_NOT_READY) {
+                        LOG.warn("[route] startup not ready for $relativePath: $output")
+                        clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        notifyRunAgentDocStillRunning(project, relativePath, output)
+                        finalStage = "route_startup_not_ready"
+                        finalError = routeAttemptError(exitCode, failureKind, output)
+                    } else if (failureKind == RunAgentDocRouteFailureKind.QUEUED_PENDING) {
+                        LOG.warn("[route] queued behind active turn for $relativePath: $output")
+                        clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        notifyRunAgentDocQueued(project, relativePath, output)
+                        finalStage = "route_queued_pending"
+                        finalError = routeAttemptError(exitCode, failureKind, output)
+                    } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.QUEUE_PAUSED) {
+                        LOG.warn("[route] queue paused for $relativePath: $output")
+                        clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        notifyRunAgentDocQueuePaused(project, file, relativePath, output)
+                        finalStage = "route_queue_paused"
+                        finalError = routeAttemptError(exitCode, failureKind, output)
+                    } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED) {
+                        LOG.warn("[route] agent switch deferred for $relativePath: $output")
+                        clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        notifyRunAgentDocAgentSwitchDeferred(project, file, relativePath, output)
+                        finalStage = "route_agent_switch_deferred"
+                        finalError = routeAttemptError(exitCode, failureKind, output)
+                    } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN) {
+                        LOG.warn("[route] dispatch start unproven for $relativePath: $output")
+                        clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        notifyRunAgentDocDispatchUnproven(project, relativePath, output)
+                        finalStage = "route_dispatch_start_unproven"
+                        finalError = routeAttemptError(exitCode, failureKind, output)
+                    } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT) {
+                        LOG.warn("[route] protected prompt input for $relativePath: $output")
+                        clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        notifyRunAgentDocProtectedPromptInput(project, relativePath, output)
+                        finalStage = "route_protected_prompt_input"
+                        finalError = routeAttemptError(exitCode, failureKind, output)
+                    } else if (exitCode != 0) {
+                        LOG.warn("[route] FAILED (exit $exitCode): $output")
+                        notifyPersistentRouteFailure(
+                            project = project,
+                            cwd = cwd,
                             relativePath = relativePath,
-                            layoutArgs = layoutArgs,
-                            waitForReadySeconds = RUN_ROUTE_WAIT_FOR_READY_SECONDS,
-                            attemptId = attempt?.id,
-                            routeKey = attempt?.routeKey,
+                            exitCode = exitCode,
+                            elapsed = elapsed,
+                            routeOutput = output,
                         )
-                        val output = routeResult.output
-                        val exitCode = routeResult.exitCode
-                        val elapsed = formatElapsedMillis(System.currentTimeMillis() - startedAt)
-                        val failureKind = classifyRunAgentDocRouteFailure(output)
-                        if (handle.wasCanceled()) {
-                            LOG.warn("[route] superseded route exited after replacement for $relativePath")
-                            finalStage = "route_superseded"
-                            finalError = "route handle was canceled"
-                            break
-                        } else if (
-                            exitCode != 0 &&
-                            isRetryableRunAgentDocRouteFailure(failureKind) &&
-                            routeAttempt < STARTING_ACTOR_ROUTE_MAX_ATTEMPTS
-                        ) {
-                            attempt?.recordIfCurrent(
-                                "route_retryable_starting",
-                                command = cmd,
-                                error = routeAttemptError(exitCode, failureKind, output),
-                            )
-                            val delayMillis = startingActorRouteRetryDelayMillis(routeAttempt)
-                            LOG.warn(
-                                "[route] actor still starting for $relativePath; retrying attempt ${routeAttempt + 1}/$STARTING_ACTOR_ROUTE_MAX_ATTEMPTS after ${delayMillis}ms"
-                            )
-                            if (!sleepBeforeRetry(handle, delayMillis)) {
-                                LOG.warn("[route] superseded starting-actor retry for $relativePath")
-                                finalStage = "route_superseded"
-                                finalError = "superseded during starting-actor retry"
-                                break
-                            }
-                            routeAttempt += 1
-                            continue
-                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.BUSY_RUNNING) {
-                            LOG.warn("[route] busy/running after retry budget for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                            notifyRunAgentDocStillRunning(project, relativePath, output)
-                            finalStage = "route_busy_running"
-                            finalError = routeAttemptError(exitCode, failureKind, output)
-                            break
-                        } else if (failureKind == RunAgentDocRouteFailureKind.QUEUED_PENDING) {
-                            LOG.warn("[route] queued behind active turn for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                            notifyRunAgentDocQueued(project, relativePath, output)
-                            finalStage = "route_queued_pending"
-                            finalError = routeAttemptError(exitCode, failureKind, output)
-                            break
-                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.QUEUE_PAUSED) {
-                            LOG.warn("[route] queue paused for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                            notifyRunAgentDocQueuePaused(project, file, relativePath, output)
-                            finalStage = "route_queue_paused"
-                            finalError = routeAttemptError(exitCode, failureKind, output)
-                            break
-                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED) {
-                            LOG.warn("[route] agent switch deferred for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                            notifyRunAgentDocAgentSwitchDeferred(project, file, relativePath, output)
-                            finalStage = "route_agent_switch_deferred"
-                            finalError = routeAttemptError(exitCode, failureKind, output)
-                            break
-                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN) {
-                            LOG.warn("[route] dispatch start unproven for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                            notifyRunAgentDocDispatchUnproven(project, relativePath, output)
-                            finalStage = "route_dispatch_start_unproven"
-                            finalError = routeAttemptError(exitCode, failureKind, output)
-                            break
-                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT) {
-                            LOG.warn("[route] protected prompt input for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                            notifyRunAgentDocProtectedPromptInput(project, relativePath, output)
-                            finalStage = "route_protected_prompt_input"
-                            finalError = routeAttemptError(exitCode, failureKind, output)
-                            break
-                        } else if (exitCode != 0) {
-                            LOG.warn("[route] FAILED (exit $exitCode): $output")
-                            notifyPersistentRouteFailure(
-                                project = project,
-                                cwd = cwd,
-                                relativePath = relativePath,
-                                exitCode = exitCode,
-                                elapsed = elapsed,
-                                routeOutput = output,
-                            )
-                            finalStage = "route_failed"
-                            finalError = routeAttemptError(exitCode, failureKind, output)
-                            break
-                        } else {
-                            LOG.warn("[route] SUCCESS: $output")
-                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                            StateProjectionBridge.recordRouteDispatchProven(
-                                documentPath,
-                                routeGeneration,
-                                "jetbrains:${routeKey.hashCode()}:attempt-$routeAttempt",
-                            )
-                            finalStage = "route_success"
-                            break
-                        }
+                        finalStage = "route_failed"
+                        finalError = routeAttemptError(exitCode, failureKind, output)
+                    } else {
+                        LOG.warn("[route] SUCCESS: $output")
+                        clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        StateProjectionBridge.recordRouteDispatchProven(
+                            documentPath,
+                            routeGeneration,
+                            "jetbrains:${routeKey.hashCode()}:command-plane",
+                        )
+                        finalStage = "route_success"
                     }
                 } catch (e: Exception) {
                     finalStage = "route_exception"
@@ -1734,17 +1703,6 @@ object TerminalUtil {
             output.contains("the authoritative actor is still starting")
     }
 
-    internal fun isRetryableRunAgentDocRouteFailure(output: String): Boolean {
-        return isRetryableRunAgentDocRouteFailure(classifyRunAgentDocRouteFailure(output))
-    }
-
-    private fun isRetryableRunAgentDocRouteFailure(kind: RunAgentDocRouteFailureKind): Boolean {
-        // Startup-only failures get one bounded retry. In particular, a
-        // `latest run is still booting (timed_out)` result means the binary's
-        // first ready window expired; it does not prove a persistent blocker.
-        return kind == RunAgentDocRouteFailureKind.RETRYABLE_STARTING
-    }
-
     internal fun classifyRunAgentDocRouteFailure(output: String): RunAgentDocRouteFailureKind {
         return when {
             isRunAgentDocRouteQueued(output) -> RunAgentDocRouteFailureKind.QUEUED_PENDING
@@ -1756,9 +1714,9 @@ object TerminalUtil {
             isDispatchStartUnproven(output) -> RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN
             isProtectedPromptInputRouteFailure(output) -> RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT
             isLatestRunStillBootingTimedOut(output) ->
-                RunAgentDocRouteFailureKind.RETRYABLE_STARTING
+                RunAgentDocRouteFailureKind.STARTUP_NOT_READY
             isStartingActorRouteFailure(output) ->
-                RunAgentDocRouteFailureKind.RETRYABLE_STARTING
+                RunAgentDocRouteFailureKind.STARTUP_NOT_READY
             else -> RunAgentDocRouteFailureKind.PERSISTENT
         }
     }
@@ -1866,24 +1824,6 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
 
     private fun hasUserFacingOutcome(lowercaseOutput: String, outcome: String): Boolean {
         return lowercaseOutput.contains("ui_outcome=$outcome")
-    }
-
-    internal fun startingActorRouteRetryDelayMillis(completedAttempts: Int): Long {
-        val index = (completedAttempts - 1).coerceIn(0, STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS.lastIndex)
-        return STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS[index]
-    }
-
-    private fun sleepBeforeRetry(handle: InFlightRouteHandle, delayMillis: Long): Boolean {
-        var remaining = delayMillis
-        while (remaining > 0) {
-            if (handle.wasCanceled()) {
-                return false
-            }
-            val chunk = minOf(remaining, 100L)
-            Thread.sleep(chunk)
-            remaining -= chunk
-        }
-        return !handle.wasCanceled()
     }
 
     fun showHint(project: Project, message: String) {

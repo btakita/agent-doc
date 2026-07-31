@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.google.gson.JsonParser
 import io.github.lazily.IpcMessage
 import io.github.lazily.NodeState
+import java.nio.file.Paths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -87,7 +88,7 @@ class CpRouteClientCommandPlaneTest {
             attemptId = "attempt-async",
             routeKey = "root:plan.md:run",
             commandId = "cmd-editor-async",
-            controllerCommand = "editor_command_submit_async",
+            controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
         )
 
         assertEquals("editor_command_submit_async", request.get("command").asString)
@@ -103,6 +104,30 @@ class CpRouteClientCommandPlaneTest {
         assertEquals("/proj/plan.md", request.get("file").asString)
         val payload = JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
         assertEquals("cmd-editor-async", payload.get("command_id").asString)
+    }
+
+    @Test
+    fun `editorCommandAwaitRequest blocks on one reactive terminal projection`() {
+        val request = CpRouteClient.editorCommandAwaitRequest(
+            "/proj/plan.md",
+            "cmd-editor-async",
+            125_000,
+        )
+
+        assertEquals(ProjectControllerCommand.EditorCommandAwait.token, request.get("command").asString)
+        assertEquals("/proj/plan.md", request.get("file").asString)
+        val payload = JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        assertEquals("cmd-editor-async", payload.get("command_id").asString)
+        assertEquals(125_000L, payload.get("timeout_ms").asLong)
+
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt"
+        ).toFile().readText()
+        val await = source.substringAfter("private fun awaitCommandSubmitTerminal")
+            .substringBeforeLast("\n}")
+        assertFalse(await.contains("while ("))
+        assertFalse(await.contains("Thread.sleep("))
+        assertFalse(await.contains("editorCommandStatusRequest("))
     }
 
     @Test

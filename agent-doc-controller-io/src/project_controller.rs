@@ -1642,6 +1642,12 @@ pub(crate) struct ControllerRuntime {
     state_plane_graph: ControllerStatePlaneGraph,
     captured_finalize_wakes: Mutex<BTreeMap<String, rpc::CapturedFinalizeWakeProjection>>,
     pane_layout_graph: ControllerPaneLayoutGraph,
+    /// Controller-owned reactive projection for accepted editor commands.
+    ///
+    /// The command worker writes accepted/terminal states into one SourceMap.
+    /// Status reads and event-driven awaits consume that same projection; there
+    /// is no client polling cache beside it.
+    async_editor_commands: ControllerAsyncEditorCommandGraph,
     supervisor_recycle_waiters: Condvar,
     /// Serialize editor-op epoch read/derive/append transitions. The checkpoint
     /// fact contains the complete epoch, so two concurrent IDE callbacks must
@@ -1691,6 +1697,231 @@ pub(crate) struct ControllerRuntime {
     /// them, instead of one private context per struct. Dropping the runtime drops
     /// the scope and every cell in it — teardown is the scope's lifetime.
     _scope: agent_doc_state_scope::ProcessScope,
+}
+
+const ASYNC_EDITOR_COMMAND_RESULT_TTL: Duration = Duration::from_secs(5 * 60);
+const ASYNC_EDITOR_COMMAND_RESULT_CAPACITY: usize = 256;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AsyncEditorCommandPhase {
+    Accepted,
+    Terminal,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct AsyncEditorCommandProjection {
+    response: serde_json::Value,
+    phase: AsyncEditorCommandPhase,
+    updated_at: Instant,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AsyncEditorFocusFence {
+    pub(crate) project_root: PathBuf,
+    pub(crate) command_id: String,
+    pub(crate) expires_at: Option<Instant>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AsyncEditorFocusFenceDecision {
+    Current,
+    Superseded,
+    Expired,
+}
+
+/// Process-scoped command completion plane for editor gestures.
+///
+/// The Lazily SourceMaps are authoritative for completion and latest-focus
+/// intent. The condition variable and effect gate carry no state: they only
+/// park socket waiters and serialize the final external focus effect.
+struct ControllerAsyncEditorCommandGraph {
+    ctx: ThreadSafeContext,
+    projections: lazily::ThreadSafeSourceMap<String, AsyncEditorCommandProjection>,
+    focus_fences: lazily::ThreadSafeSourceMap<PathBuf, AsyncEditorFocusFence>,
+    transition_gate: Mutex<()>,
+    transition: Condvar,
+    focus_effect_gate: Mutex<()>,
+}
+
+impl ControllerAsyncEditorCommandGraph {
+    fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
+        Self {
+            ctx: scope.ctx().clone(),
+            projections: lazily::ThreadSafeSourceMap::new(scope.ctx()),
+            focus_fences: lazily::ThreadSafeSourceMap::new(scope.ctx()),
+            transition_gate: Mutex::new(()),
+            transition: Condvar::new(),
+            focus_effect_gate: Mutex::new(()),
+        }
+    }
+
+    fn prune_expired_locked(&self, now: Instant) {
+        for command_id in self.projections.present_keys() {
+            let expired = self
+                .projections
+                .observe(&self.ctx, &command_id)
+                .is_some_and(|projection| {
+                    now.duration_since(projection.updated_at) > ASYNC_EDITOR_COMMAND_RESULT_TTL
+                });
+            if expired {
+                self.projections.remove(&self.ctx, &command_id);
+            }
+        }
+    }
+
+    fn publish(
+        &self,
+        command_id: impl Into<String>,
+        phase: AsyncEditorCommandPhase,
+        response: serde_json::Value,
+    ) {
+        let command_id = command_id.into();
+        let _transition = self.transition_gate.lock();
+        let now = Instant::now();
+        self.prune_expired_locked(now);
+        if self.projections.present_count() >= ASYNC_EDITOR_COMMAND_RESULT_CAPACITY
+            && !self.projections.is_present(&command_id)
+            && let Some(oldest) = self
+                .projections
+                .present_keys()
+                .into_iter()
+                .filter_map(|candidate| {
+                    self.projections
+                        .observe(&self.ctx, &candidate)
+                        .map(|projection| (candidate, projection.updated_at))
+                })
+                .min_by_key(|(_, updated_at)| *updated_at)
+                .map(|(candidate, _)| candidate)
+        {
+            self.projections.remove(&self.ctx, &oldest);
+        }
+        self.projections.set(
+            &self.ctx,
+            command_id,
+            AsyncEditorCommandProjection {
+                response,
+                phase,
+                updated_at: now,
+            },
+        );
+        self.transition.notify_all();
+    }
+
+    fn current(&self, command_id: &str) -> Option<serde_json::Value> {
+        let projection = self
+            .projections
+            .observe(&self.ctx, &command_id.to_string())?;
+        (projection.updated_at.elapsed() <= ASYNC_EDITOR_COMMAND_RESULT_TTL)
+            .then_some(projection.response)
+    }
+
+    fn await_terminal(&self, command_id: &str, timeout: Duration) -> Result<serde_json::Value> {
+        let deadline = Instant::now() + timeout;
+        let command_id = command_id.to_string();
+        let mut transition = self.transition_gate.lock();
+        loop {
+            self.prune_expired_locked(Instant::now());
+            let projection = self.projections.observe(&self.ctx, &command_id);
+            let Some(projection) = projection else {
+                anyhow::bail!("unknown or expired async editor command: {command_id}");
+            };
+            if projection.phase == AsyncEditorCommandPhase::Terminal {
+                return Ok(projection.response);
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                anyhow::bail!(
+                    "async editor command {command_id} did not publish a terminal projection within {}ms",
+                    timeout.as_millis()
+                );
+            }
+            self.transition.wait_for(&mut transition, deadline - now);
+        }
+    }
+
+    fn remove(&self, command_id: &str) {
+        let _transition = self.transition_gate.lock();
+        self.projections.remove(&self.ctx, &command_id.to_string());
+        self.transition.notify_all();
+    }
+
+    fn publish_focus_fence(&self, fence: AsyncEditorFocusFence) {
+        let _effect = self.focus_effect_gate.lock();
+        self.focus_fences
+            .set(&self.ctx, fence.project_root.clone(), fence);
+    }
+
+    fn focus_fence_decision(&self, fence: &AsyncEditorFocusFence) -> AsyncEditorFocusFenceDecision {
+        let current_command_id = self
+            .focus_fences
+            .observe(&self.ctx, &fence.project_root)
+            .map(|current| current.command_id);
+        if current_command_id.as_deref() != Some(fence.command_id.as_str()) {
+            return AsyncEditorFocusFenceDecision::Superseded;
+        }
+        if fence
+            .expires_at
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            return AsyncEditorFocusFenceDecision::Expired;
+        }
+        AsyncEditorFocusFenceDecision::Current
+    }
+
+    fn require_focus_fence_current(&self, fence: Option<&AsyncEditorFocusFence>) -> Result<()> {
+        let Some(fence) = fence else {
+            return Ok(());
+        };
+        let decision = self.focus_fence_decision(fence);
+        anyhow::ensure!(
+            decision == AsyncEditorFocusFenceDecision::Current,
+            "{}",
+            decision.reason()
+        );
+        Ok(())
+    }
+
+    fn apply_focus_effect<T>(
+        &self,
+        fence: Option<&AsyncEditorFocusFence>,
+        effect: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        let Some(fence) = fence else {
+            return effect();
+        };
+        let _effect = self.focus_effect_gate.lock();
+        let decision = self.focus_fence_decision(fence);
+        anyhow::ensure!(
+            decision == AsyncEditorFocusFenceDecision::Current,
+            "{}",
+            decision.reason()
+        );
+        effect()
+    }
+
+    fn release_focus_fence(&self, fence: Option<&AsyncEditorFocusFence>) {
+        let Some(fence) = fence else {
+            return;
+        };
+        let _effect = self.focus_effect_gate.lock();
+        if self
+            .focus_fences
+            .observe(&self.ctx, &fence.project_root)
+            .is_some_and(|current| current.command_id == fence.command_id)
+        {
+            self.focus_fences.remove(&self.ctx, &fence.project_root);
+        }
+    }
+}
+
+impl AsyncEditorFocusFenceDecision {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Superseded => "superseded_focus_intent",
+            Self::Expired => "expired_focus_intent",
+        }
+    }
 }
 
 /// Per-document retained-write settlement as a **keyed reactive collection**
@@ -3056,6 +3287,7 @@ impl ControllerRuntime {
             persisted_layout,
             actor_graph.live_bindings_handle(),
         );
+        let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         for (document_hash, projection) in &memory.state_projection.documents {
             document_graphs.set_projection(document_hash, Some(projection.clone()));
         }
@@ -3069,6 +3301,7 @@ impl ControllerRuntime {
             state_plane_graph,
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
+            async_editor_commands,
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(()),
             state_projection_waiters: Condvar::new(),
@@ -10129,6 +10362,7 @@ agent:queue\n\
             Vec::new(),
             actor_graph.live_bindings_handle(),
         );
+        let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(ControllerMemoryState {
@@ -10148,12 +10382,42 @@ agent:queue\n\
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
+            async_editor_commands,
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
             _scope: scope,
         }
     }
+
+    #[test]
+    fn editor_command_await_reacts_to_the_terminal_source_transition() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = Arc::new(ControllerAsyncEditorCommandGraph::new_in(&scope));
+        graph.publish(
+            "cmd-reactive",
+            AsyncEditorCommandPhase::Accepted,
+            serde_json::json!({"phase": "accepted"}),
+        );
+        let (waiting, waiting_observer) = std::sync::mpsc::channel();
+        let waiter_graph = Arc::clone(&graph);
+        let waiter = std::thread::spawn(move || {
+            waiting.send(()).unwrap();
+            waiter_graph
+                .await_terminal("cmd-reactive", Duration::from_secs(1))
+                .unwrap()
+        });
+        waiting_observer.recv().unwrap();
+
+        graph.publish(
+            "cmd-reactive",
+            AsyncEditorCommandPhase::Terminal,
+            serde_json::json!({"phase": "terminal"}),
+        );
+
+        assert_eq!(waiter.join().unwrap()["phase"], "terminal");
+    }
+
     fn preparing_runtime_bootstrap(
         project_root: &Path,
         handoff_state: ControllerHandoffState,

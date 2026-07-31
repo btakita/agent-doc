@@ -105,6 +105,31 @@ internal enum class MissingFocusPanePolicy(val token: String) {
     ResumeLatest("resume_latest"),
 }
 
+internal enum class ProjectControllerCommand(val token: String) {
+    EditorCommandSubmitAsync("editor_command_submit_async"),
+    EditorCommandStatus("editor_command_status"),
+    EditorCommandAwait("editor_command_await"),
+}
+
+internal enum class EditorCommandName(val token: String) {
+    EditorRoute("editor_route"),
+    SyncTmuxLayout("sync_tmux_layout"),
+    FocusDocumentPane("focus_document_pane"),
+}
+
+internal enum class CommandProjectionStatus(val token: String) {
+    Submitted("submitted"),
+    Accepted("accepted"),
+    Running("running"),
+    Applied("applied"),
+    Rejected("rejected");
+
+    companion object {
+        fun fromToken(token: String?): CommandProjectionStatus? =
+            entries.firstOrNull { it.token == token }
+    }
+}
+
 /**
  * High-level editor route RPC over the Project Controller socket.
  */
@@ -137,12 +162,17 @@ internal object CpRouteClient {
             attemptId = attemptId,
             routeKey = routeKey,
                 commandId = commandId,
-                controllerCommand = "editor_command_submit_async",
+                controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
                 selectedText = selectedText,
                 steeringId = steeringId,
             )
         return try {
-            val accepted = sendAcceptedCommandSubmitToSocket(socket, request, commandId, "editor_route")
+            val accepted = sendAcceptedCommandSubmitToSocket(
+                socket,
+                request,
+                commandId,
+                EditorCommandName.EditorRoute.token,
+            )
             if (accepted.exitCode != 0) {
                 accepted
             } else {
@@ -151,7 +181,7 @@ internal object CpRouteClient {
                     filePath = filePath,
                     commandId = commandId,
                     timeoutMs = waitForReadySeconds * 1000 + COMMAND_COMPLETION_GRACE_MS,
-                    commandName = "editor_route",
+                    commandName = EditorCommandName.EditorRoute.token,
                 )
             }
         } catch (e: Exception) {
@@ -246,10 +276,15 @@ internal object CpRouteClient {
             projectRoot = projectRoot,
             documentPath = documentPath,
             commandId = commandId,
-            controllerCommand = "editor_command_submit_async",
+            controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
         )
         return try {
-            sendAcceptedCommandSubmitToSocket(socket, request, commandId, "focus_document_pane")
+                sendAcceptedCommandSubmitToSocket(
+                    socket,
+                    request,
+                    commandId,
+                    EditorCommandName.FocusDocumentPane.token,
+                )
         } catch (e: Exception) {
             log.warn("[focus] command-plane focus_document_pane submit failed via ${socket.path}: ${e.message}")
             CpEditorRouteResult(
@@ -387,7 +422,7 @@ internal object CpRouteClient {
             steeringId,
         )
         val request = JsonObject()
-        request.addProperty("command", "editor_route")
+        request.addProperty("command", EditorCommandName.EditorRoute.token)
         request.addProperty("file", filePath)
         request.addProperty("diagnostic_payload", payload.toString())
         return request
@@ -429,7 +464,7 @@ internal object CpRouteClient {
         )
         return commandSubmitRequest(
             filePath = filePath,
-            name = "editor_route",
+            name = EditorCommandName.EditorRoute.token,
             payloadType = "agent-doc.editor_route.v1",
             payload = payload,
             // Retries of one click share an attempt id; a later intentional click
@@ -445,11 +480,29 @@ internal object CpRouteClient {
 
 internal fun editorCommandStatusRequest(filePath: String, commandId: String): JsonObject {
     val request = JsonObject()
-    request.addProperty("command", "editor_command_status")
+    request.addProperty("command", ProjectControllerCommand.EditorCommandStatus.token)
     request.addProperty("file", filePath)
     request.addProperty(
         "diagnostic_payload",
         JsonObject().also { it.addProperty("command_id", commandId) }.toString(),
+    )
+    return request
+}
+
+internal fun editorCommandAwaitRequest(
+    filePath: String,
+    commandId: String,
+    timeoutMs: Long,
+): JsonObject {
+    val request = JsonObject()
+    request.addProperty("command", ProjectControllerCommand.EditorCommandAwait.token)
+    request.addProperty("file", filePath)
+    request.addProperty(
+        "diagnostic_payload",
+        JsonObject().also {
+            it.addProperty("command_id", commandId)
+            it.addProperty("timeout_ms", timeoutMs.coerceAtLeast(MIN_COMMAND_AWAIT_TIMEOUT_MS))
+        }.toString(),
     )
     return request
 }
@@ -531,7 +584,7 @@ internal fun editorCommandStatusRequest(filePath: String, commandId: String): Js
         payload.addProperty("caller_kind", callerKind)
         return commandSubmitRequest(
             filePath = focus ?: projectRoot,
-            name = "sync_tmux_layout",
+            name = EditorCommandName.SyncTmuxLayout.token,
             payloadType = "agent-doc.sync_tmux_layout.v1",
             payload = payload,
             idempotencyKey = "$projectRoot:sync",
@@ -559,7 +612,7 @@ payload.addProperty("active_window_guard", true)
 payload.addProperty("missing_pane_policy", MissingFocusPanePolicy.ObserveOnly.token)
         return commandSubmitRequest(
             filePath = documentPath,
-            name = "focus_document_pane",
+            name = EditorCommandName.FocusDocumentPane.token,
             payloadType = "agent-doc.focus_document_pane.v1",
             payload = payload,
             // Selection focus is one latest-wins intent per project. A
@@ -645,10 +698,15 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
     if (entry.get("terminal")?.asBoolean != true) {
         return null
     }
-        val status = entry.get("status")?.asString
-        if (status != "applied") {
+        val status = CommandProjectionStatus.fromToken(entry.get("status")?.asString)
+        if (status != CommandProjectionStatus.Applied) {
             val reason = entry.get("reason")?.takeIf { !it.isJsonNull }?.asString
-            return CpEditorRouteResult(1, output.ifEmpty { "editor_route ${status ?: "rejected"}: ${reason ?: ""}" })
+            return CpEditorRouteResult(
+                1,
+                output.ifEmpty {
+                    "editor_route ${status?.token ?: CommandProjectionStatus.Rejected.token}: ${reason ?: ""}"
+                },
+            )
         }
         return CpEditorRouteResult(
             0,
@@ -668,16 +726,29 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
             it.isJsonObject && it.asJsonObject.get("command_id")?.asString == commandId
         }?.asJsonObject
             ?: return CpEditorRouteResult(1, output.ifEmpty { "command plane returned no projection entry" })
-        val status = entry.get("status")?.asString
+        val status = CommandProjectionStatus.fromToken(entry.get("status")?.asString)
         val terminal = entry.get("terminal")?.asBoolean ?: false
-        if (terminal && status != "applied") {
+        if (terminal && status != CommandProjectionStatus.Applied) {
             val reason = entry.get("reason")?.takeIf { !it.isJsonNull }?.asString
-            return CpEditorRouteResult(1, output.ifEmpty { "$commandName ${status ?: "rejected"}: ${reason ?: ""}" })
+            return CpEditorRouteResult(
+                1,
+                output.ifEmpty {
+                    "$commandName ${status?.token ?: CommandProjectionStatus.Rejected.token}: ${reason ?: ""}"
+                },
+            )
         }
-        if (status == "submitted" || status == "accepted" || status == "running" || status == "applied") {
+        if (
+            status == CommandProjectionStatus.Submitted ||
+            status == CommandProjectionStatus.Accepted ||
+            status == CommandProjectionStatus.Running ||
+            status == CommandProjectionStatus.Applied
+        ) {
             return CpEditorRouteResult(0, output)
         }
-        return CpEditorRouteResult(1, output.ifEmpty { "$commandName unexpected command status: ${status ?: "<missing>"}" })
+        return CpEditorRouteResult(
+            1,
+            output.ifEmpty { "$commandName unexpected command status: ${status?.token ?: "<missing>"}" },
+        )
     }
 
     internal fun cpcSocket(projectRoot: String): File = File(projectRoot, ".agent-doc/controller.sock")
@@ -697,13 +768,21 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
     /// running correctly — the exact failure recorded in #jbroutasync.
 private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
 private const val COMMAND_COMPLETION_GRACE_MS = 5_000L
-private const val COMMAND_COMPLETION_POLL_MS = 100L
+private const val MIN_COMMAND_AWAIT_TIMEOUT_MS = 1L
 
     private val socketWatchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }
     }
 
     private fun sendRequestDataToSocket(socket: File, request: JsonObject): JsonObject {
+        return sendRequestDataToSocketWithTimeout(socket, request, SOCKET_REQUEST_TIMEOUT_MS)
+    }
+
+    private fun sendRequestDataToSocketWithTimeout(
+        socket: File,
+        request: JsonObject,
+        timeoutMs: Long,
+    ): JsonObject {
         SocketChannel.open(UnixDomainSocketAddress.of(socket.toPath())).use { channel ->
             // Closing the channel is what unblocks a stuck `readLine()`; there is
             // no per-read timeout to set on a blocking channel.
@@ -713,13 +792,13 @@ private const val COMMAND_COMPLETION_POLL_MS = 100L
                 try {
                     channel.close()
                 } catch (_: Exception) { /* already closing */ }
-            }, SOCKET_REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            }, timeoutMs, TimeUnit.MILLISECONDS)
             try {
                 return readRequestData(channel, request)
             } catch (e: Exception) {
                 if (timedOut.get()) {
                     throw IllegalStateException(
-                        "Project Controller did not respond within ${SOCKET_REQUEST_TIMEOUT_MS}ms " +
+                        "Project Controller did not respond within ${timeoutMs}ms " +
                             "(socket=${socket.path}); the controller may be wedged",
                         e,
                     )
@@ -784,27 +863,19 @@ private fun awaitCommandSubmitTerminal(
     timeoutMs: Long,
     commandName: String,
 ): CpEditorRouteResult {
-    val deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceAtLeast(1))
-    while (true) {
-        val data = sendRequestDataToSocket(socket, editorCommandStatusRequest(filePath, commandId))
-        resolveCommandSubmitTerminalData(data, commandId)?.let { return it }
-        val remainingNanos = deadlineNanos - System.nanoTime()
-        if (remainingNanos <= 0) {
-            return CpEditorRouteResult(
-                1,
-                "$commandName did not publish a terminal result within ${timeoutMs}ms",
-            )
-        }
-        val sleepMs = minOf(
-            COMMAND_COMPLETION_POLL_MS,
-            TimeUnit.NANOSECONDS.toMillis(remainingNanos).coerceAtLeast(1),
+    val data = sendRequestDataToSocketWithTimeout(
+        socket,
+        editorCommandAwaitRequest(filePath, commandId, timeoutMs),
+        if (timeoutMs > Long.MAX_VALUE - COMMAND_COMPLETION_GRACE_MS) {
+            Long.MAX_VALUE
+        } else {
+            timeoutMs + COMMAND_COMPLETION_GRACE_MS
+        },
+    )
+    return resolveCommandSubmitTerminalData(data, commandId)
+        ?: CpEditorRouteResult(
+            1,
+            "$commandName await returned a non-terminal projection",
         )
-        try {
-            Thread.sleep(sleepMs)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            return CpEditorRouteResult(1, "$commandName completion wait interrupted")
-        }
-    }
 }
 }

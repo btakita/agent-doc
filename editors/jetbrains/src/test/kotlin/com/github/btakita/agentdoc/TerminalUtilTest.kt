@@ -83,7 +83,7 @@ class TerminalUtilTest {
         assertTrue(source.contains("attemptId = attempt?.id"))
         assertTrue(source.contains("routeKey = attempt?.routeKey"))
         assertFalse(source.contains("ProcessBuilder(cmd)"))
-        assertTrue(source.contains("\"route_retryable_starting\""))
+        assertFalse(source.contains("\"route_retryable_starting\""))
         assertTrue(source.contains("attempt?.finishIfCurrent(stage, command = cmd, error = finalError)"))
     }
 
@@ -293,19 +293,22 @@ class TerminalUtilTest {
     }
 
     @Test
-    fun `starting actor route failures are retryable`() {
+    fun `starting actor route failures are typed as startup not ready`() {
         val output = """
             [route] target tmux session: 1
             Error: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting.
         """.trimIndent()
 
         assertTrue(TerminalUtil.isStartingActorRouteFailure(output))
-        assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
+        assertEquals(
+            TerminalUtil.RunAgentDocRouteFailureKind.STARTUP_NOT_READY,
+            TerminalUtil.classifyRunAgentDocRouteFailure(output),
+        )
         assertFalse(TerminalUtil.isStartingActorRouteFailure("[agent-doc] proof-timeout: accepted but unproven"))
     }
 
     @Test
-    fun `latest-run timed out boot gets one retry while real busy and interactive blockers do not`() {
+    fun `latest-run timeout is a typed startup blocker without client resubmission`() {
         val activeTurn = """
             Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/sampleportal.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
         """.trimIndent()
@@ -317,15 +320,8 @@ class TerminalUtilTest {
         """.trimIndent()
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(activeTurn))
-        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.RETRYABLE_STARTING, TerminalUtil.classifyRunAgentDocRouteFailure(timedOut))
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.STARTUP_NOT_READY, TerminalUtil.classifyRunAgentDocRouteFailure(timedOut))
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.PERSISTENT, TerminalUtil.classifyRunAgentDocRouteFailure(shellSearch))
-        // A prompt-less timeout is still a startup-only condition and receives the
-        // plugin's single bounded retry. Real active turns and interactive shell
-        // blockers remain immediate typed outcomes.
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(activeTurn))
-        assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(timedOut))
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(shellSearch))
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure("[agent-doc] proof-timeout: accepted but unproven"))
     }
 
     @Test
@@ -352,7 +348,6 @@ class TerminalUtilTest {
         val message = TerminalUtil.buildRunAgentDocStillRunningMessage(relativePath)
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
         assertTrue(message.contains("still running"))
         assertTrue(message.contains(relativePath))
         assertFalse(message.contains("route failed"))
@@ -387,7 +382,6 @@ class TerminalUtilTest {
         val message = TerminalUtil.buildRunAgentDocStillRunningMessage(relativePath)
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
         assertTrue(message.contains("still running"))
         assertTrue(message.contains(relativePath))
         assertFalse(message.contains("route failed"))
@@ -403,7 +397,6 @@ class TerminalUtilTest {
         val message = TerminalUtil.buildRunAgentDocQueuedMessage(relativePath)
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.QUEUED_PENDING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
         assertTrue(message.contains("queued"))
         assertTrue(message.contains(relativePath))
         assertTrue(message.contains("when that turn drains"))
@@ -419,7 +412,6 @@ class TerminalUtilTest {
         val message = TerminalUtil.buildRunAgentDocProtectedPromptInputMessage(relativePath, output)
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT, TerminalUtil.classifyRunAgentDocRouteFailure(output))
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
         assertTrue(message.contains("did not start"))
         assertTrue(message.contains("unsent prompt text"))
         assertTrue(message.contains("Draft preview: › implement the feature"))
@@ -439,7 +431,6 @@ class TerminalUtilTest {
         val message = TerminalUtil.buildRunAgentDocQueuePausedMessage(relativePath, paused!!)
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.QUEUE_PAUSED, TerminalUtil.classifyRunAgentDocRouteFailure(output))
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
         assertFalse(paused.restartSupervisorRedirect)
         assertEquals("operator paused this queue for manual review", paused.reason)
         assertTrue(message.contains("queue is paused"))
@@ -606,7 +597,6 @@ class TerminalUtilTest {
             TerminalUtil.RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN,
             TerminalUtil.classifyRunAgentDocRouteFailure(output),
         )
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
         assertTrue(message.contains("did not start"))
         assertTrue(message.contains("dispatch-start proof"))
         assertTrue(message.contains("Attempt: 1781670087547-4"))
@@ -621,7 +611,6 @@ class TerminalUtilTest {
         """.trimIndent()
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.QUEUED_PENDING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
     }
 
     @Test
@@ -643,14 +632,19 @@ class TerminalUtilTest {
             TerminalUtil.RunAgentDocRouteFailureKind.QUEUED_PENDING,
             TerminalUtil.classifyRunAgentDocRouteFailure(output),
         )
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
     }
 
     @Test
-    fun `starting actor retry backoff uses bounded attempt delays`() {
-        assertEquals(2, TerminalUtil.STARTING_ACTOR_ROUTE_MAX_ATTEMPTS)
-        assertEquals(500L, TerminalUtil.startingActorRouteRetryDelayMillis(1))
-        assertEquals(500L, TerminalUtil.startingActorRouteRetryDelayMillis(2))
+    fun `run route submits once and lets the controller await reactive readiness`() {
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+        ).toFile().readText()
+        val route = source.substringAfter("val startedAt = System.currentTimeMillis()")
+            .substringBefore("private fun routeAttemptError")
+
+        assertEquals(1, Regex("CpRouteClient\\.runEditorRoute\\(").findAll(route).count())
+        assertFalse(route.contains("while ("))
+        assertFalse(route.contains("sleepBeforeRetry"))
     }
 
     @Test

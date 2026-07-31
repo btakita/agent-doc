@@ -63,6 +63,7 @@ const PANE_LAYOUT_RETRY_MIN: Duration = Duration::from_millis(250);
 const PANE_LAYOUT_RETRY_MAX: Duration = Duration::from_secs(5);
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 const PANE_LAYOUT_COMMAND_AWAIT: Duration = Duration::from_secs(30);
+const ASYNC_EDITOR_COMMAND_MIN_AWAIT_MS: u64 = 1;
 const STATE_PLANE_SUBSCRIBE_MAX: Duration = Duration::from_secs(120);
 const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
 const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
@@ -7335,8 +7336,20 @@ fn handle_editor_command_submit_rpc(
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
-    let command_result =
-        dispatch_command_submit_payload(bootstrap, runtime, &request, &submit, payload_json, None);
+    let command_result = match AsyncEditorCommandKind::try_from(submit.name.as_str()) {
+        Ok(command_kind) => dispatch_command_submit_payload(
+            bootstrap,
+            runtime,
+            &request,
+            command_kind,
+            payload_json,
+            None,
+        ),
+        Err(_) => CommandSubmitDispatchResult::rejected(
+            &submit.name,
+            format!("unsupported agent-doc command: {}", submit.name),
+        ),
+    };
     terminal_command_submit_response(&submit, command_result)
 }
 
@@ -7456,29 +7469,6 @@ fn terminal_command_submit_response(
     }))
 }
 
-const ASYNC_EDITOR_COMMAND_RESULT_TTL: Duration = Duration::from_secs(5 * 60);
-const ASYNC_EDITOR_COMMAND_RESULT_CAPACITY: usize = 256;
-
-#[derive(Clone)]
-struct AsyncEditorCommandResult {
-    response: serde_json::Value,
-    updated_at: std::time::Instant,
-}
-
-#[derive(Clone, Debug)]
-struct AsyncEditorFocusFence {
-    project_root: PathBuf,
-    command_id: String,
-    expires_at: Option<std::time::Instant>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AsyncEditorFocusFenceDecision {
-    Current,
-    Superseded,
-    Expired,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DesktopEditorFocusState {
     #[cfg(any(test, not(feature = "test-support")))]
@@ -7567,50 +7557,14 @@ fn suppress_inactive_automatic_layout_focus(
     }
 }
 
-fn async_editor_command_results()
--> &'static parking_lot::Mutex<std::collections::HashMap<String, AsyncEditorCommandResult>> {
-    static RESULTS: std::sync::LazyLock<
-        parking_lot::Mutex<std::collections::HashMap<String, AsyncEditorCommandResult>>,
-    > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
-    &RESULTS
-}
-
-fn async_editor_focus_fences()
--> &'static parking_lot::Mutex<std::collections::HashMap<PathBuf, AsyncEditorFocusFence>> {
-    static FENCES: std::sync::LazyLock<
-        parking_lot::Mutex<std::collections::HashMap<PathBuf, AsyncEditorFocusFence>>,
-    > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
-    &FENCES
-}
-
-fn decide_async_editor_focus_fence(
-    current_command_id: Option<&str>,
-    fence: &AsyncEditorFocusFence,
-    now: std::time::Instant,
-) -> AsyncEditorFocusFenceDecision {
-    if current_command_id != Some(fence.command_id.as_str()) {
-        return AsyncEditorFocusFenceDecision::Superseded;
-    }
-    if fence.expires_at.is_some_and(|deadline| now >= deadline) {
-        return AsyncEditorFocusFenceDecision::Expired;
-    }
-    AsyncEditorFocusFenceDecision::Current
-}
-
-fn async_editor_focus_fence_reason(decision: AsyncEditorFocusFenceDecision) -> &'static str {
-    match decision {
-        AsyncEditorFocusFenceDecision::Current => "current",
-        AsyncEditorFocusFenceDecision::Superseded => "superseded_focus_intent",
-        AsyncEditorFocusFenceDecision::Expired => "expired_focus_intent",
-    }
-}
-
 fn admit_async_editor_focus_fence(
     bootstrap: &ControllerBootstrap,
+    command_graph: &ControllerAsyncEditorCommandGraph,
+    command_kind: AsyncEditorCommandKind,
     submit: &lazily::CommandSubmit,
     payload_json: &str,
 ) -> Result<Option<AsyncEditorFocusFence>> {
-    if submit.name != "focus_document_pane" {
+    if command_kind != AsyncEditorCommandKind::FocusDocumentPane {
         return Ok(None);
     }
     let payload: FocusDocumentPaneCommandPayload =
@@ -7639,104 +7593,8 @@ fn admit_async_editor_focus_fence(
         command_id: submit.command_id.clone(),
         expires_at,
     };
-    async_editor_focus_fences()
-        .lock()
-        .insert(fence.project_root.clone(), fence.clone());
+    command_graph.publish_focus_fence(fence.clone());
     Ok(Some(fence))
-}
-
-fn require_async_editor_focus_current(fence: Option<&AsyncEditorFocusFence>) -> Result<()> {
-    let Some(fence) = fence else {
-        return Ok(());
-    };
-    let fences = async_editor_focus_fences().lock();
-    let decision = decide_async_editor_focus_fence(
-        fences
-            .get(&fence.project_root)
-            .map(|current| current.command_id.as_str()),
-        fence,
-        std::time::Instant::now(),
-    );
-    anyhow::ensure!(
-        decision == AsyncEditorFocusFenceDecision::Current,
-        "{}",
-        async_editor_focus_fence_reason(decision)
-    );
-    Ok(())
-}
-
-fn apply_async_editor_focus_effect<T>(
-    fence: Option<&AsyncEditorFocusFence>,
-    effect: impl FnOnce() -> Result<T>,
-) -> Result<T> {
-    let Some(fence) = fence else {
-        return effect();
-    };
-    // Hold admission's project-scoped fence across the final effect. A newer
-    // intent therefore either supersedes this command before `select-pane`, or
-    // is admitted immediately after this effect and deterministically follows it.
-    let fences = async_editor_focus_fences().lock();
-    let decision = decide_async_editor_focus_fence(
-        fences
-            .get(&fence.project_root)
-            .map(|current| current.command_id.as_str()),
-        fence,
-        std::time::Instant::now(),
-    );
-    anyhow::ensure!(
-        decision == AsyncEditorFocusFenceDecision::Current,
-        "{}",
-        async_editor_focus_fence_reason(decision)
-    );
-    effect()
-}
-
-fn release_async_editor_focus_fence(fence: Option<&AsyncEditorFocusFence>) {
-    let Some(fence) = fence else {
-        return;
-    };
-    let mut fences = async_editor_focus_fences().lock();
-    if fences
-        .get(&fence.project_root)
-        .is_some_and(|current| current.command_id == fence.command_id)
-    {
-        fences.remove(&fence.project_root);
-    }
-}
-
-fn retain_async_editor_command_result(command_id: &str, response: serde_json::Value) {
-    let now = std::time::Instant::now();
-    let mut results = async_editor_command_results().lock();
-    results.retain(|_, result| {
-        now.duration_since(result.updated_at) <= ASYNC_EDITOR_COMMAND_RESULT_TTL
-    });
-    if results.len() >= ASYNC_EDITOR_COMMAND_RESULT_CAPACITY
-        && !results.contains_key(command_id)
-        && let Some(oldest) = results
-            .iter()
-            .min_by_key(|(_, result)| result.updated_at)
-            .map(|(id, _)| id.clone())
-    {
-        results.remove(&oldest);
-    }
-    results.insert(
-        command_id.to_string(),
-        AsyncEditorCommandResult {
-            response,
-            updated_at: now,
-        },
-    );
-}
-
-fn async_editor_command_result(command_id: &str) -> Option<serde_json::Value> {
-    let now = std::time::Instant::now();
-    let mut results = async_editor_command_results().lock();
-    results.retain(|_, result| {
-        now.duration_since(result.updated_at) <= ASYNC_EDITOR_COMMAND_RESULT_TTL
-    });
-    results
-        .get(command_id)
-        .map(|result| result.response.clone())
 }
 
 #[derive(Deserialize)]
@@ -7744,18 +7602,75 @@ struct EditorCommandStatusPayload {
     command_id: String,
 }
 
-fn handle_editor_command_status_rpc(request: ControllerRequest) -> Result<serde_json::Value> {
+fn handle_editor_command_status_rpc(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
     let payload: EditorCommandStatusPayload = serde_json::from_str(&request_string(
         &request.diagnostic_payload,
         "diagnostic_payload",
     )?)
     .context("parse editor_command_status payload")?;
-    async_editor_command_result(&payload.command_id).with_context(|| {
-        format!(
-            "unknown or expired async editor command: {}",
-            payload.command_id
-        )
-    })
+    runtime
+        .async_editor_commands
+        .current(&payload.command_id)
+        .with_context(|| {
+            format!(
+                "unknown or expired async editor command: {}",
+                payload.command_id
+            )
+        })
+}
+
+#[derive(Deserialize)]
+struct EditorCommandAwaitPayload {
+    command_id: String,
+    timeout_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AsyncEditorCommandKind {
+    EditorRoute,
+    SyncTmuxLayout,
+    FocusDocumentPane,
+}
+
+impl AsyncEditorCommandKind {
+    fn token(self) -> &'static str {
+        match self {
+            Self::EditorRoute => "editor_route",
+            Self::SyncTmuxLayout => "sync_tmux_layout",
+            Self::FocusDocumentPane => "focus_document_pane",
+        }
+    }
+}
+
+impl TryFrom<&str> for AsyncEditorCommandKind {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self> {
+        match value {
+            "editor_route" => Ok(Self::EditorRoute),
+            "sync_tmux_layout" => Ok(Self::SyncTmuxLayout),
+            "focus_document_pane" => Ok(Self::FocusDocumentPane),
+            other => anyhow::bail!("unsupported async editor command: {other}"),
+        }
+    }
+}
+
+fn handle_editor_command_await_rpc(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let payload: EditorCommandAwaitPayload = serde_json::from_str(&request_string(
+        &request.diagnostic_payload,
+        "diagnostic_payload",
+    )?)
+    .context("parse editor_command_await payload")?;
+    runtime.async_editor_commands.await_terminal(
+        &payload.command_id,
+        Duration::from_millis(payload.timeout_ms.max(ASYNC_EDITOR_COMMAND_MIN_AWAIT_MS)),
+    )
 }
 
 /// Submit an editor command and return after CP admission.
@@ -7770,8 +7685,15 @@ fn handle_editor_command_submit_async_rpc(
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
-    validate_async_editor_command_payload(&submit, &payload_json)?;
-    let focus_fence = admit_async_editor_focus_fence(bootstrap, &submit, &payload_json)?;
+    let command_kind = AsyncEditorCommandKind::try_from(submit.name.as_str())?;
+    validate_async_editor_command_payload(command_kind, &payload_json)?;
+    let focus_fence = admit_async_editor_focus_fence(
+        bootstrap,
+        &runtime.async_editor_commands,
+        command_kind,
+        &submit,
+        &payload_json,
+    )?;
 
     let command_id = submit.command_id.clone();
     let generation = submit.authority_generation;
@@ -7790,7 +7712,11 @@ fn handle_editor_command_submit_async_rpc(
         "events": serde_json::to_value(progress)?,
         "receipt": serde_json::Value::Null,
     });
-    retain_async_editor_command_result(&command_id, accepted_response.clone());
+    runtime.async_editor_commands.publish(
+        &command_id,
+        AsyncEditorCommandPhase::Accepted,
+        accepted_response.clone(),
+    );
 
     let worker_bootstrap = bootstrap.clone();
     let worker_request = request.clone();
@@ -7805,7 +7731,7 @@ fn handle_editor_command_submit_async_rpc(
             &worker_bootstrap,
             worker_runtime.as_ref(),
             &worker_request,
-            &worker_submit,
+            command_kind,
             payload_json,
             worker_focus_fence.as_ref(),
         );
@@ -7830,11 +7756,19 @@ fn handle_editor_command_submit_async_rpc(
                     "output": format!("failed to encode async command completion: {response_err:#}"),
                 })
             });
-        retain_async_editor_command_result(&worker_command_id, terminal_response);
-        release_async_editor_focus_fence(worker_focus_fence.as_ref());
+        worker_runtime.async_editor_commands.publish(
+            &worker_command_id,
+            AsyncEditorCommandPhase::Terminal,
+            terminal_response,
+        );
+        worker_runtime
+            .async_editor_commands
+            .release_focus_fence(worker_focus_fence.as_ref());
     }) {
-        async_editor_command_results().lock().remove(&command_id);
-        release_async_editor_focus_fence(focus_fence.as_ref());
+        runtime.async_editor_commands.remove(&command_id);
+        runtime
+            .async_editor_commands
+            .release_focus_fence(focus_fence.as_ref());
         return Err(err);
     }
 
@@ -7842,23 +7776,22 @@ fn handle_editor_command_submit_async_rpc(
 }
 
 fn validate_async_editor_command_payload(
-    submit: &lazily::CommandSubmit,
+    command_kind: AsyncEditorCommandKind,
     payload_json: &str,
 ) -> Result<()> {
-    match submit.name.as_str() {
-        "sync_tmux_layout" => {
+    match command_kind {
+        AsyncEditorCommandKind::SyncTmuxLayout => {
             let _: ControllerTmuxLayoutSyncInvocation =
                 serde_json::from_str(payload_json).context("parse sync_tmux_layout payload")?;
         }
-        "focus_document_pane" => {
+        AsyncEditorCommandKind::FocusDocumentPane => {
             let _: FocusDocumentPaneCommandPayload =
                 serde_json::from_str(payload_json).context("parse focus_document_pane payload")?;
         }
-        "editor_route" => {
+        AsyncEditorCommandKind::EditorRoute => {
             let _: ControllerEditorRoutePayload =
                 serde_json::from_str(payload_json).context("parse editor_route payload")?;
         }
-        other => anyhow::bail!("unsupported async editor command: {other}"),
     }
     Ok(())
 }
@@ -7961,20 +7894,21 @@ fn dispatch_command_submit_payload(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     request: &ControllerRequest,
-    submit: &lazily::CommandSubmit,
+    command_kind: AsyncEditorCommandKind,
     payload_json: String,
     focus_fence: Option<&AsyncEditorFocusFence>,
 ) -> CommandSubmitDispatchResult {
-    match submit.name.as_str() {
-        "editor_route" => {
-            let mut route_request = empty_controller_request("editor_route");
+    match command_kind {
+        AsyncEditorCommandKind::EditorRoute => {
+            let command = command_kind.token();
+            let mut route_request = empty_controller_request(command);
             route_request.file = request.file.clone();
             route_request.diagnostic_payload = Some(payload_json);
             match handle_editor_route_rpc(bootstrap, route_request) {
                 Ok(result) => {
                     let terminal_applied = result.exit_code == 0;
                     let terminal_reason = (!terminal_applied)
-                        .then(|| format!("editor_route exit_code={}", result.exit_code));
+                        .then(|| format!("{command} exit_code={}", result.exit_code));
                     CommandSubmitDispatchResult {
                         exit_code: result.exit_code,
                         output: result.output.clone(),
@@ -7983,30 +7917,29 @@ fn dispatch_command_submit_payload(
                         terminal_reason,
                     }
                 }
-                Err(err) => {
-                    CommandSubmitDispatchResult::rejected("editor_route", format!("{err:#}"))
-                }
+                Err(err) => CommandSubmitDispatchResult::rejected(command, format!("{err:#}")),
             }
         }
-        "sync_tmux_layout" => {
+        AsyncEditorCommandKind::SyncTmuxLayout => {
+            let command = command_kind.token();
             let invocation: ControllerTmuxLayoutSyncInvocation =
                 match serde_json::from_str(&payload_json) {
                     Ok(invocation) => invocation,
                     Err(err) => {
                         return CommandSubmitDispatchResult::rejected(
-                            "sync_tmux_layout",
-                            format!("parse sync_tmux_layout payload: {err:#}"),
+                            command,
+                            format!("parse {command} payload: {err:#}"),
                         );
                     }
                 };
-            let mut sync_request = empty_controller_request("sync_tmux_layout");
+            let mut sync_request = empty_controller_request(command);
             sync_request.file = invocation.focus.as_ref().map(PathBuf::from);
             sync_request.diagnostic_payload = Some(match serde_json::to_string(&invocation) {
                 Ok(payload) => payload,
                 Err(err) => {
                     return CommandSubmitDispatchResult::rejected(
-                        "sync_tmux_layout",
-                        format!("serialize sync_tmux_layout payload: {err:#}"),
+                        command,
+                        format!("serialize {command} payload: {err:#}"),
                     );
                 }
             });
@@ -8018,8 +7951,8 @@ fn dispatch_command_submit_payload(
                         CommandSubmitDispatchResult::applied(output, &receipt).unwrap_or_else(
                             |err| {
                                 CommandSubmitDispatchResult::rejected(
-                                    "sync_tmux_layout",
-                                    format!("serialize sync_tmux_layout receipt: {err:#}"),
+                                    command,
+                                    format!("serialize {command} receipt: {err:#}"),
                                 )
                             },
                         )
@@ -8034,30 +7967,29 @@ fn dispatch_command_submit_payload(
                         }
                     }
                 }
-                Err(err) => {
-                    CommandSubmitDispatchResult::rejected("sync_tmux_layout", format!("{err:#}"))
-                }
+                Err(err) => CommandSubmitDispatchResult::rejected(command, format!("{err:#}")),
             }
         }
-        "focus_document_pane" => {
+        AsyncEditorCommandKind::FocusDocumentPane => {
+            let command = command_kind.token();
             let payload: FocusDocumentPaneCommandPayload = match serde_json::from_str(&payload_json)
             {
                 Ok(payload) => payload,
                 Err(err) => {
                     return CommandSubmitDispatchResult::rejected(
-                        "focus_document_pane",
-                        format!("parse focus_document_pane payload: {err:#}"),
+                        command,
+                        format!("parse {command} payload: {err:#}"),
                     );
                 }
             };
-            if let Err(err) = require_async_editor_focus_current(focus_fence) {
-                return CommandSubmitDispatchResult::rejected(
-                    "focus_document_pane",
-                    format!("{err:#}"),
-                );
+            if let Err(err) = runtime
+                .async_editor_commands
+                .require_focus_fence_current(focus_fence)
+            {
+                return CommandSubmitDispatchResult::rejected(command, format!("{err:#}"));
             }
             let _guard_flags = (payload.project_root.as_deref(), payload.no_promotion);
-            let mut focus_request = empty_controller_request("focus_document_pane");
+            let mut focus_request = empty_controller_request(command);
             focus_request.file = Some(PathBuf::from(payload.document_path));
             match handle_focus_document_pane_with_policy(
                 bootstrap,
@@ -8071,20 +8003,14 @@ fn dispatch_command_submit_payload(
                         serde_json::to_string(&receipt).unwrap_or_else(|_| receipt.reason.clone());
                     CommandSubmitDispatchResult::applied(output, &receipt).unwrap_or_else(|err| {
                         CommandSubmitDispatchResult::rejected(
-                            "focus_document_pane",
-                            format!("serialize focus_document_pane receipt: {err:#}"),
+                            command,
+                            format!("serialize {command} receipt: {err:#}"),
                         )
                     })
                 }
-                Err(err) => {
-                    CommandSubmitDispatchResult::rejected("focus_document_pane", format!("{err:#}"))
-                }
+                Err(err) => CommandSubmitDispatchResult::rejected(command, format!("{err:#}")),
             }
         }
-        other => CommandSubmitDispatchResult::rejected(
-            other,
-            format!("unsupported agent-doc command: {other}"),
-        ),
     }
 }
 
@@ -11406,7 +11332,12 @@ pub(crate) fn handle_request_locked(
         "editor_command_submit_async" => controller_envelope(
             handle_editor_command_submit_async_rpc(&bootstrap_snapshot, runtime, request),
         ),
-        "editor_command_status" => controller_envelope(handle_editor_command_status_rpc(request)),
+        "editor_command_status" => {
+            controller_envelope(handle_editor_command_status_rpc(runtime.as_ref(), request))
+        }
+        "editor_command_await" => {
+            controller_envelope(handle_editor_command_await_rpc(runtime.as_ref(), request))
+        }
         "crdt_current_text" => {
             controller_envelope(handle_crdt_current_text_rpc(&bootstrap_snapshot, request))
         }
@@ -16633,8 +16564,8 @@ struct PaneLayoutFocusEffectReceipt {
 /// observation therefore either supersedes this generation before
 /// `select-pane`, or is admitted immediately after it and deterministically
 /// follows it. This is the pane-layout counterpart of
-/// [`apply_async_editor_focus_effect`], keyed by reactive generation rather than
-/// by an imperative command id.
+/// [`ControllerAsyncEditorCommandGraph::apply_focus_effect`], keyed by reactive
+/// generation rather than by an imperative command id.
 fn apply_pane_layout_focus_effect(
     worker_state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
     generation: u64,
@@ -17546,7 +17477,12 @@ fn handle_focus_document_pane_with_policy(
         if missing_pane_policy == MissingFocusPanePolicy::ResumeLatest
             && let Some(session_id) = session_id.as_deref()
         {
-            require_async_editor_focus_current(focus_fence)?;
+            if focus_fence.is_some() {
+                runtime
+                    .context("async editor focus fence requires controller runtime")?
+                    .async_editor_commands
+                    .require_focus_fence_current(focus_fence)?;
+            }
             let file_arg = canonical.to_string_lossy().to_string();
             let stale_pane = pane_id.clone();
             pane_id = runtime_effects()?
@@ -17636,13 +17572,21 @@ fn handle_focus_document_pane_with_policy(
             window_name,
         ));
     }
-    let focused = apply_async_editor_focus_effect(focus_fence, || {
+    let focus_effect = || {
         if focus_fence.is_some() && desktop_editor_focus_state() == DesktopEditorFocusState::Other {
             return Ok(false);
         }
         tmux.select_pane(&pane_id)?;
         Ok(true)
-    })?;
+    };
+    let focused = if focus_fence.is_some() {
+        runtime
+            .context("async editor focus fence requires controller runtime")?
+            .async_editor_commands
+            .apply_focus_effect(focus_fence, focus_effect)?
+    } else {
+        focus_effect()?
+    };
     if !focused {
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
@@ -20103,29 +20047,59 @@ mod tests {
 
         // The test-support worker runs inline, so the completion channel is
         // already terminal by the time admission returns.
-        let status = handle_editor_command_status_rpc(ControllerRequest {
-            command: "editor_command_status".to_string(),
-            file: None,
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: None,
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(
-                serde_json::json!({ "command_id": "cmd-sync-async" }).to_string(),
-            ),
-        })
+        let status = handle_editor_command_status_rpc(
+            runtime.as_ref(),
+            ControllerRequest {
+                command: "editor_command_status".to_string(),
+                file: None,
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(
+                    serde_json::json!({ "command_id": "cmd-sync-async" }).to_string(),
+                ),
+            },
+        )
         .unwrap();
         assert_eq!(status["exit_code"], 0, "unexpected status: {status}");
         assert_eq!(status["projection"]["commands"][0]["status"], "applied");
         assert_eq!(status["projection"]["commands"][0]["terminal"], true);
         assert_eq!(status["payload"]["routes_created_panes"], true);
         assert!(!status["receipt"].is_null());
+
+        let awaited = handle_editor_command_await_rpc(
+            runtime.as_ref(),
+            ControllerRequest {
+                command: "editor_command_await".to_string(),
+                file: None,
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(
+                    serde_json::json!({
+                        "command_id": "cmd-sync-async",
+                        "timeout_ms": 1_000
+                    })
+                    .to_string(),
+                ),
+            },
+        )
+        .unwrap();
+        assert_eq!(awaited["projection"]["commands"][0]["terminal"], true);
     }
 
     #[test]
@@ -20165,11 +20139,19 @@ mod tests {
             "cmd-route-async",
         );
         let (submit, payload_json) = parse_editor_command_submit_request(&request).unwrap();
-        validate_async_editor_command_payload(&submit, &payload_json).unwrap();
+        validate_async_editor_command_payload(
+            AsyncEditorCommandKind::try_from(submit.name.as_str()).unwrap(),
+            &payload_json,
+        )
+        .unwrap();
     }
 
     #[test]
     fn editor_command_status_rejects_unknown_completion_id() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
         let request = ControllerRequest {
             command: "editor_command_status".to_string(),
             file: None,
@@ -20187,7 +20169,7 @@ mod tests {
                 serde_json::json!({ "command_id": "cmd-does-not-exist" }).to_string(),
             ),
         };
-        let err = handle_editor_command_status_rpc(request).unwrap_err();
+        let err = handle_editor_command_status_rpc(runtime.as_ref(), request).unwrap_err();
         assert!(format!("{err:#}").contains("unknown or expired async editor command"));
     }
 
@@ -20224,6 +20206,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
         let payload = |document: &str| {
             serde_json::json!({
                 "project_root": dir.path().display().to_string(),
@@ -20251,31 +20234,67 @@ mod tests {
         let (second_submit, second_payload) =
             parse_editor_command_submit_request(&second_request).unwrap();
 
-        let first =
-            admit_async_editor_focus_fence(&bootstrap, &first_submit, &first_payload).unwrap();
-        assert!(require_async_editor_focus_current(first.as_ref()).is_ok());
-        let second =
-            admit_async_editor_focus_fence(&bootstrap, &second_submit, &second_payload).unwrap();
-        let first_err = require_async_editor_focus_current(first.as_ref()).unwrap_err();
+        let first = admit_async_editor_focus_fence(
+            &bootstrap,
+            &runtime.async_editor_commands,
+            AsyncEditorCommandKind::FocusDocumentPane,
+            &first_submit,
+            &first_payload,
+        )
+        .unwrap();
+        assert!(
+            runtime
+                .async_editor_commands
+                .require_focus_fence_current(first.as_ref())
+                .is_ok()
+        );
+        let second = admit_async_editor_focus_fence(
+            &bootstrap,
+            &runtime.async_editor_commands,
+            AsyncEditorCommandKind::FocusDocumentPane,
+            &second_submit,
+            &second_payload,
+        )
+        .unwrap();
+        let first_err = runtime
+            .async_editor_commands
+            .require_focus_fence_current(first.as_ref())
+            .unwrap_err();
         assert!(format!("{first_err:#}").contains("superseded_focus_intent"));
-        assert!(require_async_editor_focus_current(second.as_ref()).is_ok());
+        assert!(
+            runtime
+                .async_editor_commands
+                .require_focus_fence_current(second.as_ref())
+                .is_ok()
+        );
 
         // Completion of the older worker must not clear the newer fence.
-        release_async_editor_focus_fence(first.as_ref());
-        assert!(require_async_editor_focus_current(second.as_ref()).is_ok());
-        release_async_editor_focus_fence(second.as_ref());
+        runtime
+            .async_editor_commands
+            .release_focus_fence(first.as_ref());
+        assert!(
+            runtime
+                .async_editor_commands
+                .require_focus_fence_current(second.as_ref())
+                .is_ok()
+        );
+        runtime
+            .async_editor_commands
+            .release_focus_fence(second.as_ref());
     }
 
     #[test]
     fn expired_async_focus_is_refused_at_the_effect_boundary() {
-        let now = std::time::Instant::now();
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let fence = AsyncEditorFocusFence {
             project_root: PathBuf::from("/tmp/focus-expiry"),
             command_id: "cmd-expired".to_string(),
-            expires_at: Some(now),
+            expires_at: Some(std::time::Instant::now()),
         };
+        graph.publish_focus_fence(fence.clone());
         assert_eq!(
-            decide_async_editor_focus_fence(Some("cmd-expired"), &fence, now),
+            graph.focus_fence_decision(&fence),
             AsyncEditorFocusFenceDecision::Expired
         );
     }

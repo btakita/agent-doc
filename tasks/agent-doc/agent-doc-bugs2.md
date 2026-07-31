@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -217,12 +217,22 @@ The wire protocol is request/response framed, but the automatic behavior is sema
 Regression coverage proves a production-mode native plugin cannot create or mutate `state.db`, WAL, SHM, or the controller socket, and the two-generation reload handoff no longer leaves plugin database descriptors or deleted-library work alive. Full verification passed: `make check`, `make tmux-ci`, VS Code's 167 tests and production build, JetBrains tests plus plugin build, focused native/controller regressions, `git diff --check`, and the latest completed CI run is green.
 
 The rebuilt JetBrains plugin `0.2.332` is installed in IntelliJ IDEA 2026.1. Restart IDEA once more—the installation happened after the earlier restart—so the running host loads this corrected package.
-<!-- agent:boundary:68f3f096 -->
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#fresh-project-supervisor-log]: agent-doc start should create a config
+
+
+Closed `#fresh-project-supervisor-log`. The installed `agent-doc 0.35.109` already owns supervisor stderr-log creation in the startup path: every start opens the configured/default target, creates missing parent directories, and uses append mode before deciding whether a route-owned TUI also needs process-level stderr redirection. The default is project-local `.agent-doc/logs/supervisor-stderr.log`; relative configured paths resolve from the project root; if the primary path cannot be created/opened, startup uses the deterministic temp fallback `agent-doc/supervisor-logs/<project-hash>/supervisor-stderr.log` and records the warning there.
+
+No additional source edit was required because the implementation and regression coverage were already present in clean tracked source. Verification: `cargo test -p agent-doc-supervisor-process-io` passed all 4 tests, including `fresh_project_start_creates_default_supervisor_log_tree`, configured relative-path resolution, and deterministic fallback. The installed CLI reports `agent-doc 0.35.109`; the latest CI run is `completed success`.
+<!-- agent:boundary:4a64c69b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#fresh-project-supervisor-log]: agent-doc start should create a config
 <!-- /agent:queue -->
 
 ## Notes
@@ -234,7 +244,6 @@ The rebuilt JetBrains plugin `0.2.332` is installed in IntelliJ IDEA 2026.1. Res
 
 <!-- agent:backlog priority queue -->
 - [/] [#reactive-closeout-install-verify] After the retained tsift.md editor-delivery capture reaches a terminal boundary, install the committed Agent Doc binary and verify the equityfundingsource.md queue strike, Monster Rod Holders corruption rejection, Compact Exchange recovery, and editor/tmux responsiveness without recycling an active closeout owner.
-- [ ] [#fresh-project-supervisor-log] After #reactive-closeout-install-verify completes and the new Agent Doc build is installed, make Agent Doc create/open project-local .agent-doc/logs/supervisor-stderr.log itself (with a deterministic fallback log directory) so fresh-project routes do not depend on shell-level stderr redirection; add regression coverage using a new project with no .agent-doc/logs directory.
 <!-- /agent:backlog -->
 
 ## Review

@@ -39,7 +39,27 @@ Installed Agent Doc 0.35.109 with reactive per-document authority, bounded Tokio
 
 Compacted content:
 - Archived 3 response topic(s): Response; Response; Response
-<!-- agent:boundary:f8f7178d -->
+
+### Re: completed queue items and closeout churn — gpt-5
+
+> **Queue prompt:**
+>
+> equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors.
+
+Fixed and committed all remaining code-side contributors I found.
+
+The queue cleanup had three independent gaps: it was a best-effort imperative callback that write and commit callers could miss; the controller Computed could be created before the document-authority key existed and therefore miss the later SourceMap insertion; and short free-text heads such as `staging deploy` were rejected by an unrelated four-word baseline threshold even when the captured response explicitly echoed the exact queue prompt. The old commit-seam callback and its dead capture path are now removed.
+
+Answered free-text cleanup is now a pure projection of durable captured response + current authoritative markdown. The controller owns that Computed, subscribes to both value and dependency-slot membership, and admits one exact target to the document's detached actor worker. The slow editor/CRDT convergence and follow-up commit stay off the controller reactive thread; unrelated invalidations cannot enqueue the same projection twice. SQLite is not used to decide the hot-path projection.
+
+I also added a semantic corruption boundary for the Monster Rod Holders failure shape: captured conversation text such as `> **Queue prompt:**` cannot be welded into tracked review/backlog/queue/done components. Both editor delivery and commit preserve the last valid authority when that structure is rejected.
+
+Dogfood mode is now document-configurable with `agent_doc_dogfood: true` (and alias `dogfood_mode`). Terminal Agent Doc failures—including open-cycle wedges, dependency unavailability, timeouts, interruptions, and projection failures—append a stable `ACTIONABLE_AGENT_DOC_FIX_PROMPT` with an issue class/key so the dogfood turn is explicitly prompted to repair the product. `agent_doc_dogfood: false` disables the legacy inferred dogfood behavior. The native binary owns this policy and editor plugins surface its result, preserving plugin parity.
+
+Verification is green: `make check` passed all 8,453 tests, release synchronization, static checks, and every TLA+ model. The focused tests cover the Equity Funding Source short-head case, capture-before-authority ordering, corruption rejection, and dogfood classification. Agent Doc commit: `3d8a83be6`; superproject pointer commit: `cb48b93e8`. The latest prior CI run was successful (`30580926037`), so I did not wait for a new run.
+
+I did not install or recycle processes: the retained `tsift.md` editor-delivery capture explicitly forbids install/recycle until its owner reaches a terminal boundary. I queued the install plus live Equity Funding Source, Monster Rod Holders, Compact Exchange, and editor/tmux verification behind that exact dependency rather than disturbing the durable capture.
+<!-- agent:boundary:4940c79d -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -59,6 +79,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#reactive-closeout-install-verify] After the retained tsift.md editor-delivery capture reaches a terminal boundary, install the committed Agent Doc binary and verify the equityfundingsource.md queue strike, Monster Rod Holders corruption rejection, Compact Exchange recovery, and editor/tmux responsiveness without recycling an active closeout owner.
 <!-- /agent:backlog -->
 
 ## Review

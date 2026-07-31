@@ -409,6 +409,46 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `failed remote persistence rolls back only when both exact planes prove it safe`() {
+        assertEquals(
+            RemotePersistReconciliation.Persisted,
+            remotePersistReconciliationUtil(
+                beforeText = "base",
+                targetText = "remote",
+                editorAfterSave = "remote",
+                diskAfterSave = "remote",
+            ),
+        )
+        assertEquals(
+            RemotePersistReconciliation.RollbackToBefore,
+            remotePersistReconciliationUtil(
+                beforeText = "base",
+                targetText = "remote",
+                editorAfterSave = "remote",
+                diskAfterSave = "base",
+            ),
+        )
+        assertEquals(
+            RemotePersistReconciliation.PreserveAdvancedEditor,
+            remotePersistReconciliationUtil(
+                beforeText = "base",
+                targetText = "remote",
+                editorAfterSave = "operator advanced",
+                diskAfterSave = "base",
+            ),
+        )
+        assertEquals(
+            RemotePersistReconciliation.PreserveAdvancedEditor,
+            remotePersistReconciliationUtil(
+                beforeText = "base",
+                targetText = "remote",
+                editorAfterSave = "remote",
+                diskAfterSave = "external advanced",
+            ),
+        )
+    }
+
+    @Test
     fun `unsaved editor projects remote deltas in memory without disk side effects`() {
         assertEquals(
             RemoteCrdtProjectionMode.MemoryOnly,

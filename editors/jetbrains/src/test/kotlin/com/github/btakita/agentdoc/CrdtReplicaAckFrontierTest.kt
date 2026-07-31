@@ -357,6 +357,49 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
+    fun `retained canonical projection never adopts a stale whole editor`() {
+        assertEquals(
+            ReplicaBaselineDecision.ApplyRemote,
+            replicaBaselineDecisionUtil(
+                editorState = TemplateStructureProjectionState.Exact,
+                editorMatchesExpected = false,
+                replicaMatchesExpected = true,
+                replicaMatchesEditor = false,
+                editorMatchesRemoteTarget = false,
+                replicaMatchesRemoteTarget = false,
+                recoveryInFlight = false,
+                canonicalProjectionRetained = true,
+            ),
+        )
+        assertEquals(
+            ReplicaBaselineDecision.ReplayRemoteTarget,
+            replicaBaselineDecisionUtil(
+                editorState = TemplateStructureProjectionState.Exact,
+                editorMatchesExpected = false,
+                replicaMatchesExpected = false,
+                replicaMatchesEditor = false,
+                editorMatchesRemoteTarget = false,
+                replicaMatchesRemoteTarget = true,
+                recoveryInFlight = false,
+                canonicalProjectionRetained = true,
+            ),
+        )
+        assertEquals(
+            ReplicaBaselineDecision.RetryFailClosed,
+            replicaBaselineDecisionUtil(
+                editorState = TemplateStructureProjectionState.Exact,
+                editorMatchesExpected = false,
+                replicaMatchesExpected = false,
+                replicaMatchesEditor = false,
+                editorMatchesRemoteTarget = false,
+                replicaMatchesRemoteTarget = false,
+                recoveryInFlight = false,
+                canonicalProjectionRetained = true,
+            ),
+        )
+    }
+
+    @Test
     fun `already visible target acknowledges and save echo realigns an equal replica`() {
         listOf(
             TemplateStructureProjectionState.Exact,

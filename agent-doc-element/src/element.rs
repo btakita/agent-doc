@@ -1677,6 +1677,32 @@ pub fn structural_corruption_reason(doc: &str) -> Option<String> {
         if marker_has_unterminated_quote(marker) {
             return Some(format!("malformed_attr:{}", c.name));
         }
+
+        // Component markers are binary-owned scaffolding and must occupy their
+        // own line. The parser intentionally accepts a balanced marker wherever
+        // it occurs, but that made `operator text<!-- /agent:queue -->` look
+        // structurally valid after a stale component merge welded the closing
+        // marker onto a progressively typed queue line.
+        for (kind, marker_start) in [("open", c.open_start), ("close", c.close_start)] {
+            let marker_end = find_comment_end(doc.as_bytes(), marker_start)?;
+            let line_start = doc[..marker_start].rfind('\n').map_or(0, |pos| pos + 1);
+            let line_end = doc[marker_end..]
+                .find('\n')
+                .map_or(doc.len(), |relative| marker_end + relative);
+            if !doc[line_start..marker_start].trim().is_empty()
+                || !doc[marker_end..line_end].trim().is_empty()
+            {
+                let line = doc[..marker_start]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count()
+                    + 1;
+                return Some(format!(
+                    "non_standalone_component_marker:{}:{kind}:line{line}",
+                    c.name
+                ));
+            }
+        }
     }
 
     None
@@ -3261,6 +3287,22 @@ Fix applied to skip non-agent <!-- sequences.
         assert!(
             reason.starts_with("malformed_attr:queue"),
             "reason was: {reason}"
+        );
+    }
+
+    #[test]
+    fn structural_corruption_flags_component_markers_welded_to_text() {
+        let welded_close = "<!-- agent:queue -->\n- do [#x] complete prompt<!-- /agent:queue -->\n";
+        assert_eq!(
+            structural_corruption_reason(welded_close).as_deref(),
+            Some("non_standalone_component_marker:queue:close:line2")
+        );
+
+        let welded_open =
+            "operator text<!-- agent:queue -->\n- do [#x] complete prompt\n<!-- /agent:queue -->\n";
+        assert_eq!(
+            structural_corruption_reason(welded_open).as_deref(),
+            Some("non_standalone_component_marker:queue:open:line1")
         );
     }
 

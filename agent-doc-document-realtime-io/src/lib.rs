@@ -4071,6 +4071,7 @@ fn ensure_deferred_document_write_intent_with_mode(
     let requested_target_hash = agent_doc_hash::content_hash(content);
     let external_disk_candidate =
         reason == DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor;
+    let mut superseded_editor_reconnect = None;
     let existing_pending = if external_disk_candidate {
         pending_external_disk_candidate(file)
     } else {
@@ -4086,6 +4087,12 @@ fn ensure_deferred_document_write_intent_with_mode(
                     .eq_ignore_ascii_case(&agent_doc_hash::content_hash(expected_current)))
         {
             return Ok(pending.intent_id);
+        }
+        if pending.source == agent_doc_state_backbone::DocumentWriteSource::EditorReconnect
+            && pending.reason
+                == DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
+        {
+            superseded_editor_reconnect = Some(pending.clone());
         }
 
         // An external disk candidate is a replaceable user-decision value, not
@@ -4152,6 +4159,49 @@ fn ensure_deferred_document_write_intent_with_mode(
                         file.display(),
                         pending.intent_id,
                         pending.target_hash,
+                    ),
+                );
+            } else if pending.source
+                == agent_doc_state_backbone::DocumentWriteSource::EditorReconnect
+                && pending.reason
+                    == DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
+            {
+                let merge_base = pending
+                    .expected_content
+                    .clone()
+                    .filter(|base| {
+                        agent_doc_hash::content_hash(base)
+                            .eq_ignore_ascii_case(&pending.expected_hash)
+                    })
+                    .unwrap_or_else(|| expected_current.to_string());
+                // An editor-reconnect target is a progressive visible snapshot,
+                // not an independent component branch. Preserve only any agent
+                // response it carried and rebase that semantic response over the
+                // newest complete editor cut. Raw component CRDT composition can
+                // splice the old partial queue line into the new full line.
+                target_content = rebase_agent_candidate_over_editor_cut(
+                    &merge_base,
+                    &pending.target_content,
+                    content,
+                )
+                .with_context(|| {
+                    format!(
+                        "failed to supersede progressive editor reconnect {} for {}",
+                        pending.intent_id,
+                        file.display()
+                    )
+                })?;
+                target_content =
+                    canonicalize_and_validate_agent_rebase(&target_content, content, file, source)?;
+                expected_content = merge_base;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_deferred_write_superseded_progressive_editor_cut file={} prior_intent_id={} prior_target_hash={} requested_hash={requested_target_hash} target_hash={}",
+                        file.display(),
+                        pending.intent_id,
+                        pending.target_hash,
+                        agent_doc_hash::content_hash(&target_content),
                     ),
                 );
             } else if !pending.target_hash.eq_ignore_ascii_case(&expected_hash) {
@@ -4226,6 +4276,15 @@ fn ensure_deferred_document_write_intent_with_mode(
         pending_document_write_for_target(file, &target_hash)
     };
     if let Some(pending) = pending_for_target {
+        if let Some(superseded) = superseded_editor_reconnect {
+            let superseded_target_hash = superseded.target_hash.clone();
+            append_document_write_converged_event(
+                file,
+                superseded,
+                &superseded_target_hash,
+                &format!("{source}_superseded_editor_reconnect"),
+            )?;
+        }
         return Ok(pending.intent_id);
     }
     let project_root = agent_doc_project_root_io::project_root_containing(file)
@@ -4245,7 +4304,7 @@ fn ensure_deferred_document_write_intent_with_mode(
             intent_id: intent_id.clone(),
             expected_hash: agent_doc_hash::content_hash(&expected_content),
             expected_content: Some(expected_content),
-            target_hash,
+            target_hash: target_hash.clone(),
             target_content,
             source: typed_source,
             reason,
@@ -4258,6 +4317,18 @@ fn ensure_deferred_document_write_intent_with_mode(
                 file.display()
             )
         })?;
+    // Append the successor before settling its progressive reconnect
+    // predecessor. A crash can therefore leave both intents for historical
+    // filtering, but can never lose the only durable target.
+    if let Some(superseded) = superseded_editor_reconnect {
+        let superseded_target_hash = superseded.target_hash.clone();
+        append_document_write_converged_event(
+            file,
+            superseded,
+            &superseded_target_hash,
+            &format!("{source}_superseded_editor_reconnect"),
+        )?;
+    }
     Ok(intent_id)
 }
 
@@ -4325,7 +4396,35 @@ pub fn deferred_document_write_reconnect_content(
             }
         }
     }
-    let pending_journal = pending_document_write_journal(file);
+    let pending_journal_all = pending_document_write_journal(file);
+    // Builds before progressive reconnect supersession retained every editor
+    // keystroke cut as an independent durable intent. Each later intent was
+    // created against (and therefore incorporated) the current pending target;
+    // replaying the obsolete cuts resurrects truncated queue lines. Preserve
+    // independently sourced backlog/response intents, but collapse this one
+    // explicitly typed snapshot lineage to its newest active member.
+    let pending_journal = pending_journal_all
+        .iter()
+        .enumerate()
+        .filter(|(index, intent)| {
+            !(intent.source == agent_doc_state_backbone::DocumentWriteSource::EditorReconnect
+                && intent.reason
+                    == DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
+                && *index + 1 < pending_journal_all.len())
+        })
+        .map(|(_, intent)| intent.clone())
+        .collect::<Vec<_>>();
+    if pending_journal.len() != pending_journal_all.len() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_reconnect_superseded_progressive_cuts_filtered file={} filtered={} retained={}",
+                file.display(),
+                pending_journal_all.len() - pending_journal.len(),
+                pending_journal.len(),
+            ),
+        );
+    }
     let Some(pending) = pending_journal.last().cloned() else {
         return Ok(None);
     };
@@ -9919,6 +10018,116 @@ mod tests {
         assert!(reconnected.contains("[#fund-vesting-fk]"));
         assert!(reconnected.contains("- [x] [#fundlink2]"));
         assert_eq!(reconnected.matches("agent:boundary:").count(), 1);
+    }
+
+    #[test]
+    fn complete_queue_prompt_supersedes_progressive_editor_reconnect_cut() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#fresh-project-supervisor-log]: agent-doc star\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let partial = base.replace("agent-doc star\n", "agent-doc start should create a c\n");
+        let complete = base.replace(
+            "agent-doc star\n",
+            "agent-doc start should create a configurable path to the supervisor log file. Directories should be created as needed.\n",
+        );
+        let (_dir, file, _) = temp_doc(base);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &partial,
+            "editor_reconnect",
+            DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+        )
+        .unwrap();
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &complete,
+            "serialized_atomic_write",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+
+        let pending = pending_document_write(&file).expect("complete target retained");
+        assert!(pending.target_content.contains(
+            "- do [#fresh-project-supervisor-log]: agent-doc start should create a configurable path to the supervisor log file. Directories should be created as needed.\n<!-- /agent:queue -->"
+        ));
+        assert!(
+            !pending
+                .target_content
+                .contains("needed.t should create a c")
+        );
+        assert_eq!(pending_document_write_journal(&file).len(), 1);
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&pending.target_content),
+            None,
+        );
+    }
+
+    #[test]
+    fn reconnect_filters_historical_progressive_cuts_but_keeps_independent_intents() {
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#x] sta\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let partial = base.replace("[#x] sta", "[#x] start partial");
+        let complete = base.replace("[#x] sta", "[#x] start complete");
+        let (_dir, file, _) = temp_doc(base);
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        for (event_id, intent_id, target, source) in [
+            (
+                "progressive-1",
+                "progressive-1",
+                partial.as_str(),
+                "editor_reconnect",
+            ),
+            (
+                "complete-2",
+                "complete-2",
+                complete.as_str(),
+                "test-independent",
+            ),
+        ] {
+            let event = agent_doc_state_backbone::StateEvent::new(
+                event_id,
+                agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                    document_hash: document_hash.clone(),
+                    intent_id: intent_id.to_string(),
+                    expected_hash: agent_doc_hash::content_hash(base),
+                    expected_content: Some(base.to_string()),
+                    target_hash: agent_doc_hash::content_hash(target),
+                    target_content: target.to_string(),
+                    source: agent_doc_state_backbone::DocumentWriteSource::from(source),
+                    reason: if source == "editor_reconnect" {
+                        DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
+                    } else {
+                        DocumentWriteDeferredReason::CrdtDeliveryAckPending
+                    },
+                },
+            );
+            agent_doc_controller_io::project_controller::append_state_event(
+                file.parent().unwrap(),
+                &event,
+            )
+            .unwrap();
+        }
+
+        let reconnected = deferred_document_write_reconnect_content(&file, base)
+            .unwrap()
+            .expect("latest target should replay");
+        assert!(reconnected.contains("[#x] start complete"));
+        assert!(!reconnected.contains("[#x] start partial"));
     }
 
     #[test]

@@ -97,6 +97,11 @@ pub enum DocumentWriteSource {
     SerializedAtomicWriteEditorSavePending,
     /// Editor authority advanced after delivery proof; the target was rebased.
     SerializedAtomicWriteProjectionRebase,
+    /// A reappearing editor buffer was merged with a retained canonical target.
+    ///
+    /// These snapshots are progressive editor cuts, not independent durable
+    /// mutations. A later retained target that incorporates one supersedes it.
+    EditorReconnect,
     /// Operator escape hatch: `agent-doc write --force-disk` on a detached document.
     ForceDisk,
     /// Force-disk taken from the repair path.
@@ -119,6 +124,7 @@ impl DocumentWriteSource {
             Self::SerializedAtomicWriteProjectionRebase => {
                 "serialized_atomic_write_projection_rebase"
             }
+            Self::EditorReconnect => "editor_reconnect",
             Self::ForceDisk => "force_disk",
             Self::RepairForceDisk => "repair_force_disk",
             Self::Unknown(token) => token,
@@ -138,6 +144,7 @@ impl DocumentWriteSource {
             Self::SerializedAtomicWrite
             | Self::SerializedAtomicWriteEditorSavePending
             | Self::SerializedAtomicWriteProjectionRebase
+            | Self::EditorReconnect
             | Self::ForceDisk
             | Self::RepairForceDisk
             | Self::Unknown(_) => None,
@@ -215,6 +222,7 @@ impl From<&str> for DocumentWriteSource {
             "serialized_atomic_write_projection_rebase" => {
                 Self::SerializedAtomicWriteProjectionRebase
             }
+            "editor_reconnect" => Self::EditorReconnect,
             "force_disk" => Self::ForceDisk,
             "repair_force_disk" => Self::RepairForceDisk,
             token => Self::Unknown(token.to_string()),
@@ -272,6 +280,7 @@ mod tests {
             "serialized_atomic_write",
             "serialized_atomic_write_editor_save_pending",
             "serialized_atomic_write_projection_rebase",
+            "editor_reconnect",
             "force_disk",
             "repair_force_disk",
         ] {

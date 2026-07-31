@@ -548,7 +548,9 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "remote CRDT update bursts should be merged before one editor apply instead of one invokeAndWait per update",
             remoteDrainBody.contains("appliedRemoteUpdates") &&
-                remoteDrainBody.contains("queueRemoteTextApply(filePath, expectedText, targetText"),
+                remoteDrainBody.contains("val projectionExpectedText") &&
+                remoteDrainBody.contains("queueRemoteTextApply(") &&
+                remoteDrainBody.contains("projectionExpectedText,"),
         )
         val remoteApplyBody = source.substringAfter("private fun queueRemoteTextApply")
             .substringBefore("private fun recoverRejectedRemoteCanonical")

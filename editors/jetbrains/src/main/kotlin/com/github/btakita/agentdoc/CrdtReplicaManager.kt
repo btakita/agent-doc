@@ -179,6 +179,35 @@ internal enum class RemoteCrdtProjectionMode {
     Persist,
 }
 
+internal enum class RemotePersistReconciliation {
+    Persisted,
+    RollbackToBefore,
+    PreserveAdvancedEditor,
+}
+
+/**
+ * A failed save is transactional only while both observable planes still prove
+ * the attempted mutation. Roll back when the editor remains at the remote
+ * target and disk remains at the exact pre-apply text; otherwise preserve the
+ * advanced plane and fail closed.
+ */
+internal fun remotePersistReconciliationUtil(
+    beforeText: String,
+    targetText: String,
+    editorAfterSave: String,
+    diskAfterSave: String?,
+): RemotePersistReconciliation = when {
+    editorAfterSave != targetText -> RemotePersistReconciliation.PreserveAdvancedEditor
+    diskAfterSave == targetText -> RemotePersistReconciliation.Persisted
+    diskAfterSave == beforeText -> RemotePersistReconciliation.RollbackToBefore
+    else -> RemotePersistReconciliation.PreserveAdvancedEditor
+}
+
+private data class RemotePersistOutcome(
+    val diskPersisted: Boolean,
+    val editorTextForAck: String?,
+)
+
 /**
  * The CRDT canonical is the durable effect sink. An unsaved editor can safely
  * accept a causally fenced remote delta in memory, but the plugin must not
@@ -281,11 +310,18 @@ internal fun replicaBaselineDecisionUtil(
     editorMatchesRemoteTarget: Boolean,
     replicaMatchesRemoteTarget: Boolean,
     recoveryInFlight: Boolean,
+    canonicalProjectionRetained: Boolean = false,
 ): ReplicaBaselineDecision = when {
     recoveryInFlight ->
         ReplicaBaselineDecision.RetryFailClosed
     editorMatchesRemoteTarget && replicaMatchesEditor ->
         ReplicaBaselineDecision.AcknowledgeRemoteTarget
+    canonicalProjectionRetained && replicaMatchesRemoteTarget ->
+        ReplicaBaselineDecision.ReplayRemoteTarget
+    canonicalProjectionRetained && replicaMatchesExpected ->
+        ReplicaBaselineDecision.ApplyRemote
+    canonicalProjectionRetained ->
+        ReplicaBaselineDecision.RetryFailClosed
     editorMatchesExpected && replicaMatchesRemoteTarget ->
         ReplicaBaselineDecision.ReplayRemoteTarget
     editorState != TemplateStructureProjectionState.Exact && editorMatchesExpected ->
@@ -1259,13 +1295,30 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
             val targetText = converged
             if (targetText != null && appliedRemoteUpdates.isNotEmpty() && !hasPendingLocal(filePath)) {
-            when (queueRemoteTextApply(filePath, expectedText, targetText, forwarder, appliedRemoteUpdates)) {
-                RemoteTextApplyDisposition.Queued -> queuedForEditor = true
-                RemoteTextApplyDisposition.Recovered -> usefulWork++
-                RemoteTextApplyDisposition.RetryFailClosed -> {
-                    editorBufferText(filePath)?.let { current -> shadows[filePath] = current }
+                val projectionExpectedText =
+                    if (
+                        retainedCanonicalProjectionPaths.contains(filePath) &&
+                        !TypingTracker.hasUnsyncedOperatorEdits(filePath)
+                    ) {
+                        editorBufferText(filePath) ?: expectedText
+                    } else {
+                        expectedText
+                    }
+                when (
+                    queueRemoteTextApply(
+                        filePath,
+                        projectionExpectedText,
+                        targetText,
+                        forwarder,
+                        appliedRemoteUpdates,
+                    )
+                ) {
+                    RemoteTextApplyDisposition.Queued -> queuedForEditor = true
+                    RemoteTextApplyDisposition.Recovered -> usefulWork++
+                    RemoteTextApplyDisposition.RetryFailClosed -> {
+                        editorBufferText(filePath)?.let { current -> shadows[filePath] = current }
+                    }
                 }
-            }
             }
             usefulWork = peerUpdateCount + ackCount
         } finally {
@@ -1397,7 +1450,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             document,
                             expectedText,
                             canonical,
-                        )
+                            before,
+                        ).diskPersisted
                         return@invokeAndWait
                     }
                     if (hasPendingLocal(filePath)) return@invokeAndWait
@@ -1431,9 +1485,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             document,
                             expectedText,
                             canonical,
-                        )
+                            before,
+                        ).diskPersisted
                         if (installed) {
                             log.info("[crdt-replica] applied and saved REPLACE re-bootstrap for $filePath (${canonical.length} chars)")
+                        } else {
+                            scheduleTemplateGuardRecoveryRetry(
+                                filePath,
+                                "replace-delivery-persist-rollback",
+                            )
                         }
                     } finally {
                         applyingRemote.remove(filePath)
@@ -1794,16 +1854,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 }
             if (before == pending.targetText) {
                 shadows[pending.filePath] = pending.targetText
-                RemoteEditorApplyOutcome(
-                    projectionMode == RemoteCrdtProjectionMode.Persist &&
+                if (projectionMode == RemoteCrdtProjectionMode.Persist) {
+                    val persisted =
                         persistRemoteCrdtTextIfSafe(
                             pending.filePath,
                             document,
                             pending.expectedText,
                             pending.targetText,
-                        ),
-                    before,
-                )
+                            before,
+                        )
+                    RemoteEditorApplyOutcome(
+                        persisted.diskPersisted,
+                        persisted.editorTextForAck,
+                    )
+                } else {
+                    RemoteEditorApplyOutcome(false, before)
+                }
             } else if (hasPendingLocal(pending.filePath)) {
                 RemoteEditorApplyOutcome(false, before)
             } else if (!remoteCrdtApplyStillCurrentUtil(pending.expectedText, before, pending.targetText)) {
@@ -1829,16 +1895,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         applyMinimalDocumentEditUtil(document, before, pending.targetText)
                         shadows[pending.filePath] = pending.targetText
                     }
-                    RemoteEditorApplyOutcome(
-                        projectionMode == RemoteCrdtProjectionMode.Persist &&
+                    if (projectionMode == RemoteCrdtProjectionMode.Persist) {
+                        val persisted =
                             persistRemoteCrdtTextIfSafe(
                                 pending.filePath,
                                 document,
                                 pending.expectedText,
                                 pending.targetText,
-                            ),
-                        pending.targetText,
-                    )
+                                before,
+                            )
+                        RemoteEditorApplyOutcome(
+                            persisted.diskPersisted,
+                            persisted.editorTextForAck,
+                        )
+                    } else {
+                        RemoteEditorApplyOutcome(false, pending.targetText)
+                    }
                 } finally {
                     applyingRemote.remove(pending.filePath)
                 }
@@ -1895,22 +1967,90 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         document: Document,
         expectedText: String,
         targetText: String,
-    ): Boolean {
+        beforeText: String,
+    ): RemotePersistOutcome {
         val diskText = readRawDiskText(filePath)
         if (!remoteCrdtDiskCanPersistUtil(expectedText, targetText, diskText)) {
-            return false
+            return reconcileRemotePersistence(
+                filePath,
+                document,
+                beforeText,
+                targetText,
+                diskText,
+            )
         }
         return try {
             val fileDocumentManager = FileDocumentManager.getInstance()
             fileDocumentManager.saveDocument(document)
-            val saved = !fileDocumentManager.isDocumentUnsaved(document) && document.text == targetText
-            if (!saved) {
-                log.warn("[crdt-replica] remote editor apply did not reach a clean saved state for $filePath")
+            val diskAfterSave = readRawDiskText(filePath)
+            val outcome = reconcileRemotePersistence(
+                filePath,
+                document,
+                beforeText,
+                targetText,
+                diskAfterSave,
+            )
+            if (
+                outcome.diskPersisted &&
+                fileDocumentManager.isDocumentUnsaved(document)
+            ) {
+                log.debug(
+                    "[crdt-replica] remote editor apply reached exact disk bytes while IntelliJ save state still lagged for $filePath",
+                )
             }
-            saved
+            outcome
         } catch (e: RuntimeException) {
             log.warn("[crdt-replica] remote editor apply save failed for $filePath", e)
-            false
+            reconcileRemotePersistence(
+                filePath,
+                document,
+                beforeText,
+                targetText,
+                readRawDiskText(filePath),
+            )
+        }
+    }
+
+    private fun reconcileRemotePersistence(
+        filePath: String,
+        document: Document,
+        beforeText: String,
+        targetText: String,
+        diskAfterSave: String?,
+    ): RemotePersistOutcome {
+        return when (
+            remotePersistReconciliationUtil(
+                beforeText,
+                targetText,
+                document.text,
+                diskAfterSave,
+            )
+        ) {
+            RemotePersistReconciliation.Persisted -> {
+                shadows[filePath] = targetText
+                RemotePersistOutcome(true, targetText)
+            }
+            RemotePersistReconciliation.RollbackToBefore -> {
+                log.warn(
+                    "[crdt-replica] remote editor apply did not persist; rolling the exact attempted projection back for $filePath",
+                )
+                runUndoableRemoteUpdateCommand(document) {
+                    applyMinimalDocumentEditUtil(document, targetText, beforeText)
+                }
+                shadows[filePath] = beforeText
+                if (document.text == beforeText && diskAfterSave == beforeText) {
+                    FileDocumentManager.getInstance().reloadFromDisk(document)
+                }
+                RemotePersistOutcome(false, beforeText)
+            }
+            RemotePersistReconciliation.PreserveAdvancedEditor -> {
+                val editorText = document.text
+                shadows[filePath] = editorText
+                log.warn(
+                    "[crdt-replica] remote editor persistence diverged from both exact planes; preserving the advanced editor and withholding ACK for $filePath",
+                )
+                RemotePersistOutcome(false, null)
+            }
         }
     }
 
@@ -2003,6 +2143,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val replicaHash = replicaText?.let(::contentHash)
         val editorRemoteGeneration = matchingRemoteTargetGenerationUtil(updates, editorHash)
         val replicaRemoteGeneration = matchingRemoteTargetGenerationUtil(updates, replicaHash)
+        val canonicalProjectionRetained = retainedCanonicalProjectionPaths.contains(filePath)
         val decision = replicaBaselineDecisionUtil(
             editorState = editorState,
             editorMatchesExpected = editorText == expectedText,
@@ -2011,6 +2152,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             editorMatchesRemoteTarget = editorRemoteGeneration != null,
             replicaMatchesRemoteTarget = replicaRemoteGeneration != null,
             recoveryInFlight = templateGuardRecoveryPaths.contains(filePath),
+            canonicalProjectionRetained = canonicalProjectionRetained,
         )
         if (
             decision == ReplicaBaselineDecision.ApplyRemote ||
@@ -2051,13 +2193,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         ) {
             val replayedUpdates =
                 updates.filter { it.generation <= replicaRemoteGeneration }
+            val replayExpectedText =
+                if (
+                    canonicalProjectionRetained &&
+                    !TypingTracker.hasUnsyncedOperatorEdits(filePath)
+                ) {
+                    editorText
+                } else {
+                    expectedText
+                }
             log.info(
                 "[crdt-replica] replaying a native remote target over its exact editor baseline for $filePath: " +
-                    "editor_hash=$editorHash replica_hash=$visibleReplicaHash generation=$replicaRemoteGeneration",
+                    "editor_hash=$editorHash replica_hash=$visibleReplicaHash generation=$replicaRemoteGeneration " +
+                    "retained_canonical=$canonicalProjectionRetained",
             )
             queueRemoteTextApply(
                 filePath,
-                expectedText,
+                replayExpectedText,
                 replicaText,
                 forwarder,
                 replayedUpdates,

@@ -109,6 +109,42 @@ class RefreshBeforeApplyConflictTest {
     }
 
     @Test
+    fun `failed persistent remote projections are rolled back transactionally`() {
+        val crdtReplicaPath =
+            listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                    Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"
+                    ),
+                )
+                .first { Files.exists(it) }
+        val crdtReplica = Files.readString(crdtReplicaPath)
+        val persist =
+            functionBody(crdtReplica, "private fun persistRemoteCrdtTextIfSafe(")
+        val reconcile =
+            functionBody(crdtReplica, "private fun reconcileRemotePersistence(")
+        val replace =
+            functionBody(crdtReplica, "private fun applyReplaceDelivery(")
+        val delta =
+            functionBody(crdtReplica, "private fun applyRemoteTextOnEdt(")
+
+        assertTrue(persist.contains("readRawDiskText(filePath)"))
+        assertTrue(persist.contains("reconcileRemotePersistence("))
+        assertTrue(reconcile.contains("RemotePersistReconciliation.RollbackToBefore"))
+        assertTrue(reconcile.contains("applyMinimalDocumentEditUtil(document, targetText, beforeText)"))
+        assertTrue(reconcile.contains("reloadFromDisk(document)"))
+        assertTrue(reconcile.contains("RemotePersistReconciliation.PreserveAdvancedEditor"))
+        assertTrue(reconcile.contains("RemotePersistOutcome(false, null)"))
+        assertTrue(replace.contains("before,"))
+        assertTrue(replace.contains("replace-delivery-persist-rollback"))
+        assertTrue(delta.contains("persisted.editorTextForAck"))
+        assertTrue(
+            "memory-only projection must remain visible without entering disk persistence",
+            delta.contains("RemoteEditorApplyOutcome(false, pending.targetText)"),
+        )
+    }
+
+    @Test
     fun `forced reconnect registers from the live editor without preinstalling a retained target`() {
         val crdtReplicaPath =
             listOf(

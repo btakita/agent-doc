@@ -69,7 +69,15 @@ The rename landed mid-cycle, which broke the session on the new path in two ways
 
 `tasks/professional/mary-elle-zellerbach.md` is still staged as a deletion in the superproject index. I left it alone rather than sweep it into a commit alongside other panes' staged work — remove it whenever you next commit that path.
 Go ahead and complete the delete of mary-elle-zellerbach.md. The file was renamed to mary-ellen-zellerbach.md
-<!-- agent:boundary:3abaefcb -->
+
+### Re: Complete the delete of mary-elle-zellerbach.md — opus-5
+
+Done — superproject `c995d3a`.
+
+Before committing I diffed `HEAD:tasks/professional/mary-elle-zellerbach.md` against the current `mary-ellen-zellerbach.md`: the old path's content is entirely superseded, with the only differences being the scrambled exchange ordering I already repaired and the turns that landed after the rename. Nothing unique was lost.
+
+`tasks/professional/` is now clean of the old path — gone from both the index and HEAD, with only `mary-ellen-zellerbach.md` remaining on disk.
+<!-- agent:boundary:65438f6f -->
 <!-- /agent:exchange -->
 
 ## Queue

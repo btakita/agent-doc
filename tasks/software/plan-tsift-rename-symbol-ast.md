@@ -123,6 +123,17 @@ Known limitation carried into phase 2: the Rust identifier set includes
 struct field. That matches the old scan's behaviour; narrowing it needs the
 graph-scoped resolution phase 2 introduces.
 
+**Extended to the JS-like family in `#applysamesymbol`.** `property_identifier`
+covers an object-literal key, a class method, and a member access, and none is
+the module-level binding a rename resolves to, so all three are dropped. The
+object-literal shorthand `{ beta }` had no correct span rewrite — it is the
+property name *and* a read of the binding — and now expands to `{ beta: gamma }`,
+which is what it desugars to. The destructuring form `const { beta } = mod` is
+left as a span rename: there the token reads a property off `mod`, and renaming
+in place is already right for the common case where `mod` is the module whose
+export was renamed. The prediction in the backlog item — that shorthand would
+need the shadow refusal — was wrong; expansion is strictly better than refusing.
+
 **Closed in `#narrowidentifierkind`,** and the diagnosis above was half right.
 The fix was not the graph scoping from phase 2 — that resolves *which files* a
 rename touches, not which occurrences within one. What it needed was the

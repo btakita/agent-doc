@@ -116,7 +116,30 @@ Verification passed:
 - latest three completed CI runs were green; latest was run `30580926037`
 
 The Agent Doc source commit is `3fa0fa9d8`; the superproject pointer commit is `28cd57635`. I did not install, recycle, or restart IDEA because the existing retained closeout/install gate owns that boundary. Live verification should occur after that gated install; this cycle did not disturb the retained capture.
-<!-- agent:boundary:8865464f -->
+
+### Re: Behavior-descriptive abstraction names — gpt-5
+
+> **Queue prompt:**
+> Abstraction names should be descriptive instead of using project names. Please audit all abstraction names, particularly test names.
+
+Audited Rust and Kotlin declarations for names derived from the documents/projects where bugs were first observed. One real violation remained in the write-runtime regression suite:
+
+- `TsiftDuplicateContentFixture` → `DuplicateResponseBodyRedeliveryFixture`
+- `tsift_md_duplicate_content_corruption_fixture` → `duplicate_response_body_redelivery_fixture`
+- `tsift_md_duplicate_content_fixture_skips_stale_full_document_redelivery` → `stale_full_document_redelivery_does_not_overwrite_live_typing`
+
+The historical document path and payload remain inside the fixture as concrete reproduction data; they no longer name the reusable abstraction or the test. The remaining `Tsift*` and Lazily declarations are actual integration/domain APIs (context collection, graph invocation, reactive receipts), not names borrowed from a customer or session document.
+
+Verification passed:
+
+- declaration audit has no remaining project/document-derived identifier matches
+- focused renamed regression passed (`tart-1bbcf1d7f3`)
+- full `make check` passed (`tart-8b1bc7f513`)
+- `git diff --check`
+- latest completed CI remains green (`30580926037`)
+
+Committed as `9d1afd8a9` (`test: name redelivery regression by behavior`), with superproject pointer `18ea90954`.
+<!-- agent:boundary:a1567e80 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -124,7 +147,7 @@ The Agent Doc source commit is `3fa0fa9d8`; the superproject pointer commit is `
 - ~~equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Idea is periodically non-responsive. Please fix thrashing in the plugin UI process. Be more efficient with calculation and move CPU heavy/bound tasks into another thread. Ensure plugin parity.~~
 - ~~Run Agent Doc takes several seconds to complete. Editor -> Tmux Pane autosync performance has improved but is still slow at times. Can we have authority reactives ready for all open editor tabs...even tabs that are not currently active? Please improve performance to all issues.~~
-- Abstraction names should be descriptive instead of using project names. Please audit all abstraction names, particularly test names.
+- ~~Abstraction names should be descriptive instead of using project names. Please audit all abstraction names, particularly test names.~~
 - Please audit the hotpath + startup paths to ensure the systems are fully reactive. Any imperative operations should be replace by reactive operations if possible. Consolidate any "split-brain" login into cohesive reactives. Convert any magic strings or magic values into enums or consts.
 <!-- /agent:queue -->
 

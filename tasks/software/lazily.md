@@ -113,14 +113,68 @@ I reran go's failed job to get CI coverage of the corrected script, and the guar
 **3. Your queue preset is corrupted.** The header now reads `preset="#sp****ec-test-commit-push …"`. There is no granular `agent-doc write` flag for a queue attribute, so I left your edit alone rather than rewriting it — but until it reads `#spec-test-commit-push` again the preset resolves to nothing.
 
 Also filed: `#lzruffautofixvacuity` (a formatter that rewrites cannot fail, and `make lint` still auto-repairs locally) and `#lzcireachvaranchor` (the guard can't match a make-side literal against a CI-side `$VAR`; fail-closed, worth a family-level decision). One loose end I could not close: lazily-kt's `AGENTS.md` `## Commands` block is stale, but the file carries another session's uncommitted edit and committing it would have dragged that in.
-<!-- agent:boundary:84756643 -->
+
+**Correcting my own report from last cycle.** I told you lazily-go had a lost wakeup where the effect "stays subscribed holding the pre-write value forever." That was wrong. I measured it this time instead of inferring it from a failed assertion.
+
+A 400-iteration probe under `-race` that records what the effect *actually holds* when the rerun goes missing: **coalesced-but-correct = 4, truly-stale = 0.** Every single case had the effect already holding the written value. Not one instance of a stale value.
+
+**Why it cannot be stale.** `trackDep` and the value read happen inside one `c.do()` closure on the owner goroutine, so registration and read are atomic. Either the write lands first and the body reads the *new* value with the edge registered in the same turn, or it lands after and the edge is already there to schedule a rerun. There is no interleaving that yields a registered edge next to a stale value. What I mistook for a lost wakeup was two logical runs collapsing into one that observes the final value — the same thing `Batch` does on purpose.
+
+**What was actually broken was the test.** It bumped its run counter at the *top* of the body, so the wait for the first run returned as soon as the body *started*, before `TrackSource` had subscribed. A write landing in that gap gets absorbed into the run already in flight, and the count never reaches the next number. The test asserted an exact run count across a boundary where coalescing is legal.
+
+Fixed by bumping the counter **after** the tracking read, so a run count of N is evidence the edge exists and every later write must schedule a real rerun. Same reorder in `TestAsyncEffectDownstreamOfSlotCascade`.
+
+**Verified and mutation-checked**, because a reorder that makes a flaky test pass is exactly the change that could have defanged it:
+
+- 400 iterations of both tests under `-race`: clean. Previously 1-2% red.
+- Suppress the effect's edge registration entirely, and it reddens at the first rerun.
+- Stop re-registering *after* the first rerun — the precise "deaf after one rerun" defect these tests are named for — and it reddens at the third wait.
+
+`make check` exit 0, CI green.
+
+**Cross-binding check: lazily-go was the only one.** zig and dart both reach quiescence through an explicit barrier — settle and a microtask drain — instead of polling a wall clock, so they can assert exact run counts soundly. zig's analogue already reads before it counts. dart's core-effect tests are synchronous, so no window exists. Nothing to port.
+
+### What I got wrong, and why it matters for the next one
+
+The failing assertion was a conjunction: the run count reached the expected number AND the observed value matched. I checked that it was unsatisfied and concluded the wakeup was lost, without asking which half was false. The observed value was already correct. My first probe also ran while eight agents were saturating the machine, so its 8-second bound was not the evidence I treated it as — the same probe on an idle machine, without `-race`, showed zero failures in 400 iterations.
+
+I filed `#lzrstornfanout` for the lazily-rs partial-fan-out failure carried over from last cycle, written to demand a counting probe *first* — it has the same shape as this one, and the honest answer may again be that the test asserts more than the contract promises.
+### Re: #lzgoasynclostwake — I was wrong: this is run coalescing, not a lost update — opus-5
+
+**Correcting my own report from last cycle.** I told you lazily-go had a lost wakeup where the effect "stays subscribed holding the pre-write value forever." That was wrong. I measured it this time instead of inferring it from a failed assertion.
+
+A 400-iteration probe under `-race` that records what the effect *actually holds* when the rerun goes missing: **coalesced-but-correct = 4, truly-stale = 0.** Every single case had the effect already holding the written value. Not one instance of a stale value.
+
+**Why it cannot be stale.** `trackDep` and the value read happen inside one `c.do()` closure on the owner goroutine, so registration and read are atomic. Either the write lands first and the body reads the *new* value with the edge registered in the same turn, or it lands after and the edge is already there to schedule a rerun. There is no interleaving that yields a registered edge next to a stale value. What I mistook for a lost wakeup was two logical runs collapsing into one that observes the final value — the same thing `Batch` does on purpose.
+
+**What was actually broken was the test.** It bumped its run counter at the *top* of the body, so the wait for the first run returned as soon as the body *started*, before `TrackSource` had subscribed. A write landing in that gap gets absorbed into the run already in flight, and the count never reaches the next number. The test asserted an exact run count across a boundary where coalescing is legal.
+
+Fixed by bumping the counter **after** the tracking read, so a run count of N is evidence the edge exists and every later write must schedule a real rerun. Same reorder in `TestAsyncEffectDownstreamOfSlotCascade`.
+
+**Verified and mutation-checked**, because a reorder that makes a flaky test pass is exactly the change that could have defanged it:
+
+- 400 iterations of both tests under `-race`: clean. Previously 1-2% red.
+- Suppress the effect's edge registration entirely, and it reddens at the first rerun.
+- Stop re-registering *after* the first rerun — the precise "deaf after one rerun" defect these tests are named for — and it reddens at the third wait.
+
+`make check` exit 0, CI green.
+
+**Cross-binding check: lazily-go was the only one.** zig and dart both reach quiescence through an explicit barrier — settle and a microtask drain — instead of polling a wall clock, so they can assert exact run counts soundly. zig's analogue already reads before it counts. dart's core-effect tests are synchronous, so no window exists. Nothing to port.
+
+### What I got wrong, and why it matters for the next one
+
+The failing assertion was a conjunction: the run count reached the expected number AND the observed value matched. I checked that it was unsatisfied and concluded the wakeup was lost, without asking which half was false. The observed value was already correct. My first probe also ran while eight agents were saturating the machine, so its 8-second bound was not the evidence I treated it as — the same probe on an idle machine, without `-race`, showed zero failures in 400 iterations.
+
+I filed `#lzrstornfanout` for the lazily-rs partial-fan-out failure carried over from last cycle, written to demand a counting probe *first* — it has the same shape as this one, and the honest answer may again be that the test asserts more than the contract promises.
+### Re: #lzgoasynclostwake — I was wrong: this is run coalescing, not a lost update — opus-5
+<!-- agent:boundary:71f5be30 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#sp****ec-test-commit-push use subagents for fan-out tasks" priority go -->
 - do [#lzrstornfanout]
-- 🚧 do [#lzgoasynclostwake]
+- ~~do [#lzgoasynclostwake]~~
 - do [#lzruffautofixvacuity]
 - do [#lzcireachvaranchor]
 - ~~do [#lzcheckcireachguard]~~
@@ -145,7 +199,6 @@ Also filed: `#lzruffautofixvacuity` (a formatter that rewrites cannot fail, and 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzrstornfanout] lazily-rs thread_safe_ingress::tests::concurrent_readers_never_observe_a_partial_fan_out failed once in CI with partial fan-out observed: (Some(5), Some(2)) - a reader saw a torn intermediate state where the test asserts it cannot. Surfaced while landing #lzcheckcireachguard; the agent reran the job to green, which does not make it gone, and it has not been reproduced since. Do NOT open by assuming it is a torn read. The sibling finding #lzgoasynclostwake looked exactly like a lost update and turned out to be legitimate run coalescing plus a test asserting more than the contract guarantees, so the first step is a counting probe that records what the reader ACTUALLY observed on failure rather than only that the assertion failed. Run it under -race and under load, since that one only reproduced under -race. Then decide between three outcomes and say which: a real torn read in the thread-safe ingress fan-out, a test asserting atomicity across a boundary the contract does not promise, or a wall-clock deadline masquerading as a correctness failure. Whichever it is, check whether the other bindings' thread-safe shells make the same assertion, and mutation-check the fix by forcing a reader into the window rather than waiting for the roughly one-in-many failure to reappear.
-- [ ] 🚧 [#lzgoasynclostwake] lazily-go drops a write about 1% of the time and the effect goes permanently stale. Found by CI going red on TestAsyncEffectRerunsAcrossTwoWrites, then reproduced locally without -race: a 300-iteration probe measured never-woke=3, slow=0, so the effect never reruns even given 8 seconds. It is a lost wakeup, not a slow one, which is why a longer deadline is the wrong fix. The window is in AsyncContext.runEffect in async_context.go around line 848: it clears the effect dependency set on the loop goroutine, then re-registers dependencies from a SEPARATE goroutine when the body calls TrackSource. A Set processed by the loop inside that gap finds no dependent, so invalidateDependents reaches nobody and rerunScheduled is never set. The effect ends up subscribed to the cell holding the value it read before the write, forever. The test also increments its run counter before TrackSource, so waitFor on the counter does not prove the effect has subscribed. The fix is a generation or version counter on each dependency, captured when the body starts and compared when its deps are registered, scheduling a rerun when anything it just subscribed to moved while it ran. Check the other eight bindings for the same window before fixing only this one, since every async shell re-registers dependencies off-loop the same way, and mutation-check by forcing a write into the gap rather than trusting the 1% to show up.
 - [ ] [#lzruffautofixvacuity] lazily-py pyproject.toml sets fix = true under [tool.ruff], so a bare ruff check REPAIRS the tree it is judging and then exits 0. CI ran exactly that inside poe precommit, which means lint was self-healing to green rather than gating, and formatting was not checked at all because the aggregate contains ruff_fix and no ruff format. CI is fixed as of this cycle by spelling the steps as ruff format --check and ruff check --no-fix, but make lint locally still auto-repairs, so a developer cannot reproduce what CI now enforces. Make the local target non-repairing too, keeping a separate explicitly-named target for the repairing form, and audit the other bindings for the same shape: any linter or formatter whose default is to rewrite is a gate that cannot fail.
 - [ ] [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
 - [ ] [#lzmsgpackparity] msgpack is a spec MUST for frame codecs and is implemented in only two of nine bindings. protocol.md marks it MUST as the negotiated cross-language binary default on any binary boundary between differing languages, and further states that every fixture's frames MUST round-trip through both json and msgpack for all three IpcMessage variants. Actual state, verified by reading every binding: lazily-rs and lazily-cpp implement it (rs across ipc.rs, ffi.rs, reliable_sync.rs; cpp has include/lazily/codec.hpp and msgpack.hpp). The other seven - py, go, kt, js, cs, zig, dart - mention msgpack in exactly one place each, their interop-peer handshake, where they declare it as an explicit carve_out. That is honest and fails closed, and is the codec-level equivalent of KNOWN_UNCOVERED, so this is a declared gap rather than a hidden one. The problem is that it is invisible where every other parity fact lives: coverage.json has no codec row at all, so the feature matrix cannot show that a MUST-level codec is carved out by seven bindings, and the conformance ladder cannot see it either because all four rungs verify fixture CONTENT replay, not codec round-tripping. Add a codec row per flavor to coverage.json, then add a round-trip conformance obligation so the json/msgpack requirement is actually tested rather than asserted in prose.

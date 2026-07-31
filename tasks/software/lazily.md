@@ -167,14 +167,50 @@ The failing assertion was a conjunction: the run count reached the expected numb
 
 I filed `#lzrstornfanout` for the lazily-rs partial-fan-out failure carried over from last cycle, written to demand a counting probe *first* — it has the same shape as this one, and the honest answer may again be that the test asserts more than the contract promises.
 ### Re: #lzgoasynclostwake — I was wrong: this is run coalescing, not a lost update — opus-5
-<!-- agent:boundary:fc83b059 -->
+
+### Re: do [#lzrstornfanout] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzrstornfanout]
+
+
+Verdict: **the test asserted atomicity across a boundary the contract does not promise.** Not a torn read, not a deadline. Fixed in lazily-rs and the overclaiming sentence fixed in the spec.
+
+**The probe first, as asked.** I counted what the reader actually observed instead of only that it panicked. Three variants, results written to disk so the test-output filter could not eat them:
+
+| probe | observations |
+| --- | --- |
+| free-running, 3000 trials, 2 cores | `(Some(5),Some(1))=13` `(Some(9),Some(2))=1499987` |
+| forced window, value read first | `(Some(5),Some(2))=200/200` |
+| forced window, authority read first | `(Some(9),Some(1))=200/200` |
+
+The reader calls `value()` and then `authority()`. Those are two independent `ctx.get`s, each taking and releasing the context lock. Park the reader between them and the exact pair CI rejected appears **200 times out of 200**, with the batch fully intact and nothing torn anywhere in the shell. Reverse the read order and you deterministically get `(Some(9), Some(1))` — *new value, old authority*, the pair the doc comment and the spec both name as forbidden. Both mixed pairs are reachable by read ordering alone, so the assertion was rejecting precisely the one skew its own read order can produce.
+
+The free-running numbers are the second finding: over 1.5M observations, only **13** reads landed before the admission at all. The gate was near-vacuous as well as flaky — 3000 trials and it almost never entered the window it claimed to test. That is why it took until now to redden, and why rerunning it green proved nothing.
+
+**What replaced it.** Two deterministic tests:
+
+- `a_single_observation_never_straddles_a_generation_handoff` — takes the pair through a **single derived cell**, so both reads happen in one compute under one lock hold. That is the boundary `batch()` actually guarantees. A barrier orders the reader's first read before the admission, so the pre-handoff state is always observed, and a `saw_old >= 1` guard fails loudly if it is not.
+- `two_sequential_reads_are_not_a_snapshot_and_skew_either_way` — pins **both** skew directions as expected behaviour. It is the standing counter-example to re-adding a two-read racing assertion.
+
+Atomicity itself stays gated where it already was: `a_generation_handoff_lands_value_and_authority_in_one_frontier_walk`, which is deterministic.
+
+**Mutation-checked, not assumed.** Removing `ctx.batch` from `apply` reddens the frontier-walk gate (3 effect runs, not 2) — the atomicity guard is real. Defeating the barrier trips the new vacuity guard. Swapping the expected skew pairs reddens the skew test. Then 60 repeat runs pinned to 2 cores: 0 failures.
+
+**Other bindings: clean.** go, cs, cpp, dart and js all gate the fan-out through a single effect observation already. lazily-rs was the only binding carrying the racing two-read form, so nothing to propagate.
+
+**Spec fixed.** `transport-ingress.md` said "no reader observes `new value, old authority`", which reads as a snapshot promise across separate reads and is false — the probe reproduces exactly that pair 200/200. It now states that the unit of the guarantee is one observation (one effect run, one compute closure), that two sequential reads skew whichever way they are ordered, and that a flavor's frontier-walk gate must therefore observe through a single effect or derived cell.
+
+`make check` green (exit 0, zero `result: FAILED`). Both commits pushed: lazily-rs `a379854`, lazily-spec `d4b6ade`. The lazily-rs CI run is queued as of closeout, not yet reported.
+<!-- agent:boundary:f250029f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ⏭️ do [#lzrstornfanout]
-- 🚧 do [#lzruffautofixvacuity]
+- ~~do [#lzrstornfanout]~~
+- do [#lzruffautofixvacuity]
 - do [#lzcireachvaranchor]
 - do [#lzmsgpackparity]
 - do [#lzreadmelinkrot]
@@ -196,8 +232,7 @@ I filed `#lzrstornfanout` for the lazily-rs partial-fan-out failure carried over
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzrstornfanout] lazily-rs thread_safe_ingress::tests::concurrent_readers_never_observe_a_partial_fan_out failed once in CI with partial fan-out observed: (Some(5), Some(2)) - a reader saw a torn intermediate state where the test asserts it cannot. Surfaced while landing #lzcheckcireachguard; the agent reran the job to green, which does not make it gone, and it has not been reproduced since. Do NOT open by assuming it is a torn read. The sibling finding #lzgoasynclostwake looked exactly like a lost update and turned out to be legitimate run coalescing plus a test asserting more than the contract guarantees, so the first step is a counting probe that records what the reader ACTUALLY observed on failure rather than only that the assertion failed. Run it under -race and under load, since that one only reproduced under -race. Then decide between three outcomes and say which: a real torn read in the thread-safe ingress fan-out, a test asserting atomicity across a boundary the contract does not promise, or a wall-clock deadline masquerading as a correctness failure. Whichever it is, check whether the other bindings' thread-safe shells make the same assertion, and mutation-check the fix by forcing a reader into the window rather than waiting for the roughly one-in-many failure to reappear.
-- [ ] 🚧 [#lzruffautofixvacuity] lazily-py pyproject.toml sets fix = true under [tool.ruff], so a bare ruff check REPAIRS the tree it is judging and then exits 0. CI ran exactly that inside poe precommit, which means lint was self-healing to green rather than gating, and formatting was not checked at all because the aggregate contains ruff_fix and no ruff format. CI is fixed as of this cycle by spelling the steps as ruff format --check and ruff check --no-fix, but make lint locally still auto-repairs, so a developer cannot reproduce what CI now enforces. Make the local target non-repairing too, keeping a separate explicitly-named target for the repairing form, and audit the other bindings for the same shape: any linter or formatter whose default is to rewrite is a gate that cannot fail.
+- [ ] [#lzruffautofixvacuity] lazily-py pyproject.toml sets fix = true under [tool.ruff], so a bare ruff check REPAIRS the tree it is judging and then exits 0. CI ran exactly that inside poe precommit, which means lint was self-healing to green rather than gating, and formatting was not checked at all because the aggregate contains ruff_fix and no ruff format. CI is fixed as of this cycle by spelling the steps as ruff format --check and ruff check --no-fix, but make lint locally still auto-repairs, so a developer cannot reproduce what CI now enforces. Make the local target non-repairing too, keeping a separate explicitly-named target for the repairing form, and audit the other bindings for the same shape: any linter or formatter whose default is to rewrite is a gate that cannot fail.
 - [ ] [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
 - [ ] [#lzmsgpackparity] msgpack is a spec MUST for frame codecs and is implemented in only two of nine bindings. protocol.md marks it MUST as the negotiated cross-language binary default on any binary boundary between differing languages, and further states that every fixture's frames MUST round-trip through both json and msgpack for all three IpcMessage variants. Actual state, verified by reading every binding: lazily-rs and lazily-cpp implement it (rs across ipc.rs, ffi.rs, reliable_sync.rs; cpp has include/lazily/codec.hpp and msgpack.hpp). The other seven - py, go, kt, js, cs, zig, dart - mention msgpack in exactly one place each, their interop-peer handshake, where they declare it as an explicit carve_out. That is honest and fails closed, and is the codec-level equivalent of KNOWN_UNCOVERED, so this is a declared gap rather than a hidden one. The problem is that it is invisible where every other parity fact lives: coverage.json has no codec row at all, so the feature matrix cannot show that a MUST-level codec is carved out by seven bindings, and the conformance ladder cannot see it either because all four rungs verify fixture CONTENT replay, not codec round-tripping. Add a codec row per flavor to coverage.json, then add a round-trip conformance obligation so the json/msgpack requirement is actually tested rather than asserted in prose.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.

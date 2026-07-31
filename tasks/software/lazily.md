@@ -297,17 +297,49 @@ The middle one matters most: without it the CI step is a claim, not a coupling.
 **Behaviour-neutral.** `make check` exit 0 with the gate wired in, 52/52 tests pass after the reformat, interop peer self-check OK. Pushed as `16f87d2`; CI is queued at closeout, not yet reported.
 
 One honest caveat on the reformat: 106 files in one commit is the maximally conflict-prone change shape, and it does rewrite `git blame` for this tree. It is unavoidable here — the gate cannot be true until the tree matches some config — but it is worth knowing that this commit is the boundary, and that a `git blame --ignore-rev 16f87d2` (or a `.git-blame-ignore-revs` entry) is the way to read through it.
-<!-- agent:boundary:53540a2d -->
+
+### Re: do [#lazilydartzig] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lazilydartzig]
+
+
+Decided per binding, as the item asked. Two adopted, three deliberately not — and the split is not effort, it is whether the formatter is part of the language toolchain.
+
+**Adopted: zig and dart.** In both, the formatter ships with the toolchain, so the floor costs no new dependency and there is no tool to choose. Same shape in each: `make fmt` is the non-repairing gate and is in `check`, `make fmt-fix` is the rewriting form and is not, CI runs `make fmt`, and `check-ci-reach` proves the coupling.
+
+The interesting part was *which formatter version each gate is allowed to be*, and the two bindings needed opposite answers:
+
+- **lazily-zig** pins three toolchains (0.15.2 / 0.16.0 / master), so a `zig fmt` that disagreed between them would make the gate a coin flip decided by whichever version CI happened to run. I checked instead of assuming: **all three flag exactly the same 21 files** on the pre-format tree. So `$(ZIG)` needs no pin, and the CI step goes *inside* the existing three-toolchain matrix — which keeps re-proving that agreement rather than leaving it as a comment I wrote once. 21 files reformatted, 123/152 lines.
+- **lazily-dart** runs a `stable`/`beta` SDK matrix, and `dart format` genuinely evolves with the SDK. A beta SDK carries a formatter this tree has never been run through, so gating on beta would redden the build for an unreleased style change rather than for anything a contributor did — which is how a gate teaches people to ignore it. The gate is `stable`-only; beta still runs every other step. 71 files reformatted.
+
+Worth naming: dart already had `dart analyze --fatal-infos` in `check`, which *reads* like it covers this. It does not — a linter is not a formatter, and that resemblance is probably why the gap survived.
+
+**Not adopted: js, kt, react** — with reasons rather than as an omission.
+
+- **lazily-js** has no prettier, biome, or dprint. Unlike `zig fmt` and `dart format` there is no canonical choice here, so adopting one is a preference decision on a published npm package's dev dependencies, plus a full reformat. That is your call, not mine to make silently.
+- **lazily-kt** has no ktlint or spotless plugin; adopting one means changing the Gradle build.
+- **lazily-react** has **no CI workflow at all** — no `.github` directory, and a two-line Makefile. There is nowhere to wire a gate. This is the only lazily binding in that state, and it is a strictly larger gap than the formatting one that surfaced it.
+
+Both non-adoptions are filed at the top of backlog, with a concrete recommendation for js/kt (prettier for js, spotless+ktlint for kt) and an explicit note to confirm the tool choice *before* the reformat lands, since a reformat is expensive to redo under a different formatter.
+
+**Mutation-checked in both adopted bindings**, three ways each: malformed source reddens `make fmt` (exit 2 in both); omitting the CI step reddens `check-ci-reach` with `MISSING fmt` — I saw that failure in both repos before adding the step, which is the check that turns the CI step from a claim into a coupling; and `fmt-fix` repairs so the gate goes green again.
+
+`make check` exit 0 in both. dart: 621 tests pass after the reformat. zig: full suite green — and the `failed command:` line the zig build runner prints during `test` is pre-existing, since it appears identically on the stashed unmodified tree, also with exit 0. A whitespace-only change could not have caused it, but I checked rather than assumed.
+
+Pushed: lazily-zig `163e589`, lazily-dart `0892c71`. Both CI runs are queued at closeout, not yet reported. Note that lazily-zig's `AGENTS.md` carries an unrelated tsift version-marker bump from another process; I committed only my paths and left it alone.
+<!-- agent:boundary:ed993ada -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~⏭️ do [#lazilycppfmt]~~
-- 🚧 do [#lazilydartzig]
+- ~~do [#lazilycppfmt]~~
+- ~~⏭️ do [#lazilydartzig]~~
 - ~~do [#lzrstornfanout]~~
 - ~~do [#lzruffautofixvacuity]~~
-- do [#lzcireachvaranchor]
+- 🚧 do [#lzcireachvaranchor]
 - do [#lzmsgpackparity]
 - do [#lzreadmelinkrot]
 - do [#lzvacuousrun]
@@ -328,8 +360,9 @@ One honest caveat on the reformat: 106 files in one commit is the maximally conf
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lazilydartzig] lazily-js, lazily-kt, lazily-dart, lazily-zig and lazily-react gate NO formatter at all: no formatting step in the check closure and none in CI. Found while auditing every binding for the #lzruffautofixvacuity shape. This is the absence of a gate rather than a gate that cannot fail, so it is a smaller risk, but it means five of the nine bindings have no mechanical formatting floor and drift is invisible until someone reads a diff. Decide per binding whether the floor is worth it (prettier --check, ktlint, dart format --set-exit-if-changed, zig fmt --check) and wire whichever are adopted into both check and CI so check-ci-reach can see them.
-- [ ] [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
+- [ ] [#lazilyreactworkflow] lazily-react has NO CI workflow at all: no .github directory, and a two-line Makefile whose check target runs npm run build plus npm test. Found while auditing the five formatter-less bindings under #lazilydartzig. Nothing verifies this binding on push, which is a strictly larger gap than the formatting one that surfaced it, and it also means there is nowhere to wire any future gate. It is the only lazily binding in this state. Give it a ci.yml that runs its check target, then check whether the sibling guards the other bindings carry (conformance coverage, interop peer, check-ci-reach) apply here or should be explicitly excused with a reason.
+- [ ] [#lazilyformattinggate] lazily-js and lazily-kt still have no formatting gate after #lazilydartzig, because unlike zig and dart their formatter is not part of the language toolchain and adopting one means adding a dependency plus a full reformat. lazily-js has no prettier (or biome or dprint) in devDependencies, and the choice between them is a real preference with no canonical answer for a published npm package. lazily-kt has no ktlint or spotless plugin in its Gradle build. Recommendation: prettier --check for lazily-js since it is the least surprising default and the repo already has a CI workflow to hang it on, and spotless with ktlint for lazily-kt since it is one Gradle plugin rather than a separate toolchain. Both need the reformat commit first, then the gate in check and in CI so check-ci-reach can see it. Confirm the tool choice before the reformat lands, since a reformat is expensive to redo under a different formatter.
+- [ ] 🚧 [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
 - [ ] [#lzmsgpackparity] msgpack is a spec MUST for frame codecs and is implemented in only two of nine bindings. protocol.md marks it MUST as the negotiated cross-language binary default on any binary boundary between differing languages, and further states that every fixture's frames MUST round-trip through both json and msgpack for all three IpcMessage variants. Actual state, verified by reading every binding: lazily-rs and lazily-cpp implement it (rs across ipc.rs, ffi.rs, reliable_sync.rs; cpp has include/lazily/codec.hpp and msgpack.hpp). The other seven - py, go, kt, js, cs, zig, dart - mention msgpack in exactly one place each, their interop-peer handshake, where they declare it as an explicit carve_out. That is honest and fails closed, and is the codec-level equivalent of KNOWN_UNCOVERED, so this is a declared gap rather than a hidden one. The problem is that it is invisible where every other parity fact lives: coverage.json has no codec row at all, so the feature matrix cannot show that a MUST-level codec is carved out by seven bindings, and the conformance ladder cannot see it either because all four rungs verify fixture CONTENT replay, not codec round-tripping. Add a codec row per flavor to coverage.json, then add a round-trip conformance obligation so the json/msgpack requirement is actually tested rather than asserted in prose.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.
 - [ ] [#lzreadmelinkrot] [recommended] Two small README link defects survived the family cross-linking pass, plus one log-noise issue, all found while doing it. First, lazily-zig README line 7 links lazily-py as github.com/btakita/lazily-py, the pre-lazily-hub namespace; GitHub redirects it so it is not dead, but it is the last non-canonical family link in the tree and it will break if that redirect is ever reclaimed. Second, lazily-react's opening paragraph linked @lazily-hub/lazily-js as the relative path ../lazily-js, which only resolves inside a workspace checkout and was dead on GitHub - already fixed in that pass, but it is worth a repo-wide sweep for other relative cross-repo links, since relative links never resolve across repositories. Third, lazily-zig's make check prints a bare failed command line mid-run while the target still exits 0 and every subsequent step passes, which makes a green gate read as red and is exactly the kind of noise that trains people to skim past a real failure. None of the three is urgent; all three are cheap.

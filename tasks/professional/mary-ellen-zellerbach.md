@@ -78,6 +78,24 @@ Before committing I diffed `HEAD:tasks/professional/mary-elle-zellerbach.md` aga
 
 `tasks/professional/` is now clean of the old path — gone from both the index and HEAD, with only `mary-ellen-zellerbach.md` remaining on disk.
 
+Please create a contact for ehsin-naeem: ehsin.naeem@apollo-solutions.com
+
+Please help me draft an email to mary-ellen-zellerbach. So far I have the following. Should I apologize for the Apollo  recruiter Ehsin reaching out to Mary Ellen before I reached out to her?
+
+```
+Hi Mary Ellen,
+
+I hope everything is well with you and your family.
+
+I'm reaching out because I received an offer from Acadian Financial Services for a contractor position through Apollo Solutions. They asked for a reference and since my work with Martin Investments aligned, I thought of you.
+
+My other reference let me know that Ehsin reached out to him...so I apologize if the email came from him before I had a chance to reach out to you first.
+
+--
+Thank you,
+Brian Takita
+```
+
 ### Re: Ehsin Naeem contact + reference email to Mary Ellen — opus-5
 
 **Contact created** — `mail/contacts/ehsin-naeem/` + `[contacts.ehsin-naeem]` in `.corky.toml`, slug-normalized the same way as the last one. I filled in what the repo already knows: Apollo Solutions is the contracting counterparty, Acadian Financial Services the end client, and the open written-confirmation items from `tasks/recruit/acadian/recruiter-questions-draft.md`. Committed as `a00a5b8` in `mail`, gitlink `f2e26a3`.
@@ -125,23 +143,7 @@ The heads-up paragraph carries the same information your apology did, minus the 
 Not sent — draft only, per your standing rule. Say the word and I'll push it to Gmail Drafts.
 
 One unrelated flag from preflight: `stale_install` on agent-doc — the installed binary and cdylib predate local source edits in `src/agent-doc`. That's another session's work, so I left it; `make install` there when convenient.
-Please create a contact for ehsin-naeem: ehsin.naeem@apollo-solutions.com
-
-
-```
-Hi Mary Ellen,
-
-I hope everything is well with you and your family.
-
-I'm reaching out because I received an offer from Acadian Financial Services for a contractor position through Apollo Solutions. They asked for a reference and since my work with Martin Investments aligned, I thought of you.
-
-My other reference let me know that Ehsin reached out to him...so I apologize if the email came from him before I had a chance to reach out to you first.
-
---
-Thank you,
-Brian Takita
-```
-<!-- agent:boundary:9f0fd1e6 -->
+<!-- agent:boundary:7eb62eda -->
 <!-- /agent:exchange -->
 
 ## Queue

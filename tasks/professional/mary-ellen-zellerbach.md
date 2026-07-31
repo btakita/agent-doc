@@ -68,7 +68,8 @@ The rename landed mid-cycle, which broke the session on the new path in two ways
 2. The write that raced the rename scrambled the exchange ordering — the response body was appended *above* your prompt and the `### Re:` header was stranded alone at the bottom. No text was lost. I put the prompt, header, and body back in order and re-baselined.
 
 `tasks/professional/mary-elle-zellerbach.md` is still staged as a deletion in the superproject index. I left it alone rather than sweep it into a commit alongside other panes' staged work — remove it whenever you next commit that path.
-<!-- agent:boundary:194dba11 -->
+Go ahead and complete the delete of mary-elle-zellerbach.md. The file was renamed to mary-ellen-zellerbach.md
+<!-- agent:boundary:3abaefcb -->
 <!-- /agent:exchange -->
 
 ## Queue

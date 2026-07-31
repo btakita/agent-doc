@@ -1234,6 +1234,16 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
         )
     }
+
+    fn converge_captured_answered_free_text_projection(
+        &self,
+        file: &Path,
+    ) -> anyhow::Result<usize> {
+        agent_doc_queue_io::queue_consume::converge_captured_answered_free_text_projection(
+            file,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
+    }
 }
 
 #[derive(Default)]

@@ -18,7 +18,6 @@ use std::path::Path;
 
 use crate::one_shot_sync::OneShotQueueSyncResult;
 use agent_doc_element_backlog::backlog;
-#[cfg(test)]
 use agent_doc_queue::queue_heads::active_queue_head_text;
 use agent_doc_queue::queue_heads::{ActiveQueueHeadKind, classify_active_queue_head};
 
@@ -59,6 +58,9 @@ pub trait QueueCommandEffects {
     fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
     fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
     fn prune_noise_queue_heads(&self, file: &Path) -> Result<usize>;
+    fn converge_captured_answered_free_text_projection(&self, _file: &Path) -> Result<usize> {
+        Ok(0)
+    }
 }
 
 /// Explicitly strike the leading `count` free-text queue head(s) — the agent
@@ -93,9 +95,29 @@ pub fn consume_with_options(
     let content = effects.current_document_content(file, "queue_consume_classify")?;
     match classify_active_queue_head(&content)? {
         ActiveQueueHeadKind::None => {}
+        ActiveQueueHeadKind::Inactive => {
+            let struck = effects.converge_captured_answered_free_text_projection(file)?;
+            if struck > 0 {
+                println!(
+                    "{}: recovered torn inactive queue projection and consumed {} captured-response-proven head(s)",
+                    file.display(),
+                    struck
+                );
+                return Ok(());
+            }
+            bail!(
+                "{}: queue rows exist but queue_active is false, and no durable captured response proves an answered head. Preserve the rows and repair the activation projection before consuming work.",
+                file.display()
+            );
+        }
         ActiveQueueHeadKind::IdBacked => {
+            let queue_active = agent_doc_frontmatter::frontmatter::parse(&content)?
+                .0
+                .queue_active;
+            let classified_head = active_queue_head_text(&content)?;
             bail!(
                 "{}: queue head is an id-backed directive, not a free-text prompt. \
+                 classification evidence: queue_active={queue_active:?} active_head={classified_head:?}. \
                  If it represents completed or gated work, reap it through the normal closeout with \
                  `--done <id>` / `--pending-gate <id>` so the backlog item stays in sync. \
                  If it is only an acknowledgement/correction for still-open work, use \

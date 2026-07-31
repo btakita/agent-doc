@@ -113,6 +113,10 @@ pub fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
 pub enum ActiveQueueHeadKind {
     /// No queue component, or no live prompt to strike.
     None,
+    /// Live queue rows exist, but the frontmatter activation projection is
+    /// false or absent. Captured-response recovery may heal this torn state;
+    /// blind free-text consumption must not.
+    Inactive,
     /// A free-text head (a plain question/instruction) that can be struck by the
     /// explicit consume command. Also covers bare registered `prompt_presets`
     /// token heads that have no tracked-work reap path.
@@ -140,6 +144,10 @@ pub fn classify_active_queue_head(content: &str) -> Result<ActiveQueueHeadKind> 
     let entries = crate::document_queue::parse(queue.content(content))?;
     if crate::document_queue::prompts(&entries).is_empty() {
         return Ok(ActiveQueueHeadKind::None);
+    }
+    let (frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(content)?;
+    if frontmatter.queue_active != Some(true) {
+        return Ok(ActiveQueueHeadKind::Inactive);
     }
     if queue_head_is_free_text_prompt(content)? {
         Ok(ActiveQueueHeadKind::FreeText)
@@ -557,6 +565,21 @@ mod tests {
             classify_active_queue_head(id_backed).unwrap(),
             ActiveQueueHeadKind::IdBacked
         );
+
+        let product_name_prose = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- equityfundingsource.md has queue items for already done tasks. ",
+            "Please investigate why agent-doc did not strike the done items and whether ",
+            "the cause(s) were fixed in previous versions or not. Fix all remaining ",
+            "contributing factors.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            classify_active_queue_head(product_name_prose).unwrap(),
+            ActiveQueueHeadKind::FreeText,
+            "a hyphenated product name in prose is not an id-backed directive"
+        );
     }
 
     #[test]
@@ -569,7 +592,7 @@ mod tests {
         );
         assert_eq!(
             classify_active_queue_head(inactive).unwrap(),
-            ActiveQueueHeadKind::IdBacked
+            ActiveQueueHeadKind::Inactive
         );
     }
 

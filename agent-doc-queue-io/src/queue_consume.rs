@@ -13,13 +13,12 @@ use agent_doc_element::element;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
     queue_consume::{
-        IpcNodeOp, QueueConsumptionPlan, annotate_newly_struck_free_text_heads,
-        answered_free_text_head_node_keys, consume_queue_nodes_by_key, first_n_queue_prompt_texts,
+        IpcNodeOp, QueueConsumptionPlan, consume_queue_nodes_by_key, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
-        queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
-        queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
-        strike_all_noise_queue_heads,
+        project_answered_free_text_strike, queue_consume_count_for_done_ids,
+        queue_consume_node_ops, queue_mark_done_node_ops, queue_prompt_node_keys_for_count,
+        queue_prompt_node_keys_for_done_ids, strike_all_noise_queue_heads,
     },
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
@@ -101,8 +100,8 @@ fn save_snapshot_recovery_only(file: &Path, content: &str, context: &str) {
 #[cfg(test)]
 use agent_doc_queue::{
     queue_consume::{
-        cycle_answered_foreign_exchange_prompt, queue_consumption_allowed_for_response,
-        should_consume_queue_prompt_for_write,
+        answered_free_text_head_node_keys, cycle_answered_foreign_exchange_prompt,
+        queue_consumption_allowed_for_response, should_consume_queue_prompt_for_write,
     },
     queue_response::queue_head_is_bare_do_directive,
 };
@@ -426,10 +425,6 @@ pub fn strike_answered_free_text_queue_heads(
         );
         return Ok(0);
     }
-    let (fm, _) = frontmatter::parse(&content)?;
-    if fm.queue_active != Some(true) {
-        return Ok(0);
-    }
     // `#qstrikeexplain` Phase 2: the stable pre-turn baseline gates which heads may
     // be struck — a head absent from it is an in-flight operator edit and must not
     // be struck this cycle. A missing baseline (rare; preflight writes it each
@@ -437,44 +432,28 @@ pub fn strike_answered_free_text_queue_heads(
     let baseline = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
-    let keys = answered_free_text_head_node_keys(&content, response_body, baseline.as_deref())?;
-    if keys.is_empty() {
+    let Some(projected) =
+        project_answered_free_text_strike(&content, response_body, baseline.as_deref())?
+    else {
         return Ok(0);
-    }
-    let struck_document = consume_queue_nodes_by_key(&content, &keys)?;
-    if struck_document == content {
-        return Ok(0);
-    }
-    // `#qstrikenote` Phase 1: append the deterministic auto-struck explanation to
-    // each newly-struck free-text head, on the struck queue line itself (the
-    // editor-authoritative `agent:queue` surface the strike already mutates) —
-    // NEVER into `agent:exchange`, so on-disk exchange still equals `content_ours`.
-    let new_document = annotate_newly_struck_free_text_heads(&content, &struck_document)?;
+    };
+    let keys = projected.node_keys;
+    let new_document = projected.target_content;
 
     // Snapshot sync: match the same answered free-text heads in the snapshot and
     // strike them by the snapshot's own node keys (keys are position/hash derived
     // and need not equal the document's). Required closeouts must prove both sides
     // converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "free-text strike snapshot sync") {
-        Some(snap) => match (|| -> Result<Option<String>> {
-            let snap_keys =
-                answered_free_text_head_node_keys(&snap, response_body, baseline.as_deref())?;
-            if snap_keys.is_empty() {
-                Ok(None)
-            } else {
-                let snap_struck = consume_queue_nodes_by_key(&snap, &snap_keys)?;
-                Ok(Some(annotate_newly_struck_free_text_heads(
-                    &snap,
-                    &snap_struck,
-                )?))
+        Some(snap) => {
+            match project_answered_free_text_strike(&snap, response_body, baseline.as_deref()) {
+                Ok(snapshot) => snapshot.map(|projected| projected.target_content),
+                Err(err) => {
+                    log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
+                    None
+                }
             }
-        })() {
-            Ok(snapshot) => snapshot,
-            Err(err) => {
-                log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
-                None
-            }
-        },
+        }
         None => None,
     };
 
@@ -485,11 +464,13 @@ pub fn strike_answered_free_text_queue_heads(
     // (force-disk repair, or a shape the node model can't express) keep full-text.
     let replace_ops =
         node_replace_ops_from_diff(&content, &new_document, "queue").unwrap_or_default();
+    let activation_changed = frontmatter::parse(&content)?.0.queue_active
+        != frontmatter::parse(&new_document)?.0.queue_active;
     if skip_visible_guard {
         effects
             .atomic_write(file, &new_document)
             .context("free-text strike: failed to write document")?;
-    } else if !replace_ops.is_empty() {
+    } else if !activation_changed && !replace_ops.is_empty() {
         effects
             .converge_structural_ops(file, &replace_ops, &content, "free_text_strike")
             .context("free-text strike: failed to write document")?;
@@ -534,6 +515,22 @@ pub fn strike_answered_free_text_queue_heads(
         }
     }
     Ok(keys.len())
+}
+
+/// Recover an answered-head projection from the durable captured response.
+///
+/// This is the explicit recovery counterpart to the controller subscription:
+/// it is useful when an older running controller left queue rows present while
+/// publishing `queue_active: false`. The projection itself supplies all
+/// mutation policy and refuses without materialized response + baseline proof.
+pub fn converge_captured_answered_free_text_projection(
+    file: &Path,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<usize> {
+    let Some(response_body) = projected_capture_response_body(file) else {
+        return Ok(0);
+    };
+    strike_answered_free_text_queue_heads(file, &response_body, false, effects)
 }
 
 fn projected_capture_response_body(file: &Path) -> Option<String> {

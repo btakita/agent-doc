@@ -11556,7 +11556,7 @@ agent:queue\n\
             concat!(
                 "---\n",
                 "agent_doc_session: queue-projection\n",
-                "queue_active: true\n",
+                "queue_active: false\n",
                 "---\n\n",
                 "<!-- agent:exchange patch=append -->\n",
                 "{}",
@@ -11624,6 +11624,7 @@ agent:queue\n\
                 .contains("- ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)"),
             "the Effect should apply the Computed target without a caller requesting a strike"
         );
+        assert!(projected.contains("queue: start"));
         assert!(projected.contains("- do [#production-deploy]"));
     }
 }

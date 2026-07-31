@@ -4509,7 +4509,7 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
     );
     assert!(
         queue_io_consume.contains("queue_consume::{")
-            && queue_io_consume.contains("annotate_newly_struck_free_text_heads")
+            && queue_io_consume.contains("project_answered_free_text_strike")
             && queue_io_consume.contains("cycle_answered_foreign_exchange_prompt"),
         "agent-doc-queue-io queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
     );

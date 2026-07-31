@@ -1017,10 +1017,7 @@ pub fn project_answered_free_text_strike(
     if response_body.trim().is_empty() {
         return Ok(None);
     }
-    let (frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(content)?;
-    if frontmatter.queue_active != Some(true) {
-        return Ok(None);
-    }
+    agent_doc_frontmatter::frontmatter::parse(content)?;
     let node_keys = answered_free_text_head_node_keys(content, response_body, baseline)?;
     if node_keys.is_empty() {
         return Ok(None);
@@ -1029,7 +1026,10 @@ pub fn project_answered_free_text_strike(
     if struck == content {
         return Ok(None);
     }
-    let target_content = annotate_newly_struck_free_text_heads(content, &struck)?;
+    let annotated = annotate_newly_struck_free_text_heads(content, &struck)?;
+    let remaining = crate::queue_heads::active_queue_heads(&annotated).len();
+    let target_content =
+        agent_doc_frontmatter::frontmatter::merge_queue_state(&annotated, remaining > 0)?;
     Ok(Some(AnsweredFreeTextStrikeProjection {
         node_keys,
         target_content,
@@ -2169,5 +2169,45 @@ Old.
                 .is_none(),
             "the projection must disappear once its target is authoritative"
         );
+    }
+
+    #[test]
+    fn answered_free_text_projection_heals_torn_inactive_queue_flag() {
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: queue-projection\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: completed work — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> completed work\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- completed work\n",
+            "- remaining work\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: completed work — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> completed work\n\n",
+            "Done.\n",
+        );
+
+        let projected = project_answered_free_text_strike(document, response, Some(document))
+            .unwrap()
+            .expect("captured response should heal and advance the torn queue projection");
+
+        assert!(projected.target_content.contains("queue: start"));
+        assert!(
+            projected
+                .target_content
+                .contains("- ~~completed work~~ — auto-struck: answered this cycle (#ftstrike)")
+        );
+        assert!(projected.target_content.contains("- remaining work"));
     }
 }

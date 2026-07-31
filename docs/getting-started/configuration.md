@@ -58,6 +58,19 @@ opencode_model: zai/glm-5
 
 These override the config file for that specific document.
 
+To dogfood Agent Doc itself, opt a document into actionable failure prompts:
+
+```yaml
+---
+agent_doc_dogfood: true
+---
+```
+
+When an Agent Doc command for that document fails to reach a successful
+terminal boundary, the error includes a stable `ACTIONABLE_AGENT_DOC_FIX_PROMPT`
+issue key and asks the active agent to fix the underlying product defect.
+`agent_doc_dogfood: false` disables legacy path-inferred dogfood behavior.
+
 ## Environment Variables
 
 ### Runtime Tuning

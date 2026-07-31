@@ -2674,22 +2674,34 @@ pub fn recycle_idle_grace() -> Duration {
     Duration::from_secs(secs)
 }
 
-/// `#supautoinstall` — resolve the agent-doc crate source root for a DOGFOODING session
-/// (an agent-doc session editing agent-doc's own source). A superproject may contain
-/// `src/agent-doc` while also hosting unrelated project documents; those documents must not
-/// inherit dogfood build/install policy just because the crate is nearby.
+/// Resolve the agent-doc crate source root for a dogfood-mode document.
+///
+/// `agent_doc_dogfood: true|false` is authoritative. When absent, the legacy
+/// agent-doc source/task path inference remains as a compatibility default. A
+/// superproject may contain `src/agent-doc` while also hosting unrelated project
+/// documents; those documents must not inherit dogfood behavior merely because
+/// the crate is nearby.
 pub fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
     let file = file.canonicalize().ok()?;
     let project_root = agent_doc_project_root_io::project_root_containing(&file)?;
+    let dogfood_override = std::fs::read_to_string(&file).ok().and_then(|content| {
+        agent_doc_frontmatter::frontmatter::parse(&content)
+            .ok()
+            .and_then(|(frontmatter, _)| frontmatter.dogfood_mode)
+    });
+    if dogfood_override == Some(false) {
+        return None;
+    }
     for candidate in [project_root.clone(), project_root.join("src/agent-doc")] {
         let cargo = candidate.join("Cargo.toml");
         if let Ok(content) = std::fs::read_to_string(&cargo)
             && content.contains("name = \"agent-doc\"")
-            && agent_doc_supervisor::config::is_agent_doc_dogfood_session(
-                &file,
-                &project_root,
-                &candidate,
-            )
+            && (dogfood_override == Some(true)
+                || agent_doc_supervisor::config::is_agent_doc_dogfood_session(
+                    &file,
+                    &project_root,
+                    &candidate,
+                ))
         {
             return Some(candidate);
         }
@@ -6394,6 +6406,24 @@ fn handle_commit_document_rpc(
             disk_projection_ready,
         );
     }
+    // Publish the exact pre-commit authority frontier into the queue graph.
+    // The captured response is already durable controller state, so an
+    // answered free-text strike is derived and admitted to its document actor
+    // without making commit execute a one-shot queue mutation callback.
+    let queue_authority = match agent_doc_crdt_relay_io::current_text_for_file(&canonical)? {
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+        _ => std::fs::read_to_string(&canonical).with_context(|| {
+            format!(
+                "commit queue authority projection failed to read {}",
+                canonical.display()
+            )
+        })?,
+    };
+    runtime.document_queue_authority_observe(
+        &agent_doc_hash::document_id_for_path(&canonical),
+        &canonical,
+        queue_authority,
+    )?;
     runtime_effects()?.commit_document(&canonical, payload.authoritative_compaction)
 }
 
@@ -24033,6 +24063,27 @@ mod tests {
         assert!(
             dogfood_agent_doc_crate_root(&lazily_doc).is_none(),
             "sibling software sessions must not inherit agent-doc auto-install"
+        );
+
+        std::fs::write(
+            &lazily_doc,
+            "---\nagent_doc_format: template\nagent_doc_dogfood: true\n---\n",
+        )
+        .unwrap();
+        assert_eq!(
+            dogfood_agent_doc_crate_root(&lazily_doc),
+            Some(crate_root.clone()),
+            "explicit document dogfood mode must opt a sibling session in"
+        );
+
+        std::fs::write(
+            &dogfood_doc,
+            "---\nagent_doc_format: template\nagent_doc_dogfood: false\n---\n",
+        )
+        .unwrap();
+        assert!(
+            dogfood_agent_doc_crate_root(&dogfood_doc).is_none(),
+            "explicit false must override legacy dogfood path inference"
         );
     }
 

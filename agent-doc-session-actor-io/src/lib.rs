@@ -676,6 +676,26 @@ impl DocumentActor {
         Ok(reply_rx)
     }
 
+    /// Enqueue fire-and-forget document work without manufacturing a reply
+    /// receiver. Reactive Effects use this path after an exact target has been
+    /// admitted: convergence may be slow, but the projection thread must not
+    /// wait and an intentionally absent receiver must not be logged as a lost
+    /// closeout reply.
+    pub fn enqueue_detached<F>(&self, kind: SessionOpKind, job: F) -> Result<()>
+    where
+        F: FnOnce(&mut ActorContext) + Send + 'static,
+    {
+        let tx = self
+            .tx
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("session actor for {} is shutting down", self.doc_id))?;
+        tx.send(Envelope {
+            kind,
+            run: Box::new(job),
+        })
+        .map_err(|_| anyhow::anyhow!("session actor for {} is no longer running", self.doc_id))
+    }
+
     /// Enqueue `job` and block until the owner thread runs it, returning its
     /// result. This is the serialized critical-section entrypoint #pcpc3 routes
     /// write/closeout/queue-head/lifecycle ops through.

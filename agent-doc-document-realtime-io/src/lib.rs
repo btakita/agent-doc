@@ -3532,6 +3532,13 @@ fn validate_canonical_document_target(file: &Path, content: &str, source: &str) 
         "{source}: refusing structurally invalid canonical target for {} (duplicate exchange or boundary marker); current Lazily/editor authority is unchanged and pending intents remain retained",
         file.display(),
     );
+    agent_doc_template::guard_no_conversation_content_inside_tracked_components(content)
+        .with_context(|| {
+            format!(
+                "{source}: refusing semantically corrupt canonical target for {}; current Lazily/editor authority is unchanged and pending intents remain retained",
+                file.display()
+            )
+        })?;
     Ok(())
 }
 

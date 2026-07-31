@@ -2236,25 +2236,29 @@ fn run_command_inner(
             }
         }
 
-        // `#ftstrike`: strike any free-text queue head this cycle's response
-        // answered, regardless of position. The leading-head consume above only
-        // strikes a contiguous leading run and stops at an id-backed head, so a
-        // free-text report sitting BEHIND an unfinished `do [#id]` head (the
-        // common case while a backlog directive head is still draining) was never
-        // struck even after the response addressed it — the operator could not
-        // tell which typed reports were answered. This runs independent of
-        // `queue_consumption_allowed` (which governs the leading head only) and is
-        // best-effort: a missed strike must never fail an otherwise-clean closeout.
+        // `#ftstrike-reactive`: publish authoritative markdown as a Source.
+        // Captured response is already a durable controller Source; their
+        // Computed projection derives the exact answered-free-text target and
+        // a document-owner Effect applies it out of band. This replaces the
+        // one-shot best-effort mutation which could fail here and then be
+        // forgotten while commit still succeeded.
         if commit_mode != CommitMode::None {
-            match queue_consume::strike_answered_free_text_queue_heads(
-                file,
-                &response_body,
-                options.force_disk,
-                queue_consume_writeback_effects(options.force_disk),
-            ) {
-                Ok(0) => {}
-                Ok(n) => eprintln!("[queue] struck {n} answered free-text head(s) (#ftstrike)"),
-                Err(e) => eprintln!("[queue] warning: free-text head strike failed: {e}"),
+            let effects = queue_consume_writeback_effects(options.force_disk);
+            let authority = if options.force_disk {
+                effects.force_disk_document_content(file, "free_text_projection_authority")
+            } else {
+                effects.current_document_content(file, "free_text_projection_authority")
+            };
+            match authority.and_then(|content| {
+                queue_consume::observe_authoritative_queue_state(file, &content)
+            }) {
+                Ok(projected) if projected > 0 => {
+                    eprintln!("[queue] projected {projected} terminal queue lifecycle update(s)")
+                }
+                Ok(_) => {}
+                Err(error) => eprintln!(
+                    "[queue] warning: answered free-text authority projection failed: {error}"
+                ),
             }
         }
     }

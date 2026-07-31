@@ -304,6 +304,117 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         )
     }
 
+    fn project_answered_free_text_strike(
+        &self,
+        invocation: agent_doc_controller_io::project_controller::ControllerAnsweredFreeTextStrikeInvocation,
+    ) -> anyhow::Result<()> {
+        let file = invocation
+            .file
+            .canonicalize()
+            .unwrap_or_else(|_| invocation.file.clone());
+        let project_root = agent_doc_fs::find_project_root(&file)
+            .with_context(|| format!("project root not found for {}", file.display()))?;
+        let actor = agent_doc_session_actor_io::document_actor_in(
+            &project_root,
+            file.to_string_lossy().as_ref(),
+        );
+        actor.enqueue_detached(
+            agent_doc_document_realtime::session_ops::SessionOpKind::QueueHead,
+            move |_ctx| {
+                let result = agent_doc_document_realtime_io::with_controller_document_mutation(
+                    || {
+                        agent_doc_write_converge_io::converge_document_or_disk(
+                            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+                            &file,
+                            &invocation.target_content,
+                            &invocation.expected_content,
+                            "answered_free_text_projection",
+                        )
+                    },
+                );
+                match result {
+                    Ok(()) => {
+                        if let Ok(Some(snapshot)) =
+                            agent_doc_snapshot_io::load_document_baseline(&file)
+                            && let Ok(Some(snapshot_target)) =
+                                agent_doc_queue::queue_consume::project_answered_free_text_strike(
+                                    &snapshot,
+                                    &invocation.response_body,
+                                    invocation.baseline_content.as_deref(),
+                                )
+                            && let Err(error) =
+                                agent_doc_snapshot_io::checkpoint_document_baseline(
+                                    &file,
+                                    &snapshot_target.target_content,
+                                    agent_doc_ops_log_io::log_op,
+                                )
+                        {
+                            eprintln!(
+                                "[queue] answered free-text snapshot projection failed for {}: {error}",
+                                file.display()
+                            );
+                        }
+                        if let Err(error) =
+                            agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(
+                                &file,
+                                &invocation.target_content,
+                            )
+                        {
+                            eprintln!(
+                                "[queue] answered free-text authority publication failed for {}: {error}",
+                                file.display()
+                            );
+                        }
+                        if let Err(error) = agent_doc_commit_io::commit_with_outcome(&file) {
+                            eprintln!(
+                                "[queue] answered free-text projected commit deferred for {}: {error}",
+                                file.display()
+                            );
+                            agent_doc_ops_log_io::log_op(
+                                &file,
+                                &format!(
+                                    "answered_free_text_strike_commit_deferred file={} projection_id={} error={}",
+                                    file.display(),
+                                    invocation.projection_id,
+                                    agent_doc_secret_redact::redact(&error.to_string())
+                                        .replace(char::is_whitespace, "_"),
+                                ),
+                            );
+                        }
+                        agent_doc_ops_log_io::log_op(
+                            &file,
+                            &format!(
+                                "answered_free_text_strike_applied file={} projection_id={} capture_id={} response_sha256={} nodes={}",
+                                file.display(),
+                                invocation.projection_id,
+                                invocation.capture_id,
+                                invocation.response_sha256,
+                                invocation.node_keys.len(),
+                            ),
+                        );
+                    }
+                    Err(error) => {
+                        agent_doc_ops_log_io::log_op(
+                            &file,
+                            &format!(
+                                "answered_free_text_strike_deferred file={} projection_id={} capture_id={} error={}",
+                                file.display(),
+                                invocation.projection_id,
+                                invocation.capture_id,
+                                agent_doc_secret_redact::redact(&error.to_string())
+                                    .replace(char::is_whitespace, "_"),
+                            ),
+                        );
+                        eprintln!(
+                            "[queue] answered free-text projection deferred for {}: {error}",
+                            file.display()
+                        );
+                    }
+                }
+            },
+        )
+    }
+
     fn commit_document(
         &self,
         file: &Path,
@@ -3769,9 +3880,44 @@ fn main() -> ExitCode {
 }
 
 fn print_terminal_error_report(err: &anyhow::Error) {
-    let report = format!("Error: {err:?}");
+    let mut report = format!("Error: {err:?}");
+    if let Some(file) = dogfood_document_argument()
+        && agent_doc_controller_io::project_controller::dogfood_agent_doc_crate_root(&file)
+            .is_some()
+    {
+        let diagnostic = format!("{err:#}");
+        let document_id = agent_doc_hash::document_id_for_path(&file);
+        let prompt = agent_doc_workflow::preflight_policy::format_dogfood_terminal_issue_prompt(
+            &document_id,
+            &diagnostic,
+        );
+        report.push('\n');
+        report.push_str(&prompt);
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "dogfood_terminal_issue_notified file={} class={} document_id={}",
+                file.display(),
+                agent_doc_workflow::preflight_policy::dogfood_terminal_issue_class(&diagnostic),
+                document_id,
+            ),
+        );
+    }
     let mut stderr = std::io::stderr().lock();
     let _ = write_terminal_error_report(&mut stderr, &report);
+}
+
+fn dogfood_document_argument() -> Option<PathBuf> {
+    std::env::args_os()
+        .skip(1)
+        .map(PathBuf::from)
+        .find(|argument| {
+            argument
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+                && argument.is_file()
+        })
+        .map(|file| file.canonicalize().unwrap_or(file))
 }
 
 fn write_terminal_error_report(writer: &mut impl Write, report: &str) -> std::io::Result<()> {

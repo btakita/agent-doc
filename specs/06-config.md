@@ -87,6 +87,18 @@ when both are required.
 
 `claude_args` and `AGENT_DOC_CLAUDE_ARGS` are ignored when the active harness is not Claude. `codex_args` is ignored when the active harness is not Codex. `opencode_args` is ignored when the active harness is not OpenCode.
 
+## agent_doc_dogfood
+
+`agent_doc_dogfood: true` in document frontmatter opts that session into
+actionable Agent Doc terminal-failure notifications. Any command failure that
+prevents a successful turn boundary emits an `ACTIONABLE_AGENT_DOC_FIX_PROMPT`
+with a stable document + failure-class key; the prompt directs the active agent
+to fix the underlying Agent Doc defect while preserving retained-capture
+no-resubmit/no-recycle constraints. `false` explicitly disables the mode.
+When absent, legacy agent-doc source/task path inference remains for backward
+compatibility. `dogfood_mode` is accepted as a read-only alias; serialization
+uses `agent_doc_dogfood`.
+
 ## Project Config
 
 Location: `.agent-doc/config.toml` (relative to project root).

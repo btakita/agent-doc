@@ -308,6 +308,49 @@ pub fn guard_no_conversation_tail_outside_exchange(doc: &str) -> Result<()> {
     );
 }
 
+/// Reject binary-authored conversation scaffolding embedded inside a tracked
+/// non-exchange component.
+///
+/// A response can be syntactically balanced yet still corrupt the document
+/// when CRDT text is welded onto a backlog/review item. The exact queue-prompt
+/// scaffold is a strong semantic boundary: outside `agent:exchange` it is never
+/// a valid live component value. Examples inside fenced code or ordinary HTML
+/// comments remain valid documentation.
+pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Result<()> {
+    let components = element::parse(doc).context("failed to parse components")?;
+    let code_ranges = element::find_code_ranges(doc);
+    let comment_ranges = element::find_non_agent_html_comment_ranges(doc);
+    let ignored = |position: usize| {
+        code_ranges
+            .iter()
+            .chain(comment_ranges.iter())
+            .any(|&(start, end)| position >= start && position < end)
+    };
+
+    for component in components
+        .iter()
+        .filter(|component| component.name != "exchange")
+    {
+        let body = &doc[component.open_end..component.close_start];
+        let mut offset = component.open_end;
+        for line in body.split_inclusive('\n') {
+            let line_start = offset;
+            offset += line.len();
+            if ignored(line_start) {
+                continue;
+            }
+            if line.contains("> **Queue prompt:**") {
+                anyhow::bail!(
+                    "binary conversation scaffold is embedded inside `agent:{}`; \
+                     refusing to treat response text as tracked component content",
+                    component.name
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Repair the safe malformed-template case where conversation content escaped
 /// below `<!-- /agent:exchange -->` and now trails the document after sibling
 /// components like pending/todo.
@@ -1081,6 +1124,46 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+
+    #[test]
+    fn guard_rejects_queue_response_welded_into_review_item() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [ ] [#rotate-secrets] Rotate terminal secrets after operator approval",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#ads-audit]\n\n",
+            "The audit is complete.\n",
+            "- [ ] [#rotate-secrets] Rotate terminal secrets after operator approval\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        let error = guard_no_conversation_content_inside_tracked_components(document)
+            .expect_err("welded response debris must fail closed");
+        assert!(error.to_string().contains("agent:review"));
+    }
+
+    #[test]
+    fn guard_allows_queue_prompt_examples_inside_component_code_fence() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#document-example] Preserve this example:\n",
+            "  ```markdown\n",
+            "  > **Queue prompt:**\n",
+            "  >\n",
+            "  > example only\n",
+            "  ```\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        guard_no_conversation_content_inside_tracked_components(document).unwrap();
     }
     #[test]
     fn guard_no_conversation_tail_outside_exchange_fails_on_tail_after_session_digest() {

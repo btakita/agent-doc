@@ -4455,6 +4455,7 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "pub fn annotate_struck_free_text_line",
         "fn strip_list_bullet_prefix",
         "pub fn annotate_newly_struck_free_text_heads",
+        "pub fn project_answered_free_text_strike",
         "pub struct QueueConsumptionPlan",
         "pub struct IpcNodeOp",
         "pub struct NextQueueHeadSelection",
@@ -4472,8 +4473,6 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
     let commit_io =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
-    let orchestration_git_tests =
-        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/tests/git.rs")).unwrap();
     let orchestration_preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_maintenance =
@@ -4514,17 +4513,24 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
             && queue_io_consume.contains("cycle_answered_foreign_exchange_prompt"),
         "agent-doc-queue-io queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
     );
+    let controller =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/project_controller.rs"))
+            .unwrap();
+    let session_actor =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-actor-io/src/lib.rs")).unwrap();
+    let binary = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let write_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     assert!(
-        queue_io_consume.contains("pub fn strike_answered_free_text_heads_at_commit_seam(")
-            && queue_io_consume.contains("fn capture_response_body_for_commit(")
-            && queue_io_consume
-                .contains("agent_doc_cycle_state_io::load_projected_captured_response(")
-            && orchestration_git_tests
-                .contains("queue_consume::strike_answered_free_text_heads_at_commit_seam(")
-            && commit_io.contains("queue_consume::strike_answered_free_text_heads_at_commit_seam(")
-            && !commit_io.contains("fn strike_answered_free_text_heads_at_commit_seam(")
-            && !commit_io.contains("fn capture_response_body_for("),
-        "agent-doc-queue-io should own the commit-seam answered free-text queue strike IO graph"
+        controller.contains("fn current_answered_free_text_strike(")
+            && controller.contains("fn ensure_answered_free_text_strike_effect(")
+            && session_actor.contains("pub fn enqueue_detached<")
+            && binary.contains("fn project_answered_free_text_strike(")
+            && binary.contains("actor.enqueue_detached(")
+            && !queue_io_consume.contains("strike_answered_free_text_heads_at_commit_seam")
+            && !commit_io.contains("strike_answered_free_text_heads_at_commit_seam")
+            && !write_runtime.contains("strike_answered_free_text_queue_heads"),
+        "answered free-text striking must project through the controller graph and per-document worker, without write/commit callbacks"
     );
     let orchestration_write_run_entry =
         fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))

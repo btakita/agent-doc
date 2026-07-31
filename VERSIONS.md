@@ -26,6 +26,17 @@ evidence, while the Lazily projection of the durable target, current authority,
 and replica state decides convergence. Proven duplicate terminal debris is
 repaired through that same authority effect; unique trailing text still fails
 closed.
+- **Answered free-text queue heads now strike through a reactive authority
+  projection.** A durable captured response and the current document authority
+  compute one exact target, and a per-document worker applies it without
+  making write or commit callers remember a best-effort cleanup request.
+- **Tracked components reject captured conversation debris.** Editor delivery
+  and commit boundaries now preserve the last valid authority if response text
+  is welded into a review, backlog, queue, or done component.
+- **Dogfood mode is configurable per session document.** Set
+  `agent_doc_dogfood: true` in frontmatter to append a stable, actionable
+  Agent Doc repair prompt to terminal failures such as wedges and projection
+  timeouts; an explicit `false` disables legacy path-inferred dogfooding.
 
 ## 0.35.108
 

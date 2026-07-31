@@ -22,7 +22,6 @@ use agent_doc_git_io::{
         CommitTransactionError, stage_and_commit_exact_paths_once, update_parent_submodule_pointer,
     },
 };
-use agent_doc_queue_io::queue_consume;
 use anyhow::{Context, Result};
 
 #[cfg(any(test, feature = "test-support"))]
@@ -791,6 +790,23 @@ fn commit_current_document_content(file: &Path, source: &str) -> Result<String> 
     }
 }
 
+fn guard_committable_document_content(file: &Path, content: &str, stage: &str) -> Result<()> {
+    if let Some(reason) = agent_doc_element::element::structural_corruption_reason(content) {
+        anyhow::bail!(
+            "commit refused structurally corrupt document {} at {} ({reason})",
+            file.display(),
+            stage,
+        );
+    }
+    agent_doc_template::guard_no_conversation_content_inside_tracked_components(content)
+        .with_context(|| {
+            format!(
+                "commit refused semantically corrupt document {} at {stage}",
+                file.display()
+            )
+        })
+}
+
 /// A CP-owned commit runs in the same process as the authoritative relay. The
 /// `commit_document` RPC handler has already crossed the commit barrier before
 /// entering this scope, so asking the controller socket for the same canonical
@@ -905,8 +921,6 @@ where
             ),
         );
     }
-    queue_consume::strike_answered_free_text_heads_at_commit_seam(file, ports.queue_consume_write);
-
     let timestamp = chrono_timestamp();
     let msg = agent_doc_commit_message_for_file(file, &timestamp);
 
@@ -918,6 +932,7 @@ where
                 file.display()
             )
         })?;
+    guard_committable_document_content(file, &file_content, "initial_authority")?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
     let snapshot_matched_head_before_absorb = snapshot_content
         .as_deref()
@@ -1286,6 +1301,7 @@ where
         &mut snapshot_content,
         &mut file_content,
     )?;
+    guard_committable_document_content(file, &file_content, "pre_stage")?;
 
     let mut snapshot_matches_head = snapshot_content
         .as_deref()
@@ -2092,6 +2108,35 @@ mod controller_commit_scope_tests {
         assert_eq!(
             retained_pending_commit_proof("abc", Some("def"), Some("ghi")),
             None
+        );
+    }
+
+    #[test]
+    fn commit_guard_rejects_response_welded_into_review_component() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [ ] [#rotate-secrets] Rotate secrets",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#audit]\n\n",
+            "Audit complete.\n",
+            "- [ ] [#rotate-secrets] Rotate secrets\n",
+            "<!-- /agent:review -->\n",
+        );
+        let error = guard_committable_document_content(
+            Path::new("/tmp/monster-rod-holders.md"),
+            document,
+            "pre_stage",
+        )
+        .expect_err("semantically corrupt tracked component must not reach git");
+
+        assert!(error.to_string().contains("semantically corrupt"));
+        assert!(
+            format!("{error:#}").contains("agent:review"),
+            "the rejection should name the owning component: {error:#}"
         );
     }
 }

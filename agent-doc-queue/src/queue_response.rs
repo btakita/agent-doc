@@ -549,7 +549,7 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
 pub fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
     let head_clean = strip_priority_markers(head_text);
     let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
-    if head_norm.split(' ').filter(|w| !w.is_empty()).count() < 4 {
+    if head_norm.is_empty() {
         return false;
     }
     let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(baseline, "queue") else {
@@ -868,6 +868,23 @@ mod tests {
             !free_text_head_answered_by_response(unlabeled, "deploy"),
             "an unlabeled blockquote is not enough proof for a short head"
         );
+    }
+
+    #[test]
+    fn short_free_text_head_can_be_proven_by_exact_baseline_node() {
+        let baseline = concat!(
+            "<!-- agent:queue -->\n",
+            "- staging deploy\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            free_text_head_present_in_baseline(baseline, "staging deploy"),
+            "baseline proof is an exact queue-node comparison, so it does not need the prose safety threshold"
+        );
+        assert!(!free_text_head_present_in_baseline(
+            baseline,
+            "production deploy"
+        ));
     }
 
     #[test]

@@ -166,6 +166,39 @@ Affected component: editor IPC / writeback\n\n\
     )
 }
 
+pub fn dogfood_terminal_issue_class(diagnostic: &str) -> &'static str {
+    let normalized = diagnostic.to_ascii_lowercase();
+    if normalized.contains("open_cycle") || normalized.contains("open cycle") {
+        "open_cycle_wedge"
+    } else if normalized.contains("resource temporarily unavailable") {
+        "dependency_unavailable"
+    } else if normalized.contains("timed out") || normalized.contains("timeout") {
+        "terminal_timeout"
+    } else if normalized.contains("interrupted") {
+        "interrupted_closeout"
+    } else if normalized.contains("projection") {
+        "projection_failure"
+    } else {
+        "terminal_failure"
+    }
+}
+
+/// Render the actionable notification emitted when an opted-in dogfood
+/// document's Agent Doc command does not reach a successful terminal boundary.
+///
+/// The key is stable for a document + failure class even when cycle ids,
+/// generations, and timestamps change, so notification surfaces may coalesce
+/// repeats without losing the newest diagnostic.
+pub fn format_dogfood_terminal_issue_prompt(document_id: &str, diagnostic: &str) -> String {
+    let issue_class = dogfood_terminal_issue_class(diagnostic);
+    let issue_key =
+        agent_doc_hash::content_hash(&format!("dogfood-terminal:{document_id}:{issue_class}"));
+    format!(
+        "[dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class={issue_class} issue_key={issue_key}\n\
+         Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy. Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic."
+    )
+}
+
 pub fn is_url(link: &str) -> bool {
     link.starts_with("http://") || link.starts_with("https://")
 }
@@ -403,6 +436,24 @@ mod tests {
         assert!(note.contains("Issue class: `ipc_proof_insufficient`"));
         assert!(!note.contains("```bad"));
         assert!(note.contains("'''bad"));
+    }
+
+    #[test]
+    fn dogfood_terminal_prompt_has_stable_class_key_and_action() {
+        let first = format_dogfood_terminal_issue_prompt(
+            "/repo/tasks/bugs.md",
+            "open_cycle cycle-100 could not finish",
+        );
+        let second = format_dogfood_terminal_issue_prompt(
+            "/repo/tasks/bugs.md",
+            "open cycle cycle-200 is still retained",
+        );
+
+        assert!(first.contains("issue_class=open_cycle_wedge"));
+        assert!(first.contains("Diagnose and fix the underlying Agent Doc defect"));
+        let first_key = first.split("issue_key=").nth(1).unwrap().lines().next();
+        let second_key = second.split("issue_key=").nth(1).unwrap().lines().next();
+        assert_eq!(first_key, second_key);
     }
 
     #[test]

@@ -588,6 +588,18 @@ pub struct Frontmatter {
         rename = "agent_doc_supervisor_auto_install"
     )]
     pub supervisor_auto_install: Option<bool>,
+    /// Document-level dogfood policy. When enabled, unsuccessful Agent Doc
+    /// terminal outcomes surface an actionable product-fix prompt carrying a
+    /// stable issue key. `false` explicitly disables inferred repository
+    /// dogfooding for this document; absence preserves the legacy source/path
+    /// inference for compatibility.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_dogfood",
+        alias = "dogfood_mode"
+    )]
+    pub dogfood_mode: Option<bool>,
     /// Required model tier for this document. When set, preflight emits this as
     /// `required_tier`, which the skill uses as a hard gate: if the running model's
     /// tier is below this value, the skill writes a switch prompt and stops.
@@ -808,6 +820,7 @@ impl Frontmatter {
             || self.queue_active.is_some()
             || self.dispatch.is_some()
             || self.collaboration.is_some()
+            || self.dogfood_mode.is_some()
             || !self.prompt_presets.is_empty()
             || !self.pipeline.is_empty()
     }
@@ -2601,6 +2614,7 @@ mod tests {
             supervisor_auto_recycle: None,
             agent_change_restart: None,
             supervisor_auto_install: None,
+            dogfood_mode: None,
             model_tier: None,
             pending_capture_guard: None,
             pending_done_guard: None,
@@ -3506,5 +3520,18 @@ mod tests {
         let (fm, _) = parse(&result).unwrap();
         assert_eq!(fm.model.as_deref(), Some("gpt-5"));
         assert_eq!(fm.opencode_model.as_deref(), Some("zai/glm-5"));
+    }
+
+    #[test]
+    fn dogfood_mode_round_trips_and_accepts_short_alias() {
+        let canonical = "---\nagent_doc_dogfood: true\n---\n\nBody\n";
+        let (frontmatter, body) = parse(canonical).unwrap();
+        assert_eq!(frontmatter.dogfood_mode, Some(true));
+        let rewritten = write(&frontmatter, body).unwrap();
+        assert!(rewritten.contains("agent_doc_dogfood: true"));
+        assert!(!rewritten.contains("dogfood_mode:"));
+
+        let (aliased, _) = parse("---\ndogfood_mode: false\n---\n").unwrap();
+        assert_eq!(aliased.dogfood_mode, Some(false));
     }
 }

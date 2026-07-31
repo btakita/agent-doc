@@ -27,6 +27,19 @@ use crate::{
 /// wrapper so the original head text stays struck and readable.
 pub const STRUCK_FREE_TEXT_NOTE: &str = "answered this cycle (#ftstrike)";
 
+/// Pure projection of the queue mutation implied by a captured response and an
+/// authoritative markdown frontier.
+///
+/// The controller keeps the response and markdown as independent reactive
+/// inputs.  This value is therefore a derived target, not a request to perform
+/// queue maintenance.  I/O adapters may apply `target_content` through the
+/// document authority and then publish the resulting authority frontier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnsweredFreeTextStrikeProjection {
+    pub node_keys: Vec<String>,
+    pub target_content: String,
+}
+
 pub struct QueueConsumptionPlan {
     pub consumed_text: String,
     pub consumed_texts: Vec<String>,
@@ -987,6 +1000,40 @@ pub fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result
             anyhow::anyhow!("queue consume: failed to apply node-keyed consume: {err}")
         })?;
     Ok(strip_in_progress_marker_from_struck_queue_items(&consumed))
+}
+
+/// Derive the exact answered-free-text queue target for one authoritative
+/// document frontier.
+///
+/// `baseline` fences the projection to heads that existed when the turn began,
+/// so a newly typed operator head cannot be consumed by an older response.
+/// Response-materialization proof remains the caller's responsibility because
+/// it depends on the closeout projection rather than queue syntax.
+pub fn project_answered_free_text_strike(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
+    if response_body.trim().is_empty() {
+        return Ok(None);
+    }
+    let (frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(content)?;
+    if frontmatter.queue_active != Some(true) {
+        return Ok(None);
+    }
+    let node_keys = answered_free_text_head_node_keys(content, response_body, baseline)?;
+    if node_keys.is_empty() {
+        return Ok(None);
+    }
+    let struck = consume_queue_nodes_by_key(content, &node_keys)?;
+    if struck == content {
+        return Ok(None);
+    }
+    let target_content = annotate_newly_struck_free_text_heads(content, &struck)?;
+    Ok(Some(AnsweredFreeTextStrikeProjection {
+        node_keys,
+        target_content,
+    }))
 }
 
 /// Project completion of every live queue prompt matching `done_ids` into the
@@ -2071,6 +2118,56 @@ Old.
         assert_eq!(
             annotate_newly_struck_free_text_heads(after, &annotated).unwrap(),
             annotated
+        );
+    }
+
+    #[test]
+    fn answered_free_text_strike_is_a_pure_authority_projection() {
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: queue-projection\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: staging deploy — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> staging deploy\n\n",
+            "Deployed and verified.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- staging deploy\n",
+            "- do [#production-deploy]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: staging deploy — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> staging deploy\n\n",
+            "Deployed and verified.\n",
+        );
+
+        let projected = project_answered_free_text_strike(document, response, Some(document))
+            .unwrap()
+            .expect("answered free-text head should project a target");
+
+        assert_eq!(projected.node_keys.len(), 1);
+        assert!(
+            projected
+                .target_content
+                .contains("- ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)")
+        );
+        assert!(
+            projected
+                .target_content
+                .contains("- do [#production-deploy]")
+        );
+        assert!(
+            project_answered_free_text_strike(&projected.target_content, response, Some(document))
+                .unwrap()
+                .is_none(),
+            "the projection must disappear once its target is authoritative"
         );
     }
 }

@@ -536,44 +536,7 @@ pub fn strike_answered_free_text_queue_heads(
     Ok(keys.len())
 }
 
-/// Strike answered free-text queue heads at the commit seam.
-///
-/// Sources the answered response from the typed closeout projection first, then
-/// the durable capture ledger as a compatibility fallback, and runs the same
-/// focused free-text strike used by finalize.
-/// Best-effort: a missing capture, inactive queue, or strike error never blocks
-/// the commit.
-pub fn strike_answered_free_text_heads_at_commit_seam(
-    file: &Path,
-    effects: &dyn QueueConsumeWriteEffects,
-) {
-    let Some(response_body) = capture_response_body_for_commit(file) else {
-        return;
-    };
-    if response_body.trim().is_empty() {
-        return;
-    }
-    // The commit seam is already the binary-owned closeout boundary and runs
-    // before staging under the commit lock; use the force-disk strike branch so
-    // recovery commits do not silently leave answered free-text heads live when
-    // no editor listener is attached.
-    match strike_answered_free_text_queue_heads(file, &response_body, true, effects) {
-        Ok(0) => {}
-        Ok(n) => agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "commit_seam_free_text_strike file={} struck={} (#qheadstrike)",
-                file.display(),
-                n
-            ),
-        ),
-        Err(err) => eprintln!(
-            "[commit] warning: commit-seam free-text head strike failed: {err} (non-fatal)"
-        ),
-    }
-}
-
-fn capture_response_body_for_commit(file: &Path) -> Option<String> {
+fn projected_capture_response_body(file: &Path) -> Option<String> {
     let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)
         .ok()
         .flatten()?;
@@ -1093,7 +1056,7 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 current = frontmatter::merge_queue_state(&current, false)?;
             }
 
-            let response_first_line = capture_response_body_for_commit(file)
+            let response_first_line = projected_capture_response_body(file)
                 .and_then(|body| first_nonempty_line(&body).map(str::to_string));
             current = embed_consumed_prompt_in_response(
                 &current,
@@ -1351,7 +1314,7 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     // and the snapshot, so the selective-commit boundary stays consistent) when
     // the prompt is not already present in the exchange. Fail-safe: any locator
     // miss leaves the content unchanged rather than risk corrupting the exchange.
-    let response_first_line = capture_response_body_for_commit(file)
+    let response_first_line = projected_capture_response_body(file)
         .and_then(|body| first_nonempty_line(&body).map(str::to_string));
     current = embed_consumed_prompt_in_response(
         &current,

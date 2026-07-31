@@ -4,7 +4,6 @@ use std::process::Command;
 
 use agent_doc_commit_io::{commit, commit_with_authoritative_compaction};
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
-use agent_doc_queue_io::queue_consume;
 
 #[cfg(test)]
 mod th {
@@ -2296,77 +2295,6 @@ Duplicate replay should stay live.
         assert!(
             !log.contains("commit_already_current file="),
             "guard must fire before the already-current no-op marks the cycle committed:\n{log}"
-        );
-    }
-
-    #[test]
-    fn commit_seam_strikes_answered_free_text_head_from_capture() {
-        // `#qheadstrike` P2: the recovery commit seam must strike an answered
-        // free-text queue head sourced from the durable capture — the gap that
-        // let answered heads re-surface (`#rt83`/`#qflood` churn) after a
-        // recovery-path closeout (`agent-doc commit` / `reset --from-current`).
-        use std::fs;
-        let dir = tempfile::TempDir::new().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-
-        let doc = root.join("session.md");
-        let content = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue: start\n---\n\n",
-            "<!-- agent:queue -->\n",
-            "- fix the parser bug in the lexer\n",
-            "- another unanswered task left alone\n",
-            "<!-- /agent:queue -->\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: parser\n",
-            "> **Queue prompt:** fix the parser bug in the lexer\n\n",
-            "Fixed.\n",
-            "<!-- agent:boundary:head -->\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::checkpoint_document_baseline(
-            &doc,
-            content,
-            agent_doc_ops_log_io::log_op,
-        )
-        .unwrap();
-        // Capture a response that answers the first free-text head (quoted in a
-        // blockquote, as the strike matcher requires).
-        let response =
-            "### Re: parser\n> **Queue prompt:** fix the parser bug in the lexer\n\nFixed.\n";
-        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        assert!(!capture.capture_id.is_empty());
-
-        queue_consume::strike_answered_free_text_heads_at_commit_seam(
-            &doc,
-            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
-        );
-
-        let after = fs::read_to_string(&doc).unwrap();
-        assert!(
-            after.contains("~~fix the parser bug in the lexer~~"),
-            "answered free-text head must be struck at the commit seam:\n{after}"
-        );
-        assert!(
-            after.contains("- another unanswered task left alone")
-                && !after.contains("~~another unanswered task left alone~~"),
-            "an unanswered free-text head must be preserved (not over-struck):\n{after}"
-        );
-        // The snapshot must converge on the struck state too, so the staged
-        // commit captures it.
-        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
-            .unwrap()
-            .unwrap();
-        assert!(
-            snap.contains("~~fix the parser bug in the lexer~~"),
-            "snapshot must also carry the strike:\n{snap}"
-        );
-        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            ops_log.contains("commit_seam_free_text_strike")
-                && ops_log.contains("freetext_head_strike"),
-            "commit seam strike should be observable in ops.log:\n{ops_log}"
         );
     }
 

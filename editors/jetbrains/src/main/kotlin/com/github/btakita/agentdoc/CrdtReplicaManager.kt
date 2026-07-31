@@ -2032,7 +2032,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
             RemotePersistReconciliation.RollbackToBefore -> {
                 log.warn(
-                    "[crdt-replica] remote editor apply did not persist; rolling the exact attempted projection back for $filePath",
+                    "[crdt-replica] remote editor apply did not persist; rolling the exact attempted projection back for $filePath: " +
+                        "before_hash=${contentHash(beforeText)} target_hash=${contentHash(targetText)} " +
+                        "editor_hash=${contentHash(document.text)} disk_hash=${diskAfterSave?.let(::contentHash) ?: "missing"}",
                 )
                 runUndoableRemoteUpdateCommand(document) {
                     applyMinimalDocumentEditUtil(document, targetText, beforeText)
@@ -2047,7 +2049,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val editorText = document.text
                 shadows[filePath] = editorText
                 log.warn(
-                    "[crdt-replica] remote editor persistence diverged from both exact planes; preserving the advanced editor and withholding ACK for $filePath",
+                    "[crdt-replica] remote editor persistence diverged from both exact planes; preserving the advanced editor and withholding ACK for $filePath: " +
+                        "before_hash=${contentHash(beforeText)} target_hash=${contentHash(targetText)} " +
+                        "editor_hash=${contentHash(editorText)} disk_hash=${diskAfterSave?.let(::contentHash) ?: "missing"} " +
+                        "document_unsaved=${FileDocumentManager.getInstance().isDocumentUnsaved(document)} " +
+                        "pending_local=${hasPendingLocal(filePath)}",
                 )
                 RemotePersistOutcome(false, null)
             }
@@ -2375,6 +2381,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return null
         }
         clearRegisterFailure(filePath)
+        if (forwarder.canonicalProjectionRetained) {
+            // Controller state survives an IDEA/plugin restart; this local set
+            // does not. Restore the fail-closed baseline before any whole-editor
+            // synchronization can publish a stale restarted buffer.
+            retainedCanonicalProjectionPaths.add(filePath)
+            log.info(
+                "[crdt-replica] registration retained the controller canonical projection for " +
+                    "${File(filePath).name}; canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
+            )
+        }
         if (retainedResumeState != null) {
             nativeReloadResumeStates.remove(filePath, retainedResumeState)
         }
@@ -2390,8 +2406,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             forwarder.deregister()
             return null
         }
-        if (initialEditorText != null) {
+        if (initialEditorText != null && !forwarder.canonicalProjectionRetained) {
             forwarder.ensureEditorText(initialEditorText)
+        } else if (initialEditorText != null) {
+            log.info(
+                "[crdt-replica] withheld restarted whole-editor publication for " +
+                    "${File(filePath).name}; awaiting canonical bootstrap projection",
+            )
         }
         if (
             expectedEditorTextAtSwap != null &&

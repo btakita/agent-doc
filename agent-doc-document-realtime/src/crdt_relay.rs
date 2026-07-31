@@ -1327,6 +1327,44 @@ impl RelayHub {
         self.bump_delivery_epoch();
     }
 
+    /// Keep an exact canonical projection visibly unsettled across an editor
+    /// replica replacement.
+    ///
+    /// A newly registered member is already bootstrapped from canonical, so it
+    /// does not need another semantic edit. It still needs a hash-qualified
+    /// receipt before a controller-authored write may be treated as visible in
+    /// the restarted editor. Queueing the canonical encoded state is an
+    /// idempotent CRDT update and gives the replacement identity a normal
+    /// delivery token that it can ACK after projecting the bootstrap.
+    pub fn ensure_canonical_projection_receipt(&mut self, client_id: u64) -> Result<bool> {
+        let expected_content_hash = content_hash(&self.canonical.text());
+        let canonical_state = self.canonical.encode_state();
+        let canonical_id = self.canonical_id;
+        let member = self
+            .members
+            .get_mut(&client_id)
+            .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
+        if member
+            .pending
+            .back()
+            .is_some_and(|update| update.expected_content_hash == expected_content_hash)
+        {
+            return Ok(false);
+        }
+        member.generation += 1;
+        let generation = member.generation;
+        member.pending.push_back(PendingReplicaUpdate {
+            patch_id: format!("crdt-bootstrap:{canonical_id}:{client_id}:{generation}"),
+            origin: canonical_id,
+            target: client_id,
+            generation,
+            expected_content_hash,
+            update: canonical_state,
+        });
+        self.bump_delivery_epoch();
+        Ok(true)
+    }
+
     /// Pull pending supervisor-to-editor updates for `client_id`. Updates remain in
     /// the queue until [`Self::ack_delivery`] confirms the editor applied them.
     pub fn pending_updates(&self, client_id: u64) -> Result<Vec<PendingReplicaUpdate>> {
@@ -2441,6 +2479,45 @@ mod tests {
             hub.editor_text_adoption_decision(expanded),
             EditorTextAdoptionDecision::AdoptEditorText,
         );
+    }
+
+    #[test]
+    fn replacement_identity_can_receipt_an_already_bootstrapped_canonical_projection() {
+        let mut hub = RelayHub::from_text(1, "base\n");
+        hub.register(2).unwrap();
+        hub.apply_canonical_replace("base\n", "base\nresponse\n")
+            .unwrap();
+        assert!(!hub.delivery_converged());
+
+        // Simulate an IDE restart: the old per-identity queue disappears, but
+        // the durable controller write still requires visible proof.
+        assert!(hub.deregister(2));
+        hub.register(3).unwrap();
+        assert!(hub.delivery_converged());
+        assert!(hub.ensure_canonical_projection_receipt(3).unwrap());
+        assert!(
+            !hub.ensure_canonical_projection_receipt(3).unwrap(),
+            "repeated registration recovery must not grow the receipt queue",
+        );
+
+        let pending = hub.pending_updates(3).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(pending[0].patch_id.starts_with("crdt-bootstrap:1:3:"));
+        assert_eq!(
+            pending[0].expected_content_hash,
+            content_hash("base\nresponse\n"),
+        );
+        assert!(!hub.delivery_converged());
+        assert!(
+            hub.ack_delivery_with_content_hash(
+                3,
+                &pending[0].patch_id,
+                pending[0].generation,
+                Some(&pending[0].expected_content_hash),
+            )
+            .unwrap(),
+        );
+        assert!(hub.delivery_converged());
     }
 
     #[test]

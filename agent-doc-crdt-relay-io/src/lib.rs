@@ -1518,6 +1518,11 @@ pub struct ReplicaRegistration {
     pub bootstrap: Vec<u8>,
     pub canonical_state_vector: Vec<u8>,
     pub incremental: bool,
+    /// The controller still requires an exact editor-visible receipt for its
+    /// canonical projection. A replacement editor must not publish its stale
+    /// whole buffer over this bootstrap.
+    pub canonical_projection_retained: bool,
+    pub canonical_content_hash: String,
 }
 
 /// Register an editor replica with the document's per-document hub on the live
@@ -1705,11 +1710,23 @@ fn register_replica_for_file_incremental_with_liveness(
         incremental,
         replacement_projection,
         request_authoritative_full_state,
+        canonical_projection_retained,
+        canonical_content_hash,
     ) = with_hub_seeded_from_file(file, |hub| {
+        // Registration/reconnect removes the retiring member and its queue.
+        // Preserve that unsettled visible-write obligation under the new
+        // identity, and force a full canonical bootstrap so a stale retained
+        // native frontier cannot union-merge over it.
+        let canonical_projection_retained = !hub.delivery_converged();
+        let effective_retained_state_vector = if canonical_projection_retained {
+            None
+        } else {
+            retained_state_vector
+        };
         let cold_start_with_retained_frontier =
             cold_start_registration_requires_authoritative_full_state(
                 hub.live_authority_established(),
-                retained_state_vector.is_some(),
+                effective_retained_state_vector.is_some(),
             );
         for retired_client_id in &retired_client_ids {
             hub.deregister(*retired_client_id);
@@ -1726,7 +1743,7 @@ fn register_replica_for_file_incremental_with_liveness(
             hub.register(client_id)?;
         }
         let canonical_state_vector = hub.canonical_state_vector();
-        let (bootstrap, incremental) = match retained_state_vector {
+        let (bootstrap, incremental) = match effective_retained_state_vector {
             Some(state_vector) => match hub.canonical_covers_state_vector(state_vector) {
                 Ok(true) => match hub.canonical_diff(state_vector) {
                     Ok(delta) => (delta, true),
@@ -1769,19 +1786,25 @@ fn register_replica_for_file_incremental_with_liveness(
         };
         if cold_start_with_retained_frontier {
             hub.require_authoritative_full_state(client_id);
-        } else if retained_state_vector.is_none() {
+        } else if effective_retained_state_vector.is_none() {
             // A new editor accepted this controller generation's canonical
             // bootstrap, establishing the live authority lineage.
             hub.establish_live_authority();
         }
+        if canonical_projection_retained {
+            hub.ensure_canonical_projection_receipt(client_id)?;
+        }
         let replacement_projection = (!superseded_client_ids.is_empty())
             .then(|| (hub.canonical_encoded_state(), hub.lineage().to_string()));
+        let canonical_content_hash = agent_doc_hash::content_hash(&hub.canonical_text());
         Ok::<_, anyhow::Error>((
             bootstrap,
             canonical_state_vector,
             incremental,
             replacement_projection,
             hub.awaits_authoritative_full_state(client_id),
+            canonical_projection_retained,
+            canonical_content_hash,
         ))
     })??;
     if let Some((projection, lineage)) = replacement_projection {
@@ -1826,7 +1849,44 @@ fn register_replica_for_file_incremental_with_liveness(
         bootstrap,
         canonical_state_vector,
         incremental,
+        canonical_projection_retained,
+        canonical_content_hash,
     }))
+}
+
+/// Queue an exact-hash canonical projection receipt for an already registered
+/// editor identity.
+///
+/// The controller uses this after consulting the durable retained-write
+/// projection. That durable state can outlive every relay member, so relay
+/// delivery convergence alone cannot reveal the obligation during a later IDE
+/// restart.
+pub fn ensure_canonical_projection_receipt_for_file(
+    file: &Path,
+    identity: &str,
+) -> Result<Option<bool>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let client_id = mint_client_id(identity);
+    let Some(queued) = with_existing_hub(file, |hub| {
+        hub.ensure_canonical_projection_receipt(client_id)
+    })?
+    else {
+        return Ok(None);
+    };
+    let queued = queued?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_canonical_projection_receipt file={} client_id={} queued={}",
+            file.display(),
+            client_id,
+            queued,
+        ),
+    );
+    Ok(Some(queued))
 }
 
 /// Deregister one editor replica from the document's hub on the live IPC path.
@@ -4299,6 +4359,22 @@ mod tests {
         apply_cp_write_for_file(&doc, &original, &updated, "test_incremental_register")
             .unwrap()
             .expect("canonical write should use the live relay");
+        let pull = pull_replica_updates_for_file(&doc, "intellij:incremental-old")
+            .unwrap()
+            .expect("old editor should receive the canonical suffix");
+        for update in pull.updates {
+            assert_eq!(
+                ack_replica_update_for_file_with_content_hash(
+                    &doc,
+                    "intellij:incremental-old",
+                    &update.patch_id,
+                    update.generation,
+                    Some(&update.expected_content_hash),
+                )
+                .unwrap(),
+                Some(true),
+            );
+        }
 
         let registration = register_replica_for_file_incremental(
             &doc,
@@ -4323,6 +4399,67 @@ mod tests {
             resumed.state_vector(),
             registration.canonical_state_vector,
             "the returned delta and frontier must describe the same canonical cut"
+        );
+    }
+
+    #[test]
+    fn replacement_registration_preserves_unsettled_canonical_projection_receipt() {
+        let (_dir, doc) = temp_doc("retained-register.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let original = std::fs::read_to_string(&doc).unwrap();
+        let base_identity = "intellij:retained-register";
+
+        let (old_client_id, original_bootstrap) = register_replica_for_file(&doc, base_identity)
+            .unwrap()
+            .expect("initial editor should receive the full bootstrap");
+        let original_replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            old_client_id,
+            &original_bootstrap,
+        )
+        .unwrap();
+        let updated = format!("{original}\ncontroller response awaiting visibility\n");
+        apply_cp_write_for_file(&doc, &original, &updated, "test_retained_register")
+            .unwrap()
+            .expect("canonical write should use the live relay");
+
+        let replacement_identity = "intellij:retained-register:refresh-1";
+        let registration = register_replica_for_file_incremental(
+            &doc,
+            replacement_identity,
+            Some(&original_replica.state_vector()),
+        )
+        .unwrap()
+        .expect("replacement editor should receive a safe canonical bootstrap");
+        assert!(!registration.incremental);
+        assert!(registration.canonical_projection_retained);
+        let replacement = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            registration.client_id,
+            &registration.bootstrap,
+        )
+        .unwrap();
+        assert_eq!(replacement.text(), updated);
+
+        let pull = pull_replica_updates_for_file(&doc, replacement_identity)
+            .unwrap()
+            .expect("replacement identity should own the visible receipt");
+        assert_eq!(pull.updates.len(), 1);
+        let receipt = &pull.updates[0];
+        assert!(receipt.patch_id.starts_with("crdt-bootstrap:"));
+        assert_eq!(
+            receipt.expected_content_hash,
+            registration.canonical_content_hash
+        );
+        assert_eq!(
+            ack_replica_update_for_file_with_content_hash(
+                &doc,
+                replacement_identity,
+                &receipt.patch_id,
+                receipt.generation,
+                Some(&receipt.expected_content_hash),
+            )
+            .unwrap(),
+            Some(true),
         );
     }
 
@@ -4408,7 +4545,7 @@ mod tests {
     }
 
     #[test]
-    fn replacement_registration_prunes_dead_editor_members_before_delivery_barrier() {
+    fn replacement_registration_prunes_dead_member_and_preserves_delivery_barrier() {
         let (_dir, doc) = temp_doc("dead-editor-member.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
@@ -4446,9 +4583,30 @@ mod tests {
             assert!(!hub.is_registered(stale_id));
             assert!(hub.is_registered(replacement_id));
             assert_eq!(hub.live_count(), 1);
-            assert!(hub.delivery_converged());
+            assert!(!hub.delivery_converged());
+            let pending = hub.pending_updates(replacement_id).unwrap();
+            assert_eq!(pending.len(), 1);
+            assert!(pending[0].patch_id.starts_with("crdt-bootstrap:"));
         })
         .unwrap();
+
+        let pull = pull_replica_updates_for_file(&doc, &replacement_identity)
+            .unwrap()
+            .expect("replacement should receive the retained visible receipt");
+        for update in pull.updates {
+            assert_eq!(
+                ack_replica_update_for_file_with_content_hash(
+                    &doc,
+                    &replacement_identity,
+                    &update.patch_id,
+                    update.generation,
+                    Some(&update.expected_content_hash),
+                )
+                .unwrap(),
+                Some(true),
+            );
+        }
+        with_hub(&doc, |hub| assert!(hub.delivery_converged())).unwrap();
     }
 
     #[test]

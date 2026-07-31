@@ -74,6 +74,8 @@ class CrdtReplicaForwarderTest {
         private val lineage: String? = "lineage-test",
         private val bootstrapKind: ReplicaBootstrapKind = ReplicaBootstrapKind.Full,
         private val canonicalStateVector: ByteArray? = null,
+        private val canonicalProjectionRetained: Boolean = false,
+        private val canonicalContentHash: String? = null,
     ) : ReplicaTransport {
         var registered = false
         var registeredStateVector: ByteArray? = null
@@ -103,6 +105,8 @@ class CrdtReplicaForwarderTest {
                 lineage = lineage,
                 bootstrapKind = bootstrapKind,
                 canonicalStateVector = canonicalStateVector,
+                canonicalProjectionRetained = canonicalProjectionRetained,
+                canonicalContentHash = canonicalContentHash,
             )
         }
 
@@ -150,6 +154,23 @@ class CrdtReplicaForwarderTest {
         assertTrue(transport.registered)
         assertTrue(node.opened)
         assertEquals("BASE", String(node.openedWith!!))
+    }
+
+    @Test
+    fun `register exposes controller retained canonical projection across restart`() {
+        val node = FakeNode()
+        val transport =
+            CapturingTransport(
+                bootstrap = "CANONICAL".toByteArray(),
+                canonicalProjectionRetained = true,
+                canonicalContentHash = "canonical-hash",
+            )
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:restart", node, transport)
+
+        assertTrue(fwd.register())
+        assertTrue(fwd.canonicalProjectionRetained)
+        assertEquals("canonical-hash", fwd.canonicalContentHash)
+        assertEquals("CANONICAL", fwd.replicaText())
     }
 
     @Test

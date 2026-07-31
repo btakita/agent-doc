@@ -6,7 +6,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.35.109
 
-_JetBrains plugin 0.2.331; VS Code extension 0.2.64; Zed extension 0.1.0._
+_JetBrains plugin 0.2.332; VS Code extension 0.2.64; Zed extension 0.1.0._
 
 - **Controller request workers now read the local reactive document projection.**
   Spawned request workers inherit controller identity and the in-process
@@ -33,8 +33,13 @@ closed.
   same projection heals a torn `queue: stop`/live-rows state by deriving
   activation from the remaining queue rather than trusting the stale flag.
 - **Tracked components reject captured conversation debris.** Editor delivery
-  and commit boundaries now preserve the last valid authority if response text
-  is welded into a review, backlog, queue, or done component.
+and commit boundaries now preserve the last valid authority if response text
+is welded into a review, backlog, queue, or done component.
+- **A restarted editor now inherits unsettled canonical projection authority
+from the controller.** Registration forces a full canonical bootstrap while a
+durable write awaits visibility, transfers an exact-hash receipt to the
+replacement replica identity, and withholds stale whole-buffer publication
+until that bootstrap is visible and saved.
 - **Dogfood mode is configurable per session document.** Set
   `agent_doc_dogfood: true` in frontmatter to append a stable, actionable
   Agent Doc repair prompt to terminal failures such as wedges and projection

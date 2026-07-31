@@ -101,6 +101,34 @@ class CrdtReplicaAckFrontierTest {
         )
     }
 
+    @Test
+    fun `restart restores controller retention before whole editor publication`() {
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val manager = Files.readString(managerPath)
+        val registrationBody = manager
+            .substringAfter("private fun forwarderFor(")
+            .substringBefore("private fun refreshReplicaAfterTransportLoss(")
+        val restoreRetention = "retainedCanonicalProjectionPaths.add(filePath)"
+        val guardedPublication =
+            "if (initialEditorText != null && !forwarder.canonicalProjectionRetained)"
+
+        assertTrue(registrationBody.contains("forwarder.canonicalProjectionRetained"))
+        assertTrue(registrationBody.contains(guardedPublication))
+        assertTrue(
+            registrationBody.indexOf(restoreRetention) <
+                registrationBody.indexOf(guardedPublication),
+        )
+        assertFalse(
+            registrationBody
+                .substringAfter(guardedPublication)
+                .substringBefore("} else if (initialEditorText != null)")
+                .contains("retainedCanonicalProjectionPaths.remove(filePath)"),
+        )
+    }
+
     /**
      * #crdtpushdrain: a controller-published frontier is positive evidence of pending
      * work, so it must drain urgently rather than sit behind the speculative no-op

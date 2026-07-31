@@ -74,6 +74,13 @@ class CrdtReplicaForwarder(
     var clientId: Long = 0
         private set
 
+    /** Controller-owned visible receipt obligation learned at registration. */
+    var canonicalProjectionRetained: Boolean = false
+        private set
+
+    var canonicalContentHash: String? = null
+        private set
+
     /**
      * Register this editor as a replica with the CP-owned document model and open the
      * local FFI replica bootstrapped from the canonical state the CP
@@ -100,6 +107,8 @@ class CrdtReplicaForwarder(
             }
             clientId = ack.clientId
             lineage = ack.lineage
+            canonicalProjectionRetained = ack.canonicalProjectionRetained
+            canonicalContentHash = ack.canonicalContentHash
             val incremental = ack.bootstrapKind == ReplicaBootstrapKind.Delta
             if (incremental && (resumeState == null || ack.canonicalStateVector == null)) {
                 log.warn(
@@ -407,6 +416,8 @@ data class ReplicaRegisterAck(
     val lineage: String? = null,
     val bootstrapKind: ReplicaBootstrapKind = ReplicaBootstrapKind.Full,
     val canonicalStateVector: ByteArray? = null,
+    val canonicalProjectionRetained: Boolean = false,
+    val canonicalContentHash: String? = null,
 )
 
 /** One queued CP-to-editor CRDT update owned by this replica. */
@@ -593,6 +604,9 @@ class CpSocketReplicaTransport(
             }
         val canonicalStateVector =
             data.get("canonical_state_vector_b64")?.asString?.let { decodeBase64(it) }
+        val canonicalProjectionRetained =
+            data.get("canonical_projection_retained")?.asBoolean ?: false
+        val canonicalContentHash = data.get("canonical_content_hash")?.asString
         val lineage = data.get("lineage")?.asString
         lastRegisterError = null
         return ReplicaRegisterAck(
@@ -601,6 +615,8 @@ class CpSocketReplicaTransport(
             lineage = lineage,
             bootstrapKind = bootstrapKind,
             canonicalStateVector = canonicalStateVector,
+            canonicalProjectionRetained = canonicalProjectionRetained,
+            canonicalContentHash = canonicalContentHash,
         )
     }
 

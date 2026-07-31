@@ -7046,7 +7046,7 @@ fn handle_crdt_replica_rpc(
     } else {
         None
     };
-    let data = controller_crdt_replica_data(&canonical, method_name, identity, &payload)?;
+    let data = controller_crdt_replica_data(runtime, &canonical, method_name, identity, &payload)?;
     if replica_method_changes_delivery_frontier(method_name)
         && let Some(runtime) = runtime
         && let Err(error) =
@@ -8073,6 +8073,7 @@ fn validate_editor_route_layout_args(args: &[String]) -> Result<Vec<String>> {
 }
 
 fn controller_crdt_replica_data(
+    runtime: Option<&ControllerRuntime>,
     canonical: &Path,
     method_name: &str,
     identity: &str,
@@ -8080,12 +8081,21 @@ fn controller_crdt_replica_data(
 ) -> Result<serde_json::Value> {
     match method_name {
         "replica_register" => {
-            let retained_state_vector = payload
-                .state_vector_b64
-                .as_deref()
-                .map(base64_standard_decode)
-                .transpose()
-                .context("CRDT replica register payload has invalid state_vector_b64")?;
+            let durable_projection_retained = runtime
+                .map(|runtime| retained_write_observation_basis(runtime, canonical))
+                .transpose()?
+                .flatten()
+                .is_some();
+            let retained_state_vector = if durable_projection_retained {
+                None
+            } else {
+                payload
+                    .state_vector_b64
+                    .as_deref()
+                    .map(base64_standard_decode)
+                    .transpose()
+                    .context("CRDT replica register payload has invalid state_vector_b64")?
+            };
             let registration = match payload.editor_pid {
                 Some(editor_pid) => {
                     agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
@@ -8102,16 +8112,30 @@ fn controller_crdt_replica_data(
                 )?,
             };
             match registration {
-                Some(registration) => Ok(serde_json::json!({
-                    "client_id": registration.client_id,
-                    "bootstrap_b64": base64_standard_encode(&registration.bootstrap),
-                    "bootstrap_kind": if registration.incremental { "delta" } else { "full" },
-                    "canonical_state_vector_b64": base64_standard_encode(
-                        &registration.canonical_state_vector
-                    ),
-                    "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
-                        .context("registered replica is missing its canonical lineage")?,
-                })),
+                Some(registration) => {
+                    if durable_projection_retained {
+                        agent_doc_crdt_relay_io::ensure_canonical_projection_receipt_for_file(
+                            canonical, identity,
+                        )?
+                        .context(
+                            "registered replica is missing its retained canonical receipt queue",
+                        )?;
+                    }
+                    let canonical_projection_retained =
+                        durable_projection_retained || registration.canonical_projection_retained;
+                    Ok(serde_json::json!({
+                        "client_id": registration.client_id,
+                        "bootstrap_b64": base64_standard_encode(&registration.bootstrap),
+                        "bootstrap_kind": if registration.incremental { "delta" } else { "full" },
+                        "canonical_state_vector_b64": base64_standard_encode(
+                            &registration.canonical_state_vector
+                        ),
+                        "canonical_projection_retained": canonical_projection_retained,
+                        "canonical_content_hash": registration.canonical_content_hash,
+                        "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
+                            .context("registered replica is missing its canonical lineage")?,
+                    }))
+                }
                 None => Ok(crdt_replica_refused_data("detached_authority")),
             }
         }

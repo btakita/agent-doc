@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 8940f770-c10a-481d-a5a2-48a70411b541
+resume: b48b4ace-eede-492b-8590-27351fce27d9
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -151,17 +151,71 @@ Spec updated: `specs/ast-edits.md` gains an "Indexed executors" section with the
 CI run `30589897064` is in progress; the prior run on `784a6cf` was green. Local verification is the evidence above.
 
 Remaining in the queue: `#wsdq` release + publish + install, and `#jzs7` extract-method.
-<!-- agent:boundary:38054282 -->
+
+### Re: do [#narrowidentifierkind] — opus-5
+
+Landed. tsift `e22c34a`, gitlink `c806e3928`, pushed. `make check` exit 0, 1654 tests, clippy clean. CI on the previous commit came back green; this one is queued.
+
+The diagnosis I filed this under was half wrong, and the correction is the useful part. I wrote that it "needs per-occurrence scope resolution" and pointed at phase 2's graph scoping. Phase 2 resolves *which files* a rename touches — it has nothing to say about which occurrences inside one file. What this actually needed was the resolved symbol's **kind**, which the planner already had and was discarding before it ever reached the occurrence walk. No new resolution machinery, just stopping throwing away what was in hand.
+
+A Rust function rename now skips `struct S { count: usize }`, `S { count: 1 }`, and `x.count` while keeping `x.count()`. A GDScript function rename skips `var count` and parameter bindings; a variable rename skips `func count`.
+
+    pub struct Meter { pub count: usize }      <- untouched
+    pub fn tally() -> usize { 3 }              <- renamed
+    impl Meter {
+        pub fn tally(&self) -> usize { self.count }   <- decl renamed, field read untouched
+    }
+    pub fn total(m: &Meter) -> usize { m.tally() + m.count + tally() }
+                                       ^^^^^^^^^   ^^^^^^^^^
+                                       method call  field read
+
+**The part I did not expect, and would have shipped wrong if I had trusted the green suite.** I ran the installed binary on a GDScript fixture and read the output instead of only the test results. Narrowing alone produced this:
+
+    func tally():
+        var count = 1     <- declaration keeps the old name
+        return tally      <- its read got the new one
+
+That is incoherent in a way neither the old behaviour (rename both) nor a perfect fix (rename neither) is — the local now reads the function. The tests were green because the fixture had no such read. So the narrowing gained a refusal: when a *dropped* declaration shadows the target and an unattributable reference to it survives, the rename refuses and names the shadow's line rather than emitting that file. A callee is never ambiguous — `count()` is the function whatever is in scope — so a shadow that is only ever called still renames cleanly. Live:
+
+    shadow.gd  →  unsupported | rename_symbol refuses "count": a same-named
+                  declaration on line 2 shadows it, and a bare reference cannot
+                  say which one it belongs to        (file unchanged)
+    clean.gd   →  func tally():  /  var count = 1  /  return tally()
+
+Rust needs none of that: a field and a function are reached through different syntax, so no reference between them is ambiguous.
+
+**Two limits held deliberately.**
+
+Only positions the grammar makes unambiguous get dropped. Under-renaming is the worse failure — it leaves a caller pointing at a name that no longer exists *and reports success*, which is exactly what the cross-file phase existed to stop.
+
+An unresolved or unrecognized symbol kind narrows nothing. A capture name added to `Lang::symbol_query` without a decision about what it is falls through to permissive, so a new symbol kind can never silently start dropping occurrences.
+
+And one limitation is now pinned rather than folklore: Rust macro bodies are exempt by construction. `m.count` inside `format!` is a bare `identifier` with no `field_expression` around it, because tree-sitter parses macro arguments as an opaque `token_tree` — the same opacity that lets the walk reach real call sites inside `assert_eq!`. It is still renamed, and there is a test saying so.
+
+Mutation-checked in both directions, since a narrowing test can pass by narrowing too much just as easily as too little:
+
+| mutation | reddens |
+|---|---|
+| narrowing disabled entirely | 6 unit rows + the conformance table |
+| Rust accepts `field_identifier` unconditionally | 3 unit rows + the table |
+| Rust drops `field_identifier` entirely (method calls lost) | the method-call row |
+| GDScript accepts `name` for any declaration parent | 2 unit rows + the table |
+| shadow refusal removed | both shadow rows |
+| a callee counted as ambiguous (over-refusal) | the clean-shadow row |
+
+**A process note, since it cost real time.** I clobbered the 28-row structural fixture table with a scripted string splice whose anchor (`executor: ...::Rust, alias: "rust"`) appears in *two* tables, and the edit silently deleted everything between them. It compiled far enough to look like an unrelated error. Recovered by extracting the region from `HEAD` and re-applying the intended change against a unique anchor. This is the "use the AST, not text matching, for source edits" rule earning its keep on a repo whose own tool exists to do exactly that.
+
+Follow-up filed at the top of the backlog: the JS-like family has the same shape and is genuinely harder, because `{ foo }` shorthand is both a key and a read — no position rule can be right there, so it probably wants the shadow refusal rather than narrowing.
+<!-- agent:boundary:45d8fb05 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#narrowidentifierkind]
+- do [#applysamesymbol]
+- ~~do [#narrowidentifierkind]~~
 - ⏭️ do [#wsdq]
 - 🚧 do [#jzs7]
-- ~~do [#tsrenameast3]~~
-- ~~do [#tsrenameast4]~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -170,7 +224,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#narrowidentifierkind] Narrow identifier-kind sets that are coarser than binding resolution: Rust's set includes field_identifier (renaming a fn renames an identically-named struct field) and GDScript's includes name (renaming a func renames an identically-named local var). Both match the pre-AST scan's behaviour, so neither is a new defect, but both are renames the graph could disambiguate. Needs per-occurrence scope resolution, not a table change. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
+- [ ] [#applysamesymbol] Apply the same symbol-kind narrowing to the JS-like family: property_identifier covers an object-literal key, a class method declaration, and a member call, so renaming a top-level function still rewrites { foo: 1 }. Harder than Rust/GDScript because shorthand { foo } is genuinely undecidable — it is both a key and a read, and either choice breaks one of them, so it likely needs the shadow refusal rather than a position rule. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
 - [ ] [#wsdq] release + publish + install
 - [ ] 🚧 [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->

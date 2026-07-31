@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -59,12 +59,12 @@ Dogfood mode is now document-configurable with `agent_doc_dogfood: true` (and al
 Verification is green: `make check` passed all 8,453 tests, release synchronization, static checks, and every TLA+ model. The focused tests cover the Equity Funding Source short-head case, capture-before-authority ordering, corruption rejection, and dogfood classification. Agent Doc commit: `3d8a83be6`; superproject pointer commit: `cb48b93e8`. The latest prior CI run was successful (`30580926037`), so I did not wait for a new run.
 
 I did not install or recycle processes: the retained `tsift.md` editor-delivery capture explicitly forbids install/recycle until its owner reaches a terminal boundary. I queued the install plus live Equity Funding Source, Monster Rod Holders, Compact Exchange, and editor/tmux verification behind that exact dependency rather than disturbing the durable capture.
-<!-- agent:boundary:4940c79d -->
+<!-- agent:boundary:10935298 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors.
+- ~~equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors.~~ — auto-struck: answered this cycle (#ftstrike)
 - Idea is periodically non-responsive. Please fix thrashing in the plugin UI process. Be more efficient with calculation and move CPU heavy/bound tasks into another thread. Ensure plugin parity.
 - Run Agent Doc takes several seconds to complete. Editor -> Tmux Pane autosync performance has improved but is still slow at times. Can we have authority reactives ready for all open editor tabs...even tabs that are not currently active? Please improve performance to all issues.
 - Abstraction names should be descriptive instead of using project names. Please audit all abstraction names, particularly test names.

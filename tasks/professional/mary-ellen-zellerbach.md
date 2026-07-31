@@ -77,7 +77,71 @@ Done — superproject `c995d3a`.
 Before committing I diffed `HEAD:tasks/professional/mary-elle-zellerbach.md` against the current `mary-ellen-zellerbach.md`: the old path's content is entirely superseded, with the only differences being the scrambled exchange ordering I already repaired and the turns that landed after the rename. Nothing unique was lost.
 
 `tasks/professional/` is now clean of the old path — gone from both the index and HEAD, with only `mary-ellen-zellerbach.md` remaining on disk.
-<!-- agent:boundary:65438f6f -->
+
+### Re: Ehsin Naeem contact + reference email to Mary Ellen — opus-5
+
+**Contact created** — `mail/contacts/ehsin-naeem/` + `[contacts.ehsin-naeem]` in `.corky.toml`, slug-normalized the same way as the last one. I filled in what the repo already knows: Apollo Solutions is the contracting counterparty, Acadian Financial Services the end client, and the open written-confirmation items from `tasks/recruit/acadian/recruiter-questions-draft.md`. Committed as `a00a5b8` in `mail`, gitlink `f2e26a3`.
+
+### Should you apologize? No.
+
+Nothing happened that warrants one. You gave a recruiter your references; he contacted them. That is the process working, not a breach of it. Three reasons the apology actively hurts you:
+
+1. **It invents a transgression.** Mary Ellen has no reason to think the sequencing was wrong until your email tells her it was. An apology is the first thing that makes it look like a problem.
+2. **It's the wrong posture for an ask.** You're requesting a favor after two and a half years of silence. Opening apologetic and closing with a request reads as smaller than you are — and she knew you as the contractor who caught MSCI's errors on live client reports.
+3. **You don't actually know it happened to her.** Your draft says your *other* reference heard from Ehsin. Apologizing to Mary Ellen for something that may not have reached her yet is confusing.
+
+What the situation does call for is a **heads-up**, which is a different thing: give her the context so that if Ehsin's email is already sitting in her inbox, it makes sense. Courteous, not contrite.
+
+### The bigger gap in your draft
+
+It never asks. "I thought of you" implies the request without making it, which leaves her to infer what she's agreeing to. A reference request needs four things your draft is missing: the explicit ask, what it will cost her (a short call or a few emailed questions), when, and an easy way to say no.
+
+I also added a bridge for the gap. Your last message to her, Oct 2023, was itself a reference request that went unanswered when the project went on hold — so this isn't cold, it's a continuation. Worth naming.
+
+### Draft
+
+Committed at `mail/drafts/2026-07-31-mary-ellen-zellerbach-reference-request.md`, in your voice per `mail/voice.md` (`Hi`, contractions, `&`, no "Best,"). To `MEMZ@whitneylake.net` — the address she actually writes from — cc'ing the Martin address so it lands either way.
+
+> **A reference request — & hello after too long**
+>
+> Hi Mary Ellen,
+>
+> I hope you & your family are doing well. It's been a while since our work together wrapped up, & I've thought about it often — the stewardship metrics work was some of the most interesting analysis I've done.
+>
+> I'm reaching out with a favor. I've received a contractor offer from Acadian Financial Services, through Apollo Solutions, & they've asked for references. The work is close to what we did at Martin — data-heavy financial analysis & the tooling around it — so you were the first person I thought of.
+>
+> Would you be willing to speak to my work? It would likely be a short call or a few questions by email, sometime in the next week or two.
+>
+> One heads-up: Ehsin Naeem, the recruiter at Apollo, has been moving quickly & has already contacted another of my references. If you've already heard from him, that's why — I'd wanted to reach you first & give you the context myself.
+>
+> No pressure at all if the timing doesn't work. Either way, it's good to be back in touch.
+>
+> --
+> Thank you,
+> Brian Takita
+
+The heads-up paragraph carries the same information your apology did, minus the concession. If you want it warmer, "I'd wanted to reach you first" can become "I'd hoped to reach you first" — that's as close to an apology as this needs to get.
+
+Not sent — draft only, per your standing rule. Say the word and I'll push it to Gmail Drafts.
+
+One unrelated flag from preflight: `stale_install` on agent-doc — the installed binary and cdylib predate local source edits in `src/agent-doc`. That's another session's work, so I left it; `make install` there when convenient.
+Please create a contact for ehsin-naeem: ehsin.naeem@apollo-solutions.com
+
+
+```
+Hi Mary Ellen,
+
+I hope everything is well with you and your family.
+
+I'm reaching out because I received an offer from Acadian Financial Services for a contractor position through Apollo Solutions. They asked for a reference and since my work with Martin Investments aligned, I thought of you.
+
+My other reference let me know that Ehsin reached out to him...so I apologize if the email came from him before I had a chance to reach out to you first.
+
+--
+Thank you,
+Brian Takita
+```
+<!-- agent:boundary:9f0fd1e6 -->
 <!-- /agent:exchange -->
 
 ## Queue

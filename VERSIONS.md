@@ -50,6 +50,10 @@ until that bootstrap is visible and saved.
   terminator as additional debris; repair converges that cut through document
   authority before backlog or closeout parsing, while novel trailing text
   still fails closed.
+- **One-line component patches preserve their closing marker boundary.** CLI
+  arguments, stdin, hook output, and append/prepend composition now acquire a
+  trailing newline when non-empty, so a replacement cannot weld prose to the
+  binary-owned component close marker.
 - **Dogfood mode is configurable per session document.** Set
   `agent_doc_dogfood: true` in frontmatter to append a stable, actionable
   Agent Doc repair prompt to terminal failures such as wedges and projection

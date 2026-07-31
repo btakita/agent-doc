@@ -12,6 +12,8 @@
 //! - `post_patch` shell hook: fire-and-forget after write, receives same env vars. Non-zero exit is logged as a warning only.
 //! - After patching, the document is written through document authority and the typed ledger baseline is checkpointed.
 //! - `run` reads replacement content from the `content` argument or stdin when `None`.
+//! - A non-empty replacement is newline-terminated before the component close marker, including
+//!   after append/prepend composition and hook transformation.
 //!
 //! ## Agentic Contracts
 //! - `run(file, component_name, content)` — returns `Err` if the file is missing, the component is not found, or any hook fails.
@@ -29,6 +31,7 @@
 //! - append_mode_requires_explicit_override: append-mode component + bare patch → old content replaced
 //! - explicit_append_mode: `--mode append` + second patch → both entries present in document
 //! - explicit_prepend_mode: `--mode prepend` + new entry → new entry appears before existing
+//! - replacement_without_trailing_newline: a one-line CLI argument remains structurally valid
 //! - trim_entries_limits: 5-line content trimmed to 3 → oldest 2 lines removed
 //! - pre_patch_hook_transforms: `pre_patch = "tr a-z A-Z"` → content uppercased before write
 //! - post_patch_hook_runs: `post_patch = "touch <file>"` → marker file created after write
@@ -174,6 +177,7 @@ pub fn run(
             }
         }
     };
+    let final_content = terminate_component_content(final_content);
 
     let new_doc = comp.replace_content(&doc, &final_content);
 
@@ -199,6 +203,13 @@ pub fn run(
         mode_name
     );
     Ok(())
+}
+
+fn terminate_component_content(mut content: String) -> String {
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content
 }
 
 /// Run a pre_patch hook. Passes content on stdin, returns transformed content from stdout.
@@ -311,6 +322,31 @@ mod tests {
         assert!(result.contains("<!-- agent:status -->"));
         assert!(result.contains("<!-- /agent:status -->"));
         assert!(result.contains("Footer"));
+    }
+
+    #[test]
+    fn replacement_without_trailing_newline_preserves_component_structure() {
+        let dir = setup_project();
+        let doc = write_doc(
+            dir.path(),
+            "test.md",
+            "<!-- agent:queue -->\n- do truncated\n<!-- /agent:queue -->\n",
+        );
+
+        run(
+            &doc,
+            "queue",
+            PatchMode::Replace,
+            Some("- do complete prompt"),
+        )
+        .unwrap();
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("- do complete prompt\n<!-- /agent:queue -->"));
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&result),
+            None
+        );
     }
 
     #[test]

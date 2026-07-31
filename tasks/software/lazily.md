@@ -255,14 +255,56 @@ Both are agent-doc defects rather than lazily defects, so I have not filed them 
 **Not looping.** `queue_continuation_required` is `false` even though 18 heads remain and the queue is active, and the head `#lazilycppfmt` carries 🚧. That is the binary's authoritative in-session-drainability signal saying this session should not take the next head, so I am reporting and stopping rather than re-dispatching. Remaining heads, in order: `#lazilycppfmt`, `#lazilydartzig`, `#lzcireachvaranchor`, `#lzmsgpackparity`, `#lzreadmelinkrot`, `#lzvacuousrun`, `#lzscenariobodyskip`, `#lzspecscenarioids`, `#lzassertionblockschema`, `#lzdependencyavailability`, then eight pinned items.
 
 One standing note: preflight still reports the `stale_install` warning — `~/.cargo/bin/agent-doc` and the cdylib predate the latest local agent-doc source edit, so live tmux/JetBrains sessions may be running pre-edit code at an unchanged version number. That is an agent-doc-side `make install`, not a lazily change, and I have left it alone since this document does not own that tree.
-<!-- agent:boundary:9cec71b7 -->
+
+### Re: do [#lazilycppfmt] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lazilycppfmt]
+
+
+Done. lazily-cpp has a formatting gate that can fail, which required performing the reformat it had never performed.
+
+**Three independent reasons the old target proved nothing.** `make fmt` was `clang-format -i … || true`:
+
+1. `-i` **rewrites** the tree it is judging, then exits 0 whatever it found.
+2. `|| true` swallowed failure even from a formatter that errored outright.
+3. There was **no `.clang-format` in the repo at all**, so it enforced whatever LLVM defaults the local binary happened to carry — a style that moves between major versions.
+
+The third is the one I did not expect going in, and it is the worst of them: without a config there was no style to enforce, only a moving target.
+
+**Why this could not be a one-line flip.** Under a pinned clang-format, **93 of 105** sources were unformatted. I grid-searched configs to see whether some setting made the existing tree clean — column limit 80/100/120, pointer alignment left/right, short-if on/off — and the best case still left ~11k changed lines against ~15k for bare LLVM defaults. Nothing came near clean, because the tree was hand-formatted, not tool-formatted. There was no config that avoided the reformat; there was only a choice of which reformat.
+
+**What landed:**
+
+- **`.clang-format` checked in** — LLVM plus `ColumnLimit: 100`, `PointerAlignment: Left`, `AllowShortIfStatementsOnASingleLine: WithoutElse`. That is the house style the existing code was already reaching for (`auto* channel`, one-line early returns, lines past 80). It pins *what* the style is.
+- **`CLANG_FORMAT_VERSION = 18.1.8`**, fetched via `uvx clang-format@<version>`. That pins the *implementation*. These drift separately — pinning the style alone still lets a new clang-format reinterpret it, and pinning the version alone still leaves the style undefined. It also removes the system `clang-format` from the equation, so a laptop and a runner return the same verdict. My own machine has 22.1.8; the gate does not care.
+- **`make fmt` is `--dry-run -Werror` and is in `check`.** Missing `uv` is a hard error with an explanatory message, not a skip — a gate that quietly does nothing when a tool is absent is the same defect in a smaller coat.
+- **`make fmt-fix`** is the repairing form and is not in `check`.
+- **CI runs `make fmt`**, so `check-ci-reach` reaches it rather than taking my word.
+- **106 files reformatted**, mechanically.
+
+**Mutation-checked in three directions**, since the whole point of this item is that the old target could not fail:
+
+| mutation | expected | observed |
+| --- | --- | --- |
+| malformed declaration in `types.hpp` | `make fmt` reddens | exit 2, violations listed |
+| delete the CI step | `check-ci-reach` reddens | `MISSING fmt` |
+| `make fmt-fix` then re-gate | repairs, goes green | exit 0 |
+
+The middle one matters most: without it the CI step is a claim, not a coupling.
+
+**Behaviour-neutral.** `make check` exit 0 with the gate wired in, 52/52 tests pass after the reformat, interop peer self-check OK. Pushed as `16f87d2`; CI is queued at closeout, not yet reported.
+
+One honest caveat on the reformat: 106 files in one commit is the maximally conflict-prone change shape, and it does rewrite `git blame` for this tree. It is unavoidable here — the gate cannot be true until the tree matches some config — but it is worth knowing that this commit is the boundary, and that a `git blame --ignore-rev 16f87d2` (or a `.git-blame-ignore-revs` entry) is the way to read through it.
+<!-- agent:boundary:53540a2d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lazilycppfmt]
-- do [#lazilydartzig]
+- ~~⏭️ do [#lazilycppfmt]~~
+- 🚧 do [#lazilydartzig]
 - ~~do [#lzrstornfanout]~~
 - ~~do [#lzruffautofixvacuity]~~
 - do [#lzcireachvaranchor]
@@ -286,8 +328,7 @@ One standing note: preflight still reports the `stale_install` warning — `~/.c
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lazilycppfmt] lazily-cpp make fmt runs clang-format -i over include, src and tests, and ends in an unconditional true, so it rewrites the tree and cannot fail even if clang-format errors. It is not in check today, so it is not yet a vacuous gate, but it is exactly the shape #lzruffautofixvacuity is about and one line away from becoming one. It cannot simply be flipped to a check: under clang-format 22 the tree is NOT clean (src/ffi.cpp among others), so this needs the reformat, a pinned clang-format version so the gate does not swing with whatever the developer has installed, a non-repairing fmt plus an explicit fmt-fix, and a CI step so check-ci-reach reaches it.
-- [ ] [#lazilydartzig] lazily-js, lazily-kt, lazily-dart, lazily-zig and lazily-react gate NO formatter at all: no formatting step in the check closure and none in CI. Found while auditing every binding for the #lzruffautofixvacuity shape. This is the absence of a gate rather than a gate that cannot fail, so it is a smaller risk, but it means five of the nine bindings have no mechanical formatting floor and drift is invisible until someone reads a diff. Decide per binding whether the floor is worth it (prettier --check, ktlint, dart format --set-exit-if-changed, zig fmt --check) and wire whichever are adopted into both check and CI so check-ci-reach can see them.
+- [ ] 🚧 [#lazilydartzig] lazily-js, lazily-kt, lazily-dart, lazily-zig and lazily-react gate NO formatter at all: no formatting step in the check closure and none in CI. Found while auditing every binding for the #lzruffautofixvacuity shape. This is the absence of a gate rather than a gate that cannot fail, so it is a smaller risk, but it means five of the nine bindings have no mechanical formatting floor and drift is invisible until someone reads a diff. Decide per binding whether the floor is worth it (prettier --check, ktlint, dart format --set-exit-if-changed, zig fmt --check) and wire whichever are adopted into both check and CI so check-ci-reach can see them.
 - [ ] [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
 - [ ] [#lzmsgpackparity] msgpack is a spec MUST for frame codecs and is implemented in only two of nine bindings. protocol.md marks it MUST as the negotiated cross-language binary default on any binary boundary between differing languages, and further states that every fixture's frames MUST round-trip through both json and msgpack for all three IpcMessage variants. Actual state, verified by reading every binding: lazily-rs and lazily-cpp implement it (rs across ipc.rs, ffi.rs, reliable_sync.rs; cpp has include/lazily/codec.hpp and msgpack.hpp). The other seven - py, go, kt, js, cs, zig, dart - mention msgpack in exactly one place each, their interop-peer handshake, where they declare it as an explicit carve_out. That is honest and fails closed, and is the codec-level equivalent of KNOWN_UNCOVERED, so this is a declared gap rather than a hidden one. The problem is that it is invisible where every other parity fact lives: coverage.json has no codec row at all, so the feature matrix cannot show that a MUST-level codec is carved out by seven bindings, and the conformance ladder cannot see it either because all four rungs verify fixture CONTENT replay, not codec round-tripping. Add a codec row per flavor to coverage.json, then add a round-trip conformance obligation so the json/msgpack requirement is actually tested rather than asserted in prose.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.

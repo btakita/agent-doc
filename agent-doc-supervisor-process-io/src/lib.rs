@@ -17,9 +17,13 @@ use agent_doc_turn_executor::codex_launch::{
 };
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
+
+const DEFAULT_SUPERVISOR_STDERR_LOG: &str = ".agent-doc/logs/supervisor-stderr.log";
+const FALLBACK_SUPERVISOR_LOG_DIR: &str = "agent-doc/supervisor-logs";
 
 /// Log callbacks supplied by the concrete supervisor start host.
 pub trait SupervisorLaunchLog {
@@ -53,8 +57,144 @@ pub fn supervisor_stderr_redirect_needed(harness: &HarnessConfig, route_owned: b
     route_owned && harness.is_tui_harness()
 }
 
-pub fn supervisor_stderr_redirect_path(project_root: &Path) -> PathBuf {
-    agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(project_root)
+#[derive(Debug)]
+pub struct SupervisorStderrLog {
+    file: std::fs::File,
+    path: PathBuf,
+    fallback_from: Option<PathBuf>,
+}
+
+impl SupervisorStderrLog {
+    pub fn file(&self) -> &std::fs::File {
+        &self.file
+    }
+
+    pub fn into_file(self) -> std::fs::File {
+        self.file
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn fallback_from(&self) -> Option<&Path> {
+        self.fallback_from.as_deref()
+    }
+}
+
+fn configured_supervisor_stderr_log(project_root: &Path) -> (Option<String>, Option<String>) {
+    let config_path = project_root.join(".agent-doc").join("config.toml");
+    if !config_path.exists() {
+        return (None, None);
+    }
+    let content = match std::fs::read_to_string(&config_path) {
+        Ok(content) => content,
+        Err(err) => {
+            return (
+                None,
+                Some(format!(
+                    "failed to read supervisor stderr configuration {}: {err}",
+                    config_path.display()
+                )),
+            );
+        }
+    };
+    match agent_doc_frontmatter::project_config::parse_project_toml(&content) {
+        Ok(config) => (config.agent_doc_supervisor_stderr_log, None),
+        Err(err) => (
+            None,
+            Some(format!(
+                "failed to parse supervisor stderr configuration {}: {err}",
+                config_path.display()
+            )),
+        ),
+    }
+}
+
+fn resolve_supervisor_stderr_log_path(project_root: &Path, configured: Option<&str>) -> PathBuf {
+    let configured = configured.map(str::trim).filter(|path| !path.is_empty());
+    let path = configured
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_SUPERVISOR_STDERR_LOG));
+    if path.is_absolute() {
+        path
+    } else {
+        project_root.join(path)
+    }
+}
+
+pub fn supervisor_stderr_log_path(project_root: &Path) -> Result<PathBuf> {
+    let (configured, warning) = configured_supervisor_stderr_log(project_root);
+    if let Some(warning) = warning {
+        anyhow::bail!(warning);
+    }
+    Ok(resolve_supervisor_stderr_log_path(
+        project_root,
+        configured.as_deref(),
+    ))
+}
+
+pub fn supervisor_stderr_fallback_path(project_root: &Path) -> PathBuf {
+    let stable_root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    let hash = agent_doc_hash::path_string_hash(&stable_root.to_string_lossy());
+    std::env::temp_dir()
+        .join(FALLBACK_SUPERVISOR_LOG_DIR)
+        .join(&hash[..16])
+        .join("supervisor-stderr.log")
+}
+
+fn open_append_log(path: &Path) -> Result<std::fs::File> {
+    let parent = path
+        .parent()
+        .context("supervisor stderr path must include a parent directory")?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create {}", parent.display()))?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))
+}
+
+pub fn open_supervisor_stderr_log(project_root: &Path) -> Result<SupervisorStderrLog> {
+    let (configured, config_warning) = configured_supervisor_stderr_log(project_root);
+    let primary_path = resolve_supervisor_stderr_log_path(project_root, configured.as_deref());
+    let (mut file, path, fallback_from, primary_warning) = match open_append_log(&primary_path) {
+        Ok(file) => (file, primary_path, None, None),
+        Err(primary_error) => {
+            let fallback_path = supervisor_stderr_fallback_path(project_root);
+            let file = open_append_log(&fallback_path).with_context(|| {
+                format!(
+                    "primary supervisor stderr log {} was unavailable ({primary_error:#}); fallback {} also failed",
+                    primary_path.display(),
+                    fallback_path.display()
+                )
+            })?;
+            (
+                file,
+                fallback_path,
+                Some(primary_path.clone()),
+                Some(format!(
+                    "primary supervisor stderr log {} was unavailable: {primary_error:#}; using deterministic fallback",
+                    primary_path.display()
+                )),
+            )
+        }
+    };
+    for warning in [config_warning.as_deref(), primary_warning.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        writeln!(file, "[start] warning: {warning}")
+            .with_context(|| format!("failed to write startup warning to {}", path.display()))?;
+    }
+    Ok(SupervisorStderrLog {
+        file,
+        path,
+        fallback_from,
+    })
 }
 
 #[cfg(unix)]
@@ -69,10 +209,35 @@ impl SupervisorStderrRedirect {
         route_owned: bool,
         log: &mut dyn SupervisorLaunchLog,
     ) -> Self {
+        let stderr_log = match open_supervisor_stderr_log(project_root) {
+            Ok(stderr_log) => stderr_log,
+            Err(err) => {
+                log.log_event(&format!(
+                    "supervisor_stderr_log_open_failed harness={} error={:?}",
+                    harness.binary,
+                    err.to_string()
+                ));
+                eprintln!(
+                    "[start] warning: could not open supervisor stderr log for {}: {err:#}",
+                    harness.binary
+                );
+                return Self::inactive();
+            }
+        };
         if !supervisor_stderr_redirect_needed(harness, route_owned) {
+            let fallback = stderr_log
+                .fallback_from()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "none".to_string());
+            log.log_event(&format!(
+                "supervisor_stderr_log_ready harness={} target={} fallback_from={}",
+                harness.binary,
+                stderr_log.path().display(),
+                fallback
+            ));
             return Self::inactive();
         }
-        match Self::start(project_root, harness, log) {
+        match Self::start_opened(stderr_log, harness, log) {
             Ok(guard) => guard,
             Err(err) => {
                 log.log_event(&format!(
@@ -94,32 +259,35 @@ impl SupervisorStderrRedirect {
         harness: &HarnessConfig,
         log: &mut dyn SupervisorLaunchLog,
     ) -> Result<Self> {
-        let stderr_path = supervisor_stderr_redirect_path(project_root);
-        let logs_dir = stderr_path
-            .parent()
-            .context("supervisor stderr path must include logs directory")?;
-        std::fs::create_dir_all(logs_dir)
-            .with_context(|| format!("failed to create {}", logs_dir.display()))?;
-        let log_file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&stderr_path)
-            .with_context(|| format!("failed to open {}", stderr_path.display()))?;
+        let stderr_log = open_supervisor_stderr_log(project_root)?;
+        Self::start_opened(stderr_log, harness, log)
+    }
+
+    fn start_opened(
+        stderr_log: SupervisorStderrLog,
+        harness: &HarnessConfig,
+        log: &mut dyn SupervisorLaunchLog,
+    ) -> Result<Self> {
         let saved_fd = agent_doc_supervisor_process::pty::dup_cloexec(libc::STDERR_FILENO)
             .map_err(|e| anyhow::anyhow!("dup(stderr) failed: {e}"))?;
         let saved_stderr = unsafe { OwnedFd::from_raw_fd(saved_fd) };
-        let redirected = unsafe { libc::dup2(log_file.as_raw_fd(), libc::STDERR_FILENO) };
+        let redirected = unsafe { libc::dup2(stderr_log.file().as_raw_fd(), libc::STDERR_FILENO) };
         if redirected < 0 {
             anyhow::bail!("dup2(stderr) failed: {}", std::io::Error::last_os_error());
         }
+        let fallback = stderr_log
+            .fallback_from()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "none".to_string());
         log.log_event(&format!(
-            "supervisor_stderr_redirect harness={} target={}",
+            "supervisor_stderr_redirect harness={} target={} fallback_from={}",
             harness.binary,
-            stderr_path.display()
+            stderr_log.path().display(),
+            fallback
         ));
         eprintln!(
             "[start] stderr redirected to {} for {} route-owned TUI",
-            stderr_path.display(),
+            stderr_log.path().display(),
             harness.binary
         );
         Ok(Self {
@@ -158,11 +326,36 @@ impl SupervisorStderrRedirect {
     }
 
     pub fn maybe_start(
-        _project_root: &Path,
-        _harness: &HarnessConfig,
+        project_root: &Path,
+        harness: &HarnessConfig,
         _route_owned: bool,
-        _log: &mut dyn SupervisorLaunchLog,
+        log: &mut dyn SupervisorLaunchLog,
     ) -> Self {
+        match open_supervisor_stderr_log(project_root) {
+            Ok(stderr_log) => {
+                let fallback = stderr_log
+                    .fallback_from()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "none".to_string());
+                log.log_event(&format!(
+                    "supervisor_stderr_log_ready harness={} target={} fallback_from={}",
+                    harness.binary,
+                    stderr_log.path().display(),
+                    fallback
+                ));
+            }
+            Err(err) => {
+                log.log_event(&format!(
+                    "supervisor_stderr_log_open_failed harness={} error={:?}",
+                    harness.binary,
+                    err.to_string()
+                ));
+                eprintln!(
+                    "[start] warning: could not open supervisor stderr log for {}: {err:#}",
+                    harness.binary
+                );
+            }
+        }
         Self
     }
 }
@@ -422,6 +615,20 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    #[derive(Default)]
+    struct RecordingLaunchLog {
+        events: Vec<String>,
+    }
+
+    impl SupervisorLaunchLog for RecordingLaunchLog {
+        fn log_event(&mut self, msg: &str) {
+            self.events.push(msg.to_string());
+        }
+
+        fn start_console_status(&mut self, _message: &str) {}
+    }
 
     #[test]
     fn reexec_handoff_env_is_not_part_of_the_child_launch_contract() {
@@ -442,5 +649,72 @@ mod tests {
             env.get("STABLE_CHILD_ENV").map(String::as_str),
             Some("kept")
         );
+    }
+
+    #[test]
+    fn fresh_project_start_creates_default_supervisor_log_tree() {
+        let project = TempDir::new().unwrap();
+        let harness = HarnessConfig::codex();
+        let mut log = RecordingLaunchLog::default();
+
+        let guard =
+            SupervisorStderrRedirect::maybe_start(project.path(), &harness, false, &mut log);
+        drop(guard);
+
+        let path = project.path().join(".agent-doc/logs/supervisor-stderr.log");
+        assert!(path.is_file());
+        assert_eq!(
+            log.events.len(),
+            1,
+            "start setup should emit one ownership event: {:?}",
+            log.events
+        );
+        assert!(log.events[0].contains(&format!("target={}", path.display())));
+        assert!(log.events[0].contains("fallback_from=none"));
+    }
+
+    #[test]
+    fn project_config_resolves_relative_supervisor_log_from_project_root() {
+        let project = TempDir::new().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            project.path().join(".agent-doc/config.toml"),
+            "agent_doc_supervisor_stderr_log = \"var/log/agent-doc-supervisor.log\"\n",
+        )
+        .unwrap();
+
+        let opened = open_supervisor_stderr_log(project.path()).unwrap();
+
+        assert_eq!(
+            opened.path(),
+            project.path().join("var/log/agent-doc-supervisor.log")
+        );
+        assert!(opened.path().is_file());
+        assert!(opened.fallback_from().is_none());
+    }
+
+    #[test]
+    fn unavailable_project_log_uses_deterministic_fallback() {
+        let project = TempDir::new().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            project.path().join(".agent-doc/config.toml"),
+            "supervisor_stderr_log = \"blocked/supervisor.log\"\n",
+        )
+        .unwrap();
+        std::fs::write(project.path().join("blocked"), "not a directory").unwrap();
+
+        let opened = open_supervisor_stderr_log(project.path()).unwrap();
+        let primary_path = project.path().join("blocked/supervisor.log");
+
+        assert_eq!(
+            opened.path(),
+            supervisor_stderr_fallback_path(project.path())
+        );
+        assert_eq!(opened.fallback_from(), Some(primary_path.as_path()));
+        assert!(opened.path().is_file());
+        let fallback_dir = opened.path().parent().unwrap().to_path_buf();
+        drop(opened);
+        std::fs::remove_dir_all(fallback_dir).unwrap();
     }
 }

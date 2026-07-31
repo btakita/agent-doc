@@ -19860,39 +19860,51 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
             .unwrap();
     for required in [
         "pub fn route_owned_start_command(",
-        "pub fn route_owned_start_command_with_stderr_log(",
-        "pub fn route_owned_start_command_with_reap_policy_and_stderr_log(",
-        "pub fn route_owned_stderr_log_path(",
+        "pub fn route_owned_start_command_with_options(",
         "fn shell_quote_arg(",
         "start --route-owned",
-        "2>> {}",
     ] {
         assert!(
             supervisor_start_command.contains(required),
             "agent-doc-supervisor-process should own route-owned supervisor start command rendering: {required}"
         );
     }
-    // `#restartstderrbleed`: every route-owned boot must name a stderr log at the
-    // shell boundary, so fd2 is redirected before the binary runs its first
-    // instruction. Assert on `stderr_log`, not on one renderer's function name —
-    // the previous name-only guard broke when `#restartresume` moved these call
-    // sites onto `RouteOwnedStartOptions` even though the invariant still held,
-    // which teaches the next reader to silence the guard instead of honouring it.
+    assert!(
+        !supervisor_start_command.contains("pub stderr_log:")
+            && !supervisor_start_command.contains("route_owned_stderr_log_path"),
+        "agent-doc start must own supervisor stderr setup; its shell command must carry no log path or redirect"
+    );
+    // `#fresh-project-supervisor-log`: route and cold-replacement callers own
+    // only process submission. The start binary owns config resolution,
+    // directory creation, file open, deterministic fallback, and fd2 redirect.
     for relative in [
         "agent-doc-route-io/src/startup.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
-        let names_a_renderer = source.contains("route_owned_start_command_with_options")
-            || source.contains("route_owned_start_command_with_reap_policy_and_stderr_log")
-            || source.contains("route_owned_start_command_with_stderr_log");
+        let names_a_renderer = source.contains("route_owned_start_command_with_options");
         assert!(
             names_a_renderer,
             "{relative} must render its route-owned start command through agent-doc-supervisor-process"
         );
         assert!(
-            source.contains("stderr_log"),
-            "{relative} must redirect fd2 at the shell boundary before a route-owned supervisor boots (pass a stderr_log)"
+            !source.contains("stderr_log: Some(&stderr_log)"),
+            "{relative} must not pass a caller-owned stderr log into the start command"
+        );
+    }
+    let supervisor_process_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process-io/src/lib.rs"))
+            .unwrap();
+    for required in [
+        "pub fn open_supervisor_stderr_log(",
+        "agent_doc_supervisor_stderr_log",
+        "std::fs::create_dir_all(parent)",
+        "supervisor_stderr_fallback_path(project_root)",
+        "libc::dup2(stderr_log.file().as_raw_fd(), libc::STDERR_FILENO)",
+    ] {
+        assert!(
+            supervisor_process_io.contains(required),
+            "agent-doc start must own supervisor stderr setup in-process: {required}"
         );
     }
     let supervisor_detached_child =

@@ -138,6 +138,7 @@ Location: `.agent-doc/config.toml` (relative to project root).
 |-------|-------------|
 | `tmux_session` | Tmux session name bound to this project |
 | `agent_doc_auto_compact` | Line threshold for automatic compaction opt-in |
+| `agent_doc_supervisor_stderr_log` | Supervisor stderr log path. Relative paths resolve from the project root; absolute paths are used as written. Defaults to `.agent-doc/logs/supervisor-stderr.log` |
 | `documents.include` | Project-relative globs for session document opt-in |
 | `documents.auto_session_for_all_md` | Legacy escape hatch (default `false`) |
 

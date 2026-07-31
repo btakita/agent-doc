@@ -355,6 +355,11 @@ pub struct ProjectConfig {
     /// docs cannot force it on.
     #[serde(default, alias = "supervisor_auto_install")]
     pub agent_doc_supervisor_auto_install: Option<bool>,
+    /// Optional supervisor stderr log path. Relative paths resolve from the
+    /// project root; absolute paths are used as written. Empty values fall back
+    /// to `.agent-doc/logs/supervisor-stderr.log`.
+    #[serde(default, alias = "supervisor_stderr_log")]
+    pub agent_doc_supervisor_stderr_log: Option<String>,
     /// Optional project-default document for `#agent-doc-bug` / dogfooding bug
     /// backlog capture. When absent or empty, bug backlog items stay in the
     /// current session document.
@@ -682,6 +687,31 @@ agent_doc_bug_target_document = "tasks/agent-doc/agent-doc-bugs2.md"
         assert_eq!(
             cfg.agent_doc_bug_target_document.as_deref(),
             Some("tasks/agent-doc/agent-doc-bugs2.md")
+        );
+    }
+
+    #[test]
+    fn parses_supervisor_stderr_log_path_and_alias() {
+        let cfg = parse_project_toml(
+            r#"
+agent_doc_supervisor_stderr_log = "var/log/agent-doc-supervisor.log"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.agent_doc_supervisor_stderr_log.as_deref(),
+            Some("var/log/agent-doc-supervisor.log")
+        );
+
+        let alias = parse_project_toml(
+            r#"
+supervisor_stderr_log = "/tmp/agent-doc-supervisor.log"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            alias.agent_doc_supervisor_stderr_log.as_deref(),
+            Some("/tmp/agent-doc-supervisor.log")
         );
     }
 

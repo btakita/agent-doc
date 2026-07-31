@@ -539,6 +539,7 @@ dependencies = [
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
+ "agent-doc-supervisor-process-io",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
@@ -2470,6 +2471,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-git-io",
  "agent-doc-harness",
+ "agent-doc-hash",
  "agent-doc-model-tier",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
@@ -2477,6 +2479,7 @@ dependencies = [
  "agent-doc-turn-executor",
  "anyhow",
  "libc",
+ "tempfile",
 ]
 
 [[package]]

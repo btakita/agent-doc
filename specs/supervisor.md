@@ -162,11 +162,17 @@ a closed actor record is replaceable through the stale-authority path.
   (`AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`) so normal supervisor
   filtering cannot print diagnostics into the managed TUI while the operator is
   typing.
-- Managed Claude/Codex/OpenCode supervisors redirect their own stderr to
-  `.agent-doc/logs/supervisor-stderr.log` after startup. Routine idle-watch,
-  stale-busy reconcile, and stale-binary hot-reload diagnostics must stay in the
-  session log / ops log instead of painting over the foreground TUI after
-  `/clear`, restart, or inter-queue-item recycle.
+- Every `agent-doc start` opens its supervisor stderr log; managed
+  Claude/Codex/OpenCode route-owned starts additionally redirect stderr to that
+  opened file in-process. The shell start command carries no `2>>` redirect.
+  The start binary resolves `agent_doc_supervisor_stderr_log` from
+  `.agent-doc/config.toml` (relative paths are project-root-relative), creates
+  its parent directories, and defaults to
+  `.agent-doc/logs/supervisor-stderr.log`. If the project-local target cannot be
+  opened, it records the failure in a deterministic temporary fallback log.
+  Routine idle-watch, stale-busy reconcile, and stale-binary hot-reload
+  diagnostics must stay in the session log / ops log instead of painting over
+  the foreground TUI after `/clear`, restart, or inter-queue-item recycle.
 - Codex background-terminal banners are active-turn evidence. If recent pane
   output contains `Waiting for background terminal (... esc to interrupt)`, the
   supervisor idle-queue watch and route readiness checks must treat the pane as

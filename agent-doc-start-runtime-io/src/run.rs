@@ -18,7 +18,7 @@ use agent_doc_supervisor_process_io::{
 };
 #[cfg(test)]
 use agent_doc_supervisor_process_io::{
-    supervisor_stderr_redirect_needed, supervisor_stderr_redirect_path,
+    supervisor_stderr_log_path, supervisor_stderr_redirect_needed,
 };
 
 pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
@@ -2342,7 +2342,7 @@ mod tests {
         assert!(!supervisor_stderr_redirect_needed(&codex, false));
         assert!(!supervisor_stderr_redirect_needed(&generic, true));
         assert_eq!(
-            supervisor_stderr_redirect_path(tmp.path()),
+            supervisor_stderr_log_path(tmp.path()).unwrap(),
             tmp.path()
                 .join(".agent-doc")
                 .join("logs")

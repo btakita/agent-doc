@@ -2901,20 +2901,20 @@ fn auto_install_stream_dup_fd(target_fd: std::os::fd::RawFd) -> std::process::St
 
 /// Open the supervisor stderr log for auto-install child output
 /// (`#restartbleednonroute`). `None` when no project root resolves or the file
-/// cannot be opened, in which case the caller keeps the fd2 plan.
+/// cannot be opened even through its deterministic fallback, in which case the
+/// caller keeps the fd2 plan.
 #[cfg(unix)]
 fn auto_install_stderr_log_file(crate_root: &Path) -> Option<std::fs::File> {
     let project_root = agent_doc_project_root_io::project_root_containing(crate_root)?;
-    let path =
-        agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(&project_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok()?;
+    match agent_doc_supervisor_process_io::open_supervisor_stderr_log(&project_root) {
+        Ok(log) => Some(log.into_file()),
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] warning: could not open supervisor stderr log for auto-install: {err:#}"
+            );
+            None
+        }
     }
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .ok()
 }
 
 /// Run the auto-install sequence ONCE through `make install`. The Makefile owns
@@ -19017,24 +19017,6 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                     );
                 }
                 let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
-                let project_root = agent_doc_project_root_io::project_root_containing(&work.file)
-                    .or_else(|| work.file.parent().map(Path::to_path_buf))
-                    .context(
-                        "replacement supervisor document must have a project root or parent",
-                    )?;
-                let stderr_log =
-                    agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(
-                        &project_root,
-                    );
-                let stderr_log_dir = stderr_log
-                    .parent()
-                    .context("replacement supervisor stderr path must include a logs directory")?;
-                std::fs::create_dir_all(stderr_log_dir).with_context(|| {
-                    format!(
-                        "failed to prepare replacement supervisor stderr directory {}",
-                        stderr_log_dir.display()
-                    )
-                })?;
                 let start_cmd =
                     agent_doc_supervisor_process::start_command::route_owned_start_command_with_options(
                         &agent_doc_bin,
@@ -19042,7 +19024,6 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                         &agent_doc_supervisor_process::start_command::RouteOwnedStartOptions {
                             reap_policy:
                                 agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto,
-                            stderr_log: Some(&stderr_log),
                             resume: resume.clone(),
                         },
                     );
@@ -21793,8 +21774,7 @@ mod tests {
             "the child must dup a real log fd, never the inherited fd2/pane"
         );
 
-        let path =
-            agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(dir.path());
+        let path = agent_doc_supervisor_process_io::supervisor_stderr_log_path(dir.path()).unwrap();
         assert!(
             path.exists(),
             "opening must create the log: {}",

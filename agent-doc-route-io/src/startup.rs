@@ -5,7 +5,7 @@
 //! when every visible pane proves ownership of a different agent-doc document;
 //! unknown ownership and same-document ownership remain fail-closed.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -565,18 +565,6 @@ pub fn auto_start_in_session_with_lock_mode(
     let cwd = agent_doc_git_io::dirs::resolve_pane_cwd(file);
     let registry_base_dir = agent_doc_project_root_io::project_root_or_file_parent(file)
         .unwrap_or_else(|_| cwd.clone());
-    let stderr_log = agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(
-        &registry_base_dir,
-    );
-    let stderr_log_dir = stderr_log
-        .parent()
-        .context("route-owned supervisor stderr path must include a logs directory")?;
-    std::fs::create_dir_all(stderr_log_dir).with_context(|| {
-        format!(
-            "failed to prepare route-owned supervisor stderr directory {}",
-            stderr_log_dir.display()
-        )
-    })?;
 
     // Resolve the agent-doc binary path (same binary that's currently running)
     let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
@@ -750,7 +738,6 @@ pub fn auto_start_in_session_with_lock_mode(
             Path::new(&start_path),
             &agent_doc_supervisor_process::start_command::RouteOwnedStartOptions {
                 reap_policy,
-                stderr_log: Some(&stderr_log),
                 resume: resume.clone(),
             },
         );

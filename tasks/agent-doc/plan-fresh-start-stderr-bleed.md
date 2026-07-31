@@ -43,16 +43,17 @@ submit), reading as "stderr bled through."
 - Operator-verify: live JB `Run Agent Doc` on a no-pane document, confirm no raw
 stderr appears in the pane on start or on the first manual submit.
 
-## Implementation status (2026-07-16)
+## Implementation status (superseded 2026-07-30)
 
-Code-complete. Fresh route provisioning and controller-owned cold replacement
-now create the supervisor stderr log before submitting the pane command and
-render `2>> <supervisor-stderr.log>` into that command. This closes the entire
-pre-redirect window, including argument parsing and admission failures; the
-existing in-process `SupervisorStderrRedirect` remains defense in depth.
+The 2026-07-16 implementation made fresh route provisioning and controller-owned
+cold replacement create the log and render `2>> <supervisor-stderr.log>`.
+`#fresh-project-supervisor-log` supersedes that caller-owned shell contract:
+`agent-doc start` now resolves the configurable path, creates and opens it
+append-only (with a deterministic fallback), and installs the fd2 redirect
+in-process. Route and cold-replacement commands carry no log path or `2>>`.
 
-A deterministic fd-plumbing test executes a fake route-owned agent-doc binary
-and proves its boot diagnostic reaches only the supervisor log, with empty pane
-stdout/stderr captures. The remaining live no-pane JB observation is an
+Deterministic regressions cover a fresh project with no `.agent-doc` directory,
+project-relative configuration, an unavailable primary target, and the absence
+of shell redirection. The remaining live no-pane JB observation is an
 operator-verification gate because automated verification must not create or
 focus an IDE/tmux pane during operator activity.

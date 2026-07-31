@@ -1608,6 +1608,76 @@ pub fn repair_duplicated_document_suffix(doc: &str) -> Option<String> {
     None
 }
 
+/// Repair a closing `agent:queue` marker welded to the final queue-item line.
+///
+/// A historical progressive-editor merge could append both an obsolete typing
+/// suffix and the binary-owned close marker to the complete queue prompt:
+///
+/// `... Directories should be created as needed.t should create a c<!-- /agent:queue -->`
+///
+/// The marker split is lossless. The suffix prune is deliberately narrower:
+/// only the tail after the last sentence terminator is removed, and only when
+/// that non-whitespace tail already occurs verbatim in the completed prefix.
+/// This proves it is a repeated typing snapshot rather than novel operator text.
+pub fn repair_welded_queue_close_marker(doc: &str) -> Option<String> {
+    let components = parse(doc).ok()?;
+    let mut repaired = doc.to_string();
+    let mut changed = false;
+
+    for component in components
+        .iter()
+        .rev()
+        .filter(|component| component.name == "queue")
+    {
+        let marker_start = component.close_start;
+        let marker_end = find_comment_end(repaired.as_bytes(), marker_start)?;
+        let line_start = repaired[..marker_start]
+            .rfind('\n')
+            .map_or(0, |position| position + 1);
+        let line_end = repaired[marker_end..]
+            .find('\n')
+            .map_or(repaired.len(), |relative| marker_end + relative);
+        let prefix = &repaired[line_start..marker_start];
+        let suffix = &repaired[marker_end..line_end];
+        if prefix.trim().is_empty() {
+            continue;
+        }
+        if !suffix.trim().is_empty() {
+            return None;
+        }
+
+        let queue_line = prefix.trim_end();
+        let mut completed_line = queue_line;
+        if let Some((terminator_start, terminator)) =
+            queue_line
+                .char_indices()
+                .rev()
+                .find(|(position, character)| {
+                    matches!(character, '.' | '!' | '?')
+                        && *position + character.len_utf8() < queue_line.len()
+                })
+        {
+            let completed_end = terminator_start + terminator.len_utf8();
+            let repeated_tail = &queue_line[completed_end..];
+            let completed_prefix = &queue_line[..completed_end];
+            if repeated_tail.len() >= 12
+                && repeated_tail.contains(char::is_whitespace)
+                && !repeated_tail.starts_with(char::is_whitespace)
+                && completed_prefix.contains(repeated_tail)
+            {
+                completed_line = completed_prefix;
+            }
+        }
+
+        let marker = &repaired[marker_start..marker_end];
+        let replacement = format!("{completed_line}\n{marker}");
+        repaired.replace_range(line_start..marker_end, &replacement);
+        changed = true;
+    }
+
+    (changed && structural_corruption_reason(&repaired).is_none()).then_some(repaired)
+}
+
 /// Detect structural corruption that must never be adopted as a snapshot base
 /// (`#dupcontent`). Returns `Some(reason)` when the document is corrupt:
 /// - a parse failure (mismatched / unclosed markers),
@@ -3303,6 +3373,38 @@ Fix applied to skip non-agent <!-- sequences.
         assert_eq!(
             structural_corruption_reason(welded_open).as_deref(),
             Some("non_standalone_component_marker:queue:open:line1")
+        );
+    }
+
+    #[test]
+    fn welded_queue_close_repair_prunes_only_a_proven_progressive_suffix() {
+        let corrupted = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#fresh-project-supervisor-log]: agent-doc start should create a configurable path to the supervisor log file. Directories should be created as needed.t should create a c",
+            "<!-- /agent:queue -->\n",
+        );
+        let expected = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#fresh-project-supervisor-log]: agent-doc start should create a configurable path to the supervisor log file. Directories should be created as needed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert_eq!(
+            repair_welded_queue_close_marker(corrupted).as_deref(),
+            Some(expected),
+        );
+        assert_eq!(structural_corruption_reason(expected), None);
+    }
+
+    #[test]
+    fn welded_queue_close_repair_preserves_novel_queue_text() {
+        let corrupted =
+            "<!-- agent:queue -->\n- do [#x] novel operator text<!-- /agent:queue -->\n";
+        let expected =
+            "<!-- agent:queue -->\n- do [#x] novel operator text\n<!-- /agent:queue -->\n";
+        assert_eq!(
+            repair_welded_queue_close_marker(corrupted).as_deref(),
+            Some(expected),
         );
     }
 

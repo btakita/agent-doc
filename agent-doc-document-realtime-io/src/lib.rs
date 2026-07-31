@@ -1659,24 +1659,35 @@ pub fn settle_retained_captured_projection_through_authority(
     // never require Ctrl+S, preflight repair, recapture, or a force-disk reset to
     // make progress.
     let mut canonical = try_resolve_current_document_content(path, source)?;
-    if let Some(pruned) = agent_doc_element_done::prune_proven_redundant_terminal_debris(&canonical)
-    {
+    let observed_canonical = canonical.clone();
+    let mut repaired_canonical =
+        heal_welded_scaffolding(&canonical).unwrap_or_else(|| canonical.clone());
+    let welded_scaffolding_repaired = repaired_canonical != canonical;
+    let terminal_debris =
+        agent_doc_element_done::prune_proven_redundant_terminal_debris(&repaired_canonical);
+    let removed_line_count = terminal_debris
+        .as_ref()
+        .map_or(0, |pruned| pruned.removed_line_count);
+    if let Some(pruned) = terminal_debris {
+        repaired_canonical = pruned.content;
+    }
+    if repaired_canonical != observed_canonical {
         validate_canonical_document_target(
             path,
-            &pruned.content,
+            &repaired_canonical,
             "retained_captured_terminal_debris_projection",
         )?;
         let Some(_) = apply_canonical_replace_if_attached(
             path,
-            &canonical,
-            &pruned.content,
+            &observed_canonical,
+            &repaired_canonical,
             "retained_captured_terminal_debris_projection",
         )?
         else {
             return Ok(false);
         };
         let projected = try_resolve_current_document_content(path, source)?;
-        if projected != pruned.content {
+        if projected != repaired_canonical {
             // The effect receipt is only evidence. The Lazily projection of
             // current authority is the settlement gate and will recompute when
             // replica state advances.
@@ -1685,10 +1696,11 @@ pub fn settle_retained_captured_projection_through_authority(
         agent_doc_ops_log_io::log_op(
             path,
             &format!(
-                "retained_captured_terminal_debris_projected file={} source={} removed_line_count={} projected_hash={}",
+                "retained_captured_terminal_debris_projected file={} source={} removed_line_count={} welded_scaffolding_repaired={} projected_hash={}",
                 path.display(),
                 source,
-                pruned.removed_line_count,
+                removed_line_count,
+                welded_scaffolding_repaired,
                 agent_doc_hash::content_hash(&projected),
             ),
         );
@@ -3688,6 +3700,18 @@ fn heal_welded_boundary(content: &str) -> Option<String> {
     (repaired != content).then(|| agent_doc_template::reposition_boundary_to_end_clean(&repaired))
 }
 
+/// Repair legacy binary-owned scaffolding before the structural adoption gate.
+///
+/// Boundary corruption and a queue close marker welded to a progressive typing
+/// suffix were produced by the same historical component-composition path, so
+/// every durable-intent recovery seam must handle both before validation.
+fn heal_welded_scaffolding(content: &str) -> Option<String> {
+    let mut repaired = agent_doc_element::element::repair_welded_queue_close_marker(content)
+        .unwrap_or_else(|| content.to_string());
+    repaired = heal_welded_boundary(&repaired).unwrap_or(repaired);
+    (repaired != content).then_some(repaired)
+}
+
 fn canonicalize_and_validate_agent_rebase(
     merged: &str,
     response_branch: &str,
@@ -3701,7 +3725,7 @@ fn canonicalize_and_validate_agent_rebase(
     // the editor cut OR a retained intent target replayed out of `state.db`.
     // Healing only the intake leaves the poisoned copy in the durable intent, so
     // every reconnect re-fails identically and the document stays wedged forever.
-    let canonical = heal_welded_boundary(&canonical).unwrap_or(canonical);
+    let canonical = heal_welded_scaffolding(&canonical).unwrap_or(canonical);
     validate_canonical_document_target(file, &canonical, source)?;
     Ok(canonical)
 }
@@ -4429,12 +4453,10 @@ pub fn deferred_document_write_reconnect_content(
         return Ok(None);
     };
     if editor_hash.eq_ignore_ascii_case(&pending.target_hash) {
-        validate_canonical_document_target(
-            file,
-            &pending.target_content,
-            "editor_reconnect_retained_target",
-        )?;
-        return Ok(Some(pending.target_content));
+        let retained = heal_welded_scaffolding(&pending.target_content)
+            .unwrap_or_else(|| pending.target_content.clone());
+        validate_canonical_document_target(file, &retained, "editor_reconnect_retained_target")?;
+        return Ok(Some(retained));
     }
     let disk_content = std::fs::read_to_string(file).ok();
     // `#boundarysplice`: heal a welded boundary marker in the editor canonical at
@@ -4444,7 +4466,7 @@ pub fn deferred_document_write_reconnect_content(
     // seam runs and nothing else rewrites the text. Repairing here is lossless and
     // touches only binary-owned scaffolding.
     let mut merged =
-        heal_welded_boundary(editor_content).unwrap_or_else(|| editor_content.to_string());
+        heal_welded_scaffolding(editor_content).unwrap_or_else(|| editor_content.to_string());
     if let Some(pruned) = agent_doc_element_done::prune_proven_redundant_terminal_debris(&merged) {
         agent_doc_ops_log_io::log_op(
             file,
@@ -4534,11 +4556,11 @@ pub fn deferred_document_write_reconnect_content(
         // `#boundarysplice`: the retained target is durable `state.db` content, so
         // a welded boundary captured into it re-fails on every reconnect forever.
         let retained =
-            heal_welded_boundary(&pending.target_content).unwrap_or(pending.target_content);
+            heal_welded_scaffolding(&pending.target_content).unwrap_or(pending.target_content);
         validate_canonical_document_target(file, &retained, "editor_reconnect_retained_target")?;
         return Ok(Some(retained));
     }
-    let merged = heal_welded_boundary(&merged).unwrap_or(merged);
+    let merged = heal_welded_scaffolding(&merged).unwrap_or(merged);
     validate_canonical_document_target(file, &merged, "editor_reconnect")?;
     ensure_deferred_document_write_intent(
         file,
@@ -10632,6 +10654,80 @@ mod tests {
             try_resolve_current_document_content(
                 &file,
                 "retained_capture_terminal_debris_projection_current",
+            )
+            .unwrap(),
+            valid,
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), valid);
+        assert!(pending_document_write(&file).is_none());
+    }
+
+    #[test]
+    fn retained_capture_repairs_legacy_welded_queue_close_before_validation() {
+        let captured_response = "### Re: investigate\n\nThe retained response is durable.\n";
+        let valid = format!(
+            concat!(
+                "# Session\n\n",
+                "<!-- agent:queue -->\n",
+                "- do [#fresh-project-supervisor-log]: agent-doc start should create a configurable path to the supervisor log file. Directories should be created as needed.\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:exchange -->\n",
+                "{}",
+                "<!-- /agent:exchange -->\n",
+            ),
+            captured_response,
+        );
+        let invalid = valid.replace(
+            "Directories should be created as needed.\n<!-- /agent:queue -->",
+            "Directories should be created as needed.t should create a c<!-- /agent:queue -->",
+        );
+        assert!(agent_doc_element::element::structural_corruption_reason(&invalid).is_some());
+        let (_dir, file, _canonical) = temp_doc(&invalid);
+        let identity = "test-retained-capture-welded-queue-close";
+        seed_reliable_sync_open(&file, identity);
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach to the legacy invalid authority cut");
+
+        // Seed the historical invalid intent directly: current builds reject it
+        // at retention, but recovery must still consume databases created by
+        // older builds.
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let event = agent_doc_state_backbone::StateEvent::new(
+            "legacy-welded-queue-close",
+            agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                document_hash,
+                intent_id: "legacy-welded-queue-close".to_string(),
+                expected_hash: agent_doc_hash::content_hash(&valid),
+                expected_content: Some(valid.clone()),
+                target_hash: agent_doc_hash::content_hash(&invalid),
+                target_content: invalid.clone(),
+                source: agent_doc_state_backbone::DocumentWriteSource::SerializedAtomicWrite,
+                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            },
+        );
+        agent_doc_controller_io::project_controller::append_state_event(
+            file.parent().unwrap(),
+            &event,
+        )
+        .unwrap();
+
+        let delivery = ack_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_welded_queue_close_test",
+            )
+            .unwrap(),
+            "the historical welded target should repair through authority without force disk",
+        );
+        delivery.join().unwrap();
+
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_capture_welded_queue_close_current",
             )
             .unwrap(),
             valid,

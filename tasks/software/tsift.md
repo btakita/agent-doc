@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: b48b4ace-eede-492b-8590-27351fce27d9
+resume: 2a62090c-ec88-4312-8b64-de627376e280
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -206,16 +206,48 @@ Mutation-checked in both directions, since a narrowing test can pass by narrowin
 **A process note, since it cost real time.** I clobbered the 28-row structural fixture table with a scripted string splice whose anchor (`executor: ...::Rust, alias: "rust"`) appears in *two* tables, and the edit silently deleted everything between them. It compiled far enough to look like an unrelated error. Recovered by extracting the region from `HEAD` and re-applying the intended change against a unique anchor. This is the "use the AST, not text matching, for source edits" rule earning its keep on a repo whose own tool exists to do exactly that.
 
 Follow-up filed at the top of the backlog: the JS-like family has the same shape and is genuinely harder, because `{ foo }` shorthand is both a key and a read — no position rule can be right there, so it probably wants the shadow refusal rather than narrowing.
-<!-- agent:boundary:45d8fb05 -->
+
+### Re: do [#applysamesymbol] — opus-5
+
+Landed. tsift `adb5c56`, gitlink `ae84e4ef6`, pushed. `make check` exit 0, 1659 tests, clippy clean. Last cycle's CI came back green; this one is in progress.
+
+The narrowing now covers TypeScript, TSX, JavaScript, and JSX. `property_identifier` spans an object-literal key, a class method, and a member access, and none of them is the module-level binding a rename resolves to — the symbol query indexes `function_declaration`, `class_declaration`, and arrow-valued `variable_declarator` and nothing else — so all three are dropped. `type_identifier` is kept only for a type rename.
+
+**The prediction in the backlog item was wrong, and being wrong is what made this a fix instead of a refusal.** I filed it saying `{ beta }` shorthand is "genuinely undecidable... likely needs the shadow refusal." It is not undecidable. The token is both the property name and a read of the binding, and there is a spelling where both stay correct — the one the shorthand already desugars to:
+
+    function gamma(v) { return v; }              <- renamed
+    const keyed = { beta: 1 };                   <- key untouched
+    const shorthand = { beta: gamma };           <- expanded, not overwritten
+    class Panel { beta() { return 2; } }         <- method untouched
+    const total = keyed.beta + gamma(3);         <- member read untouched, call renamed
+
+That is the installed binary on a real file, not a fixture. Refusing there would have blocked an ordinary re-export, which is a worse outcome than either thing I was choosing between. `IdentifierOccurrence` now carries the expansion as a flag so the splice decides the spelling, rather than every caller having to.
+
+**One case is deliberately left alone.** `const { beta } = mod` looks like the same shorthand but is not: the token reads a property off `mod` *and* declares a local of the same name, so the right rewrite depends on whether `mod` is the module whose export was renamed. That is the common case, plain span renaming already handles it correctly, and expanding it would break exactly the shape that works today. There is a test asserting it is renamed in place and not expanded.
+
+Mutation-checked in both directions, since a narrowing can be wrong by dropping too much as easily as too little:
+
+| mutation | reddens |
+|---|---|
+| `property_identifier` accepted again | 2 unit rows + conformance table + E2E |
+| shorthand expansion disabled (plain overwrite) | 1 unit row + table + E2E |
+| destructuring pattern expanded too | the in-place row |
+| `type_identifier` accepted for callables | the type-rename row |
+
+The JS-like conformance fixtures now carry an object key, a class method, and a member access each, so the table catches this class rather than only the unit tests.
+
+Remaining in the queue: `#wsdq` release + publish + install, and `#jzs7` extract-method. I filed one follow-up above it — Python and Kotlin are the two indexed languages still on a flat identifier set, and they have the same shape through different nodes (`identifier` under `attribute` / `navigation_expression`). They need one twist the others did not: both index methods as functions, so the callee position is a genuine target and must be kept rather than dropped.
+<!-- agent:boundary:b332ad5b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#applysamesymbol]
+- do [#finishsymbolkind]
+- ~~do [#applysamesymbol]~~
 - ~~do [#narrowidentifierkind]~~
-- ⏭️ do [#wsdq]
-- 🚧 do [#jzs7]
+- do [#wsdq]
+- do [#jzs7]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -224,9 +256,9 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#applysamesymbol] Apply the same symbol-kind narrowing to the JS-like family: property_identifier covers an object-literal key, a class method declaration, and a member call, so renaming a top-level function still rewrites { foo: 1 }. Harder than Rust/GDScript because shorthand { foo } is genuinely undecidable — it is both a key and a read, and either choice breaks one of them, so it likely needs the shadow refusal rather than a position rule. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
+- [ ] [#finishsymbolkind] Finish the symbol-kind narrowing for Python and Kotlin, the two indexed languages still at a flat identifier set. Both have the Rust field_identifier shape via a different node: Python spells obj.foo as an identifier under attribute, Kotlin as an identifier under navigation_expression, so renaming a module-level def/fun still rewrites every same-named attribute access. The rule is the one already used three times — accept the position only when it is the callee of a call — but unlike Rust, Python and Kotlin index methods as functions too, so the callee case is a real target and must be kept. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
 - [ ] [#wsdq] release + publish + install
-- [ ] 🚧 [#jzs7] Plan and implement extract method refactoring
+- [ ] [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->
 
 ## Review

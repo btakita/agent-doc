@@ -203,14 +203,50 @@ Atomicity itself stays gated where it already was: `a_generation_handoff_lands_v
 **Spec fixed.** `transport-ingress.md` said "no reader observes `new value, old authority`", which reads as a snapshot promise across separate reads and is false — the probe reproduces exactly that pair 200/200. It now states that the unit of the guarantee is one observation (one effect run, one compute closure), that two sequential reads skew whichever way they are ordered, and that a flavor's frontier-walk gate must therefore observe through a single effect or derived cell.
 
 `make check` green (exit 0, zero `result: FAILED`). Both commits pushed: lazily-rs `a379854`, lazily-spec `d4b6ade`. The lazily-rs CI run is queued as of closeout, not yet reported.
-<!-- agent:boundary:f250029f -->
+
+### Re: do [#lzruffautofixvacuity] — opus-5
+
+Done. lazily-py's local gates no longer repair the tree they judge, and the audit turned up no second instance — plus one adjacent gap in lazily-cs that I closed and two that I filed.
+
+**lazily-py.** The root cause was `fix = true` under `[tool.ruff]`, which made *every* call site that forgot `--no-fix` unfailable. CI was already fixed; the local side was not:
+
+- Dropped `fix = true`. A bare `ruff check` now gates everywhere rather than only where someone remembered the flag.
+- `make check` runs `format-check` (`ruff format --check`) and `lint` (`ruff check --no-fix`). `--no-fix` stays explicit as belt-and-braces: re-adding the setting cannot silently un-gate the target.
+- The repairing forms are `make format-fix` / `make lint-fix` and `poe ruff_fix` / `poe ruff_format_fix`. None is in a gate — running one is a decision, not a side effect.
+- `poe precommit` runs `ruff_format_check` + `ruff_check` instead of `ruff_fix`, so formatting is checked there at all for the first time.
+
+**Mutation-checked on a file whose only violation is fixable**, which is what makes the before/after unambiguous:
+
+| command | exit | file |
+| --- | --- | --- |
+| `ruff check --fix` (the old shape) | **0** | unused import deleted |
+| `ruff check --no-fix` (the gate) | **1** | untouched |
+| `ruff check` (bare, post-fix) | **1** | untouched |
+| `ruff format` (old `make format`) | **0** | rewritten |
+| `ruff format --check` (the gate) | **1** | untouched |
+
+The first row is the whole defect: exit 0 having changed the thing it was judging.
+
+**The audit.** No other binding runs a repairing linter or formatter inside a `check` closure or a CI gate — I checked every Makefile closure and every workflow `run:` body across the nine bindings. go (`gofmt -l`), rs (`cargo fmt --all --check`) and interop (`cargo fmt --check`) were already non-repairing.
+
+One real gap, opposite direction: **lazily-cs** had `format-check` spelled correctly and CI has been running `dotnet format --verify-no-changes` all along, but `make check` ran neither — the same "a developer cannot reproduce what CI enforces" complaint this item makes, from the other side. Verified clean locally, then added `format-check` to `check`; `check-ci-reach` confirms CI reaches it.
+
+Two findings I did **not** fold into this cycle, because each is its own piece of work rather than a line change — both filed at the top of backlog:
+
+- **lazily-cpp** `make fmt` is `clang-format -i … || true`: rewrites *and* swallows failure. Not in `check`, so not vacuous yet, but one line away. It cannot just be flipped — under clang-format 22 the tree is not clean, so it needs the reformat, a pinned formatter version, and a CI step.
+- **js, kt, dart, zig, react** gate no formatter at all, in `check` or in CI. Absence of a gate rather than a gate that cannot fail, but five of nine bindings have no mechanical formatting floor.
+
+`make check` green in both repos I touched: lazily-py 676 passed, lazily-cs 238 passed, both exit 0. Pushed as lazily-py `e93fc29` and lazily-cs `c2c1459`. All three CI runs from this session (rs, py, cs) are in progress at closeout, not yet reported.
+<!-- agent:boundary:87ebc036 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lazilycppfmt]
+- do [#lazilydartzig]
 - ~~do [#lzrstornfanout]~~
-- do [#lzruffautofixvacuity]
+- ~~do [#lzruffautofixvacuity]~~
 - do [#lzcireachvaranchor]
 - do [#lzmsgpackparity]
 - do [#lzreadmelinkrot]
@@ -232,7 +268,8 @@ Atomicity itself stays gated where it already was: `a_generation_handoff_lands_v
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzruffautofixvacuity] lazily-py pyproject.toml sets fix = true under [tool.ruff], so a bare ruff check REPAIRS the tree it is judging and then exits 0. CI ran exactly that inside poe precommit, which means lint was self-healing to green rather than gating, and formatting was not checked at all because the aggregate contains ruff_fix and no ruff format. CI is fixed as of this cycle by spelling the steps as ruff format --check and ruff check --no-fix, but make lint locally still auto-repairs, so a developer cannot reproduce what CI now enforces. Make the local target non-repairing too, keeping a separate explicitly-named target for the repairing form, and audit the other bindings for the same shape: any linter or formatter whose default is to rewrite is a gate that cannot fail.
+- [ ] [#lazilycppfmt] lazily-cpp make fmt runs clang-format -i over include, src and tests, and ends in an unconditional true, so it rewrites the tree and cannot fail even if clang-format errors. It is not in check today, so it is not yet a vacuous gate, but it is exactly the shape #lzruffautofixvacuity is about and one line away from becoming one. It cannot simply be flipped to a check: under clang-format 22 the tree is NOT clean (src/ffi.cpp among others), so this needs the reformat, a pinned clang-format version so the gate does not swing with whatever the developer has installed, a non-repairing fmt plus an explicit fmt-fix, and a CI step so check-ci-reach reaches it.
+- [ ] [#lazilydartzig] lazily-js, lazily-kt, lazily-dart, lazily-zig and lazily-react gate NO formatter at all: no formatting step in the check closure and none in CI. Found while auditing every binding for the #lzruffautofixvacuity shape. This is the absence of a gate rather than a gate that cannot fail, so it is a smaller risk, but it means five of the nine bindings have no mechanical formatting floor and drift is invisible until someone reads a diff. Decide per binding whether the floor is worth it (prettier --check, ktlint, dart format --set-exit-if-changed, zig fmt --check) and wire whichever are adopted into both check and CI so check-ci-reach can see them.
 - [ ] [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
 - [ ] [#lzmsgpackparity] msgpack is a spec MUST for frame codecs and is implemented in only two of nine bindings. protocol.md marks it MUST as the negotiated cross-language binary default on any binary boundary between differing languages, and further states that every fixture's frames MUST round-trip through both json and msgpack for all three IpcMessage variants. Actual state, verified by reading every binding: lazily-rs and lazily-cpp implement it (rs across ipc.rs, ffi.rs, reliable_sync.rs; cpp has include/lazily/codec.hpp and msgpack.hpp). The other seven - py, go, kt, js, cs, zig, dart - mention msgpack in exactly one place each, their interop-peer handshake, where they declare it as an explicit carve_out. That is honest and fails closed, and is the codec-level equivalent of KNOWN_UNCOVERED, so this is a declared gap rather than a hidden one. The problem is that it is invisible where every other parity fact lives: coverage.json has no codec row at all, so the feature matrix cannot show that a MUST-level codec is carved out by seven bindings, and the conformance ladder cannot see it either because all four rungs verify fixture CONTENT replay, not codec round-tripping. Add a codec row per flavor to coverage.json, then add a round-trip conformance obligation so the json/msgpack requirement is actually tested rather than asserted in prose.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.

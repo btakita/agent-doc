@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019fb5dd-1fc3-7fb2-801c-02dadc03b1af
+resume: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -202,28 +202,27 @@ The `tsift.md` and `lazily.md` reports are retained controller-owned closeouts, 
 ### Re: Fresh-project supervisor logging — gpt-5
 
 The shell currently evaluates `2>> project/.agent-doc/logs/supervisor-stderr.log` before Agent Doc starts, so a fresh project can fail before the binary can create its state directory. The follow-up is queued after the pending installation boundary: Agent Doc should create and open the project-local supervisor log itself, with a deterministic fallback directory when project-local initialization is unavailable, rather than requiring caller-owned shell redirection.
+### Re: Controller-owned editor state, SQLite boundary, and IDEA crash — gpt-5.6
 
-### Re: Fix all contributing factors to prompt truncation and editor/disk convergence — Codex
+Yes—I recommend a plan file for a change of this scope, followed by executing it in the same cycle. I created and completed `src/agent-doc/tasks/agent-doc/plan-controller-owned-editor-reactive-plane.md`; its status is implemented and verified.
 
-Fixed the full truncation/convergence chain and restored the deleted queue prompt exactly.
+The plugin was directly involved in the IDEA crash. The fatal frame is inside `libagent_doc-*.so`, specifically SQLite's `walFindFrame`, and the faulting address was in a deleted `state.db-shm` mapping owned by an older native plugin generation. The fix is therefore architectural, not just a retry or restart workaround.
 
-- `agent-doc start` now owns the configurable supervisor stderr-log path, creates its directory tree, and does not redirect the start command's own stderr into that file.
-- JetBrains typing capture now computes each operation from the stable pre-edit snapshot, preventing progressive prefix loss. Restarted IDEA generations bootstrap from unsettled canonical authority instead of publishing a stale whole buffer.
-- Consumed editor-operation captures remain available for exact-base recovery; repair reconstructs a truncated projection only when durable operations and captured-response history prove every line, and fails closed when the historical operation stream or newer text is not explainable.
-- Repair now heals legacy welded queue targets and proven duplicated editor suffixes before component parsing, including the live duplicated `icebox`/`done` tail plus its torn comment-terminator bytes. Novel trailing text is never discarded.
-- One-line `agent-doc patch` arguments, stdin, hook output, append, and prepend now retain a newline before the component close marker, preventing a repair edit from creating another welded/truncated boundary.
-- IDEA restarted with JetBrains plugin `0.2.332`; the installed native/CLI build is `0.35.109`, and live-library reload reached the editor endpoint.
+All normal SQLite ownership is now on the project Control Plane. Once the editor native ABI initializes, the embedded editor process is fail-closed against opening `state.db`, including transitive legacy fallbacks. Editor clients use existing-controller-only paths and cannot bootstrap a controller or create a durable database locally. CLI/offline tools remain explicit non-editor exceptions.
 
-The restored queue item is:
+The plugin does not need a durable copy. Its editor state is now ephemeral: open-tab/focus observations, generation and sequence fences, and small UI caches. The controller owns durable projections, document authority, convergence, and effects. Retired native generations are fenced and cannot reopen SQLite or resume stale work.
 
-> do [#fresh-project-supervisor-log]: agent-doc start should auto-create a configurable path to the supervisor-stderr.log. The default should be PROJECT_ROOT/.agent-doc/logs/supervisor-stderr.log. Auto-create directory structure. The agent-doc start command should not redirect stderr to the file.
+The wire protocol is request/response framed, but the automatic behavior is semantically reactive: editors publish Source observations and read controller-owned projections; the controller derives focus/sync intents and owns the effects. Imperative RPC remains only for explicit operator commands. The transport shape is not being mistaken for the state-model semantics.
 
-Verification completed: the targeted positive and fail-closed regressions pass; the full `make check` gate passed after each final code change; the structural repair converged through editor authority; `agent-doc read` and disk compare exactly; and the document commit boundary completed. Implementation is committed through agent-doc `bbe856cba` and root `469cccf38`.
-<!-- agent:boundary:fdaa57e6 -->
+Regression coverage proves a production-mode native plugin cannot create or mutate `state.db`, WAL, SHM, or the controller socket, and the two-generation reload handoff no longer leaves plugin database descriptors or deleted-library work alive. Full verification passed: `make check`, `make tmux-ci`, VS Code's 167 tests and production build, JetBrains tests plus plugin build, focused native/controller regressions, `git diff --check`, and the latest completed CI run is green.
+
+The rebuilt JetBrains plugin `0.2.332` is installed in IntelliJ IDEA 2026.1. Restart IDEA once more—the installation happened after the earlier restart—so the running host loads this corrected package.
+<!-- agent:boundary:68f3f096 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#fresh-project-supervisor-log]: agent-doc start should create a config
 <!-- /agent:queue -->
 
 ## Notes

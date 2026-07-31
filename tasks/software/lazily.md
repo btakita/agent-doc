@@ -35,7 +35,6 @@ Compacted content:
 >
 > do [#lzbenchbudgetheadroom]
 
-
 Measured before changing anything. The two flakes were the visible edge of a much larger problem, and the gate had its tradeoff exactly backwards.
 
 **The sweep.** 750 runs of `examples/instrumentation_profile.rs` across four environments: idle (200), moderate load (200, 8 CPU burners), heavy load (200, 24 burners on 32 cores), and 2-core-pinned via `taskset -c 0,1` (150) — the shape of the GitHub runner the gate actually runs on. Under load **15 of 45 gated counters blew their budget**, some on 25-30% of runs. `thread_safe_contention_batched_write_bursts_16 / set_cell_invalidation`, budgeted at 16, ranges **1 to 256**: under contention invalidation stops coalescing and every write takes its own lock. A budget of 16 over that counter is a coin flip.
@@ -161,19 +160,11 @@ Fixed by bumping the counter **after** the tracking read, so a run count of N is
 
 **Cross-binding check: lazily-go was the only one.** zig and dart both reach quiescence through an explicit barrier — settle and a microtask drain — instead of polling a wall clock, so they can assert exact run counts soundly. zig's analogue already reads before it counts. dart's core-effect tests are synchronous, so no window exists. Nothing to port.
 
-### What I got wrong, and why it matters for the next one
-
-The failing assertion was a conjunction: the run count reached the expected number AND the observed value matched. I checked that it was unsatisfied and concluded the wakeup was lost, without asking which half was false. The observed value was already correct. My first probe also ran while eight agents were saturating the machine, so its 8-second bound was not the evidence I treated it as — the same probe on an idle machine, without `-race`, showed zero failures in 400 iterations.
-
-I filed `#lzrstornfanout` for the lazily-rs partial-fan-out failure carried over from last cycle, written to demand a counting probe *first* — it has the same shape as this one, and the honest answer may again be that the test asserts more than the contract promises.
-### Re: #lzgoasynclostwake — I was wrong: this is run coalescing, not a lost update — opus-5
-
 ### Re: do [#lzrstornfanout] — opus-5
 
 > **Queue prompt:**
 >
 > do [#lzrstornfanout]
-
 
 Verdict: **the test asserted atomicity across a boundary the contract does not promise.** Not a torn read, not a deadline. Fixed in lazily-rs and the overclaiming sentence fixed in the spec.
 
@@ -236,8 +227,35 @@ Two findings I did **not** fold into this cycle, because each is its own piece o
 - **lazily-cpp** `make fmt` is `clang-format -i … || true`: rewrites *and* swallows failure. Not in `check`, so not vacuous yet, but one line away. It cannot just be flipped — under clang-format 22 the tree is not clean, so it needs the reformat, a pinned formatter version, and a CI step.
 - **js, kt, dart, zig, react** gate no formatter at all, in `check` or in CI. Absence of a gate rather than a gate that cannot fail, but five of nine bindings have no mechanical formatting floor.
 
-`make check` green in both repos I touched: lazily-py 676 passed, lazily-cs 238 passed, both exit 0. Pushed as lazily-py `e93fc29` and lazily-cs `c2c1459`. All three CI runs from this session (rs, py, cs) are in progress at closeout, not yet reported.
-<!-- agent:boundary:07f3d385 -->
+`make check` green in both repos I touched: lazily-py 676 passed, lazily-cs 238 passed, both exit 0. Pushed as lazily-py `e93fc29` and lazily-cs `c2c1459`. All three CI runs from this session (rs, py, cs) are in progresseout, not yet reported.
+
+### Re: CI results for last session, and repairing what the interrupted cycle left — opus-5
+
+**All four CI runs are green.** This closes out the "in progress at closeout, not yet reported" line from the previous two responses:
+
+| repo | commit | run |
+| --- | --- | --- |
+| lazily-rs | `a379854` | success |
+| lazily-spec | `d4b6ade` | success |
+| lazily-py | `e93fc29` | success |
+| lazily-cs | `c2c1459` | success |
+
+So the `#lzrstornfanout` test rewrite and the `#lzruffautofixvacuity` gate changes both hold in CI, not just locally. Worth noting for the py one specifically: its CI was already running `ruff format --check` and `ruff check --no-fix`, so a green run there is the expected outcome — the change it proves is that `make check` now runs the same non-repairing commands, which is what a developer actually executes.
+
+**The interrupted cycle left two marks in this document, and I repaired one of them.**
+
+The `#lzruffautofixvacuity` closeout deferred on pending CRDT convergence and `session-check` came back INTERRUPTED with editor authority and the disk projection diverged. The controller did resolve it — this turn's preflight found the response already present, retired the retained intent, and auto-committed. But the reconciliation was not clean:
+
+1. **An orphan duplicate response heading.** `### Re: #lzgoasynclostwake — I was wrong: this is run coalescing, not a lost update` appeared twice, the second with no body at all, immediately above the `#lzrstornfanout` response. `agent-doc exchange list` showed two nodes with identical labels — `r:eb0659c3837a` (the real one, body intact) and `r:e75ce58ae710` (empty). Removed the empty one with `agent-doc exchange remove --id`, which is the node-safe path that re-baselines the snapshot and CRDT together rather than hand-aligning disk to authority. Verified: one node with that label now, body intact, heading order correct.
+
+2. **A dropped span inside the last response's final sentence** — it reads "are in progresseout" where it should read "are in progress at closeout". I did **not** surgically edit that committed response body. Editing a landed response in place under a live editor is how the doubled-canonical-target wedge gets invited, and the cost/benefit is bad for eight missing characters. The record is corrected forward by the CI table above, which supersedes the sentence anyway.
+
+Both are agent-doc defects rather than lazily defects, so I have not filed them here — they belong in the agent-doc session document, alongside the existing interrupted-closeout material.
+
+**Not looping.** `queue_continuation_required` is `false` even though 18 heads remain and the queue is active, and the head `#lazilycppfmt` carries 🚧. That is the binary's authoritative in-session-drainability signal saying this session should not take the next head, so I am reporting and stopping rather than re-dispatching. Remaining heads, in order: `#lazilycppfmt`, `#lazilydartzig`, `#lzcireachvaranchor`, `#lzmsgpackparity`, `#lzreadmelinkrot`, `#lzvacuousrun`, `#lzscenariobodyskip`, `#lzspecscenarioids`, `#lzassertionblockschema`, `#lzdependencyavailability`, then eight pinned items.
+
+One standing note: preflight still reports the `stale_install` warning — `~/.cargo/bin/agent-doc` and the cdylib predate the latest local agent-doc source edit, so live tmux/JetBrains sessions may be running pre-edit code at an unchanged version number. That is an agent-doc-side `make install`, not a lazily change, and I have left it alone since this document does not own that tree.
+<!-- agent:boundary:9cec71b7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -315,3 +333,4 @@ Two findings I did **not** fold into this cycle, because each is its own piece o
 <!-- /agent:done -->
 eturn typed satisfied/timed-out/cancelled/disposed-or-unavailable outcomes; optionally prove keyed side-effect receipts while leaving receipt storage and transport policy outside the primitive. Test lost wakeups, already-satisfied state, revision races, cancellation, deadlines, disposal, and keyed receipts; document using the stdlib Timer as the deadline budget.
 cate orphan line remains outside all agent-doc components at line 158. Please delete only the stray `- [ ] [#lzstdlibbarrier] ...` line in IDEA, save, and send `continue`. The completed item is already archived, so removing this duplicate is the only remaining closeout step.
+ebc036

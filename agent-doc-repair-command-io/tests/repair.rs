@@ -141,6 +141,33 @@ mod tests {
     }
 
     #[test]
+    fn repair_heals_duplicated_component_tail_before_component_parsing() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let sound = concat!(
+            "---\nagent_doc_session: structural-repair\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#preserved] preserve this partial operator prompt\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] Source-backed work is explicit and audited.\n",
+            "<!-- /agent:icebox -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done archive=done.md -->\n\n",
+            "<!-- completed work archived in done.md -->\n",
+            "<!-- /agent:done -->",
+        );
+        let duplicated_tail = sound
+            .find(" audited.")
+            .map(|start| &sound[start..])
+            .expect("fixture contains the mid-line duplicated suffix");
+        std::fs::write(&doc, format!("{sound}{duplicated_tail}--\n>")).unwrap();
+
+        assert_eq!(run(&doc).unwrap(), RepairOutcome::TemplateNormalized);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), sound);
+    }
+
+    #[test]
     fn repair_materialization_requires_captured_response_block() {
         let response = concat!(
             "<!-- patch:exchange -->\n",

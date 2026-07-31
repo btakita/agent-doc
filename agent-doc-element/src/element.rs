@@ -1593,6 +1593,31 @@ pub fn repair_single_unmatched_duplicate_component_close(doc: &str) -> Option<St
 pub fn repair_duplicated_document_suffix(doc: &str) -> Option<String> {
     structural_corruption_reason(doc)?;
 
+    if let Some(prefix) = exact_duplicated_document_prefix(doc) {
+        return Some(prefix);
+    }
+
+    // A torn editor replay can append an exact suffix and then progressively
+    // publish only pieces of the final binary-owned comment terminator. Keep
+    // this recovery deliberately narrow: the duplicated body still has to be
+    // byte-for-byte exact, and the only additional bytes may be a short
+    // `-->` fragment split by whitespace.
+    for (debris_start, _) in doc.char_indices().rev() {
+        let debris = &doc[debris_start..];
+        if debris.len() > 16 {
+            break;
+        }
+        if !is_comment_terminator_debris(debris) {
+            continue;
+        }
+        if let Some(prefix) = exact_duplicated_document_prefix(&doc[..debris_start]) {
+            return Some(prefix);
+        }
+    }
+    None
+}
+
+fn exact_duplicated_document_prefix(doc: &str) -> Option<String> {
     for (split, _) in doc.char_indices().rev() {
         let prefix = &doc[..split];
         let suffix = &doc[split..];
@@ -1606,6 +1631,14 @@ pub fn repair_duplicated_document_suffix(doc: &str) -> Option<String> {
         return Some(prefix.to_string());
     }
     None
+}
+
+fn is_comment_terminator_debris(value: &str) -> bool {
+    value.starts_with('-')
+        && value.contains('>')
+        && value
+            .chars()
+            .all(|ch| matches!(ch, '-' | '>' | ' ' | '\t' | '\r' | '\n'))
 }
 
 /// Repair a closing `agent:queue` marker welded to the final queue-item line.
@@ -3676,6 +3709,37 @@ Fix applied to skip non-agent <!-- sequences.
             )),
             None,
             "a non-exact mid-token structural tail must fail closed"
+        );
+    }
+
+    #[test]
+    fn repair_duplicated_document_suffix_drops_only_trailing_terminator_debris() {
+        let sound = concat!(
+            "<!-- agent:review -->\n",
+            "- [/] Keep the operator-authored diagnosis audited.\n",
+            "<!-- /agent:review -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] Future item.\n",
+            "<!-- /agent:icebox -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- completed work archived -->\n",
+            "<!-- /agent:done -->",
+        );
+        let duplicated_tail = sound
+            .find(" audited.")
+            .map(|start| &sound[start..])
+            .expect("fixture contains the mid-line duplicated suffix");
+
+        assert_eq!(
+            repair_duplicated_document_suffix(&format!("{sound}{duplicated_tail}--\n>")).as_deref(),
+            Some(sound),
+        );
+        assert_eq!(
+            repair_duplicated_document_suffix(&format!(
+                "{sound}{duplicated_tail}--\n>operator text\n"
+            )),
+            None,
+            "novel trailing operator text must remain outside repair authority"
         );
     }
 

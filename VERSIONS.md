@@ -45,6 +45,11 @@ until that bootstrap is visible and saved.
   evidence; when an exact merge-base replay explains a truncated response
   capture, repair restores the complete operator edit before materializing the
   retained response and preserves newer frontmatter metadata.
+- **Repair removes proven duplicated editor tails before component parsing.**
+  An exact duplicated document suffix may carry only a short torn comment
+  terminator as additional debris; repair converges that cut through document
+  authority before backlog or closeout parsing, while novel trailing text
+  still fails closed.
 - **Dogfood mode is configurable per session document.** Set
   `agent_doc_dogfood: true` in frontmatter to append a stable, actionable
   Agent Doc repair prompt to terminal failures such as wedges and projection

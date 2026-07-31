@@ -488,6 +488,16 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     {
         doc_content = restored;
     }
+    if force_disk_override != Some(true) {
+        let structurally_repaired_doc = repair_structural_projection_if_needed(
+            effects.repair_io_effects,
+            &canonical,
+            &doc_content,
+        )?;
+        if structurally_repaired_doc != doc_content {
+            return Ok(RepairOutcome::TemplateNormalized);
+        }
+    }
     let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let projected_capture = if projected_capture_is_repairable
         && let Some(state) = cycle_state.as_ref()
@@ -1643,6 +1653,53 @@ pub fn repair_duplicate_exchange_scaffold_if_needed(
         file.display()
     );
     Ok(repaired)
+}
+
+fn repair_structural_projection_if_needed(
+    effects: &impl RepairTemplateWriteEffects,
+    file: &Path,
+    doc_content: &str,
+) -> Result<String> {
+    let Some(repaired) =
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+            file,
+            doc_content,
+            "repair_structural_projection",
+        )?
+    else {
+        return Ok(doc_content.to_string());
+    };
+
+    agent_doc_document_realtime_io::reconcile_deferred_write_to_canonical_cut_if_needed(
+        file,
+        &repaired,
+        "repair_structural_projection",
+    )?;
+    let settled = effects.atomic_write_if_current(
+        file,
+        &repaired,
+        doc_content,
+        "repair_structural_projection",
+    )?;
+    anyhow::ensure!(
+        settled == repaired,
+        "[repair] structural projection repair for {} returned a non-exact authority cut",
+        file.display(),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "repair_structural_projection_reconciled file={} prior_hash={} repaired_hash={}",
+            file.display(),
+            agent_doc_hash::content_hash(doc_content),
+            agent_doc_hash::content_hash(&settled),
+        ),
+    );
+    eprintln!(
+        "[repair] removed proven duplicated editor projection debris from {}",
+        file.display()
+    );
+    Ok(settled)
 }
 
 fn repair_answered_stale_boundary_if_safe(

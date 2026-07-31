@@ -48,7 +48,27 @@ Last contact was Dec 2023 (Invoice 32). The open thread you left in Oct 2023 was
 - I did **not** commit the `mail` submodule. `.corky.toml` already had uncommitted `craig-fryar` and `luke-richey` entries from another session, and committing my change would sweep those in too. Let me know if you want it committed anyway.
 
 commit .corky.toml. I renamed the document.
-<!-- agent:boundary:d7e22174 -->
+
+### Re: Commit .corky.toml, document renamed — opus-5
+
+Committed, and the rename is reconciled.
+
+**Commits**
+
+- `mail` submodule `6f53b17` — `.corky.toml` + `contacts/mary-ellen-zellerbach/{AGENTS.md,CLAUDE.md}`
+- superproject `83216af` — bumps the `mail` gitlink
+
+As flagged, the `.corky.toml` commit carries the pre-existing `craig-fryar` and `luke-richey` entries from a concurrent session, since they share the file and can't be split. Their contact directories are still untracked, so those two entries currently point at nothing on disk.
+
+**Rename fallout, repaired**
+
+The rename landed mid-cycle, which broke the session on the new path in two ways:
+
+1. `preflight` rejected the new path with `direct_response_patchback` (the `### Re:` block is in the working tree but the new path's HEAD predates it), while `write --commit` rejected it with the already-committed gate — the usual circular deadlock. Escape was `reset --from-current --preserve-session` followed by `agent-doc commit`; `session-check` went green immediately.
+2. The write that raced the rename scrambled the exchange ordering — the response body was appended *above* your prompt and the `### Re:` header was stranded alone at the bottom. No text was lost. I put the prompt, header, and body back in order and re-baselined.
+
+`tasks/professional/mary-elle-zellerbach.md` is still staged as a deletion in the superproject index. I left it alone rather than sweep it into a commit alongside other panes' staged work — remove it whenever you next commit that path.
+<!-- agent:boundary:194dba11 -->
 <!-- /agent:exchange -->
 
 ## Queue

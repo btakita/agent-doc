@@ -139,16 +139,76 @@ Verification passed:
 - latest completed CI remains green (`30580926037`)
 
 Committed as `9d1afd8a9` (`test: name redelivery regression by behavior`), with superproject pointer `18ea90954`.
-<!-- agent:boundary:a1567e80 -->
+> **Queue prompt:** Please audit the hotpath + startup paths to ensure the systems are fully reactive. Any imperative operations should be replace by reactive operations if possible. Consolidate any "split-brain" login into cohesive reactives. Convert any magic strings or magic values into enums or consts.
+
+### Re: Reactive hot path and startup audit — gpt-5
+
+Implemented and committed the audit as source commit `6d0bf4090` and root submodule-pointer commit `ff9c27808`.
+
+The Run Agent Doc path no longer polls command status every 100 ms, sleeps between attempts, or resubmits the entire editor route when an actor is still starting. Admission and terminal completion now live in one process-scoped Lazily `SourceMap`; the JetBrains client performs one event-driven `editor_command_await`, and a condition variable only parks the socket waiter until that Source changes—it carries no parallel state.
+
+The last-write-wins focus fence was another split authority: it lived in a static mutex `HashMap`. It now lives beside command completion in the same process-scoped reactive graph as a keyed focus-intent `SourceMap`. A narrow gate only serializes the final tmux effect, so a newer reactive focus intent supersedes stale work without accumulating requests.
+
+Command endpoint names, command operation names, projection statuses, focus outcomes, and await bounds are typed enums or named constants. Startup-not-ready remains a typed nonterminal outcome, but the controller owns readiness and completion rather than the client retrying imperatively.
+
+Plugin parity is preserved at the shared controller boundary. JetBrains consumes the new await operation; other clients keep the shared command projection and do not need a parallel status-poll loop.
+
+Verification passed:
+
+- focused controller tests for reactive terminal wake, last-write-wins focus supersession, expiration, and sync/async rejection semantics;
+- focused JetBrains `CpRouteClientCommandPlaneTest` and `TerminalUtilTest`;
+- source contract test for the typed editor-route wire operation;
+- full `make check`, artifact `tart-c41786fbce`, exit 0;
+- latest completed CI run `30580926037` is green.
+
+No install, controller recycle, IDE restart, or retained-response resubmission was performed because the existing closeout/install gate still owns that boundary.
+
+### Re: Retained closeouts reported during the audit — gpt-5
+
+The `tsift.md` and `lazily.md` reports are retained controller-owned closeouts, not invitations to recapture their responses. I did not rerun finalize/session-check, force disk, recycle, or rewrite either document. I expanded the existing install/verification gate to require both retained editor-delivery lineages to reach terminal proof before installation. The `tsift.md` wording correction remains deferred until that proof makes a normal new edit safe.
+
+### Re: Fresh-project supervisor logging — gpt-5
+
+The shell currently evaluates `2>> project/.agent-doc/logs/supervisor-stderr.log` before Agent Doc starts, so a fresh project can fail before the binary can create its state directory. The follow-up is queued after the pending installation boundary: Agent Doc should create and open the project-local supervisor log itself, with a deterministic fallback directory when project-local initialization is unavailable, rather than requiring caller-owned shell redirection.
+
+### Re: Reactive hot path and startup audit — gpt-5
+
+> **Queue prompt:** Please audit the hotpath + startup paths to ensure the systems are fully reactive. Any imperative operations should be replace by reactive operations if possible. Consolidate any "split-brain" login into cohesive reactives. Convert any magic strings or magic values into enums or consts.
+
+Implemented and committed the audit as source commit `6d0bf4090` and root submodule-pointer commit `ff9c27808`.
+
+The Run Agent Doc path no longer polls command status every 100 ms, sleeps between attempts, or resubmits the entire editor route when an actor is still starting. Admission and terminal completion now live in one process-scoped Lazily `SourceMap`; the JetBrains client performs one event-driven `editor_command_await`, and a condition variable only parks the socket waiter until that Source changes—it carries no parallel state.
+
+The last-write-wins focus fence was another split authority: it lived in a static mutex `HashMap`. It now lives beside command completion in the same process-scoped reactive graph as a keyed focus-intent `SourceMap`. A narrow gate only serializes the final tmux effect, so a newer reactive focus intent supersedes stale work without accumulating requests.
+
+Command endpoint names, command operation names, projection statuses, focus outcomes, and await bounds are typed enums or named constants. Startup-not-ready remains a typed nonterminal outcome, but the controller owns readiness and completion rather than the client retrying imperatively.
+
+Plugin parity is preserved at the shared controller boundary. JetBrains consumes the new await operation; other clients keep the shared command projection and do not need a parallel status-poll loop.
+
+Verification passed:
+
+- focused controller tests for reactive terminal wake, last-write-wins focus supersession, expiration, and sync/async rejection semantics;
+- focused JetBrains `CpRouteClientCommandPlaneTest` and `TerminalUtilTest`;
+- source contract test for the typed editor-route wire operation;
+- full `make check`, artifact `tart-c41786fbce`, exit 0;
+- latest completed CI run `30580926037` is green.
+
+No install, controller recycle, IDE restart, or retained-response resubmission was performed because the existing closeout/install gate still owns that boundary.
+
+### Re: Retained closeouts reported during the audit — gpt-5
+
+The `tsift.md` and `lazily.md` reports are retained controller-owned closeouts, not invitations to recapture their responses. I did not rerun finalize/session-check, force disk, recycle, or rewrite either document. I expanded the existing install/verification gate to require both retained editor-delivery lineages to reach terminal proof before installation. The `tsift.md` wording correction remains deferred until that proof makes a normal new edit safe.
+
+### Re: Fresh-project supervisor logging — gpt-5
+
+The shell currently evaluates `2>> project/.agent-doc/logs/supervisor-stderr.log` before Agent Doc starts, so a fresh project can fail before the binary can create its state directory. The follow-up is queued after the pending installation boundary: Agent Doc should create and open the project-local supervisor log itself, with a deterministic fallback directory when project-local initialization is unavailable, rather than requiring caller-owned shell redirection.
+<!-- agent:boundary:a70b233a -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Idea is periodically non-responsive. Please fix thrashing in the plugin UI process. Be more efficient with calculation and move CPU heavy/bound tasks into another thread. Ensure plugin parity.~~
-- ~~Run Agent Doc takes several seconds to complete. Editor -> Tmux Pane autosync performance has improved but is still slow at times. Can we have authority reactives ready for all open editor tabs...even tabs that are not currently active? Please improve performance to all issues.~~
-- ~~Abstraction names should be descriptive instead of using project names. Please audit all abstraction names, particularly test names.~~
-- Please audit the hotpath + startup paths to ensure the systems are fully reactive. Any imperative operations should be replace by reactive operations if possible. Consolidate any "split-brain" login into cohesive reactives. Convert any magic strings or magic values into enums or consts.
+- ~~Please audit the hotpath + startup paths to ensure the systems are fully reactive. Any imperative operations should be replace by reactive operations if possible. Consolidate any "split-brain" login into cohesive reactives. Convert any magic strings or magic~~ — auto-struck: answered this cycle (#ftstrike) 
+4values into enums or consts.
 <!-- /agent:queue -->
 
 ## Notes
@@ -160,6 +220,7 @@ Committed as `9d1afd8a9` (`test: name redelivery regression by behavior`), with 
 
 <!-- agent:backlog priority queue -->
 - [/] [#reactive-closeout-install-verify] After the retained tsift.md editor-delivery capture reaches a terminal boundary, install the committed Agent Doc binary and verify the equityfundingsource.md queue strike, Monster Rod Holders corruption rejection, Compact Exchange recovery, and editor/tmux responsiveness without recycling an active closeout owner.
+- [ ] [#fresh-project-supervisor-log] After #reactive-closeout-install-verify completes and the new Agent Doc build is installed, make Agent Doc create/open project-local .agent-doc/logs/supervisor-stderr.log itself (with a deterministic fallback log directory) so fresh-project routes do not depend on shell-level stderr redirection; add regression coverage using a new project with no .agent-doc/logs directory.
 <!-- /agent:backlog -->
 
 ## Review

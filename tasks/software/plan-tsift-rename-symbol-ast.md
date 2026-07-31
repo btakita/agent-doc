@@ -123,6 +123,17 @@ Known limitation carried into phase 2: the Rust identifier set includes
 struct field. That matches the old scan's behaviour; narrowing it needs the
 graph-scoped resolution phase 2 introduces.
 
+**Closed in `#narrowidentifierkind`,** and the diagnosis above was half right.
+The fix was not the graph scoping from phase 2 — that resolves *which files* a
+rename touches, not which occurrences within one. What it needed was the
+resolved symbol's *kind*, which the planner already had and was throwing away
+before the walk. A Rust function rename now skips a field declaration, a struct
+literal field, and a field read while keeping `x.count()`; a GDScript function
+rename skips a local `var` declaration and parameter bindings. Positions the
+grammar leaves ambiguous are kept, because under-renaming reports success while
+breaking the build. Rust macro bodies stay exempt — `token_tree` opacity gives
+the position rule nothing to read — which is now a pinned test, not folklore.
+
 ### Phase 2 — `#tsrenameast2` — cross-file rename via the call graph
 
 Resolve the symbol through the index, collect its referencing files from the

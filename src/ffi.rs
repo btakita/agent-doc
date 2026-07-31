@@ -839,6 +839,7 @@ pub unsafe extern "C" fn agent_doc_stop_ipc_listener(project_root: *const c_char
 pub extern "C" fn agent_doc_quiesce_for_reload(timeout_ms: i64) -> i32 {
     let timeout = std::time::Duration::from_millis(timeout_ms.max(1) as u64);
     NATIVE_GENERATION_QUIESCING.store(true, Ordering::SeqCst);
+    agent_doc_editor_surface_io::quiesce_for_reload();
     let mut generations = {
         let mut registry = IPC_LISTENER_GENERATIONS.lock();
         registry.drain().collect::<Vec<_>>()
@@ -870,6 +871,7 @@ pub extern "C" fn agent_doc_quiesce_for_reload(timeout_ms: i64) -> i32 {
             registry.insert(root, generation);
         }
         NATIVE_GENERATION_QUIESCING.store(false, Ordering::SeqCst);
+        agent_doc_editor_surface_io::resume_after_reload_failure();
         return 0;
     }
     for (_, generation) in generations.drain(..) {
@@ -883,6 +885,7 @@ pub extern "C" fn agent_doc_quiesce_for_reload(timeout_ms: i64) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn agent_doc_resume_after_reload_failure() {
     NATIVE_GENERATION_QUIESCING.store(false, Ordering::SeqCst);
+    agent_doc_editor_surface_io::resume_after_reload_failure();
 }
 
 /// Legacy ACK-content ABI retained only to fail old editor plugins closed.

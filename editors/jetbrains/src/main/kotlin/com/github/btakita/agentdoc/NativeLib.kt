@@ -1192,6 +1192,12 @@ interface AgentDocLib : Library {
                                     "old generation restore failed (${restoreError.message})"
                             )
                         }
+                    if (!restored.resumeNativeAfterFailure()) {
+                        return markRestartRequired(
+                            "replacement load failed (${replacementError.message}); " +
+                                "restored generation did not resume"
+                        )
+                    }
                     publishGeneration(restored, path, oldMtime)
                     LOG.warn(
                         "[native] replacement load failed; restored prior generation: ${replacementError.message}"

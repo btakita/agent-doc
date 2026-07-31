@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.ProjectManager
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -21,6 +22,8 @@ internal object NativeReloadCoordinator {
         ApplicationManager.getApplication().executeOnPooledThread {
             var replicaProjects = emptyList<com.intellij.openapi.project.Project>()
             var watchers = emptyList<PatchWatcher>()
+            val surfaceProjects =
+                ProjectManager.getInstance().openProjects.filterNot { it.isDisposed }.toList()
             try {
                 // Stop inbound callbacks before tearing down the CRDT managers
                 // they call. The reverse order used to dispose every manager,
@@ -53,6 +56,16 @@ internal object NativeReloadCoordinator {
             } finally {
                 watchers.forEach { it.restartNativeEndpointsAfterReload() }
                 CrdtReplicaManager.restartAfterNativeReload(replicaProjects)
+                // The retired generation deliberately discarded every editor
+                // surface and document-authority subscription. Republish the
+                // current open-tab surface into whichever generation won the
+                // handoff so inactive tabs are warm again without waiting for
+                // an operator focus or selection event.
+                surfaceProjects
+                    .filterNot { it.isDisposed }
+                    .forEach { project ->
+                        EditorTabSyncListener.install(project).onEditorLayoutChanged(project)
+                    }
                 scheduled.set(false)
             }
         }

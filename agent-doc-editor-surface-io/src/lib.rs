@@ -26,7 +26,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use agent_doc_editor_surface::{
@@ -126,14 +126,16 @@ struct DeferredDocumentAuthorityDispatcher {
     documents: Mutex<HashMap<(PathBuf, String), DeferredDocumentAuthority>>,
     fully_warm_roots_reported: Mutex<HashSet<PathBuf>>,
     next_generation: AtomicU64,
+    generation_accepting: Arc<AtomicBool>,
 }
 
 impl DeferredDocumentAuthorityDispatcher {
-    fn new() -> Arc<Self> {
+    fn new(generation_accepting: Arc<AtomicBool>) -> Arc<Self> {
         Arc::new(Self {
             documents: Mutex::new(HashMap::new()),
             fully_warm_roots_reported: Mutex::new(HashSet::new()),
             next_generation: AtomicU64::new(1),
+            generation_accepting,
         })
     }
 
@@ -171,6 +173,9 @@ impl DeferredDocumentAuthorityDispatcher {
         let mut membership_changed = false;
         {
             let mut documents = self.documents();
+            if !self.generation_accepting.load(Ordering::SeqCst) {
+                return;
+            }
             documents.retain(|(document_root, document), authority| {
                 let retained = document_root != root || desired.contains(document);
                 if !retained {
@@ -366,6 +371,24 @@ impl DeferredDocumentAuthorityDispatcher {
             .unwrap_or_else(|error| error.into_inner())
             .remove(root);
     }
+
+    fn quiesce(&self) -> usize {
+        self.generation_accepting.store(false, Ordering::SeqCst);
+        let subscriptions = {
+            let mut documents = self.documents();
+            let subscriptions = documents.len();
+            for authority in documents.values() {
+                let _ = authority.membership.send(false);
+            }
+            documents.clear();
+            subscriptions
+        };
+        self.fully_warm_roots_reported
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+        subscriptions
+    }
 }
 
 /// Per-root latest-wins dispatcher for editor observations.
@@ -381,6 +404,7 @@ struct DeferredSurfaceDispatcher {
     observe: SurfaceObserver,
     probe_tmux: TmuxLayoutProbe,
     observe_tmux: TmuxObserver,
+    generation_accepting: Arc<AtomicBool>,
 }
 
 impl DeferredSurfaceDispatcher {
@@ -388,12 +412,14 @@ impl DeferredSurfaceDispatcher {
         observe: SurfaceObserver,
         probe_tmux: TmuxLayoutProbe,
         observe_tmux: TmuxObserver,
+        generation_accepting: Arc<AtomicBool>,
     ) -> Arc<Self> {
         Arc::new(Self {
             roots: Mutex::new(HashMap::new()),
             observe,
             probe_tmux,
             observe_tmux,
+            generation_accepting,
         })
     }
 
@@ -404,6 +430,9 @@ impl DeferredSurfaceDispatcher {
     fn enqueue(self: &Arc<Self>, root: PathBuf, surface: EditorSurface) -> Result<()> {
         let should_start = {
             let mut roots = self.roots();
+            if !self.generation_accepting.load(Ordering::SeqCst) {
+                anyhow::bail!("native editor generation is quiescing");
+            }
             let entry = roots.entry(root.clone()).or_default();
             entry.generation = entry.generation.saturating_add(1);
             entry.latest = Some((entry.generation, surface));
@@ -425,6 +454,9 @@ impl DeferredSurfaceDispatcher {
 
     fn run_root(self: &Arc<Self>, root: PathBuf) {
         loop {
+            if !self.generation_accepting.load(Ordering::SeqCst) {
+                return;
+            }
             let Some((generation, surface)) = ({
                 let mut roots = self.roots();
                 let Some(entry) = roots.get_mut(&root) else {
@@ -463,6 +495,14 @@ impl DeferredSurfaceDispatcher {
 
     fn forget(&self, root: &Path) {
         self.roots().remove(root);
+    }
+
+    fn quiesce(&self) -> usize {
+        self.generation_accepting.store(false, Ordering::SeqCst);
+        let mut roots = self.roots();
+        let root_count = roots.len();
+        roots.clear();
+        root_count
     }
 }
 
@@ -682,6 +722,19 @@ impl Registry {
         entry.state.stop(&entry.consequence);
         true
     }
+
+    /// Stop every root consequence owned by this native generation.
+    pub fn forget_all(&self) -> usize {
+        let entries = {
+            let mut roots = self.roots();
+            roots.drain().map(|(_, entry)| entry).collect::<Vec<_>>()
+        };
+        let root_count = entries.len();
+        for entry in entries {
+            entry.state.stop(&entry.consequence);
+        }
+        root_count
+    }
 }
 
 /// Drive the tmux consequence of `intent` through the Project Controller.
@@ -776,6 +829,9 @@ fn probe_tmux_via_controller(root: &Path, surface: &EditorSurface) -> Option<Tmu
     })
 }
 
+static EDITOR_GENERATION_ACCEPTING: LazyLock<Arc<AtomicBool>> =
+    LazyLock::new(|| Arc::new(AtomicBool::new(true)));
+
 static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     Registry::with_tmux_probe(
         Arc::new(run_intent_via_controller),
@@ -794,14 +850,25 @@ static DEFERRED_SURFACES: LazyLock<Arc<DeferredSurfaceDispatcher>> = LazyLock::n
         Arc::new(|root, layout| {
             let _ = REGISTRY.observe_tmux(root, layout);
         }),
+        Arc::clone(&EDITOR_GENERATION_ACCEPTING),
     )
 });
 
 static DEFERRED_AUTHORITIES: LazyLock<Arc<DeferredDocumentAuthorityDispatcher>> =
-    LazyLock::new(DeferredDocumentAuthorityDispatcher::new);
+    LazyLock::new(|| {
+        DeferredDocumentAuthorityDispatcher::new(Arc::clone(&EDITOR_GENERATION_ACCEPTING))
+    });
 
 /// Record an editor-surface observation for the process-wide registry.
 pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservationReceipt {
+    if !EDITOR_GENERATION_ACCEPTING.load(Ordering::SeqCst) {
+        return SurfaceObservationReceipt {
+            intent: SurfaceIntent::Idle,
+            idle: true,
+            outcome: None,
+            error: Some("native editor generation is quiescing".to_string()),
+        };
+    }
     let receipt = REGISTRY.observe(project_root, surface.clone());
     DEFERRED_AUTHORITIES.observe_surface(project_root, &surface);
     receipt
@@ -819,6 +886,14 @@ pub fn enqueue_from_json(project_root: &Path, surface_json: &str) -> Result<()> 
 
 /// Record a tmux-layout observation for the process-wide registry.
 pub fn observe_tmux(project_root: &Path, layout: Option<TmuxLayout>) -> SurfaceObservationReceipt {
+    if !EDITOR_GENERATION_ACCEPTING.load(Ordering::SeqCst) {
+        return SurfaceObservationReceipt {
+            intent: SurfaceIntent::Idle,
+            idle: true,
+            outcome: None,
+            error: Some("native editor generation is quiescing".to_string()),
+        };
+    }
     REGISTRY.observe_tmux(project_root, layout)
 }
 
@@ -834,7 +909,8 @@ pub fn observe_from_json(
 
 /// [`observe_from_json`] with the receipt serialized back to JSON.
 pub fn observe_json(project_root: &Path, surface_json: &str) -> Result<String> {
-    REGISTRY.observe_json(project_root, surface_json)
+    let receipt = observe_from_json(project_root, surface_json)?;
+    serde_json::to_string(&receipt).context("serialize editor surface receipt")
 }
 
 /// Forget a project root in the process-wide registry.
@@ -842,6 +918,27 @@ pub fn forget(project_root: &Path) -> bool {
     DEFERRED_SURFACES.forget(project_root);
     DEFERRED_AUTHORITIES.forget(project_root);
     REGISTRY.forget(project_root)
+}
+
+/// Quiesce the editor reactive plane before this native generation is retired.
+///
+/// Mapped Rust cdylibs can remain resident after `dlclose`; without an explicit
+/// state-plane teardown, each retired mapping retains its Tokio tasks and
+/// Lazily effects. Stop accepting ingress first, then cancel every document
+/// subscription and discard all per-root projections so the mapping is inert.
+pub fn quiesce_for_reload() {
+    EDITOR_GENERATION_ACCEPTING.store(false, Ordering::SeqCst);
+    let surface_roots = DEFERRED_SURFACES.quiesce();
+    let authority_subscriptions = DEFERRED_AUTHORITIES.quiesce();
+    let reactive_roots = REGISTRY.forget_all();
+    eprintln!(
+        "[editor-surface] native generation quiesced surface_roots={surface_roots} authority_subscriptions={authority_subscriptions} reactive_roots={reactive_roots}"
+    );
+}
+
+/// Re-enable a retained generation after its replacement failed to load.
+pub fn resume_after_reload_failure() {
+    EDITOR_GENERATION_ACCEPTING.store(true, Ordering::SeqCst);
 }
 
 pub fn document_authority(project_root: &Path, document: &str) -> Option<DocumentAuthority> {
@@ -1220,6 +1317,52 @@ mod tests {
     }
 
     #[test]
+    fn retired_generation_cancels_authority_membership_and_rejects_surface_ingress() {
+        let generation_accepting = Arc::new(AtomicBool::new(true));
+        let authorities =
+            DeferredDocumentAuthorityDispatcher::new(Arc::clone(&generation_accepting));
+        let (membership, membership_observer) = tokio::sync::watch::channel(true);
+        authorities.documents().insert(
+            (PathBuf::from("/p"), "/one.md".to_string()),
+            DeferredDocumentAuthority {
+                generation: 1,
+                revision: 1,
+                readiness: DocumentAuthorityReadiness::Ready,
+                membership,
+            },
+        );
+
+        assert_eq!(authorities.quiesce(), 1);
+        assert!(!*membership_observer.borrow());
+        assert!(authorities.documents().is_empty());
+
+        let surfaces = DeferredSurfaceDispatcher::new(
+            Arc::new(|_, _| false),
+            Arc::new(|_, _| None),
+            Arc::new(|_, _| {}),
+            generation_accepting,
+        );
+        assert!(
+            surfaces
+                .enqueue(PathBuf::from("/p"), surface("/one.md", &[&["/one.md"]]))
+                .is_err(),
+            "a retired native mapping must not recreate reactive work"
+        );
+    }
+
+    #[test]
+    fn forgetting_all_roots_stops_every_generation_owned_effect() {
+        let (registry, ran) = registry();
+        registry.observe(Path::new("/one"), surface("/a.md", &[&["/a.md"]]));
+        registry.observe(Path::new("/two"), surface("/b.md", &[&["/b.md"]]));
+        assert_eq!(ran.lock().unwrap().len(), 2);
+
+        assert_eq!(registry.forget_all(), 2);
+        assert!(registry.roots().is_empty());
+        assert_eq!(registry.forget_all(), 0);
+    }
+
+    #[test]
     fn deferred_surface_dispatch_is_non_blocking_and_latest_wins_per_root() {
         let (seen_tx, seen_rx) = mpsc::channel();
         let release_first = Arc::new((Mutex::new(false), Condvar::new()));
@@ -1239,6 +1382,7 @@ mod tests {
                 }),
                 Arc::new(|_, _| None),
                 Arc::new(|_, _| {}),
+                Arc::new(AtomicBool::new(true)),
             )
         };
 
@@ -1304,6 +1448,7 @@ mod tests {
                         .unwrap_or_default();
                     tmux_tx.send(focused).unwrap();
                 }),
+                Arc::new(AtomicBool::new(true)),
             )
         };
 

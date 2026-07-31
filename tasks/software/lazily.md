@@ -329,17 +329,56 @@ Both non-adoptions are filed at the top of backlog, with a concrete recommendati
 `make check` exit 0 in both. dart: 621 tests pass after the reformat. zig: full suite green — and the `failed command:` line the zig build runner prints during `test` is pre-existing, since it appears identically on the stashed unmodified tree, also with exit 0. A whitespace-only change could not have caused it, but I checked rather than assumed.
 
 Pushed: lazily-zig `163e589`, lazily-dart `0892c71`. Both CI runs are queued at closeout, not yet reported. Note that lazily-zig's `AGENTS.md` carries an unrelated tsift version-marker bump from another process; I committed only my paths and left it alone.
-<!-- agent:boundary:ed993ada -->
+
+### Re: do [#lazilyformattinggate] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lazilyformattinggate]
+
+
+Both adopted, after confirming the tool choice — which this item asked for precisely because a reformat is expensive to redo. You picked **prettier** for js and **spotless + ktlint** for kt. Numbers that framed it: js 134 of 152 files, kt 124 files / ~35.7k LOC.
+
+Every binding in the family now has a formatting floor except lazily-react, which is blocked on having no CI workflow at all and is already filed as `#lazilyreactworkflow`.
+
+**lazily-js — prettier, pinned exactly.** `3.9.6`, no caret. That is the whole lesson of this series expressed in npm: prettier ships style changes in *minors*, so `^3.9.6` would be a gate whose verdict changes on npm's release schedule rather than on anything a contributor did. The gate is `prettier --check .` in `check`; `fmt-fix` writes and is not. `.prettierignore` keeps it to code — markdown and JSON are out of scope, since reformatting BENCHMARKS.md would bury real diffs in churn. 103 files reformatted.
+
+One interaction worth checking rather than assuming: a reformat changes published byte counts, and this repo gates on size budgets. `npm run build` regenerates `.size-limit.json` and it came back byte-identical, `size:check` green.
+
+**lazily-kt — spotless + ktlint, two pins.** The plugin and the formatter it shells to version independently, so pinning only the plugin leaves the style free to move when spotless bumps its default ktlint. Both pinned.
+
+Establishing that this is a *formatting* floor took the real work. ktlint bundles lint rules with its formatter and stops at the first error per file, so `spotlessApply` aborted before formatting anything — and each fix I made revealed the next one. That serial discovery is a trap: I renamed a private sentinel object to satisfy `class-naming`, and the next run surfaced `no-consecutive-comments`. Enumerating with the ktlint CLI directly gave the whole picture at once: **~5,100 violations, of which all but 31 were auto-fixable layout.**
+
+Those 31 are four non-formatting rules, now disabled with the reason recorded per rule:
+
+| rule | why it is off |
+| --- | --- |
+| `function-naming` | the JNA bindings in `LazilyFFI.kt` must match native C symbols exactly — renaming breaks the FFI |
+| `class-naming` | private SCREAMING_SNAKE sentinel objects, an idiom two independent authors reached for |
+| `filename` | `CrdtPlane.kt` → `CrdtPlaneRuntime.kt` changes the JVM facade class name, so it is a Java-interop change |
+| `no-consecutive-comments` | 24 sites where a KDoc follows a KDoc — an authoring convention here, not layout |
+
+I reverted the sentinel rename once I found the second one: renaming one site while suppressing the rule for the other would have been the worse of both options. And `max-line-length` is deliberately **not** in that table — its single violation is a raw-string JSON fixture that cannot be wrapped without changing the bytes under test, so it carries a targeted `@Suppress` at that one site and the rule stays enforced everywhere else. 120 files reformatted.
+
+**Also landed this cycle: the zig and dart CI failures from the previous turn**, whose report was lost when the document wedged. Both were real, and both were my error:
+
+- **zig** — I claimed the three pinned toolchains format identically, on the strength of a local check. That check could not prove it: `setup-zig` resolves `master` to the current nightly, so the locally-installed `master` and CI's are different compilers. Gate now runs on the two pinned releases only. `db1fce2`.
+- **dart** — the version was *not* the difference; CI ran 3.12.2, exactly what this machine runs. `dart format` reads the package's language version from `.dart_tool/package_config.json` to choose between the pre-3.7 and 3.7+ tall styles, and my step ran before `dart pub get` — so with no package_config it silently picked the other style and called 105 of 117 files changed on a clean tree. Reproduced exactly by moving `.dart_tool` aside locally. Step moved after `dart pub get`. `5225611`.
+
+The through-line across all five gates in this series is one mistake in five costumes: **pinning the style without pinning the implementation.** clang-format's defaults move between majors; `master` and `stable` are channels, not versions; a caret range is a moving version; and `dart format` picks its style from build state, so even an exact version is not enough without a resolved workspace.
+
+Mutation-checked in both bindings, three ways each: malformed source reddens `make fmt` (exit 2 in both); omitting the CI step reddens `check-ci-reach` with `MISSING fmt` — seen in both repos before adding the step; `fmt-fix` repairs and the gate goes green.
+
+`make check` exit 0 in both — js 573 tests, kt full suite green. Pushed lazily-js `e3d529a`, lazily-kt `4546107`. CI: zig, dart and js all green; kt still running at closeout.
+<!-- agent:boundary:5e75c6ce -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lazilycppfmt]~~
-- ~~⏭️ do [#lazilydartzig]~~
-- ~~do [#lzrstornfanout]~~
-- ~~do [#lzruffautofixvacuity]~~
-- 🚧 do [#lzcireachvaranchor]
+- ~~do [#lazilyformattinggate]~~
+- do [#lazilyreactworkflow]
+- ⏭️ do [#lzcireachvaranchor]
 - do [#lzmsgpackparity]
 - do [#lzreadmelinkrot]
 - do [#lzvacuousrun]
@@ -361,8 +400,7 @@ Pushed: lazily-zig `163e589`, lazily-dart `0892c71`. Both CI runs are queued at 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lazilyreactworkflow] lazily-react has NO CI workflow at all: no .github directory, and a two-line Makefile whose check target runs npm run build plus npm test. Found while auditing the five formatter-less bindings under #lazilydartzig. Nothing verifies this binding on push, which is a strictly larger gap than the formatting one that surfaced it, and it also means there is nowhere to wire any future gate. It is the only lazily binding in this state. Give it a ci.yml that runs its check target, then check whether the sibling guards the other bindings carry (conformance coverage, interop peer, check-ci-reach) apply here or should be explicitly excused with a reason.
-- [ ] [#lazilyformattinggate] lazily-js and lazily-kt still have no formatting gate after #lazilydartzig, because unlike zig and dart their formatter is not part of the language toolchain and adopting one means adding a dependency plus a full reformat. lazily-js has no prettier (or biome or dprint) in devDependencies, and the choice between them is a real preference with no canonical answer for a published npm package. lazily-kt has no ktlint or spotless plugin in its Gradle build. Recommendation: prettier --check for lazily-js since it is the least surprising default and the repo already has a CI workflow to hang it on, and spotless with ktlint for lazily-kt since it is one Gradle plugin rather than a separate toolchain. Both need the reformat commit first, then the gate in check and in CI so check-ci-reach can see it. Confirm the tool choice before the reformat lands, since a reformat is expensive to redo under a different formatter.
-- [ ] 🚧 [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
+- [ ] [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
 - [ ] [#lzmsgpackparity] msgpack is a spec MUST for frame codecs and is implemented in only two of nine bindings. protocol.md marks it MUST as the negotiated cross-language binary default on any binary boundary between differing languages, and further states that every fixture's frames MUST round-trip through both json and msgpack for all three IpcMessage variants. Actual state, verified by reading every binding: lazily-rs and lazily-cpp implement it (rs across ipc.rs, ffi.rs, reliable_sync.rs; cpp has include/lazily/codec.hpp and msgpack.hpp). The other seven - py, go, kt, js, cs, zig, dart - mention msgpack in exactly one place each, their interop-peer handshake, where they declare it as an explicit carve_out. That is honest and fails closed, and is the codec-level equivalent of KNOWN_UNCOVERED, so this is a declared gap rather than a hidden one. The problem is that it is invisible where every other parity fact lives: coverage.json has no codec row at all, so the feature matrix cannot show that a MUST-level codec is carved out by seven bindings, and the conformance ladder cannot see it either because all four rungs verify fixture CONTENT replay, not codec round-tripping. Add a codec row per flavor to coverage.json, then add a round-trip conformance obligation so the json/msgpack requirement is actually tested rather than asserted in prose.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.
 - [ ] [#lzreadmelinkrot] [recommended] Two small README link defects survived the family cross-linking pass, plus one log-noise issue, all found while doing it. First, lazily-zig README line 7 links lazily-py as github.com/btakita/lazily-py, the pre-lazily-hub namespace; GitHub redirects it so it is not dead, but it is the last non-canonical family link in the tree and it will break if that redirect is ever reclaimed. Second, lazily-react's opening paragraph linked @lazily-hub/lazily-js as the relative path ../lazily-js, which only resolves inside a workspace checkout and was dead on GitHub - already fixed in that pass, but it is worth a repo-wide sweep for other relative cross-repo links, since relative links never resolve across repositories. Third, lazily-zig's make check prints a bare failed command line mid-run while the target still exits 0 and every subsequent step passes, which makes a green gate read as red and is exactly the kind of noise that trains people to skim past a real failure. None of the three is urgent; all three are cheap.

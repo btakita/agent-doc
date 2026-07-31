@@ -89,14 +89,41 @@ Verification is green:
 - superproject pointer commit: `45b3991cb` (`chore: update agent-doc reconnect guard`).
 
 I did not install, recycle, or restart processes in this cycle. The retained `tsift.md` editor-delivery capture still owns that boundary. Existing gated backlog item `#reactive-closeout-install-verify` covers installing these commits and verifying editor/tmux responsiveness after that capture reaches a terminal state.
-<!-- agent:boundary:743e581d -->
+
+### Re: Open-tab authority readiness and editor/tmux latency — gpt-5
+
+> **Queue prompt:**
+> Run Agent Doc takes several seconds to complete. Editor -> Tmux Pane autosync performance has improved but is still slow at times. Can we have authority reactives ready for all open editor tabs...even tabs that are not currently active? Please improve performance to all issues.
+
+Yes. The current implementation already projects every open Markdown tab into the authority warm set at plugin startup and on layout changes, with the focused document first, nearby tabs next, and a bounded 256-document capacity. Each document owns a cancellable Tokio task on a shared runtime; idle subscriptions do not consume an OS thread. The remaining live slowdown was a lifecycle fault rather than missing prewarming.
+
+The IDEA process had four native-library generations mapped at once. A mapped generation was described as inert after hot reload, but native quiescence only stopped IPC listeners and CRDT replicas. It did not cancel that generation's open-document authority streams, queued editor surfaces, Tokio work, or Lazily Effects. Each retained mapping could therefore keep an entire duplicate reactive plane alive, explaining periodic UI CPU pressure, accumulated focus latency, and cold-looking authority behavior despite the open-tab warm set.
+
+Fixed in `3fa0fa9d8` (`fix: quiesce retired editor reactives`):
+
+- Native reload quiescence now rejects late editor ingress, cancels every per-document authority membership, clears queued surfaces, and unsubscribes every per-root Lazily Effect before retiring the generation.
+- A mapped retired library is now genuinely idle even when the loader cannot unmap it.
+- The reload coordinator republishes the complete open-tab surface after handoff, so focused, adjacent, and inactive open documents are prewarmed immediately in the winning generation.
+- Replacement-load failure explicitly resumes the retained generation and its reactive ingress instead of leaving it silently quiesced.
+- Shared native editor-surface logic supplies plugin parity; the JetBrains-only addition is the hot-reload handoff that JetBrains requires.
+- Tests prove retired generations cancel authority subscriptions, reject recreated work, and stop all generation-owned Effects.
+
+Verification passed:
+
+- `cargo test -p agent-doc-editor-surface-io`
+- full `make check` (`tart-777fa50a6e`)
+- `git diff --check`
+- latest three completed CI runs were green; latest was run `30580926037`
+
+The Agent Doc source commit is `3fa0fa9d8`; the superproject pointer commit is `28cd57635`. I did not install, recycle, or restart IDEA because the existing retained closeout/install gate owns that boundary. Live verification should occur after that gated install; this cycle did not disturb the retained capture.
+<!-- agent:boundary:8865464f -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Idea is periodically non-responsive. Please fix thrashing in the plugin UI process. Be more efficient with calculation and move CPU heavy/bound tasks into another thread. Ensure plugin parity.~~
-- Run Agent Doc takes several seconds to complete. Editor -> Tmux Pane autosync performance has improved but is still slow at times. Can we have authority reactives ready for all open editor tabs...even tabs that are not currently active? Please improve performance to all issues.
+- ~~Run Agent Doc takes several seconds to complete. Editor -> Tmux Pane autosync performance has improved but is still slow at times. Can we have authority reactives ready for all open editor tabs...even tabs that are not currently active? Please improve performance to all issues.~~
 - Abstraction names should be descriptive instead of using project names. Please audit all abstraction names, particularly test names.
 - Please audit the hotpath + startup paths to ensure the systems are fully reactive. Any imperative operations should be replace by reactive operations if possible. Consolidate any "split-brain" login into cohesive reactives. Convert any magic strings or magic values into enums or consts.
 <!-- /agent:queue -->

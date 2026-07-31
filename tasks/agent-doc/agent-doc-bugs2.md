@@ -59,13 +59,43 @@ Dogfood mode is now document-configurable with `agent_doc_dogfood: true` (and al
 Verification is green: `make check` passed all 8,453 tests, release synchronization, static checks, and every TLA+ model. The focused tests cover the Equity Funding Source short-head case, capture-before-authority ordering, corruption rejection, and dogfood classification. Agent Doc commit: `3d8a83be6`; superproject pointer commit: `cb48b93e8`. The latest prior CI run was successful (`30580926037`), so I did not wait for a new run.
 
 I did not install or recycle processes: the retained `tsift.md` editor-delivery capture explicitly forbids install/recycle until its owner reaches a terminal boundary. I queued the install plus live Equity Funding Source, Monster Rod Holders, Compact Exchange, and editor/tmux verification behind that exact dependency rather than disturbing the durable capture.
-<!-- agent:boundary:10935298 -->
+
+### Re: JetBrains native subscription CPU churn — gpt-5
+
+> **Queue prompt:**
+>
+> Idea is periodically non-responsive. Please fix thrashing in the plugin UI process. Be more efficient with calculation and move CPU heavy/bound tasks into another thread. Ensure plugin parity.
+
+I reproduced the churn against the restarted IDEA process. CPU sampling showed several native `agent-doc-editor-reactive` threads consuming cores while IDEA was otherwise idle; the Kotlin thread dump did not show Agent Doc work running on the EDT. The expensive work was already out of band, but the native document-authority subscriptions could reconnect in a tight loop.
+
+The contributing defect was in the shared reactive authority stream: after a controller socket closed or was interrupted, every open document immediately reconnected with a cold cursor (`after_version = 0`, no controller generation). A stale or one-shot controller could therefore return the same projection and close again, multiplying redundant controller launches, decoding, and reactive invalidations across all open documents.
+
+Fixed in the shared native editor authority layer:
+
+- reconnects now resume from the last Lazily controller-generation/version cursor;
+- duplicate same-cursor projections no longer invalidate dependents;
+- one compatibility reconnect is allowed, then a second no-progress disconnect projects the authority as unavailable instead of becoming a CPU-bound retry loop;
+- a real controller-generation or authority-version change reactivates the subscription;
+- the path remains socket/event driven—no sleep or polling loop was added.
+
+Because this is in the shared Rust/native authority stream rather than JetBrains-specific Kotlin code, the editor integrations receive the same behavior and retain plugin parity. CPU-heavy controller work remains off the IDEA UI thread.
+
+Verification is green:
+
+- focused authority reconnect tests pass, including cursor resume, no-progress churn termination, and controller-generation reactivation;
+- full `make check` passes;
+- latest completed CI run `30580926037` is green;
+- source commit: `5413a80e0` (`fix: stop document authority reconnect churn`);
+- superproject pointer commit: `45b3991cb` (`chore: update agent-doc reconnect guard`).
+
+I did not install, recycle, or restart processes in this cycle. The retained `tsift.md` editor-delivery capture still owns that boundary. Existing gated backlog item `#reactive-closeout-install-verify` covers installing these commits and verifying editor/tmux responsiveness after that capture reaches a terminal state.
+<!-- agent:boundary:743e581d -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~equityfundingsource.md has queue items for already done tasks. Please investigate why agent-doc did not strike the done items and whether the cause(s) were fixed in previous versions or not. Fix all remaining contributing factors.~~ — auto-struck: answered this cycle (#ftstrike)
-- Idea is periodically non-responsive. Please fix thrashing in the plugin UI process. Be more efficient with calculation and move CPU heavy/bound tasks into another thread. Ensure plugin parity.
+- ~~Idea is periodically non-responsive. Please fix thrashing in the plugin UI process. Be more efficient with calculation and move CPU heavy/bound tasks into another thread. Ensure plugin parity.~~
 - Run Agent Doc takes several seconds to complete. Editor -> Tmux Pane autosync performance has improved but is still slow at times. Can we have authority reactives ready for all open editor tabs...even tabs that are not currently active? Please improve performance to all issues.
 - Abstraction names should be descriptive instead of using project names. Please audit all abstraction names, particularly test names.
 - Please audit the hotpath + startup paths to ensure the systems are fully reactive. Any imperative operations should be replace by reactive operations if possible. Consolidate any "split-brain" login into cohesive reactives. Convert any magic strings or magic values into enums or consts.

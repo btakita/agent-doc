@@ -16,6 +16,15 @@ codex_args: -s danger-full-access
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Please create a contact for mary-ellen-zellerbach:
+- MEMZ@whitneylake.net
+- c.m.zellerbach@martin-investments.com
+- cmz2970@sbcglobal.net
+
+I did client services for her at Martin Investments.
+
+### Re: Contact for Mary Ellen Zellerbach — opus-5
+
 Created. She was already all over the mail corpus, so I pulled the context out of it rather than leaving a stub.
 
 **What was created**
@@ -37,14 +46,9 @@ Last contact was Dec 2023 (Invoice 32). The open thread you left in Oct 2023 was
 
 - This session document is named `mary-elle-zellerbach.md` but you wrote `mary-ellen-zellerbach`. I used **mary-ellen-zellerbach** for the slug, since the corpus confirms "Mary Ellen." The doc filename is the odd one out — say the word if you want it renamed.
 - I did **not** commit the `mail` submodule. `.corky.toml` already had uncommitted `craig-fryar` and `luke-richey` entries from another session, and committing my change would sweep those in too. Let me know if you want it committed anyway.
-Please create a contact for mary-ellen-zellerbach:
-- MEMZ@whitneylake.net
-- c.m.zellerbach@martin-investments.com
-- cmz2970@sbcglobal.net
 
-I did client services for her at Martin Investments.
-### Re: Contact for Mary Ellen Zellerbach — opus-5
-<!-- agent:boundary:babc6d5f -->
+commit .corky.toml. I renamed the document.
+<!-- agent:boundary:d7e22174 -->
 <!-- /agent:exchange -->
 
 ## Queue

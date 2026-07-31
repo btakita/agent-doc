@@ -405,15 +405,45 @@ That closes the formatting audit that began with `#lzruffautofixvacuity`. **All 
 Mutation-checked: deleting the format step reddens `check-ci-reach` with `MISSING fmt`; malformed source reddens `make fmt` (exit 2); `fmt-fix` repairs and the gate goes green.
 
 `make check` exit 0, 18 tests pass after the reformat. Pushed `662c20b`. lazily-kt's CI came back green (`4546107`); react's first run is in flight at closeout.
-<!-- agent:boundary:7ca384f7 -->
+
+### Re: do [#lzcireachvaranchor] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcireachvaranchor]
+
+
+Decided: **teach the normalizer, don't keep the strictness.** Applied to all ten copies at once, byte-identical.
+
+**Why that way round.** The strict reading has a real argument — forcing CI to spell what make spells is a genuine coupling. But look at what it actually cost. lazily-cpp's workaround was a hardcoded second spelling of the manifest path in the workflow, plus a hand-written equality assertion to stop the two spellings drifting apart. That is a new drift surface, invented to satisfy a guard whose entire job is detecting drift, and it has to be remembered and written by hand at every future site. The guard should absorb that, not export it to nine call sites.
+
+The other half is that the old behaviour wasn't strict so much as *lossy*. It dropped the `$VAR` token outright, which discarded the **argument** along with its unresolvable value — so `script.sh <path>` stopped matching a step that really ran `script.sh "$PATH"`. That is not "CI must spell what make spells", it is "the guard forgot there was an argument at all".
+
+**What changed.** An unresolvable variable reference becomes a **wildcard matching exactly one token**, on either side — a recipe can leave `$$VAR` for the shell just as a CI step can pass `$VAR`. Arity survives, which is the part the drop lost: `script.sh $A` still does not match a step that passes no argument. This is the same looseness the normalizer already applies to paths, which it reduces to basenames; reach is a floor, not equivalence, exactly as the header has always said.
+
+**Mutation-checked in both directions**, which matters here because the fix is a loosening and the obvious failure mode is loosening into a false green:
+
+| probe | expected | observed |
+| --- | --- | --- |
+| patched guard, CI step passes **no** argument | still `MISSING` | `MISSING conformance-coverage` |
+| **pre-fix** guard vs the env-var spelling | `MISSING` | `MISSING conformance-coverage` |
+
+The second row is the one that proves the defect was real rather than assumed, and that this change is what moved the verdict.
+
+**Propagation.** All ten copies now hash identically, and every binding's guard still reports OK with **unchanged target counts** — 41 for rs, 9 js, 8 go/dart/cs, 7 py/cpp, 6 kt/zig, 4 react. That is the check that matters for a loosening: no target silently flipped from unreachable to reached.
+
+The header's `HOW A TARGET IS MATCHED` section documents the wildcard, since leaving it describing the old drop would have been worse than the bug.
+
+**lazily-cpp's workaround is gone** in the same commit: the coverage step passes `"$LAZILY_CONFORMANCE_MANIFEST"` like every other step in that job, and the equality assertion is deleted. That is the end-to-end proof — the spelling the guard used to reject is now the spelling in the tree.
+
+Pushed to all ten: cpp `fc47ccf`, rs `e71c0bd`, py `7fda1be`, go `cdcba6a`, js `22de8df`, kt `591fde1`, dart `39c296c`, zig `49be38d`, cs `5403db6`, react `b188293`. All ten CI runs are queued or in progress at closeout. lazily-react's first-ever workflow run, from last cycle, came back **green**.
+<!-- agent:boundary:ce49a0ae -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lazilyformattinggate]~~
-- ~~do [#lazilyreactworkflow]~~
-- ⏭️ do [#lzcireachvaranchor]
+- ~~do [#lzcireachvaranchor]~~
 - do [#lzmsgpackparity]
 - do [#lzreadmelinkrot]
 - do [#lzvacuousrun]
@@ -434,7 +464,6 @@ Mutation-checked: deleting the format step reddens `check-ci-reach` with `MISSIN
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
 - [ ] [#lzmsgpackparity] msgpack is a spec MUST for frame codecs and is implemented in only two of nine bindings. protocol.md marks it MUST as the negotiated cross-language binary default on any binary boundary between differing languages, and further states that every fixture's frames MUST round-trip through both json and msgpack for all three IpcMessage variants. Actual state, verified by reading every binding: lazily-rs and lazily-cpp implement it (rs across ipc.rs, ffi.rs, reliable_sync.rs; cpp has include/lazily/codec.hpp and msgpack.hpp). The other seven - py, go, kt, js, cs, zig, dart - mention msgpack in exactly one place each, their interop-peer handshake, where they declare it as an explicit carve_out. That is honest and fails closed, and is the codec-level equivalent of KNOWN_UNCOVERED, so this is a declared gap rather than a hidden one. The problem is that it is invisible where every other parity fact lives: coverage.json has no codec row at all, so the feature matrix cannot show that a MUST-level codec is carved out by seven bindings, and the conformance ladder cannot see it either because all four rungs verify fixture CONTENT replay, not codec round-tripping. Add a codec row per flavor to coverage.json, then add a round-trip conformance obligation so the json/msgpack requirement is actually tested rather than asserted in prose.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.
 - [ ] [#lzreadmelinkrot] [recommended] Two small README link defects survived the family cross-linking pass, plus one log-noise issue, all found while doing it. First, lazily-zig README line 7 links lazily-py as github.com/btakita/lazily-py, the pre-lazily-hub namespace; GitHub redirects it so it is not dead, but it is the last non-canonical family link in the tree and it will break if that redirect is ever reclaimed. Second, lazily-react's opening paragraph linked @lazily-hub/lazily-js as the relative path ../lazily-js, which only resolves inside a workspace checkout and was dead on GitHub - already fixed in that pass, but it is worth a repo-wide sweep for other relative cross-repo links, since relative links never resolve across repositories. Third, lazily-zig's make check prints a bare failed command line mid-run while the target still exits 0 and every subsequent step passes, which makes a green gate read as red and is exactly the kind of noise that trains people to skim past a real failure. None of the three is urgent; all three are cheap.

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: b8a61422-b7ed-4cdd-80a6-c793c56e04df
+resume: 8940f770-c10a-481d-a5a2-48a70411b541
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -96,19 +96,72 @@ Nothing is written on a refusal — asserted, not assumed.
 12 rename tests now, each asserting renamed *and* untouched positions individually. I mutation-checked the new ones: disabling the cross-file branch reddens the cross-file test, disabling the ambiguity filter reddens the refusal test, and disabling the shadowing rule reddens the self-defining-caller test. All three fail on their mutant and pass on the real code.
 
 Remaining: `#tsrenameast3` (open rename to bash/zig/gdscript), `#tsrenameast4` (the structural-only refusal E2E), then `#wsdq` release.
-<!-- agent:boundary:b3beaa47 -->
+
+### Re: do [#tsrenameast3] / do [#tsrenameast4] — opus-5
+
+Both phases landed together — phase 4 turned out to be a correction to phase 4, so splitting them would have shipped a claim I could not support. tsift `b7b02c7`, gitlink `0d92121df`, pushed. `make check` exit 0, 1644 tests, clippy clean.
+
+`rename_symbol` now works for Kotlin, Bash, Zig, and GDScript. Nothing about those languages was blocking it — each family hand-rolled its own substring scan, so a language without one was refused while being fully indexed. Once occurrences come out of the grammar and extent comes out of the call graph, the language is a parameter: registration is an identifier-node-kind set plus a fixture row, and no new rewriting code exists anywhere in this change. Kotlin came along because it was indexed and structural for the same implementation reason, and leaving it out would have been an arbitrary line.
+
+**Two things fell out of building it that the plan did not have, and both are the interesting part.**
+
+Bash needed a *position* rule, not a kind rule. Its grammar spells the function name, the command name, and every unquoted argument as the same `word` node — so `echo deploy` would have had the rename rewrite an argument that is data. That is phase 1's string-literal defect arriving through a different door, and a kind-set table entry alone would have shipped it. `word` occurrences are now restricted to the declaration and command-name positions; `variable_name` needs no guard, since it is only ever a variable.
+
+Rename scope had to be re-keyed per language. Phase 2 scoped by executor *family*, which was right when the families were Rust / Python / JS-like. A single `Indexed` family covering four languages would have had a Zig `deploy` block a rename of a Bash `deploy` — the exact Python-vs-JavaScript defect phase 2 fixed, reintroduced by the grouping rather than by the logic. Each language in the indexed and structural tiers is now its own rename family; only the JS-like executors share one, because they genuinely call each other.
+
+Zig and GDScript recognize `rename_symbol` and **not** `structural_rewrite` — this build compiles no ast-grep grammar for them, and advertising a kind that can only fail at match time is worse than declining it at registration.
+
+**I need to correct the plan's premise for `#tsrenameast4`.** It said the structural-only `rename_symbol` refusal would become reachable end to end once an indexed language could otherwise fall through. It does not. Making *every* indexed language renamable leaves the structural-only tier defined by having no `tsift-graph` binding at all, so there is no symbol to resolve and the index layer answers first:
+
+    $ echo '{"intents":[{"kind":"rename_symbol","symbol":"widgetCount","file":"main.go",...}]}' | tsift edit-intents
+    Error: no indexed symbol matched "widgetCount"
+
+Checked live against a Go fixture, not reasoned about. Phase 3 dissolved the premise instead of satisfying it.
+
+What phase 3 *did* make reachable is the same guard through a different door. Zig and GDScript are the first executors that recognize one kind and refuse another, so `structural_rewrite` on a `.zig` file now reaches the executor-level refusal end to end and names the executor. Markdown does the same for `rename_symbol`. Both have end-to-end tests, and the structural-only case has one pinning where its refusal actually comes from, so a later change that moves it reads as a change rather than as a regression. I amended the plan file rather than leave the overstated claim standing.
+
+**Conformance.** Two exhaustive tables now, keyed on the recognized-intent set rather than on a hand-kept list: a structural fixture per executor that recognizes `structural_rewrite`, a rename fixture per executor that recognizes `rename_symbol`. A `Lang` brought into the renamable tier with no rename row fails the suite. Each rename row declares the positions that must change *and* the positions that must survive byte for byte, asserted individually.
+
+I mutation-checked the ones that matter, since a rename table is easy to write so that it proves nothing:
+
+| mutation | reddens |
+|---|---|
+| drop the bash `word` position rule | bash row — `echo widget_count` gets renamed |
+| add `string_content` to Zig's identifier set | zig row — the string literal gets renamed |
+| drop `"name"` from GDScript's set | gdscript row — the declaration is not renamed |
+| collapse the indexed tier to one rename family | the family-separation test |
+| let Zig advertise `structural_rewrite` | 4 tests, including the ast-grep grammar guard |
+| remove the indexed dispatch branch | the end-to-end apply test |
+
+One pre-existing test asserted the old behaviour — `edit_intents_structural_rewrite_reaches_the_kotlin_and_bash_executors` checked that Kotlin and Bash *refuse* `rename_symbol`. It now checks `replace_function_body` instead, which is a kind that tier still genuinely has no rewriting for.
+
+Live, on the installed binary, `deploy` → `launch` across all four files:
+
+    util.sh    launch() {           <- renamed
+                 echo deploy        <- preserved (argument, not a name)
+                 local label="deploy"   <- preserved
+                 # deploy comment   <- preserved
+               launch               <- renamed (call)
+    main.zig   pub fn launch()      <- renamed, comment and string preserved
+    player.gd  func launch():       <- renamed, comment and string preserved
+    caller.gd  return launch() + 1  <- cross-file, no GDScript-specific code
+
+Spec updated: `specs/ast-edits.md` gains an "Indexed executors" section with the tier table and the bash position rule, `specs/structural-patterns.md` corrects "promotion unlocks the symbol-resolved kinds" to "promotion unlocks `rename_symbol` immediately", and `specs/search-navigation.md` lists the new apply-capable languages.
+
+CI run `30589897064` is in progress; the prior run on `784a6cf` was green. Local verification is the evidence above.
+
+Remaining in the queue: `#wsdq` release + publish + install, and `#jzs7` extract-method.
+<!-- agent:boundary:38054282 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- do [#narrowidentifierkind]
 - ⏭️ do [#wsdq]
 - 🚧 do [#jzs7]
-- ~~do [#w505]~~
-- ~~do [#tsrenameast1]~~
-- ~~do [#tsrenameast2]~~
-- do [#tsrenameast3]
-- do [#tsrenameast4]
+- ~~do [#tsrenameast3]~~
+- ~~do [#tsrenameast4]~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -117,8 +170,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tsrenameast3] #tsrenameast3 rename_symbol phase 3 — open rename_symbol to every indexed language (bash, zig, gdscript) via a per-language identifier-node-set entry plus conformance fixture rows asserting renamed AND untouched positions. Depends on #tsrenameast1. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
-- [ ] [#tsrenameast4] #tsrenameast4 rename_symbol phase 4 — add the end-to-end test for the structural-only rename_symbol refusal, reachable for the first time once an indexed language could otherwise fall through. Depends on #tsrenameast3. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
+- [ ] [#narrowidentifierkind] Narrow identifier-kind sets that are coarser than binding resolution: Rust's set includes field_identifier (renaming a fn renames an identically-named struct field) and GDScript's includes name (renaming a func renames an identically-named local var). Both match the pre-AST scan's behaviour, so neither is a new defect, but both are renames the graph could disambiguate. Needs per-occurrence scope resolution, not a table change. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
 - [ ] [#wsdq] release + publish + install
 - [ ] 🚧 [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->

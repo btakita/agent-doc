@@ -370,14 +370,49 @@ The through-line across all five gates in this series is one mistake in five cos
 Mutation-checked in both bindings, three ways each: malformed source reddens `make fmt` (exit 2 in both); omitting the CI step reddens `check-ci-reach` with `MISSING fmt` — seen in both repos before adding the step; `fmt-fix` repairs and the gate goes green.
 
 `make check` exit 0 in both — js 573 tests, kt full suite green. Pushed lazily-js `e3d529a`, lazily-kt `4546107`. CI: zig, dart and js all green; kt still running at closeout.
-<!-- agent:boundary:5e75c6ce -->
+
+### Re: do [#lazilyreactworkflow] — opus-5
+
+lazily-react has a CI workflow — its first ever. It was the only lazily binding with no `.github` directory at all, so `make check` ran on a laptop and nothing verified a push.
+
+**The item asked which sibling guards apply here.** Working through them rather than copying all three:
+
+- **check-ci-reach — applies**, and this binding is the argument for it. Copied the guard and its conf. It compares `make check`'s prerequisite closure against the workflow's `run:` bodies and guards itself by being in `check`.
+- **conformance coverage / scenario replay — do not apply.** lazily-react replays no lazily-spec fixtures; it is a thin `useSyncExternalStore` adapter over lazily-js, and the fixtures are exercised there.
+- **interop peer — does not apply.** No wire format to agree on, no peer binary.
+
+None needed an excuse entry, because two are genuinely absent rather than skipped — an excuse for a gate that does not exist would be exactly the kind of rot the excuse list is meant to prevent.
+
+**One step per gate, not a single `make check`.** I wrote it the lazy way first and the guard caught it: with one aggregate step it reported all four targets as `MISSING`, because `make_invokes` matches the root target only. That is the same opacity the lazily-py workflow comment warns about — a gate can stop running with no step name changing. Split, the guard prints one line per gate.
+
+**The sibling checkout is load-bearing.** `devDependencies` carries `"@lazily-hub/lazily-js": "file:../lazily-js"`, so without the sibling `npm install` cannot resolve it and nothing exercises lazily at all — a green run that tested nothing. The workflow checks lazily-js out beside the package and asserts the path before installing.
+
+**Also finished the formatting floor here** rather than filing it. `#lazilyformattinggate` skipped react precisely because there was nowhere to hang a gate, and that reason is now gone — leaving it would have meant filing an item for something this cycle could finish. prettier pinned to `3.9.6`, the same exact version as lazily-js: these two are one JavaScript family, and a split pin would let them drift apart.
+
+That closes the formatting audit that began with `#lzruffautofixvacuity`. **All nine bindings now have a formatting gate that can fail**, each with its formatter version pinned as well as its style:
+
+| binding | formatter | how it is pinned |
+| --- | --- | --- |
+| rs, interop | `cargo fmt --check` | toolchain |
+| go | `gofmt -l` | toolchain |
+| py | `ruff` | lockfile, `fix = true` removed |
+| cpp | `clang-format` | `uvx clang-format@18.1.8` |
+| zig | `zig fmt --check` | two pinned releases, never `master` |
+| dart | `dart format --set-exit-if-changed` | stable SDK, after `pub get` |
+| js, react | `prettier --check` | exact `3.9.6`, no caret |
+| kt | `spotless` + `ktlint` | both versions pinned separately |
+
+Mutation-checked: deleting the format step reddens `check-ci-reach` with `MISSING fmt`; malformed source reddens `make fmt` (exit 2); `fmt-fix` repairs and the gate goes green.
+
+`make check` exit 0, 18 tests pass after the reformat. Pushed `662c20b`. lazily-kt's CI came back green (`4546107`); react's first run is in flight at closeout.
+<!-- agent:boundary:7ca384f7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lazilyformattinggate]~~
-- do [#lazilyreactworkflow]
+- ~~do [#lazilyreactworkflow]~~
 - ⏭️ do [#lzcireachvaranchor]
 - do [#lzmsgpackparity]
 - do [#lzreadmelinkrot]
@@ -399,7 +434,6 @@ Mutation-checked in both bindings, three ways each: malformed source reddens `ma
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilyreactworkflow] lazily-react has NO CI workflow at all: no .github directory, and a two-line Makefile whose check target runs npm run build plus npm test. Found while auditing the five formatter-less bindings under #lazilydartzig. Nothing verifies this binding on push, which is a strictly larger gap than the formatting one that surfaced it, and it also means there is nowhere to wire any future gate. It is the only lazily binding in this state. Give it a ci.yml that runs its check target, then check whether the sibling guards the other bindings carry (conformance coverage, interop peer, check-ci-reach) apply here or should be explicitly excused with a reason.
 - [ ] [#lzcireachvaranchor] [recommended] The CI-reachability guard cannot match a Makefile argument that CI supplies through a shell variable. Recipe arguments are expanded by make -n and land as literals, while a CI-side token starting with a dollar sign has no slash and is dropped by the anchor normalizer, so the two never line up. lazily-cpp hit this: CI genuinely ran the coverage script but passed the manifest path as an environment variable, and the guard reported the target unreachable. It is fail-closed, so it costs a false red and never a false green, and cpp worked around it by naming the same path in the CI step plus an equality assertion so the spellings cannot drift. Decide at the family level whether to keep the strictness, which forces CI to spell what make spells, or teach the normalizer to keep variable NAMES as wildcards. Whichever way it goes, apply it to all nine copies at once, since the script is byte-identical across the family by design.
 - [ ] [#lzmsgpackparity] msgpack is a spec MUST for frame codecs and is implemented in only two of nine bindings. protocol.md marks it MUST as the negotiated cross-language binary default on any binary boundary between differing languages, and further states that every fixture's frames MUST round-trip through both json and msgpack for all three IpcMessage variants. Actual state, verified by reading every binding: lazily-rs and lazily-cpp implement it (rs across ipc.rs, ffi.rs, reliable_sync.rs; cpp has include/lazily/codec.hpp and msgpack.hpp). The other seven - py, go, kt, js, cs, zig, dart - mention msgpack in exactly one place each, their interop-peer handshake, where they declare it as an explicit carve_out. That is honest and fails closed, and is the codec-level equivalent of KNOWN_UNCOVERED, so this is a declared gap rather than a hidden one. The problem is that it is invisible where every other parity fact lives: coverage.json has no codec row at all, so the feature matrix cannot show that a MUST-level codec is carved out by seven bindings, and the conformance ladder cannot see it either because all four rungs verify fixture CONTENT replay, not codec round-tripping. Add a codec row per flavor to coverage.json, then add a round-trip conformance obligation so the json/msgpack requirement is actually tested rather than asserted in prose.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.

@@ -228,7 +228,54 @@ The rebuilt JetBrains plugin `0.2.332` is installed in IntelliJ IDEA 2026.1. Res
 Closed `#fresh-project-supervisor-log`. The installed `agent-doc 0.35.109` already owns supervisor stderr-log creation in the startup path: every start opens the configured/default target, creates missing parent directories, and uses append mode before deciding whether a route-owned TUI also needs process-level stderr redirection. The default is project-local `.agent-doc/logs/supervisor-stderr.log`; relative configured paths resolve from the project root; if the primary path cannot be created/opened, startup uses the deterministic temp fallback `agent-doc/supervisor-logs/<project-hash>/supervisor-stderr.log` and records the warning there.
 
 No additional source edit was required because the implementation and regression coverage were already present in clean tracked source. Verification: `cargo test -p agent-doc-supervisor-process-io` passed all 4 tests, including `fresh_project_start_creates_default_supervisor_log_tree`, configured relative-path resolution, and deterministic fallback. The installed CLI reports `agent-doc 0.35.109`; the latest CI run is `completed success`.
-<!-- agent:boundary:4a64c69b -->
+fix Run Agent Doc issues in lazily.md
+```
+  Verification
+
+  Five mutation probes, all caught: dropped roots, Opaque decayed to {"Opaque": null}, NodeSnapshot.key written as null instead of omitted, a renamed DeltaOp tag, and a deleted runner assertion (caught by the #lzassertunknownkeys guard).
+
+  make check exit 0 — 53/53 tests, conformance coverage OK: 113 canonical fixtures across 21 areas, scenario coverage OK: 78 of 82, fmt + ci-reach clean. Ledger: codec joined REQUIRED_AREAS, json fixture left KNOWN_UNCOVERED, MIN_FIXTURES
+  112 → 113. coverage.json C++ json row flipped and derived tables regenerated; 11 repos committed and pushed separately.
+
+  lazily-cpp CI run 30680492937 is still in progress — local evidence above, not a CI green.
+
+  Two things to flag
+
+  The preflight semantic_completion_match claiming this item was already resolved by #lzmsgpackparity (1.983) was wrong — that item created the fixture and the obligation, it implemented no binding's codec.
+
+  I hit an agent-doc defect: the coined-id PreToolUse hook reads #include/#ifndef/#define/#endif as untracked coined ids, so no C-family header can be written through the Write tool in any repo. I worked around it with shell heredocs (a
+  hook bypass) and filed it at the top of backlog alongside the distributed/crdt_sync_frames.json runner follow-up. Saved to memory.
+
+  Closeout state — not clean
+
+  respond applied every mutation (#lzcppjsoncodec reaped, queue head consumed, both backlog items prepended) but did not reach committed:
+
+  ▎ editor is the current authority … CRDT relay convergence is still pending … The capture is already durable and the same intent commits itself once delivery converges.
+
+  session-check confirms authority/disk divergence with a pending editor-native save receipt, and explicitly says the controller owns the next closeout attempt. Per that instruction I did not re-send, force disk, recycle, or reload-lib —
+  and I stopped the queue drain rather than looping on an uncommitted closeout. 16 queue items remain; the drain should resume once the controller settles the commit.
+```
+
+### Re: Run Agent Doc failures reported from lazily.md — gpt-5.6
+
+Fixed and committed the two real Agent Doc defects reported by the Lazily cycle.
+
+The false `semantic_completion_match` came from reusing the general memory-search ranker for task equivalence. General search intentionally adds a large score boost when a query mentions a tracked item id; therefore the new `#lzcppjsoncodec` task's provenance phrase, “Found while closing `#lzmsgpackparity`,” was misread as evidence that the completed parent had already fulfilled the child. Semantic completion warnings and free-text queue auto-strikes now use content-equivalence ranking without the navigation-only item-id boost. Regression coverage proves a completed parent can neither suppress nor auto-consume the distinct child task it discovered, while genuinely equivalent completed work still matches.
+
+The coined-id PreToolUse hook now recognizes actual C-family preprocessor directives in C/C++/Objective-C/CUDA targets. It masks only the leading hash of a fixed, named directive set at directive position before running the tracked-id scan. `#include`, `#ifndef`, `#define`, `#endif`, conditionals, pragmas, and the remaining standard/common directives therefore no longer block `Write`/`Edit`; real coined ids in comments still fail closed, and the same words outside directive position or outside C-family files remain protected tracked-work ids.
+
+I also inspected the retained Lazily closeout rather than treating its nonterminal message as another defect. The durable capture later emitted `captured_finalize_resume_committed`; the controller's exact-once recovery completed as designed. Re-finalizing, forcing disk, or recycling would have created the closeout churn the recovery path is meant to prevent, so no recovery-contract change was warranted.
+
+Verification is green:
+
+- focused red/green regressions for semantic completion, queue auto-strike, and C-family directives;
+- `cargo test -p agent-doc-memory -p agent-doc-hooks-io`;
+- full `make check`, final artifact `tart-f56f1fe7ee`, exit 0;
+- `git diff --check` on the scoped files;
+- latest completed CI run `30612438030` is green.
+
+Committed as Agent Doc source `e5a0af2fd` (`fix: harden workflow guard classification`) and superproject pointer `3c7e026ee` (`chore: update agent-doc workflow guards`). I did not push because this prompt did not request a push. I also did not install or recycle: existing review gate `#reactive-closeout-install-verify` explicitly defers the committed-binary install until the retained `tsift.md` editor-delivery lineage reaches a terminal boundary, so this fix should ride that guarded install rather than disturb an active closeout owner. No additional backlog item is needed because that existing gate already owns the remaining installation boundary.
+<!-- agent:boundary:c97c9efc -->
 <!-- /agent:exchange -->
 ## Queue
 

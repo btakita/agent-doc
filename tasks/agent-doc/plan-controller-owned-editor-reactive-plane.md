@@ -228,10 +228,12 @@ the existing authority-safe reconcile. The action identity includes the
 controller generation and delivery version, so repeated observations and
 multiple subscriptions do not duplicate work.
 
-A replacement controller also derives a generation-scoped hydration Effect for
-each durable retained transition whose delivery input is not locally observed.
-The Effect reads the already-retained registered editor/CRDT projection into the
-controller Source. It sends no editor request and waits for no ACK.
+A replacement controller derives `AwaitingDelivery` from the same exhaustive
+retained-transition state machine when its delivery Source is absent. That
+state's activation Effect observes the already-retained registered editor/CRDT
+projection into the Source. The listener is bound before liveness restoration
+publishes missing-replica targets, so a returning projection is a reliable
+reactive edge. It sends no editor request and waits for no ACK.
 
 Structural ambiguity, zero live replicas, unconverged delivery, missing captured
 response content, and ordinary divergent writes derive no action. They remain

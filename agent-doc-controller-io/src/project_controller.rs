@@ -2013,15 +2013,6 @@ struct ControllerDocumentGraphs {
     /// post-event relay state into this Source; retained closeout wake
     /// eligibility is derived from it beside the durable document projection.
     retained_delivery: lazily::ThreadSafeSourceMap<String, Option<RetainedDeliveryObservation>>,
-    /// A durable retained intent with no controller-local delivery Source
-    /// derives one graph-activation hydration. Its Effect observes the
-    /// already-retained CRDT projection; it does not request editor work.
-    retained_delivery_hydration:
-        lazily::ThreadSafeComputedMap<String, Option<RetainedDeliveryHydrationProjection>>,
-    /// Controller-local receipt for one successfully observed activation
-    /// projection.
-    retained_delivery_hydrated:
-        lazily::ThreadSafeSourceMap<String, Option<RetainedDeliveryHydrationProjection>>,
     /// Controller-generation activation edge. A reconstructed graph first
     /// hydrates its durable inputs, then the sink installation advances this
     /// Source so already-satisfied effects rerun with a live durable sink.
@@ -2030,24 +2021,19 @@ struct ControllerDocumentGraphs {
         String,
         agent_doc_state_backbone::retained_write::SettlementVerdict,
     >,
-    /// Typed captured-closeout recovery identity that may run now. Delivery
-    /// ingress and durable intent/capture state are Sources; this is the
-    /// shared decision plane, not an ACK callback.
-    retained_resume: lazily::ThreadSafeComputedMap<String, Option<RetainedResumeSignal>>,
-    /// Controller-local receipt for an applied wake signal. Effects may update
-    /// other Lazily state while projecting a wake, so this Source makes
-    /// application one-shot for a typed delivery frontier instead of relying
-    /// on an effect scheduler's global drain behavior.
-    retained_resume_applied: lazily::ThreadSafeSourceMap<String, Option<RetainedResumeSignal>>,
-    /// A retained target that can be safely projected from the current editor
-    /// frontier. The projection exists only while visible authority still
-    /// byte-matches the transition's recorded base.
-    retained_transition:
-        lazily::ThreadSafeComputedMap<String, Option<RetainedTransitionProjection>>,
-    /// Controller-local receipt for one submitted target frontier. A later
-    /// delivery version invalidates this receipt and can retry the projection.
-    retained_transition_applied:
-        lazily::ThreadSafeSourceMap<String, Option<RetainedTransitionProjection>>,
+    /// Exhaustive state of one retained Base -> Target transition. Durable
+    /// transition facts, current visible delivery, and controller activation
+    /// are Sources; this one Computed is the decision plane.
+    retained_transition_state: lazily::ThreadSafeComputedMap<String, RetainedTransitionState>,
+    /// The effect-bearing projection of [`Self::retained_transition_state`].
+    /// Waiting and conflict states deliberately project no effect.
+    retained_transition_effect:
+        lazily::ThreadSafeComputedMap<String, Option<RetainedTransitionEffect>>,
+    /// Controller-local receipt for the exact effect frontier. Delivery
+    /// version and controller generation are part of the typed identity, so a
+    /// changed frontier can retry while an unchanged one stays one-shot.
+    retained_transition_effect_applied:
+        lazily::ThreadSafeSourceMap<String, Option<RetainedTransitionEffect>>,
     /// Durable compact continuation whose retained document write has reached
     /// the projected authority+disk fixed point.
     compact_resume: lazily::ThreadSafeComputedMap<
@@ -2086,13 +2072,8 @@ struct ControllerDocumentGraphs {
     /// map for its values. Minting is idempotent, so the effect exists from the
     /// first verdict query onward and fires whenever the slot changes.
     settle_effects: Mutex<BTreeMap<String, lazily::Effect>>,
-    /// One retained-closeout wake Effect per document. Held for the controller
-    /// lifetime so later replica events and controller activation invalidate
-    /// the same subscription.
-    retained_resume_effects: Mutex<BTreeMap<String, lazily::Effect>>,
-    /// One activation hydration Effect per retained document.
-    retained_delivery_hydration_effects: Mutex<BTreeMap<String, lazily::Effect>>,
-    /// One guarded retained-target projection Effect per document.
+    /// One retained-transition Effect per document. Held for the controller
+    /// lifetime so every Source change is reduced by the same state machine.
     retained_transition_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// One durable compact-completion Effect per document.
     compact_resume_effects: Mutex<BTreeMap<String, lazily::Effect>>,
@@ -2320,7 +2301,7 @@ struct RetainedDeliveryObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RetainedDeliveryHydrationProjection {
+struct RetainedDeliveryActivation {
     intent_id: String,
     controller_generation: u64,
 }
@@ -2363,6 +2344,109 @@ struct RetainedTransitionProjection {
     target_hash: String,
     delivery_version: u64,
     controller_generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetainedTransitionConflict {
+    MissingBase,
+    InvalidTargetHash,
+    InvalidTargetStructure,
+    DivergentVisibleProjection,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RetainedTransitionState {
+    NoProjection,
+    Idle,
+    AwaitingController {
+        intent_id: String,
+    },
+    AwaitingDelivery(RetainedDeliveryActivation),
+    AwaitingLiveEditor {
+        intent_id: String,
+        delivery_version: u64,
+    },
+    AwaitingConvergence {
+        intent_id: String,
+        delivery_version: u64,
+    },
+    ApplyTarget(RetainedTransitionProjection),
+    TargetVisible {
+        intent_id: String,
+        target_hash: String,
+        delivery_version: u64,
+        controller_generation: u64,
+        resume: Option<RetainedResumeSignal>,
+    },
+    ReconcileMaterializedCapture(RetainedResumeSignal),
+    Conflict {
+        intent_id: String,
+        target_hash: String,
+        visible_hash: Option<String>,
+        delivery_version: Option<u64>,
+        reason: RetainedTransitionConflict,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RetainedTransitionEffect {
+    ObserveCurrentDelivery(RetainedDeliveryActivation),
+    ApplyTarget(RetainedTransitionProjection),
+    ResumeCloseout(RetainedResumeSignal),
+}
+
+impl RetainedTransitionState {
+    fn effect(&self) -> Option<RetainedTransitionEffect> {
+        match self {
+            Self::AwaitingDelivery(activation) => Some(
+                RetainedTransitionEffect::ObserveCurrentDelivery(activation.clone()),
+            ),
+            Self::ApplyTarget(transition) => {
+                Some(RetainedTransitionEffect::ApplyTarget(transition.clone()))
+            }
+            Self::TargetVisible {
+                resume: Some(signal),
+                ..
+            }
+            | Self::ReconcileMaterializedCapture(signal) => {
+                Some(RetainedTransitionEffect::ResumeCloseout(signal.clone()))
+            }
+            Self::NoProjection
+            | Self::Idle
+            | Self::AwaitingController { .. }
+            | Self::AwaitingLiveEditor { .. }
+            | Self::AwaitingConvergence { .. }
+            | Self::TargetVisible { resume: None, .. }
+            | Self::Conflict { .. } => None,
+        }
+    }
+
+    fn resume_signal(&self) -> Option<RetainedResumeSignal> {
+        match self {
+            Self::TargetVisible {
+                resume: Some(signal),
+                ..
+            }
+            | Self::ReconcileMaterializedCapture(signal) => Some(signal.clone()),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    fn transition_projection(&self) -> Option<RetainedTransitionProjection> {
+        match self {
+            Self::ApplyTarget(transition) => Some(transition.clone()),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    fn delivery_activation(&self) -> Option<RetainedDeliveryActivation> {
+        match self {
+            Self::AwaitingDelivery(activation) => Some(activation.clone()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2443,7 +2527,7 @@ impl RetainedWriteSettleSink {
 
     /// Observe the already-retained editor/CRDT projection when a replacement
     /// controller activates after the editor's most recent replica event.
-    fn hydrate_retained_delivery(
+    fn observe_current_retained_delivery(
         &self,
         document_hash: &str,
     ) -> Option<RetainedDeliveryObservation> {
@@ -2455,7 +2539,7 @@ impl RetainedWriteSettleSink {
                 agent_doc_ops_log_io::log_op(
                     &self.project_root,
                     &format!(
-                        "retained_delivery_hydrated_from_projection document_hash={document_hash} content_hash={} delivery_version={} live_editors={}",
+                        "retained_delivery_observed_on_activation document_hash={document_hash} content_hash={} delivery_version={} live_editors={}",
                         agent_doc_hash::content_hash(&observation.content),
                         observation.delivery_version,
                         observation.live_editors,
@@ -2468,7 +2552,7 @@ impl RetainedWriteSettleSink {
                 agent_doc_ops_log_io::log_op(
                     &self.project_root,
                     &format!(
-                        "retained_delivery_hydration_deferred document_hash={document_hash} error={error:#}"
+                        "retained_delivery_activation_observation_deferred document_hash={document_hash} error={error:#}"
                     ),
                 );
                 None
@@ -2706,14 +2790,11 @@ impl ControllerDocumentGraphs {
             authority: lazily::ThreadSafeSourceMap::new(&ctx),
             disk: lazily::ThreadSafeSourceMap::new(&ctx),
             retained_delivery: lazily::ThreadSafeSourceMap::new(&ctx),
-            retained_delivery_hydration: lazily::ThreadSafeComputedMap::new(&ctx),
-            retained_delivery_hydrated: lazily::ThreadSafeSourceMap::new(&ctx),
             settle_generation: lazily::ThreadSafeSourceMap::new(&ctx),
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
-            retained_resume: lazily::ThreadSafeComputedMap::new(&ctx),
-            retained_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
-            retained_transition: lazily::ThreadSafeComputedMap::new(&ctx),
-            retained_transition_applied: lazily::ThreadSafeSourceMap::new(&ctx),
+            retained_transition_state: lazily::ThreadSafeComputedMap::new(&ctx),
+            retained_transition_effect: lazily::ThreadSafeComputedMap::new(&ctx),
+            retained_transition_effect_applied: lazily::ThreadSafeSourceMap::new(&ctx),
             compact_resume: lazily::ThreadSafeComputedMap::new(&ctx),
             compact_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
             queue_authority: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -2723,8 +2804,6 @@ impl ControllerDocumentGraphs {
             preflight_facts: lazily::ThreadSafeSourceMap::new(&ctx),
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
             settle_effects: Mutex::new(BTreeMap::new()),
-            retained_resume_effects: Mutex::new(BTreeMap::new()),
-            retained_delivery_hydration_effects: Mutex::new(BTreeMap::new()),
             retained_transition_effects: Mutex::new(BTreeMap::new()),
             compact_resume_effects: Mutex::new(BTreeMap::new()),
             answered_free_text_strike_effects: Mutex::new(BTreeMap::new()),
@@ -2757,12 +2836,7 @@ impl ControllerDocumentGraphs {
             .cloned()
             .collect::<BTreeSet<_>>();
         document_hashes.extend(self.compact_resume_effects.lock().keys().cloned());
-        document_hashes.extend(
-            self.retained_delivery_hydration_effects
-                .lock()
-                .keys()
-                .cloned(),
-        );
+        document_hashes.extend(self.retained_transition_effects.lock().keys().cloned());
         self.ctx.batch(|ctx| {
             for document_hash in document_hashes {
                 self.settle_generation.set(ctx, document_hash, 1);
@@ -2829,9 +2903,7 @@ impl ControllerDocumentGraphs {
             // installation advances `settle_generation` once the runtime is
             // safely inside its Arc.
             self.current_verdict(document_hash);
-            self.current_retained_delivery_hydration(document_hash);
-            self.current_retained_resume(document_hash);
-            self.current_retained_transition(document_hash);
+            self.current_retained_transition_state(document_hash);
         }
         if has_captured_response {
             self.current_answered_free_text_strike(document_hash);
@@ -2956,7 +3028,8 @@ impl ControllerDocumentGraphs {
     ) -> Option<RetainedResumeSignal> {
         self.retained_delivery
             .set(&self.ctx, document_hash.to_string(), observation);
-        self.current_retained_resume(document_hash)
+        self.current_retained_transition_state(document_hash)
+            .resume_signal()
     }
 
     fn current_verdict(
@@ -3002,22 +3075,18 @@ impl ControllerDocumentGraphs {
         verdict
     }
 
-    fn current_retained_delivery_hydration(
-        &self,
-        document_hash: &str,
-    ) -> Option<RetainedDeliveryHydrationProjection> {
+    fn current_retained_transition_state(&self, document_hash: &str) -> RetainedTransitionState {
         let projection = self.projection.clone();
         let delivery = self.retained_delivery.clone();
         let settle_generation = self.settle_generation.clone();
-        let applied = self.retained_delivery_hydrated.clone();
-        let hydration = self.retained_delivery_hydration.get_or_insert_with(
+        let state = self.retained_transition_state.get_or_insert_with(
             &self.ctx,
             document_hash.to_string(),
             move |ctx, key| {
                 // `observe` cannot subscribe to an entry that is not materialized yet.
                 // Observe membership first so a replacement controller recomputes when
                 // any cold retained-transition input appears.
-                let transition = projection
+                let projection = projection
                     .contains_key(ctx, key)
                     .then(|| projection.observe(ctx, key))
                     .flatten()
@@ -3032,96 +3101,54 @@ impl ControllerDocumentGraphs {
                     .then(|| settle_generation.observe(ctx, key))
                     .flatten()
                     .unwrap_or_default();
+                retained_transition_state(
+                    projection.as_ref(),
+                    delivery.as_ref(),
+                    controller_generation,
+                )
+            },
+        );
+        self.current_retained_transition_effect(document_hash);
+        state
+    }
+
+    fn current_retained_transition_effect(
+        &self,
+        document_hash: &str,
+    ) -> Option<RetainedTransitionEffect> {
+        let state = self.retained_transition_state.clone();
+        let applied = self.retained_transition_effect_applied.clone();
+        let effect = self.retained_transition_effect.get_or_insert_with(
+            &self.ctx,
+            document_hash.to_string(),
+            move |ctx, key| {
+                let candidate = state
+                    .contains_key(ctx, key)
+                    .then(|| state.observe(ctx, key))
+                    .flatten()
+                    .and_then(|state| state.effect());
                 let applied = applied
                     .contains_key(ctx, key)
                     .then(|| applied.observe(ctx, key))
                     .flatten()
                     .flatten();
-                let candidate = retained_delivery_hydration_projection(
-                    transition.as_ref(),
-                    delivery.as_ref(),
-                    controller_generation,
-                );
                 match candidate {
                     Some(candidate) if applied.as_ref() != Some(&candidate) => Some(candidate),
                     _ => None,
                 }
             },
         );
-        self.ensure_retained_delivery_hydration_effect(document_hash);
-        hydration
-    }
-
-    fn current_retained_resume(&self, document_hash: &str) -> Option<RetainedResumeSignal> {
-        let projection = self.projection.clone();
-        let delivery = self.retained_delivery.clone();
-        let settle_generation = self.settle_generation.clone();
-        let applied = self.retained_resume_applied.clone();
-        let signal = self.retained_resume.get_or_insert_with(
-            &self.ctx,
-            document_hash.to_string(),
-            move |ctx, key| {
-                // `observe` is intentionally non-minting, so an absent keyed
-                // Source has no value edge yet. Subscribe to membership as
-                // well: replica delivery may precede the first durable
-                // projection, or the retained intent may precede the first
-                // replica event.
-                let _projection_present = projection.contains_key(ctx, key);
-                let _delivery_present = delivery.contains_key(ctx, key);
-                let _generation_present = settle_generation.contains_key(ctx, key);
-                let _applied_present = applied.contains_key(ctx, key);
-                let candidate = retained_resume_signal(
-                    projection.observe(ctx, key).flatten().as_ref(),
-                    delivery.observe(ctx, key).flatten().as_ref(),
-                    settle_generation.observe(ctx, key).unwrap_or_default(),
-                );
-                match candidate {
-                    Some(candidate)
-                        if applied.observe(ctx, key).flatten().as_ref() != Some(&candidate) =>
-                    {
-                        Some(candidate)
-                    }
-                    _ => None,
-                }
-            },
-        );
-        self.ensure_retained_resume_effect(document_hash);
-        signal
-    }
-
-    fn current_retained_transition(
-        &self,
-        document_hash: &str,
-    ) -> Option<RetainedTransitionProjection> {
-        let projection = self.projection.clone();
-        let delivery = self.retained_delivery.clone();
-        let settle_generation = self.settle_generation.clone();
-        let applied = self.retained_transition_applied.clone();
-        let transition = self.retained_transition.get_or_insert_with(
-            &self.ctx,
-            document_hash.to_string(),
-            move |ctx, key| {
-                let _projection_present = projection.contains_key(ctx, key);
-                let _delivery_present = delivery.contains_key(ctx, key);
-                let _generation_present = settle_generation.contains_key(ctx, key);
-                let _applied_present = applied.contains_key(ctx, key);
-                let candidate = retained_transition_projection(
-                    projection.observe(ctx, key).flatten().as_ref(),
-                    delivery.observe(ctx, key).flatten().as_ref(),
-                    settle_generation.observe(ctx, key).unwrap_or_default(),
-                );
-                match candidate {
-                    Some(candidate)
-                        if applied.observe(ctx, key).flatten().as_ref() != Some(&candidate) =>
-                    {
-                        Some(candidate)
-                    }
-                    _ => None,
-                }
-            },
-        );
         self.ensure_retained_transition_effect(document_hash);
-        transition
+        effect
+    }
+
+    #[cfg(test)]
+    fn current_retained_resume(&self, document_hash: &str) -> Option<RetainedResumeSignal> {
+        self.current_retained_transition_state(document_hash);
+        match self.current_retained_transition_effect(document_hash) {
+            Some(RetainedTransitionEffect::ResumeCloseout(signal)) => Some(signal),
+            _ => None,
+        }
     }
 
     fn current_compact_resume(
@@ -3394,94 +3421,6 @@ impl ControllerDocumentGraphs {
         effects.insert(key, effect);
     }
 
-    /// Subscribe graph activation to the already-retained CRDT projection.
-    ///
-    /// The Computed decides whether hydration is missing. The Effect only
-    /// observes current replica state and publishes that immutable observation
-    /// into the delivery Source.
-    fn ensure_retained_delivery_hydration_effect(&self, document_hash: &str) {
-        if self
-            .retained_delivery_hydration_effects
-            .lock()
-            .contains_key(document_hash)
-        {
-            return;
-        }
-        let key = document_hash.to_string();
-        let hydration_map = self.retained_delivery_hydration.clone();
-        let delivery = self.retained_delivery.clone();
-        let applied = self.retained_delivery_hydrated.clone();
-        let sink = self.settle_sink.clone();
-        let effect_key = key.clone();
-        let effect = self.ctx.effect(move |ctx| {
-            let Some(hydration) = hydration_map.observe(ctx, &effect_key).flatten() else {
-                return;
-            };
-            let Some(sink) = sink.get() else {
-                return;
-            };
-            let Some(observation) = sink.hydrate_retained_delivery(&effect_key) else {
-                return;
-            };
-            applied.set(ctx, effect_key.clone(), Some(hydration));
-            delivery.set(ctx, effect_key.clone(), Some(observation));
-        });
-        let mut effects = self.retained_delivery_hydration_effects.lock();
-        if effects.contains_key(&key) {
-            drop(effects);
-            self.ctx.dispose_effect(&effect);
-            return;
-        }
-        effects.insert(key, effect);
-    }
-
-    /// Subscribe the closeout wake to typed retained-delivery eligibility.
-    ///
-    /// Replica RPCs are boundary ingress only. They never decide to resume a
-    /// closeout; updating the delivery Source invalidates this Computed and
-    /// this Effect applies the resulting exact identity.
-    fn ensure_retained_resume_effect(&self, document_hash: &str) {
-        if self
-            .retained_resume_effects
-            .lock()
-            .contains_key(document_hash)
-        {
-            return;
-        }
-        let key = document_hash.to_string();
-        let signal_map = self.retained_resume.clone();
-        let settle_generation = self.settle_generation.clone();
-        let applied = self.retained_resume_applied.clone();
-        let sink = self.settle_sink.clone();
-        let effect_key = key.clone();
-        let effect = self.ctx.effect(move |ctx| {
-            // Activation is independently observed so an equal logical signal
-            // is re-applied by a replacement controller after its sink exists.
-            let _generation_present = settle_generation.contains_key(ctx, &effect_key);
-            let _generation = settle_generation
-                .observe(ctx, &effect_key)
-                .unwrap_or_default();
-            let Some(signal) = signal_map.observe(ctx, &effect_key).flatten() else {
-                return;
-            };
-            let Some(sink) = sink.get() else {
-                return;
-            };
-            // Consume this typed frontier before projecting the wake. The wake
-            // itself updates another Lazily graph; acknowledging first makes
-            // the next effect drain observe `None` rather than re-emitting.
-            applied.set(ctx, effect_key.clone(), Some(signal.clone()));
-            sink.resume(&effect_key, &signal);
-        });
-        let mut effects = self.retained_resume_effects.lock();
-        if effects.contains_key(&key) {
-            drop(effects);
-            self.ctx.dispose_effect(&effect);
-            return;
-        }
-        effects.insert(key, effect);
-    }
-
     fn ensure_compact_resume_effect(&self, document_hash: &str) {
         if self
             .compact_resume_effects
@@ -3639,9 +3578,10 @@ impl ControllerDocumentGraphs {
         effects.insert(key, effect);
     }
 
-    /// Subscribe guarded retained-target delivery to the derived editor
-    /// projection. The Effect submits state to the CRDT relay; the editor's
-    /// later full-content projection is the only convergence proof.
+    /// Apply the sole effect-bearing projection of the retained-transition
+    /// state table. Replica RPCs publish Sources only; this Effect is the one
+    /// place that observes activation state, submits a guarded Base -> Target
+    /// transition, or wakes retained closeout reconciliation.
     fn ensure_retained_transition_effect(&self, document_hash: &str) {
         if self
             .retained_transition_effects
@@ -3651,24 +3591,39 @@ impl ControllerDocumentGraphs {
             return;
         }
         let key = document_hash.to_string();
-        let transition_map = self.retained_transition.clone();
-        let settle_generation = self.settle_generation.clone();
-        let applied = self.retained_transition_applied.clone();
+        let effect_map = self.retained_transition_effect.clone();
+        let delivery = self.retained_delivery.clone();
+        let applied = self.retained_transition_effect_applied.clone();
         let sink = self.settle_sink.clone();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
-            let _generation_present = settle_generation.contains_key(ctx, &effect_key);
-            let _generation = settle_generation
-                .observe(ctx, &effect_key)
-                .unwrap_or_default();
-            let Some(transition) = transition_map.observe(ctx, &effect_key).flatten() else {
+            let Some(projected_effect) = effect_map.observe(ctx, &effect_key).flatten() else {
                 return;
             };
             let Some(sink) = sink.get() else {
                 return;
             };
-            if sink.project_retained_transition(&effect_key, &transition) {
-                applied.set(ctx, effect_key.clone(), Some(transition));
+            match &projected_effect {
+                RetainedTransitionEffect::ObserveCurrentDelivery(_) => {
+                    let Some(observation) = sink.observe_current_retained_delivery(&effect_key)
+                    else {
+                        return;
+                    };
+                    applied.set(ctx, effect_key.clone(), Some(projected_effect));
+                    delivery.set(ctx, effect_key.clone(), Some(observation));
+                }
+                RetainedTransitionEffect::ApplyTarget(transition) => {
+                    if sink.project_retained_transition(&effect_key, transition) {
+                        applied.set(ctx, effect_key.clone(), Some(projected_effect));
+                    }
+                }
+                RetainedTransitionEffect::ResumeCloseout(signal) => {
+                    // Consume the exact frontier before publishing the wake.
+                    // Publishing updates another graph and may synchronously
+                    // invalidate this Computed.
+                    applied.set(ctx, effect_key.clone(), Some(projected_effect.clone()));
+                    sink.resume(&effect_key, signal);
+                }
             }
         });
         let mut effects = self.retained_transition_effects.lock();
@@ -3681,71 +3636,124 @@ impl ControllerDocumentGraphs {
     }
 }
 
-fn retained_delivery_hydration_projection(
+fn retained_transition_state(
     projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
     delivery: Option<&RetainedDeliveryObservation>,
     controller_generation: u64,
-) -> Option<RetainedDeliveryHydrationProjection> {
-    if controller_generation == 0 || delivery.is_some() {
-        return None;
-    }
-    let intent = projection?.document.pending_write.as_ref()?;
-    Some(RetainedDeliveryHydrationProjection {
-        intent_id: intent.intent_id.clone(),
-        controller_generation,
-    })
-}
-
-fn retained_transition_projection(
-    projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
-    delivery: Option<&RetainedDeliveryObservation>,
-    controller_generation: u64,
-) -> Option<RetainedTransitionProjection> {
+) -> RetainedTransitionState {
+    let Some(projection) = projection else {
+        return RetainedTransitionState::NoProjection;
+    };
+    let Some(intent) = projection.document.pending_write.as_ref() else {
+        return RetainedTransitionState::Idle;
+    };
     if controller_generation == 0 {
-        return None;
+        return RetainedTransitionState::AwaitingController {
+            intent_id: intent.intent_id.clone(),
+        };
     }
-    let intent = projection?.document.pending_write.as_ref()?;
-    let delivery = delivery?;
-    if delivery.live_editors == 0 || !delivery.delivery_converged {
-        return None;
+    let Some(delivery) = delivery else {
+        return RetainedTransitionState::AwaitingDelivery(RetainedDeliveryActivation {
+            intent_id: intent.intent_id.clone(),
+            controller_generation,
+        });
+    };
+    if delivery.live_editors == 0 {
+        return RetainedTransitionState::AwaitingLiveEditor {
+            intent_id: intent.intent_id.clone(),
+            delivery_version: delivery.delivery_version,
+        };
     }
-    let base_content = intent.expected_content.as_deref()?;
-    if delivery.content.as_ref() != base_content
-        || intent.target_content == base_content
-        || !agent_doc_hash::content_hash(&intent.target_content)
-            .eq_ignore_ascii_case(&intent.target_hash)
-        || agent_doc_element::element::structural_corruption_reason(&intent.target_content)
-            .is_some()
+    if !delivery.delivery_converged {
+        return RetainedTransitionState::AwaitingConvergence {
+            intent_id: intent.intent_id.clone(),
+            delivery_version: delivery.delivery_version,
+        };
+    }
+
+    if agent_doc_element::element::structural_corruption_reason(&intent.target_content).is_some() {
+        return RetainedTransitionState::Conflict {
+            intent_id: intent.intent_id.clone(),
+            target_hash: intent.target_hash.clone(),
+            visible_hash: Some(delivery.content_hash.clone()),
+            delivery_version: Some(delivery.delivery_version),
+            reason: RetainedTransitionConflict::InvalidTargetStructure,
+        };
+    }
+
+    let resume = derive_retained_resume_signal(projection, delivery, controller_generation);
+    if delivery
+        .content_hash
+        .eq_ignore_ascii_case(&intent.target_hash)
     {
-        return None;
+        return RetainedTransitionState::TargetVisible {
+            intent_id: intent.intent_id.clone(),
+            target_hash: intent.target_hash.clone(),
+            delivery_version: delivery.delivery_version,
+            controller_generation,
+            resume,
+        };
     }
-    Some(RetainedTransitionProjection {
-        file: delivery.file.clone(),
-        base_content: Arc::from(base_content),
-        target_content: Arc::from(intent.target_content.as_str()),
+    if let Some(
+        signal @ RetainedResumeSignal {
+            action: RetainedResumeAction::ReconcileMaterializedCapture,
+            ..
+        },
+    ) = resume
+    {
+        return RetainedTransitionState::ReconcileMaterializedCapture(signal);
+    }
+
+    let Some(base_content) = intent.expected_content.as_deref() else {
+        return RetainedTransitionState::Conflict {
+            intent_id: intent.intent_id.clone(),
+            target_hash: intent.target_hash.clone(),
+            visible_hash: Some(delivery.content_hash.clone()),
+            delivery_version: Some(delivery.delivery_version),
+            reason: RetainedTransitionConflict::MissingBase,
+        };
+    };
+    if delivery.content.as_ref() == base_content {
+        if intent.target_content == base_content
+            || !agent_doc_hash::content_hash(&intent.target_content)
+                .eq_ignore_ascii_case(&intent.target_hash)
+        {
+            return RetainedTransitionState::Conflict {
+                intent_id: intent.intent_id.clone(),
+                target_hash: intent.target_hash.clone(),
+                visible_hash: Some(delivery.content_hash.clone()),
+                delivery_version: Some(delivery.delivery_version),
+                reason: RetainedTransitionConflict::InvalidTargetHash,
+            };
+        }
+        return RetainedTransitionState::ApplyTarget(RetainedTransitionProjection {
+            file: delivery.file.clone(),
+            base_content: Arc::from(base_content),
+            target_content: Arc::from(intent.target_content.as_str()),
+            intent_id: intent.intent_id.clone(),
+            target_hash: intent.target_hash.clone(),
+            delivery_version: delivery.delivery_version,
+            controller_generation,
+        });
+    }
+
+    RetainedTransitionState::Conflict {
         intent_id: intent.intent_id.clone(),
         target_hash: intent.target_hash.clone(),
-        delivery_version: delivery.delivery_version,
-        controller_generation,
-    })
+        visible_hash: Some(delivery.content_hash.clone()),
+        delivery_version: Some(delivery.delivery_version),
+        reason: RetainedTransitionConflict::DivergentVisibleProjection,
+    }
 }
 
-fn retained_resume_signal(
-    projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
-    delivery: Option<&RetainedDeliveryObservation>,
+fn derive_retained_resume_signal(
+    projection: &agent_doc_state_backbone::DocumentStateProjection,
+    delivery: &RetainedDeliveryObservation,
     controller_generation: u64,
 ) -> Option<RetainedResumeSignal> {
-    if controller_generation == 0 {
-        return None;
-    }
-    let projection = projection?;
     let intent = projection.document.pending_write.as_ref()?;
     let capture = projection.closeout.captured_response.as_ref()?;
     let cycle_id = projection.closeout.cycle_id.as_deref()?;
-    let delivery = delivery?;
-    if delivery.live_editors == 0 || !delivery.delivery_converged {
-        return None;
-    }
     let action = if delivery
         .content_hash
         .eq_ignore_ascii_case(&intent.target_hash)
@@ -3778,6 +3786,33 @@ fn retained_resume_signal(
         delivery_version: delivery.delivery_version,
         controller_generation,
     })
+}
+
+#[cfg(test)]
+fn retained_delivery_activation(
+    projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    delivery: Option<&RetainedDeliveryObservation>,
+    controller_generation: u64,
+) -> Option<RetainedDeliveryActivation> {
+    retained_transition_state(projection, delivery, controller_generation).delivery_activation()
+}
+
+#[cfg(test)]
+fn retained_transition_projection(
+    projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    delivery: Option<&RetainedDeliveryObservation>,
+    controller_generation: u64,
+) -> Option<RetainedTransitionProjection> {
+    retained_transition_state(projection, delivery, controller_generation).transition_projection()
+}
+
+#[cfg(test)]
+fn retained_resume_signal(
+    projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    delivery: Option<&RetainedDeliveryObservation>,
+    controller_generation: u64,
+) -> Option<RetainedResumeSignal> {
+    retained_transition_state(projection, delivery, controller_generation).resume_signal()
 }
 
 fn compact_resume_signal(
@@ -12173,12 +12208,227 @@ agent:queue\n\
         );
 
         assert!(matches!(
-            verdict,
-            agent_doc_state_backbone::retained_write::SettlementVerdict::Unsettled {
-                intent_id,
-                ..
-            } if intent_id == "intent-after-start"
+                verdict,
+                agent_doc_state_backbone::retained_write::SettlementVerdict::Unsettled {
+                    intent_id,
+                    ..
+                } if intent_id == "intent-after-start"
         ));
+    }
+
+    fn retained_transition_state_tag(state: &RetainedTransitionState) -> &'static str {
+        match state {
+            RetainedTransitionState::NoProjection => "no_projection",
+            RetainedTransitionState::Idle => "idle",
+            RetainedTransitionState::AwaitingController { .. } => "awaiting_controller",
+            RetainedTransitionState::AwaitingDelivery(_) => "awaiting_delivery",
+            RetainedTransitionState::AwaitingLiveEditor { .. } => "awaiting_live_editor",
+            RetainedTransitionState::AwaitingConvergence { .. } => "awaiting_convergence",
+            RetainedTransitionState::ApplyTarget(_) => "apply_target",
+            RetainedTransitionState::TargetVisible { .. } => "target_visible",
+            RetainedTransitionState::ReconcileMaterializedCapture(_) => {
+                "reconcile_materialized_capture"
+            }
+            RetainedTransitionState::Conflict {
+                reason: RetainedTransitionConflict::MissingBase,
+                ..
+            } => "conflict_missing_base",
+            RetainedTransitionState::Conflict {
+                reason: RetainedTransitionConflict::InvalidTargetHash,
+                ..
+            } => "conflict_invalid_target_hash",
+            RetainedTransitionState::Conflict {
+                reason: RetainedTransitionConflict::InvalidTargetStructure,
+                ..
+            } => "conflict_invalid_target_structure",
+            RetainedTransitionState::Conflict {
+                reason: RetainedTransitionConflict::DivergentVisibleProjection,
+                ..
+            } => "conflict_divergent_visible_projection",
+        }
+    }
+
+    fn retained_transition_effect_tag(state: &RetainedTransitionState) -> &'static str {
+        match state.effect() {
+            None => "none",
+            Some(RetainedTransitionEffect::ObserveCurrentDelivery(_)) => "observe_current_delivery",
+            Some(RetainedTransitionEffect::ApplyTarget(_)) => "apply_target",
+            Some(RetainedTransitionEffect::ResumeCloseout(_)) => "resume_closeout",
+        }
+    }
+
+    #[test]
+    fn retained_transition_state_table_covers_every_state_and_effect() {
+        let base = "# Queue\n";
+        let target = "# Queue\n\n### Re: done\n";
+        let mut transition = retained_resume_projection("doc-retained-state-table");
+        {
+            let intent = transition.document.pending_write.as_mut().unwrap();
+            intent.expected_content = Some(base.to_string());
+            intent.expected_hash = agent_doc_hash::content_hash(base);
+            intent.target_content = target.to_string();
+            intent.target_hash = agent_doc_hash::content_hash(target);
+        }
+        let delivery = |content: &str, live_editors: usize, delivery_converged: bool| {
+            RetainedDeliveryObservation {
+                file: PathBuf::from("/work/task.md"),
+                content: Arc::from(content),
+                content_hash: agent_doc_hash::content_hash(content),
+                live_editors,
+                delivery_converged,
+                delivery_version: 11,
+            }
+        };
+
+        let idle = agent_doc_state_backbone::DocumentStateProjection::new("doc-retained-idle");
+        let mut target_without_capture = transition.clone();
+        target_without_capture.closeout.captured_response = None;
+        let mut materialized = transition.clone();
+        materialized.document.pending_write.as_mut().unwrap().source =
+            agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition;
+        let mut missing_base = transition.clone();
+        missing_base
+            .document
+            .pending_write
+            .as_mut()
+            .unwrap()
+            .expected_content = None;
+        let mut invalid_hash = transition.clone();
+        invalid_hash
+            .document
+            .pending_write
+            .as_mut()
+            .unwrap()
+            .target_hash = "not-the-target".into();
+        let mut invalid_structure = transition.clone();
+        {
+            let intent = invalid_structure.document.pending_write.as_mut().unwrap();
+            intent.target_content = "# Queue\n-->\n".to_string();
+            intent.target_hash = agent_doc_hash::content_hash(&intent.target_content);
+        }
+
+        let cases = vec![
+            ("no projection", None, None, 1, "no_projection", "none"),
+            (
+                "no retained transition",
+                Some(idle),
+                None,
+                1,
+                "idle",
+                "none",
+            ),
+            (
+                "controller not active",
+                Some(transition.clone()),
+                None,
+                0,
+                "awaiting_controller",
+                "none",
+            ),
+            (
+                "delivery source absent",
+                Some(transition.clone()),
+                None,
+                1,
+                "awaiting_delivery",
+                "observe_current_delivery",
+            ),
+            (
+                "no live editor",
+                Some(transition.clone()),
+                Some(delivery(base, 0, true)),
+                1,
+                "awaiting_live_editor",
+                "none",
+            ),
+            (
+                "delivery not converged",
+                Some(transition.clone()),
+                Some(delivery(base, 1, false)),
+                1,
+                "awaiting_convergence",
+                "none",
+            ),
+            (
+                "base visible",
+                Some(transition.clone()),
+                Some(delivery(base, 1, true)),
+                1,
+                "apply_target",
+                "apply_target",
+            ),
+            (
+                "target visible with captured closeout",
+                Some(transition.clone()),
+                Some(delivery(target, 1, true)),
+                1,
+                "target_visible",
+                "resume_closeout",
+            ),
+            (
+                "target visible without captured closeout",
+                Some(target_without_capture),
+                Some(delivery(target, 1, true)),
+                1,
+                "target_visible",
+                "none",
+            ),
+            (
+                "newer projection materializes retained response",
+                Some(materialized),
+                Some(delivery("operator queue edit\nresponse body\n", 1, true)),
+                1,
+                "reconcile_materialized_capture",
+                "resume_closeout",
+            ),
+            (
+                "legacy transition has no base",
+                Some(missing_base),
+                Some(delivery("divergent\n", 1, true)),
+                1,
+                "conflict_missing_base",
+                "none",
+            ),
+            (
+                "target hash is invalid",
+                Some(invalid_hash),
+                Some(delivery(base, 1, true)),
+                1,
+                "conflict_invalid_target_hash",
+                "none",
+            ),
+            (
+                "target structure is invalid",
+                Some(invalid_structure),
+                Some(delivery(base, 1, true)),
+                1,
+                "conflict_invalid_target_structure",
+                "none",
+            ),
+            (
+                "visible projection diverged from base and target",
+                Some(transition),
+                Some(delivery("operator typing\n", 1, true)),
+                1,
+                "conflict_divergent_visible_projection",
+                "none",
+            ),
+        ];
+
+        for (name, projection, delivery, generation, expected_state, expected_effect) in cases {
+            let state =
+                retained_transition_state(projection.as_ref(), delivery.as_ref(), generation);
+            assert_eq!(
+                retained_transition_state_tag(&state),
+                expected_state,
+                "state: {name}"
+            );
+            assert_eq!(
+                retained_transition_effect_tag(&state),
+                expected_effect,
+                "effect: {name}"
+            );
+        }
     }
 
     #[test]
@@ -12299,17 +12549,17 @@ agent:queue\n\
     }
 
     #[test]
-    fn controller_activation_derives_delivery_hydration_without_requesting_an_ack() {
+    fn controller_activation_derives_delivery_observation_without_requesting_an_ack() {
         let projection = retained_resume_projection("doc-retained-hydration");
-        let hydration = retained_delivery_hydration_projection(Some(&projection), None, 7).unwrap();
-        assert_eq!(hydration.intent_id, "intent-1");
-        assert_eq!(hydration.controller_generation, 7);
+        let activation = retained_delivery_activation(Some(&projection), None, 7).unwrap();
+        assert_eq!(activation.intent_id, "intent-1");
+        assert_eq!(activation.controller_generation, 7);
         assert!(
-            retained_delivery_hydration_projection(Some(&projection), None, 0).is_none(),
-            "a graph without its Effect sink cannot hydrate"
+            retained_delivery_activation(Some(&projection), None, 0).is_none(),
+            "a graph without its Effect sink cannot observe activation state"
         );
         assert!(
-            retained_delivery_hydration_projection(
+            retained_delivery_activation(
                 Some(&projection),
                 Some(&RetainedDeliveryObservation {
                     file: PathBuf::from("/work/task.md"),

@@ -9732,17 +9732,6 @@ pub(crate) fn serve_with_options(
     let durable_project_root = bootstrap.project_root.clone();
     let runtime = ControllerRuntime::new_arc(bootstrap)?;
     install_local_document_projection_reader(&runtime);
-    // P4: rebuild every controller-acknowledged liveness fact before the socket
-    // becomes visible. Sender frames may already have been pruned after their ACK;
-    // the receiver journal is therefore the recycle authority, not a lease scan.
-    restore_reliable_sync_liveness(&durable_project_root)?;
-    // #s4b: install the OS process-exit watcher on the process-global editor-attachment
-    // registry so the editor-attached authority (`authority_for_file`) can read pure
-    // reactive state on the hot path and learn about editor **crashes** (which send no
-    // `deregister`) from a bounded-latency liveness poller instead of a per-decision
-    // filesystem lease read. A short-lived CLI hydrates from the durable receiver
-    // journal and retained sender suffix instead of scanning lease sidecars.
-    crate::process_exit_watcher::install_process_exit_watcher(durable_project_root);
     let name = sock.clone().to_fs_name::<GenericFilePath>()?;
     let listener = ListenerOptions::new()
         .name(name)
@@ -9759,6 +9748,20 @@ pub(crate) fn serve_with_options(
     listener
         .set_nonblocking(ListenerNonblockingMode::Accept)
         .context("failed to set project controller listener nonblocking")?;
+    // P4: rebuild every controller-acknowledged liveness fact only after the
+    // replacement socket is bound. Restoration derives missing-replica targets
+    // and signals editors immediately; binding first lets their full projection
+    // queue on the listener and become a delivery Source edge when the serve
+    // loop starts. Signalling before bind could lose the sole edge that moves a
+    // retained transition out of `AwaitingDelivery`.
+    //
+    // Sender frames may already have been pruned after their ACK; the receiver
+    // journal is therefore the recycle authority, not a lease scan.
+    restore_reliable_sync_liveness(&durable_project_root)?;
+    // #s4b: install the OS process-exit watcher on the process-global
+    // editor-attachment registry so `authority_for_file` reads reactive state
+    // and editor crashes publish a bounded-latency liveness transition.
+    crate::process_exit_watcher::install_process_exit_watcher(durable_project_root);
 
     let should_stop = Arc::new(AtomicBool::new(false));
     let active_clients = Arc::new(AtomicUsize::new(0));
@@ -25747,11 +25750,15 @@ mod tests {
     }
 
     fn reliable_sync_open_request(document_hash: &str) -> ControllerRequest {
+        reliable_sync_open_request_for_pid(document_hash, 100)
+    }
+
+    fn reliable_sync_open_request_for_pid(document_hash: &str, pid: u64) -> ControllerRequest {
         use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
         // A valid 3A reliable-sync envelope carrying one liveness Open op.
         let frame = encode_liveness_frame(&[LivenessOp::Open {
             document_hash: document_hash.into(),
-            pid: 100,
+            pid,
             tag: "t1".into(),
         }])
         .expect("encode liveness frame");
@@ -26073,6 +26080,30 @@ mod tests {
                  (#lazily-hot-path: durable storage is a sink, not a decision authority)"
             );
         }
+    }
+
+    #[test]
+    fn controller_listener_is_bound_before_liveness_projects_replica_rebuilds() {
+        let source = include_str!("rpc.rs");
+        let serve = &source[source
+            .find("pub(crate) fn serve_with_options(")
+            .expect("controller serve entrypoint")..];
+        let listener_bound = serve
+            .find("let listener = ListenerOptions::new()")
+            .expect("controller listener bind");
+        let listener_nonblocking = serve
+            .find("set_nonblocking(ListenerNonblockingMode::Accept)")
+            .expect("controller listener readiness");
+        let liveness_restored = serve
+            .find("restore_reliable_sync_liveness(&durable_project_root)?")
+            .expect("reliable-sync liveness restoration");
+
+        assert!(
+            listener_bound < listener_nonblocking && listener_nonblocking < liveness_restored,
+            "restored liveness immediately projects missing-replica targets; the controller \
+             listener must already be ready so the returning editor projection becomes a \
+             retained-delivery Source edge"
+        );
     }
 
     #[test]
@@ -26489,6 +26520,10 @@ mod tests {
     #[test]
     fn reliable_sync_status_projects_plane_open_set_without_sidecar_oracle() {
         let _env = reliable_sync_env_lock();
+        // The liveness plane is process-global. Use a test-unique PID identity
+        // so an Alive(false) fact from an earlier test cannot suppress this
+        // document's open-set projection.
+        let status_pid = u64::MAX - 100;
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = ControllerBootstrap {
@@ -26503,10 +26538,10 @@ mod tests {
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        // Fold an Open frame so the shadow plane derives one open doc (pid 100).
+        // Fold an Open frame so the shadow plane derives one open doc.
         handle_reliable_sync(
             &bootstrap.project_root,
-            reliable_sync_open_request("docwire-status"),
+            reliable_sync_open_request_for_pid("docwire-status", status_pid),
         )
         .expect("fold");
         let status = handle_reliable_sync_status(&bootstrap).expect("status ok");
@@ -26531,7 +26566,7 @@ mod tests {
             .find(|(d, _)| d == "docwire-status")
             .map(|(_, p)| p.clone())
             .unwrap_or_default();
-        assert!(pids.contains(&100));
+        assert!(pids.contains(&status_pid));
         // `#wsflake2`: scope the "no registration" claim to THIS document. The
         // liveness plane is process-global and shared by every test in this
         // crate, so asserting the whole list is empty really asserts that no

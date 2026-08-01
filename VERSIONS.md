@@ -8,8 +8,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 _JetBrains plugin 0.2.334; VS Code extension 0.2.64; Zed extension 0.1.0._
 
+- **Retained delivery now has one exhaustive typed state table and one Effect
+  boundary.** Durable Base → Target facts, current delivery, live membership,
+  convergence, and controller generation reduce to a single
+  `RetainedTransitionState`; only activation observation, guarded target apply,
+  and closeout resume project effects. Controller startup now binds its listener
+  before restored liveness publishes missing-replica targets, so a returning
+  editor projection cannot race an unopened socket and strand closeout in
+  `AwaitingDelivery`.
 - **Retained transitions now flow back into attached editors as guarded
-  reactive projections.** The controller derives a transition only when the
+reactive projections.** The controller derives a transition only when the
   current visible projection still byte-matches its recorded base, then a
   per-document Effect submits it through the CRDT relay's compare-and-project
   guard. The transition contains explicit base and target content. The editor's

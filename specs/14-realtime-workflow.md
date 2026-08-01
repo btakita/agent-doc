@@ -773,14 +773,17 @@ Additional convergence invariants:
 reconnect or delivery must pass the shared document structural validator
 before becoming an editor projection. This includes singleton components,
 balanced component markers, and at most one live exchange boundary marker.
-- Retained delivery is a Lazily projection over the durable target, current
-authority text, live replica membership, and transport availability. Its
-Effect may publish once for the current generation; receipts feed evidence
-back into the inputs but never create an imperative retry loop.
-- A replacement controller hydrates that delivery projection from the
-already-retained registered editor/CRDT state. The hydration Effect only
-observes controller-owned state and publishes a generation-scoped receipt; it
-does not ask an editor to resend content or acknowledge a request.
+- Retained delivery is one exhaustive Lazily state projection over durable Base
+  → Target facts, current authority text, live replica membership, convergence,
+  and controller generation. One optional-effect projection covers activation
+  observation, guarded target application, and closeout resume; waiting and
+  conflict states project no Effect.
+- A replacement controller observes the already-retained registered editor/CRDT
+  projection as the `AwaitingDelivery` transition's activation Effect. The
+  controller listener is bound before restored liveness publishes
+  missing-replica targets, so the editor's resulting projection becomes a
+  delivery Source edge instead of racing an unopened socket. This does not ask
+  an editor to acknowledge a request.
 - If current authority consists of a structurally valid document through the
   terminal `agent:done` close followed only by text provably duplicated from
   managed content, the settlement projection may remove that trailing debris

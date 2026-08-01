@@ -49,6 +49,14 @@ projection consumers. Disk is a settlement sink, not a competing live authority.
 | Editor detaches and disk authority is proven | Detached-disk settlement becomes eligible | Persist through the normal detached authority path |
 | Route/tmux consumer observes pending delivery | Route projection remains pending/current | Do not request ACK replay, refresh, or full-state adoption |
 
+The implementation represents this table as one `RetainedTransitionState` enum:
+`NoProjection`, `Idle`, `AwaitingController`, `AwaitingDelivery`,
+`AwaitingLiveEditor`, `AwaitingConvergence`, `ApplyTarget`, `TargetVisible`,
+`ReconcileMaterializedCapture`, or a typed `Conflict`. A second Computed projects
+at most one `RetainedTransitionEffect`: observe the current delivery, apply
+Target, or resume closeout. This makes every waiting/conflict row explicitly
+effect-free and lets a single table test cover the state/effect product.
+
 ### Reactive topology
 
 ```text

@@ -27,7 +27,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-Installed Agent Doc 0.35.109 with reactive per-document authority, bounded Tokio scheduling, live Compact Exchange validation, and closeout coalescing; Monster Rodholders remains retained pending the post-install plugin restart.
+complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -40,11 +40,55 @@ Installed Agent Doc 0.35.109 with reactive per-document authority, bounded Tokio
 Compacted content:
 - Archived 13 response topic(s): completed queue items and closeout churn; JetBrains native subscription CPU churn; Open-tab authority readiness and editor/tmux latency; 10 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): Response; Response; Response
-<!-- agent:boundary:e9aaa25b -->
+❯ 🚧 Are these issues in tsift.md now fixed? If not please fix: #spec-test-build-install-commit-push
+```
+● #applysamesymbol is implemented, verified, and pushed. The document write is deferred to the controller again — though this time the response section, the strike, and the follow-up are already visible on disk; only the git commit is
+  pending.
+
+  Landed — tsift adb5c56, gitlink ae84e4ef6. make check exit 0, 1659 tests, clippy clean. Last cycle's CI came back green; this cycle's run is in progress.
+
+  The narrowing now covers TypeScript, TSX, JavaScript, and JSX. property_identifier spans an object-literal key, a class method, and a member access — none is the module-level binding a rename resolves to — so all three are dropped, and
+  type_identifier is kept only for a type rename.
+
+  The prediction I filed the item under was wrong, and that's what turned it into a fix. I'd written that { beta } shorthand is "genuinely undecidable… likely needs the shadow refusal." It isn't. The token is both the property name and a
+  read of the binding, and there's a spelling where both survive — the one the shorthand already desugars to. Live on the installed binary:
+
+  function gamma(v) { return v; }        <- renamed
+  const keyed = { beta: 1 };             <- key untouched
+  const shorthand = { beta: gamma };     <- expanded, not overwritten
+  class Panel { beta() { return 2; } }   <- method untouched
+  const total = keyed.beta + gamma(3);   <- member read untouched, call renamed
+
+  Refusing there would have blocked an ordinary re-export — worse than either option I thought I was choosing between.
+
+  const { beta } = mod is deliberately left as an in-place span rename: the token reads a property off mod and declares a local, so the right rewrite depends on whether mod is the module whose export changed. That's the common case and
+  already works; expanding would break it. There's a test asserting it is not expanded.
+
+  Four mutations checked in both directions — re-accepting property_identifier, disabling the expansion, expanding the destructuring form too, and accepting type_identifier for callables — each reddening a specific row. The JS-like
+  conformance fixtures now each carry an object key, a class method, and a member access, so the table catches this class rather than only the unit tests.
+
+  On the deferral: respond reaped #applysamesymbol, consumed the queue head, and prepended the follow-up — all of which are visible in the document now. session-check reports authority and disk still diverging with the editor-save receipt
+  pending, and instructs against re-sending, forcing disk, or recycling. This is the third cycle in a row with the same deferral, and the previous two both resolved cleanly at the next preflight, so I'm treating it the same way rather than
+  intervening.
+
+  Follow-up filed at the queue head (#finishsymbolkind): Python and Kotlin are the last two indexed languages on a flat identifier set, with the same defect through different nodes (identifier under attribute / navigation_expression). They
+  need one twist the others didn't — both index methods as functions, so the callee position is a genuine rename target and must be kept rather than dropped.
+```
+
+### Re: Are these issues in tsift.md now fixed? — gpt-5
+
+Yes. The missing Python/Kotlin symbol-kind narrowing is implemented in tsift commit `36e669d658ef6982b1f851b6c4962705c00e9c49`, recorded by the superproject in `18bfede97`, and pushed. `packages/tsift-graph/src/rename.rs` now drops Python attribute and Kotlin navigation member reads while retaining callable positions; the CLI conformance fixtures, AST-edit specification, and version notes cover the behavior.
+
+Verification is complete: both targeted rename tests passed, the final `make check` passed, the installed `tsift` reports `0.1.78`, and GitHub Actions run `30684057240` completed successfully. A later documentation-indentation repair is separately running in CI and does not change this result.
+
+I also installed committed Agent Doc source `e5a0af2fd` from an isolated clean worktree, preserving the concurrent dirty controller/editor work in `src/agent-doc`. The binary, native library, and matching JetBrains package installed successfully. The controller now maps the installed inode; this document's older route supervisor has been waiting on this open response-cycle fence and can recycle at the idle boundary created by this closeout.
+
+The admission churn was procedural: the connected admission already opened the lightweight cycle, and running legacy preflight again repaired/reopened that same cycle. This closeout deliberately uses the existing cycle once, with no second preflight and no replay of completed work. The legacy gated install-verification item is moved out of backlog into review, and the exact duplicate review candidate `#crde` is resolved against completed item `#5bzd`.
+<!-- agent:boundary:3ef71d88 -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Notes
@@ -55,12 +99,12 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#reactive-closeout-install-verify] After the retained tsift.md editor-delivery capture reaches a terminal boundary, install the committed Agent Doc binary and verify the equityfundingsource.md queue strike, Monster Rod Holders corruption rejection, Compact Exchange recovery, and editor/tmux responsiveness without recycling an active closeout owner.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#reactive-closeout-install-verify] After the retained tsift.md editor-delivery capture reaches a terminal boundary, install the committed Agent Doc binary and verify the equityfundingsource.md queue strike, Monster Rod Holders corruption rejection, Compact Exchange recovery, and editor/tmux responsiveness without recycling an active closeout owner.
 - [/] [#compactreactiveprojectionverify] [operator-verify] With IntelliJ IDEA 2026.1 running JetBrains plugin 0.2.319 / native agent-doc 0.35.83, retry Compact Exchange from a saved large session without restarting IDEA. Verify ACK replay/hot reload either completes the retained editor delivery exactly once or leaves it retained without duplicate mutation, disk fallback, focus change, or a fresh agent session. Then type a sustained burst and confirm recovery is coalesced rather than per-keystroke. Record any residual queued-EDT late effect for #implementlazilyintent. Do not queue this item automatically; it requires operator UI observation.
 - [/] [#steeringmirrorverifylive313] [operator-verify] With IntelliJ IDEA running JetBrains plugin 0.2.313 / native agent-doc 0.35.71, make two separate exchange edits during one active turn. Confirm the banner/status item shows the aggregate edit count and its hover contains both edits verbatim; then run Agent Doc once and verify the controller records one aggregate handoff without submitting a partial edit. Do not queue this item automatically; it requires operator UI observation.
 - [/] [#preflightinbinary] [operator-verify] Live proof for #preflightinbinary AFTER the default flip (5ce9b06e6). The flip has landed: SKILL.md now says do NOT run preflight when the '[agent-doc] cycle contract ...' marker is present, and the hook is registered in this project's .claude/settings.json under UserPromptSubmit alongside turn-status. Needing a live session to confirm: (a) invoke /agent-doc <FILE> in a FRESH Claude Code session and confirm the marker + contract appear in context before the agent runs any tool, and that the agent does NOT shell to 'agent-doc preflight'; (b) confirm exactly ONE cycle id is opened for that turn — grep .agent-doc/logs/ops.log for preflight_diff_start, and confirm 'repaired stale preflight_started cycle' does NOT appear; that line is the tell that the agent still ran preflight and the round trip was merely absorbed by repair rather than removed; (c) confirm an ordinary prompt that merely mentions agent-doc produces no marker and no cycle; (d) confirm a Codex/OpenCode turn (no Claude hook, so no marker) still runs preflight explicitly and closes out normally. Scope note: reusable_by_reentrant_preflight is defence in depth only — start_preflight runs at preflight step 4, after repair at step 1, so in the live pipeline repair closes any prior open cycle before the guard sees it. What removes the double-open is the flip itself.
@@ -85,8 +129,6 @@ Compacted content:
 - [/] [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
 - [/] [#agentsignals] [future/separate] Add a realtime agent:signals element after core realtime convergence is stable. Start with deterministic built-in signals for tests, queue, supervisor, and ipc; design custom user-defined signals as plugin-backed tracked work with Rust as the first target and future multi-language support; use tasks/software/realtime-signals-patchboard.md as the GUI/semi-programmatic reference; keep MLP enhancement optional/experimental and not load-bearing for deterministic states.
 - [/] [#steeringobservableset] #agent-doc-bug Phase 6 durable graph adoption: back RealtimeSteeringSet with a lazily reactive OBSERVABLE SET (not a drain-one-head QueueCell) keyed on the body-aware identity (Phase 3.1), reconciled on the reliable-sync plane; session-check reads set-emptiness (all directives settled) instead of re-diffing HEAD↔buffer. Plan: src/agent-doc/tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md (Phase 6). [recommended]
-- [/] [#crde] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
-  evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978020608-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
 - [/] [#supboundarylivelock] #agent-doc-bug Supervisor idle-boundary recycle can livelock, leaving a stale binary mapped indefinitely. supervisor_recycle_action (agent-doc-supervisor/src/lifecycle.rs:124) returns None on `!turn_boundary` for everything except write_wedged/editor_delivery_stale, and turn_boundary = prompt_visible && !turn_active (idle_watch.rs:1898) never holds for a continuously-active pane. The only bypass, stale_recycle_safe_checkpoint (idle_watch.rs:136) = supervisor_stale && inflight_handlers == 0, is gated on staleness, so an explicit `admin recycle` on a NON-stale busy supervisor can never be consumed and silently expires at DEFAULT_RECYCLE_REQUEST_TTL_SECS=900 (recycle_request.rs:17) with the ledger phase left Requested. --force does not help: rpc.rs:5905 only changes the reason string, and idle_watch.rs:2403 collapses the request to a plain bool. MAX_CYCLE_OPEN_DEFER_TICKS escalation cannot rescue it either (idle_watch.rs:2253 only accrues the streak AT a boundary). OBSERVED 2026-07-18: supervisor pid 2040014 stayed stale across this whole session even though it IS stale (so the checkpoint bypass should apply and inflight_connection_handlers is an in-process RAII-guarded atomic that cannot leak) - the stale-side path needs its own trace. Fixing the non-stale side means a mid-turn execve, which is exactly what the boundary gate exists to prevent, so this needs a design decision (manufacture a boundary via the recycle-yield path? bound the defer? re-arm instead of expiring?), not a quick patch. Related shipped fixes: #dispatchgateleak + #authorityfactretention (submodule 566a72f6d).
 - [/] [#jbrunsteering] #agent-doc-bug JB `Run Agent Doc` while a turn is already running should feed the prompt in as realtime steering (#realtime-steering-verbatim / #realtime-steering-aggregate) instead of interrupting the active turn. Operator-reported: invoking it mid-turn produced "Interrupted · What should Claude do instead?" rather than surfacing the new prompt to the running turn. NOT STARTED.
 - [/] [#ay80] CI red on main, pre-existing and unrelated to #jbsteerinterrupt: `finalize_skips_ignored_untracked_session_doc` (tests/finalize_integration.rs:248) fails in GitHub Actions with `Unexpected stderr, failed var.contains(skipped ignored untracked path scratch/session.md)` but PASSES locally (7627/7627 green). Run 29657026491 on b7e17f4d5. Likely a CI-environment gitignore/tmpdir difference; reproduce with the CI runner git config.

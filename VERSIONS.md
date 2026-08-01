@@ -8,11 +8,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 _JetBrains plugin 0.2.334; VS Code extension 0.2.64; Zed extension 0.1.0._
 
-- **Retained targets now flow back into attached editors as guarded reactive
-  projections.** The controller derives a target only when the current visible
-  projection still byte-matches the retained write's expected base, then a
+- **Retained transitions now flow back into attached editors as guarded
+  reactive projections.** The controller derives a transition only when the
+  current visible projection still byte-matches its recorded base, then a
   per-document Effect submits it through the CRDT relay's compare-and-project
-  guard. The editor's later full-content projection is cumulative convergence
+  guard. The transition contains explicit base and target content. The editor's
+  later full-content projection is cumulative convergence
   proof; there is no editor ACK request, force refresh, reload-from-disk step, or
   forced disk write. Divergent operator typing and malformed targets remain
   fail-closed.

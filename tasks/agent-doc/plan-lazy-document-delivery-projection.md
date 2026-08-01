@@ -43,7 +43,7 @@ projection consumers. Disk is a settlement sink, not a competing live authority.
 | --- | --- | --- |
 | Agent/compact mutation accepted | Canonical revision becomes desired; delivery is pending | Queue exact canonical replace/delta for attached editors |
 | Editor visible projection equals the exact revision | Derived convergence advances | Persist the exact canonical target and resume the captured closeout |
-| Retained target is absent and visible projection still equals its expected base | Guarded target projection becomes eligible | Compare-and-project the retained target through the CRDT relay |
+| Retained transition is pending and visible projection still equals its recorded base | Guarded transition projection becomes eligible | Compare-and-project the transition's target through the CRDT relay |
 | Editor reports a stale baseline | Delivery remains pending; stale delta is quarantined | Re-project current canonical revision to that editor |
 | Editor has unsaved divergent text | Conflict remains explicit and unsettled | Do not adopt, merge, save, snapshot, or commit |
 | Editor detaches and disk authority is proven | Detached-disk settlement becomes eligible | Persist through the normal detached authority path |

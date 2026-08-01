@@ -2032,11 +2032,13 @@ struct ControllerDocumentGraphs {
     retained_resume_applied: lazily::ThreadSafeSourceMap<String, Option<RetainedResumeSignal>>,
     /// A retained target that can be safely projected from the current editor
     /// frontier. The projection exists only while visible authority still
-    /// byte-matches the intent's expected base.
-    retained_target: lazily::ThreadSafeComputedMap<String, Option<RetainedTargetProjection>>,
+    /// byte-matches the transition's recorded base.
+    retained_transition:
+        lazily::ThreadSafeComputedMap<String, Option<RetainedTransitionProjection>>,
     /// Controller-local receipt for one submitted target frontier. A later
     /// delivery version invalidates this receipt and can retry the projection.
-    retained_target_applied: lazily::ThreadSafeSourceMap<String, Option<RetainedTargetProjection>>,
+    retained_transition_applied:
+        lazily::ThreadSafeSourceMap<String, Option<RetainedTransitionProjection>>,
     /// Durable compact continuation whose retained document write has reached
     /// the projected authority+disk fixed point.
     compact_resume: lazily::ThreadSafeComputedMap<
@@ -2080,7 +2082,7 @@ struct ControllerDocumentGraphs {
     /// the same subscription.
     retained_resume_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// One guarded retained-target projection Effect per document.
-    retained_target_effects: Mutex<BTreeMap<String, lazily::Effect>>,
+    retained_transition_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// One durable compact-completion Effect per document.
     compact_resume_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// One answered-free-text projection Effect per document.
@@ -2336,9 +2338,9 @@ struct RetainedResumeSignal {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RetainedTargetProjection {
+struct RetainedTransitionProjection {
     file: PathBuf,
-    expected_content: Arc<str>,
+    base_content: Arc<str>,
     target_content: Arc<str>,
     intent_id: String,
     target_hash: String,
@@ -2456,10 +2458,10 @@ impl RetainedWriteSettleSink {
     /// Materialize one derived retained target in the controller-owned CRDT
     /// relay. The relay performs the final expected-base CAS, so a stale Effect
     /// can never overwrite operator typing that advanced after derivation.
-    fn project_retained_target(
+    fn project_retained_transition(
         &self,
         document_hash: &str,
-        target: &RetainedTargetProjection,
+        transition: &RetainedTransitionProjection,
     ) -> bool {
         let Some(runtime) = self.runtime.upgrade() else {
             return false;
@@ -2470,29 +2472,31 @@ impl RetainedWriteSettleSink {
         let Some(intent) = projection.document.pending_write.as_ref() else {
             return false;
         };
-        if intent.intent_id != target.intent_id
-            || !intent.target_hash.eq_ignore_ascii_case(&target.target_hash)
-            || intent.expected_content.as_deref() != Some(target.expected_content.as_ref())
-            || intent.target_content != target.target_content.as_ref()
+        if intent.intent_id != transition.intent_id
+            || !intent
+                .target_hash
+                .eq_ignore_ascii_case(&transition.target_hash)
+            || intent.expected_content.as_deref() != Some(transition.base_content.as_ref())
+            || intent.target_content != transition.target_content.as_ref()
         {
             return false;
         }
-        let source = "retained_target_projection_effect";
+        let source = "retained_transition_projection_effect";
         match agent_doc_crdt_relay_io::apply_cp_write_for_file(
-            &target.file,
-            target.expected_content.as_ref(),
-            target.target_content.as_ref(),
+            &transition.file,
+            transition.base_content.as_ref(),
+            transition.target_content.as_ref(),
             source,
         ) {
             Ok(Some(outcome)) => {
                 agent_doc_ops_log_io::log_op(
                     &self.project_root,
                     &format!(
-                        "retained_target_projected document_hash={document_hash} intent_id={} target_hash={} delivery_version={} controller_generation={} applied={} targets={} source={source}",
-                        target.intent_id,
-                        target.target_hash,
-                        target.delivery_version,
-                        target.controller_generation,
+                        "retained_transition_projected document_hash={document_hash} intent_id={} target_hash={} delivery_version={} controller_generation={} applied={} targets={} source={source}",
+                        transition.intent_id,
+                        transition.target_hash,
+                        transition.delivery_version,
+                        transition.controller_generation,
                         outcome.applied,
                         outcome.targets,
                     ),
@@ -2504,11 +2508,11 @@ impl RetainedWriteSettleSink {
                 agent_doc_ops_log_io::log_op(
                     &self.project_root,
                     &format!(
-                        "retained_target_projection_deferred document_hash={document_hash} intent_id={} target_hash={} delivery_version={} controller_generation={} source={source} error={error:#}",
-                        target.intent_id,
-                        target.target_hash,
-                        target.delivery_version,
-                        target.controller_generation,
+                        "retained_transition_projection_deferred document_hash={document_hash} intent_id={} target_hash={} delivery_version={} controller_generation={} source={source} error={error:#}",
+                        transition.intent_id,
+                        transition.target_hash,
+                        transition.delivery_version,
+                        transition.controller_generation,
                     ),
                 );
                 false
@@ -2654,8 +2658,8 @@ impl ControllerDocumentGraphs {
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_resume: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
-            retained_target: lazily::ThreadSafeComputedMap::new(&ctx),
-            retained_target_applied: lazily::ThreadSafeSourceMap::new(&ctx),
+            retained_transition: lazily::ThreadSafeComputedMap::new(&ctx),
+            retained_transition_applied: lazily::ThreadSafeSourceMap::new(&ctx),
             compact_resume: lazily::ThreadSafeComputedMap::new(&ctx),
             compact_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
             queue_authority: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -2666,7 +2670,7 @@ impl ControllerDocumentGraphs {
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
             settle_effects: Mutex::new(BTreeMap::new()),
             retained_resume_effects: Mutex::new(BTreeMap::new()),
-            retained_target_effects: Mutex::new(BTreeMap::new()),
+            retained_transition_effects: Mutex::new(BTreeMap::new()),
             compact_resume_effects: Mutex::new(BTreeMap::new()),
             answered_free_text_strike_effects: Mutex::new(BTreeMap::new()),
             queue_completion_effects: Mutex::new(BTreeMap::new()),
@@ -2765,7 +2769,7 @@ impl ControllerDocumentGraphs {
             // safely inside its Arc.
             self.current_verdict(document_hash);
             self.current_retained_resume(document_hash);
-            self.current_retained_target(document_hash);
+            self.current_retained_transition(document_hash);
         }
         if has_captured_response {
             self.current_answered_free_text_strike(document_hash);
@@ -2973,12 +2977,15 @@ impl ControllerDocumentGraphs {
         signal
     }
 
-    fn current_retained_target(&self, document_hash: &str) -> Option<RetainedTargetProjection> {
+    fn current_retained_transition(
+        &self,
+        document_hash: &str,
+    ) -> Option<RetainedTransitionProjection> {
         let projection = self.projection.clone();
         let delivery = self.retained_delivery.clone();
         let settle_generation = self.settle_generation.clone();
-        let applied = self.retained_target_applied.clone();
-        let target = self.retained_target.get_or_insert_with(
+        let applied = self.retained_transition_applied.clone();
+        let transition = self.retained_transition.get_or_insert_with(
             &self.ctx,
             document_hash.to_string(),
             move |ctx, key| {
@@ -2986,7 +2993,7 @@ impl ControllerDocumentGraphs {
                 let _delivery_present = delivery.contains_key(ctx, key);
                 let _generation_present = settle_generation.contains_key(ctx, key);
                 let _applied_present = applied.contains_key(ctx, key);
-                let candidate = retained_target_projection(
+                let candidate = retained_transition_projection(
                     projection.observe(ctx, key).flatten().as_ref(),
                     delivery.observe(ctx, key).flatten().as_ref(),
                     settle_generation.observe(ctx, key).unwrap_or_default(),
@@ -3001,8 +3008,8 @@ impl ControllerDocumentGraphs {
                 }
             },
         );
-        self.ensure_retained_target_effect(document_hash);
-        target
+        self.ensure_retained_transition_effect(document_hash);
+        transition
     }
 
     fn current_compact_resume(
@@ -3482,18 +3489,18 @@ impl ControllerDocumentGraphs {
     /// Subscribe guarded retained-target delivery to the derived editor
     /// projection. The Effect submits state to the CRDT relay; the editor's
     /// later full-content projection is the only convergence proof.
-    fn ensure_retained_target_effect(&self, document_hash: &str) {
+    fn ensure_retained_transition_effect(&self, document_hash: &str) {
         if self
-            .retained_target_effects
+            .retained_transition_effects
             .lock()
             .contains_key(document_hash)
         {
             return;
         }
         let key = document_hash.to_string();
-        let target_map = self.retained_target.clone();
+        let transition_map = self.retained_transition.clone();
         let settle_generation = self.settle_generation.clone();
-        let applied = self.retained_target_applied.clone();
+        let applied = self.retained_transition_applied.clone();
         let sink = self.settle_sink.clone();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
@@ -3501,17 +3508,17 @@ impl ControllerDocumentGraphs {
             let _generation = settle_generation
                 .observe(ctx, &effect_key)
                 .unwrap_or_default();
-            let Some(target) = target_map.observe(ctx, &effect_key).flatten() else {
+            let Some(transition) = transition_map.observe(ctx, &effect_key).flatten() else {
                 return;
             };
             let Some(sink) = sink.get() else {
                 return;
             };
-            if sink.project_retained_target(&effect_key, &target) {
-                applied.set(ctx, effect_key.clone(), Some(target));
+            if sink.project_retained_transition(&effect_key, &transition) {
+                applied.set(ctx, effect_key.clone(), Some(transition));
             }
         });
-        let mut effects = self.retained_target_effects.lock();
+        let mut effects = self.retained_transition_effects.lock();
         if effects.contains_key(&key) {
             drop(effects);
             self.ctx.dispose_effect(&effect);
@@ -3521,11 +3528,11 @@ impl ControllerDocumentGraphs {
     }
 }
 
-fn retained_target_projection(
+fn retained_transition_projection(
     projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
     delivery: Option<&RetainedDeliveryObservation>,
     controller_generation: u64,
-) -> Option<RetainedTargetProjection> {
+) -> Option<RetainedTransitionProjection> {
     if controller_generation == 0 {
         return None;
     }
@@ -3534,9 +3541,9 @@ fn retained_target_projection(
     if delivery.live_editors == 0 || !delivery.delivery_converged {
         return None;
     }
-    let expected_content = intent.expected_content.as_deref()?;
-    if delivery.content.as_ref() != expected_content
-        || intent.target_content == expected_content
+    let base_content = intent.expected_content.as_deref()?;
+    if delivery.content.as_ref() != base_content
+        || intent.target_content == base_content
         || !agent_doc_hash::content_hash(&intent.target_content)
             .eq_ignore_ascii_case(&intent.target_hash)
         || agent_doc_element::element::structural_corruption_reason(&intent.target_content)
@@ -3544,9 +3551,9 @@ fn retained_target_projection(
     {
         return None;
     }
-    Some(RetainedTargetProjection {
+    Some(RetainedTransitionProjection {
         file: delivery.file.clone(),
-        expected_content: Arc::from(expected_content),
+        base_content: Arc::from(base_content),
         target_content: Arc::from(intent.target_content.as_str()),
         intent_id: intent.intent_id.clone(),
         target_hash: intent.target_hash.clone(),
@@ -12071,32 +12078,32 @@ agent:queue\n\
     }
 
     #[test]
-    fn retained_target_is_a_guarded_computed_projection_not_an_ack_request() {
+    fn retained_transition_is_a_guarded_computed_projection_not_an_ack_request() {
         let mut projection = retained_resume_projection("doc-retained-target");
         let intent = projection.document.pending_write.as_mut().unwrap();
-        let expected = "# Queue\n";
+        let base = "# Queue\n";
         let target = "# Queue\n\n### Re: done\n";
-        intent.expected_content = Some(expected.to_string());
-        intent.expected_hash = agent_doc_hash::content_hash(expected);
+        intent.expected_content = Some(base.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(base);
         intent.target_content = target.to_string();
         intent.target_hash = agent_doc_hash::content_hash(target);
         let delivery = RetainedDeliveryObservation {
             file: PathBuf::from("/work/task.md"),
-            content: Arc::from(expected),
-            content_hash: agent_doc_hash::content_hash(expected),
+            content: Arc::from(base),
+            content_hash: agent_doc_hash::content_hash(base),
             live_editors: 1,
             delivery_converged: true,
             delivery_version: 8,
         };
 
-        let target_projection =
-            retained_target_projection(Some(&projection), Some(&delivery), 1).unwrap();
-        assert_eq!(target_projection.expected_content.as_ref(), expected);
-        assert_eq!(target_projection.target_content.as_ref(), target);
-        assert_eq!(target_projection.delivery_version, 8);
+        let transition =
+            retained_transition_projection(Some(&projection), Some(&delivery), 1).unwrap();
+        assert_eq!(transition.base_content.as_ref(), base);
+        assert_eq!(transition.target_content.as_ref(), target);
+        assert_eq!(transition.delivery_version, 8);
 
         assert!(
-            retained_target_projection(
+            retained_transition_projection(
                 Some(&projection),
                 Some(&RetainedDeliveryObservation {
                     content: Arc::from("# operator typing\n"),
@@ -12109,7 +12116,7 @@ agent:queue\n\
             "a divergent visible authority must never be overwritten"
         );
         assert!(
-            retained_target_projection(Some(&projection), Some(&delivery), 0).is_none(),
+            retained_transition_projection(Some(&projection), Some(&delivery), 0).is_none(),
             "a pre-sink controller cannot submit the projection"
         );
 
@@ -12118,7 +12125,7 @@ agent:queue\n\
         intent.target_content = malformed.to_string();
         intent.target_hash = agent_doc_hash::content_hash(malformed);
         assert!(
-            retained_target_projection(Some(&projection), Some(&delivery), 1).is_none(),
+            retained_transition_projection(Some(&projection), Some(&delivery), 1).is_none(),
             "structurally invalid targets remain fail-closed"
         );
     }

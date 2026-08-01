@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: bac73049-47a1-42bc-b46b-7ef4283cbdb6
+resume: 8ba5db0d-2d64-45d5-af3d-fdac260b96cd
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -384,16 +384,43 @@ One note on the runbook, since it misled me for a minute: §TL;DR says `make dep
 **34 schedule rows across 11 of 26 loans.** That number was structurally 0 on every capture ever taken before this change — the sweep hard-coded an empty array. No sweep errors, no per-loan read errors. `complete=false` is the `--no-content` flag doing its documented job (7 attachments listed as `skipped (--no-content)`); I used it to keep the run read-light. The artifact was written outside the repo and deleted.
 
 Worth knowing where this leaves the two environments: staging's scheduled TMO backup will now write schedule-bearing artifacts, **production's will not** — it still runs the prior build, and its daily job keeps producing `schedule_rows=0`. That matters for `#tmo-clone-apply`, which wants a schedule-bearing source. Filed as `#efs-prod-deploy-20d7a416` rather than doing it, since you asked for staging.
-<!-- agent:boundary:e92898a3 -->
+
+### Re: #efs-prod-deploy-20d7a416 — production is on the schedule-capture build — opus-5
+
+> **Queue prompt:**
+>
+> do [#efs-prod-deploy-20d7a416]
+
+Production is live on `20d7a416`: version `4e040d1b-df18-4083-b144-a8449f2a1e74`, deployed 2026-08-01T04:16:42Z, active at 100%. `EFS_ENVIRONMENT="production"`, both `equityfundingsource.com` and `www.` return 200. Repo was in sync with origin/main (0 ahead / 0 behind).
+
+Pre-deploy per `runbooks/deployment.md`: `make check` green (2282 pass, 0 fail, build + worker build clean); **no migrations pending on production D1** before or after, so this was code-only; Time Travel bookmark recorded (`000005f9-0000000e-000050ba-…`). Rollback target if you need it: `3b7d6d2d-bdf8-4847-8ba1-a45ab111a5e6` (2026-07-30T18:19Z).
+
+**On what the build-identity evidence does and does not prove.** Content-hashed assets on production match my clean local build exactly — `index.browser-7YCODNTY.js`, `index.server-45257KN3_YJAK3EWU.css`. But this change is server-side, so matching asset hashes only show the build came from this tree; the deployment timestamp and version ID are what establish the *server* bundle is new. I tried to byte-compare the deployed worker script against local `dist/worker/index.js` and could not: `.env` stores `passage:` references rather than literal credentials, so a raw Cloudflare API fetch does not authenticate. The wrappers resolve those at run time, and I am not resolving secrets by hand on a livestreamed session.
+
+**The scheduled path is verified running clean on the new build.** The 04:15Z sync tick fired 90 seconds *before* the deploy, so I waited for the next one:
+
+```
+tmo_sync_last_started_at    2026-08-01T04:45:48Z
+tmo_sync_last_completed_at  2026-08-01T04:45:50Z
+tmo_sync_cursor_ts          2026-08-01T04:45:48Z
+```
+
+The cursor advancing is the signal that matters, not the two-second runtime. A `partial` batch leaves the cursor stuck — that was the whole shape of `#tmo-sync-cron-failures`, where four consecutive runs re-swept the same 28 loans because the cursor never moved. It moved. No error recorded.
+
+**The change itself is still inert on production, and will be until ~17:00Z today.** The backup interval is 24 hours and the last run was `2026-07-31T17:00:53Z` — cut on the old build, so `schedule_rows=0` like every production artifact before it. The next daily job is the first that can carry schedules. I can force it early by setting `tmo_backup_interval_hours` to 0 and restoring it after a tick, but that is a production settings write you did not ask for, so I left it. Filed as `#tmo-prod-schedule-artifact-confirm` instead, with the check spelled out — that is what unblocks `#tmo-clone-apply`, which needs a schedule-bearing source.
+
+Both environments now run the same build: staging `410b3c74` (2026-07-30T23:18Z), production `4e040d1b`.
+<!-- agent:boundary:adc511bf -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
+- ~~do [#efs-prod-deploy-20d7a416]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#efs-prod-deploy-20d7a416] [recommended] Deploy EFS 20d7a416 (the inline payment-schedule capture, #tmo-backup-schedule-inline) to production. Staging is live on version 410b3c74-4c9b-4c6d-89b5-d3037201242b as of 2026-07-30T23:18Z and verified against the real TMO sandbox at 34 schedule rows over 26 loans. Production still runs the prior build, so its daily scheduled TMO backup keeps writing artifacts with zero schedule rows, and #tmo-clone-apply needs a schedule-bearing source. Run make deploy in a production checkout via deploy:worker:production; no D1 migration is pending on either environment, so this is code-only.
+- [ ] [#tmo-prod-schedule-artifact-confirm] Confirm the first schedule-bearing PRODUCTION TMO backup artifact. Production went live on 20d7a416 at 2026-08-01T04:16Z, but tmo_backup_interval_hours is 24 and the last run was 2026-07-31T17:00:53Z on the old build, so the next daily job around 2026-08-01T17:00Z is the first artifact that can carry payment schedules. Check: read tmo_backup_last_key and tmo_backup_last_status from production platform_settings, confirm the key advanced to a 2026-08-01 object and status is complete, then pull that object from R2 bucket equityfundingsource-tmo-cache-production and count schedule rows - expect roughly 12 of 31 loans to carry one, versus 0 on every prior artifact. Sandbox already measured 34 rows over 26 loans. Unblocks #tmo-clone-apply, which needs a schedule-bearing clone source. Do not read the artifact contents into the transcript - it holds production PII; count and discard.
 - [/] [#tmo-clone-apply] [operator-verify] Execute the anonymized live-to-sandbox TMO clone and the staging D1 refresh per prds/tmo-sandbox-clone-and-staging-refresh-plan.md section 8. Blocked on two operator actions: (1) create passage btak/equityfundingsource/anonymize_seed, which must be stable forever because regenerating it re-pseudonymizes everything and breaks the sandbox-to-staging joins; (2) an explicit go for the destructive steps, which delete sandbox loans and wipe-and-load staging D1. Everything else is built and green as of EFS 20d7a416: rehearse with tmo-sandbox-clone.ts --simulate, then --from-r2 dry run, then --from-r2 --apply, then d1-staging-refresh.ts dry run and --apply. Use a backup captured AFTER EFS 20d7a416 - the recorded tmo_backup_last_key from 2026-07-30T17:00 predates #tmo-backup-schedule-inline and carries no payment-schedule rows; the next daily scheduled backup does. Coordinate with #tmo-sandbox-purge-apply, which gates the same purge.
 - [ ] [#efs-dev-vars-secret-history] Confirm .dev.vars.production / .dev.vars.staging were never committed, and rotate if they were. Both hold cleartext AUTH_SECRET and ADMIN_GLOBAL_PASSWORD; .gitignore covered '.dev.vars' but NOT the per-environment variants, so they sat untracked-but-committable until EFS 292b52d6 added '.dev.vars.*'. Run: git -C src/equityfundingsource-dev log --all --diff-filter=A -- '.dev.vars*'. If any commit ever added one, rotate AUTH_SECRET (wrangler secret put AUTH_SECRET, both envs) and ADMIN_GLOBAL_PASSWORD, and purge from history. Audit the same gap in sibling repos that copied this .gitignore.
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.

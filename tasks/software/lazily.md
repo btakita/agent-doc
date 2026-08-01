@@ -23,122 +23,17 @@ gated: npm security-key user presence required
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/44ae7f3a5c03b112ffe17aa5c85d000e3d79a6e9a4875e16442309ebf1c06a1c-20260801-042245.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/44ae7f3a5c03b112ffe17aa5c85d000e3d79a6e9a4875e16442309ebf1c06a1c-20260801-230430.md`*
 
 Compacted content:
-- Archived 14 response topic(s): do [#lzbenchbudgetheadroom]; do [#lzinteroppeerci]; #lzcheckcireachguard; 11 more
-- Prior summary/context: prior compacted content: Archived 7 response topic(s): do [#lzconsumednotasserted]; do [#lzscenariocoverage]; Protobu...
-
-### Re: do [#bugcoinedpretooluse] — already fixed upstream; verified live, and the guard has a worse hole — opus-5
-
-The C-family false positive is **fixed and live**. I wrote no agent-doc code this cycle — another session landed it at `e5a0af2fd` (2026-07-31 23:01, "fix: harden workflow guard classification"), about half an hour after I filed the item. My job was to prove it, not to re-do it.
-
-**The fix**, in `agent-doc-hooks-io/src/coined_id_pretooluse.rs`: `coined_id_scan_text` blanks the leading `#` on any line whose first token is a preprocessor directive, gated by `is_c_family_target` on the file extension. It covers more than I asked for — 17 directives including `elifdef`, `include_next`, `embed` and `import`, across 16 extensions including `.cu`, `.m`, `.mm`, `.ipp`, `.tpp`.
-
-**Verification, in order:**
-
-1. `cargo test -p agent-doc-hooks-io --lib coined` — 13 passed.
-2. **Mutation probe** — disabled the guard with an early `return Cow::Borrowed(text)`; `c_family_preprocessor_directives_are_not_coined_ids` went red. The test is real, not bookkeeping. Tree restored clean.
-3. **Live, through the Write tool** — a `.hpp` carrying `#ifndef` / `#define` / `#include` / `#pragma` / `#endif` now writes without a block. That is the exact call that failed yesterday.
-4. **Negative control** — a `.hpp` carrying `#zzzsecondprobeid` was still refused. The fix narrowed the guard; it did not open it.
-
-Probe files removed; `lazily-cpp` and `agent-doc-hooks-io` are both clean.
-
----
-
-**The finding that matters more.** While running step 4 I got two consecutive Write calls carrying a genuinely untracked id that the hook **allowed** — one to the scratchpad, one into `src/lazily-cpp/`. The second actually landed on disk. The same input, fed to `agent-doc hook coined-id-pre-tool-use` directly, denies with exit 2 every time, and a retry through the harness a minute later denied correctly. So the guard intermittently opens.
-
-`handle_pretooluse` is **fail-open by construction**:
-
-```rust
-let known = active_document_for(&cwd, pane.as_deref())
-    .and_then(|file| known_ids_for_document(&file));
-let decision = match &known {
-    Some(known) => pretooluse_decision(tool_name, tool_input, known, true),
-    None => PreToolUseDecision::Allow,
-};
-```
-
-and `known_ids_for_document` is two `.ok()?` in a row — `read_to_string` then `element::parse`. So "this cwd has no agent-doc document" and "the document was unreadable or unparseable for a moment" produce the identical `None`, and both mean **allow**. The session document is rewritten constantly by the write pipeline and the CRDT relay, `state.db` is contended across roughly seven live panes, and I had cargo builds running — any of those makes a transient `None` plausible.
-
-To be exact about what I proved: the fail-open code path is certain from reading it; I did **not** pin which of the three arms fired for my two observed misses. What is certain is that the guard is not the invariant it reads as — it is best-effort, and it fails silently in the permissive direction under exactly the load where you would want it most.
-
-I did not fix it here, and the reason is not effort. Deciding what "document momentarily unreadable" should do — deny, or bounded-retry-then-deny — changes the behaviour of a hook that gates every tool call in every live pane, and `src/agent-doc` is currently carrying another session's in-progress refactor across 20+ files in 14 crates. I can commit one clean file with `--only`, but I cannot `cargo install` the result without publishing that session's unfinished work into every pane's PATH, and a hook fix that is committed but not installed protects nothing. Filed at the top of backlog with the root cause and the proposed shape.
-
-Exchange is at 478 lines / 14 sections; queue stays active.
-
-### Re: do [#coinedpretooluseguard] — the guard no longer opens when its ledger is unreadable — opus-5
-
-Fixed, built from a clean commit, installed, and proven live. `agent-doc` `4f3f4d2c4`, superproject `594136261`.
-
-**The defect.** `handle_pretooluse` mapped `None` → `Allow`, and five distinct conditions funnelled into that one `None`: no pane scope, no project root, a session registry that would not open, a registered document that would not read, a document that would not parse. The last three are *transient* — the session document and `state.db` are rewritten continuously by the write pipeline, the CRDT relay, and every other live pane — so the guard silently switched itself off under exactly the contention where ids get coined.
-
-**The fix.** `DocumentIds` splits the collapsed `None` three ways:
-
-| Case | Meaning | Decision |
-|---|---|---|
-| `Ungoverned` | no pane, no project, no registry on disk, or a registry that read cleanly and holds no document for this pane | **Allow** — an unrelated repo is none of the guard's business |
-| `Known(ids)` | the ledger answered | unchanged |
-| `Unavailable{file, cause}` | the ledger *should* have answered and did not | **Deny**, after 5 reads spaced 20ms, naming the file and the cause |
-
-Failing closed stays narrow on purpose. With an unreadable ledger the comparison basis becomes the empty set, so text carrying **no id-shaped token is still allowed**, and the C-family preprocessor sanitization still runs first. Without that, every write during a document rewrite would be refused and the guard would be unusable — the over-correction is as bad as the hole.
-
-One deliberate behaviour change beyond the bug: a registry entry pointing at a document that no longer reads is now `Unavailable`, not `Ungoverned`. A stale registry entry should be loud, not a silent off-switch.
-
-**Proof.** 31/31 in `agent-doc-hooks-io`; both directions mutation-checked:
-
-- reverting `Unavailable` to `Allow` (the original defect) reddens `an_unreadable_ledger_refuses_a_tagged_write`
-- widening the denial to any write reddens `an_unreadable_ledger_still_allows_an_untagged_write` and `..._c_preprocessor_directives`
-
-Then live, against a scratch project with a deliberately corrupt `.agent-doc/state.db`, using the **installed** binary:
-
-- corrupt ledger + tagged write → **exit 2**, "the ledger that would vouch for them could not be read"
-- corrupt ledger + untagged write → exit 0
-- corrupt ledger + `.hpp` full of `#ifndef`/`#define`/`#include` → exit 0
-
-and against this live project: preprocessor directives allowed, untracked id denied, tracked id allowed, non-project cwd allowed.
-
-**Build discipline.** `src/agent-doc` was carrying another session's refactor when I started, so I committed only my one file, built `--release` from a git worktree under `src/` (so the `../tmux-router` path dep resolves), and installed with `agent-doc binary-install` — atomic rename, live process inodes preserved. Worktree removed. That session has since committed everything; the tree is clean at `4f3f4d2c4`. I did **not** ship a cdylib: this change is binary-only, and a `reload_library` fan-out mid-refactor is not something to do as a side effect. `.bin/agent-doc` was already dangling before this cycle and I left it that way — the local install profile writes elsewhere.
-
-agent-doc CI run `30718871518` is in progress; local evidence above.
-
-This closes the finding I filed two cycles ago while verifying the C-preprocessor false positive. That one was fixed upstream; this one was the reason the first one was hard to see.
-
-### Re: do [#lazilycppexcuses] — the excuse is gone, and replaying it found two more codec defects — opus-5
-
-Done and pushed. lazily-cpp `9a4ff3f`, superproject `def6fc0c3`.
-
-`distributed/crdt_sync_frames.json` was excused for one stated reason: no JSON codec for the `IpcMessage` envelope, so there was nothing to replay `wire` through. `#lzcppjsoncodec` removed that reason two cycles ago and left the excuse standing.
-
-**Replaying it found two defects the codec fixture could not see**, because `codec/frame_roundtrip_json.json` always carries a frontier and this corpus has a frame that does not:
-
-- `json_to_crdt_sync` **required** `frontier`, so `crdt_sync_frontier_suppressed` was undecodable outright.
-- `json_from_crdt_sync` always wrote it, so an empty frontier round-tripped as `"frontier": []`.
-
-That second one is not cosmetic. Per protocol.md's frontier-suppression relaxation the two forms are different statements: **omitted** means "unchanged since the last frame the receiver accepted", while an explicit empty list claims the sender advertises nothing — which would make a receiver discard its last-merged frontier. Both now match the reference binding's `serde(default, skip_serializing_if = "Vec::is_empty")`.
-
-**The runner.** Each frame decodes, re-encodes, decodes again, and every assertion is evaluated against the second decode. `frontier_omitted` goes further than the reference runner: besides checking the wire shape and that an omitted frontier decodes as empty, it re-parses the **encoded bytes** and requires the field to still be absent. That is the half a decode-only runner structurally cannot see, and it is the half that was broken here.
-
-Three mutation probes, all caught:
-
-- encoder always writes `frontier` → `frontier_omitted` disagreed
-- decoder requires `frontier` → the suppressed frame threw on decode
-- encoder drops the last op → round-trip equality failed
-
-`make check` exit 0: 53/53 tests, `conformance coverage OK: 114 canonical fixtures across 21 areas (10 known-uncovered, down from 11)`, scenario coverage 78/82, fmt and ci-reach clean. `MIN_FIXTURES` 113 → 114.
-
-**One thing I did not change, deliberately.** `coverage.json` needs no edit — every CrdtSync row was *already* marked shipped for C++. "IPC wire — `Snapshot` + `Delta` + `CrdtSync`" has read ✅ for this binding the whole time, while the binding could not encode or decode a single one of those frames in the reference codec. The matrix scores having the *types*, not speaking the *wire*, and it cannot tell the two apart. That is the same failure mode as the excuse I just deleted, one level up, so I filed it rather than quietly fixing a row.
-
-**Two smaller notes.** The guard I shipped last cycle blocked my own commit message — `#lzspecfrontiersuppress` is a real lazily-spec id but is not in this document's ledger, and the hook is pane-document-scoped. I dropped the sigil from the message. I kept it in the C++ comment to match lazily-rs and protocol.md, where it does resolve; disclosing that because the file was written through a python heredoc, which does not pass through the hook.
-
-And the previous cycle's CI is now green — run `30680492937` (the json reference codec) completed **success**. This cycle's run `30720210025` is in progress.
-<!-- agent:boundary:01a5a4ce -->
+- Archived 3 response topic(s): do [#bugcoinedpretooluse]; do [#coinedpretooluseguard]; do [#lazilycppexcuses]
+- Prior summary/context: prior compacted content: Archived 14 response topic(s): do [#lzbenchbudgetheadroom]; do [#lzinteroppeerci]; #lzcheckc...
+<!-- agent:boundary:1ab22854 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~📌 do [#lazilycppexcuses]~~
 - 📌 do [#lzcppmsgpackwire]
 - 📌 do [#lzmsgpackseven]
 - 📌 do [#lzreadmelinkrot]

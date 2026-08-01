@@ -28,13 +28,52 @@ gated: npm security-key user presence required
 Compacted content:
 - Archived 14 response topic(s): do [#lzbenchbudgetheadroom]; do [#lzinteroppeerci]; #lzcheckcireachguard; 11 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): do [#lzconsumednotasserted]; do [#lzscenariocoverage]; Protobu...
-<!-- agent:boundary:dd9f720e -->
+
+### Re: do [#bugcoinedpretooluse] — already fixed upstream; verified live, and the guard has a worse hole — opus-5
+
+The C-family false positive is **fixed and live**. I wrote no agent-doc code this cycle — another session landed it at `e5a0af2fd` (2026-07-31 23:01, "fix: harden workflow guard classification"), about half an hour after I filed the item. My job was to prove it, not to re-do it.
+
+**The fix**, in `agent-doc-hooks-io/src/coined_id_pretooluse.rs`: `coined_id_scan_text` blanks the leading `#` on any line whose first token is a preprocessor directive, gated by `is_c_family_target` on the file extension. It covers more than I asked for — 17 directives including `elifdef`, `include_next`, `embed` and `import`, across 16 extensions including `.cu`, `.m`, `.mm`, `.ipp`, `.tpp`.
+
+**Verification, in order:**
+
+1. `cargo test -p agent-doc-hooks-io --lib coined` — 13 passed.
+2. **Mutation probe** — disabled the guard with an early `return Cow::Borrowed(text)`; `c_family_preprocessor_directives_are_not_coined_ids` went red. The test is real, not bookkeeping. Tree restored clean.
+3. **Live, through the Write tool** — a `.hpp` carrying `#ifndef` / `#define` / `#include` / `#pragma` / `#endif` now writes without a block. That is the exact call that failed yesterday.
+4. **Negative control** — a `.hpp` carrying `#zzzsecondprobeid` was still refused. The fix narrowed the guard; it did not open it.
+
+Probe files removed; `lazily-cpp` and `agent-doc-hooks-io` are both clean.
+
+---
+
+**The finding that matters more.** While running step 4 I got two consecutive Write calls carrying a genuinely untracked id that the hook **allowed** — one to the scratchpad, one into `src/lazily-cpp/`. The second actually landed on disk. The same input, fed to `agent-doc hook coined-id-pre-tool-use` directly, denies with exit 2 every time, and a retry through the harness a minute later denied correctly. So the guard intermittently opens.
+
+`handle_pretooluse` is **fail-open by construction**:
+
+```rust
+let known = active_document_for(&cwd, pane.as_deref())
+    .and_then(|file| known_ids_for_document(&file));
+let decision = match &known {
+    Some(known) => pretooluse_decision(tool_name, tool_input, known, true),
+    None => PreToolUseDecision::Allow,
+};
+```
+
+and `known_ids_for_document` is two `.ok()?` in a row — `read_to_string` then `element::parse`. So "this cwd has no agent-doc document" and "the document was unreadable or unparseable for a moment" produce the identical `None`, and both mean **allow**. The session document is rewritten constantly by the write pipeline and the CRDT relay, `state.db` is contended across roughly seven live panes, and I had cargo builds running — any of those makes a transient `None` plausible.
+
+To be exact about what I proved: the fail-open code path is certain from reading it; I did **not** pin which of the three arms fired for my two observed misses. What is certain is that the guard is not the invariant it reads as — it is best-effort, and it fails silently in the permissive direction under exactly the load where you would want it most.
+
+I did not fix it here, and the reason is not effort. Deciding what "document momentarily unreadable" should do — deny, or bounded-retry-then-deny — changes the behaviour of a hook that gates every tool call in every live pane, and `src/agent-doc` is currently carrying another session's in-progress refactor across 20+ files in 14 crates. I can commit one clean file with `--only`, but I cannot `cargo install` the result without publishing that session's unfinished work into every pane's PATH, and a hook fix that is committed but not installed protects nothing. Filed at the top of backlog with the root cause and the proposed shape.
+
+Exchange is at 478 lines / 14 sections; queue stays active.
+<!-- agent:boundary:bdfd0763 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#bugcoinedpretooluse]
+- do [#coinedpretooluseguard]
+- ~~do [#bugcoinedpretooluse]~~
 - do [#lazilycppexcuses]
 - ⏭️ do [#lzcppmsgpackwire]
 - do [#lzmsgpackseven]
@@ -57,8 +96,8 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#coinedpretooluseguard] agent-doc: the coined-id PreToolUse guard is FAIL-OPEN and intermittently lets an untracked id through. handle_pretooluse computes known = active_document_for(cwd, pane).and_then(known_ids_for_document) and maps None to Allow; known_ids_for_document is two .ok()? in a row, read_to_string then element::parse. So 'this cwd has no agent-doc document', 'the document was unreadable for a moment' and 'the document did not parse for a moment' all collapse to the same None and all mean allow. Observed live on 2026-08-01: two consecutive Write calls carrying an untracked id were permitted and one landed on disk in src/lazily-cpp, while the identical payload fed to the hook directly denies with exit 2 every time and a retry a minute later denied correctly. The session document is rewritten constantly by the write pipeline and the CRDT relay and state.db is contended across several live panes, so a transient None is reachable under exactly the load where the guard matters most. Work: distinguish 'no document resolved here' from 'resolved but temporarily unreadable'. The second should bounded-retry with a short backoff and then DENY rather than allow, and the hook should say which arm it took so a miss is visible instead of silent. Add a regression case per arm. Not fixed in the discovering cycle because src/agent-doc is carrying another session's in-progress refactor across 20-plus files, so the change cannot be cargo-installed without publishing that WIP, and an uninstalled hook fix protects nothing.
 - [ ] [#lazilycppexcuses] lazily-cpp still excuses distributed/crdt_sync_frames.json in KNOWN_UNCOVERED, but the reason that entry was written for is gone: it said replaying wire needs an encoder first, and json_codec.hpp is that encoder as of #lzcppjsoncodec. What is missing now is only a runner. Work: replay conformance/distributed/crdt_sync_frames.json through decode_json and encode_json in tests/test_distributed_conformance.cpp or a sibling, delete the KNOWN_UNCOVERED entry, and raise MIN_FIXTURES in scripts/check-conformance-coverage.sh in the same change. An excuse whose stated cause has been fixed is the exact rot that ledger exists to prevent.
-- [ ] 🚧 [#bugcoinedpretooluse] agent-doc bug: the coined-id PreToolUse hook classifies C and C++ preprocessor directives as untracked coined ids. Writing a new .hpp through the Write tool is blocked with 'this Write would write coined id(s) #define, #endif, #ifndef, #include', none of which are ids at all. The check fires on the leading-hash token shape without excluding the preprocessor keyword set, so every C, C++ and Objective-C header in every repo is unwritable through the Write tool and the agent has to bypass the hook with a shell heredoc, which defeats the guard entirely rather than narrowing it. Work: skip the fixed preprocessor keyword set (include, define, undef, ifdef, ifndef, endif, else, elif, pragma, error, warning, line, if) when the target is a C-family source or header, and add a regression case. Belongs in the agent-doc bugs document; filed here because that document is owned by another pane this cycle.
 - [ ] [#lzcppmsgpackwire] lazily-cpp ships a MessagePack codec that is NOT protocol.md's msgpack, which is worse than not having one because the file made it read as implemented and coverage.json would have shown a check. The spec frame is externally tagged, Snapshot mapping to its body, over named-field maps whose keys match the json schema; include/lazily/codec.hpp writes an INTERNALLY tagged envelope with type and value keys, gives NodeState and IpcValue integer kind discriminators instead of the Payload and Inline external tags, and also ships a positional array form protocol.md excludes outright. A peer that negotiated msgpack with lazily-cpp would not decode its frames. Two honest exits: align codec.hpp to the spec frame and replay codec/frame_roundtrip_msgpack.json, or keep it as a private codec, rename it so nothing implies the msgpack token, and drop msgpack from anything cpp advertises. coverage.json marks it partial until then. Depends on #lzcppjsoncodec only for the fixture-reading seam, not for the wire itself.
 - [ ] [#lzmsgpackseven] Seven bindings (py, kt, js, dart, zig, go, cs) carve out msgpack, a protocol.md MUST, and each now names codec/frame_roundtrip_msgpack.json in its KNOWN_UNCOVERED with a reason. Closing one means encoding and decoding IpcMessage as an externally-tagged frame over named-field MessagePack maps whose keys match the json schema, keeping the omit-when-absent rule for the optional NodeKey uniform with json, replaying the fixture through it, deleting the KNOWN_UNCOVERED entry, and flipping that binding's mark on the msgpack row of coverage.json. tests/codec_roundtrip_conformance.rs in lazily-rs is the reference runner shape, including the schema-less decode of its own output that pins the named-field rule: a positional encoder round-trips every value correctly and is still non-conforming, so a value-only check cannot see it.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.

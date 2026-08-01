@@ -40,7 +40,26 @@ complete
 Compacted content:
 - Archived 1 response topic(s): Are these issues in tsift.md now fixed?
 - Prior summary/context: prior compacted content: Archived 13 response topic(s): completed queue items and closeout churn; JetBrains native su...
-<!-- agent:boundary:bf77a198 -->
+tmux pane auto-sync is laggy or possibly wedged. #spec-test-build-install-commit-push: `mismatched component: opened 'status' but closed 'backlog'`
+
+### Re: Response
+
+Implemented and pushed the tmux/editor convergence fix as `ce4f580ed` (`fix: retain canonical editor projections reactively`).
+
+The root cause was stale whole-buffer promotion, not tmux layout itself: tmux converged, then the old editor-delivery recovery barrier requested a full state; a stale editor buffer could be re-registered and merged into controller canonical text, deleting queue additions and producing `mismatched component: opened 'status' but closed 'backlog'`.
+
+The controller is now the sole whole-document authority. It retains one process-scoped, Lazily keyed canonical projection independently of disposable relay membership. Editors consume controller bootstrap/revisions and may only send later user-attributable incremental deltas upstream. Stale deltas remain quarantined and trigger canonical reprojection; they cannot replace canonical text.
+
+Removed the active CRDT recovery sidecar path, `request_full_state`, ACK replay/force-refresh recovery, editor text/full-state adoption, the foreground 8-second recovery barrier, repair force-disk fallback, and post-commit fallback IPC. Unsettled work returns a typed retained/pending projection instead of writing a secondary snapshot or forcing disk. JetBrains, VS Code, and Zed follow the same authority boundary; Zed full-sync `didChange` is reduced to a causal delta.
+
+An exact projection ACK release means the controller sends a canonical revision plus content hash; after the editor applies it, the editor reports the hash of what is actually displayed. Only an exact hash match clears that editor's `canonical_projection_required` fence and releases the retained closeout. A mismatch keeps the fence and canonical projection retained. This is a content-qualified delivery receipt, not permission for the editor to upload or replace the document.
+
+A legacy projection means a CRDT recovery row/whole-document projection persisted by an older version, potentially surviving process or controller recycling. Those rows remain decodable only for rolling compatibility; current runtime authority neither hydrates from nor checkpoints them.
+
+Also removed the pointless `let left = left` Clippy artifact.
+
+Verification: exact staged `make check` passed (8,476 tests plus release/formal/TLA targets; artifact `tart-19446638c1`), JetBrains `./gradlew test buildPlugin` passed all 413 tests, and installation from the exact commit succeeded. The CLI/shared library and JetBrains package `0.2.332` were installed; 2/3 editor endpoints hot-reloaded and one running IDE requires restart. GitHub CI run `30691805683` is queued for `ce4f580ed`; the prior CI baseline is green.
+<!-- agent:boundary:68dc82db -->
 <!-- /agent:exchange -->
 ## Queue
 

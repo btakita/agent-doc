@@ -1665,6 +1665,12 @@ pub(crate) struct ControllerRuntime {
     state_plane_graph: ControllerStatePlaneGraph,
     captured_finalize_wakes: Mutex<BTreeMap<String, rpc::CapturedFinalizeWakeProjection>>,
     pane_layout_graph: ControllerPaneLayoutGraph,
+    /// Editor facts, history-dependent intent, and tmux consequences share the
+    /// controller ProcessScope. Editors retain only transport/projection caches.
+    editor_surface_graph: rpc::ControllerEditorSurfaceGraph,
+    /// Retained old-path → new-path observations and their convergence
+    /// receipts. Requests carry effects; this projection owns rename truth.
+    document_path_transition_graph: rpc::ControllerDocumentPathTransitionGraph,
     /// Controller-owned reactive projection for accepted editor commands.
     ///
     /// The command worker writes accepted/terminal states into one SourceMap.
@@ -3484,6 +3490,10 @@ impl ControllerRuntime {
             actor_graph.live_bindings_handle(),
         );
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
+        let editor_surface_graph =
+            rpc::ControllerEditorSurfaceGraph::new(Arc::new(rpc::run_controller_editor_intent));
+        let document_path_transition_graph =
+            rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         for (document_hash, projection) in &memory.state_projection.documents {
             document_graphs.set_projection(document_hash, Some(projection.clone()));
         }
@@ -3497,6 +3507,8 @@ impl ControllerRuntime {
             state_plane_graph,
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
+            editor_surface_graph,
+            document_path_transition_graph,
             async_editor_commands,
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(()),
@@ -6724,7 +6736,7 @@ mod tests {
             .unwrap();
         let cold_replay = plane.subscribe("test/layout", 0, false, Duration::ZERO);
         assert_eq!(cold_replay.frames, vec![replacement.clone()]);
-        assert_eq!(
+        assert!(
             plane
                 .subscribe(
                     "test/layout",
@@ -6732,8 +6744,7 @@ mod tests {
                     false,
                     Duration::ZERO,
                 )
-                .timed_out,
-            true
+                .timed_out
         );
         let legacy_replacement_replay =
             plane.subscribe("test/layout", u64::MAX, true, Duration::ZERO);
@@ -10539,6 +10550,10 @@ agent:queue\n\
             actor_graph.live_bindings_handle(),
         );
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
+        let editor_surface_graph =
+            rpc::ControllerEditorSurfaceGraph::new(Arc::new(rpc::run_controller_editor_intent));
+        let document_path_transition_graph =
+            rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(ControllerMemoryState {
@@ -10558,6 +10573,8 @@ agent:queue\n\
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
+            editor_surface_graph,
+            document_path_transition_graph,
             async_editor_commands,
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),

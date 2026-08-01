@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
 use agent_doc_frontmatter::frontmatter::session_id_from_content;
@@ -439,34 +439,41 @@ pub fn ensure_initial_snapshot_with_content(
     Ok(true)
 }
 
-/// Detect a document rename from the durable session registry and rekey its
-/// typed state history.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DetectedDocumentPathTransition {
+    pub project_root: PathBuf,
+    pub session_id: String,
+    pub old_path: PathBuf,
+    pub new_path: PathBuf,
+}
+
+/// Detect a document rename from the durable session registry.
 ///
 /// A document rename changes the path-derived state hash. The session registry
-/// supplies the previous path identity; crash sidecars are never scanned,
-/// parsed, moved, or used as fallback state.
-pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
-    if load_document_baseline(doc)?.is_some() {
-        return Ok(false);
-    }
-
+/// supplies the previous path identity. This adapter is observation-only:
+/// callers send the returned transition through the Project Controller, which
+/// owns the durable state migration. Crash sidecars are never scanned, parsed,
+/// moved, or used as fallback state.
+pub fn detect_document_path_transition(
+    doc: &Path,
+) -> Result<Option<DetectedDocumentPathTransition>> {
     let session_uuid = match std::fs::read_to_string(doc)
         .ok()
         .and_then(|content| session_id_from_content(&content))
     {
         Some(uuid) => uuid,
-        None => return Ok(false),
+        None => return Ok(None),
     };
 
     let canonical = doc.canonicalize()?;
     let project_root = match agent_doc_project_root_io::project_root_containing(&canonical) {
         Some(root) => root,
-        None => return Ok(false),
+        None => return Ok(None),
     };
     let Some(previous_entry) =
         agent_doc_session_registry_io::lookup_entry_in(&project_root, &session_uuid)?
     else {
-        return Ok(false);
+        return Ok(None);
     };
     let previous_path = Path::new(&previous_entry.file);
     let previous_path = if previous_path.is_absolute() {
@@ -475,7 +482,7 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         project_root.join(previous_path)
     };
     if previous_path == canonical {
-        return Ok(false);
+        return Ok(None);
     }
 
     let new_hash = agent_doc_fs::document_state_hash(doc)?;
@@ -485,37 +492,15 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         agent_doc_fs::document_state_hash_from_str(&previous_path.to_string_lossy())
     };
     if old_hash == new_hash {
-        return Ok(false);
+        return Ok(None);
     }
 
-    eprintln!(
-        "[init] detected rename — rekeying typed state from {}.. to {}..",
-        &old_hash[..8.min(old_hash.len())],
-        &new_hash[..8.min(new_hash.len())]
-    );
-
-    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    let migration_report =
-        agent_doc_sqlite::state_store::rekey_document_state_in_db(&conn, &old_hash, &new_hash)?;
-    if migration_report.state_events_rekeyed == 0 {
-        return Ok(false);
-    }
-
-    let updated = agent_doc_session_registry_io::update_session_file_in(
-        &project_root,
-        &session_uuid,
-        doc,
-        &canonical,
-    )?;
-    if updated > 0 {
-        eprintln!("[init] updated {} session registry entry(ies)", updated);
-    }
-
-    eprintln!(
-        "[init] rename migration complete — {} typed event(s) rekeyed, {} stale peer acknowledgement(s) retired",
-        migration_report.state_events_rekeyed, migration_report.peer_acknowledgements_retired,
-    );
-    Ok(true)
+    Ok(Some(DetectedDocumentPathTransition {
+        project_root,
+        session_id: session_uuid,
+        old_path: previous_path,
+        new_path: canonical,
+    }))
 }
 
 /// Checkpoint the pre-write content used by undo/extract in the durable ledger.
@@ -792,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn renamed_document_rekeys_ledger_from_registry_without_reading_crash_sidecar() {
+    fn renamed_document_is_detected_from_registry_without_reading_crash_sidecar() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
@@ -821,12 +806,13 @@ mod tests {
         .unwrap();
         std::fs::rename(&old_doc, &new_doc).unwrap();
 
-        assert!(try_migrate_renamed(&new_doc).unwrap());
-
-        assert_eq!(
-            load_document_baseline(&new_doc).unwrap().as_deref(),
-            Some("ledger baseline")
-        );
+        let transition = detect_document_path_transition(&new_doc)
+            .unwrap()
+            .expect("registry path drift must produce a controller observation");
+        assert_eq!(transition.project_root, root);
+        assert_eq!(transition.session_id, session_id);
+        assert_eq!(transition.old_path, old_doc);
+        assert_eq!(transition.new_path, new_doc);
         assert!(
             old_crash_sidecar.exists(),
             "write-only crash-state sidecar must remain untouched"
@@ -841,7 +827,7 @@ mod tests {
         );
         let entry = agent_doc_session_registry_io::lookup_entry_in(root, session_id)
             .unwrap()
-            .expect("updated session registry entry");
-        assert_eq!(entry.file, new_doc.display().to_string());
+            .expect("observation does not mutate the registry");
+        assert_eq!(entry.file, old_doc.display().to_string());
     }
 }

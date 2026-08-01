@@ -370,7 +370,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `surface reporting enqueues without waiting for a controller receipt`() {
+    fun `surface reporting uses the existing controller socket off the EDT`() {
         val listenerPath =
             listOf(
                     Paths.get(
@@ -388,9 +388,10 @@ class EditorTabSyncListenerTest {
                 )
                 .substringBefore("private fun captureSurface(")
 
-        assertTrue(reportBody.contains("NativeAdminControls.editorSurfaceEnqueue("))
-        assertTrue(reportBody.contains("nativeDeliveryExecutor.execute"))
+        assertTrue(reportBody.contains("CpRouteClient.observeEditorSurface("))
+        assertTrue(reportBody.contains("surfaceDeliveryExecutor.execute"))
         assertFalse(reportBody.contains("requestObservation("))
+        assertFalse(reportBody.contains("NativeAdminControls.editorSurface"))
         assertFalse(reportBody.contains("editorSurfaceObserve("))
         assertFalse(reportBody.contains("syncHintFromReceipt("))
     }

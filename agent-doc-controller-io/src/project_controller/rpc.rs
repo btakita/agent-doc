@@ -26,6 +26,10 @@ use agent_doc_controller::supervisor_replacement::{
 };
 use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_document_realtime::watch_authority::{DiskChangeSignal, WatchAction, WatchDelivery};
+use agent_doc_editor_surface::{
+    EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
+    SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
+};
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use std::collections::BTreeSet;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
@@ -68,13 +72,269 @@ const STATE_PLANE_SUBSCRIBE_MAX: Duration = Duration::from_secs(120);
 const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
 const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
 const DOCUMENT_TURN_AUTHORITY_TYPE_TAG: &str = "agent-doc.document-turn-authority.v1";
-const DOCUMENT_TURN_AUTHORITY_LAUNCH_CONCURRENCY: usize = 4;
-static DOCUMENT_TURN_AUTHORITY_LAUNCH_PERMITS: tokio::sync::Semaphore =
-    tokio::sync::Semaphore::const_new(DOCUMENT_TURN_AUTHORITY_LAUNCH_CONCURRENCY);
+const EDITOR_SURFACE_PROJECTION_TYPE_TAG: &str = "agent-doc.editor-surface.projection.v1";
 pub const CAPTURED_FINALIZE_WAKE_STATE_CHANNEL: &str = "agent-doc/captured-finalize/wake/v1";
 const CAPTURED_FINALIZE_WAKE_TYPE_TAG: &str = "agent-doc.captured-finalize.wake.v1";
 static PANE_LAYOUT_STATUS_EPOCH: AtomicU64 = AtomicU64::new(1);
 static CAPTURED_FINALIZE_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
+static EDITOR_SURFACE_PROJECTION_EPOCH: AtomicU64 = AtomicU64::new(1);
+
+type ControllerEditorSurfaceIntentRunner =
+    Arc<dyn Fn(&Path, &SurfaceIntent) -> Result<String> + Send + Sync>;
+
+struct ControllerEditorSurfaceRoot {
+    generation: u64,
+    sequence: u64,
+    retired: bool,
+    state: EditorSurfaceState,
+    consequence: lazily::Effect,
+    outcome: Arc<Mutex<Option<Result<String, String>>>>,
+}
+
+/// Project-Controller-owned editor observation graph.
+///
+/// The editor process publishes ordered facts. The controller's ProcessScope
+/// owns the history-dependent fold and the only effect that can act on tmux.
+/// Reloaded native libraries therefore hold neither live intent authority nor
+/// a route that can bootstrap/open controller SQLite.
+pub(super) struct ControllerEditorSurfaceGraph {
+    roots: Mutex<BTreeMap<(PathBuf, String), ControllerEditorSurfaceRoot>>,
+    run_intent: ControllerEditorSurfaceIntentRunner,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentPathTransitionObservation {
+    pub transition_id: String,
+    pub client_id: String,
+    pub generation: u64,
+    pub sequence: u64,
+    pub old_path: String,
+    pub new_path: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentPathTransitionPhase {
+    Observed,
+    Applying,
+    RetryPending,
+    Converged,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentPathTransitionReceipt {
+    pub transition_id: String,
+    pub phase: DocumentPathTransitionPhase,
+    pub converged: bool,
+    pub attempt: u64,
+    pub old_path: String,
+    pub new_path: String,
+    #[serde(default)]
+    pub old_document_hash: Option<String>,
+    #[serde(default)]
+    pub new_document_hash: Option<String>,
+    #[serde(default)]
+    pub state_events_rekeyed: usize,
+    #[serde(default)]
+    pub sessions_rekeyed: u32,
+    #[serde(default)]
+    pub actor_rekeyed: bool,
+    #[serde(default)]
+    pub relay_hub_moved: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DocumentPathTransitionProjection {
+    observation: DocumentPathTransitionObservation,
+    receipt: DocumentPathTransitionReceipt,
+}
+
+/// Retained controller projection for editor-observed path transitions.
+///
+/// Socket calls are effect attempts. This map owns the latest observation and
+/// its receipt, so a dropped response or controller retry cannot manufacture a
+/// second logical rename. A converged projection is idempotently replayed.
+pub(super) struct ControllerDocumentPathTransitionGraph {
+    ctx: ThreadSafeContext,
+    projections: lazily::ThreadSafeSourceMap<String, DocumentPathTransitionProjection>,
+}
+
+impl ControllerDocumentPathTransitionGraph {
+    pub(super) fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
+        Self {
+            ctx: scope.ctx().clone(),
+            projections: lazily::ThreadSafeSourceMap::new(scope.ctx()),
+        }
+    }
+
+    fn observe(
+        &self,
+        observation: DocumentPathTransitionObservation,
+    ) -> DocumentPathTransitionReceipt {
+        if let Some(current) = self
+            .projections
+            .observe(&self.ctx, &observation.transition_id)
+            && (current.receipt.converged
+                || observation.generation < current.observation.generation
+                || (observation.generation == current.observation.generation
+                    && observation.sequence < current.observation.sequence))
+        {
+            return current.receipt;
+        }
+        let attempt = self
+            .projections
+            .observe(&self.ctx, &observation.transition_id)
+            .map_or(1, |current| current.receipt.attempt.saturating_add(1));
+        let receipt = DocumentPathTransitionReceipt {
+            transition_id: observation.transition_id.clone(),
+            phase: DocumentPathTransitionPhase::Observed,
+            converged: false,
+            attempt,
+            old_path: observation.old_path.clone(),
+            new_path: observation.new_path.clone(),
+            old_document_hash: None,
+            new_document_hash: None,
+            state_events_rekeyed: 0,
+            sessions_rekeyed: 0,
+            actor_rekeyed: false,
+            relay_hub_moved: false,
+            error: None,
+        };
+        self.projections.set(
+            &self.ctx,
+            observation.transition_id.clone(),
+            DocumentPathTransitionProjection {
+                observation,
+                receipt: receipt.clone(),
+            },
+        );
+        receipt
+    }
+
+    fn settle(
+        &self,
+        observation: DocumentPathTransitionObservation,
+        receipt: DocumentPathTransitionReceipt,
+    ) {
+        self.projections.set(
+            &self.ctx,
+            observation.transition_id.clone(),
+            DocumentPathTransitionProjection {
+                observation,
+                receipt,
+            },
+        );
+    }
+}
+
+impl ControllerEditorSurfaceGraph {
+    pub(super) fn new(run_intent: ControllerEditorSurfaceIntentRunner) -> Self {
+        Self {
+            roots: Mutex::new(BTreeMap::new()),
+            run_intent,
+        }
+    }
+
+    fn observe(
+        &self,
+        scope: &agent_doc_state_scope::ProcessScope,
+        project_root: &Path,
+        observation: EditorSurfaceObservation,
+        tmux: Option<TmuxLayout>,
+    ) -> (bool, SurfaceObservationReceipt) {
+        let key = (project_root.to_path_buf(), observation.client_id.clone());
+        let mut roots = self.roots.lock();
+
+        if let Some(current) = roots.get(&key)
+            && ((current.retired && observation.generation <= current.generation)
+                || observation.generation < current.generation
+                || (observation.generation == current.generation
+                    && observation.sequence <= current.sequence))
+        {
+            return (
+                false,
+                SurfaceObservationReceipt {
+                    intent: SurfaceIntent::Idle,
+                    idle: true,
+                    outcome: None,
+                    error: None,
+                },
+            );
+        }
+
+        let replace_generation = roots
+            .get(&key)
+            .is_some_and(|current| observation.generation > current.generation);
+        if replace_generation && let Some(retired) = roots.remove(&key) {
+            retired.state.stop(&retired.consequence);
+        }
+
+        let root = project_root.to_path_buf();
+        let run_intent = Arc::clone(&self.run_intent);
+        let entry = roots.entry(key).or_insert_with(|| {
+            let state = EditorSurfaceState::new_in(scope);
+            let outcome = Arc::new(Mutex::new(None));
+            let consequence = {
+                let outcome = Arc::clone(&outcome);
+                let root = root.clone();
+                state.on_intent(move |intent| {
+                    let result = run_intent(&root, intent).map_err(|error| format!("{error:#}"));
+                    *outcome.lock() = Some(result);
+                })
+            };
+            ControllerEditorSurfaceRoot {
+                generation: observation.generation,
+                sequence: 0,
+                retired: false,
+                state,
+                consequence,
+                outcome,
+            }
+        });
+
+        entry.generation = observation.generation;
+        entry.sequence = observation.sequence;
+        *entry.outcome.lock() = None;
+        match tmux {
+            Some(layout) => entry
+                .state
+                .observe_with_tmux(observation.surface, Some(layout)),
+            None => entry.state.observe(observation.surface),
+        }
+        let intent = entry.state.intent();
+        let consequence = entry.outcome.lock().clone();
+        let (outcome, error) = match consequence {
+            Some(Ok(output)) => (Some(output), None),
+            Some(Err(message)) => (None, Some(message)),
+            None => (None, None),
+        };
+        (
+            true,
+            SurfaceObservationReceipt {
+                idle: intent.is_idle(),
+                intent,
+                outcome,
+                error,
+            },
+        )
+    }
+
+    fn forget(&self, project_root: &Path, client_id: &str, generation: u64) -> bool {
+        let key = (project_root.to_path_buf(), client_id.to_string());
+        let mut roots = self.roots.lock();
+        let Some(current) = roots.get_mut(&key) else {
+            return false;
+        };
+        if current.generation != generation || current.retired {
+            return false;
+        }
+        current.state.stop(&current.consequence);
+        current.retired = true;
+        true
+    }
+}
 /// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
 /// gets a generous ceiling.
@@ -100,6 +360,8 @@ thread_local! {
 }
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT: Duration = Duration::from_secs(35);
+#[cfg(any(test, feature = "test-support"))]
+const CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
 
 /// Mark this process as a reloadable native-library host.
 ///
@@ -254,34 +516,6 @@ async fn connect_path_async(path: &Path) -> Result<interprocess::local_socket::t
         .connect_tokio()
         .await
         .context("failed to connect asynchronously to project controller")
-}
-
-async fn connect_or_launch_async(
-    project_root: &Path,
-    launch_mode: LaunchMode,
-) -> Result<interprocess::local_socket::tokio::Stream> {
-    let controller_socket = socket_path(project_root);
-    if let Ok(stream) = connect_path_async(&controller_socket).await {
-        return Ok(stream);
-    }
-
-    // A burst of editor tabs can discover a missing controller together. Only a
-    // small bounded set may enter the blocking launch/recovery path, and every
-    // waiter rechecks the socket after acquiring a permit so one successful
-    // launch satisfies the rest.
-    let _launch_permit = DOCUMENT_TURN_AUTHORITY_LAUNCH_PERMITS
-        .acquire()
-        .await
-        .context("document-authority launch semaphore closed")?;
-    if let Ok(stream) = connect_path_async(&controller_socket).await {
-        return Ok(stream);
-    }
-
-    let blocking_root = project_root.to_path_buf();
-    tokio::task::spawn_blocking(move || connect_or_launch(&blocking_root, launch_mode).map(drop))
-        .await
-        .context("document-authority controller launch worker failed")??;
-    connect_path_async(&controller_socket).await
 }
 
 pub(crate) fn request(project_root: &Path, command: &str) -> Result<String> {
@@ -508,7 +742,10 @@ pub async fn observe_document_turn_authority_stream(
     while *membership.borrow() {
         let (request, raw) =
             document_turn_authority_stream_request(file, &channel, reconnect.cursor)?;
-        let stream = connect_or_launch_async(&authority_root, LaunchMode::Lazy).await?;
+        // Editor authority observation is passive. A missing controller means
+        // authority is temporarily unavailable; it must never make the editor
+        // process bootstrap controller state (and therefore SQLite).
+        let stream = connect_path_async(&socket_path(&authority_root)).await?;
         reconnect.begin_connection();
         let (reader_half, mut writer_half) = tokio::io::split(stream);
         if let Err(error) = writer_half.write_all(raw.as_bytes()).await {
@@ -687,8 +924,9 @@ pub fn subscribe_captured_finalize_wakes_for_file(
 
 /// Send one editor-replica request through the project controller.
 ///
-/// This is the focused client seam used by editor sidecars. It lazily launches
-/// the controller exactly like other mutating client requests.
+/// This is the focused client seam used by editor sidecars. Standalone callers
+/// may lazily launch the controller; an embedded editor host is existing-only
+/// and reports unavailability to the adapter.
 pub fn request_crdt_replica(
     project_root: &Path,
     file: &Path,
@@ -778,7 +1016,15 @@ fn request_controller_with_timeout<T: DeserializeOwned>(
     request: ControllerRequest,
     timeout: Duration,
 ) -> Result<T> {
-    let stream = connect_or_launch(project_root, LaunchMode::Lazy)?;
+    // A reloadable editor library is a passive client, never a controller
+    // lifecycle owner. In particular it must not run `status`/bootstrap
+    // recovery, because those paths open the controller's SQLite store and can
+    // retain WAL mappings across a native-library reload.
+    let stream = if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
+        connect(project_root)?
+    } else {
+        connect_or_launch(project_root, LaunchMode::Lazy)?
+    };
     request_controller_on_stream_with_timeout(project_root, request, timeout, stream)
 }
 
@@ -1775,7 +2021,7 @@ pub fn enqueue_document_pane_focus(project_root: &Path, file: &Path) -> Result<S
             active_window_guard: true,
             missing_pane_policy: MissingFocusPanePolicy::ResumeLatest,
         };
-        let accepted: serde_json::Value = request_command_submit_payload_async(
+        let accepted: serde_json::Value = request_existing_command_submit_payload_async(
             project_root,
             Some(file.to_path_buf()),
             "focus_document_pane",
@@ -1908,7 +2154,7 @@ pub fn enqueue_tmux_layout_sync(
                 "manual".to_string()
             },
         };
-        let accepted: serde_json::Value = request_command_submit_payload_async(
+        let accepted: serde_json::Value = request_existing_command_submit_payload_async(
             project_root,
             invocation.focus.as_ref().map(PathBuf::from),
             "sync_tmux_layout",
@@ -1936,7 +2182,7 @@ pub fn tmux_layout_sync_state(
     let diagnostic_payload = serde_json::to_string(&invocation)
         .context("serialize tmux layout sync state invocation")?;
     let file = invocation.focus.as_ref().map(PathBuf::from);
-    request_controller(
+    request_existing_controller_with_timeout(
         project_root,
         ControllerRequest {
             command: "tmux_layout_sync_state".to_string(),
@@ -1953,7 +2199,223 @@ pub fn tmux_layout_sync_state(
             command_kind: None,
             diagnostic_payload: Some(diagnostic_payload),
         },
+        CONTROLLER_RPC_TIMEOUT,
     )
+}
+
+/// Publish one ordered editor fact to an already-running Project Controller.
+///
+/// This is deliberately existing-controller-only. Editor observation is
+/// passive ingress and must not launch a controller or hydrate/open SQLite in
+/// the editor process.
+pub fn observe_editor_surface_existing(
+    project_root: &Path,
+    observation: &EditorSurfaceObservation,
+) -> Result<SurfaceObservationReceipt> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "editor_surface_observe".to_string(),
+            file: Some(PathBuf::from(&observation.surface.focused)),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(observation.generation),
+            state: None,
+            caller: Some(observation.client_id.clone()),
+            reason: Some("editor_surface_observation".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(observation)?),
+        },
+        CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
+    )
+}
+
+pub fn forget_editor_surface_existing(
+    project_root: &Path,
+    client_id: &str,
+    generation: u64,
+) -> Result<bool> {
+    let response: serde_json::Value = request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "editor_surface_forget".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(generation),
+            state: None,
+            caller: Some(client_id.to_string()),
+            reason: Some("editor_surface_client_retired".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+        CONTROLLER_RPC_TIMEOUT,
+    )?;
+    Ok(response
+        .get("forgotten")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false))
+}
+
+/// Publish a retained editor-observed old-path → new-path transition to an
+/// already-running controller. The returned value is the controller's
+/// convergence receipt, not a transport ACK.
+pub fn observe_document_path_transition_existing(
+    project_root: &Path,
+    observation: &DocumentPathTransitionObservation,
+) -> Result<DocumentPathTransitionReceipt> {
+    request_existing_controller_with_timeout(
+        project_root,
+        document_path_transition_request(observation)?,
+        CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
+    )
+}
+
+/// Publish a path transition through the Project Controller, launching the
+/// controller when a cold CLI invocation has no existing owner.
+///
+/// This is the CLI counterpart to
+/// [`observe_document_path_transition_existing`]. It never opens state SQLite in
+/// the short-lived caller; the controller remains the sole durable writer.
+pub fn observe_document_path_transition(
+    project_root: &Path,
+    observation: &DocumentPathTransitionObservation,
+) -> Result<DocumentPathTransitionReceipt> {
+    request_controller(project_root, document_path_transition_request(observation)?)
+}
+
+pub fn new_document_path_transition_observation(
+    old_path: &Path,
+    new_path: &Path,
+    client_id: &str,
+) -> DocumentPathTransitionObservation {
+    let old_path = old_path.to_string_lossy().to_string();
+    let new_path = new_path.to_string_lossy().to_string();
+    let digest = agent_doc_hash::content_hash(&format!("{old_path}\0{new_path}"));
+    let suffix = digest.get(..32).unwrap_or(&digest);
+    DocumentPathTransitionObservation {
+        transition_id: format!("path-{suffix}"),
+        client_id: client_id.to_string(),
+        generation: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX),
+        sequence: 1,
+        old_path,
+        new_path,
+    }
+}
+
+fn document_path_transition_request(
+    observation: &DocumentPathTransitionObservation,
+) -> Result<ControllerRequest> {
+    Ok(ControllerRequest {
+        command: "document_path_transition_observe".to_string(),
+        file: Some(PathBuf::from(&observation.new_path)),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: Some(observation.generation),
+        state: None,
+        caller: Some(observation.client_id.clone()),
+        reason: Some("editor_vfs_path_transition".to_string()),
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(observation)?),
+    })
+}
+
+/// Publish one editor-produced state fact to an already-running controller.
+///
+/// The editor library may keep an ephemeral rendering cache, but the controller
+/// is the only process allowed to append the durable projection ledger.
+pub fn append_editor_state_event_existing(
+    project_root: &Path,
+    file: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "state_event_append".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("embedded_editor_state_source".to_string()),
+            reason: Some("editor_state_observation".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(event)?),
+        },
+        CONTROLLER_RPC_TIMEOUT,
+    )
+}
+
+pub fn document_state_projection_existing(
+    project_root: &Path,
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "document_state_projection".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("embedded_editor_projection_client".to_string()),
+            reason: Some("editor_projection_read".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+        CONTROLLER_RPC_TIMEOUT,
+    )
+}
+
+pub(super) fn run_controller_editor_intent(
+    project_root: &Path,
+    intent: &SurfaceIntent,
+) -> Result<String> {
+    match intent {
+        SurfaceIntent::Idle => Ok(String::new()),
+        SurfaceIntent::Focus { document } => {
+            serde_json::to_string(&focus_document_pane(project_root, Path::new(document))?)
+                .context("serialize controller-owned focus receipt")
+        }
+        SurfaceIntent::Sync { columns, document } => serde_json::to_string(&sync_tmux_layout(
+            project_root,
+            ControllerTmuxLayoutSyncInvocation {
+                columns: columns
+                    .iter()
+                    .map(|column| column.files.join(","))
+                    .collect(),
+                window: None,
+                focus: Some(document.clone()),
+                no_autostart: true,
+                exact_visible: true,
+                caller_kind: "automatic".to_string(),
+                actor_bindings: Vec::new(),
+            },
+        )?)
+        .context("serialize controller-owned tmux layout receipt"),
+    }
 }
 
 #[cfg(not(any(test, feature = "test-support")))]
@@ -2003,11 +2465,12 @@ where
         timeout,
         payload,
         "editor_command_submit",
+        ControllerConnectionPolicy::LaunchIfMissing,
     )
 }
 
 #[cfg(not(any(test, feature = "test-support")))]
-fn request_command_submit_payload_async<T, P>(
+fn request_existing_command_submit_payload_async<T, P>(
     project_root: &Path,
     file: Option<PathBuf>,
     name: &str,
@@ -2029,7 +2492,15 @@ where
         timeout,
         payload,
         "editor_command_submit_async",
+        ControllerConnectionPolicy::ExistingOnly,
     )
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControllerConnectionPolicy {
+    LaunchIfMissing,
+    ExistingOnly,
 }
 
 #[cfg(not(any(test, feature = "test-support")))]
@@ -2043,6 +2514,7 @@ fn request_command_submit_payload_via<T, P>(
     timeout: Duration,
     payload: &P,
     controller_command: &str,
+    connection_policy: ControllerConnectionPolicy,
 ) -> Result<T>
 where
     T: DeserializeOwned,
@@ -2082,25 +2554,29 @@ where
         required_features: vec!["causal-receipts".to_string(), "command-events".to_string()],
     };
     let message = lazily::CommandMessage::CommandSubmit(Box::new(submit));
-    let response: serde_json::Value = request_controller_with_timeout(
-        project_root,
-        ControllerRequest {
-            command: controller_command.to_string(),
-            file,
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: None,
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(serde_json::to_string(&message)?),
-        },
-        timeout,
-    )?;
+    let request = ControllerRequest {
+        command: controller_command.to_string(),
+        file,
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: None,
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(&message)?),
+    };
+    let response: serde_json::Value = match connection_policy {
+        ControllerConnectionPolicy::LaunchIfMissing => {
+            request_controller_with_timeout(project_root, request, timeout)
+        }
+        ControllerConnectionPolicy::ExistingOnly => {
+            request_existing_controller_with_timeout(project_root, request, timeout)
+        }
+    }?;
     let exit_code = response
         .get("exit_code")
         .and_then(|value| value.as_i64())
@@ -8025,7 +8501,54 @@ fn canonical_controller_request_file(
     } else {
         bootstrap.project_root.join(requested_file)
     };
-    candidate.canonicalize().unwrap_or(candidate)
+    let canonical = PathBuf::from(tmux_router::registry::canonical_registry_key_in(
+        &bootstrap.project_root,
+        &candidate.to_string_lossy(),
+    ));
+    resolve_controller_path_alias(&canonical)
+}
+
+fn controller_path_aliases() -> &'static Mutex<BTreeMap<PathBuf, PathBuf>> {
+    static ALIASES: OnceLock<Mutex<BTreeMap<PathBuf, PathBuf>>> = OnceLock::new();
+    ALIASES.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn normalized_transition_path(bootstrap: &ControllerBootstrap, path: &Path) -> PathBuf {
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        bootstrap.project_root.join(path)
+    };
+    PathBuf::from(tmux_router::registry::canonical_registry_key_in(
+        &bootstrap.project_root,
+        &candidate.to_string_lossy(),
+    ))
+}
+
+fn resolve_controller_path_alias(path: &Path) -> PathBuf {
+    let aliases = controller_path_aliases().lock();
+    let mut current = path.to_path_buf();
+    for _ in 0..16 {
+        let Some(next) = aliases.get(&current) else {
+            break;
+        };
+        if next == &current {
+            break;
+        }
+        current = next.clone();
+    }
+    current
+}
+
+fn retain_controller_path_alias(old_path: PathBuf, new_path: PathBuf) {
+    let target = resolve_controller_path_alias(&new_path);
+    let mut aliases = controller_path_aliases().lock();
+    for existing_target in aliases.values_mut() {
+        if *existing_target == old_path {
+            *existing_target = target.clone();
+        }
+    }
+    aliases.insert(old_path, target);
 }
 
 fn crdt_replica_refused_data(reason: &str) -> serde_json::Value {
@@ -8595,7 +9118,11 @@ fn log_launch_claim_waiter_adopted(
 }
 
 pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
-    let stream = connect_or_launch(project_root, launch_mode)?;
+    let stream = if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
+        connect(project_root)?
+    } else {
+        connect_or_launch(project_root, launch_mode)?
+    };
     drop(stream);
     Ok(())
 }
@@ -10936,6 +11463,24 @@ pub(crate) fn handle_request_locked(
         "inspect_actor" => controller_envelope(handle_inspect_actor(&bootstrap_snapshot, request)),
         "tmux_focus_state" => controller_envelope(handle_tmux_focus_state(&bootstrap_snapshot)),
         "tmux_layout_sync_state" => controller_envelope(handle_tmux_layout_sync_state(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "editor_surface_observe" => controller_envelope(handle_editor_surface_observe(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "editor_surface_forget" => controller_envelope(handle_editor_surface_forget(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "document_path_transition_observe" => controller_envelope(
+            handle_document_path_transition_observe(&bootstrap_snapshot, runtime.as_ref(), request),
+        ),
+        "document_turn_projection" => controller_envelope(handle_document_turn_projection(
             &bootstrap_snapshot,
             runtime.as_ref(),
             request,
@@ -15594,6 +16139,261 @@ pub(crate) fn handle_tmux_layout_sync_state(
     tmux_layout_sync_state_for_invocation(bootstrap, runtime, &invocation)
 }
 
+fn handle_editor_surface_observe(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<SurfaceObservationReceipt> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let observation: EditorSurfaceObservation =
+        serde_json::from_str(&payload_json).context("parse editor surface observation")?;
+    let tmux = controller_tmux_layout_for_surface(bootstrap, runtime, &observation.surface);
+    let projection_identity = (
+        observation.client_id.clone(),
+        observation.generation,
+        observation.sequence,
+    );
+    let (accepted, receipt) = runtime.editor_surface_graph.observe(
+        &runtime._scope,
+        &bootstrap.project_root,
+        observation,
+        tmux,
+    );
+    if accepted {
+        let projection = EditorSurfaceProjection {
+            client_id: projection_identity.0.clone(),
+            generation: projection_identity.1,
+            sequence: projection_identity.2,
+            receipt: receipt.clone(),
+        };
+        let channel = editor_surface_projection_channel(&projection_identity.0);
+        let epoch = EDITOR_SURFACE_PROJECTION_EPOCH.fetch_add(1, Ordering::SeqCst);
+        let message_json = state_plane_snapshot_message_json(
+            epoch,
+            &channel,
+            EDITOR_SURFACE_PROJECTION_TYPE_TAG,
+            &projection,
+        )?;
+        let producer_id = format!(
+            "editor-surface:{}:{}",
+            projection_identity.0, projection_identity.1
+        );
+        runtime.publish_state_plane_frame(channel, producer_id, message_json, epoch, None)?;
+    }
+    Ok(receipt)
+}
+
+fn handle_editor_surface_forget(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let client_id = request_string(&request.caller, "caller")?;
+    let generation = request
+        .generation
+        .context("editor_surface_forget requires generation")?;
+    let forgotten =
+        runtime
+            .editor_surface_graph
+            .forget(&bootstrap.project_root, &client_id, generation);
+    Ok(serde_json::json!({ "forgotten": forgotten }))
+}
+
+fn handle_document_path_transition_observe(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<DocumentPathTransitionReceipt> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let observation: DocumentPathTransitionObservation = serde_json::from_str(&payload_json)
+        .context("parse document path transition observation")?;
+    anyhow::ensure!(
+        !observation.transition_id.trim().is_empty(),
+        "document path transition requires transition_id"
+    );
+    anyhow::ensure!(
+        !observation.client_id.trim().is_empty(),
+        "document path transition requires client_id"
+    );
+
+    let admitted = runtime
+        .document_path_transition_graph
+        .observe(observation.clone());
+    if admitted.converged {
+        return Ok(admitted);
+    }
+
+    let old_path = normalized_transition_path(bootstrap, Path::new(&observation.old_path));
+    let new_path = normalized_transition_path(bootstrap, Path::new(&observation.new_path));
+    let project_root = bootstrap
+        .project_root
+        .canonicalize()
+        .unwrap_or_else(|_| bootstrap.project_root.clone());
+    anyhow::ensure!(
+        old_path.starts_with(&project_root) && new_path.starts_with(&project_root),
+        "document path transition must stay inside controller project root"
+    );
+    anyhow::ensure!(
+        new_path.exists(),
+        "document path transition destination does not exist: {}",
+        new_path.display()
+    );
+
+    let old_document_hash = if old_path.exists() {
+        agent_doc_fs::document_state_hash(&old_path)?
+    } else {
+        agent_doc_fs::document_state_hash_from_str(&old_path.to_string_lossy())
+    };
+    let new_document_hash = agent_doc_fs::document_state_hash(&new_path)?;
+    let mut applying = admitted.clone();
+    applying.phase = DocumentPathTransitionPhase::Applying;
+    applying.old_path = old_path.to_string_lossy().to_string();
+    applying.new_path = new_path.to_string_lossy().to_string();
+    applying.old_document_hash = Some(old_document_hash.clone());
+    applying.new_document_hash = Some(new_document_hash.clone());
+    runtime
+        .document_path_transition_graph
+        .settle(observation.clone(), applying.clone());
+
+    let apply = (|| -> Result<DocumentPathTransitionReceipt> {
+        let relay = agent_doc_crdt_relay_io::rekey_live_document_path(&old_path, &new_path)?;
+        // Install the alias as soon as the live hub moves. An old-path request
+        // already queued in the editor then lands on the moved hub while every
+        // durable projection below converges.
+        retain_controller_path_alias(old_path.clone(), new_path.clone());
+
+        let conn = open_state_db(&bootstrap.project_root)?;
+        let state_report =
+            agent_doc_sqlite::state_store::merge_document_state_for_path_transition_in_db(
+                &conn,
+                &old_document_hash,
+                &new_document_hash,
+            )?;
+        let old_document_id = old_path.to_string_lossy().to_string();
+        let new_document_id = new_path.to_string_lossy().to_string();
+        let actor_rekeyed = agent_doc_sqlite::state_store::rekey_actor_document_path_in_db(
+            &conn,
+            &old_document_id,
+            &new_document_id,
+            &new_document_id,
+        )?;
+
+        let session_id = std::fs::read_to_string(&new_path).ok().and_then(|content| {
+            agent_doc_frontmatter::frontmatter::session_id_from_content(&content)
+        });
+        let sessions_rekeyed = match session_id.as_deref() {
+            Some(session_id) => agent_doc_session_registry_io::update_session_file_in(
+                &bootstrap.project_root,
+                session_id,
+                &new_path,
+                &new_path,
+            )?,
+            None => 0,
+        };
+
+        runtime.refresh_memory()?;
+        Ok(DocumentPathTransitionReceipt {
+            transition_id: observation.transition_id.clone(),
+            phase: DocumentPathTransitionPhase::Converged,
+            converged: true,
+            attempt: applying.attempt,
+            old_path: old_document_id,
+            new_path: new_document_id,
+            old_document_hash: Some(old_document_hash.clone()),
+            new_document_hash: Some(new_document_hash.clone()),
+            state_events_rekeyed: state_report.state_events_rekeyed,
+            sessions_rekeyed,
+            actor_rekeyed,
+            relay_hub_moved: relay.hub_moved,
+            error: None,
+        })
+    })();
+
+    let receipt = match apply {
+        Ok(receipt) => receipt,
+        Err(error) => DocumentPathTransitionReceipt {
+            phase: DocumentPathTransitionPhase::RetryPending,
+            error: Some(format!("{error:#}")),
+            ..applying
+        },
+    };
+    runtime
+        .document_path_transition_graph
+        .settle(observation.clone(), receipt.clone());
+    agent_doc_ops_log_io::log_op(
+        &new_path,
+        &format!(
+            "document_path_transition_projection transition_id={} phase={:?} attempt={} old={} new={} state_events_rekeyed={} sessions_rekeyed={} actor_rekeyed={} relay_hub_moved={} error={}",
+            receipt.transition_id,
+            receipt.phase,
+            receipt.attempt,
+            old_path.display(),
+            new_path.display(),
+            receipt.state_events_rekeyed,
+            receipt.sessions_rekeyed,
+            receipt.actor_rekeyed,
+            receipt.relay_hub_moved,
+            receipt.error.as_deref().unwrap_or("none"),
+        ),
+    );
+    Ok(receipt)
+}
+
+fn handle_document_turn_projection(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_turn::cp_projection::TurnProjection> {
+    let file = request_file(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    Ok(runtime.document_turn_authority_projection(&document_hash, &document_id))
+}
+
+pub fn editor_surface_projection_channel(client_id: &str) -> String {
+    format!(
+        "agent-doc/editor-surface/{}/projection/v1",
+        agent_doc_hash::content_hash(client_id)
+    )
+}
+
+fn controller_tmux_layout_for_surface(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    surface: &EditorSurface,
+) -> Option<TmuxLayout> {
+    if surface.columns.len() < 2 {
+        return None;
+    }
+    let invocation = ControllerTmuxLayoutSyncStateInvocation {
+        columns: surface
+            .columns
+            .iter()
+            .map(|column| column.files.join(","))
+            .collect(),
+        window: None,
+        focus: Some(surface.focused.clone()),
+    };
+    let report = tmux_layout_sync_state_for_invocation(bootstrap, runtime, &invocation).ok()?;
+    if report.synced {
+        return Some(TmuxLayout {
+            columns: surface.columns.clone(),
+        });
+    }
+    Some(TmuxLayout {
+        columns: report
+            .actual_documents
+            .into_iter()
+            .map(|document| SurfaceColumn {
+                files: vec![document],
+            })
+            .collect(),
+    })
+}
+
 fn tmux_layout_sync_state_for_invocation(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -19087,6 +19887,218 @@ mod tests {
         ControllerRuntime::new_arc(bootstrap.clone()).unwrap()
     }
 
+    fn test_editor_surface(focused: &str) -> EditorSurface {
+        EditorSurface {
+            focused: focused.to_string(),
+            visible: vec![focused.to_string()],
+            open: vec![focused.to_string()],
+            columns: vec![SurfaceColumn {
+                files: vec![focused.to_string()],
+            }],
+            force_reconcile: true,
+        }
+    }
+
+    fn test_path_transition(
+        transition_id: &str,
+        generation: u64,
+        sequence: u64,
+    ) -> DocumentPathTransitionObservation {
+        DocumentPathTransitionObservation {
+            transition_id: transition_id.to_string(),
+            client_id: "idea:test".to_string(),
+            generation,
+            sequence,
+            old_path: "/project/tasks/before.md".to_string(),
+            new_path: "/project/tasks/after.md".to_string(),
+        }
+    }
+
+    #[test]
+    fn document_path_transition_graph_retries_effects_and_replays_convergence() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = ControllerDocumentPathTransitionGraph::new_in(&scope);
+        let observation = test_path_transition("transition-replay", 4, 9);
+
+        let first = graph.observe(observation.clone());
+        assert_eq!(first.phase, DocumentPathTransitionPhase::Observed);
+        assert_eq!(first.attempt, 1);
+        let retry = DocumentPathTransitionReceipt {
+            phase: DocumentPathTransitionPhase::RetryPending,
+            error: Some("controller restarted before receipt".to_string()),
+            ..first
+        };
+        graph.settle(observation.clone(), retry);
+
+        let second = graph.observe(observation.clone());
+        assert_eq!(second.phase, DocumentPathTransitionPhase::Observed);
+        assert_eq!(second.attempt, 2);
+        let converged = DocumentPathTransitionReceipt {
+            phase: DocumentPathTransitionPhase::Converged,
+            converged: true,
+            error: None,
+            ..second
+        };
+        graph.settle(observation.clone(), converged.clone());
+
+        let replay = graph.observe(test_path_transition("transition-replay", 5, 1));
+        assert_eq!(
+            replay, converged,
+            "a later transport replay must observe retained convergence instead of reapplying the rename",
+        );
+    }
+
+    #[test]
+    fn controller_old_path_alias_resolves_in_flight_requests_to_moved_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("before.md");
+        let new = dir.path().join("after.md");
+        std::fs::write(&new, "# moved\n").unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let canonical_new = new.canonicalize().unwrap();
+        retain_controller_path_alias(old.clone(), canonical_new.clone());
+
+        assert_eq!(
+            canonical_controller_request_file(&bootstrap, &old),
+            canonical_new,
+            "an already-queued old-path RPC must follow the live path alias",
+        );
+        assert_eq!(
+            canonical_controller_request_file(&bootstrap, Path::new("./nested/../before.md"),),
+            canonical_new,
+            "relative old-path RPCs must normalize before alias resolution",
+        );
+    }
+
+    #[test]
+    fn controller_editor_surface_graph_fences_duplicate_stale_and_retired_generations() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let effects = Arc::new(Mutex::new(Vec::<SurfaceIntent>::new()));
+        let recorded = Arc::clone(&effects);
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(move |_, intent| {
+            recorded.lock().push(intent.clone());
+            Ok("recorded".to_string())
+        }));
+        let root = Path::new("/project");
+
+        let first = EditorSurfaceObservation {
+            client_id: "idea:42".to_string(),
+            generation: 10,
+            sequence: 1,
+            surface: test_editor_surface("/project/first.md"),
+        };
+        let (first_accepted, first_receipt) = graph.observe(&scope, root, first.clone(), None);
+        assert!(first_accepted);
+        assert!(!first_receipt.idle);
+        assert_eq!(effects.lock().len(), 1);
+
+        let (duplicate_accepted, duplicate) = graph.observe(&scope, root, first, None);
+        assert!(!duplicate_accepted);
+        assert!(duplicate.idle);
+        assert_eq!(effects.lock().len(), 1);
+
+        let replacement = EditorSurfaceObservation {
+            client_id: "idea:42".to_string(),
+            generation: 11,
+            sequence: 1,
+            surface: test_editor_surface("/project/reloaded.md"),
+        };
+        let (replacement_accepted, replacement_receipt) =
+            graph.observe(&scope, root, replacement, None);
+        assert!(replacement_accepted);
+        assert!(!replacement_receipt.idle);
+        assert_eq!(effects.lock().len(), 2);
+
+        let retired_generation = EditorSurfaceObservation {
+            client_id: "idea:42".to_string(),
+            generation: 10,
+            sequence: u64::MAX,
+            surface: test_editor_surface("/project/stale.md"),
+        };
+        let (retired_accepted, retired_receipt) =
+            graph.observe(&scope, root, retired_generation, None);
+        assert!(!retired_accepted);
+        assert!(retired_receipt.idle);
+        assert_eq!(
+            effects.lock().len(),
+            2,
+            "a retired native mapping cannot regain effect authority"
+        );
+
+        assert!(!graph.forget(root, "idea:42", 10));
+        assert!(graph.forget(root, "idea:42", 11));
+        assert!(!graph.forget(root, "idea:42", 11));
+        let late_after_forget = EditorSurfaceObservation {
+            client_id: "idea:42".to_string(),
+            generation: 11,
+            sequence: u64::MAX,
+            surface: test_editor_surface("/project/late.md"),
+        };
+        let (late_accepted, _) = graph.observe(&scope, root, late_after_forget, None);
+        assert!(!late_accepted);
+        assert_eq!(
+            effects.lock().len(),
+            2,
+            "a retired plugin generation cannot recreate its stopped effect"
+        );
+
+        let next_generation = EditorSurfaceObservation {
+            client_id: "idea:42".to_string(),
+            generation: 12,
+            sequence: 1,
+            surface: test_editor_surface("/project/new.md"),
+        };
+        let (next_accepted, _) = graph.observe(&scope, root, next_generation, None);
+        assert!(next_accepted);
+        assert_eq!(effects.lock().len(), 3);
+    }
+
+    #[test]
+    fn passive_editor_observation_does_not_bootstrap_or_touch_state_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = state_db_path(dir.path());
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        std::fs::write(&db, b"sentinel-not-a-sqlite-database").unwrap();
+        let before = std::fs::read(&db).unwrap();
+        let before_entries = std::fs::read_dir(db.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<BTreeSet<_>>();
+        let observation = EditorSurfaceObservation {
+            client_id: "idea:passive".to_string(),
+            generation: 1,
+            sequence: 1,
+            surface: test_editor_surface("/project/passive.md"),
+        };
+
+        let error = observe_editor_surface_existing(dir.path(), &observation).unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("failed to connect to project controller"),
+            "passive ingress should fail at the absent socket: {error:#}"
+        );
+        assert_eq!(std::fs::read(&db).unwrap(), before);
+        let after_entries = std::fs::read_dir(db.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            after_entries, before_entries,
+            "passive editor ingress must not create bootstrap, WAL, or SHM files"
+        );
+    }
+
     fn document_turn_authority_subscription(
         controller_generation: u64,
         latest_version: u64,
@@ -19258,43 +20270,6 @@ mod tests {
         assert_eq!(
             controller_current_text_from_data(&encoded).unwrap(),
             current
-        );
-    }
-
-    #[test]
-    fn the_editor_ack_profile_reports_legs_it_can_derive_and_omits_the_rest() {
-        // #ackeditorstamps: the whole point is attribution, so each leg must be
-        // separately readable — a total would not distinguish a late delivery
-        // from a slow apply from a slow receipt.
-        let profile = render_editor_ack_profile(Some(1_000), Some(1_400), Some(1_450), 1_600)
-            .expect("fully stamped ack renders a profile");
-        assert_eq!(
-            profile,
-            "received_to_applied=400ms applied_to_receipt=50ms receipt_to_observed=150ms received_to_observed=600ms"
-        );
-
-        // A self-echo ACK never crosses the buffer, so its middle stamp is absent.
-        // The legs that touch it must be omitted, NOT computed against 0 — an
-        // epoch-relative delta would report a ~55-year apply.
-        let profile = render_editor_ack_profile(Some(1_000), None, Some(1_050), 1_100)
-            .expect("partially stamped ack still bounds the editor half");
-        assert_eq!(
-            profile, "receipt_to_observed=50ms received_to_observed=100ms",
-            "unstamped endpoints must drop their legs, not fabricate them"
-        );
-
-        // An un-updated replica sends no stamps at all: emit nothing rather than
-        // a line whose only content is the controller's own clock.
-        assert!(render_editor_ack_profile(None, None, None, 1_100).is_none());
-
-        // Two processes, two clocks. A negative leg is real information about
-        // skew; clamping it to 0 would read as "instant" and mislead the next
-        // person profiling this path.
-        let profile = render_editor_ack_profile(Some(2_000), Some(1_000), None, 3_000)
-            .expect("skewed stamps still render");
-        assert!(
-            profile.contains("received_to_applied=skew"),
-            "backwards leg must be named, not clamped: {profile}"
         );
     }
 

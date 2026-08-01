@@ -71,8 +71,8 @@ pub struct EditorSurface {
     pub visible: Vec<String>,
     /// Every open markdown document owned by this editor process, ordered by
     /// editor proximity: focused first, then nearby tabs, then the remaining
-    /// open documents. This may be larger than `visible`; the native authority
-    /// plane keeps one independent controller projection warm for each entry.
+    /// open documents. This may be larger than `visible`; editor adapters may
+    /// use it to choose which controller projections to subscribe to.
     #[serde(default)]
     pub open: Vec<String>,
     /// The split layout. Empty means "layout not detected"; the signature then
@@ -85,25 +85,38 @@ pub struct EditorSurface {
     pub force_reconcile: bool,
 }
 
+/// Ordered editor fact sent to the Project Controller.
+///
+/// The transport is request/response framed, but this value is observation
+/// ingress: the editor reports facts and never chooses the resulting intent.
+/// `(client_id, generation, sequence)` lets the controller reject replay from
+/// a retired native generation after an editor/plugin reload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorSurfaceObservation {
+    pub client_id: String,
+    pub generation: u64,
+    pub sequence: u64,
+    pub surface: EditorSurface,
+}
+
 /// Availability of the controller-owned turn projection for one document.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DocumentAuthorityReadiness {
-    /// The editor reported the document and the native worker has not completed
-    /// its first controller projection yet.
+    /// The editor reported the document and has not received its first
+    /// controller projection yet.
     #[default]
     Pending,
     /// The controller-owned projection was read successfully.
     Ready,
-    /// The native worker could not resolve or read the controller projection.
+    /// The editor could not resolve or read the controller projection.
     Unavailable,
 }
 
-/// Native/controller input for one open document.
+/// Controller projection for one open document.
 ///
-/// This is a Source value. Editors do not manufacture it: their only input is
-/// [`EditorSurface`], while the native adapter observes controller state and
-/// publishes this value independently for every open document.
+/// This is a Source value. Editors do not manufacture it: they observe it from
+/// the controller independently for every open document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentAuthority {
     pub document: String,
@@ -128,8 +141,8 @@ impl DocumentAuthority {
     }
 }
 
-/// Pure join of the selected editor document and that document's native
-/// controller authority.
+/// Pure join of the selected editor document and that document's controller
+/// authority.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CurrentDocumentAuthority {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,6 +266,27 @@ pub enum SurfaceIntent {
         columns: Vec<SurfaceColumn>,
         document: String,
     },
+}
+
+/// Projection returned after the controller folds an editor observation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SurfaceObservationReceipt {
+    pub intent: SurfaceIntent,
+    /// `true` when the observation implied no tmux consequence.
+    pub idle: bool,
+    /// The consequence's reply, when one ran.
+    pub outcome: Option<String>,
+    /// A consequence failure does not invalidate the editor fact.
+    pub error: Option<String>,
+}
+
+/// Controller-published reactive projection for an accepted editor fact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorSurfaceProjection {
+    pub client_id: String,
+    pub generation: u64,
+    pub sequence: u64,
+    pub receipt: SurfaceObservationReceipt,
 }
 
 impl SurfaceIntent {

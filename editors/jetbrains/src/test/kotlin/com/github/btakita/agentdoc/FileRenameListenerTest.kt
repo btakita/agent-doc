@@ -1,66 +1,67 @@
 package com.github.btakita.agentdoc
 
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class FileRenameListenerTest {
-
     @Test
-    fun `shouldHandleFile returns true for md files`() {
+    fun `shouldHandleFile is scoped to markdown destinations`() {
         assertTrue(FileRenameListener.shouldHandleFile("plan.md"))
-        assertTrue(FileRenameListener.shouldHandleFile("tasks/agent-doc-bugs.md"))
-        assertTrue(FileRenameListener.shouldHandleFile("CHANGELOG.md"))
-    }
-
-    @Test
-    fun `shouldHandleFile returns false for non-md files`() {
+        assertTrue(FileRenameListener.shouldHandleFile("mary-ellen-zellerbach.md"))
         assertFalse(FileRenameListener.shouldHandleFile("main.rs"))
-        assertFalse(FileRenameListener.shouldHandleFile("package.json"))
-        assertFalse(FileRenameListener.shouldHandleFile("style.css"))
         assertFalse(FileRenameListener.shouldHandleFile("readme.markdown"))
-    }
-
-    @Test
-    fun `shouldHandleFile returns false for null`() {
         assertFalse(FileRenameListener.shouldHandleFile(null))
     }
 
     @Test
-    fun `buildSyncCommand constructs correct args with rename flag`() {
-        val cmd = FileRenameListener.buildSyncCommand(
-            "agent-doc",
-            listOf("plan.md", "tasks/bugs.md"),
-            "tasks/software/renamed.md"
+    fun `rename and move paths retain the exact old identity`() {
+        assertEquals(
+            "/work/tasks/mary-elle-zellerbach.md",
+            FileRenameListener.oldPathForRename(
+                "/work/tasks",
+                "mary-elle-zellerbach.md",
+            ),
         )
         assertEquals(
-            listOf("agent-doc", "sync", "--col", "plan.md,tasks/bugs.md", "--focus", "tasks/software/renamed.md", "--rename"),
-            cmd
+            "/work/old/doc.md",
+            FileRenameListener.oldPathForMove("/work/old", "doc.md"),
         )
     }
 
     @Test
-    fun `buildSyncCommand handles single visible file`() {
-        val cmd = FileRenameListener.buildSyncCommand(
-            "/usr/local/bin/agent-doc",
-            listOf("only-file.md"),
-            "only-file.md"
-        )
-        assertEquals(
-            listOf("/usr/local/bin/agent-doc", "sync", "--col", "only-file.md", "--focus", "only-file.md", "--rename"),
-            cmd
-        )
+    fun `transition identity is deterministic and path-pair scoped`() {
+        val first = FileRenameListener.pathTransitionId("/work/old.md", "/work/new.md")
+        val repeated = FileRenameListener.pathTransitionId("/work/old.md", "/work/new.md")
+        val different = FileRenameListener.pathTransitionId("/work/old.md", "/work/other.md")
+
+        assertEquals(first, repeated)
+        assertNotEquals(first, different)
     }
 
     @Test
-    fun `buildSyncCommand handles empty visible files`() {
-        val cmd = FileRenameListener.buildSyncCommand(
-            "agent-doc",
-            emptyList(),
-            "renamed.md"
-        )
-        assertEquals(
-            listOf("agent-doc", "sync", "--col", "", "--focus", "renamed.md", "--rename"),
-            cmd
-        )
+    fun `retry projection uses bounded exponential delay`() {
+        assertEquals(250L, documentPathTransitionRetryDelayMs(0))
+        assertEquals(500L, documentPathTransitionRetryDelayMs(1))
+        assertEquals(30_000L, documentPathTransitionRetryDelayMs(20))
+    }
+
+    @Test
+    fun `rename listener never invokes sync or a layout process`() {
+        val source =
+            File(
+                "src/main/kotlin/com/github/btakita/agentdoc/FileRenameListener.kt",
+            ).readText()
+
+        assertFalse(source.contains("ProcessBuilder"))
+        assertFalse(source.contains("\"sync\""))
+        assertFalse(source.contains("--rename"))
+        assertFalse(source.contains("sync_tmux_layout"))
+        assertTrue(source.contains("document_path_transition_observe").not())
+        assertTrue(source.contains("observeDocumentPathTransition"))
+        assertTrue(source.contains("ThreadSafeSourceMap"))
     }
 }

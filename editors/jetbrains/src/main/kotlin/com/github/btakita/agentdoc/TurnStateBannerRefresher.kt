@@ -253,7 +253,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         val next =
             TurnStateBridge.presentationFromDocumentAuthority(
                 filePath,
-                NativeAdminControls.documentAuthority(projectRoot, filePath),
+                CpRouteClient.documentTurnAuthority(projectRoot, filePath),
             )
         if (next == null) {
             scheduleDelayedRefresh(filePath, TURN_STATE_AUTHORITY_SETTLE_MS, "$reason-authority")

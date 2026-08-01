@@ -47,6 +47,11 @@ use std::time::Duration;
 /// lock: the merge can safely fall back to its diff path if this bounded write
 /// cannot be recorded.
 const EDITOR_OP_CAPTURE_BUSY_TIMEOUT: Duration = Duration::from_millis(250);
+/// A remote editor projection cannot be installed until its operator-op epoch
+/// is durably closed. Unlike optional typing evidence, this is a causal fence:
+/// a short controller queue spike must retain the projection, but it must not
+/// turn the ordinary replay path into a permanent retry storm.
+const EDITOR_PROJECTION_FENCE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Per-document memo of the last `current_base_hash` result, keyed by the
 /// durable-baseline content hash that produced it (`#qbasehashmemo`). No
@@ -460,6 +465,20 @@ pub fn last_editor_text_for_base(doc: &Path, base_text: &str) -> Result<Option<S
 /// Clear the active Lazily op-capture epoch. Idempotent at the public boundary:
 /// clearing an absent epoch succeeds while retaining a monotonic clear marker.
 pub fn clear_op_capture(doc: &Path) -> Result<()> {
+    clear_op_capture_with_timeout(doc, EDITOR_OP_CAPTURE_BUSY_TIMEOUT)
+}
+
+/// Close the active editor-op epoch before a controller-owned projection is
+/// handed to an editor host.
+///
+/// This is still bounded and fail-closed, but it has a larger budget than
+/// optional typing capture because the visible delivery cannot safely proceed
+/// without the fence.
+pub fn clear_op_capture_for_editor_projection(doc: &Path) -> Result<()> {
+    clear_op_capture_with_timeout(doc, EDITOR_PROJECTION_FENCE_TIMEOUT)
+}
+
+fn clear_op_capture_with_timeout(doc: &Path, timeout: Duration) -> Result<()> {
     let (project_root, document_hash, _) = state_db_identity(doc)?;
     let nonce = event_nonce();
     let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
@@ -476,7 +495,7 @@ pub fn clear_op_capture(doc: &Path) -> Result<()> {
         match agent_doc_state_wire::send_ndjson_request_to_actor(
             &controller_socket,
             &request,
-            EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
+            timeout,
         ) {
             Ok(raw) => {
                 #[derive(serde::Deserialize)]
@@ -500,10 +519,8 @@ pub fn clear_op_capture(doc: &Path) -> Result<()> {
         }
     }
 
-    let mut conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
-        &project_root,
-        EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
-    )?;
+    let mut conn =
+        agent_doc_sqlite::state_store::open_state_db_with_timeout(&project_root, timeout)?;
     let local_generation = agent_doc_state_wire::in_controller_request()
         .then(|| load_projected_captures(doc, &project_root, &document_hash))
         .transpose()?
@@ -890,6 +907,12 @@ mod tests {
             Some(retained),
             "later idempotent clears must not erase retained evidence"
         );
+    }
+
+    #[test]
+    fn visible_editor_projection_fence_outlives_optional_capture_budget() {
+        assert!(EDITOR_PROJECTION_FENCE_TIMEOUT > EDITOR_OP_CAPTURE_BUSY_TIMEOUT);
+        assert_eq!(EDITOR_PROJECTION_FENCE_TIMEOUT, Duration::from_secs(3));
     }
 
     #[test]

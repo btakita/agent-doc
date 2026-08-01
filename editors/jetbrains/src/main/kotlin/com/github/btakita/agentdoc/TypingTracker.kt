@@ -305,6 +305,25 @@ object TypingTracker : DocumentListener {
     fun hasUnsyncedOperatorEdits(filePath: String): Boolean =
         filePath in unsyncedLocalEditPaths
 
+    fun rekeyDocumentPath(oldPath: String, newPath: String, document: Document) {
+        if (oldPath == newPath) return
+        pendingContentReports.remove(oldPath)?.let { state ->
+            synchronized(state) {
+                state.future?.cancel(false)
+                state.future = null
+            }
+        }
+        pendingEditorOps.remove(oldPath)?.let { oldOps ->
+            pendingEditorOps.compute(newPath) { _, existing ->
+                (existing ?: mutableListOf()).also { it.addAll(0, oldOps) }
+            }
+        }
+        if (unsyncedLocalEditPaths.remove(oldPath)) {
+            unsyncedLocalEditPaths.add(newPath)
+        }
+        scheduleFullContentReport(newPath, document)
+    }
+
     private fun scheduleFullContentReport(
         filePath: String,
         document: Document,

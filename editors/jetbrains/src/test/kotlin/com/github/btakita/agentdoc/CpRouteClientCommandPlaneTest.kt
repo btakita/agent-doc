@@ -24,6 +24,68 @@ class CpRouteClientCommandPlaneTest {
     }
 
     @Test
+    fun `editor surface observation is an ordered fact for the existing controller`() {
+        val request =
+            CpRouteClient.editorSurfaceObserveRequest(
+                surfaceJson = """{"focused":"/proj/plan.md","visible":["/proj/plan.md"],"open":["/proj/plan.md"],"columns":[],"force_reconcile":false}""",
+                clientId = "jetbrains-pid:42",
+                generation = 100,
+                sequence = 7,
+            )
+
+        assertEquals("editor_surface_observe", request.get("command").asString)
+        assertEquals("/proj/plan.md", request.get("file").asString)
+        assertEquals(100L, request.get("generation").asLong)
+        assertEquals("jetbrains-pid:42", request.get("caller").asString)
+        val observation =
+            JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        assertEquals("jetbrains-pid:42", observation.get("client_id").asString)
+        assertEquals(100L, observation.get("generation").asLong)
+        assertEquals(7L, observation.get("sequence").asLong)
+        assertEquals(
+            "/proj/plan.md",
+            observation.getAsJsonObject("surface").get("focused").asString,
+        )
+    }
+
+    @Test
+    fun `document path transition is an ordered controller observation`() {
+        val request =
+            CpRouteClient.documentPathTransitionRequest(
+                transitionId = "path-transition-1",
+                oldPath = "/proj/tasks/mary-elle-zellerbach.md",
+                newPath = "/proj/tasks/mary-ellen-zellerbach.md",
+                clientId = "jetbrains-pid:42",
+                generation = 100,
+                sequence = 8,
+            )
+
+        assertEquals("document_path_transition_observe", request.get("command").asString)
+        assertEquals("/proj/tasks/mary-ellen-zellerbach.md", request.get("file").asString)
+        val observation =
+            JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        assertEquals("path-transition-1", observation.get("transition_id").asString)
+        assertEquals(
+            "/proj/tasks/mary-elle-zellerbach.md",
+            observation.get("old_path").asString,
+        )
+        assertEquals(
+            "/proj/tasks/mary-ellen-zellerbach.md",
+            observation.get("new_path").asString,
+        )
+        assertEquals(8L, observation.get("sequence").asLong)
+    }
+
+    @Test
+    fun `turn status reads the controller in-memory projection`() {
+        val request = CpRouteClient.documentTurnProjectionRequest("/proj/plan.md")
+
+        assertEquals("document_turn_projection", request.get("command").asString)
+        assertEquals("/proj/plan.md", request.get("file").asString)
+        assertEquals(EditorIdentity.id, request.get("caller").asString)
+    }
+
+    @Test
     fun `editorCommandSubmitRequest builds an agent-doc editor_route CommandSubmit`() {
         val request = CpRouteClient.editorCommandSubmitRequest(
             filePath = "/proj/plan.md",

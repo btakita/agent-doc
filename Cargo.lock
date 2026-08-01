@@ -514,6 +514,7 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-editor-surface",
  "agent-doc-flow",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
@@ -777,7 +778,6 @@ dependencies = [
  "lazily 0.53.0",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -2776,6 +2776,7 @@ dependencies = [
 name = "agent-doc-workflow-io"
 version = "0.35.109"
 dependencies = [
+ "agent-doc-controller-io",
  "agent-doc-cycle-state-io",
  "agent-doc-element-exchange",
  "agent-doc-frontmatter",

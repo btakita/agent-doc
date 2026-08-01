@@ -130,11 +130,28 @@ pub fn update_session_file_in(
     let mut registry = load_in(base_dir)?;
     let doc_path = file.to_string_lossy().to_string();
     let canonical_path = canonical_file.to_string_lossy().to_string();
+    let destination_key = canonical_registry_key_in(base_dir, &canonical_path);
     let mut updated = 0u32;
-    for entry in registry.values_mut() {
-        if entry.session_id == session_id && entry.file != doc_path && entry.file != canonical_path
-        {
-            entry.file = doc_path.clone();
+    let matching_keys = registry
+        .iter()
+        .filter_map(|(key, entry)| (entry.session_id == session_id).then_some(key.clone()))
+        .collect::<Vec<_>>();
+    for key in matching_keys {
+        let Some(mut entry) = registry.remove(&key) else {
+            continue;
+        };
+        let changed =
+            key != destination_key || (entry.file != doc_path && entry.file != canonical_path);
+        entry.file = doc_path.clone();
+        if let Some(existing) = registry.get(&destination_key) {
+            anyhow::ensure!(
+                existing.session_id == session_id,
+                "cannot move session {session_id} registry entry to {canonical_path}: destination belongs to session {}",
+                existing.session_id,
+            );
+        }
+        registry.insert(destination_key.clone(), entry);
+        if changed {
             updated += 1;
         }
     }
@@ -248,10 +265,11 @@ mod tests {
         std::fs::write(&old_file, "body").unwrap();
         std::fs::write(&new_file, "body").unwrap();
         let mut registry = Registry::new();
-        registry.insert(
-            old_file.display().to_string(),
-            entry("rename-session", "%80", &old_file.display().to_string()),
-        );
+        registry.insert(old_file.display().to_string(), {
+            let mut entry = entry("rename-session", "%80", &old_file.display().to_string());
+            entry.window = "@12".to_string();
+            entry
+        });
         save_in(dir.path(), &registry).unwrap();
 
         let updated =
@@ -259,11 +277,15 @@ mod tests {
 
         assert_eq!(updated, 1);
         let loaded = load_in(dir.path()).unwrap();
+        let destination_key =
+            canonical_registry_key_in(dir.path(), &new_file.display().to_string());
         let entry = loaded
-            .values()
-            .find(|entry| entry.session_id == "rename-session")
-            .unwrap();
+            .get(&destination_key)
+            .expect("destination registry key");
         assert_eq!(entry.file, new_file.display().to_string());
+        assert_eq!(entry.pane, "%80");
+        assert_eq!(entry.window, "@12");
+        assert_eq!(loaded.len(), 1);
     }
 
     #[test]

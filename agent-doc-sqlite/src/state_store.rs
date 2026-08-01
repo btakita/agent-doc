@@ -16,11 +16,13 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STATE_DB_FILE: &str = "state.db";
 const STATE_DB_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 const STATE_DB_SCHEMA_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+static STATE_DB_CONNECTIONS_FORBIDDEN: AtomicBool = AtomicBool::new(false);
 
 use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState, ActorStoreWrite};
 
@@ -317,6 +319,20 @@ pub fn state_db_path(project_root: &Path) -> PathBuf {
     project_root.join(".agent-doc").join(STATE_DB_FILE)
 }
 
+/// Permanently forbid SQLite connections in this process.
+///
+/// Reloadable editor-native libraries call this during ABI initialization.
+/// Their controller clients may publish facts and consume projections, but no
+/// code path— including a legacy fallback in a transitive dependency—may map
+/// the controller's WAL from the IDE process.
+pub fn forbid_state_db_connections_for_process() {
+    STATE_DB_CONNECTIONS_FORBIDDEN.store(true, Ordering::SeqCst);
+}
+
+pub fn state_db_connections_forbidden_for_process() -> bool {
+    STATE_DB_CONNECTIONS_FORBIDDEN.load(Ordering::SeqCst)
+}
+
 pub fn open_state_db(project_root: &Path) -> Result<Connection> {
     open_state_db_with_timeout(project_root, STATE_DB_BUSY_TIMEOUT)
 }
@@ -330,6 +346,10 @@ pub fn open_state_db_with_timeout(
     project_root: &Path,
     busy_timeout: Duration,
 ) -> Result<Connection> {
+    anyhow::ensure!(
+        !state_db_connections_forbidden_for_process(),
+        "SQLite state connections are forbidden in this process; use the Project Controller projection/command plane"
+    );
     let path = state_db_path(project_root);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -2493,6 +2513,170 @@ pub fn load_actor_store_from_db(conn: &Connection) -> Result<BTreeMap<String, Ac
     Ok(store)
 }
 
+/// Rekey controller-owned document/session projections after a proven path
+/// transition while preserving the existing pane and window binding.
+///
+/// The old actor wins ties so a rename cannot replace its live pane with a
+/// destination actor manufactured by a raced preflight. If the destination
+/// already advanced to a strictly newer generation, that newer actor wins.
+/// Records from a different session are never merged.
+pub fn rekey_actor_document_path_in_db(
+    conn: &Connection,
+    old_document_id: &str,
+    new_document_id: &str,
+    new_canonical_path: &str,
+) -> Result<bool> {
+    if old_document_id == new_document_id {
+        conn.execute(
+            "UPDATE documents SET canonical_path = ?1 WHERE document_id = ?2",
+            params![new_canonical_path, new_document_id],
+        )?;
+        return Ok(false);
+    }
+
+    let tx = conn
+        .unchecked_transaction()
+        .context("begin actor document path rekey")?;
+    let Some(old) = load_actor_record_from_db(&tx, old_document_id)? else {
+        return Ok(false);
+    };
+    let destination = load_actor_record_from_db(&tx, new_document_id)?;
+    if let Some(destination) = destination.as_ref() {
+        anyhow::ensure!(
+            destination.session_id == old.session_id,
+            "cannot rekey actor document path: destination belongs to session {} instead of {}",
+            destination.session_id,
+            old.session_id,
+        );
+    }
+    let old_wins = destination
+        .as_ref()
+        .is_none_or(|destination| old.generation >= destination.generation);
+
+    tx.execute(
+        "UPDATE actor_transitions SET document_id = ?1 WHERE document_id = ?2",
+        params![new_document_id, old_document_id],
+    )
+    .context("rekey actor transition history")?;
+
+    tx.execute(
+        "INSERT OR REPLACE INTO supervisor_leases (
+             document_id, generation, supervisor_pid, supervisor_socket,
+             last_heartbeat, runtime_state
+         )
+         SELECT ?1, generation, supervisor_pid, supervisor_socket,
+                last_heartbeat, runtime_state
+         FROM supervisor_leases
+         WHERE document_id = ?2",
+        params![new_document_id, old_document_id],
+    )
+    .context("rekey supervisor leases")?;
+    tx.execute(
+        "DELETE FROM supervisor_leases WHERE document_id = ?1",
+        [old_document_id],
+    )?;
+
+    if old_wins {
+        tx.execute(
+            "DELETE FROM documents WHERE document_id = ?1",
+            [new_document_id],
+        )?;
+        tx.execute(
+            "UPDATE documents
+             SET document_id = ?1, canonical_path = ?2
+             WHERE document_id = ?3",
+            params![new_document_id, new_canonical_path, old_document_id],
+        )
+        .context("rekey actor document")?;
+    } else {
+        tx.execute(
+            "DELETE FROM documents WHERE document_id = ?1",
+            [old_document_id],
+        )?;
+        tx.execute(
+            "UPDATE documents SET canonical_path = ?1 WHERE document_id = ?2",
+            params![new_canonical_path, new_document_id],
+        )
+        .context("refresh destination actor canonical path")?;
+    }
+
+    for table in [
+        "dispatch_attempts",
+        "projection_diagnostics",
+        "queue_backpressure",
+        "context_injections",
+        "admin_operations",
+        "crash_recovery_markers",
+    ] {
+        tx.execute(
+            &format!("UPDATE OR IGNORE {table} SET document_id = ?1 WHERE document_id = ?2"),
+            params![new_document_id, old_document_id],
+        )
+        .with_context(|| format!("rekey {table} document identity"))?;
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE document_id = ?1"),
+            [old_document_id],
+        )
+        .with_context(|| format!("retire old {table} document identity"))?;
+    }
+
+    tx.execute(
+        "INSERT OR IGNORE INTO queue_heads
+         SELECT ?1, queue_name, generation, head_id, prompt, state, priority,
+                selected_at, updated_at
+         FROM queue_heads WHERE document_id = ?2",
+        params![new_document_id, old_document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM queue_heads WHERE document_id = ?1",
+        [old_document_id],
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO queue_head_provenance
+         SELECT ?1, head_identity, source, recorded_at
+         FROM queue_head_provenance WHERE document_id = ?2",
+        params![new_document_id, old_document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM queue_head_provenance WHERE document_id = ?1",
+        [old_document_id],
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO document_cycles
+         SELECT ?1, cycle_id, state, queue_head_id, response_commit, updated_at
+         FROM document_cycles WHERE document_id = ?2",
+        params![new_document_id, old_document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM document_cycles WHERE document_id = ?1",
+        [old_document_id],
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO context_manifest
+         SELECT ?1, session_id, cycle_id, harness, prompt_fingerprint,
+                pack_ids_json, chunk_ids_json, token_count, created_at
+         FROM context_manifest WHERE document_id = ?2",
+        params![new_document_id, old_document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM context_manifest WHERE document_id = ?1",
+        [old_document_id],
+    )?;
+    tx.execute(
+        "UPDATE OR IGNORE pending_mutations
+         SET document_id = ?1
+         WHERE document_id = ?2",
+        params![new_document_id, old_document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM pending_mutations WHERE document_id = ?1",
+        [old_document_id],
+    )?;
+
+    tx.commit().context("commit actor document path rekey")?;
+    Ok(true)
+}
+
 pub fn load_actor_transitions_from_db(
     conn: &Connection,
     document_id: &str,
@@ -3425,6 +3609,35 @@ pub fn rekey_document_state_in_db(
     old_document_hash: &str,
     new_document_hash: &str,
 ) -> Result<DocumentStateRekeyReport> {
+    rekey_document_state_in_db_with_policy(conn, old_document_hash, new_document_hash, false)
+}
+
+/// Merge one path lineage into another after an observed filesystem rename.
+///
+/// Unlike [`rekey_document_state_in_db`], this accepts rows already written
+/// under the destination hash. That shape is expected when a VFS rename races
+/// preflight: the new-path actor may append a fact before the retained rename
+/// projection reaches the controller. The filesystem transition/session UUID
+/// is the caller's proof that both hashes are one logical document.
+///
+/// Replay ordering remains the stable row `id`. Versions are reassigned on the
+/// merged lineage and acknowledgements for both path identities are retired so
+/// no peer can skip a row solely because it acknowledged the pre-rename
+/// numbering.
+pub fn merge_document_state_for_path_transition_in_db(
+    conn: &Connection,
+    old_document_hash: &str,
+    new_document_hash: &str,
+) -> Result<DocumentStateRekeyReport> {
+    rekey_document_state_in_db_with_policy(conn, old_document_hash, new_document_hash, true)
+}
+
+fn rekey_document_state_in_db_with_policy(
+    conn: &Connection,
+    old_document_hash: &str,
+    new_document_hash: &str,
+    allow_destination_history: bool,
+) -> Result<DocumentStateRekeyReport> {
     if old_document_hash == new_document_hash {
         return Ok(DocumentStateRekeyReport::default());
     }
@@ -3439,10 +3652,12 @@ pub fn rekey_document_state_in_db(
             |row| row.get(0),
         )
         .context("probe destination document state")?;
-    anyhow::ensure!(
-        destination_event_count == 0,
-        "cannot rekey document state: destination hash already has {destination_event_count} event(s)"
-    );
+    if !allow_destination_history {
+        anyhow::ensure!(
+            destination_event_count == 0,
+            "cannot rekey document state: destination hash already has {destination_event_count} event(s)"
+        );
+    }
 
     let event_payloads = {
         let mut statement = tx
@@ -3495,12 +3710,40 @@ pub fn rekey_document_state_in_db(
         );
     }
 
+    if allow_destination_history && !event_payloads.is_empty() {
+        let merged_rows = {
+            let mut statement = tx
+                .prepare(
+                    "SELECT id
+                     FROM state_events
+                     WHERE document_hash = ?1
+                     ORDER BY id",
+                )
+                .context("prepare merged document version scan")?;
+            statement
+                .query_map([new_document_hash], |row| row.get::<_, i64>(0))
+                .context("scan merged document versions")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("collect merged document versions")?
+        };
+        for (offset, row_id) in merged_rows.into_iter().enumerate() {
+            let version = u64::try_from(offset.saturating_add(1))
+                .context("merged document version exceeds u64")?;
+            tx.execute(
+                "UPDATE state_events SET document_version = ?1 WHERE id = ?2",
+                params![sqlite_i64(version, "merged document version")?, row_id],
+            )
+            .context("renumber merged document state")?;
+        }
+    }
+
     let peer_acknowledgements_retired = tx
         .execute(
-            "DELETE FROM state_event_peer_acks WHERE document_hash = ?1",
-            [old_document_hash],
+            "DELETE FROM state_event_peer_acks
+             WHERE document_hash = ?1 OR document_hash = ?2",
+            params![old_document_hash, new_document_hash],
         )
-        .context("retire old-path state event acknowledgements")?;
+        .context("retire path-transition state event acknowledgements")?;
     tx.commit().context("commit document state rekey")?;
     Ok(DocumentStateRekeyReport {
         state_events_rekeyed: event_payloads.len(),
@@ -4979,6 +5222,123 @@ mod tests {
         assert!(error.to_string().contains("destination hash already has"));
         assert_eq!(load_state_events_from_db(&conn, Some("old-hash"))?.len(), 1);
         assert_eq!(load_state_events_from_db(&conn, Some("new-hash"))?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn path_transition_merges_raced_destination_history_and_retires_acks() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        for (event_id, document_hash, generation) in [
+            ("old-event", "old-hash", 1_u64),
+            ("new-event", "new-hash", 2_u64),
+        ] {
+            let payload = serde_json::json!({
+                "event_id": event_id,
+                "fact": {
+                    "type": "document_baseline_cleared",
+                    "document_hash": document_hash,
+                    "generation": generation
+                }
+            })
+            .to_string();
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id,
+                    document_hash,
+                    domain: "document",
+                    fact_type: "document_baseline_cleared",
+                    payload_json: &payload,
+                },
+            )?;
+            record_state_event_peer_ack_in_db(
+                &conn,
+                document_hash,
+                generation,
+                &format!("editor-{generation}"),
+                1,
+            )?;
+        }
+
+        let report = merge_document_state_for_path_transition_in_db(&conn, "old-hash", "new-hash")?;
+
+        assert_eq!(report.state_events_rekeyed, 1);
+        assert_eq!(report.peer_acknowledgements_retired, 2);
+        assert!(load_state_events_from_db(&conn, Some("old-hash"))?.is_empty());
+        let merged = load_state_events_from_db(&conn, Some("new-hash"))?;
+        assert_eq!(
+            merged
+                .iter()
+                .map(|event| (event.event_id.as_str(), event.document_version))
+                .collect::<Vec<_>>(),
+            vec![("old-event", 1), ("new-event", 2)],
+            "stable ledger row order must define the merged version sequence",
+        );
+        let rewritten: serde_json::Value = serde_json::from_str(&merged[0].payload_json)?;
+        assert_eq!(
+            rewritten
+                .pointer("/fact/document_hash")
+                .and_then(serde_json::Value::as_str),
+            Some("new-hash"),
+        );
+        assert!(load_state_event_peer_acks_from_db(&conn, "old-hash")?.is_empty());
+        assert!(load_state_event_peer_acks_from_db(&conn, "new-hash")?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn actor_path_rekey_preserves_live_pane_and_window_binding() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let mut conn = open_state_db(dir.path())?;
+        let old = ActorRecord {
+            document_id: "tasks/mary-elle-zellerbach.md".to_string(),
+            session_id: "session-mary-ellen".to_string(),
+            generation: 7,
+            pane_id: "%80".to_string(),
+            window_id: "@12".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Ready,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "before_rename".to_string(),
+                timestamp: timestamp_secs(),
+                prior_generation: 6,
+                new_generation: 7,
+            },
+        };
+        store_actor_record_tx(&mut conn, None, &old, Some("managed".to_string()), Some(9))?;
+        upsert_supervisor_lease_in_db(&conn, &old, Some(8080), Some("supervisor.sock"), "ready")?;
+
+        assert!(rekey_actor_document_path_in_db(
+            &conn,
+            "tasks/mary-elle-zellerbach.md",
+            "tasks/mary-ellen-zellerbach.md",
+            "/project/tasks/mary-ellen-zellerbach.md",
+        )?);
+
+        assert!(
+            load_actor_record_from_db(&conn, "tasks/mary-elle-zellerbach.md")?.is_none(),
+            "old actor identity must be retired",
+        );
+        let moved = load_actor_record_from_db(&conn, "tasks/mary-ellen-zellerbach.md")?
+            .expect("new actor identity");
+        assert_eq!(moved.session_id, old.session_id);
+        assert_eq!(moved.generation, old.generation);
+        assert_eq!(moved.pane_id, "%80");
+        assert_eq!(moved.window_id, "@12");
+        assert_eq!(
+            load_actor_transitions_from_db(&conn, "tasks/mary-ellen-zellerbach.md")?.len(),
+            1,
+        );
+        let lease_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM supervisor_leases
+             WHERE document_id = ?1 AND generation = ?2
+               AND supervisor_pid = 8080 AND supervisor_socket = 'supervisor.sock'",
+            params!["tasks/mary-ellen-zellerbach.md", 7],
+            |row| row.get(0),
+        )?;
+        assert_eq!(lease_count, 1);
         Ok(())
     }
 

@@ -3,6 +3,37 @@
 use anyhow::Result;
 use std::path::Path;
 
+fn migrate_renamed_via_controller(doc: &Path) -> Result<bool> {
+    let Some(transition) = agent_doc_snapshot_io::detect_document_path_transition(doc)? else {
+        return Ok(false);
+    };
+    eprintln!(
+        "[init] detected document path transition: {} → {}",
+        transition.old_path.display(),
+        transition.new_path.display(),
+    );
+    let observation =
+        agent_doc_controller_io::project_controller::new_document_path_transition_observation(
+            &transition.old_path,
+            &transition.new_path,
+            &format!("workflow-init:{}", std::process::id()),
+        );
+    let receipt = agent_doc_controller_io::project_controller::observe_document_path_transition(
+        &transition.project_root,
+        &observation,
+    )?;
+    anyhow::ensure!(
+        receipt.converged,
+        "document path transition remains {:?}: {}",
+        receipt.phase,
+        receipt.error.as_deref().unwrap_or("retry pending"),
+    );
+    Ok(receipt.state_events_rekeyed > 0
+        || receipt.actor_rekeyed
+        || receipt.sessions_rekeyed > 0
+        || receipt.relay_hub_moved)
+}
+
 /// Perform initialization for a document entering the agent-doc lifecycle.
 ///
 /// This composes the focused ledger/file adapters and leaves the concrete
@@ -13,7 +44,7 @@ pub fn ensure_initialized(
     logger: impl FnMut(&Path, &str),
 ) -> Result<bool> {
     let uuid_assigned = ensure_session_uuid(doc)?;
-    let migrated = agent_doc_snapshot_io::try_migrate_renamed(doc)?;
+    let migrated = migrate_renamed_via_controller(doc)?;
     let snapshot_created = if migrated {
         false
     } else {
@@ -57,7 +88,7 @@ pub fn ensure_initialized_with_content(
         (content.to_string(), false)
     };
 
-    let migrated = agent_doc_snapshot_io::try_migrate_renamed(doc)?;
+    let migrated = migrate_renamed_via_controller(doc)?;
     let snapshot_created = if migrated {
         false
     } else {

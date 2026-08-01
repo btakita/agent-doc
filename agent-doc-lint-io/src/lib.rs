@@ -180,7 +180,7 @@ pub fn validate_integrity_on_content_with_logger(
 /// Validate the component tree at every lint boundary, including transient
 /// states inside one atomic closeout transaction.
 pub fn validate_structure_on_content(file: &Path, content: &str) -> Result<()> {
-    agent_doc_element::element::parse(content)
+    let components = agent_doc_element::element::parse(content)
         .with_context(|| {
             format!(
                 "[integrity-gate] INTERRUPTED: malformed agent-doc component tree in {}; repair the document structure before retrying",
@@ -188,6 +188,93 @@ pub fn validate_structure_on_content(file: &Path, content: &str) -> Result<()> {
             )
         })?;
     validate_boundary_markers(file, content)?;
+    if let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    {
+        validate_exchange_response_bodies(file, exchange.content(content))?;
+    }
+    Ok(())
+}
+
+fn validate_exchange_response_bodies(file: &Path, exchange: &str) -> Result<()> {
+    let mut active_heading: Option<&str> = None;
+    let mut active_has_body = false;
+    let mut fence: Option<&str> = None;
+
+    for line in exchange.lines() {
+        let trimmed = line.trim();
+        let fence_marker = if trimmed.starts_with("```") {
+            Some("```")
+        } else if trimmed.starts_with("~~~") {
+            Some("~~~")
+        } else {
+            None
+        };
+        if let Some(marker) = fence_marker {
+            if active_heading.is_some() {
+                active_has_body = true;
+            }
+            fence = if fence == Some(marker) {
+                None
+            } else {
+                Some(marker)
+            };
+            continue;
+        }
+        if fence.is_some() {
+            if active_heading.is_some() && !trimmed.is_empty() {
+                active_has_body = true;
+            }
+            continue;
+        }
+
+        let response_heading = trimmed
+            .strip_prefix('❯')
+            .map(str::trim_start)
+            .unwrap_or(trimmed)
+            .starts_with("### Re:");
+        if response_heading {
+            if let Some(previous) = active_heading
+                && !active_has_body
+            {
+                bail!(
+                    "[integrity-gate] INTERRUPTED: response heading `{}` in {} has no response body; prompt/response ordering was interrupted",
+                    previous,
+                    file.display(),
+                );
+            }
+            active_heading = Some(trimmed);
+            active_has_body = false;
+            continue;
+        }
+        if trimmed.starts_with('❯') {
+            if let Some(heading) = active_heading
+                && !active_has_body
+            {
+                bail!(
+                    "[integrity-gate] INTERRUPTED: prompt follows response heading `{}` without a response body in {}; prompt/response ordering was interrupted",
+                    heading,
+                    file.display(),
+                );
+            }
+            continue;
+        }
+        if active_heading.is_none() || trimmed.is_empty() || trimmed.starts_with("<!--") {
+            continue;
+        }
+        active_has_body = true;
+    }
+
+    if let Some(heading) = active_heading
+        && !active_has_body
+    {
+        bail!(
+            "[integrity-gate] INTERRUPTED: response heading `{}` in {} has no response body; prompt/response ordering was interrupted",
+            heading,
+            file.display(),
+        );
+    }
     Ok(())
 }
 
@@ -452,6 +539,62 @@ operator-owned scratch state\n\
             <!-- /agent:exchange -->\n";
         let file = write_doc(&dir, "boundary-artifact.md", doc);
         run(&file, None).expect("registered boundary inline marker artifact must pass lint gate");
+    }
+
+    #[test]
+    fn ordered_prompt_response_exchange_passes_integrity_gate() {
+        let dir = TempDir::new().unwrap();
+        let doc = concat!(
+            "---\nagent_doc_session: test\nagent_doc_lint_dialect: off\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ Rename the document.\n\n",
+            "### Re: Rename the document.\n\n",
+            "The live replica followed the new path.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let file = write_doc(&dir, "ordered-exchange.md", doc);
+        validate_structure_on_content(&file, doc)
+            .expect("prompt → response heading → response body must pass");
+    }
+
+    #[test]
+    fn stranded_response_heading_blocks_integrity_gate() {
+        let dir = TempDir::new().unwrap();
+        let doc = concat!(
+            "---\nagent_doc_session: test\nagent_doc_lint_dialect: off\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ Rename the document.\n\n",
+            "The response raced above its heading.\n\n",
+            "### Re: Rename the document.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let file = write_doc(&dir, "stranded-heading.md", doc);
+        let error = validate_structure_on_content(&file, doc)
+            .expect_err("a response heading without its body must fail closed");
+        assert!(
+            format!("{error:#}").contains("has no response body"),
+            "unexpected integrity error: {error:#}",
+        );
+    }
+
+    #[test]
+    fn prompt_after_empty_response_heading_blocks_integrity_gate() {
+        let dir = TempDir::new().unwrap();
+        let doc = concat!(
+            "---\nagent_doc_session: test\nagent_doc_lint_dialect: off\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ First prompt.\n\n",
+            "### Re: First prompt.\n\n",
+            "❯ Second prompt.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let file = write_doc(&dir, "prompt-after-empty-heading.md", doc);
+        let error = validate_structure_on_content(&file, doc)
+            .expect_err("a later prompt must not strand an empty response heading");
+        assert!(
+            format!("{error:#}").contains("prompt follows response heading"),
+            "unexpected integrity error: {error:#}",
+        );
     }
 
     #[test]

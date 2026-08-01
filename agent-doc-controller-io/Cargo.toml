@@ -23,6 +23,7 @@ agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.109" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.109" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.109" }
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.109" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.109" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.109" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.109" }

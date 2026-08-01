@@ -533,8 +533,7 @@ pub fn auto_start_in_session_with_lock_mode(
     // Resolve the runtime owner independently of the registry. A missing or
     // stale row must not suppress live-owner discovery and turn autostart into
     // a duplicate-pane allocator.
-    let live_owner =
-        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id);
+    let live_owner = agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id);
     match decide_existing_startup_registration(
         existing_registration.as_deref(),
         existing_alive,

@@ -25266,7 +25266,9 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() 
             .unwrap();
     for required in [
         "pub fn ensure_initialized(",
-        "agent_doc_snapshot_io::try_migrate_renamed(doc)?",
+        "migrate_renamed_via_controller(doc)?",
+        "agent_doc_snapshot_io::detect_document_path_transition(doc)?",
+        "observe_document_path_transition(",
         "agent_doc_snapshot_io::ensure_initial_snapshot(",
         "agent_doc_element_exchange::strip_exchange_content",
         "ensure_git_tracked_with_commit(doc, commit)?",
@@ -25387,6 +25389,39 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() 
             "agent_doc_snapshot_io::delete_recovery_projection_and_clear_baseline(file)?"
         ) && !reset_source.contains("snapshot::delete(file)?"),
         "reset should clear the focused recovery projection and ledger baseline"
+    );
+}
+
+#[test]
+fn test_document_path_transition_writes_are_project_controller_owned() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let rename = fs::read_to_string(manifest_dir.join("src/rename.rs")).unwrap();
+    assert!(
+        rename.contains("new_document_path_transition_observation(")
+            && rename.contains("observe_document_path_transition("),
+        "the CLI rename path must publish one retained controller observation",
+    );
+    for forbidden in [
+        "open_state_db(",
+        "merge_document_state_for_path_transition_in_db(",
+        "rekey_actor_document_path_in_db(",
+        "RegistryLock::acquire(",
+        "sync_tmux_layout",
+    ] {
+        assert!(
+            !rename.contains(forbidden),
+            "the short-lived rename caller must not own `{forbidden}`",
+        );
+    }
+
+    let document_init =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/document_init.rs"))
+            .unwrap();
+    assert!(document_init.contains("detect_document_path_transition(doc)?"));
+    assert!(document_init.contains("observe_document_path_transition("));
+    assert!(
+        !document_init.contains("open_state_db("),
+        "mid-cycle rename detection must not race the controller's durable write",
     );
 }
 

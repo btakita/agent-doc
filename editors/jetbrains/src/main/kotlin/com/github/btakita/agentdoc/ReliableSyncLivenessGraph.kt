@@ -71,6 +71,64 @@ registrationOp(documentHash, path, editorId, editorKind, editorVersion, capabili
         return opsJson(closeOp(documentHash, observed))
     }
 
+    /**
+     * Atomically project an already-open document onto its new path identity.
+     *
+     * The new add/register precedes the observed-remove of the old identity, so
+     * the controller never derives a detached gap. Replaying this transition is
+     * idempotent at the graph: the new identity stays present and a retired old
+     * identity contributes no second close.
+     */
+    @Synchronized
+    fun move(
+        oldDocumentHash: String,
+        newDocumentHash: String,
+        newPath: String,
+        editorId: String,
+        editorKind: String,
+        editorVersion: String,
+        capabilitiesCsv: String,
+    ): String? {
+        if (oldDocumentHash == newDocumentHash) {
+            return opsJson(
+                registrationOp(
+                    newDocumentHash,
+                    newPath,
+                    editorId,
+                    editorKind,
+                    editorVersion,
+                    capabilitiesCsv,
+                ),
+            )
+        }
+
+        val ops = mutableListOf<JsonObject>()
+        val newState = docs.getOrPut(newDocumentHash) { DocState() }
+        if (!newState.orSet.present()) {
+            val newTag = UUID.randomUUID().toString()
+            newState.orSet.add(newTag)
+            newState.tags.add(newTag)
+            ops.add(openOp(newDocumentHash, newTag))
+        }
+        ops.add(
+            registrationOp(
+                newDocumentHash,
+                newPath,
+                editorId,
+                editorKind,
+                editorVersion,
+                capabilitiesCsv,
+            ),
+        )
+        docs.remove(oldDocumentHash)?.let { oldState ->
+            val observed = oldState.tags.toList()
+            oldState.orSet.removeObserved(observed)
+            oldState.tags.clear()
+            ops.add(closeOp(oldDocumentHash, observed))
+        }
+        return opsJson(*ops.toTypedArray())
+    }
+
     /** Reactive: is this editor currently holding `documentHash` open? */
     @Synchronized
     fun isOpen(documentHash: String): Boolean = docs[documentHash]?.orSet?.present() == true

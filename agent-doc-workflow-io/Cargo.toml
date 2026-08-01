@@ -12,6 +12,7 @@ name = "agent_doc_workflow_io"
 
 [dependencies]
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.109" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.109" }
 agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.109" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.109" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.109" }

@@ -38,9 +38,9 @@ object TurnStateBridge {
     )
 
     /**
-     * Render the native Lazily authority Source. `null` means the subscription has not produced its
-     * first projection yet, so callers retain their prior presentation and retry a cheap cache
-     * read.
+     * Render the controller-owned authority projection. `null` means the transport has not produced
+     * its first projection yet, so callers retain their prior presentation and retry a cheap
+     * in-memory projection read.
      */
     fun presentationFromDocumentAuthority(
         filePath: String,
@@ -73,7 +73,7 @@ object TurnStateBridge {
                 }
             }
         } catch (e: Throwable) {
-            LOG.debug("[turn-projection] native authority parse failed: ${e.message}")
+            LOG.debug("[turn-projection] controller authority parse failed: ${e.message}")
             null
         }
     }

@@ -238,6 +238,14 @@ fn native_generations_handoff_without_sqlite_or_deleted_library_state() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("project");
     std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+    // The control-plane owner starts before either reloadable generation. An
+    // embedded native client is intentionally existing-controller-only and may
+    // never bootstrap through SQLite itself.
+    agent_doc_controller_io::project_controller::ensure_controller_running(
+        &project,
+        agent_doc_controller::status::LaunchMode::Lazy,
+    )
+    .expect("start controller from the non-plugin test process");
     let generation_one = temp.path().join("libagent_doc-generation-1.so");
     let generation_two = temp.path().join("libagent_doc-generation-2.so");
     std::fs::copy(&source, &generation_one).unwrap();

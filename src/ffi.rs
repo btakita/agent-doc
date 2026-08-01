@@ -1019,25 +1019,42 @@ fn record_editor_patch_receipt(
         );
         return 0;
     };
-    if let Err(err) = agent_doc_controller_io::project_controller::append_state_event(
-        &project_root,
-        &generation_event,
-    ) {
+    if let Err(err) =
+        append_editor_state_event_from_ffi(&project_root, &canonical, &generation_event)
+    {
         eprintln!(
             "[state-projection] editor patch receipt rejected for {file_path}: durable generation append failed: {err}"
         );
         return 0;
     }
-    if let Err(err) = agent_doc_controller_io::project_controller::append_state_event(
-        &project_root,
-        &receipt_event,
-    ) {
+    if let Err(err) = append_editor_state_event_from_ffi(&project_root, &canonical, &receipt_event)
+    {
         eprintln!(
             "[state-projection] editor patch receipt rejected for {file_path}: durable receipt append failed: {err}"
         );
         return 0;
     }
     1
+}
+
+fn append_editor_state_event_from_ffi(
+    project_root: &Path,
+    file: &Path,
+    event: &StateEvent,
+) -> anyhow::Result<bool> {
+    #[cfg(not(test))]
+    {
+        agent_doc_controller_io::project_controller::append_editor_state_event_existing(
+            project_root,
+            file,
+            event,
+        )
+    }
+    #[cfg(test)]
+    {
+        let _ = file;
+        agent_doc_controller_io::project_controller::append_state_event(project_root, event)
+    }
 }
 
 /// Record that the editor applied a queued patch as a lazily transport receipt.
@@ -1610,7 +1627,7 @@ pub unsafe extern "C" fn agent_doc_clear_editor_op_epoch(file_path: *const c_cha
         return 0;
     };
     let file_path_buf = std::path::PathBuf::from(file);
-    match agent_doc_op_capture_io::clear_op_capture(&file_path_buf) {
+    match agent_doc_op_capture_io::clear_op_capture_for_editor_projection(&file_path_buf) {
         Ok(()) => {
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
@@ -2875,25 +2892,24 @@ pub unsafe extern "C" fn agent_doc_tmux_focus_state_json(
     })())
 }
 
-/// Report what an editor looks like right now and let the graph decide what tmux
-/// should do about it (`#jbpluginlazilyeffects`).
+/// Report what an editor looks like right now to the controller-owned graph
+/// (`#jbpluginlazilyeffects`).
 ///
 /// `surface_json` is an `EditorSurface`: `{ "focused": "<path>", "visible":
 /// ["<path>", ...], "columns": [{ "files": ["<path>", ...] }, ...],
 /// "force_reconcile": false }`.
 ///
-/// Note there is no `layout_synced`: whether tmux has drifted is derived by
-/// comparing this observation against the controller's own
-/// ([`agent_doc_editor_surface_observe_tmux_json`]), so a plugin never has to
-/// report a fact it would have to ask the controller for.
+/// Note there is no `layout_synced`: the Project Controller observes tmux
+/// locally, so a plugin never reports a fact it would have to ask the
+/// controller for.
 ///
 /// This is the entry point a plugin should call instead of choosing between
 /// [`agent_doc_focus_document_pane_json`] and [`agent_doc_sync_tmux_layout_json`]
-/// itself. The plugin reports an observation; the intent is derived from it and
-/// the previous one, and an `Effect` drives the consequence. An observation
-/// identical to the last one costs nothing, so the plugin needs no dedup of its
-/// own — which is what lets the per-editor planners and their `@Volatile`
-/// previous-observation fields go away instead of being reimplemented per editor.
+/// itself. Native transport adds `(client_id, generation, sequence)` and sends
+/// the observation only to an existing controller. The controller derives
+/// intent from it and the previous observation, publishes the accepted
+/// projection, and owns the consequence `Effect`. An identical observation
+/// costs nothing, so plugins need no dedup of their own.
 ///
 /// Returns a receipt: `{ "intent": {...}, "idle": bool, "outcome": string|null,
 /// "error": string|null }`.

@@ -100,6 +100,14 @@ internal data class ProjectControllerStateSubscribeResult(
     val peerAckRecorded: Boolean,
 )
 
+internal data class CpDocumentPathTransitionReceipt(
+    val transitionId: String,
+    val phase: String,
+    val converged: Boolean,
+    val attempt: Long,
+    val error: String? = null,
+)
+
 internal enum class MissingFocusPanePolicy(val token: String) {
     ObserveOnly("observe_only"),
     ResumeLatest("resume_latest"),
@@ -139,6 +147,189 @@ internal object CpRouteClient {
     private const val PANE_LAYOUT_DESIRED_TYPE_TAG = "agent-doc.pane-layout.desired.v1"
     private val statePlaneProducerId = "jetbrains-" + java.util.UUID.randomUUID().toString()
     private val statePlaneEpoch = java.util.concurrent.atomic.AtomicLong(0)
+    private val editorSurfaceClientId = "jetbrains-pid:${ProcessHandle.current().pid()}"
+    private val editorSurfaceGeneration = System.nanoTime().coerceAtLeast(1L)
+    private val editorSurfaceSequence = java.util.concurrent.atomic.AtomicLong(0)
+
+    /**
+     * Publish one ordered editor fact directly to the already-running Project Controller.
+     *
+     * This passive lane deliberately bypasses the reloadable native library: the controller owns
+     * both the reactive graph and its tmux effect, while the plugin owns only observation capture
+     * and socket transport.
+     */
+    fun observeEditorSurface(
+        projectRoot: String,
+        surfaceJson: String,
+    ): CpEditorRouteResult {
+        val socket = cpcSocket(projectRoot)
+        val request =
+            editorSurfaceObserveRequest(
+                surfaceJson = surfaceJson,
+                clientId = editorSurfaceClientId,
+                generation = editorSurfaceGeneration,
+                sequence = editorSurfaceSequence.incrementAndGet(),
+            )
+        return try {
+            val receipt = sendRequestDataToSocket(socket, request)
+            CpEditorRouteResult(
+                exitCode = 0,
+                output = receipt.toString(),
+            )
+        } catch (e: Exception) {
+            log.debug(
+                "[layout-sync] editor_surface_observe unavailable via ${socket.path}: ${e.message}",
+            )
+            CpEditorRouteResult(
+                exitCode = 1,
+                output = "editor_surface_observe unavailable via ${socket.path}: ${e.message}",
+            )
+        }
+    }
+
+    fun forgetEditorSurface(projectRoot: String): Boolean {
+        val socket = cpcSocket(projectRoot)
+        val request =
+            JsonObject().also {
+                it.addProperty("command", "editor_surface_forget")
+                it.addProperty("generation", editorSurfaceGeneration)
+                it.addProperty("caller", editorSurfaceClientId)
+        }
+        return try {
+            sendRequestDataToSocket(socket, request).get("forgotten")?.asBoolean ?: false
+        } catch (e: Exception) {
+            log.debug(
+                "[layout-sync] editor_surface_forget unavailable via ${socket.path}: ${e.message}",
+            )
+            false
+        }
+    }
+
+    fun observeDocumentPathTransition(
+        projectRoot: String,
+        transitionId: String,
+        oldPath: String,
+        newPath: String,
+    ): CpDocumentPathTransitionReceipt {
+        val socket = cpcSocket(projectRoot)
+        val request =
+            documentPathTransitionRequest(
+                transitionId = transitionId,
+                oldPath = oldPath,
+                newPath = newPath,
+                clientId = editorSurfaceClientId,
+                generation = editorSurfaceGeneration,
+                sequence = editorSurfaceSequence.incrementAndGet(),
+            )
+        return try {
+            val receipt = sendRequestDataToSocket(socket, request)
+            CpDocumentPathTransitionReceipt(
+                transitionId =
+                    jsonStringFieldOrNull(receipt, "transition_id") ?: transitionId,
+                phase = jsonStringFieldOrNull(receipt, "phase") ?: "retry_pending",
+                converged = jsonBooleanFieldOrNull(receipt, "converged") == true,
+                attempt = jsonLongFieldOrNull(receipt, "attempt") ?: 0L,
+                error = jsonStringFieldOrNull(receipt, "error"),
+            )
+        } catch (e: Exception) {
+            CpDocumentPathTransitionReceipt(
+                transitionId = transitionId,
+                phase = "retry_pending",
+                converged = false,
+                attempt = 0,
+                error =
+                    "document_path_transition_observe unavailable via ${socket.path}: ${e.message}",
+            )
+        }
+    }
+
+    /**
+     * Read the controller's current in-memory turn projection for one document.
+     *
+     * The returned shape matches [TurnStateBridge.presentationFromDocumentAuthority] so the UI
+     * keeps one fail-closed rendering path without entering the native library or opening SQLite.
+     */
+    fun documentTurnAuthority(
+        projectRoot: String,
+        filePath: String,
+    ): String {
+        val socket = cpcSocket(projectRoot)
+        return try {
+            val turn = sendRequestDataToSocket(socket, documentTurnProjectionRequest(filePath))
+            JsonObject().also {
+                it.addProperty("document", filePath)
+                it.addProperty("readiness", "ready")
+                it.add("turn", turn)
+            }.toString()
+        } catch (e: Exception) {
+            JsonObject().also {
+                it.addProperty("document", filePath)
+                it.addProperty("readiness", "unavailable")
+                it.addProperty(
+                    "error",
+                    "document_turn_projection unavailable via ${socket.path}: ${e.message}",
+                )
+            }.toString()
+        }
+    }
+
+    internal fun documentTurnProjectionRequest(filePath: String): JsonObject =
+        JsonObject().also {
+            it.addProperty("command", "document_turn_projection")
+            it.addProperty("file", filePath)
+            it.addProperty("caller", EditorIdentity.id)
+        }
+
+    internal fun editorSurfaceObserveRequest(
+        surfaceJson: String,
+        clientId: String,
+        generation: Long,
+        sequence: Long,
+    ): JsonObject {
+        val surface = JsonParser.parseString(surfaceJson).asJsonObject
+        val observation =
+            JsonObject().also {
+                it.addProperty("client_id", clientId)
+                it.addProperty("generation", generation)
+                it.addProperty("sequence", sequence)
+                it.add("surface", surface)
+            }
+        return JsonObject().also {
+            it.addProperty("command", "editor_surface_observe")
+            it.addProperty("file", surface.get("focused").asString)
+            it.addProperty("generation", generation)
+            it.addProperty("caller", clientId)
+            it.addProperty("reason", "editor_surface_observation")
+            it.addProperty("diagnostic_payload", observation.toString())
+        }
+    }
+
+    internal fun documentPathTransitionRequest(
+        transitionId: String,
+        oldPath: String,
+        newPath: String,
+        clientId: String,
+        generation: Long,
+        sequence: Long,
+    ): JsonObject {
+        val observation =
+            JsonObject().also {
+                it.addProperty("transition_id", transitionId)
+                it.addProperty("client_id", clientId)
+                it.addProperty("generation", generation)
+                it.addProperty("sequence", sequence)
+                it.addProperty("old_path", oldPath)
+                it.addProperty("new_path", newPath)
+            }
+        return JsonObject().also {
+            it.addProperty("command", "document_path_transition_observe")
+            it.addProperty("file", newPath)
+            it.addProperty("generation", generation)
+            it.addProperty("caller", clientId)
+            it.addProperty("reason", "editor_vfs_path_transition")
+            it.addProperty("diagnostic_payload", observation.toString())
+        }
+    }
 
     fun runEditorRoute(
         projectRoot: String,

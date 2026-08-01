@@ -21,6 +21,10 @@ class PluginLifecycleListener : ProjectManagerListener {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
         // Attach markdown buffers as CRDT replicas when the CP endpoint is available.
         CrdtReplicaManager.getInstance(project)
+        // Registration is retained independently of the controller's current
+        // durable-registration query. At startup that query can correctly be
+        // empty before this editor has published its first open-document fact.
+        CrdtReplicaManager.ensureOpenDocumentReplicas(project, "plugin-startup")
         // `#ctrlkillreregister` Tier 3: ask the controller which of THIS editor's
         // registrations it holds no replica for, and rebuild exactly those, so a
         // Lazily-retained response/backlog target cannot remain parked until an
@@ -74,6 +78,11 @@ class PluginLifecycleListener : ProjectManagerListener {
                         TypingTracker.scheduleOpenDocumentReport(file)
                         if (file.name.endsWith(".md")) {
                             patchWatcher.registerRootForFile(file.path)
+                            CrdtReplicaManager.ensureOpenDocumentReplica(
+                                project,
+                                file.path,
+                                "file-opened",
+                            )
                             CrdtReplicaManager.requestRemoteDrain(project, file.path, "file-opened")
                         }
                     }
@@ -104,6 +113,7 @@ class PluginLifecycleListener : ProjectManagerListener {
     }
 
     override fun projectClosed(project: Project) {
+        ReliableSyncLivenessListener.disposeProject(project)
         CrdtReplicaManager.disposeProject(project)
         PatchWatcher.disposeProject(project)
         LayoutChangeDetector.disposeProject(project)

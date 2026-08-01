@@ -20,19 +20,20 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * Every tab selection publishes selected-document intent. A later editor-layout event projects that
  * intent with the current visible markdown set and column layout, then hands the complete
- * observation to `agent_doc_editor_surface_observe_json`. The reactive graph behind that entry
- * point folds the observation against what tmux was last reconciled against, derives focus-vs-sync,
- * and runs the Project Controller command as an `Effect`.
+ * observation directly to the already-running Project Controller. Socket transport adds an
+ * ordered reload generation/cursor without entering the reloadable native library. The
+ * controller's process-scoped graph folds it against locally observed tmux state, derives
+ * focus-vs-sync, and runs the tmux consequence as an `Effect`.
  *
  * The plugin therefore holds no plan, no previous-signature field, and no retry ladder: an
  * observation identical to the last one is idle and costs nothing, so repeat events need no dedup
  * here. What remains is event-storm handling that is genuinely the editor's: a 40ms debounce plus a
  * generation guard so a burst reports only its final state. Capture is projected by the next EDT
- * event; native delivery remains off the EDT, so neither side waits on the other.
+ * event; socket delivery remains off the EDT, so neither side waits on the other.
  *
  * Focus and layout are both projections of the same selected-document Source. There is no direct
- * focus command lane for an older selection to occupy: the native graph receives only the latest
- * stable surface and derives the consequence.
+ * focus command lane for an older selection to occupy: the controller receives ordered facts,
+ * fences retired plugin generations, and derives the consequence.
  *
  * Registered from [PluginLifecycleListener] via [install] so it survives hot-reload.
  */
@@ -40,8 +41,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
     private val latestSurfaceObservation = AtomicReference<PendingSurfaceObservation?>(null)
 
     /**
-     * Every project root this instance has observed. A root's graph holds the reconciled-layout
-     * history, so it is released on project close through `agent_doc_editor_surface_forget`.
+     * Every project root this instance has observed. Controller projection membership is released
+     * on project close through `editor_surface_forget`; controller cursors fence late reload
+     * callbacks independently.
      */
     private val observedRoots: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
@@ -51,7 +53,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
      */
     private val generation = AtomicLong(0)
 
-    private val nativeDeliveryExecutor = Executors.newSingleThreadExecutor { runnable ->
+    private val surfaceDeliveryExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "agent-doc-editor-surface-delivery").apply { isDaemon = true }
     }
 
@@ -270,25 +272,26 @@ class EditorTabSyncListener : FileEditorManagerListener {
                             log("observe: retained until editor-surface dependency changes")
                             return@invokeLater
                         }
-                nativeDeliveryExecutor.execute {
+                surfaceDeliveryExecutor.execute {
                     if (generation.get() != requestedGeneration) {
-                        log("native delivery: superseded gen=$requestedGeneration")
+                        log("socket delivery: superseded gen=$requestedGeneration")
                         return@execute
                     }
                     observedRoots.add(pending.projectRoot)
-                    val accepted =
-                        NativeAdminControls.editorSurfaceEnqueue(
+                    val receipt =
+                        CpRouteClient.observeEditorSurface(
                             projectRoot = pending.projectRoot,
                             surfaceJson = pending.surfaceJson,
                         )
-                    if (!accepted) {
+                    if (receipt.exitCode != 0) {
                         LOG.warn(
-                            "[layout-sync] surface observation unavailable for ${pending.relativePath}",
+                            "[layout-sync] surface observation unavailable for " +
+                                "${pending.relativePath}: ${receipt.output}",
                         )
                         return@execute
                     }
                     latestSurfaceObservation.compareAndSet(observation, null)
-                    log("observe: queued file=${pending.relativePath}")
+                    log("observe: published file=${pending.relativePath}")
                 }
             } catch (e: Exception) {
                 LOG.warn("[layout-sync] observation failed: ${e.message}")
@@ -390,14 +393,14 @@ class EditorTabSyncListener : FileEditorManagerListener {
     }
 
     private fun shutdown() {
-        nativeDeliveryExecutor.shutdownNow()
+        surfaceDeliveryExecutor.shutdownNow()
         val roots = observedRoots.toList()
         observedRoots.clear()
         latestSurfaceObservation.set(null)
         Thread(
                 {
                     for (root in roots) {
-                        NativeAdminControls.editorSurfaceForget(root)
+                        CpRouteClient.forgetEditorSurface(root)
                     }
                 },
                 "agent-doc-editor-surface-forget",

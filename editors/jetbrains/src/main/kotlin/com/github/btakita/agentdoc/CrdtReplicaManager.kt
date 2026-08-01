@@ -765,6 +765,103 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         return true
     }
 
+    private fun rebindOpenDocumentPath(
+        oldPath: String,
+        newPath: String,
+        document: Document,
+        editorText: String,
+    ): Boolean {
+        if (oldPath == newPath) {
+            return ensureOpenDocumentReplica(
+                newPath,
+                document,
+                editorText = editorText,
+                await = true,
+                forceRefresh = false,
+            )
+        }
+        return try {
+            documentWorkers.forDocument(newPath).submit<Boolean> {
+                val existingNew = forwarders[newPath]
+                val oldForwarder = forwarders[oldPath]
+                val activeNew =
+                    if (existingNew?.attached == true) {
+                        existingNew
+                    } else {
+                        val root = resolveProjectRoot(newPath) ?: return@submit false
+                        val resume = oldForwarder?.captureResumeState()
+                        val replacement =
+                            CrdtReplicaForwarder(
+                                filePath = newPath,
+                                identity = "${EditorIdentity.id}:$newPath:path-transition-${refreshConnectionEpoch.incrementAndGet()}",
+                                node = NativeReplicaNode(),
+                                transport = CpSocketReplicaTransport(root),
+                                ownershipContext = ownershipContext,
+                                resumeState = resume,
+                            )
+                        if (!replacement.register()) {
+                            recordRegisterFailure(newPath, "path-transition-register")
+                            return@submit false
+                        }
+                    val raced = forwarders.putIfAbsent(newPath, replacement)
+                        if (raced != null) {
+                            replacement.deregister()
+                            raced
+                    } else {
+                        retainCanonicalProjectionAfterRegistration(newPath, editorText, replacement)
+                        replacement
+                        }
+            }
+
+            if (!activeNew.attached) return@submit false
+            retainCanonicalProjectionAfterRegistration(newPath, editorText, activeNew)
+            clearRegisterFailure(newPath)
+                scheduleDeferredWriteReplayAfterRegistration(
+                    newPath,
+                    document,
+                    editorText,
+                    activeNew,
+                )
+
+                if (oldForwarder != null && forwarders.remove(oldPath, oldForwarder)) {
+                    oldForwarder.deregister()
+                }
+                shadows.remove(oldPath)
+                localEditorFlushTasks.remove(oldPath)?.cancel(false)
+                localEditorFlushVersions.remove(oldPath)
+                if (localEditorFlushPendingPaths.remove(oldPath)) {
+                    clearLocalPending(oldPath)
+                }
+                pendingLocalEdits.remove(oldPath)
+                remoteEditorEffectGenerations.remove(oldPath)
+                drainRequestedPaths.remove(oldPath)
+                registerFailureCounts.remove(oldPath)
+                registerRetryAfterMs.remove(oldPath)
+                registerRetryProjections.remove(oldPath)
+                registerRetryTasks.remove(oldPath)?.cancel(false)
+                projectionRecoveryReregisterStartedAtMs.remove(oldPath)
+                remoteEditorApplyPaths.remove(oldPath)
+                retainedCanonicalProjectionPaths.remove(oldPath)
+                templateGuardRecoveryPaths.remove(oldPath)
+                templateGuardRecoveryRetryPaths.remove(oldPath)
+                templateGuardRecoveryFailureCounts.remove(oldPath)
+                nonOperatorMutationEpochs.remove(oldPath)?.let { oldEpoch ->
+                    nonOperatorMutationEpochs
+                        .computeIfAbsent(newPath) { AtomicLong(0L) }
+                        .updateAndGet { current -> maxOf(current, oldEpoch.get()) }
+                }
+                TypingTracker.rekeyDocumentPath(oldPath, newPath, document)
+                requestRemoteDrain(newPath, "document-path-transition")
+                true
+            }.get(CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        } catch (error: Exception) {
+            log.warn(
+                "[crdt-replica] path transition rebind deferred $oldPath → $newPath: ${error.message}",
+            )
+            false
+        }
+    }
+
     private fun scheduleDeferredWriteReplayAfterRegistration(
         filePath: String,
         document: Document,
@@ -2363,6 +2460,84 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     forceRefreshOpenDocumentReplica(project, filePath, "$reason-peer-replica-pull")
                 }
             }
+        }
+
+        /**
+         * Observe every currently open markdown document without replacing a
+         * healthy replica. Missing registrations retain their own bounded retry.
+         */
+        fun ensureOpenDocumentReplicas(project: Project, reason: String) {
+            runOnEdtNonBlocking {
+                if (project.isDisposed) return@runOnEdtNonBlocking
+                val manager = instances[project] ?: return@runOnEdtNonBlocking
+                val fileDocumentManager = FileDocumentManager.getInstance()
+                FileEditorManager.getInstance(project).openFiles
+                    .asSequence()
+                    .filter { it.name.endsWith(".md") }
+                    .forEach { file ->
+                        val document = fileDocumentManager.getDocument(file) ?: return@forEach
+                        manager.log.debug(
+                            "[crdt-replica] ensuring open-document registration for ${file.name}; reason=$reason",
+                        )
+                        manager.ensureOpenDocumentReplica(
+                            file.path,
+                            document,
+                            await = false,
+                            forceRefresh = false,
+                        )
+                    }
+            }
+        }
+
+        fun ensureOpenDocumentReplica(project: Project, filePath: String, reason: String) {
+            runOnEdtNonBlocking {
+                if (project.isDisposed) return@runOnEdtNonBlocking
+                val manager = instances[project] ?: return@runOnEdtNonBlocking
+                val file =
+                    FileEditorManager.getInstance(project).openFiles
+                        .firstOrNull { it.path == filePath }
+                        ?: return@runOnEdtNonBlocking
+                val document =
+                    FileDocumentManager.getInstance().getDocument(file)
+                        ?: return@runOnEdtNonBlocking
+                manager.log.debug(
+                    "[crdt-replica] ensuring open-document registration for ${file.name}; reason=$reason",
+                )
+                manager.ensureOpenDocumentReplica(
+                    file.path,
+                    document,
+                    await = false,
+                    forceRefresh = false,
+                )
+            }
+        }
+
+        fun rebindOpenDocumentPath(
+            project: Project,
+            oldPath: String,
+            newPath: String,
+        ): Boolean {
+            if (project.isDisposed) return false
+            val manager = instances[project] ?: return false
+            val documentRef = AtomicReference<Document?>()
+            val textRef = AtomicReference<String?>()
+            val capture = {
+                val file =
+                    FileEditorManager.getInstance(project).openFiles
+                        .firstOrNull { it.path == newPath }
+                        ?: LocalFileSystem.getInstance().findFileByPath(newPath)
+                val document = file?.let { FileDocumentManager.getInstance().getDocument(it) }
+                documentRef.set(document)
+                textRef.set(document?.text)
+            }
+            if (SwingUtilities.isEventDispatchThread()) {
+                capture()
+            } else {
+                ApplicationManager.getApplication().invokeAndWait { capture() }
+            }
+            val document = documentRef.get() ?: return false
+            val editorText = textRef.get() ?: return false
+            return manager.rebindOpenDocumentPath(oldPath, newPath, document, editorText)
         }
 
         fun forceRefreshOpenDocumentReplicas(project: Project, reason: String) {

@@ -78,14 +78,13 @@ Python/Kotlin `mod.CONST` case the shipped rule already drops.
 Unrelated to this document: preflight reports the installed `agent-doc` binary is one
 commit behind. `src/agent-doc` has a dirty tree from another session, so I did not
 build over it.
-<!-- agent:boundary:0515e0a3 -->
+<!-- agent:boundary:6fffd799 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#zigthirdindexed]
-- ~~do [#finishsymbolkind]~~
+- 🚧 do [#zigthirdindexed]
 - do [#wsdq]
 - do [#jzs7]
 <!-- /agent:queue -->
@@ -96,7 +95,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#zigthirdindexed] Zig is a third indexed language with a flat identifier node set, and it is deliberately left un-narrowed. Zig has no import-into-namespace form, so every cross-file reference to another module's symbol is the member of a field_expression. Applying the Python/Kotlin callee-only rule there would silently drop every cross-file reference of a renamed const, struct, or non-called function, which is exactly the under-rename the module doc warns against. Decide the receiver-resolution rule first: narrowing a member position needs to know whether the object is a module namespace or a value. The same open question applies to the already-shipped Python and Kotlin rules, which today drop a module-qualified read such as mod.CONST.
+- [ ] 🚧 [#zigthirdindexed] Zig is a third indexed language with a flat identifier node set, and it is deliberately left un-narrowed. Zig has no import-into-namespace form, so every cross-file reference to another module's symbol is the member of a field_expression. Applying the Python/Kotlin callee-only rule there would silently drop every cross-file reference of a renamed const, struct, or non-called function, which is exactly the under-rename the module doc warns against. Decide the receiver-resolution rule first: narrowing a member position needs to know whether the object is a module namespace or a value. The same open question applies to the already-shipped Python and Kotlin rules, which today drop a module-qualified read such as mod.CONST.
 - [ ] [#wsdq] release + publish + install
 - [ ] [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->

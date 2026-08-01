@@ -134,6 +134,14 @@ in place is already right for the common case where `mod` is the module whose
 export was renamed. The prediction in the backlog item — that shorthand would
 need the shadow refusal — was wrong; expansion is strictly better than refusing.
 
+**Extended to Python and Kotlin in `#finishsymbolkind`.** Both grammars use a
+flat `identifier` kind for module bindings and member names. The occurrence walk
+now drops Python attribute names and non-receiver Kotlin navigation identifiers
+for resolved renames, except when the enclosing attribute/navigation expression
+is the callee of a call. That exception is required because both languages index
+methods as callables. Regression tests and conformance fixtures keep method
+declarations and calls while leaving same-named member reads untouched.
+
 **Closed in `#narrowidentifierkind`,** and the diagnosis above was half right.
 The fix was not the graph scoping from phase 2 — that resolves *which files* a
 rename touches, not which occurrences within one. What it needed was the

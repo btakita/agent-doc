@@ -2628,7 +2628,7 @@ pub fn schedule_stale_supervisor_cp_recycle(file: &Path, source: &str) -> String
 pub fn schedule_stale_editor_replica_cp_recycle(file: &Path, source: &str) -> String {
     match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
         file,
-        agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+        agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
         0,
     ) {
         Ok(outcome) => {
@@ -2718,7 +2718,7 @@ fn schedule_supervisor_cp_recycle(
         };
     let reregister_status = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
         file,
-        agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+        agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
         0,
     ) {
         Ok(()) => "requested".to_string(),
@@ -4768,7 +4768,7 @@ fn await_local_delivery_convergence_change_for_file_inner(
             let reason = if force_refresh_due {
                 force_refresh_sent = true;
                 force_refresh_at = None;
-                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh
+                agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection
             } else {
                 agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckReplay
             };
@@ -5096,7 +5096,7 @@ fn warn_controller_recycle_checkpoint_failures(scope: &str, checkpoint: CrdtChec
         return;
     }
     eprintln!(
-        "[agent-doc] warning: continuing controller recycle for {scope} after CRDT durable checkpoint failed for {} document(s) ({} checkpointed, {} detached, {} skipped); supervisor recycle fan-out still skips any uncheckpointed document",
+        "[agent-doc] warning: continuing controller recycle for {scope} after controller projection observation failed for {} document(s) ({} observed, {} detached, {} unavailable)",
         checkpoint.failed, checkpoint.checkpointed, checkpoint.detached, checkpoint.skipped,
     );
 }
@@ -5143,7 +5143,7 @@ fn checkpoint_crdt_via_controller_document_model(
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "controller_crdt_checkpoint file={} source={} status=deferred authority=cp_model transport=local_document_model reason={} recovery=background_yrs_repair",
+                    "controller_crdt_checkpoint file={} source={} status=unavailable authority=cp_model transport=local_document_model reason={} recovery=retained_lazily_projection",
                     canonical.display(),
                     source,
                     reason,
@@ -5163,7 +5163,7 @@ fn checkpoint_crdt_via_controller_document_model(
             );
             Err(err).with_context(|| {
                 format!(
-                    "controller document-model CRDT durable checkpoint failed for {}",
+                    "controller document-model projection observation failed for {}",
                     canonical.display()
                 )
             })
@@ -5865,55 +5865,6 @@ pub struct ControllerCrdtTextAdoptResult {
 struct ControllerCrdtTextAdoptPayload {
     text: String,
     source: Option<String>,
-}
-
-/// Fold editor-visible text into the controller-owned canonical relay model.
-///
-/// Callers must already have a verified editor receipt. This is the process
-/// boundary companion to `adopt_editor_text_for_file`: the project controller,
-/// rather than a short-lived CLI process, owns the canonical model consumed by
-/// the closeout commit barrier.
-pub fn adopt_editor_text_via_controller_model_for_doc(
-    doc: &Path,
-    text: &str,
-    source: &str,
-) -> Result<Option<bool>> {
-    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
-        agent_doc_ops_log_io::log_op(
-            doc,
-            &format!(
-                "controller_crdt_text_adopt_skipped file={} source={} reason=no_project_root",
-                doc.display(),
-                source,
-            ),
-        );
-        return Ok(None);
-    };
-    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
-    let payload = ControllerCrdtTextAdoptPayload {
-        text: text.to_string(),
-        source: Some(source.to_string()),
-    };
-    let result: ControllerCrdtTextAdoptResult = request_controller(
-        &project_root,
-        ControllerRequest {
-            command: "crdt_text_adopt".to_string(),
-            file: Some(canonical),
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: Some("verified_editor_receipt".to_string()),
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(serde_json::to_string(&payload)?),
-        },
-    )?;
-    Ok(result.changed)
 }
 
 pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
@@ -6980,20 +6931,21 @@ fn handle_crdt_text_adopt_rpc(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("controller_text_adopt");
-    let changed = agent_doc_crdt_relay_io::adopt_editor_text_for_file(&canonical, &payload.text)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
-            "controller_crdt_text_adopt file={} source={} changed={} content_hash={}",
+            "controller_crdt_text_adopt_ignored file={} source={} changed=false content_hash={} recovery=lazy_controller_canonical_projection",
             canonical.display(),
             source,
-            changed
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "unavailable".to_string()),
             agent_doc_hash::content_hash(&payload.text),
         ),
     );
-    Ok(ControllerCrdtTextAdoptResult { changed })
+    let _ = agent_doc_crdt_relay_io::signal_crdt_replica_event(
+        &canonical,
+        agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
+        1,
+    );
+    anyhow::bail!("crdt_text_adopt is retired; consume the controller canonical projection instead")
 }
 
 fn handle_crdt_replica_rpc(
@@ -8395,7 +8347,7 @@ pub fn checkpoint_route_owned_documents_for_project(
                     ),
                 );
                 eprintln!(
-                    "[agent-doc] warning: failed to checkpoint CRDT durable projection for {} before {source}: {err:#}",
+                    "[agent-doc] warning: failed to observe the controller projection for {} before {source}: {err:#}",
                     record.document_id
                 );
             }
@@ -8419,7 +8371,7 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
             Err(err) => {
                 skipped += 1;
                 eprintln!(
-                    "[agent-doc] warning: not marking supervisor recycle-request for {} because CRDT durable checkpoint failed: {err:#}",
+                    "[agent-doc] warning: not marking supervisor recycle-request for {} because controller projection observation failed: {err:#}",
                     doc.display()
                 );
                 continue;
@@ -11987,7 +11939,7 @@ fn editor_replica_rebuild_plane(project_root: &Path) -> &'static EditorReplicaRe
                 let file = std::path::PathBuf::from(&path);
                 match agent_doc_crdt_relay_io::signal_crdt_replica_event(
                     &file,
-                    agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+                    agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
                     1,
                 ) {
                     Ok(()) => agent_doc_ops_log_io::log_op(
@@ -12097,7 +12049,7 @@ fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
         let file = std::path::PathBuf::from(&registration.path);
         match agent_doc_crdt_relay_io::signal_crdt_replica_event(
             &file,
-            agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
             1,
         ) {
             Ok(()) => agent_doc_ops_log_io::log_op(
@@ -12541,24 +12493,30 @@ fn handle_reliable_sync(
     // before the durable receiver cursor advances. Serving the fed canonical (removing
     // the frozen-canonical read) is the separate P3 authority flip — this only keeps the
     // canonical fed.
-    // `#reattach-adopt` (bounded, runaway-safe): a TEXT-adopt frame rebuilds the canonical
-    // from the editor's document text (O(text), self-echo-guarded). This is the path the
-    // new one-shot-on-reattach plugin uses. Checked first.
+    // Legacy whole-editor adoption frames are decode-only compatibility input.
+    // They wake the controller-owned canonical projection and never mutate it.
     if let Some(file) = request.file.as_deref()
         && let Some(decoded) =
             agent_doc_reliable_sync_io::document_op::decode_text_adopt_frame(&message)
     {
         let text = decoded
             .with_context(|| format!("reliable_sync_text_adopt_malformed hash={document_hash}"))?;
-        agent_doc_crdt_relay_io::adopt_editor_text_for_file(file, &text)
-            .with_context(|| format!("reliable_sync_text_adopt_failed hash={document_hash}"))?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "reliable_sync_text_adopt_ignored hash={} editor_hash={} recovery=lazy_controller_canonical_projection",
+                document_hash,
+                agent_doc_hash::content_hash(&text),
+            ),
+        );
+        let _ = agent_doc_crdt_relay_io::signal_crdt_replica_event(
+            file,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
+            1,
+        );
     }
 
-    // `#reattach-adopt`: a full-state adopt frame REPLACES the canonical with the
-    // editor's authoritative lazily state (drops `#sy71`-class drift, lineage-intact),
-    // as opposed to the fold path below which union-merges an incremental delta. Checked
-    // first so an adopt frame never falls through to the fold. Inert until the FFI sends
-    // an adopt frame on reattach.
+    // Legacy full-state adoption frames are also decode-only compatibility input.
     if let Some(file) = request.file.as_deref()
         && let Some(decoded) =
             agent_doc_reliable_sync_io::document_op::decode_full_state_adopt_frame(&message)
@@ -12566,13 +12524,19 @@ fn handle_reliable_sync(
         let ops = decoded.with_context(|| {
             format!("reliable_sync_full_state_adopt_malformed hash={document_hash}")
         })?;
-        let full_state =
-            agent_doc_merge::crdt_sync::encode_update_ops(&ops).with_context(|| {
-                format!("reliable_sync_full_state_adopt_reencode_failed hash={document_hash}")
-            })?;
-        agent_doc_crdt_relay_io::adopt_editor_full_state_for_file(file, &full_state).with_context(
-            || format!("reliable_sync_full_state_adopt_failed hash={document_hash}"),
-        )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "reliable_sync_full_state_adopt_ignored hash={} ops={} recovery=lazy_controller_canonical_projection",
+                document_hash,
+                ops.len(),
+            ),
+        );
+        let _ = agent_doc_crdt_relay_io::signal_crdt_replica_event(
+            file,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
+            1,
+        );
     }
 
     if let Some(file) = request.file.as_deref()
@@ -19333,8 +19297,8 @@ pub struct ControllerRestartOutcome {
 /// signals the controller PID(s) directly (SIGTERM → 750ms → SIGKILL, via
 /// [`reap_verified_controller_pid`], which is guarded by
 /// [`is_same_project_controller_pid`] so it never touches this process or another
-/// project's controller). Route-owned document state is durably checkpointed
-/// first so the fresh controller rebuilds its model from disk. With
+/// project's controller). Route-owned documents are observed through their
+/// keyed controller projection first; no CRDT sidecar is written. With
 /// `--launch-mode lazy` the next request relaunches a fresh controller, so no
 /// explicit relaunch is issued here.
 ///
@@ -19345,12 +19309,12 @@ pub fn force_restart_controller(
     project_root: &Path,
     force: bool,
 ) -> Result<ControllerRestartOutcome> {
-    // Best-effort durable snapshot so the fresh controller recovers in-flight
-    // route-owned document state. Never block the restart on a checkpoint failure.
+    // Best-effort observation for diagnostics. Never block restart on an
+    // unavailable reactive projection.
     if let Err(err) =
         checkpoint_route_owned_documents_for_project(project_root, "controller_restart_request")
     {
-        eprintln!("[controller] restart: durable checkpoint warning: {err:#}");
+        eprintln!("[controller] restart: projection observation warning: {err:#}");
     }
 
     let mut graceful = false;

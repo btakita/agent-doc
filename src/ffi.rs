@@ -483,9 +483,9 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
         Ok(s) => s,
         Err(_) => return CString::new(idle_json()).unwrap().into_raw(),
     };
-    // Compatibility cache read over the native Lazily projection. Subscription
-    // membership is supplied by the editor surface; this function never opens
-    // a controller request or reads SQLite.
+    // Legacy compatibility-cache read. Current editor adapters query the
+    // controller's in-memory projection directly; this function never opens a
+    // controller request, subscribes, or reads SQLite.
     let proj = agent_doc_project_root_io::project_root_containing(Path::new(path))
         .and_then(|project_root| {
             agent_doc_editor_surface_io::document_authority(&project_root, path)
@@ -2497,9 +2497,11 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_document_op_push(
     }
 }
 
-/// One-shot, bounded reattach recovery: enqueue the editor's authoritative UTF-8
-/// text (`O(text)`, never its tombstone history), then synchronously flush it on the
-/// same ordered document channel as incremental ops.
+/// Compatibility symbol for plugins that still link the retired text-adopt ABI.
+///
+/// Whole-editor recovery publication is no longer accepted. The controller's
+/// retained Lazily projection is the only whole-document authority, so callers
+/// receive `-1` and must consume the next controller bootstrap/delivery.
 ///
 /// # Safety
 ///
@@ -2510,20 +2512,8 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_text_adopt_push(
     file_path: *const c_char,
     text: *const c_char,
 ) -> c_int {
-    let result = (|| -> anyhow::Result<()> {
-        let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
-        let file_path = unsafe { required_ffi_string(file_path, "file_path") }?;
-        let text = unsafe { required_ffi_string(text, "text") }?;
-        let frame = agent_doc_reliable_sync_io::document_op::encode_text_adopt_frame(&text)?;
-        enqueue_document_push_frame(Path::new(&project_root), Path::new(&file_path), frame)
-    })();
-    match result {
-        Ok(()) => 0,
-        Err(error) => {
-            eprintln!("[ffi] agent_doc_reliable_sync_text_adopt_push: {error:#}");
-            -1
-        }
-    }
+    let _ = (&project_root, &file_path, &text);
+    -1
 }
 
 /// Retry the retained document-op suffix without enqueueing a new frame.
@@ -2552,11 +2542,9 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_document_op_flush(
 
 /// Compatibility-only no-op for plugins that still link the retired full-state-adopt ABI.
 ///
-/// Reattach recovery must use [`agent_doc_reliable_sync_text_adopt_push`]. Sending the
-/// replica's full operation log here caused an editor/canonical feedback loop and
-/// unbounded tombstone growth. The symbol remains exported so an older loaded plugin
-/// cannot fail linkage while upgrading, but it deliberately ignores every argument.
-/// Returns `0` unconditionally.
+/// Sending the replica's full operation log here caused an editor/canonical feedback
+/// loop and unbounded tombstone growth. The symbol remains exported so an older loaded
+/// plugin cannot fail linkage while upgrading, but it refuses the request.
 ///
 /// # Safety
 ///
@@ -2570,9 +2558,8 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_push_full_state_adopt(
     let _ = (&project_root, &file_path, &full_state_json);
     // Retired after the 2026-07-13 live incident: pushing `encode_state` on every buffer
     // alignment fed canonical output back into the editor and grew tombstones without
-    // bound. Keep the symbol as a permanent no-op for rolling plugin/native upgrades;
-    // the bounded text-adopt endpoint is the supported genuine-reattach recovery path.
-    0
+    // bound. Keep the symbol as a permanent refusal for rolling plugin/native upgrades.
+    -1
 }
 
 /// Inspect one actor through the project controller and return the same JSON

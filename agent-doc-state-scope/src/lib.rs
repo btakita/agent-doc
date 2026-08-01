@@ -161,10 +161,7 @@ mod tests {
     fn cells_built_from_one_local_scope_share_a_graph() {
         let scope = LocalTurnScope::new();
         let left = scope.ctx().source(1u32);
-        let right = {
-            let left = left.clone();
-            scope.ctx().computed(move |ctx| ctx.get(&left) + 1)
-        };
+        let right = scope.ctx().computed(move |ctx| ctx.get(&left) + 1);
 
         assert_eq!(scope.ctx().get(&right), 2);
         scope.ctx().set(&left, 41);

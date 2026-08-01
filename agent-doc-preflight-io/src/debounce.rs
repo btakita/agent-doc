@@ -140,7 +140,7 @@ where
                 request_urgent_drain,
             } => {
                 if let Some(targets) = observation.drain_targets.filter(|_| request_urgent_drain) {
-                    let reason = CrdtReplicaEventReason::AckRecoveryForceRefresh;
+                    let reason = CrdtReplicaEventReason::CanonicalProjection;
                     last_urgent_drain = Some(Instant::now());
                     if let Err(error) = signal(file, reason, targets) {
                         eprintln!(
@@ -360,7 +360,7 @@ mod tests {
 
         assert_eq!(
             signals.into_inner(),
-            vec![(CrdtReplicaEventReason::AckRecoveryForceRefresh, 1)],
+            vec![(CrdtReplicaEventReason::CanonicalProjection, 1)],
             "preflight must pull the pending delivery instead of only polling it"
         );
     }

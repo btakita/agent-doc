@@ -133,6 +133,7 @@ pub struct CompactCommitOutcome {
 struct CompactDocumentTargets {
     live: String,
     committed: String,
+    settled: bool,
 }
 
 struct CompactApplyOptions<'a> {
@@ -146,6 +147,7 @@ impl CompactDocumentTargets {
         Self {
             live: content.clone(),
             committed: content,
+            settled: true,
         }
     }
 
@@ -211,7 +213,11 @@ impl CompactDocumentTargets {
             committed = reconciled;
         }
 
-        Ok(Self { live, committed })
+        Ok(Self {
+            live,
+            committed,
+            settled: self.settled,
+        })
     }
 }
 
@@ -706,6 +712,12 @@ fn run_in_controller_scoped(
     // the requested compaction retained the document byte-for-byte.
     if targets.live == content && targets.committed == content {
         eprintln!("[compact] no compaction changes; leaving document and commit state untouched");
+        return Ok(());
+    }
+    if !targets.settled {
+        eprintln!(
+            "[compact] canonical target retained; lazy editor delivery projection will settle it"
+        );
         return Ok(());
     }
 
@@ -1550,6 +1562,7 @@ fn apply_compacted_document(
     let mut targets = CompactDocumentTargets {
         live: compacted.to_string(),
         committed: snapshot_content.to_string(),
+        settled: true,
     };
     if force_disk {
         runtime_effects()?.force_disk_atomic_write(file, compacted)?;
@@ -1589,16 +1602,32 @@ fn apply_compacted_document(
         // raw CP error (the reported JB `Compact Exchange` exit-1). The zero-live
         // editor case is already resolved to disk authority by #stale-lease-cp-authority.
         converge_compacted_with_retry(runtime_effects()?, file, compacted, write_base_content)?;
-        agent_doc_document_realtime_io::guard_visible_delivery_convergence(
+        if let Err(error) = agent_doc_document_realtime_io::guard_visible_delivery_convergence(
             file,
-            "compact_post_write_delivery_barrier",
-        )
-        .with_context(|| {
-            format!(
-                "compact: refusing snapshot/CRDT-sidecar work before editor delivery ACK for {}",
-                file.display()
-            )
-        })?;
+            "compact_post_write_delivery_projection",
+        ) {
+            if error
+                .downcast_ref::<agent_doc_document_realtime_io::AwaitEditorReplicaNoDiskWrite>()
+                .is_some()
+            {
+                targets.settled = false;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "compact_delivery_projection_pending file={} content_hash={} action=retain_without_snapshot_or_commit driver=lazy_projection",
+                        file.display(),
+                        agent_doc_hash::content_hash(&targets.live),
+                    ),
+                );
+                return Ok(targets);
+            }
+            return Err(error).with_context(|| {
+                format!(
+                    "compact: failed to observe lazy editor delivery projection for {}",
+                    file.display()
+                )
+            });
+        }
 
         // #compact-independent-cells: editor/CRDT convergence may legitimately
         // carry a concurrent edit from a sibling component cell (for example,
@@ -1630,13 +1659,7 @@ fn apply_compacted_document(
         agent_doc_ops_log_io::log_op,
     )?;
 
-    if refresh_crdt {
-        let new_crdt =
-            agent_doc_merge::crdt_sync::ReplicaState::from_text(1, &targets.live).encode_state();
-        let lineage = format!("compact:{}", agent_doc_hash::content_hash(&targets.live));
-        agent_doc_snapshot_io::checkpoint_crdt_recovery_projection(file, &new_crdt, &lineage)?;
-        eprintln!("[compact] cold CRDT recovery projection refreshed from post-compact content");
-    }
+    let _ = refresh_crdt;
 
     Ok(targets)
 }
@@ -2379,9 +2402,13 @@ mod tests {
             "Operator edited the post-boundary prompt while compact ran.",
         );
 
-        let rebased = CompactDocumentTargets { live, committed }
-            .rebase_onto_authoritative_siblings(&authoritative, "exchange")
-            .expect("sibling deletion should preserve the two-target exchange lineage");
+        let rebased = CompactDocumentTargets {
+            live,
+            committed,
+            settled: true,
+        }
+        .rebase_onto_authoritative_siblings(&authoritative, "exchange")
+        .expect("sibling deletion should preserve the two-target exchange lineage");
 
         assert!(
             rebased
@@ -3345,7 +3372,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_advances_baseline_and_cold_recovery_projection() {
+    fn compact_advances_baseline_without_crdt_recovery_sidecar() {
         let mut exchange = String::new();
         for i in 0..40 {
             exchange.push_str(&format!(
@@ -3369,14 +3396,6 @@ mod tests {
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        let legacy = agent_doc_merge::crdt::CrdtDoc::from_text(&doc).encode_state();
-        agent_doc_snapshot_io::checkpoint_crdt_recovery_projection(
-            &file,
-            &legacy,
-            "test:pre-compact",
-        )
-        .unwrap();
-
         // Full compact (keep=None) in CRDT mode.
         run_component_compact_force_disk(&file, &doc, "exchange", Some("Session compacted."), true)
             .unwrap();
@@ -3409,34 +3428,17 @@ mod tests {
             doc.len()
         );
 
-        // The cold restart projection must equal the compacted text.
-        let recovery = agent_doc_snapshot_io::load_crdt_recovery_projection(&file)
-            .unwrap()
-            .unwrap();
-        let projected = agent_doc_document_realtime::crdt_relay::RelayHub::recover_from_projection(
-            1,
-            &recovery.projection,
-        )
-        .unwrap()
-        .canonical_text();
         assert!(
-            !projected.contains("topic 0"),
-            "recovery projection must contain the compacted document, not the pre-compaction one:\n{projected}"
-        );
-        assert_eq!(
-            projected, visible,
-            "recovery projection must equal the compacted visible document"
+            agent_doc_snapshot_io::load_crdt_recovery_projection(&file)
+                .unwrap()
+                .is_none(),
+            "compact must not materialize a CRDT recovery sidecar"
         );
 
         // With the durable baseline advanced, the stale-snapshot drift guard must not bail.
         runtime_effects()
             .unwrap()
-            .guard_no_stale_snapshot_reset_drift(
-                &file,
-                Some(projected.as_str()),
-                &visible,
-                "commit",
-            )
+            .guard_no_stale_snapshot_reset_drift(&file, Some(visible.as_str()), &visible, "commit")
             .expect(
                 "compacted overlay/snapshot must not trip the stale-snapshot reset-drift guard",
             );
@@ -4394,7 +4396,7 @@ mod tests {
         let error = ensure_compact_live_relay_target(&file, COMPACTED_DOC)
             .expect_err("matching canonical bytes without the editor ACK must fail closed");
         assert!(
-            format!("{error:#}").contains("remained unacknowledged"),
+            format!("{error:#}").contains("retained by the lazy delivery projection"),
             "compact must report ACK backpressure, not claim matching text converged: {error:#}"
         );
         let ops = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
@@ -5261,7 +5263,6 @@ mod tests {
         // relay to the HEAD-only projection and force a whole-buffer rebootstrap;
         // that reset lets delayed JetBrains document events replay the old editor
         // lineage and resurrect archived exchange content.
-        use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
         use std::fs;
 
         let dir = tempfile::tempdir().unwrap();
@@ -5349,22 +5350,11 @@ mod tests {
             "archived history must not survive in the live editor:\n{live_after}"
         );
 
-        let recovery = agent_doc_snapshot_io::load_crdt_recovery_projection(&file)
-            .unwrap()
-            .expect("post-compact recovery projection");
-        // Recovery checkpoints persist the relay's compact ReplicaState
-        // (`ADCR1`), the same projection the cold-start runtime consumes.
-        let recovery_markdown =
-            agent_doc_document_realtime::crdt_relay::RelayHub::recover_from_projection(
-                1,
-                &recovery.projection,
-            )
-            .unwrap()
-            .canonical_text();
-        assert_eq!(
-            normalize_transient_agent_doc_markers(&recovery_markdown),
-            normalize_transient_agent_doc_markers(&live_after),
-            "cold recovery projection must match the live compacted editor"
+        assert!(
+            agent_doc_snapshot_io::load_crdt_recovery_projection(&file)
+                .unwrap()
+                .is_none(),
+            "compact commit must not materialize a CRDT recovery sidecar"
         );
 
         let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();

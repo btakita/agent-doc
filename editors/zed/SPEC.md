@@ -13,6 +13,11 @@
   controller. Controller deltas are applied through `workspace/applyEdit` and
   acknowledged only after the resulting visible buffer hash is observed in
   `didChange`.
+- Registration always bootstraps from controller canonical state. A divergent
+  opening buffer is projected downstream with `workspace/applyEdit`; it is
+  never published upstream as a whole-document baseline. Because Zed reports
+  full-sync changes, the LSP reduces each operator observation to the smallest
+  contiguous code-point delta before publishing it.
 - Remote edit echoes are generation-fenced by comparing the visible buffer to
   the already-advanced local replica; they are acknowledged, never rebroadcast.
 - The LSP process PID is part of registration so the controller's process-exit

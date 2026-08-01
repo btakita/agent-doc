@@ -18737,23 +18737,20 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "queue maintenance must not ensure the document model against this process's empty local hub registry"
     );
 
-    // `#ensurereplicagensup`: the relay-hub-owner role is what lets hub-backed
-    // work tell "the replica has not registered yet" (a real transient, only
-    // meaningful in the owning process) apart from "the hub lives in another
-    // process" (waiting can never help). Only the controller may claim it — if
-    // any other crate marks itself as owner, every non-owner guard silently stops
-    // guarding.
+    // The process role still prevents the controller from asking its own socket,
+    // but projection retention no longer branches on that role or creates a
+    // background repair request. It observes the process-scoped Lazily map.
     let relay_io =
         fs::read_to_string(manifest_dir.join("agent-doc-crdt-relay-io/src/lib.rs")).unwrap();
     assert!(
-        relay_io.contains("durable_checkpoint_deferral_reason(process_serves_relay_hub())"),
-        "the durable checkpoint must consult the process-role deferral decision"
+        relay_io.contains("retained_canonical_projections().observe(&document_hash)")
+            && relay_io.contains("storage=controller_lazily_projection")
+            && !relay_io.contains("durable_checkpoint_deferral_reason")
+            && !relay_io.contains("record_durable_projection_repair_request"),
+        "projection observation must read the process-scoped Lazily target without a repair request",
     );
-    // `#wsflake2`: keep that decision pure and keep the role out of tests. A test
-    // that flips `PROCESS_SERVES_RELAY_HUB` is not hermetic however carefully it
-    // restores the value — five sibling tests in that crate need the checkpoint to
-    // actually run, and any of them scheduled inside the window fail. Only the
-    // controller's own `mark_process_as_relay_hub_owner` may write the flag.
+    // Keep the role out of tests. Only the controller's own
+    // `mark_process_as_relay_hub_owner` may write the flag.
     assert_eq!(
         relay_io.matches("PROCESS_SERVES_RELAY_HUB.store(").count(),
         1,
@@ -31880,20 +31877,11 @@ fn retained_write_boundary_flags_are_typed_at_development_call_sites() {
         "closed-set retained-write transition flags must be owned by one Rust enum",
     );
     assert!(
-        realtime.contains("enum ZeroReplicaRepairSource")
-            && realtime.contains("ZeroReplicaRepairSource::RetainedIntentValidation.as_str()")
-            && realtime.contains("ZeroReplicaRepairSource::CanonicalProjection.as_str()")
-            && realtime.contains("ZeroReplicaRepairSource::ReconnectLineage.as_str()")
-            && realtime
-                .matches("\"zero_replica_repair_retained_intent\"")
-                .count()
-                == 1
-            && realtime
-                .matches("\"repair_force_disk_canonical_projection\"")
-                .count()
-                == 1
-            && realtime.matches("\"repair_force_disk\"").count() == 1,
-        "zero-replica repair stage flags must be enum variants outside their string boundary",
+        !realtime.contains("enum ZeroReplicaRepairSource")
+            && !realtime.contains("repair_force_disk_canonical_projection")
+            && !realtime.contains("zero_replica_repair_projected")
+            && realtime.contains("Repair is not an authority escape hatch"),
+        "repair must retain the reactive controller projection instead of exposing a zero-replica force-disk boundary",
     );
     assert!(
         preflight.contains("RetainedWriteCycleBoundary::Preflight")

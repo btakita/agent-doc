@@ -1,28 +1,26 @@
 # JetBrains File Cache Conflict
 
-After a controller recycle or binary upgrade, an open JetBrains tab may outlive its server-side relay membership. `forceRefresh` is a real re-registration operation: the plugin captures the exact current IntelliJ `Document`, validates it, retires the cached forwarder, and issues a fresh `REGISTER` seeded from those same bytes. It never installs or saves a deferred whole-document target before registration. Durable agent intents remain in Lazily and replay over the newly published editor cut through the ordinary CRDT/document-cell delivery path. A `reload_lib` broadcast triggers this refresh for every open Markdown document; tab reopen and IDE restart are not required recovery steps after the updated plugin is active.
+After a controller recycle or binary upgrade, an open JetBrains tab may outlive its server-side relay membership. Re-registration always opens the controller bootstrap and projects that retained canonical revision into the editor. The pre-existing IntelliJ `Document` is not a recovery baseline: it may predate queue additions or acknowledged edits from another endpoint. A `reload_lib` broadcast can rebuild the downstream consumer, but it cannot publish the whole editor buffer upstream.
 
 `--force-disk` remains an explicit operator choice, but it does not outrank an open editor. Before writing disk, the binary stores the full pre-write editor cut and disk target in an independent Lazily external-disk slot. It never component-merges that candidate into the editor. The ordinary pending response lineage remains separate, so a file-cache decision cannot replace or clear a retained agent response. The recovery source is Lazily state, never Git HEAD.
 
-Captured-response recovery is also editor-authoritative. The final capture stores the complete pre-response editor buffer in Lazily state. If a cache conflict leaves response lines partially or out-of-order in the editor, repair removes only a multi-line subset proven as additions relative to that baseline, publishes the reconciled buffer through document authority, and replays/commits the full capture. With no live replica, that target remains a durable deferred Lazily write and the command returns promptly. Git `HEAD` is never a restore target; for legacy hash-only captures it may serve only as a hash-verified historical anchor that is immediately upgraded into content-bearing capture state. `session-check` must not close the cycle merely because the old snapshot is in `HEAD`: the captured response body itself must be materialized there.
+Captured-response recovery is controller-authoritative. The final capture and exact canonical target live in the controller-owned keyed Lazily graph. If the editor is unavailable or has not acknowledged that revision, the operation remains retained and returns promptly; snapshot, commit, and disk projection do not run ahead of the visible receipt.
 
 When IntelliJ has a session document open, an older or degraded write path can surface a **File Cache Conflict** dialog because the editor cache disagrees with a competing disk or legacy IPC mutation. The current attached-document path prevents that race by treating CRDT delivery as the only visible-document mutation plane.
 
-Durable CRDT deltas are lineage-scoped. A whole-buffer editor adoption or
-canonical reconstruction rotates the lineage; replay from the pre-rebuild
-outbox is quarantined and ACKed instead of union-merged. This is the boundary
-that prevents a stale replica from duplicating an exchange or resurrecting an
-operator-deleted queue item after recovery.
+Durable CRDT deltas are lineage-scoped. Stale or obsolete lineages are
+quarantined. They wake the controller's retained canonical projection, never a
+full-state request, editor adoption, or canonical reconstruction.
 
 ## External Disk Pending Lifecycle
 
-Any filesystem change observed while at least one editor buffer is open is a pending disk candidate, regardless of whether agent-doc, Git, a formatter, or another process wrote it. The file watcher records the exact disk bytes in Lazily but does not route them into canonical CRDT state. The authority order is live editor/CRDT, then disk when no editor exists, then Git only as historical recovery evidence.
+Any filesystem change observed while at least one editor buffer is open is a pending disk candidate. The watcher records it in Lazily but does not replace controller canonical state. The authority order is controller canonical, then disk after detach and proof, with Git only as historical evidence.
 
-- If the IDE loads/accepts the filesystem version, the plugin proves the exact candidate, resets its stale replica from the now-visible editor buffer, propagates that buffer through CRDT, and clears the candidate only after registration succeeds.
-- If the user edits the buffer, that newer editor cut propagates and clears the candidate without merging it.
-- If the editor saves and those exact buffer bytes flush to disk, the save cut is authoritative and clears any older candidate, even if it differs from the originally observed disk version.
-- If several editor replicas are reconnecting and no exact editor cut is proven, the disk bytes remain pending without mutation until CRDT converges or an explicit editor action resolves them.
-- When the final editor closes, the candidate is cleared and current disk becomes authority. Closing one of several editors does not demote the remaining editor/CRDT authority.
+- A controller revision is delivered downstream and acknowledged by exact content.
+- A subsequent operator `DocumentEvent` publishes only its causal incremental delta.
+- A stale opening buffer, failed ACK, or reconnect never publishes whole editor text.
+- Disk candidates remain pending until detached authority is proven or an explicit operator action resolves the conflict.
+- Closing one of several editors does not demote controller authority.
 
 ## Quiescent CRDT Delivery
 
@@ -30,20 +28,17 @@ For a document with an attached CRDT replica, every ordinary binary-owned write 
 
 CRDT bootstrap/delta payloads use the compact UTF-8-safe `ADCR1:` envelope over the existing plugin string seam. The binary still accepts legacy JSON, so `agent-doc admin reload-lib` can upgrade a live plugin and finish an update that was retained by the previous binary. The compact envelope prevents per-character CRDT operations and tombstones from inflating an ordinary session document into a controller payload large enough to starve its delivery ACK.
 
-1. Wait for the shared typing signal to remain idle for 500 ms. The wait happens outside the Project Controller RPC loop so the editor can continue publishing local changes and acknowledgements.
-2. Observe the latest canonical CRDT text. If the operator edited while the agent was working, rebase the original agent change over that settled operator cut with the component-aware CRDT merge.
-   If the observed document is structurally poisoned by a previous agent projection (duplicate exchange or boundary markers), reconstruct the operator cut from the intent's expected base plus the durable editor-op stream, then replay the ordered deferred agent-intent journal. Do not force-disk: operator-only text must survive and non-operator duplicated projection bytes must not become authority merely because they are in the IDE document.
-3. Retain the candidate in the Lazily `DocumentWriteDeferred` lineage before delivery. If an earlier canonical frontier is still awaiting visible-editor acknowledgement, enqueue this candidate at most once behind it; the content-qualified ACK for the final coalesced editor target cumulatively retires the whole older prefix. A same-target retry is an idempotent canonical no-op, not another response.
-4. Never follow an accepted CRDT write with the legacy component/full-content editor IPC path; that second mutation is interpreted as local typing and can duplicate the document.
-5. Wait until canonical text equals the target and every attached replica has acknowledged the delivery frontier. Delivery ACK is not disk-save proof. If disk still lags, send typed `save_document` to the owning editor; never write the session file behind an attached editor. Settle only after disk contains the exact requested editor version and a fresh authority read proves that same version remains canonical and converged. If the editor saves a newer operator cut, preserve the durable agent intent and return to the merge step instead of treating the older request as settled.
+1. Observe controller canonical state and retain the desired target in the per-document Lazily key.
+2. Derive delivery and settlement from canonical revision, membership, visible receipt, and disk observation.
+3. Let one keyed editor-delivery effect project the exact canonical revision.
+4. On exact receipt, let the settlement effect persist and resume the captured closeout.
+5. On missing receipt, return the typed retained/pending outcome immediately. Do not poll for eight seconds, request ACK replay or refresh, adopt editor text, checkpoint a CRDT sidecar, snapshot, or commit.
 
-The retry is responsive and bounded: it uses 25–250 ms exponential backoff and actively writes an `ack_replay` replica event every 250 ms while delivery is pending. JetBrains retains failed ACKs and replays them with a fresh hash of the current editor buffer. After two seconds the binary sends one `ack_recovery_force_refresh` event. That foreground recovery bypasses the plugin's background no-op drain timer for one targeted pull. It first atomically replaces the replica from the exact live editor cut; only after that swap may the plugin request the retained semantic replay. The replay is installed and saved only while the editor still equals that registration cut, the replacement replica is current, no local delta is pending, and disk has no novel external text, then its recovered cut is published explicitly through the replica. Never preinstall the retained whole-document target before registration or let an older reconnect ABI return divergent bytes. If this recovery still has not settled after eight seconds, the command returns promptly with the candidate retained in CRDT + Lazily state and no operator-gated force-disk prompt; reconnect continues asynchronously. It never falls back to a competing disk write while an editor-owned replica remains attached.
+When `session-check` reports a retained pending document write, reuse that capture. Registration or a normal controller delivery event wakes the same Lazily projection; no recovery command is manufactured.
 
-When `session-check` reports a retained pending document write, reuse that capture: reload the native library if the plugin generation is stale, then allow the ACK/reconnect retry to resume it. Retry only `session-check`; do not paste or recapture the response, issue another finalize/write payload, or select `--force-disk`. A replacement registration may already be bootstrapped from the retained canonical target and therefore have no ACK queued. Exact canonical/target/disk equality lets `session-check` retire that historical slot, refresh the response snapshot, and commit the same capture without manufacturing an ACK.
+Response-only finalize uses the same derived settlement. A durable `ResponseCellAdded` fact is an idempotence receipt, not permission to commit ahead of the visible editor. With no live member or receipt, the full target remains retained and the next controller bootstrap projects it downstream.
 
-Response-only finalize uses the same barrier. A durable `ResponseCellAdded` fact is an idempotence receipt, not permission to commit ahead of the visible editor. The response-cell path must wait for outbound ACK convergence and materialize the acknowledged canonical cut to disk before snapshot/commit. When durable attached authority remains but its relay currently has zero live members, there is no delivery convergence or disk authority. The full target remains in a Lazily `DocumentWriteDeferred` fact and finalize returns promptly; the next replica bootstrap/current-buffer publication restores and settles that target. Coverage includes `durable_response_cell_waits_for_outbound_editor_ack`, `response_cell_projection_materializes_with_retained_authority_and_no_live_replica`, and SimWorld `response_cell_closeout_materializes_only_after_visible_ack`.
-
-The durable visible-write receipt must carry the complete editor-visible content. Its hashes are validation and lookup fields only. When an older hash-only receipt answers `already_applied`, the binary requests one bounded publication of the current live buffer and records the content-bearing upgrade for that same patch. It never falls through to file IPC. If the publication does not prove the retained response, response authority is kept for an authoritative retry rather than restoring Git `HEAD` or adopting a stale worktree cut.
+The durable visible-write receipt carries the complete editor-visible content. Hashes are validation and lookup fields only. A legacy hash-only receipt cannot authorize current-buffer publication or whole-document adoption; the controller reprojects its retained canonical revision instead.
 
 Delivery proof is not a disk-projection lock. If the canonical document advances
 after the proof but before disk projection, the binary retains the original

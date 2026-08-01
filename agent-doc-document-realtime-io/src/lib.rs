@@ -74,33 +74,6 @@ fn controller_document_mutation_in_progress() -> bool {
     CONTROLLER_DOCUMENT_MUTATION.with(Cell::get)
 }
 
-#[cfg(test)]
-fn install_post_delivery_proof_hook(file: PathBuf, hook: impl FnOnce(&Path) + Send + 'static) {
-    *POST_DELIVERY_PROOF_HOOK.lock() = Some((file, Box::new(hook)));
-}
-
-fn run_post_delivery_proof_hook(file: &Path) {
-    #[cfg(not(test))]
-    let _ = file;
-    #[cfg(test)]
-    {
-        let hook = {
-            let mut slot = POST_DELIVERY_PROOF_HOOK.lock();
-            if slot
-                .as_ref()
-                .is_some_and(|(hook_file, _)| hook_file == file)
-            {
-                slot.take().map(|(_, hook)| hook)
-            } else {
-                None
-            }
-        };
-        if let Some(hook) = hook {
-            hook(file);
-        }
-    }
-}
-
 fn unix_secs() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -132,7 +105,7 @@ use agent_doc_crdt_relay_io::ensure_document_model as test_support_ensure_docume
 use agent_doc_crdt_relay_io::register_replica_for_file as test_support_register_replica_for_file;
 #[cfg(test)]
 use agent_doc_crdt_relay_io::{
-    ack_replica_update_for_file as test_support_ack_replica_update_for_file,
+    ack_replica_update_for_file_with_content_hash as test_support_ack_replica_update_for_file,
     pull_replica_updates_for_file as test_support_pull_replica_updates_for_file,
 };
 
@@ -142,11 +115,6 @@ static DOCUMENT_WRITE_INTENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static DOCUMENT_AUTHORITY_OBSERVATIONS: LazyLock<
     Mutex<HashMap<PathBuf, DocumentAuthorityObservation>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
-#[cfg(test)]
-type PostDeliveryProofHook = Box<dyn FnOnce(&Path) + Send>;
-#[cfg(test)]
-static POST_DELIVERY_PROOF_HOOK: LazyLock<Mutex<Option<(PathBuf, PostDeliveryProofHook)>>> =
-    LazyLock::new(|| Mutex::new(None));
 const CRDT_POST_PROOF_REBASE_LIMIT: usize = 3;
 
 #[cfg(test)]
@@ -186,18 +154,13 @@ const CRDT_ACK_FALLBACK_BACKOFF_POLICY:
         CRDT_ACK_FALLBACK_BACKOFF_INITIAL_MS,
         CRDT_ACK_FALLBACK_BACKOFF_MAX_MS,
     );
-const CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS: u64 = 250;
-#[cfg(test)]
-const CRDT_ACK_FORCE_REFRESH_AFTER_MS: u64 = 500;
-#[cfg(not(test))]
-const CRDT_ACK_FORCE_REFRESH_AFTER_MS: u64 = 2_000;
 #[cfg(test)]
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 1_800;
 #[cfg(not(test))]
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 8_000;
 const _: () = assert!(CRDT_ACK_RECOVERY_TIMEOUT_MS > CRDT_ACK_FALLBACK_BACKOFF_MAX_MS);
 #[derive(Debug)]
-struct AwaitEditorReplicaNoDiskWrite(String);
+pub struct AwaitEditorReplicaNoDiskWrite(String);
 
 impl std::fmt::Display for AwaitEditorReplicaNoDiskWrite {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -614,46 +577,7 @@ impl AckRecoveryState {
             .duration_since(started)
             .as_millis()
             .min(u128::from(u64::MAX)) as u64;
-        let force_refresh =
-            elapsed_ms >= CRDT_ACK_FORCE_REFRESH_AFTER_MS && !self.force_refresh_sent;
-        let signal_due = force_refresh
-            || self.last_signal.is_none_or(|last| {
-                now.duration_since(last)
-                    >= std::time::Duration::from_millis(CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS)
-            });
-        if signal_due {
-            let reason = if force_refresh {
-                self.force_refresh_sent = true;
-                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh
-            } else {
-                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckReplay
-            };
-            if let Err(err) =
-                agent_doc_crdt_relay_io::signal_crdt_replica_event(file, reason, live_editors)
-            {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "{source}_crdt_ack_recovery_signal_failed file={} reason={} error={err}",
-                        file.display(),
-                        reason,
-                    ),
-                );
-            } else {
-                self.recovery_signal_observed = true;
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "{source}_crdt_ack_recovery_signal file={} reason={} elapsed_ms={} live_editors={} strategy=retained_ack_replay_then_bounded_reregister",
-                        file.display(),
-                        reason,
-                        elapsed_ms,
-                        live_editors,
-                    ),
-                );
-            }
-            self.last_signal = Some(now);
-        }
+        let _ = (file, source, live_editors);
         if elapsed_ms >= CRDT_ACK_RECOVERY_TIMEOUT_MS {
             return Ok(AckRecoveryWait::ForegroundDeadline);
         }
@@ -698,18 +622,11 @@ impl AckRecoveryState {
         if wait_ms == 0 {
             return Ok(AckRecoveryWait::ForegroundDeadline);
         }
-        let recovery = agent_doc_controller_io::project_controller::DeliveryConvergenceRecovery {
-            live_editors,
-            elapsed_ms,
-            signal_interval_ms: CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS,
-            force_refresh_after_ms: CRDT_ACK_FORCE_REFRESH_AFTER_MS,
-            force_refresh_sent: self.force_refresh_sent,
-        };
         let status = await_delivery_change(
             file,
             delivery_version,
             std::time::Duration::from_millis(wait_ms),
-            Some(recovery),
+            None,
         );
         match status {
             Ok(Some(status)) => self.observe_subscription_status(&status),
@@ -1082,11 +999,6 @@ fn atomic_write_rebased_through_authority_inner(
                     relay_write.content_hash,
                 )));
             }
-
-            // Deterministic unit coverage injects the exact race observed in the
-            // Haiven live session: an editor delta lands after the delivery proof
-            // but before the disk projection observation.
-            run_post_delivery_proof_hook(path);
 
             let current = observe_live_editor_authority_after_model_ensure(
                 path,
@@ -1574,9 +1486,8 @@ pub fn settle_retained_committed_projection_through_authority(
     expected_disk: &str,
     source: &str,
 ) -> Result<bool> {
-    let canonical = try_resolve_current_document_content(path, source)?;
     let disk = resolve_disk_current_document_content(path, source)?;
-    if canonical != committed_content || disk != expected_disk {
+    if disk != expected_disk && disk != committed_content {
         return Ok(false);
     }
     let committed_hash = agent_doc_hash::content_hash(committed_content);
@@ -1603,7 +1514,24 @@ pub fn settle_retained_committed_projection_through_authority(
         None => return Ok(false),
     };
 
-    atomic_write_if_current_through_authority(path, committed_content, expected_disk, source)?;
+    let mut canonical = try_resolve_current_document_content(path, source)?;
+    if canonical == expected_disk && canonical != committed_content {
+        let Some(relay_write) =
+            apply_canonical_replace_if_attached(path, expected_disk, committed_content, source)?
+        else {
+            return Ok(false);
+        };
+        if !relay_write.delivery_converged {
+            return Ok(false);
+        }
+        canonical = try_resolve_current_document_content(path, source)?;
+    }
+    if canonical != committed_content {
+        return Ok(false);
+    }
+    if !settle_live_editor_projection_through_authority(path, source)? {
+        return Ok(false);
+    }
     let canonical = try_resolve_current_document_content(path, source)?;
     let disk = resolve_disk_current_document_content(path, source)?;
     anyhow::ensure!(
@@ -2247,194 +2175,32 @@ pub fn settle_acknowledged_captured_projection_through_authority(
     Ok(Some(text))
 }
 
-/// Closed-set provenance for the explicit zero-replica repair transaction.
+/// Apply a repair through the same controller-owned reactive projection used by
+/// ordinary writes.
 ///
-/// These values become strings only when crossing an existing logging or
-/// state-event API; repair policy call sites remain exhaustively typed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ZeroReplicaRepairSource {
-    RetainedIntentValidation,
-    CanonicalProjection,
-    ReconnectLineage,
-}
-
-impl ZeroReplicaRepairSource {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::RetainedIntentValidation => "zero_replica_repair_retained_intent",
-            Self::CanonicalProjection => "repair_force_disk_canonical_projection",
-            Self::ReconnectLineage => "repair_force_disk",
-        }
-    }
-}
-
-/// Repair-only zero-replica recovery.
-///
-/// Ordinary editor-owned writes must never fall back to disk when the owner has
-/// no registered relay replica. Explicit repair is different: after the CAS
-/// write has durably retained the exact canonical target, it may project that
-/// same target to disk through the audited force-disk authority. This closes the
-/// recovery transaction instead of leaving clean CRDT authority paired with a
-/// corrupt disk projection that a retry would misclassify as "nothing to do".
+/// Repair is not an authority escape hatch. If no editor replica can receive
+/// the canonical target, the ordinary write retains its exact intent and
+/// returns the typed deferral. It must not project to disk behind the editor or
+/// promote a historical editor buffer into controller canonical state.
 pub fn atomic_repair_write_if_current_through_authority(
     path: &Path,
     content: &str,
     expected_current: &str,
     source: &str,
 ) -> Result<String> {
-    match atomic_write_if_current_through_authority(path, content, expected_current, source) {
-        Ok(()) => {
-            let canonical = try_resolve_current_document_content(path, source)?;
-            let disk = resolve_disk_current_document_content(path, source)?;
-            anyhow::ensure!(
-                canonical == content && disk == content,
-                "{source}: successful repair write for {} did not converge exactly before settling deferred lineage (expected_hash={}, canonical_hash={}, disk_hash={})",
-                path.display(),
-                agent_doc_hash::content_hash(content),
-                agent_doc_hash::content_hash(&canonical),
-                agent_doc_hash::content_hash(&disk),
-            );
-            clear_all_deferred_document_write_intents(path, source)?;
-            return Ok(canonical);
-        }
-        Err(err)
-            if err
-                .downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
-                .is_none() =>
-        {
-            return Err(err);
-        }
-        Err(_) => {}
-    }
-
+    atomic_write_if_current_through_authority(path, content, expected_current, source)?;
     let canonical = try_resolve_current_document_content(path, source)?;
-    let retained_zero_replica_target =
-        pending_document_write_journal(path)
-            .into_iter()
-            .rev()
-            .find(|pending| {
-                matches!(
-                    pending.reason,
-                    DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
-                        | DocumentWriteDeferredReason::ExtendPendingEditorReconnectTarget
-                ) && pending
-                    .target_hash
-                    .eq_ignore_ascii_case(&agent_doc_hash::content_hash(&pending.target_content))
-                    && (pending.target_content == content
-                        || pending.expected_content.as_deref().is_some_and(|expected| {
-                            pending
-                                .expected_hash
-                                .eq_ignore_ascii_case(&agent_doc_hash::content_hash(expected))
-                                && visible_write_content_matches(&canonical, expected)
-                        }))
-            });
-    let retained_target = if canonical == content {
-        canonical
-    } else if let Some(pending) = retained_zero_replica_target {
-        // A zero-recipient ordinary write deliberately leaves the relay
-        // canonical untouched. Explicit repair may still use the journaled
-        // semantic target as its audited force-disk proof when that intent is
-        // content-addressed and based on the exact current canonical.
-        validate_canonical_document_target(
-            path,
-            &pending.target_content,
-            ZeroReplicaRepairSource::RetainedIntentValidation.as_str(),
-        )?;
-        agent_doc_ops_log_io::log_op(
-            path,
-            &format!(
-                "{source}_retained_zero_replica_repair_target file={} intent_id={} target_hash={} authority=durable_intent expected_canonical_exact=true",
-                path.display(),
-                pending.intent_id,
-                pending.target_hash,
-            ),
-        );
-        pending.target_content
-    } else {
-        // The editor may advance between repair composition and the serialized
-        // CRDT apply. `apply_canonical_replace_if_attached` rebases the repair
-        // candidate over that newer operator cut. Prove that the canonical
-        // frontier is exactly that semantic rebase before treating it as the
-        // retained repair target; byte equality with the stale candidate would
-        // reject a valid monotonic merge and strand the closeout.
-        let editor_cut =
-            editor_operator_cut_for_agent_rebase(path, expected_current, &canonical, source);
-        let merged = rebase_agent_candidate_over_editor_cut(expected_current, content, &editor_cut)
-            .with_context(|| {
-                format!(
-                    "{source}: failed to verify the retained repair rebase for {}",
-                    path.display()
-                )
-            })?;
-        let verified = canonicalize_and_validate_agent_rebase(&merged, content, path, source)?;
-        anyhow::ensure!(
-            visible_write_content_matches(&canonical, &verified),
-            "{source}: zero-replica repair target for {} was not retained as the requested semantic rebase (requested_hash={}, verified_hash={}, canonical_hash={}); refusing force-disk projection",
-            path.display(),
-            agent_doc_hash::content_hash(content),
-            agent_doc_hash::content_hash(&verified),
-            agent_doc_hash::content_hash(&canonical),
-        );
-        agent_doc_ops_log_io::log_op(
-            path,
-            &format!(
-                "{source}_retained_rebased_repair_target file={} requested_hash={} canonical_hash={} authority=editor_cut",
-                path.display(),
-                agent_doc_hash::content_hash(content),
-                agent_doc_hash::content_hash(&canonical),
-            ),
-        );
-        canonical
-    };
-    let pre_force_disk = resolve_disk_current_document_content(path, source)?;
-    let reconnect_base = pending_document_write(path)
-        .and_then(|pending| {
-            pending.expected_content.filter(|expected| {
-                agent_doc_hash::content_hash(expected).eq_ignore_ascii_case(&pending.expected_hash)
-            })
-        })
-        .unwrap_or_else(|| pre_force_disk.clone());
-    atomic_write_force_disk_through_authority(path, &retained_target)?;
     let disk = resolve_disk_current_document_content(path, source)?;
     anyhow::ensure!(
-        disk == retained_target,
-        "{source}: zero-replica repair projection for {} did not materialize exactly (expected_hash={}, disk_hash={})",
+        canonical == content && disk == content,
+        "{source}: successful repair write for {} did not converge exactly before settling deferred lineage (expected_hash={}, canonical_hash={}, disk_hash={})",
         path.display(),
-        agent_doc_hash::content_hash(&retained_target),
+        agent_doc_hash::content_hash(content),
+        agent_doc_hash::content_hash(&canonical),
         agent_doc_hash::content_hash(&disk),
     );
-    adopt_verified_editor_text_through_relay_authority(
-        path,
-        &retained_target,
-        ZeroReplicaRepairSource::CanonicalProjection.as_str(),
-    )?;
-    let repaired_canonical = try_resolve_current_document_content(path, source)?;
-    anyhow::ensure!(
-        repaired_canonical == retained_target,
-        "{source}: zero-replica repair projection for {} reached disk but not the protected relay canonical (expected_hash={}, canonical_hash={})",
-        path.display(),
-        agent_doc_hash::content_hash(&retained_target),
-        agent_doc_hash::content_hash(&repaired_canonical),
-    );
     clear_all_deferred_document_write_intents(path, source)?;
-    if reconnect_base != retained_target {
-        ensure_deferred_document_write_intent(
-            path,
-            &reconnect_base,
-            &retained_target,
-            ZeroReplicaRepairSource::ReconnectLineage.as_str(),
-            DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection,
-        )?;
-    }
-    agent_doc_ops_log_io::log_op(
-        path,
-        &format!(
-            "{source}_zero_replica_repair_projected file={} content_hash={} authority=retained_crdt_cas transport=audited_force_disk",
-            path.display(),
-            agent_doc_hash::content_hash(&retained_target),
-        ),
-    );
-    Ok(retained_target)
+    Ok(canonical)
 }
 
 /// Apply a binary/CP-authored document update to the live CRDT relay.
@@ -2469,22 +2235,24 @@ pub fn apply_cp_write_through_relay_authority(
     )
 }
 
-/// Fold text proven visible by an editor receipt into the canonical relay.
+/// Verify that an editor receipt observes the controller-owned canonical text.
 ///
-/// Production requests cross the controller boundary so subsequent canonical
-/// reads and commit barriers observe the update. Unit fixtures that explicitly
-/// opt into a process-local relay retain their isolated model.
+/// Editor visibility is downstream evidence only. It must never replace
+/// canonical state, even when the editor is stale or the relay was rebuilt.
 pub fn adopt_verified_editor_text_through_relay_authority(
     file: &Path,
     text: &str,
     source: &str,
 ) -> Result<Option<bool>> {
-    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
-        return agent_doc_crdt_relay_io::adopt_editor_text_for_file(file, text);
-    }
-    agent_doc_controller_io::project_controller::adopt_editor_text_via_controller_model_for_doc(
-        file, text, source,
-    )
+    let canonical = try_resolve_current_document_content(file, source)?;
+    anyhow::ensure!(
+        canonical == text,
+        "{source}: refusing editor receipt that diverges from controller canonical for {} (canonical_hash={}, editor_hash={}); retained canonical projection remains authoritative",
+        file.display(),
+        agent_doc_hash::content_hash(&canonical),
+        agent_doc_hash::content_hash(text),
+    );
+    Ok(Some(false))
 }
 
 pub fn apply_canonical_replace_if_attached(
@@ -2500,10 +2268,6 @@ pub fn apply_canonical_replace_if_attached(
     let mut deadline = DeadlineCore::new(CRDT_WRITE_CONVERGENCE_TIMEOUT_MS);
     let mut frontier_backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
     let mut delivery_wait_elapsed = std::time::Duration::ZERO;
-    // `#crdtcasraced`: the canonical hash of the last non-converged apply, so the
-    // backoff policy can tell a write that is genuinely advancing from one that
-    // is re-applying against a moving frontier and racing forever.
-    let mut last_applied_hash: Option<String> = None;
     let mut pending_target: Option<String> = None;
     let mut pending_write: Option<agent_doc_crdt_relay_io::CpRelayWrite> = None;
     let mut ack_recovery = AckRecoveryState::default();
@@ -2641,99 +2405,19 @@ pub fn apply_canonical_replace_if_attached(
                         if write_policy::decide_crdt_write_admission(delivery_converged)
                             == write_policy::CrdtWriteAdmission::WaitForDeliveryAck
                         {
-                            // Do not stack a second write behind an unacknowledged
-                            // one. The editor pulls a coalesced canonical frontier;
-                            // this poll applies backpressure until that frontier is
-                            // visible and ACKed.
-                            wait_state = CrdtConvergenceState::DeliveryAckPending;
-                            if ack_recovery.wait_for_delivery_change_charged(
-                                DeliveryChangeWait {
-                                    file,
-                                    source,
-                                    live_editors,
-                                    delivery_version,
-                                    // This frontier was just created by this
-                                    // transaction. Subscribe first so a normal
-                                    // editor ACK can settle it without an
-                                    // unnecessary recovery broadcast.
-                                    signal_immediately: false,
-                                    max_wait_ms: None,
-                                },
-                                &mut delivery_wait_elapsed,
-                            )? == AckRecoveryWait::ForegroundDeadline
-                            {
-                                let relay_write = pending_write
-                                    .take()
-                                    .expect("pending CRDT target must retain its write receipt");
-                                // Socket delivery can win the race before the
-                                // controller-side CAS acquires the relay. The
-                                // resulting no-op receipt is still durably retained
-                                // because the intent was journaled before apply.
-                                let exact_target_retained = exact_target_has_active_retention(
-                                    file,
-                                    &relay_write,
-                                    applied_target,
-                                    &relay_text,
-                                );
-                                let completion = write_policy::decide_crdt_write_completion(
-                                    write_policy::CrdtWriteCompletionEvidence {
-                                        exact_target_retained,
-                                        async_delivery_recovery_active: ack_recovery
-                                            .recovery_signal_observed,
-                                        delivery_converged,
-                                    },
-                                );
-                                match completion {
-                                    write_policy::CrdtWriteCompletion::RetainedForAsyncDelivery => {
-                                        // `#deliveryackcut`: this is the path a
-                                        // stalled replica actually reaches --
-                                        // `async_delivery_recovery_active` flips
-                                        // true on the FIRST AckReplay send, so a
-                                        // registered-but-silent replica lands
-                                        // here, not on BlockMissingRetention.
-                                        // Reconciling only there left the wedge in
-                                        // place for every later operation.
-                                        reconcile_stalled_replicas(file, source)?;
-                                        agent_doc_ops_log_io::log_op(
-                                            file,
-                                            &format!(
-                                                "{source}_crdt_delivery_deferred file={} content_hash={} timeout_ms={} recovery=retained_async_editor_delivery operator_action=none",
-                                                file.display(),
-                                                relay_write.content_hash,
-                                                CRDT_ACK_RECOVERY_TIMEOUT_MS,
-                                            ),
-                                        );
-                                        return Ok(Some(relay_write));
-                                    }
-                                    write_policy::CrdtWriteCompletion::BlockMissingRetention => {
-                                        // `#deliveryackcut`: no retained-delivery
-                                        // proof either, so reconcile here too --
-                                        // this is the path where the cache being
-                                        // wrong is most likely to be why nothing
-                                        // completed.
-                                        // Already failing closed; a reconcile
-                                        // error only adds detail, so log it and
-                                        // keep the caller's original reason.
-                                        if let Err(err) = reconcile_stalled_replicas(file, source) {
-                                            eprintln!(
-                                                "[{source}] warning: replica cache reconcile failed while blocking closeout: {err:#}"
-                                            );
-                                        }
-                                        anyhow::bail!(
-                                            "{source}: editor delivery ACK recovery for {} did not settle within {}ms and the exact canonical target lacks active retained-delivery proof; refusing closeout",
-                                            file.display(),
-                                            CRDT_ACK_RECOVERY_TIMEOUT_MS,
-                                        );
-                                    }
-                                    write_policy::CrdtWriteCompletion::VisibleAndAcknowledged => {
-                                        unreachable!(
-                                            "delivery-converged writes return before ACK recovery"
-                                        );
-                                    }
-                                }
-                            }
-                            continue;
-                        } else if delivery_converged {
+                            let relay_write = pending_write
+                                .take()
+                                .expect("pending CRDT target must retain its write receipt");
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "{source}_crdt_delivery_deferred file={} content_hash={} recovery=retained_async_editor_delivery operator_action=none driver=lazy_projection",
+                                    file.display(),
+                                    relay_write.content_hash,
+                                ),
+                            );
+                            return Ok(Some(relay_write));
+                        } else {
                             // A controller handoff can overlap the editor's application of
                             // the valid CP target. A replacement replica may then publish
                             // one transient, structurally incomplete buffer generation
@@ -2955,45 +2639,28 @@ pub fn apply_canonical_replace_if_attached(
                         }
 
                         if effective_target == relay_text && !delivery_converged {
-                            // The canonical already contains this exact target. A
-                            // prior delivery is still outstanding, so replay its
-                            // wakeup/ACK path without manufacturing another Yrs
-                            // transaction for identical bytes.
+                            // The canonical already contains this exact target.
+                            // Delivery is a keyed lazy projection; return its
+                            // retained receipt without polling or issuing a
+                            // recovery request.
                             reconcile_deferred_write_to_canonical_cut_if_needed(
                                 file,
                                 &effective_target,
                                 source,
                             )?;
-                            wait_state = CrdtConvergenceState::DeliveryAckPending;
-                            if ack_recovery.wait_for_delivery_change_charged(
-                                DeliveryChangeWait {
-                                    file,
-                                    source,
+                            let mut relay_write =
+                                acknowledged_noop_relay_write(&effective_target, live_editors);
+                            relay_write.delivery_converged = false;
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "{source}_crdt_relay_noop_delivery_deferred file={} content_hash={} live_editors={} delivery_converged=false action=retain_existing_delivery_no_reapply driver=lazy_projection",
+                                    file.display(),
+                                    relay_write.content_hash,
                                     live_editors,
-                                    delivery_version,
-                                    signal_immediately: true,
-                                    max_wait_ms: None,
-                                },
-                                &mut delivery_wait_elapsed,
-                            )? == AckRecoveryWait::ForegroundDeadline
-                            {
-                                reconcile_stalled_replicas(file, source)?;
-                                let mut relay_write =
-                                    acknowledged_noop_relay_write(&effective_target, live_editors);
-                                relay_write.delivery_converged = false;
-                                agent_doc_ops_log_io::log_op(
-                                    file,
-                                    &format!(
-                                        "{source}_crdt_relay_noop_delivery_deferred file={} content_hash={} live_editors={} delivery_converged=false action=await_existing_delivery_no_reapply timeout_ms={}",
-                                        file.display(),
-                                        relay_write.content_hash,
-                                        live_editors,
-                                        CRDT_ACK_RECOVERY_TIMEOUT_MS,
-                                    ),
-                                );
-                                return Ok(Some(relay_write));
-                            }
-                            continue;
+                                ),
+                            );
+                            return Ok(Some(relay_write));
                         }
 
                         if delivery_converged
@@ -3084,20 +2751,15 @@ pub fn apply_canonical_replace_if_attached(
                                 return Ok(Some(relay_write));
                             }
                             Ok(Some(relay_write)) => {
-                                wait_state = CrdtConvergenceState::DeliveryAckPending;
-                                pending_target = Some(effective_target);
-                                // `#crdtcasraced`: an apply is only progress if it
-                                // actually moved the canonical content. Resetting the
-                                // floor on every apply kept a contended write pinned at
-                                // 25ms for the whole 60s budget (~2400 merge+CAS
-                                // attempts, each worsening the contention it retried).
-                                let advanced = last_applied_hash.as_deref()
-                                    != Some(relay_write.content_hash.as_str());
-                                last_applied_hash = Some(relay_write.content_hash.clone());
-                                frontier_backoff_ms = CRDT_WRITE_BACKOFF_POLICY
-                                    .next_ms(frontier_backoff_ms, advanced);
-                                pending_write = Some(relay_write);
-                                ack_recovery.reset();
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_crdt_delivery_deferred file={} content_hash={} recovery=retained_async_editor_delivery operator_action=none driver=lazy_projection",
+                                        file.display(),
+                                        relay_write.content_hash,
+                                    ),
+                                );
+                                return Ok(Some(relay_write));
                             }
                             Err(err) => {
                                 let detail = format!("{err:#}");
@@ -3186,18 +2848,6 @@ fn acknowledged_noop_relay_write(
         live_editors,
         delivery_converged: true,
     }
-}
-
-fn exact_target_has_active_retention(
-    file: &Path,
-    relay_write: &agent_doc_crdt_relay_io::CpRelayWrite,
-    applied_target: &str,
-    relay_text: &str,
-) -> bool {
-    relay_text == applied_target
-        && relay_write.content_hash == agent_doc_hash::content_hash(applied_target)
-        && (relay_write.applied
-            || pending_document_write_for_target(file, &relay_write.content_hash).is_some())
 }
 
 pub fn reconcile_deferred_write_to_canonical_cut_if_needed(
@@ -5421,12 +5071,30 @@ pub fn guard_visible_write_current_transition_with_budget(
 /// retain such a write, but secondary compact/closeout effects must not run
 /// behind it.
 pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<()> {
-    guard_visible_write_current_transition_with_policy(
-        file,
-        source,
-        CRDT_ACK_RECOVERY_TIMEOUT_MS,
-        false,
-    )
+    match query_live_editor_authority(file, source)? {
+        agent_doc_crdt_relay_io::CurrentText::Detached
+        | agent_doc_crdt_relay_io::CurrentText::Current {
+            delivery_converged: true,
+            ..
+        } => Ok(()),
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            delivery_version,
+            live_editors,
+            ..
+        } => defer_visible_delivery_ack(file, source, delivery_version, live_editors),
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            Err(await_editor_replica_no_disk_write(format!(
+                "visible document write for {} is retained by the lazy delivery projection; the attached editor replica is not registered, so no snapshot or commit effect is eligible",
+                file.display(),
+            )))
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            Err(await_editor_replica_no_disk_write(format!(
+                "visible document write for {} is retained by the lazy delivery projection while editor synchronization is pending; no snapshot or commit effect is eligible",
+                file.display(),
+            )))
+        }
+    }
 }
 
 fn defer_visible_delivery_ack(
@@ -5435,22 +5103,19 @@ fn defer_visible_delivery_ack(
     delivery_version: u64,
     live_editors: usize,
 ) -> Result<()> {
-    reconcile_stalled_replicas(file, source)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "visible_write_delivery_ack_deferred file={} source={} delivery_version={} live_editors={} timeout_ms={} recovery=bounded_ack_replay_force_refresh_and_build_upgrade",
+            "visible_write_delivery_ack_deferred file={} source={} delivery_version={} live_editors={} recovery=lazy_projection_pending operator_action=none",
             file.display(),
             source,
             delivery_version,
             live_editors,
-            CRDT_ACK_RECOVERY_TIMEOUT_MS,
         ),
     );
     Err(await_editor_replica_no_disk_write(format!(
-        "visible document write for {} deferred: editor delivery remained unacknowledged after the {}ms recovery barrier; the exact write remains retained, no secondary snapshot/commit or forced disk write was attempted. ACK replay, force-refresh, and build-skew recovery were requested automatically; if the editor listener cannot hot-reload, reload the IDE host and retry the existing operation",
+        "visible document write for {} is retained by the lazy delivery projection because editor delivery is not yet acknowledged; no secondary snapshot/commit or forced disk write was attempted",
         file.display(),
-        CRDT_ACK_RECOVERY_TIMEOUT_MS,
     )))
 }
 
@@ -6439,7 +6104,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
     for attempt in 1..=attempts {
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
             file,
-            agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
             0,
         ) {
             Ok(()) => "requested".to_string(),
@@ -8465,6 +8130,7 @@ mod tests {
                             identity,
                             &update.patch_id,
                             update.generation,
+                            Some(&update.expected_content_hash),
                         )
                         .expect("ACK CRDT delivery"),
                         Some(true),
@@ -8495,7 +8161,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_replace_waits_for_visible_replica_ack() {
+    fn canonical_replace_returns_retained_then_ack_converges_projection() {
         let baseline = "# Session\n\nbody\n";
         let target = "# Session\n\nbody\n\n### Re: settled\n\nDone.\n";
         let (dir, file, _canonical) = temp_doc(baseline);
@@ -8512,7 +8178,19 @@ mod tests {
                 .expect("attached CRDT write");
         ack.join().unwrap();
 
-        assert!(write.delivery_converged);
+        assert!(
+            !write.delivery_converged,
+            "the foreground call returns the retained projection without polling"
+        );
+        let current = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
+        assert!(matches!(
+            current,
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                ref text,
+                delivery_converged: true,
+                ..
+            } if text == target
+        ));
         assert_eq!(write.content_hash, agent_doc_hash::content_hash(target));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
         assert_eq!(
@@ -8532,12 +8210,12 @@ mod tests {
         assert!(
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
                 .unwrap()
-                .contains("transport=crdt_only")
+                .contains("driver=lazy_projection")
         );
     }
 
     #[test]
-    fn compact_exchange_coalesces_prior_ack_backpressure_without_secondary_recovery() {
+    fn compact_exchange_retains_once_while_cumulative_ack_settles_async() {
         // Regression for the live JB failure: a response was already visible in
         // the editor but its ACK was lost, so Compact Exchange sat behind
         // `prior_delivery_ack_pending` for a full minute. The next target is safe
@@ -8579,14 +8257,26 @@ mod tests {
             started.elapsed() >= std::time::Duration::from_millis(800),
             "fixture must exercise a delayed prior delivery ACK"
         );
-        assert!(write.delivery_converged);
+        assert!(
+            !write.delivery_converged,
+            "compact returns the retained target instead of polling the delayed ACK"
+        );
         assert_eq!(write.content_hash, agent_doc_hash::content_hash(compacted));
+        let current = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
+        assert!(matches!(
+            current,
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                ref text,
+                delivery_converged: true,
+                ..
+            } if text == compacted
+        ));
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("compact_crdt_convergence_wait")
-                && log.contains("compact_crdt_relay_acknowledged")
+            log.contains("compact_crdt_delivery_deferred")
+                && log.contains("driver=lazy_projection")
                 && !log.contains("compact_crdt_ack_recovery_signal"),
-            "compact should converge the retained target through the cumulative Lazily ACK:\n{log}"
+            "compact should retain once and let the cumulative Lazily ACK settle asynchronously:\n{log}"
         );
         let current_text_observations = log
             .lines()
@@ -8617,8 +8307,8 @@ mod tests {
 
         assert!(!write.delivery_converged);
         assert!(
-            started.elapsed() >= std::time::Duration::from_millis(CRDT_ACK_RECOVERY_TIMEOUT_MS),
-            "the fixture must cross the foreground ACK deadline"
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "retaining the lazy delivery projection must not wait through a foreground ACK deadline"
         );
         let current = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
         assert!(matches!(
@@ -8633,11 +8323,22 @@ mod tests {
                 && log.contains("operator_action=none"),
             "compact must report retained asynchronous recovery as success:\n{log}"
         );
+        assert!(
+            !log.contains("compact_crdt_ack_recovery_signal")
+                && !log.contains("ack_replay")
+                && !log.contains("force_refresh"),
+            "retained delivery must not issue imperative recovery requests:\n{log}"
+        );
         assert!(!log.contains("did not settle within"), "{log}");
 
+        let barrier_started = std::time::Instant::now();
         let barrier_error =
             guard_visible_delivery_convergence(&file, "compact_secondary_effect_test")
                 .expect_err("secondary effects must stop behind the retained unACKed target");
+        assert!(
+            barrier_started.elapsed() < std::time::Duration::from_millis(500),
+            "the settlement observation must return pending without polling"
+        );
         assert!(
             barrier_error
                 .downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
@@ -8663,7 +8364,7 @@ mod tests {
     /// re-register. It must NOT be dropped, and the canonical must stay
     /// serveable, because the retained target IS the canonical.
     #[test]
-    fn a_stalled_ack_reconciles_the_replica_cache_against_process_liveness() {
+    fn a_stalled_ack_keeps_the_retained_projection_without_recovery_request() {
         let baseline = "# Session\n\nseed\n";
         let compacted = "# Session\n\nseed\n\n## Exchange\n\n*Compacted.*\n";
         let (dir, file, _canonical) = temp_doc(baseline);
@@ -8679,17 +8380,11 @@ mod tests {
         assert!(!write.delivery_converged, "the fixture never ACKs");
 
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("compact_crdt_delivery_deferred"));
+        assert!(log.contains("driver=lazy_projection"));
         assert!(
-            log.contains("crdt_replica_cache_reconciled"),
-            "a stalled ACK must reconcile the replica cache:\n{log}"
-        );
-        assert!(
-            log.contains("removed_dead=[]"),
-            "a live editor process must NOT be dropped from the cache:\n{log}"
-        );
-        assert!(
-            !log.contains("live_unacked=[]"),
-            "the non-ACKing live replica must be reported for refill:\n{log}"
+            !log.contains("crdt_replica_cache_reconciled"),
+            "the foreground call must not launch ACK recovery:\n{log}"
         );
 
         // The canonical stays serveable: the retained target IS the canonical.
@@ -8739,7 +8434,18 @@ mod tests {
             other => panic!("expected current CRDT text, got {other:?}"),
         };
 
-        assert!(write.delivery_converged);
+        assert!(
+            !write.delivery_converged,
+            "the foreground call returns before the editor receipt"
+        );
+        let delivery = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
+        assert!(matches!(
+            delivery,
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                delivery_converged: true,
+                ..
+            }
+        ));
         assert!(current.contains("- operator edit"));
         assert_eq!(current.matches("### Re: agent").count(), 1);
         assert_eq!(current.matches("Applied once.").count(), 1);
@@ -8760,8 +8466,17 @@ mod tests {
             .expect("editor replica should attach");
         let ack = ack_next_crdt_delivery(file.clone(), identity);
 
-        atomic_write_through_authority(&file, target).unwrap();
+        let err = atomic_write_through_authority(&file, target).unwrap_err();
+        assert!(err.to_string().contains("remains retained"));
         ack.join().unwrap();
+        assert!(
+            settle_retained_non_capture_projection_through_authority(
+                &file,
+                "serialized_atomic_write_after_projection_ack_test",
+            )
+            .unwrap(),
+            "the asynchronous exact projection receipt should settle the retained write",
+        );
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
         let current = match agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap() {
@@ -8781,12 +8496,11 @@ mod tests {
             "native disk-save proof must retire the matching write intent",
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("transport=crdt_editor_native_save"));
-        assert!(log.contains("disk_rewritten=false"));
+        assert!(log.contains("retained_non_capture_projection_settled"));
     }
 
     #[test]
-    fn cas_atomic_write_submits_the_captured_target_once() {
+    fn cas_atomic_write_retains_the_captured_target_after_one_submit() {
         let baseline = "# Session\n\nbody\n";
         let target = "# Session\n\nbody\n\n### Re: once\n\nApplied once.\n";
         let (dir, file, _canonical) = temp_doc(baseline);
@@ -8797,8 +8511,10 @@ mod tests {
             .expect("editor replica should attach");
         let ack = ack_next_crdt_delivery(file.clone(), identity);
 
-        atomic_write_if_current_through_authority(&file, target, baseline, "cas_single_submit")
-            .unwrap();
+        let error =
+            atomic_write_if_current_through_authority(&file, target, baseline, "cas_single_submit")
+                .expect_err("the foreground boundary should retain until editor settlement");
+        assert!(error.to_string().contains("remains retained"));
         ack.join().unwrap();
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
@@ -8840,22 +8556,41 @@ mod tests {
             .unwrap()
             .expect("editor replica should attach");
 
-        install_post_delivery_proof_hook(file.clone(), move |hook_file| {
-            agent_doc_crdt_relay_io::with_hub(hook_file, |hub| {
-                let current = hub.canonical_text();
-                let operator = current.replace(
-                    "- existing queue\n",
-                    "- existing queue\n- operator typed after delivery proof\n",
-                );
-                hub.apply_local(client_id, 0, current.chars().count() as u32, &operator)
-                    .unwrap();
-            })
-            .unwrap();
-        });
-        let ack = ack_crdt_deliveries(file.clone(), identity, 2, std::time::Duration::ZERO);
-
-        atomic_write_through_authority(&file, &target).unwrap();
+        let ack = ack_next_crdt_delivery(file.clone(), identity);
+        let err = atomic_write_through_authority(&file, &target).unwrap_err();
+        assert!(err.to_string().contains("remains retained"));
         ack.join().unwrap();
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            let current = hub.canonical_text();
+            let operator = current.replace(
+                "- existing queue\n",
+                "- existing queue\n- operator typed after delivery proof\n",
+            );
+            hub.apply_local(client_id, 0, current.chars().count() as u32, &operator)
+                .unwrap();
+        })
+        .unwrap();
+        assert!(
+            !settle_retained_non_capture_projection_through_authority(
+                &file,
+                "serialized_atomic_write_post_receipt_operator_advance_test",
+            )
+            .unwrap(),
+            "an unsaved post-receipt operator delta must remain pending",
+        );
+        let operator_cut = match agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap() {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+            other => panic!("expected current CRDT text, got {other:?}"),
+        };
+        std::fs::write(&file, &operator_cut).expect("simulate the operator's native save");
+        assert!(
+            settle_retained_non_capture_projection_through_authority(
+                &file,
+                "serialized_atomic_write_post_receipt_operator_save_test",
+            )
+            .unwrap(),
+            "the exact native-save projection should settle without resubmitting the response",
+        );
 
         let disk = std::fs::read_to_string(&file).unwrap();
         assert_eq!(disk.matches("### Re: Haiven load test").count(), 1);
@@ -8873,9 +8608,8 @@ mod tests {
         assert_eq!(canonical.matches("### Re: Haiven load test").count(), 1);
         assert_eq!(canonical.matches("#haivensharreg").count(), 1);
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("serialized_atomic_write_post_proof_rebase"));
-        assert!(log.contains("action=rebase_same_intent"));
-        assert!(log.contains("post_proof_rebases=1"));
+        assert!(log.contains("retained_non_capture_response_projection_settled"));
+        assert!(!log.contains("action=rebase_same_intent"));
     }
 
     #[test]
@@ -9289,31 +9023,6 @@ mod tests {
     }
 
     #[test]
-    fn no_op_race_receipt_uses_the_preapply_durable_intent_as_retention_proof() {
-        let baseline = "# Session\n\nBefore.\n";
-        let target = "# Session\n\nBefore.\n\nAfter.\n";
-        let (_dir, file, _canonical) = temp_doc(baseline);
-        ensure_deferred_document_write_intent(
-            &file,
-            baseline,
-            target,
-            "no_op_race_retention_test",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
-        )
-        .unwrap();
-        let mut receipt = acknowledged_noop_relay_write(target, 1);
-        receipt.delivery_converged = false;
-
-        assert!(!receipt.applied);
-        assert!(exact_target_has_active_retention(
-            &file, &receipt, target, target
-        ));
-        assert!(!exact_target_has_active_retention(
-            &file, &receipt, target, baseline
-        ));
-    }
-
-    #[test]
     fn retained_response_rebase_exhausts_editor_cut_interleavings() {
         let baseline = concat!(
             "<!-- agent:exchange -->\n",
@@ -9423,10 +9132,9 @@ mod tests {
     }
 
     #[test]
-    fn repair_cas_projects_retained_target_when_editor_owner_has_zero_replicas() {
+    fn repair_cas_retains_target_when_editor_owner_has_zero_replicas() {
         let baseline = "# Session\n\nfragmented response\n<!-- agent:boundary:old --><!-- agent:boundary:old -->\n";
         let first_target = "# Session\n\ncomplete response\n<!-- no-pending-capture -->\n<!-- agent:boundary:old -->\n";
-        let final_target = "# Session\n\ncomplete response\n<!-- agent:boundary:new -->\n";
         let (_dir, file, _canonical) = temp_doc(baseline);
         let identity = "test-repair-zero-replica-projection";
         seed_reliable_sync_open(&file, identity);
@@ -9435,25 +9143,23 @@ mod tests {
             .expect("editor replica should attach");
         agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
 
-        atomic_repair_write_if_current_through_authority(
+        let err = atomic_repair_write_if_current_through_authority(
             &file,
             first_target,
             baseline,
             "repair_zero_replica_test",
         )
-        .unwrap();
-        atomic_repair_write_if_current_through_authority(
-            &file,
-            final_target,
-            first_target,
-            "repair_zero_replica_final_normalization_test",
-        )
-        .unwrap();
-
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), final_target);
+        .unwrap_err();
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "repair must retain the same typed no-disk deferral as an ordinary write: {err:#}",
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
         assert_eq!(
             try_resolve_current_document_content(&file, "repair_zero_replica_verify").unwrap(),
-            final_target,
+            baseline,
+            "repair must not promote its retained target without a controller projection receipt",
         );
         let projection =
             agent_doc_controller_io::project_controller::load_state_backbone_projection(
@@ -9464,55 +9170,33 @@ mod tests {
         let pending = projection
             .document(&document_hash)
             .and_then(|document| document.document.pending_write.as_ref())
-            .expect("force-disk repair must preserve editor reconnect lineage");
-        assert_eq!(pending.target_content, final_target);
+            .expect("reactive repair must preserve editor reconnect lineage");
+        assert_eq!(pending.target_content, first_target);
         assert_eq!(
             pending.reason,
-            DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection
+            DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
         );
-        let external = projection
-            .document(&document_hash)
-            .and_then(|document| document.document.pending_external_disk.as_ref())
-            .expect("zero-replica disk projection must remain a separate editor decision");
-        assert_eq!(external.target_content, final_target);
+        assert!(
+            projection
+                .document(&document_hash)
+                .and_then(|document| document.document.pending_external_disk.as_ref())
+                .is_none()
+        );
         assert_eq!(
             deferred_document_write_reconnect_content(&file, baseline)
                 .unwrap()
                 .as_deref(),
-            None,
-            "a stale editor cut must remain mutation-free while the disk projection is pending",
-        );
-        assert_eq!(
-            deferred_document_write_reconnect_content(&file, final_target)
-                .unwrap()
-                .as_deref(),
-            Some(final_target),
-            "the editor-visible accepted target may propagate exactly",
+            Some(first_target),
+            "the retained controller target should be delivered lazily on reconnect",
         );
         assert!(
-            clear_pending_external_disk_decision_after_editor_propagation(
-                &file,
-                final_target,
-                "repair_zero_replica_editor_propagated_test",
-            )
-            .unwrap()
-        );
-        assert!(pending_external_disk_candidate(&file).is_none());
-
-        clear_deferred_document_write_intent(
-            &file,
-            &agent_doc_hash::content_hash(final_target),
-            "repair_zero_replica_delivery_ack_test",
-        )
-        .unwrap();
-        assert!(
-            pending_document_write(&file).is_none(),
-            "settling the final reconnect target must not uncover an older intermediate repair"
+            pending_document_write(&file).is_some(),
+            "a reconnect read alone is not an exact controller projection receipt",
         );
     }
 
     #[test]
-    fn zero_replica_repair_projects_semantic_rebase_over_newer_operator_cut() {
+    fn deferred_repair_never_force_projects_over_newer_operator_cut() {
         let editor_base = concat!(
             "<!-- agent:exchange -->\n",
             "❯ Original prompt.\n",
@@ -9567,28 +9251,43 @@ mod tests {
             }
         });
 
-        let materialized = atomic_repair_write_if_current_through_authority(
+        let err = atomic_repair_write_if_current_through_authority(
             &file,
             &response_target,
             editor_base,
             "repair_zero_replica_semantic_rebase_test",
         )
-        .unwrap();
+        .unwrap_err();
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "a raced repair must stay retained until its controller projection is acknowledged: {err:#}",
+        );
         race.join().unwrap();
 
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), materialized);
-        assert!(materialized.contains("Prompt typed during repair."));
-        assert!(!materialized.contains("#deleted"));
         assert_eq!(
-            materialized
+            std::fs::read_to_string(&file).unwrap(),
+            editor_base,
+            "repair must not force-project either the retained target or the newer editor cut",
+        );
+        let canonical = try_resolve_current_document_content(
+            &file,
+            "deferred_repair_newer_operator_cut_verify",
+        )
+        .unwrap();
+        assert_eq!(canonical, operator_cut);
+        assert!(canonical.contains("Prompt typed during repair."));
+        assert!(!canonical.contains("#deleted"));
+        assert_eq!(
+            canonical
                 .matches("### Re: Original prompt. — gpt-5")
                 .count(),
             1
         );
-        assert_eq!(materialized.matches("agent:boundary:").count(), 1);
+        assert_eq!(canonical.matches("agent:boundary:").count(), 1);
         let pending = pending_document_write(&file)
-            .expect("rebased repair target must remain available for editor reconnect");
-        assert_eq!(pending.target_content, materialized);
+            .expect("unacknowledged controller target must remain available for exact replay");
+        assert_eq!(pending.target_content, response_target);
     }
 
     #[test]
@@ -10190,41 +9889,21 @@ mod tests {
         assert_eq!(pending.expected_content.as_deref(), Some(editor_base));
         assert_eq!(pending.target_content, committed);
 
-        let (replacement_id, replacement_bootstrap) =
-            test_support_register_replica_for_file(&file, identity)
-                .unwrap()
-                .expect("replacement editor replica should register before deferred replay");
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("replacement editor replica should register before deferred replay");
         let replayed = deferred_document_write_reconnect_content(&file, editor_base)
             .unwrap()
             .expect("replacement editor should receive the retained committed projection");
         assert_eq!(replayed, committed);
-        let replacement_replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
-            replacement_id,
-            &replacement_bootstrap,
-        )
-        .unwrap();
-        let replacement_text = replacement_replica.text();
-        replacement_replica.apply_local_edit(0, replacement_text.len() as u32, &replayed);
-        agent_doc_crdt_relay_io::relay_replica_update_for_file(
-            &file,
-            identity,
-            &replacement_replica.encode_state(),
-        )
-        .unwrap()
-        .expect("editor replay should publish the retained committed projection");
-        let relay_current =
-            agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file).unwrap();
-        let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } = relay_current else {
-            panic!("replacement replica should expose current relay text: {relay_current:?}");
-        };
-        assert_eq!(text, committed);
         assert_eq!(
             try_resolve_current_document_content(
                 &file,
                 "retained_committed_projection_post_register_verify",
             )
             .unwrap(),
-            committed,
+            editor_base,
+            "the editor must not publish the reconnect target upstream before controller delivery",
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), editor_base);
         let pending =
@@ -10233,16 +9912,26 @@ mod tests {
         assert_eq!(pending.target_content, committed);
         let ack = ack_next_crdt_delivery(file.clone(), identity);
         assert!(
-            settle_retained_committed_projection_through_authority(
+            !settle_retained_committed_projection_through_authority(
                 &file,
                 committed,
                 editor_base,
                 "retained_committed_projection_reattach_test",
             )
             .unwrap(),
-            "matching retained committed lineage should resume after replica reattach"
+            "a matching retained lineage stays pending until the editor projection receipt arrives"
         );
         ack.join().unwrap();
+        assert!(
+            settle_retained_committed_projection_through_authority(
+                &file,
+                committed,
+                editor_base,
+                "retained_committed_projection_after_ack_test",
+            )
+            .unwrap(),
+            "the exact asynchronous receipt should settle matching committed lineage",
+        );
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), committed);
         assert_eq!(
@@ -10505,15 +10194,24 @@ mod tests {
 
         let ack = ack_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
         assert!(
-            settle_retained_captured_projection_through_authority(
+            !settle_retained_captured_projection_through_authority(
                 &file,
                 captured_response,
                 "retained_capture_missing_response_replay_test",
             )
             .unwrap(),
-            "the binary should replay, ACK, project, and settle the missing response cell"
+            "foreground recovery should retain while the lazy controller projection is unacknowledged"
         );
         ack.join().unwrap();
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_missing_response_after_projection_ack_test",
+            )
+            .unwrap(),
+            "the exact asynchronous projection receipt should release the retained capture",
+        );
         assert_eq!(
             try_resolve_current_document_content(
                 &file,
@@ -10572,15 +10270,24 @@ mod tests {
 
         let ack = ack_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
         assert!(
-            settle_retained_captured_projection_through_authority(
+            !settle_retained_captured_projection_through_authority(
                 &file,
                 captured_response,
                 "retained_capture_prior_cycle_reconnect_target_test",
             )
             .unwrap(),
-            "the newer durable capture should supersede the stale prior-cycle reconnect target"
+            "the newer durable capture remains retained until its lazy projection is acknowledged"
         );
         ack.join().unwrap();
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_prior_cycle_after_ack_test",
+            )
+            .unwrap(),
+            "the exact receipt should supersede stale prior-cycle reconnect lineage",
+        );
         assert_eq!(
             try_resolve_current_document_content(
                 &file,
@@ -10794,13 +10501,25 @@ mod tests {
             .expect("simulate the operator saving the newer editor cut");
 
         let ack = ack_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
-        let settled_synchronously = settle_retained_captured_projection_through_authority(
-            &file,
-            captured_response,
-            "retained_capture_operator_save_rebase_test",
-        )
-        .unwrap();
+        assert!(
+            !settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_operator_save_rebase_test",
+            )
+            .unwrap(),
+            "the foreground repair must not wait for or synthesize an editor projection receipt",
+        );
         ack.join().unwrap();
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_operator_save_after_projection_ack_test",
+            )
+            .unwrap(),
+            "the exact asynchronous projection receipt should settle the same retained capture",
+        );
 
         let rebased = try_resolve_current_document_content(
             &file,
@@ -10809,19 +10528,6 @@ mod tests {
         .unwrap();
         assert!(rebased.contains("operator item saved before recovery"));
         assert_eq!(rebased.matches("Fixed the retained closeout.").count(), 1);
-        if !settled_synchronously {
-            assert_eq!(std::fs::read_to_string(&file).unwrap(), operator_saved_cut);
-            std::fs::write(&file, &rebased).expect("simulate the requested native editor save");
-            assert!(
-                settle_retained_captured_projection_through_authority(
-                    &file,
-                    captured_response,
-                    "retained_capture_operator_save_after_native_save_test",
-                )
-                .unwrap(),
-                "the binary should settle the same retained capture without preflight repair"
-            );
-        }
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), rebased);
     }
@@ -11316,7 +11022,7 @@ mod tests {
     }
 
     #[test]
-    fn live_editor_projection_recovers_historical_ack_without_retained_intent() {
+    fn live_editor_projection_refuses_historical_divergence_without_retained_intent() {
         let baseline = "# Session\n\n<!-- agent:queue -->\nold\n<!-- /agent:queue -->\n";
         let editor_target =
             "# Session\n\n<!-- agent:queue -->\noperator cut\n<!-- /agent:queue -->\n";
@@ -11347,21 +11053,6 @@ mod tests {
             .unwrap()
             .expect("replacement editor should receive the retained target after registration");
         assert_eq!(replayed, editor_target);
-        adopt_verified_editor_text_through_relay_authority(
-            &file,
-            &replayed,
-            "live_editor_projection_historical_ack_post_register",
-        )
-        .unwrap()
-        .expect("editor replay should publish the retained target");
-        assert_eq!(
-            try_resolve_current_document_content(
-                &file,
-                "live_editor_projection_historical_ack_current",
-            )
-            .unwrap(),
-            editor_target,
-        );
 
         clear_deferred_document_write_intent(
             &file,
@@ -11370,28 +11061,44 @@ mod tests {
         )
         .unwrap();
         assert!(pending_document_write(&file).is_none());
+
+        let err = adopt_verified_editor_text_through_relay_authority(
+            &file,
+            &replayed,
+            "live_editor_projection_historical_ack_post_register",
+        )
+        .unwrap_err();
         assert!(
-            !settle_live_editor_projection_through_authority(
+            err.to_string()
+                .contains("refusing editor receipt that diverges from controller canonical"),
+            "a recycled editor must not promote a historical whole-buffer projection: {err:#}",
+        );
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "live_editor_projection_historical_ack_current",
+            )
+            .unwrap(),
+            baseline,
+            "the controller canonical must survive a recycled editor's stale projection",
+        );
+        assert!(
+            settle_live_editor_projection_through_authority(
                 &file,
                 "live_editor_projection_before_native_save_test",
             )
             .unwrap(),
-            "requesting a native save is not itself disk proof",
+            "the unchanged controller projection is already exact on disk",
         );
         assert!(
             !dir.path().join(".agent-doc/patches").exists(),
-            "historical ACK recovery must retain a typed save intent without file IPC",
+            "a historical editor receipt must not emit file IPC",
         );
-
-        std::fs::write(&file, editor_target).expect("simulate the editor's native save");
-        assert!(
-            settle_live_editor_projection_through_authority(
-                &file,
-                "live_editor_projection_after_native_save_test",
-            )
-            .unwrap(),
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            baseline,
+            "the stale editor projection must not delete canonical queue content",
         );
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), editor_target);
         assert!(pending_document_write(&file).is_none());
     }
 
@@ -11630,35 +11337,40 @@ mod tests {
     }
 
     #[test]
-    fn committed_transient_split_without_retained_lineage_settles_after_upgrade() {
+    fn committed_transient_split_without_retained_lineage_retains_until_ack() {
         let stale_disk = "# Session\n\ncomplete response\n<!-- agent:boundary:old -->\n";
         let committed = "# Session\n\ncomplete response\n<!-- agent:boundary:new -->\n";
         let (_dir, file, _canonical) = temp_doc(stale_disk);
         let identity = "test-historical-committed-transient-split";
         seed_reliable_sync_open(&file, identity);
-        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+        test_support_register_replica_for_file(&file, identity)
             .unwrap()
             .expect("editor replica should attach");
-        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
-            hub.apply_local(client_id, 0, stale_disk.chars().count() as u32, committed)
-                .unwrap();
-        })
-        .unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), stale_disk);
         assert!(pending_document_write(&file).is_none());
 
         let ack = ack_next_crdt_delivery(file.clone(), identity);
         assert!(
-            settle_retained_committed_projection_through_authority(
+            !settle_retained_committed_projection_through_authority(
                 &file,
                 committed,
                 stale_disk,
                 "historical_committed_transient_split_test",
             )
             .unwrap(),
-            "a historical authority/disk split that differs only by transient markers should settle without repair",
+            "the historical committed target stays pending until its controller projection receipt",
         );
         ack.join().unwrap();
+        assert!(
+            settle_retained_committed_projection_through_authority(
+                &file,
+                committed,
+                stale_disk,
+                "historical_committed_transient_split_after_ack_test",
+            )
+            .unwrap(),
+            "the exact asynchronous receipt should settle the historical transient split",
+        );
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), committed);
         assert_eq!(

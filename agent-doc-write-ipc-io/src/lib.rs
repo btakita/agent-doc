@@ -342,6 +342,22 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> BoundaryRepositionAttempt {
                 eprintln!("[commit] CRDT boundary refresh materialized");
                 return BoundaryRepositionAttempt::Delivered;
             }
+            Err(err)
+                if err
+                    .downcast_ref::<agent_doc_document_realtime_io::AwaitEditorReplicaNoDiskWrite>()
+                    .is_some() =>
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "post_commit_reposition_retained file={} content_hash={} driver=lazy_projection recovery=exact_editor_receipt",
+                        file.display(),
+                        agent_doc_hash::content_hash(&target),
+                    ),
+                );
+                eprintln!("[commit] CRDT boundary refresh retained pending exact editor receipt");
+                return BoundaryRepositionAttempt::RetainedForRetry;
+            }
             Err(err) => {
                 eprintln!(
                     "[commit] authority/disk boundary refresh failed (falling back to IPC): {err}"
@@ -730,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn post_commit_reposition_materializes_acknowledged_crdt_target_to_disk() {
+    fn post_commit_reposition_retains_or_materializes_exact_crdt_target() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
@@ -757,12 +773,20 @@ mod tests {
 
         let target = post_commit_reposition_target(working, Some("committed-id"), &[])
             .expect("boundary before the response must move to the exchange tail");
-        assert_eq!(
-            try_ipc_reposition_boundary(&doc),
-            BoundaryRepositionAttempt::Delivered,
+        let attempt = try_ipc_reposition_boundary(&doc);
+        assert!(
+            matches!(
+                attempt,
+                BoundaryRepositionAttempt::Delivered | BoundaryRepositionAttempt::RetainedForRetry
+            ),
+            "controller delivery must never fall back to unavailable IPC: {attempt:?}",
         );
 
-        assert_eq!(fs::read_to_string(&doc).unwrap(), target);
+        let disk = fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk == working || disk == target,
+            "disk may trail the retained controller projection or contain the exact native save",
+        );
         assert_eq!(
             agent_doc_document_realtime_io::try_resolve_current_document_content(
                 &doc,
@@ -771,5 +795,11 @@ mod tests {
             .unwrap(),
             target,
         );
+        if disk == working {
+            assert!(
+                agent_doc_document_realtime_io::pending_document_write(&doc).is_some(),
+                "a trailing disk projection must retain the exact target",
+            );
+        }
     }
 }

@@ -81,11 +81,10 @@ mod pane_layout_projection_model {
 
 /// `#jbcoldstartcrdtowner` reference model. Pane focus/layout sync is an
 /// independent fast lane while a replacement controller fences a retained
-/// editor lineage, requests full state, and waits for exact target convergence.
+/// editor lineage and lazily reprojects the retained canonical target.
 mod cold_start_crdt_authority_model {
     use agent_doc_crdt_relay_io::{
-        ColdStartReplicaUpdateDecision, cold_start_registration_requires_authoritative_full_state,
-        decide_cold_start_replica_update,
+        ColdStartReplicaUpdateDecision, decide_cold_start_replica_update,
     };
 
     const OBSERVED_PANE_SYNC_MS: u64 = 1_063;
@@ -93,7 +92,6 @@ mod cold_start_crdt_authority_model {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Projection {
-        DiskSeed,
         DoubledRetained,
         Target,
     }
@@ -103,30 +101,25 @@ mod cold_start_crdt_authority_model {
         Restart,
         RetainedRegistration,
         RetainedIncrementalUpdate,
-        FullState { target_hash_matches: bool },
+        CanonicalProjection,
         PaneSync,
     }
 
-    const ACTIONS: [Action; 6] = [
+    const ACTIONS: [Action; 5] = [
         Action::Restart,
         Action::RetainedRegistration,
         Action::RetainedIncrementalUpdate,
-        Action::FullState {
-            target_hash_matches: false,
-        },
-        Action::FullState {
-            target_hash_matches: true,
-        },
+        Action::CanonicalProjection,
         Action::PaneSync,
     ];
 
     #[derive(Clone)]
     struct World {
         registered: bool,
-        awaiting_authoritative_full_state: bool,
+        canonical_projection_pending: bool,
         authority: Projection,
         retained_editor: Projection,
-        full_state_requests: usize,
+        stale_updates_quarantined: usize,
         semantic_recovery_successes: usize,
         pane_sync_ms: Option<u64>,
         disk_fallbacks: usize,
@@ -137,10 +130,10 @@ mod cold_start_crdt_authority_model {
         fn default() -> Self {
             Self {
                 registered: true,
-                awaiting_authoritative_full_state: false,
+                canonical_projection_pending: false,
                 authority: Projection::Target,
                 retained_editor: Projection::DoubledRetained,
-                full_state_requests: 0,
+                stale_updates_quarantined: 0,
                 semantic_recovery_successes: 0,
                 pane_sync_ms: None,
                 disk_fallbacks: 0,
@@ -154,25 +147,22 @@ mod cold_start_crdt_authority_model {
             match action {
                 Action::Restart => {
                     self.registered = false;
-                    self.awaiting_authoritative_full_state = false;
-                    self.authority = Projection::DiskSeed;
+                    self.canonical_projection_pending = true;
+                    // The controller/Lazily key survives relay reconstruction;
+                    // a disk-seeded transport replica is only a downstream
+                    // consumer awaiting this retained target.
+                    self.authority = Projection::Target;
                     self.semantic_recovery_successes = 0;
                 }
                 Action::RetainedRegistration => {
                     self.registered = true;
-                    if cold_start_registration_requires_authoritative_full_state(
-                        self.authority == Projection::Target,
-                        true,
-                    ) {
-                        self.awaiting_authoritative_full_state = true;
-                        self.full_state_requests += 1;
-                    }
+                    self.canonical_projection_pending = true;
                 }
                 Action::RetainedIncrementalUpdate => {
                     match decide_cold_start_replica_update(
                         self.registered,
                         self.authority == Projection::Target,
-                        self.awaiting_authoritative_full_state,
+                        self.canonical_projection_pending,
                     ) {
                         ColdStartReplicaUpdateDecision::Relay => {
                             // Once full-state convergence established the shared
@@ -180,24 +170,19 @@ mod cold_start_crdt_authority_model {
                             // projection; it never resurrects the retained 2× state.
                             debug_assert_eq!(self.authority, Projection::Target);
                         }
-                        ColdStartReplicaUpdateDecision::AwaitAuthoritativeFullState => {
+                        ColdStartReplicaUpdateDecision::ReprojectCanonical => {
                             self.registered = true;
-                            self.awaiting_authoritative_full_state = true;
-                            self.full_state_requests += 1;
+                            self.authority = Projection::Target;
+                            self.canonical_projection_pending = true;
+                            self.stale_updates_quarantined += 1;
                         }
                     }
                 }
-                Action::FullState {
-                    target_hash_matches,
-                } => {
-                    // A recovery candidate is not a success receipt. Publish
-                    // success only after the live authority equals the target
-                    // hash, and make replay of that receipt idempotent.
-                    if self.awaiting_authoritative_full_state && target_hash_matches {
-                        self.authority = Projection::Target;
-                        self.retained_editor = Projection::Target;
-                        self.awaiting_authoritative_full_state = false;
-                        self.semantic_recovery_successes += 1;
+                Action::CanonicalProjection => {
+                    if self.canonical_projection_pending {
+                        self.retained_editor = self.authority;
+                        self.canonical_projection_pending = false;
+                        self.semantic_recovery_successes = 1;
                     }
                 }
                 Action::PaneSync => {
@@ -247,21 +232,13 @@ mod cold_start_crdt_authority_model {
         world.step(Action::RetainedIncrementalUpdate);
         world.step(Action::RetainedIncrementalUpdate);
         world.step(Action::PaneSync);
-        world.step(Action::FullState {
-            target_hash_matches: false,
-        });
-        assert_eq!(world.semantic_recovery_successes, 0);
-        world.step(Action::FullState {
-            target_hash_matches: true,
-        });
-        world.step(Action::FullState {
-            target_hash_matches: true,
-        });
+        world.step(Action::CanonicalProjection);
+        world.step(Action::CanonicalProjection);
 
         assert_eq!(world.authority, Projection::Target);
         assert_eq!(world.semantic_recovery_successes, 1);
         assert_eq!(world.pane_sync_ms, Some(OBSERVED_PANE_SYNC_MS));
-        assert!(world.full_state_requests >= 1);
+        assert!(world.stale_updates_quarantined >= 1);
     }
 
     #[test]
@@ -270,12 +247,10 @@ mod cold_start_crdt_authority_model {
         world.step(Action::Restart);
         world.step(Action::RetainedRegistration);
         world.step(Action::RetainedIncrementalUpdate);
-        assert_eq!(world.authority, Projection::DiskSeed);
-        assert!(world.awaiting_authoritative_full_state);
+        assert_eq!(world.authority, Projection::Target);
+        assert!(world.canonical_projection_pending);
 
-        world.step(Action::FullState {
-            target_hash_matches: true,
-        });
+        world.step(Action::CanonicalProjection);
         world.step(Action::RetainedIncrementalUpdate);
         assert_eq!(world.authority, Projection::Target);
         assert_eq!(world.semantic_recovery_successes, 1);

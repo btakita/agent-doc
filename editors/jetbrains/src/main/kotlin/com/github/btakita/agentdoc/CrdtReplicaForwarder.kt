@@ -201,12 +201,7 @@ class CrdtReplicaForwarder(
         logSlow("forwardLocalDelta", started, warnMs = 100, details = "update_bytes=$updateBytes")
     }
 
-    /**
-     * Align a newly attached native replica with the live editor buffer before
-     * forwarding the first real `DocumentEvent` delta. The CP bootstrap is
-     * seeded from disk, while JetBrains can already hold unsaved edits; applying
-     * an event offset against that stale bootstrap can otherwise clamp/truncate.
-     */
+    /** Publish an already-fenced local editor delta against this replica. */
     fun ensureEditorText(editorText: String) {
         if (!attached) return
         val started = System.nanoTime()
@@ -231,9 +226,8 @@ class CrdtReplicaForwarder(
         if (!node.applyLocal(clientId, 0, deleteLen, editorText)) return
         knownReplicaText = editorText
         logSlow("native.applyLocal", applyStarted, details = "reason=ensureEditorText delete_cp=$deleteLen insert_chars=${editorText.length}")
-        // Incremental from the bootstrap frontier. The incident-causing full-state
-        // adopt remains disabled; bounded text adopt is triggered only by an explicit
-        // controller reattach signal.
+        // Incremental from the bootstrap frontier. Callers may only use this
+        // after proving the editor shadow matches the controller bootstrap.
         val updateBytes = publishIncremental("ensure-editor-text")
         logSlow("ensureEditorText", started, warnMs = 100, details = "chars=${editorText.length} update_bytes=$updateBytes")
     }
@@ -250,9 +244,6 @@ class CrdtReplicaForwarder(
         logSlow("transport.broadcastUpdate", broadcastStarted, details = "reason=$reason update_bytes=${update.size}")
         return update.size
     }
-
-    /** Genuine-reattach recovery only: bounded authoritative text, never full op-log. */
-    fun pushTextAdopt(editorText: String): Boolean = transport.pushTextAdopt(filePath, editorText)
 
     /**
      * Apply a remote update (a peer's ops fanned out by the document model) into
@@ -278,10 +269,10 @@ class CrdtReplicaForwarder(
     /**
      * Current actor-owned local-replica projection.
      *
-     * The editor buffer remains authoritative; a mismatch makes the manager
-     * publish the editor buffer before mutating this replica further. This does
-     * not cross FFI on each keystroke: all native mutations are serialized and
-     * update [knownReplicaText] at their boundary.
+     * The controller bootstrap remains authoritative; a mismatch makes the
+     * manager retain its canonical projection before mutating this replica
+     * further. This does not cross FFI on each keystroke: all native mutations
+     * are serialized and update [knownReplicaText] at their boundary.
      */
     fun replicaText(): String? {
         if (!attached) return null
@@ -513,9 +504,6 @@ interface ReplicaTransport {
     /** Durable document-op plane; default success keeps test transports thin. */
     fun pushDocumentOps(filePath: String, lineage: String?, deltaJson: String): Boolean = true
 
-    /** Bounded reattach-only adopt; default false means unsupported by a test transport. */
-    fun pushTextAdopt(filePath: String, text: String): Boolean = false
-
     /** Retry the retained document-op suffix. */
     fun flushDocumentOps(filePath: String) {}
 
@@ -643,42 +631,6 @@ class CpSocketReplicaTransport(
             log.warn("[document-op] durable push failed for ${File(filePath).name}: ${e.message}")
             false
         }
-    }
-
-    override fun pushTextAdopt(filePath: String, text: String): Boolean {
-        val lib = AgentDocLib.get() ?: return false
-        val retained = try {
-            lib.agent_doc_reliable_sync_text_adopt_push(projectRoot, filePath, text) == 0
-        } catch (e: Throwable) {
-            log.warn("[reattach-adopt] bounded text adopt failed for ${File(filePath).name}: ${e.message}")
-            false
-        }
-        if (!retained) return false
-
-        // The reliable-sync call makes the intent durable, but a retained frame
-        // can sit behind an older unsettled suffix. Re-registering before this
-        // exact editor cut is visible in the controller projection recreates
-        // the stale native baseline and turns every following keystroke into a
-        // full-document recovery. Require a synchronous projection ACK here.
-        // The retained frame may replay later; text-adopt is self-echo guarded.
-        val payload = JsonObject().apply {
-            addProperty("text", text)
-            addProperty("source", "jetbrains_stale_baseline_recovery")
-        }
-        val request = JsonObject().apply {
-            addProperty("command", "crdt_text_adopt")
-            addProperty("file", filePath)
-            addProperty("diagnostic_payload", payload.toString())
-        }
-        val response = send(request)
-        if (response?.ok != true) {
-            log.warn(
-                "[reattach-adopt] controller projection did not acknowledge ${File(filePath).name}; " +
-                    "reason=${response?.error ?: lastSendError ?: "unknown"}",
-            )
-            return false
-        }
-        return true
     }
 
     override fun flushDocumentOps(filePath: String) {

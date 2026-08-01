@@ -68,12 +68,10 @@ class FakeTransport implements ReplicaTransport {
     acked: Array<{ patchId: string; generation: number; contentHash?: string }> = [];
     deregistered: string[] = [];
     broadcastGate: Promise<void> | undefined;
-    registerGate: Promise<void> | undefined;
     registerCount = 0;
     pullCount = 0;
     unavailablePulls = 0;
     ackFailures = 0;
-    textAdopts: string[] = [];
 
     async register(
         _filePath: string,
@@ -81,7 +79,6 @@ class FakeTransport implements ReplicaTransport {
         _stateVector?: Uint8Array | null,
     ): Promise<{ clientId: number; bootstrap?: Uint8Array | null }> {
         this.registerCount += 1;
-        if (this.registerCount > 1 && this.registerGate) await this.registerGate;
         return { clientId: 41 + this.registerCount, bootstrap: Buffer.from([9]) };
     }
 
@@ -102,12 +99,6 @@ class FakeTransport implements ReplicaTransport {
             return { kind: 'unavailable', reason: 'controller_socket_unavailable' };
         }
         return { kind: 'deltas', updates: this.pending };
-    }
-
-    async pushTextAdopt(_filePath: string, text: string): Promise<boolean> {
-        this.textAdopts.push(text);
-        this.pending = [];
-        return true;
     }
 
     async ackUpdate(
@@ -261,7 +252,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.deepStrictEqual(Array.from(transport.broadcasts[0].update), [1, 2, 3]);
     });
 
-    it('adopts an unsaved queue edit once when the native baseline is stale', async () => {
+    it('retains an unsaved queue edit without whole-editor adoption when the native baseline is stale', async () => {
         const staleNode = new FakeNode('base');
         const replacementNode = new FakeNode('base\n- queue item');
         const nodes = [staleNode, replacementNode];
@@ -288,33 +279,23 @@ it('applies peer remote updates but suppresses self echoes', () => {
         ]);
 
         assert.deepStrictEqual(staleNode.locals, []);
-        assert.deepStrictEqual(transport.textAdopts, [editorText]);
-        assert.strictEqual(transport.registerCount, 2);
+        assert.strictEqual(transport.registerCount, 1);
         assert.strictEqual(editorText.match(/- queue item/g)?.length, 1);
         manager.dispose();
     });
 
-    it('revalidates editor authority at the asynchronous replica swap boundary', async () => {
+    it('retains successive queue edits while a stale native baseline awaits canonical projection', async () => {
         const firstEdit = 'base\n- queue item';
         const latestEdit = `${firstEdit}\n- later item`;
         const staleNode = new FakeNode('base');
-        const nodes = [
-            staleNode,
-            new FakeNode(firstEdit),
-            new FakeNode(latestEdit),
-        ];
         const transport = new FakeTransport();
-        let releaseRegister!: () => void;
-        transport.registerGate = new Promise<void>((resolve) => {
-            releaseRegister = resolve;
-        });
         const filePath = '/work/plan.md';
         let editorText = 'base';
         const manager = new CrdtReplicaManager({
             projectRoot: '/work',
             identity: 'vscode-test',
             transport,
-            nodeFactory: () => nodes.shift()!,
+            nodeFactory: () => staleNode,
             listDocuments: () => [],
             currentText: () => editorText,
             applyText: async () => true,
@@ -325,23 +306,15 @@ it('applies peer remote updates but suppresses self echoes', () => {
         staleNode.remoteText = 'stale native text';
         staleNode.applyUpdate(42, Buffer.from([7]));
         editorText = firstEdit;
-        const firstAdopt = manager.handleLocalChangeDelta(filePath, [
+        await manager.handleLocalChangeDelta(filePath, [
             { rangeOffset: 4, rangeLength: 0, text: '\n- queue item' },
         ]);
-        while (transport.registerCount < 2) {
-            await new Promise<void>((resolve) => setImmediate(resolve));
-        }
         editorText = latestEdit;
-        releaseRegister();
-        await firstAdopt;
-
-        transport.registerGate = undefined;
         await manager.handleLocalChangeDelta(filePath, [
             { rangeOffset: firstEdit.length, rangeLength: 0, text: '\n- later item' },
         ]);
 
-        assert.deepStrictEqual(transport.textAdopts, [firstEdit, latestEdit]);
-        assert.strictEqual(transport.registerCount, 3);
+        assert.strictEqual(transport.registerCount, 1);
         assert.strictEqual(editorText.match(/- queue item/g)?.length, 1);
         assert.strictEqual(editorText.match(/- later item/g)?.length, 1);
         manager.dispose();
@@ -425,11 +398,11 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
         const drain = manager.drainRemoteUpdates();
         await started;
-        await manager.handleReattachRequest(filePath, true);
-        assert.deepStrictEqual(
-            transport.textAdopts,
-            [],
-            'an unsynced-edit flag cannot supersede a retained canonical projection',
+        manager.requestRemoteDrain(filePath);
+        assert.strictEqual(
+            transport.registerCount,
+            1,
+            'an unsynced-edit flag cannot replace the controller-owned projection',
         );
         releaseProjection();
         await drain;
@@ -478,7 +451,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         manager.dispose();
     });
 
-    it('repairs a rejected canonical by adopting only the exact unchanged editor baseline', async () => {
+    it('rejects malformed canonical without adopting the editor baseline', async () => {
         const first = new FakeNode('base');
         first.remoteText = 'INVALID_CANONICAL';
         const replacement = new FakeNode('base');
@@ -508,9 +481,8 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
         await manager.drainRemoteUpdates();
 
-        assert.deepStrictEqual(transport.textAdopts, ['base']);
-        assert.strictEqual(transport.registerCount, 2);
-        assert.deepStrictEqual(transport.deregistered, [filePath]);
+        assert.strictEqual(transport.registerCount, 1);
+        assert.deepStrictEqual(transport.deregistered, []);
         manager.dispose();
     });
 
@@ -542,7 +514,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.strictEqual(templateStructureProjectionState('raw', null), 'invalid');
         assert.strictEqual(
             remoteTemplateProjectionDecision('invalid', 'exact', true, false),
-            'adopt-exact-editor-baseline',
+            'retry-fail-closed',
         );
         assert.strictEqual(
             remoteTemplateProjectionDecision('invalid', 'exact', false, false),
@@ -863,21 +835,20 @@ it('force-refresh never republishes an unproven full editor snapshot', async () 
         assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
         assert.strictEqual(await manager.attachDocument(filePath, 'base updated', true), true);
 
-        assert.strictEqual(transport.registerCount, 1);
-        assert.deepStrictEqual(transport.deregistered, []);
-        assert.deepStrictEqual(nodes.map((node) => node.opened), [42]);
-    assert.deepStrictEqual(nodes[0].locals.map((local) => local.insert), ['base']);
-    assert.strictEqual(transport.broadcasts.length, 1);
-});
+        assert.strictEqual(transport.registerCount, 2);
+        assert.deepStrictEqual(transport.deregistered, [filePath]);
+        assert.deepStrictEqual(nodes.map((node) => node.opened), [42, 43]);
+        assert.deepStrictEqual(nodes.flatMap((node) => node.locals), []);
+        assert.strictEqual(transport.broadcasts.length, 0);
+    });
 
-it('force-refresh installs a proven deferred target before replica rebootstrap', async () => {
+    it('force-refresh reprojects controller canonical without a deferred editor request', async () => {
     const nodes: FakeNode[] = [];
     const transport = new FakeTransport();
     const filePath = '/work/plan.md';
     let editorText = 'base';
     const applied: Array<{ text: string; expected: string }> = [];
-    const settled: string[] = [];
-    const manager = new CrdtReplicaManager({
+        const manager = new CrdtReplicaManager({
         projectRoot: '/work',
         identity: 'vscode-test',
         transport,
@@ -894,21 +865,17 @@ it('force-refresh installs a proven deferred target before replica rebootstrap',
             editorText = text;
             return true;
         },
-        resolveDeferredReconnectContent: (_file, current) =>
-            current === 'base' ? 'recovered target' : null,
-        settleDeferredReconnectContent: (_file, current) => settled.push(current),
-    });
+        });
 
     assert.strictEqual(await manager.attachDocument(filePath, editorText), true);
     assert.strictEqual(await manager.attachDocument(filePath, editorText, true), true);
 
-    assert.deepStrictEqual(applied, [{ text: 'recovered target', expected: 'base' }]);
-    assert.strictEqual(editorText, 'recovered target');
-    assert.strictEqual(transport.registerCount, 2);
-    assert.strictEqual(transport.deregistered.length, 1);
-    assert.strictEqual(nodes.length, 2);
-    assert.deepStrictEqual(nodes[1].locals.map((local) => local.insert), ['recovered target']);
-    assert.deepStrictEqual(settled, ['recovered target']);
+        assert.deepStrictEqual(applied, []);
+        assert.strictEqual(editorText, 'base');
+        assert.strictEqual(transport.registerCount, 2);
+        assert.strictEqual(transport.deregistered.length, 1);
+        assert.strictEqual(nodes.length, 2);
+        assert.deepStrictEqual(nodes[1].locals, []);
 });
 
 it('non-operator editor events fence queued deltas and never mutate canonical', async () => {

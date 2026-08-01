@@ -466,25 +466,23 @@ hash matches and otherwise mints a new fail-closed lineage.
 when an editor coalesces generations and proves the final target for generation
 N, the relay atomically advances every older pending generation through N.
 
-JetBrains must retain an ACK after the visible editor apply until the controller
-accepts it. Retry recomputes the proof from the current editor buffer; remembered
-text is never accepted as proof. A mismatched proof triggers the replace-capable
-re-bootstrap, while a transport failure remains in the client ACK replay ledger.
-The binary wakes this replay while convergence is pending and, after a bounded
-grace period, sends a targeted force-refresh event that re-registers the document
-replica from the exact editor buffer. The deferred candidate remains retained
-as an ordered semantic intent and replays only after that editor baseline is
-published. The JetBrains client then resolves that replay through a distinct
-post-registration ABI, requires the editor and replacement replica to still
-match the registered baseline with no pending local delta, verifies that disk
-contains no novel external text, installs and saves the minimal editor mutation,
-and explicitly publishes the resulting CRDT delta. The older reconnect ABI
-continues to return only the exact editor bytes so a rolling upgrade cannot let
-an older client preinstall a retained whole-document target. Thus process exit,
-controller recycle, or a same-target finalize retry cannot lose or duplicate
-the response. Recovery is
-bounded and automatic; it must not require closing the editor tab, recycling the
-controller, or choosing between force-disk and an uncommitted response.
+JetBrains retains a content-qualified ACK after the visible editor apply until
+the controller accepts it. Retry recomputes the proof from the current editor
+buffer; remembered text is never accepted as proof. Transport only wakes the
+controller-owned Lazily delivery projection. A missing or mismatched receipt
+leaves that exact canonical revision pending and re-projects it to the editor;
+it never requests an editor full state, force-refreshes, or re-registers from the
+editor buffer. In particular, a stale native baseline quarantines the local
+delta and schedules a pull of the current controller canonical projection.
+
+The deferred candidate remains retained as an ordered semantic intent, and the
+per-document settlement graph resumes persistence and closeout only when its
+derived content-qualified receipt is current. Process exit, controller recycle,
+or a same-target finalize retry therefore cannot lose or duplicate the response.
+No foreground caller polls that graph or waits through an ACK-recovery barrier:
+pending is a successful retained state, while unsaved divergent editor text is
+an explicit conflict. The controller's canonical text remains the only
+whole-document authority throughout recovery.
 
 Deferred agent mutations are an ordered, content-bearing intent journal rather
 than one replaceable whole-document target. Each entry retains its expected cut
@@ -1160,33 +1158,22 @@ Implementations must keep tests for these cases:
   live editor buffer or fail closed before any agent response lands;
 - lazily visible-write drift cannot reset operator-visible file content;
 - an editor ACK persists its full visible content in Lazily, and a legacy
-hash-only `already_applied` receipt is upgraded by one bounded CRDT current-text
-publication without file-IPC fallback;
-- an editor-owned write with zero registered replicas in either pre-delivery
-timing window retains its full target
-as a Lazily deferred-write intent, returns promptly, and does not project to
-disk; the central stale-recycle operation emits an
-`ack_recovery_force_refresh` event for every turn-stage caller, every
-controller-published CRDT remote event bypasses the background no-op drain
-backoff for a targeted pull on the existing replica, editor
-reload/controller-replacement handlers rebuild
-cached open-document forwarders, and later replica bootstrap/publication
-restores and proves that target;
+  hash-only `already_applied` receipt cannot authorize current-buffer
+  publication; the controller reprojects its retained canonical revision;
+- an editor-owned write with zero registered replicas retains its full target
+  as a keyed Lazily deferred-write intent, returns promptly, and does not
+  project to disk; registration and controller delivery events wake the same
+  canonical projection without a recovery request;
 - a peer-pull-capable editor still receives the controller's targeted
 missing-replica rebuild after restart, and an idle explicit missing/sync-pending
 observation schedules one bounded repair before the zero-replica backoff;
-- stale-replica ACK recovery first publishes the targeted editor re-registration
-  event without recycling a healthy supervisor. JetBrains coalesces repeated
-  re-registration requests for the same open document within one bounded
-  interval and asks the existing replica to drain urgently; only failure to
-  publish the targeted recovery event may fall back to supervisor recycle;
+- stale-replica handling quarantines the obsolete delta and retains the
+  controller revision. JetBrains, VS Code, and Zed project that revision
+  downstream and expose no whole-editor recovery publication;
 - after controller restart, an incremental update arriving before replica
   registration may restore membership but must not union-apply the retained
   editor lineage to a disk-seeded canonical. Every update from that member stays
-  fenced until a requested authoritative full-state frame replaces canonical
-  and rebases the hub-side mirror; repeated frames and a retained exact-2×
-  projection therefore converge to exactly one live target without disk
-  fallback or `force-disk`;
+  fenced while the controller bootstrap is lazily reprojected downstream;
 - every `DocumentWriteDeferred` target passes the shared structural validator
   before its event is appended. A legacy exact-2× whole-document projection may
   retire retained intents before the integrity gate only when disk is the exact
@@ -1206,20 +1193,11 @@ observation schedules one bounded repair before the zero-replica backoff;
   observing the exact target content/hash. The JetBrains EditorSurface
   focus/layout lane remains independent of document-authority recovery and its
   first pane sync must complete in less than two seconds;
-- `#crdtpushdrain`: the editor's no-op drain backoff gates only *speculative*
-  polling (file-watcher, editor-event, and self-rescheduled drains that have no
-  evidence of pending work). A controller-published CRDT remote event is positive
-  evidence that the CP already holds a frontier, so it must drain urgently
-  instead of being suppressed. Suppressing it stalled every write on an idle
-  document — where the backoff has escalated toward its 30s ceiling — until the
-  binary escalated to `ack_recovery_force_refresh`, costing a fixed ~2s on the
-  Compact Exchange and finalize hot paths. Controller pushes are externally rate
-  limited (one per ACK-replay signal interval, only while a write awaits ACK), so
-  draining them eagerly cannot reintroduce the no-op spin the backoff exists to
-  prevent. A urgent drain that applies useful work also resets the escalated
-  backoff counter, so the next push is not re-suppressed by a stale gate. The
-  binary-side `ack_recovery_force_refresh` escalation remains as a backstop for
-  older plugin builds;
+- `#crdtpushdrain`: the editor's no-op drain backoff gates only speculative
+  polling. A controller-published canonical-projection event is positive
+  evidence of retained work and drains urgently. The per-document Lazily key
+  coalesces repeated projection demand; no ACK-replay or force-refresh
+  escalation exists;
 - response-cell retry materialization normalizes transient ` (HEAD)` and
   boundary annotations, and a latest complete response supersedes only
   uncommitted assistant-response nodes after the last unchanged committed

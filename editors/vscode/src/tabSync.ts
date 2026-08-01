@@ -3,9 +3,9 @@
  *
  * The extension no longer plans a tab change. It reports what it sees — focused
  * document, visible markdown set, column layout — and the reactive graph behind
- * `agent_doc_editor_surface_observe_json` folds that against what tmux was last
- * reconciled against, derives focus-vs-sync, and runs the Project Controller
- * command as an `Effect`. So the previous-state field, the focus/sync decision,
+ * the Project Controller's editor-surface Source folds that against what tmux
+ * was last reconciled against, derives focus-vs-sync, and runs the consequence
+ * as an `Effect`. So the previous-state field, the focus/sync decision,
  * the preserved-layout retry ladder, and the timeout backoff all left this file;
  * what stayed is the layout normalization the editor alone can do, plus the
  * manual `Sync Layout` command's argument builder.

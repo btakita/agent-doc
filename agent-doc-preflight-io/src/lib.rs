@@ -220,7 +220,7 @@ fn observe_current_text_with_bounded_retry(
         if request_plugin_refresh {
             let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
                 file,
-                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+                agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
                 0,
             ) {
                 Ok(()) => "requested".to_string(),
@@ -4826,7 +4826,7 @@ fn ensure_document_model_with_replica_reregistration(
     for attempt in 1..=attempts {
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
             file,
-            agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
             0,
         ) {
             Ok(()) => "requested".to_string(),

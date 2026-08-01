@@ -259,7 +259,7 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
-    fun `stale local baseline recovery is coalesced across a typing burst`() {
+    fun `stale local baseline projects controller canonical without editor adoption`() {
         val replicaPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
@@ -268,21 +268,17 @@ class TypingTrackerEdtBudgetTest {
         val forwardBody = replica
             .substringAfter("private fun forwardLocalDeltaFromShadow")
             .substringBefore("fun requestRemoteDrain")
-        val recoveryBody = replica
-            .substringAfter("private fun scheduleStaleBaselineRecovery")
-            .substringBefore("fun requestRemoteDrain")
 
         assertTrue(
-            "typing while recovery is pending must replace the quiet-period task without another native baseline read",
-            forwardBody.contains("staleBaselineRecoveryTasks.containsKey(filePath)") &&
-                forwardBody.contains("scheduleStaleBaselineRecovery(filePath, document)") &&
-                forwardBody.contains("recovery=coalesced_exact_editor_adopt_after_quiet"),
+            "a stale native baseline must retain the controller projection and wake its pull",
+            forwardBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
+                forwardBody.contains("requestRemoteDrain(filePath, \"stale-local-baseline\")"),
         )
-        assertTrue(
-            "the coalesced recovery must adopt one exact live editor cut and cancel its predecessor",
-            recoveryBody.contains("tryReadDocumentText(document)") &&
-                recoveryBody.contains("reason = \"coalesced-local-delta-baseline-diverged\"") &&
-                recoveryBody.contains("staleBaselineRecoveryTasks.put(filePath, scheduled)?.cancel(false)"),
+        assertFalse(
+            "stale-baseline recovery must never adopt a whole editor buffer into canonical authority",
+            replica.contains("scheduleStaleBaselineRecovery") ||
+                forwardBody.contains("adoptExactEditorBaseline(") ||
+                forwardBody.contains("coalesced_exact_editor_adopt_after_quiet"),
         )
     }
 
@@ -418,7 +414,7 @@ class TypingTrackerEdtBudgetTest {
             listenerBody.contains("forwardLocalDelta("),
         )
         assertTrue(
-            "authority-bearing publish/open document repair must wait for the CRDT replica while ordinary open reports stay asynchronous",
+            "controller-bootstrap projection must wait for the CRDT replica while ordinary open reports stay asynchronous",
                 source.contains("fun ensureOpenDocumentReplica(") &&
                 source.contains("forceRefresh: Boolean = false") &&
                 source.contains("bypassRegisterBackoff = forceRefresh") &&
@@ -428,7 +424,7 @@ class TypingTrackerEdtBudgetTest {
                 source.contains(".get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
                 source.contains("private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L") &&
                 source.contains("documentWorkers.forDocument(filePath).execute { attach() }") &&
-                source.contains("forwarder.ensureEditorText(initialEditorText)"),
+                source.contains("retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)"),
         )
         val forceRefreshAttachBody = source.substringAfter("fun ensureOpenDocumentReplica(")
             .substringBefore("private fun scheduleDeferredWriteReplayAfterRegistration(")
@@ -439,7 +435,7 @@ class TypingTrackerEdtBudgetTest {
                 forceRefreshAttachBody.contains("persistRemoteCrdtTextIfSafe("),
         )
         assertTrue(
-            "forced refresh must register from the exact editor cut and fence a raced swap",
+            "forced refresh must fence the observed editor cut without adopting it",
             forceRefreshAttachBody.contains("val registrationText = text") &&
                 forceRefreshAttachBody.contains("scheduleDeferredWriteReplayAfterRegistration(") &&
                 forceRefreshAttachBody.contains("replaceCached = forceRefresh") &&
@@ -492,15 +488,20 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("stale-operator-event-fenced"),
         )
         val localDeltaBody = source.substringAfter("private fun forwardLocalDeltaFromShadow(")
-            .substringBefore("private fun requestRemoteDrain(")
+            .substringBefore("fun requestRemoteDrain(")
         assertTrue(
-            "a local editor delta must verify the native shadow frontier or coalesce exact-editor adoption",
+            "a stale local baseline must retain and lazily pull the controller canonical projection",
             localDeltaBody.contains("tryReadDocumentText(document)") &&
                 localDeltaBody.contains("coalescedLocalEditUtil(beforeText, editorText)") &&
                 localDeltaBody.contains("shouldForwardLocalDeltaUtil(replicaText, beforeText)") &&
-                localDeltaBody.contains("staleBaselineRecoveryTasks.containsKey(filePath)") &&
-                localDeltaBody.contains("scheduleStaleBaselineRecovery(filePath, document)") &&
-                source.contains("reason = \"coalesced-local-delta-baseline-diverged\""),
+                localDeltaBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
+                localDeltaBody.contains("requestRemoteDrain(filePath, \"stale-local-baseline\")") &&
+                localDeltaBody.contains("recovery=lazy-controller-canonical-projection"),
+        )
+        assertFalse(
+            "a stale local baseline must never schedule whole-editor adoption",
+            localDeltaBody.contains("scheduleStaleBaselineRecovery") ||
+                localDeltaBody.contains("adoptExactEditorBaseline"),
         )
         val openReplicaBody = source.substringAfter("fun ensureOpenDocumentReplica(")
             .substringBefore("/**\n     * Publish the exact closing editor cut")
@@ -525,15 +526,15 @@ class TypingTrackerEdtBudgetTest {
         val forwarderForBody = source.substringAfter("private fun forwarderFor(")
             .substringBefore("private fun refreshReplicaAfterTransportLoss(")
         assertTrue(
-            "replica replacement must fence the exact editor before publication and revalidate it at the swap boundary",
+            "replica replacement must fence the observed editor before projecting the canonical bootstrap",
             forwarderForBody.contains("expectedEditorTextAtSwap") &&
                 forwarderForBody.contains("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
-                forwarderForBody.indexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") <
-                forwarderForBody.indexOf("forwarder.ensureEditorText(initialEditorText)") &&
                 forwarderForBody.lastIndexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") >
-                forwarderForBody.indexOf("forwarder.ensureEditorText(initialEditorText)") &&
-                forwarderForBody.indexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") <
-                forwarderForBody.indexOf("forwarders.replace(filePath, cached, forwarder)"),
+                forwarderForBody.indexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
+                forwarderForBody.lastIndexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") <
+                forwarderForBody.indexOf("forwarders.replace(filePath, cached, forwarder)") &&
+                forwarderForBody.contains("retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)") &&
+                !forwarderForBody.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
         assertTrue(
             "visible editor applies must retain failed delivery ACKs and replay them from the current buffer",
@@ -567,10 +568,13 @@ class TypingTrackerEdtBudgetTest {
         val guardRecoveryBody = source.substringAfter("private fun recoverRejectedRemoteCanonical")
             .substringBefore("private fun scheduleTemplateGuardRecoveryRetry")
         assertTrue(
-            "template-guard recovery must fence exact editor authority before bounded adopt and atomic replacement",
-            guardRecoveryBody.contains("editorText == expectedText") &&
-                guardRecoveryBody.contains("editorBufferText(filePath) != editorText") &&
-                guardRecoveryBody.contains("staleForwarder.pushTextAdopt(editorText)") &&
+            "template-guard recovery must retain and lazily pull controller canonical state",
+            guardRecoveryBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
+                guardRecoveryBody.contains("requestRemoteDrain(filePath, \"template-guard-lazy-canonical-projection\")"),
+        )
+        assertFalse(
+            "template-guard recovery must never adopt a whole editor baseline",
+            guardRecoveryBody.contains("pushTextAdopt") ||
                 guardRecoveryBody.contains("replaceCached = true"),
         )
         assertTrue(

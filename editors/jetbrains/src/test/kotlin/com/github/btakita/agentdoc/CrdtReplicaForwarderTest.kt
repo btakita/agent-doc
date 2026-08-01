@@ -459,6 +459,15 @@ class CrdtReplicaForwarderTest {
             ),
         )
         assertEquals(
+            RemotePersistReconciliation.PersistedEditorNormalization,
+            remotePersistReconciliationUtil(
+                beforeText = "base\n",
+                targetText = "base",
+                editorAfterSave = "base\n",
+                diskAfterSave = "base\n",
+            ),
+        )
+        assertEquals(
             RemotePersistReconciliation.PreserveAdvancedEditor,
             remotePersistReconciliationUtil(
                 beforeText = "base",
@@ -467,6 +476,53 @@ class CrdtReplicaForwarderTest {
                 diskAfterSave = "external advanced",
             ),
         )
+        assertEquals(
+            RemotePersistReconciliation.PreserveAdvancedEditor,
+            remotePersistReconciliationUtil(
+                beforeText = "base",
+                targetText = "remote",
+                editorAfterSave = "operator advanced",
+                diskAfterSave = "remote",
+            ),
+        )
+    }
+
+    @Test
+    fun `desired replica registration remains retryable across early controller refusal`() {
+        val first =
+            nextReplicaRegistrationRetryProjection(
+                previous = null,
+                nowMs = 1_000L,
+                baseBackoffMs = 100L,
+                maxBackoffMs = 800L,
+            )
+        assertEquals(1, first.failureCount)
+        assertEquals(100L, first.backoffMs)
+        assertFalse(replicaRegistrationAttemptDueUtil(first, 1_099L))
+        assertTrue(replicaRegistrationAttemptDueUtil(first, 1_100L))
+
+        val second =
+            nextReplicaRegistrationRetryProjection(
+                previous = first,
+                nowMs = 1_100L,
+                baseBackoffMs = 100L,
+                maxBackoffMs = 800L,
+            )
+        assertEquals(2, second.failureCount)
+        assertEquals(200L, second.backoffMs)
+
+        var retained = second
+        repeat(8) {
+            retained =
+                nextReplicaRegistrationRetryProjection(
+                    previous = retained,
+                    nowMs = retained.retryAfterMs,
+                    baseBackoffMs = 100L,
+                    maxBackoffMs = 800L,
+                )
+        }
+        assertEquals(800L, retained.backoffMs)
+        assertTrue(replicaRegistrationAttemptDueUtil(null, retained.retryAfterMs))
     }
 
     @Test

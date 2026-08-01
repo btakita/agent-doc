@@ -176,13 +176,12 @@ pub fn run(
     if from_current {
         rebuild_recovery_projections_from_current(file, &updated_content)?;
         eprintln!(
-            "Reset session for {} and rebuilt snapshot/CRDT from current file",
+            "Reset session for {} and rebuilt document baseline from current file",
             file.display()
         );
     } else {
         // Delete snapshot
         agent_doc_snapshot_io::delete_recovery_projection_and_clear_baseline(file)?;
-        agent_doc_snapshot_io::clear_crdt_recovery_projection(file)?;
 
         eprintln!("Reset session for {}", file.display());
     }
@@ -195,9 +194,6 @@ fn rebuild_recovery_projections_from_current(file: &Path, content: &str) -> Resu
         content,
         agent_doc_ops_log_io::log_op,
     )?;
-    let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(content).encode_state();
-    let lineage = format!("reset:{}", agent_doc_hash::content_hash(content));
-    agent_doc_snapshot_io::checkpoint_crdt_recovery_projection(file, &crdt, &lineage)?;
     Ok(())
 }
 
@@ -224,7 +220,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn assert_recovery_projection_projects_to(doc: &Path, expected: &str) {
+    fn assert_legacy_recovery_projection_unchanged(doc: &Path, expected: &str) {
         let projection = agent_doc_snapshot_io::load_crdt_recovery_projection(doc)
             .unwrap()
             .expect("cold recovery projection present");
@@ -233,12 +229,12 @@ mod tests {
             .to_text();
         assert_eq!(
             projected, expected,
-            "cold recovery projection must match the current visible document"
+            "reset must not rewrite the retired CRDT recovery sidecar"
         );
     }
 
     #[test]
-    fn from_current_rebuilds_durable_recovery_projections() {
+    fn from_current_does_not_rewrite_legacy_recovery_projection() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: old\n---\n\nBody\n";
@@ -263,7 +259,7 @@ mod tests {
                 .unwrap(),
             updated
         );
-        assert_recovery_projection_projects_to(&doc, &updated);
+        assert_legacy_recovery_projection_unchanged(&doc, "stale crdt");
     }
 
     #[test]
@@ -341,7 +337,7 @@ mod tests {
                 .unwrap(),
             current
         );
-        assert_recovery_projection_projects_to(&doc, current);
+        assert_legacy_recovery_projection_unchanged(&doc, "stale crdt");
     }
 
     #[test]
@@ -485,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn default_reset_clears_durable_baseline_and_recovery_projection() {
+    fn default_reset_clears_baseline_without_touching_legacy_recovery_projection() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("session.md");
@@ -510,11 +506,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(
-            agent_doc_snapshot_io::load_crdt_recovery_projection(&doc)
-                .unwrap()
-                .is_none()
-        );
+        assert_legacy_recovery_projection_unchanged(&doc, "stale crdt");
     }
 
     #[test]

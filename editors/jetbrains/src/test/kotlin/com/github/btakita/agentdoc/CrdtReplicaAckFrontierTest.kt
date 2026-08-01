@@ -63,25 +63,16 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
-    fun `retained canonical projection blocks stale whole editor adoption`() {
-        assertFalse(
-            shouldAdoptEditorTextUtil(
-                hasUnsyncedOperatorEdit = true,
-                canonicalProjectionRetained = true,
-            ),
-        )
-        assertFalse(
-            shouldAdoptEditorTextUtil(
-                hasUnsyncedOperatorEdit = false,
-                canonicalProjectionRetained = false,
-            ),
-        )
-        assertTrue(
-            shouldAdoptEditorTextUtil(
-                hasUnsyncedOperatorEdit = true,
-                canonicalProjectionRetained = false,
-            ),
-        )
+    fun `retained canonical projection has no whole editor adoption surface`() {
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val manager = Files.readString(managerPath)
+
+        assertFalse(manager.contains("shouldAdoptEditorTextUtil"))
+        assertFalse(manager.contains("requestTextAdopt("))
+        assertFalse(manager.contains("pushTextAdopt("))
     }
 
     @Test
@@ -102,7 +93,7 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
-    fun `restart restores controller retention before whole editor publication`() {
+    fun `restart projects the controller bootstrap without whole editor publication`() {
         val managerPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
@@ -111,39 +102,29 @@ class CrdtReplicaAckFrontierTest {
         val registrationBody = manager
             .substringAfter("private fun forwarderFor(")
             .substringBefore("private fun refreshReplicaAfterTransportLoss(")
-        val restoreRetention = "retainedCanonicalProjectionPaths.add(filePath)"
-        val guardedPublication =
-            "if (initialEditorText != null && !forwarder.canonicalProjectionRetained)"
-
         assertTrue(registrationBody.contains("forwarder.canonicalProjectionRetained"))
-        assertTrue(registrationBody.contains(guardedPublication))
         assertTrue(
-            registrationBody.indexOf(restoreRetention) <
-                registrationBody.indexOf(guardedPublication),
+            registrationBody.contains("retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)"),
         )
         assertFalse(
-            registrationBody
-                .substringAfter(guardedPublication)
-                .substringBefore("} else if (initialEditorText != null)")
-                .contains("retainedCanonicalProjectionPaths.remove(filePath)"),
+            registrationBody.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
     }
 
     /**
      * #crdtpushdrain: a controller-published frontier is positive evidence of pending
      * work, so it must drain urgently rather than sit behind the speculative no-op
-     * backoff. Only `request_full_state` is exempt — it owns the text-adopt path.
+     * backoff. The retained Lazily key is the coalescing boundary.
      */
     @Test
     fun `controller published crdt frontiers bypass the speculative no-op drain backoff`() {
         assertTrue(shouldUrgentDrainForRemoteEventUtil("cp_write"))
         assertTrue(shouldUrgentDrainForRemoteEventUtil("ack_replay"))
-        assertTrue(shouldUrgentDrainForRemoteEventUtil("ack_recovery_force_refresh"))
         assertTrue(shouldUrgentDrainForRemoteEventUtil("fanout"))
         assertTrue(shouldUrgentDrainForRemoteEventUtil("response_cell_add"))
         assertTrue(shouldUrgentDrainForRemoteEventUtil("rebootstrap"))
         assertTrue(shouldUrgentDrainForRemoteEventUtil(null))
-        assertFalse(shouldUrgentDrainForRemoteEventUtil("request_full_state"))
+        assertTrue(shouldUrgentDrainForRemoteEventUtil("canonical_projection"))
     }
 
     @Test
@@ -166,20 +147,9 @@ class CrdtReplicaAckFrontierTest {
             "one controller push must not enqueue a second drain through generic activity recording",
             deliveryBranch.contains("recordDocumentActivity(file, \"socket-crdt-remote\")"),
         )
-        // #ensurereregister: the controller emits this typed reason only after it
-        // observed an attached editor with no controller-side replica. A cached
-        // plugin forwarder can outlive a controller recycle, so the handler must
-        // not use that cache as a membership guard.
-        val forceRefreshBranch = deliveryBranch
-            .substringAfter("CrdtReplicaEventReason.AckRecoveryForceRefresh ->")
-            .substringBefore("else -> Unit")
-        assertTrue(
-            "missing controller membership must force a replacement registration",
-            forceRefreshBranch.contains("CrdtReplicaManager.forceRefreshOpenDocumentReplica("),
-        )
         assertFalse(
-            "plugin-local forwarder presence cannot suppress controller recovery",
-            forceRefreshBranch.contains("hasOpenDocumentReplica"),
+            "controller delivery must never replace its authority from the editor buffer",
+            deliveryBranch.contains("forceRefreshOpenDocumentReplica("),
         )
     }
 
@@ -197,7 +167,7 @@ class CrdtReplicaAckFrontierTest {
         val manager = Files.readString(managerPath)
         val urgentBody = manager
             .substringAfter("fun requestUrgentRemoteDrain(")
-            .substringBefore("fun requestTextAdopt(")
+            .substringBefore("private fun queueRemoteDrain(")
 
         assertTrue(
             "a useful urgent drain must clear the escalated no-op backoff counter",
@@ -273,30 +243,28 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
-    fun `replica registration preserves the attached editor as authority`() {
-        assertEquals(
-            ReplicaRegistrationMode.ExactTemplate,
-            replicaRegistrationModeUtil(TemplateStructureProjectionState.Exact),
-        )
-        for (state in listOf(
-            TemplateStructureProjectionState.RepairRequired,
-            TemplateStructureProjectionState.Invalid,
-        )) {
-            assertEquals(
-                ReplicaRegistrationMode.AuthoritativeEditorBaseline,
-                replicaRegistrationModeUtil(state),
-            )
-        }
+    fun `replica registration preserves the controller bootstrap as authority`() {
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val registration = Files.readString(managerPath)
+            .substringAfter("private fun retainCanonicalProjectionAfterRegistration(")
+            .substringBefore("private fun refreshReplicaAfterTransportLoss(")
+
+        assertTrue(registration.contains("val canonical = forwarder.replicaText()"))
+        assertTrue(registration.contains("queueRemoteTextApply("))
+        assertFalse(registration.contains("ensureEditorText("))
     }
 
     @Test
-    fun `rejected remote canonical adopts only an exact unchanged editor baseline`() {
+    fun `rejected remote canonical never adopts an editor baseline`() {
         for (remoteState in listOf(
             TemplateStructureProjectionState.Invalid,
             TemplateStructureProjectionState.RepairRequired,
         )) {
             assertEquals(
-                RemoteTemplateProjectionDecision.AdoptExactEditorBaseline,
+                RemoteTemplateProjectionDecision.RetryFailClosed,
                 remoteTemplateProjectionDecisionUtil(
                     remoteState = remoteState,
                     editorState = TemplateStructureProjectionState.Exact,
@@ -369,9 +337,9 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
-    fun `stale native replica adopts an unrelated exact editor`() {
+    fun `stale native replica never adopts an unrelated exact editor`() {
         assertEquals(
-            ReplicaBaselineDecision.AdoptExactEditor,
+            ReplicaBaselineDecision.RetryFailClosed,
             replicaBaselineDecisionUtil(
                 editorState = TemplateStructureProjectionState.Exact,
                 editorMatchesExpected = false,

@@ -6742,7 +6742,7 @@ mod tests {
     }
 
     #[test]
-    fn crdt_checkpoint_defers_editor_attached_actor_without_supervisor_route() {
+    fn crdt_projection_is_unavailable_without_controller_model() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/editor.md");
@@ -6761,13 +6761,13 @@ mod tests {
         assert_eq!(summary.skipped, 1);
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("controller_crdt_checkpoint"));
-        assert!(ops_log.contains("status=deferred"));
-        assert!(ops_log.contains("recovery=background_yrs_repair"));
+        assert!(ops_log.contains("status=unavailable"));
+        assert!(ops_log.contains("recovery=retained_lazily_projection"));
         assert!(!ops_log.contains("supervisor_crdt_checkpoint"));
     }
 
     #[test]
-    fn recycle_controller_continues_when_checkpoint_lacks_editor_model() {
+    fn recycle_controller_continues_when_projection_is_unavailable() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/recycle-editor.md");
@@ -6784,8 +6784,8 @@ mod tests {
         assert!(!recycled, "no live controller was present to recycle");
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("controller_crdt_checkpoint"));
-        assert!(ops_log.contains("status=deferred"));
-        assert!(ops_log.contains("recovery=background_yrs_repair"));
+        assert!(ops_log.contains("status=unavailable"));
+        assert!(ops_log.contains("recovery=retained_lazily_projection"));
         assert!(!ops_log.contains("supervisor_crdt_checkpoint"));
     }
 
@@ -6810,41 +6810,17 @@ mod tests {
         assert_eq!(summary.failed, 0);
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
 
-        // `#ctrlchkptiso`: assert what this test's NAME claims — the checkpoint
-        // runs through the controller's own document model and never delegates
-        // to the supervisor. It must NOT additionally require
-        // `status=checkpointed`.
-        //
-        // Whether the checkpoint lands or defers is decided by
-        // `durable_checkpoint_deferral_reason(process_serves_relay_hub())`, and
-        // that role is a PROCESS-global flag defaulting to `cfg!(test)` — which
-        // is per-crate, so in this crate's test binary the relay-io dependency
-        // is built without `cfg(test)` and the flag starts `false`. The only
-        // writer is the controller's own `mark_process_as_relay_hub_owner()`.
-        // So `status=checkpointed` held only when some *sibling* test in this
-        // same binary had already run the controller-serve path and flipped the
-        // flag — pure cross-test leakage. Under nextest (one process per test)
-        // this test runs alone, the flag is `false`, the checkpoint correctly
-        // defers, and the old `checkpointed == 1` assertion failed while
-        // `cargo test --workspace` stayed green. Re-asserting the role here
-        // would just re-create the `#wsflake2` trap from the other direction:
-        // the sibling `..._deferred` test needs the flag `false`, and the flag
-        // is monotonic once set.
+        // `#ctrlchkptiso`: the observation runs through the controller's own
+        // retained Lazily projection and never delegates to the supervisor or
+        // consults a process-global hub-owner flag.
         assert!(ops_log.contains("controller_crdt_checkpoint"));
         assert!(
             ops_log.contains("authority=cp_model")
                 && ops_log.contains("transport=local_document_model"),
-            "the checkpoint must go through the controller document model: {ops_log}"
+            "the projection observation must use the controller document model: {ops_log}"
         );
         assert!(!ops_log.contains("supervisor_crdt_checkpoint"));
-
-        // Pin the actual decision rule directly — the pure split-out fn exists
-        // precisely so tests exercise it without mutating the process role.
-        assert_eq!(
-            ops_log.contains("status=checkpointed"),
-            agent_doc_crdt_relay_io::process_serves_relay_hub(),
-            "checkpoint-vs-defer must track the relay-hub-owner role and nothing else"
-        );
+        assert!(ops_log.contains("status=checkpointed"));
     }
 
     fn actor_record(

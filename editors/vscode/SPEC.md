@@ -52,8 +52,8 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 
 ## External Disk Pending Parity
 
-- A clean whole-buffer text event may mean the operator accepted an external file reload. VS Code defers heavy work off the change listener, asks the shared binary resolver for an exact pending disk candidate, installs only that proven target, then resets and re-registers the replica from the visible buffer. It reports the candidate settled only after CRDT propagation succeeds.
-- A dirty operator edit remains editor-authoritative and clears the shared candidate through the full-buffer report; the disk version is never component-merged. A successful editor save is recognized by the binary file watcher when the exact buffer bytes reach disk and clears any older candidate. Closing the final editor falls back to disk.
+- A whole-buffer editor notification is reduced to its causal text delta against the retained shadow; reconnect and recovery never publish the full visible buffer.
+- Replica registration opens the controller bootstrap and projects it downstream. Dirty operator changes originate only from subsequent editor events; disk candidates are never component-merged or promoted while a controller-owned document remains attached.
 - This is the same FFI and authority lifecycle as JetBrains. VS Code must not implement a private disk reread, Git fallback, or extension-local pending-response slot.
 
 ## Editor Performance Parity

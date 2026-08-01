@@ -6,7 +6,6 @@ import {
     peerReplicasMissing,
     reliableSyncDocumentOpFlush,
     reliableSyncDocumentOpPush,
-    reliableSyncTextAdoptPush,
 } from './native.js';
 import {
     MergeOwnershipStateChart,
@@ -51,7 +50,6 @@ export interface ReplicaTransport {
     ): Promise<ReplicaRegisterAck | null>;
     broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void>;
     pushDocumentOps?(filePath: string, lineage: string | null, deltaJson: string): Promise<boolean>;
-    pushTextAdopt?(filePath: string, text: string): Promise<boolean>;
     flushDocumentOps?(filePath: string): void;
     pullUpdates(filePath: string, identity: string): Promise<ReplicaRemoteUpdate[]>;
     /** D2: fetch the pending delivery, distinguishing additive deltas from a replace
@@ -144,18 +142,15 @@ export function templateStructureProjectionState(
 
 export type RemoteTemplateProjectionDecision =
     | 'queue-remote'
-    | 'adopt-exact-editor-baseline'
     | 'retry-fail-closed';
 
 export function remoteTemplateProjectionDecision(
     remoteState: TemplateStructureProjectionState,
-    editorState: TemplateStructureProjectionState | null,
-    editorMatchesExpected: boolean,
-    recoveryInFlight: boolean,
+    _editorState: TemplateStructureProjectionState | null,
+    _editorMatchesExpected: boolean,
+    _recoveryInFlight: boolean,
 ): RemoteTemplateProjectionDecision {
     if (remoteState === 'exact') return 'queue-remote';
-    if (recoveryInFlight) return 'retry-fail-closed';
-    if (editorMatchesExpected && editorState === 'exact') return 'adopt-exact-editor-baseline';
     return 'retry-fail-closed';
 }
 
@@ -165,7 +160,6 @@ export type ReplicaBaselineDecision =
     | 'acknowledge-remote-target'
     | 'replay-remote-target'
     | 'realign-shadow'
-    | 'adopt-exact-editor'
     | 'retry-fail-closed';
 
 export function matchingRemoteTargetGeneration(
@@ -195,9 +189,9 @@ export function replicaBaselineDecision(
     if (editorMatchesExpected && replicaMatchesRemoteTarget) return 'replay-remote-target';
     if (editorState !== 'exact' && editorMatchesExpected) return 'apply-remote-repair';
     if (editorState !== 'exact') return 'retry-fail-closed';
-  if (editorMatchesExpected && replicaMatchesExpected) return 'apply-remote';
+    if (editorMatchesExpected && replicaMatchesExpected) return 'apply-remote';
     if (replicaMatchesEditor) return 'realign-shadow';
-    return 'adopt-exact-editor';
+    return 'retry-fail-closed';
 }
 
 export function shouldForwardLocalDelta(replicaText: string | null, shadowText: string): boolean {
@@ -345,10 +339,6 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
     async pushDocumentOps(filePath: string, lineage: string | null, deltaJson: string): Promise<boolean> {
         const payload = lineage == null ? deltaJson : JSON.stringify({ lineage, delta_json: deltaJson });
         return reliableSyncDocumentOpPush(this.projectRoot, filePath, payload);
-    }
-
-    async pushTextAdopt(filePath: string, text: string): Promise<boolean> {
-        return reliableSyncTextAdoptPush(this.projectRoot, filePath, text);
     }
 
     flushDocumentOps(filePath: string): void {
@@ -544,15 +534,6 @@ export class CrdtReplicaForwarder {
         await this.publishIncremental();
     }
 
-    async ensureEditorText(editorText: string): Promise<void> {
-        if (!this.attached) return;
-        const current = this.node.text();
-        if (current == null || current === editorText) return;
-        const deleteLen = Array.from(current).length;
-        if (!this.node.applyLocal(this.clientId, 0, deleteLen, editorText)) return;
-        await this.publishIncremental();
-    }
-
     private async publishIncremental(): Promise<void> {
         const frontier = this.pushedVersion ?? this.node.stateVector?.() ?? new Uint8Array();
         const update = this.node.diff?.(frontier) ?? this.node.encodeState();
@@ -566,12 +547,6 @@ export class CrdtReplicaForwarder {
             : true;
         if (durable) this.pushedVersion = this.node.stateVector?.() ?? this.pushedVersion;
         await this.transport.broadcastUpdate(this.filePath, this.identity, update);
-    }
-
-    async pushTextAdopt(editorText: string): Promise<boolean> {
-        return this.transport.pushTextAdopt
-            ? this.transport.pushTextAdopt(this.filePath, editorText)
-            : false;
     }
 
     applyRemoteUpdate(update: Uint8Array): string | null {
@@ -647,8 +622,6 @@ export interface CrdtReplicaManagerOptions {
     listDocuments: () => ReplicaDocumentSnapshot[];
     currentText: (filePath: string) => string | null;
     applyText: (filePath: string, text: string, expectedText: string) => Promise<boolean>;
-    resolveDeferredReconnectContent?: (filePath: string, editorText: string) => string | null;
-    settleDeferredReconnectContent?: (filePath: string, editorText: string) => void;
     normalizeTemplateStructure?: (text: string) => string | null;
     /**
      * `#ctrlkillreregister` Tier 3 — ask the controller which of this editor's
@@ -670,9 +643,7 @@ export class CrdtReplicaManager {
     private readonly forwarders = new Map<string, CrdtReplicaForwarder>();
     private readonly attaching = new Map<string, Promise<CrdtReplicaForwarder | null>>();
     private readonly applyingRemote = new Set<string>();
-    private readonly reattachRecovering = new Set<string>();
     private readonly pendingRemoteAcks = new Map<string, Map<string, PendingRemoteAck>>();
-    private readonly templateGuardRecovering = new Set<string>();
     private readonly replicaRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private readonly replicaRetryFailureCounts = new Map<string, number>();
     private readonly pendingLocalEdits = new Map<string, number>();
@@ -720,7 +691,6 @@ export class CrdtReplicaManager {
         for (const timer of this.replicaRetryTimers.values()) clearTimeout(timer);
         this.replicaRetryTimers.clear();
         this.replicaRetryFailureCounts.clear();
-        this.templateGuardRecovering.clear();
         this.pendingRemoteAcks.clear();
         this.applyingRemote.clear();
         for (const forwarder of this.forwarders.values()) {
@@ -787,36 +757,9 @@ export class CrdtReplicaManager {
     }
 
     async attachDocument(filePath: string, text?: string, forceRefresh = false): Promise<boolean> {
-        let registrationText = text ?? this.currentEditorText(filePath) ?? this.shadows.get(filePath);
-        let rebootstrapProven = false;
-        if (forceRefresh && registrationText !== undefined) {
-            const recovered = this.options.resolveDeferredReconnectContent?.(
-                filePath,
-                registrationText,
-            );
-            if (recovered != null) {
-                rebootstrapProven = true;
-            }
-            if (recovered != null && recovered !== registrationText) {
-                if (this.hasPendingLocal(filePath)) return false;
-                this.advanceNonOperatorProjectionEpoch(filePath);
-                this.applyingRemote.add(filePath);
-                let installed = false;
-                try {
-                    installed = await this.options.applyText(filePath, recovered, registrationText);
-                } finally {
-                    this.applyingRemote.delete(filePath);
-                }
-                if (!installed) {
-                    this.logger.warn(
-                        `[crdt-replica] deferred reconnect target lost editor CAS for ${filePath}; keeping live editor authority`,
-                    );
-                    return false;
-                }
-                registrationText = recovered;
-            }
-        }
-        if (rebootstrapProven) {
+        const registrationText = text ?? this.currentEditorText(filePath) ?? this.shadows.get(filePath);
+        if (forceRefresh) {
+            if (this.hasPendingLocal(filePath)) return false;
             const staleForwarder = this.forwarders.get(filePath);
             if (staleForwarder) {
                 this.forwarders.delete(filePath);
@@ -825,13 +768,7 @@ export class CrdtReplicaManager {
         }
         if (registrationText !== undefined) this.seedDocument(filePath, registrationText);
         const forwarder = await this.forwarderFor(filePath);
-        // A null resolver result means either no retained target or a pending
-        // external-disk/editor decision. In both cases the exact editor buffer
-        // remains authoritative and is never republished as an unproven reset.
         if (forwarder) {
-            if (rebootstrapProven && registrationText !== undefined) {
-                this.options.settleDeferredReconnectContent?.(filePath, registrationText);
-            }
             this.requestRemoteDrain(filePath);
         }
         return forwarder != null;
@@ -857,7 +794,6 @@ export class CrdtReplicaManager {
         this.attaching.delete(filePath);
         this.clearPendingRemoteAcks(filePath);
         this.clearReplicaRetryBackoff(filePath);
-        this.templateGuardRecovering.delete(filePath);
         const forwarder = this.forwarders.get(filePath);
         this.forwarders.delete(filePath);
         await forwarder?.deregister();
@@ -936,19 +872,13 @@ export class CrdtReplicaManager {
                 if (shouldForwardLocalDelta(replicaText, oldText)) {
                     await forwarder.forwardLocalDelta(offset, deleteLen, change.text);
                 } else {
-                    this.logger.warn(
-                        `[crdt-replica] local delta found a stale native baseline for ${filePath}; ` +
-                        `shadow_hash=${sha256(oldText)} ` +
-                        `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)} ` +
-                        'recovery=exact_editor_adopt_then_atomic_reregister',
-                    );
-                    await this.adoptExactEditorBaseline(
-                        filePath,
-                        newText,
-                        forwarder,
-                        true,
-                        'local-delta-baseline-diverged',
-                    );
+                this.logger.warn(
+                    `[crdt-replica] local delta found a stale native baseline for ${filePath}; ` +
+                    `shadow_hash=${sha256(oldText)} ` +
+                    `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)} ` +
+                    'recovery=lazy-controller-canonical-projection',
+                );
+                this.scheduleReplicaRetry(filePath, 'local-delta-lazy-canonical-projection');
                 }
             }
         } finally {
@@ -981,13 +911,11 @@ export class CrdtReplicaManager {
         if (!installed) {
             const current = this.currentEditorText(filePath);
             if (current != null) {
-                await this.adoptExactEditorBaseline(
-                    filePath,
-                    current,
-                    forwarder,
-                    false,
-                    'replace-delivery-editor-diverged',
+                this.logger.warn(
+                    `[crdt-replica] replace delivery retained while the live editor diverges for ${filePath}; ` +
+                    `editor_hash=${sha256(current)} canonical_hash=${sha256(canonical)}`,
                 );
+                this.scheduleReplicaRetry(filePath, 'replace-delivery-lazy-canonical-projection');
             }
         }
         if (installed) {
@@ -1017,35 +945,6 @@ export class CrdtReplicaManager {
             this.drainTimer = undefined;
             void this.drainRequestedRemoteUpdates();
         }, 0);
-    }
-
-    /** Full text adopt is allowed only to recover a proven unsynced user edit. */
-    async handleReattachRequest(filePath: string, hasUnsyncedOperatorEdit = false): Promise<void> {
-        if (this.reattachRecovering.has(filePath)) return;
-        if (this.applyingRemote.has(filePath)) {
-            this.logger.warn(`[crdt-replica] refused full editor text adopt for ${filePath}; retained canonical projection owns the visible frontier`);
-            this.requestRemoteDrain(filePath);
-            return;
-        }
-        if (!hasUnsyncedOperatorEdit) {
-            this.logger.warn(`[crdt-replica] refused full editor text adopt for ${filePath}; no unsynced operator edit proves editor-origin content`);
-            this.requestRemoteDrain(filePath);
-            return;
-        }
-        this.reattachRecovering.add(filePath);
-        try {
-        const forwarder = this.forwarders.get(filePath);
-        if (!forwarder) return;
-        const editorText = this.currentEditorText(filePath) ?? this.shadows.get(filePath);
-        if (editorText === undefined || !(await forwarder.pushTextAdopt(editorText))) return;
-        if (this.forwarders.get(filePath) !== forwarder) return;
-        this.forwarders.delete(filePath);
-        await forwarder.deregister();
-        const reattached = await this.forwarderFor(filePath);
-        if (reattached) this.requestRemoteDrain(filePath);
-        } finally {
-            this.reattachRecovering.delete(filePath);
-        }
     }
 
     async drainRemoteUpdates(filePath?: string): Promise<void> {
@@ -1257,64 +1156,16 @@ export class CrdtReplicaManager {
         filePath: string,
         expectedText: string,
         remoteText: string,
-        staleForwarder: CrdtReplicaForwarder,
+        _staleForwarder: CrdtReplicaForwarder,
         remoteState: TemplateStructureProjectionState,
     ): Promise<boolean> {
-        const editorText = this.currentEditorText(filePath);
-        const editorState = editorText == null ? null : this.templateStructureState(editorText);
-        const decision = remoteTemplateProjectionDecision(
-            remoteState,
-            editorState,
-            editorText === expectedText,
-            this.templateGuardRecovering.has(filePath),
+        this.logger.warn(
+            `[crdt-replica] rejected malformed remote projection for ${filePath}; ` +
+            `remote_state=${remoteState} expected_hash=${sha256(expectedText)} ` +
+            `remote_hash=${sha256(remoteText)} recovery=lazy-controller-canonical-projection`,
         );
-        if (decision !== 'adopt-exact-editor-baseline' || editorText == null) {
-            this.logger.warn(
-                `[crdt-replica] template-guard recovery deferred for ${filePath}; ` +
-                `remote_state=${remoteState} editor_state=${editorState ?? 'missing'} ` +
-                `editor_matches_expected=${editorText === expectedText} ` +
-                `recovery_in_flight=${this.templateGuardRecovering.has(filePath)} ` +
-                `remote_hash=${sha256(remoteText)}`,
-            );
-            this.scheduleReplicaRetry(filePath, 'template-guard-proof-missing');
-            return false;
-        }
-        this.templateGuardRecovering.add(filePath);
-        try {
-            if (
-                this.forwarders.get(filePath) !== staleForwarder ||
-                this.hasPendingLocal(filePath) ||
-                this.currentEditorText(filePath) !== editorText
-            ) {
-                this.scheduleReplicaRetry(filePath, 'template-guard-adopt-fence-raced');
-                return false;
-            }
-            if (!(await staleForwarder.pushTextAdopt(editorText))) {
-                this.scheduleReplicaRetry(filePath, 'template-guard-adopt-push-failed');
-                return false;
-            }
-            if (this.hasPendingLocal(filePath) || this.currentEditorText(filePath) !== editorText) {
-                this.scheduleReplicaRetry(filePath, 'template-guard-adopt-editor-advanced');
-                return false;
-            }
-            const replacement = await this.replaceForwarder(filePath, staleForwarder, editorText);
-            if (!replacement) {
-                this.scheduleReplicaRetry(filePath, 'template-guard-reregister-failed');
-                return false;
-            }
-            this.shadows.set(filePath, editorText);
-            this.clearReplicaRetryBackoff(filePath);
-            this.logger.warn(
-                `[crdt-replica] recovered rejected remote canonical for ${filePath}; ` +
-                `remote_state=${remoteState} editor_chars=${editorText.length} ` +
-                `remote_hash=${sha256(remoteText)} editor_hash=${sha256(editorText)} ` +
-                'recovery=exact_editor_adopt_then_atomic_reregister',
-            );
-            this.requestRemoteDrain(filePath);
-            return true;
-        } finally {
-            this.templateGuardRecovering.delete(filePath);
-        }
+        this.scheduleReplicaRetry(filePath, 'template-guard-lazy-canonical-projection');
+        return false;
     }
 
     private scheduleReplicaRetry(filePath: string, reason: string): void {
@@ -1330,59 +1181,8 @@ export class CrdtReplicaManager {
             this.replicaRetryTimers.delete(filePath);
             if (!this.disposed) this.requestRemoteDrain(filePath);
         }, delayMs);
+        timer.unref?.();
         this.replicaRetryTimers.set(filePath, timer);
-    }
-
-    private async adoptExactEditorBaseline(
-        filePath: string,
-        editorText: string,
-        staleForwarder: CrdtReplicaForwarder,
-        allowPendingLocal: boolean,
-        reason: string,
-    ): Promise<boolean> {
-        if (this.templateStructureState(editorText) !== 'exact') {
-            this.scheduleReplicaRetry(filePath, `${reason}-editor-structure-not-exact`);
-            return false;
-        }
-        if (
-            this.forwarders.get(filePath) !== staleForwarder ||
-            (!allowPendingLocal && this.hasPendingLocal(filePath)) ||
-            this.currentEditorText(filePath) !== editorText
-        ) {
-            this.scheduleReplicaRetry(filePath, `${reason}-adopt-fence-raced`);
-            return false;
-        }
-        if (!(await staleForwarder.pushTextAdopt(editorText))) {
-            this.scheduleReplicaRetry(filePath, `${reason}-adopt-push-failed`);
-            return false;
-        }
-        if (
-            this.forwarders.get(filePath) !== staleForwarder ||
-            (!allowPendingLocal && this.hasPendingLocal(filePath)) ||
-            this.currentEditorText(filePath) !== editorText
-        ) {
-            this.scheduleReplicaRetry(filePath, `${reason}-editor-advanced`);
-            return false;
-        }
-        const replacement = await this.replaceForwarder(
-            filePath,
-            staleForwarder,
-            editorText,
-            allowPendingLocal,
-        );
-        if (!replacement) {
-            this.scheduleReplicaRetry(filePath, `${reason}-reregister-failed`);
-            return false;
-        }
-        this.shadows.set(filePath, editorText);
-        this.clearReplicaRetryBackoff(filePath);
-        this.logger.warn(
-            `[crdt-replica] adopted exact live editor baseline for ${filePath}; ` +
-            `reason=${reason} editor_hash=${sha256(editorText)} ` +
-            'recovery=exact_editor_adopt_then_atomic_reregister',
-        );
-        this.requestRemoteDrain(filePath);
-        return true;
     }
 
     private clearReplicaRetryBackoff(filePath: string): void {
@@ -1440,7 +1240,6 @@ export class CrdtReplicaManager {
             staleForwarder.captureResumeState(),
         );
         if (!(await replacement.register())) return null;
-        await replacement.ensureEditorText(editorText);
         if (
             this.forwarders.get(filePath) !== staleForwarder ||
             this.currentEditorText(filePath) !== editorText ||
@@ -1488,7 +1287,7 @@ export class CrdtReplicaManager {
             replicaText === editorText,
             editorRemoteGeneration != null,
             replicaRemoteGeneration != null,
-            this.templateGuardRecovering.has(filePath),
+            false,
         );
         if (decision === 'apply-remote' || decision === 'apply-remote-repair') {
             if (decision === 'apply-remote-repair') {
@@ -1545,27 +1344,12 @@ export class CrdtReplicaManager {
             this.requestRemoteDrain(filePath);
             return false;
         }
-        if (decision === 'adopt-exact-editor') {
-            this.logger.warn(
-                `[crdt-replica] incoming update deferred while the exact editor baseline replaces a stale native replica for ${filePath}: ` +
-                `editor_hash=${editorHash} expected_hash=${sha256(expectedText)} ` +
-                `replica_hash=${replicaHash ?? 'missing'}`,
-            );
-            await this.adoptExactEditorBaseline(
-                filePath,
-                editorText,
-                forwarder,
-                false,
-                'remote-delivery-baseline-diverged',
-            );
-            return false;
-        }
         this.logger.warn(
-            `[crdt-replica] incoming update deferred because editor adoption lacks a stable exact proof for ${filePath}: ` +
+            `[crdt-replica] incoming update retained for lazy canonical projection because baselines diverged for ${filePath}: ` +
             `editor_state=${editorState} editor_hash=${editorHash} expected_hash=${sha256(expectedText)} ` +
             `replica_hash=${replicaHash ?? 'missing'}`,
         );
-        this.scheduleReplicaRetry(filePath, 'editor-baseline-proof-missing');
+        this.scheduleReplicaRetry(filePath, 'baseline-diverged-lazy-canonical-projection');
         return false;
     }
 
@@ -1617,8 +1401,6 @@ export class CrdtReplicaManager {
             );
             try {
                 if (!(await forwarder.register())) return null;
-                const editorText = this.shadows.get(filePath);
-                if (editorText !== undefined) await forwarder.ensureEditorText(editorText);
                 this.forwarders.set(filePath, forwarder);
                 return forwarder;
             } catch (e: any) {

@@ -39,17 +39,22 @@ Steps to compact an agent-doc exchange component when it grows too large.
 
 4. **Run `agent-doc compact <FILE> --component exchange --commit`**
 - The CLI, JetBrains action, and VS Code action submit one operation to the CP;
-  they never compute or apply compaction themselves. The CP performs the read,
-  archive, CRDT replacement, projection ACK, and commit in one controller-owned
-  mutation scope.
+they never compute or apply compaction themselves. The CP performs the read,
+archive, and canonical CRDT replacement in one controller-owned mutation scope.
+Editor delivery, durable settlement, and closeout are derived by the keyed
+per-document Lazily projection. A retained target is accepted without a
+foreground ACK-recovery request or polling barrier.
 - Inside that scope, relay reads/writes and the commit use in-process controller
   state rather than recursively requesting the controller socket. This removes
   the short generic RPC timeout and self-queue deadlock from Compact Exchange.
    - Archives the original content to `.agent-doc/archives/`
    - When the active captured response is folded into that archive and removed from the compacted document, closeout accepts the exact response in the referenced archive as materialization evidence. Missing or unrelated archive content still blocks the commit and preserves the captured cycle.
    - Replaces exchange content with the supplied summary, or when no custom `--message` is provided, with a default session summary that includes archive pointer plus live backlog/queue/icebox context
-   - Updates snapshot atomically
-   - Closes out via the binary-owned `agent-doc commit` path and verifies the VCS refresh signal when available
+- Updates the document baseline only after the Lazily settlement projection
+proves the exact canonical target editor-visible or detached-disk authoritative;
+there is no CRDT recovery sidecar.
+- Closes out through the binary-owned continuation derived from that same
+settlement projection and verifies the VCS refresh signal when available.
    - Uses the quiescent CRDT-only convergence path when a replica is attached; component `op:replace` remains only for a reliable legacy endpoint without an attached model, and editor IPC `fullContent` is never used. The guarded direct-write path is only the detached fallback, so a second mutation cannot race the CRDT delivery or the next prompt being drafted and the binary does not write behind a running plugin
    - `#jb-compact-editor-buffer-flush`: the `op:replace` convergence updates only the live editor's in-memory buffer — the plugin does not save. Before the `--commit` selective commit stages the snapshot, the binary asks the editor to flush its buffer to disk (the same `save_document` IPC preflight uses for `live_prompt_drift`) and waits for disk to match the **live compacted target**. That target includes any unresolved post-boundary prompt, while the separate committed snapshot intentionally omits it. Look for `compact_editor_buffer_flush ... transport=save_document` in `ops.log`.
    - `#jb-compact-two-target-lineage`: when live and committed targets differ, closeout never adopts the committed-only target into an already-converged relay. Doing so schedules a whole-buffer editor rebootstrap and lets delayed JetBrains document events replay the pre-compact lineage, resurrecting archived content as uncommitted text. The commit stages/verifies the committed target without changing the live target.

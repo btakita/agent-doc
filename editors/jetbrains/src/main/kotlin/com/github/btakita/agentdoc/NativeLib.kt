@@ -732,13 +732,6 @@ interface AgentDocLib : Library {
         deltaJson: String,
     ): Int
 
-    /** Bounded genuine-reattach recovery carrying editor text, never op history. */
-    fun agent_doc_reliable_sync_text_adopt_push(
-        projectRoot: String,
-        filePath: String,
-        text: String,
-    ): Int
-
     /** Retry a retained document-op suffix without enqueueing a new frame. */
     fun agent_doc_reliable_sync_document_op_flush(projectRoot: String, filePath: String): Int
 

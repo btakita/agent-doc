@@ -184,7 +184,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 "preflight_response_replay_dedup",
             )?;
         }
-        agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+        retain_preflight_controller_projection(
             file,
             &normalized,
             &content,
@@ -216,7 +216,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         )
         .is_some()
     {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, &head)?;
+        retain_preflight_controller_projection(
+            file,
+            &head,
+            &content,
+            "preflight_committed_overapplication_repair",
+        )?;
         content =
             resolve_current_preflight_document(file, "after_committed_overapplication_repair")?;
         agent_doc_snapshot_io::checkpoint_document_baseline(
@@ -1902,6 +1907,41 @@ fn preflight_commit_error_is_live_editor_pending(err: &anyhow::Error) -> bool {
         || message.contains("editor_attached_model_missing")
 }
 
+fn retain_preflight_controller_projection(
+    file: &Path,
+    target: &str,
+    expected_current: &str,
+    source: &str,
+) -> Result<bool> {
+    match agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+        file,
+        target,
+        expected_current,
+        source,
+    ) {
+        Ok(()) => Ok(false),
+        Err(err)
+            if err
+                .downcast_ref::<agent_doc_document_realtime_io::AwaitEditorReplicaNoDiskWrite>()
+                .is_some() =>
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_retained file={} target_hash={} driver=lazy_projection",
+                    file.display(),
+                    agent_doc_hash::content_hash(target),
+                ),
+            );
+            Ok(true)
+        }
+        Err(err) => Err(err.context(format!(
+            "{source}: failed to retain controller projection for {}",
+            file.display(),
+        ))),
+    }
+}
+
 fn converge_exact_document_replay_before_preflight(file: &Path) -> Result<(String, Option<usize>)> {
     let current = resolve_current_preflight_document(file, "exact_document_replay_check")?;
     let Some(replay) =
@@ -1925,8 +1965,12 @@ fn converge_exact_document_replay_before_preflight(file: &Path) -> Result<(Strin
             agent_doc_hash::content_hash(&canonical),
         ),
     );
-    agent_doc_document_realtime_io::atomic_write_through_authority(file, &canonical)
-        .context("failed to converge exact whole-document replay through CRDT authority")?;
+    let retained = retain_preflight_controller_projection(
+        file,
+        &canonical,
+        &current,
+        "preflight_exact_document_replay",
+    )?;
     let converged = resolve_current_preflight_document(file, "exact_document_replay_converged")?;
     anyhow::ensure!(
         agent_doc_document_realtime::write_policy::coalesce_exact_document_replay(&converged)
@@ -1936,7 +1980,8 @@ fn converge_exact_document_replay_before_preflight(file: &Path) -> Result<(Strin
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "preflight_exact_document_replay action=converged transport=crdt copies={} canonical_len={} canonical_hash={}",
+            "preflight_exact_document_replay action={} transport=crdt driver=lazy_projection copies={} canonical_len={} canonical_hash={}",
+            if retained { "retained" } else { "converged" },
             copies,
             converged.len(),
             agent_doc_hash::content_hash(&converged),
@@ -2072,11 +2117,20 @@ mod tests {
 
         assert_eq!(copies, Some(2));
         assert_eq!(settled, canonical);
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), canonical);
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk == replayed || disk == canonical,
+            "disk may trail the retained projection or contain the editor's exact native save",
+        );
         let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops.contains("preflight_exact_document_replay action=converged transport=crdt"));
-        assert!(ops.contains("transport=crdt_editor_native_save"));
-        assert!(ops.contains("disk_rewritten=false"));
+        assert!(ops.contains("preflight_exact_document_replay action="));
+        assert!(ops.contains("transport=crdt driver=lazy_projection"));
+        if disk == replayed {
+            assert!(
+                agent_doc_document_realtime_io::pending_document_write(&doc).is_some(),
+                "a trailing disk projection must retain the exact controller target",
+            );
+        }
 
         std::fs::remove_file(&doc).unwrap();
     }
@@ -5952,7 +6006,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_retires_redundant_intent_before_exact_doubled_recovery() {
+    fn preflight_retires_redundant_intent_before_retaining_exact_projection() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let clean = concat!(
@@ -5990,9 +6044,16 @@ mod tests {
             resolve_current_preflight_document(&doc, "test_exact_doubled_retirement").unwrap();
         assert_eq!(current, clean);
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), clean);
+        let journal = agent_doc_document_realtime_io::pending_document_write_journal(&doc);
         assert!(
-            agent_doc_document_realtime_io::pending_document_write_journal(&doc).is_empty(),
-            "the redundant retained lineage must be retired through state events",
+            journal
+                .iter()
+                .all(|intent| intent.source.token() != "legacy_delivery_failed_to_all"),
+            "the redundant historical lineage must be retired through state events: {journal:?}",
+        );
+        assert!(
+            journal.iter().all(|intent| intent.target_content == clean),
+            "any remaining intent must be only the exact lazy controller projection: {journal:?}",
         );
     }
 }

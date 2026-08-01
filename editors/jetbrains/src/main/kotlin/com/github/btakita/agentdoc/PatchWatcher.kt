@@ -21,21 +21,6 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
 
-private enum class CrdtReplicaEventReason(val token: String) {
-    RequestFullState("request_full_state"),
-    Fanout("fanout"),
-    ResponseCellAdd("response_cell_add"),
-    CpWrite("cp_write"),
-    Rebootstrap("rebootstrap"),
-    AckReplay("ack_replay"),
-    AckRecoveryForceRefresh("ack_recovery_force_refresh");
-
-    companion object {
-        fun fromToken(token: String?): CrdtReplicaEventReason? =
-            entries.firstOrNull { it.token == token }
-    }
-}
-
 /** Cross-language editor intent names; mirrored by Rust and VS Code. */
 private enum class EditorIntent(val token: String) {
     ApplyCanonical("apply_canonical"),
@@ -483,27 +468,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val editorId = extractStringField(json, "editor_id")
                 if (!targetsThisEditorId(editorId)) return APPLY_FAILED
                 val reasonToken = extractStringField(json, "reason")
-                when (CrdtReplicaEventReason.fromToken(reasonToken)) {
-                    CrdtReplicaEventReason.RequestFullState ->
-                        CrdtReplicaManager.requestTextAdopt(project, file)
-                // #ensurereregister: this reason means the controller has no CRDT
-                // member for an attached editor. The plugin's local forwarder cache
-                // is not proof of controller membership: it survives controller
-                // recycle. Always replace/register from the exact visible editor
-                // cut, matching ReloadLibrary's recovery without refreshing every
-                // open document.
-                CrdtReplicaEventReason.AckRecoveryForceRefresh ->
-                    CrdtReplicaManager.forceRefreshOpenDocumentReplica(
-                        project,
-                        file,
-                        "ack-recovery-missing-controller-replica",
-                    )
-                    else -> Unit
-                }
                 // #crdtpushdrain: every controller-published frontier drains urgently.
-                // Only `request_full_state` (handled above by the text-adopt path) is
-                // exempt. The urgent path falls back to the gated drain when it finds
-                // no work, so the no-op backoff still governs speculative polling.
+                // The urgent path falls back to the gated drain when it finds no work,
+                // so the no-op backoff still governs speculative polling. Legacy
+                // recovery tokens are also handled as ordinary projection wakeups;
+                // they never adopt an editor buffer into controller authority.
                 if (shouldUrgentDrainForRemoteEventUtil(reasonToken)) {
                     CrdtReplicaManager.requestUrgentRemoteDrain(
                         project,

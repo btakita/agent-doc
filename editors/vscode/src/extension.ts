@@ -72,6 +72,9 @@ const AUTOMATIC_SYNC_CLI_TIMEOUT_MS = 5_000;
 const ROUTE_CANCEL_WAIT_MS = 5_000;
 const ROUTE_WAIT_FOR_READY_SECONDS = '120';
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
+const EDITOR_SURFACE_CLIENT_ID = `vscode-pid:${process.pid}`;
+const EDITOR_SURFACE_CLIENT_GENERATION = monotonicMillis();
+const EDITOR_SURFACE_OBSERVE_TIMEOUT_MS = 40_000;
 const LAZILY_CURRENT_OBSERVATION_DELAY_MS = 75;
 
 function monotonicMillis(): number {
@@ -407,15 +410,24 @@ function showError(message: string): void {
     vscode.window.showErrorMessage(`Agent Doc: ${message}`);
 }
 
-// Controller→native→plugin turn-state coordination. Native owns one reactive
-// authority subscription per open document; this view only samples the local
-// Computed cache and never requests controller or SQLite state.
+// Controller-owned turn-state coordination. The status view samples a pure
+// in-memory projection over the existing controller socket; neither the
+// reloadable native library nor SQLite participates in this editor hot path.
 const turnStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
 const TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS = 250;
+const TURN_STATUS_PROJECTION_TIMEOUT_MS = 2_000;
 const TURN_STATUS_AUTHORITY_SETTLE_MS = 75;
 let turnStatusWatcherRoot: string | undefined;
 let turnStatusRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let turnStatusLastRefreshMs = 0;
+let turnAuthorityRequestController: AbortController | undefined;
+let turnAuthorityCache: {
+    key: string;
+    readiness: 'pending' | 'ready' | 'unavailable';
+    projection?: import('./sessionUi.js').TurnProjection;
+    error?: string;
+    observedAt: number;
+} | undefined;
 
 function activeAgentDocProjectRoot(): string | undefined {
     const editor = vscode.window.activeTextEditor;
@@ -429,6 +441,9 @@ function disposeTurnStatusWatcher(): void {
     turnStatusWatcherRoot = undefined;
     if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
     turnStatusRefreshTimer = undefined;
+    turnAuthorityRequestController?.abort();
+    turnAuthorityRequestController = undefined;
+    turnAuthorityCache = undefined;
 }
 
 function configureTurnStatusWatcher(): void {
@@ -468,7 +483,7 @@ function refreshTurnStatus(reason = 'event', force = false): void {
     }, delayMs);
 }
 
-function currentNativeTurnAuthority(
+function currentControllerTurnAuthority(
     projectRoot: string,
     filePath: string,
 ): {
@@ -476,27 +491,59 @@ function currentNativeTurnAuthority(
     projection?: import('./sessionUi.js').TurnProjection;
     error?: string;
 } {
-    try {
-        const authorityJson = native.currentDocumentAuthorityJson(projectRoot);
-        if (!authorityJson) return { readiness: 'pending' };
-        const current = JSON.parse(authorityJson);
-        if (current?.document !== filePath || !current?.authority) {
-            return { readiness: 'pending' };
-        }
-        const readiness = current.authority.readiness;
-        if (readiness === 'ready') {
-            return {
-                readiness,
-                projection: current.authority.turn as import('./sessionUi.js').TurnProjection,
-            };
-        }
-        if (readiness === 'unavailable') {
-            return { readiness, error: current.authority.error };
-        }
-        return { readiness: 'pending' };
-    } catch (err: any) {
-        return { readiness: 'unavailable', error: err?.message ?? 'Native authority parse failed' };
+    const key = `${projectRoot}\0${filePath}`;
+    if (turnAuthorityCache?.key !== key) {
+        turnAuthorityRequestController?.abort();
+        turnAuthorityRequestController = undefined;
+        turnAuthorityCache = {
+            key,
+            readiness: 'pending',
+            observedAt: 0,
+        };
     }
+    const cache = turnAuthorityCache;
+    if (
+        !turnAuthorityRequestController
+        && Date.now() - cache.observedAt >= TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS
+    ) {
+        const controller = new AbortController();
+        turnAuthorityRequestController = controller;
+        void requestProjectController(
+            projectRoot,
+            {
+                command: 'document_turn_projection',
+                file: filePath,
+                caller: EDITOR_ID,
+            },
+            controller.signal,
+            TURN_STATUS_PROJECTION_TIMEOUT_MS,
+        ).then((projection: import('./sessionUi.js').TurnProjection) => {
+            if (turnAuthorityCache?.key !== key || controller.signal.aborted) return;
+            turnAuthorityCache = {
+                key,
+                readiness: 'ready',
+                projection,
+                observedAt: Date.now(),
+            };
+        }).catch((error: unknown) => {
+            if (turnAuthorityCache?.key !== key || controller.signal.aborted) return;
+            turnAuthorityCache = {
+                key,
+                readiness: 'unavailable',
+                error: String(error),
+                observedAt: Date.now(),
+            };
+        }).finally(() => {
+            if (turnAuthorityRequestController !== controller) return;
+            turnAuthorityRequestController = undefined;
+            refreshTurnStatus('controller-authority', true);
+        });
+    }
+    return {
+        readiness: cache.readiness,
+        projection: cache.projection,
+        error: cache.error,
+    };
 }
 
 function refreshTurnStatusNow(reason: string): void {
@@ -518,7 +565,7 @@ function refreshTurnStatusNow(reason: string): void {
         turnStatusBarItem.show();
         return;
     }
-    const authority = currentNativeTurnAuthority(projectRoot, editor.document.fileName);
+    const authority = currentControllerTurnAuthority(projectRoot, editor.document.fileName);
     if (authority.readiness === 'pending') {
         scheduleTurnStatusCacheObservation(TURN_STATUS_AUTHORITY_SETTLE_MS);
         return;
@@ -954,6 +1001,7 @@ function requestProjectController(
     projectRoot: string,
     request: Record<string, unknown>,
     signal: AbortSignal,
+    timeoutMs?: number,
 ): Promise<any> {
     return new Promise((resolve, reject) => {
         if (signal.aborted) {
@@ -983,6 +1031,13 @@ function requestProjectController(
 
         signal.addEventListener('abort', abortHandler, { once: true });
         socket.setEncoding('utf8');
+        if (timeoutMs !== undefined) {
+            socket.setTimeout(timeoutMs, () => {
+                finish(() => reject(new Error(
+                    `project controller request timed out after ${timeoutMs}ms`,
+                )));
+            });
+        }
         socket.on('connect', () => {
             socket.write(`${JSON.stringify(request)}\n`);
         });
@@ -1835,6 +1890,8 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
 let surfaceProjectionQueued = false;
 let surfaceProjectionActive = false;
 let latestSurfaceGeneration = 0;
+let editorSurfaceSequence = 0;
+let surfaceObservationController: AbortController | undefined;
 /** Every project root observed this session, released on deactivate. */
 const observedSurfaceRoots = new Set<string>();
 
@@ -1949,16 +2006,58 @@ function reportCurrentSurface(requestedGeneration: number): void {
     const pending = captureCurrentSurface(false);
     if (pending === null) return;
     observedSurfaceRoots.add(pending.root);
-    native.editorSurfaceEnqueueJson({
-        projectRoot: pending.root,
-        surfaceJson: JSON.stringify(pending.surface),
+    surfaceObservationController?.abort();
+    const controller = new AbortController();
+    surfaceObservationController = controller;
+    const observation = {
+        client_id: EDITOR_SURFACE_CLIENT_ID,
+        generation: EDITOR_SURFACE_CLIENT_GENERATION,
+        sequence: ++editorSurfaceSequence,
+        surface: pending.surface,
+    };
+    void requestProjectController(
+        pending.root,
+        {
+            command: 'editor_surface_observe',
+            file: pending.surface.focused,
+            generation: EDITOR_SURFACE_CLIENT_GENERATION,
+            caller: EDITOR_SURFACE_CLIENT_ID,
+            reason: 'editor_surface_observation',
+            diagnostic_payload: JSON.stringify(observation),
+        },
+        controller.signal,
+        EDITOR_SURFACE_OBSERVE_TIMEOUT_MS,
+    ).catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+            console.debug(
+                `[agent-doc/editor-surface] controller observation unavailable for `
+                + `${pending.relativePath}: ${String(error)}`,
+            );
+        }
+    }).finally(() => {
+        if (surfaceObservationController === controller) {
+            surfaceObservationController = undefined;
+        }
     });
 }
 
 /** Release every observed root's surface graph. */
 function forgetObservedSurfaces(): void {
     for (const root of observedSurfaceRoots) {
-        native.editorSurfaceForget(root);
+        const controller = new AbortController();
+        void requestProjectController(
+            root,
+            {
+                command: 'editor_surface_forget',
+                generation: EDITOR_SURFACE_CLIENT_GENERATION,
+                caller: EDITOR_SURFACE_CLIENT_ID,
+            },
+            controller.signal,
+            TURN_STATUS_PROJECTION_TIMEOUT_MS,
+        ).catch(() => {
+            // The controller may already be gone; generation fencing makes
+            // an unacknowledged retirement harmless.
+        });
     }
     observedSurfaceRoots.clear();
 }
@@ -2153,11 +2252,6 @@ class PatchWatcher implements vscode.Disposable {
             listDocuments: () => this.currentProjectMarkdownSnapshots(projectRoot),
             currentText: (filePath) => this.currentOpenDocumentText(filePath),
             applyText: (filePath, text, expectedText) => this.applyCrdtReplicaText(filePath, text, expectedText),
-            resolveDeferredReconnectContent: (filePath, editorText) =>
-                native.deferredWriteReconnectContent(filePath, editorText, projectRoot),
-            settleDeferredReconnectContent: (filePath, editorText) => {
-                native.deferredWriteReconnectPropagated(filePath, editorText, projectRoot);
-            },
             normalizeTemplateStructure: (text) => native.normalizeTemplateStructure(text, projectRoot),
             logger: {
                 debug: (message) => this.outputChannel.appendLine(message),
@@ -2357,12 +2451,6 @@ class PatchWatcher implements vscode.Disposable {
             }
             case EditorIntent.DeliverCrdtRemote:
                 if (!filePath) return 0;
-                if (message.reason === 'request_full_state' || message.reason === 'ack_recovery_force_refresh') {
-                    await this.crdtReplicas?.handleReattachRequest(
-                        filePath,
-                        this.unsyncedLocalEditDocs.has(filePath),
-                    );
-                }
                 this.crdtReplicas?.requestRemoteDrain(filePath);
                 return 1;
             case EditorIntent.SaveDocument: {
@@ -3270,6 +3358,8 @@ export function deactivate(): void {
     surfaceProjectionActive = false;
     surfaceProjectionQueued = false;
     latestSurfaceGeneration++;
+    surfaceObservationController?.abort();
+    surfaceObservationController = undefined;
     // Release each observed root's surface graph: its reconciled-layout history
     // must not outlive the editor that produced it.
     forgetObservedSurfaces();

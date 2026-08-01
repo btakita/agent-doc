@@ -48,7 +48,7 @@ const DOCUMENT_OP_NODE: NodeId = NodeId(u64::MAX - 1);
 /// whole `Vec<TextOp>` (`ReplicaState::encode_state` = `delta_since(∅)`), sent on
 /// reattach so the controller can REPLACE a drifted canonical (drop `#sy71`-class
 /// drift) rather than union-merge it. Distinct from [`DOCUMENT_OP_NODE`] so the
-/// controller routes it to `adopt_editor_full_state_for_file`, not the fold path.
+/// controller recognizes it only as decode-only rolling-build compatibility input.
 const DOCUMENT_OP_ADOPT_NODE: NodeId = NodeId(u64::MAX - 2);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -229,7 +229,7 @@ fn decode_adopt_ops(ops: &[&CrdtOp]) -> Result<Vec<TextOp>> {
 
 /// Reserved node id for a **bounded text adopt** frame (`#reattach-adopt`, runaway-safe):
 /// carries the editor's authoritative TEXT (`O(text)`), NOT the tombstone op-log. The
-/// controller rebuilds the canonical from text (`RelayHub::adopt_editor_text`).
+/// controller recognizes it only as decode-only rolling-build compatibility input.
 const TEXT_ADOPT_NODE: NodeId = NodeId(u64::MAX - 3);
 
 /// Encode a bounded text-adopt frame carrying the editor's document `text`.

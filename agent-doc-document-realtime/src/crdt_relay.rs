@@ -247,16 +247,15 @@ pub enum DocumentOpDeltaOutcome {
     LegacyQuarantined,
 }
 
-/// Shared authority decision for a bounded whole-editor text adoption.
-///
-/// A retained controller projection owns the document until every live target
-/// has produced a visible-content receipt. An editor's coarse "unsynced edit"
-/// fact does not prove that its whole buffer descends from that newer target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum EditorTextAdoptionDecision {
-    AlreadyCurrent,
-    AdoptEditorText,
-    RetainCanonicalProjection,
+/// Controller-owned in-memory projection retained independently of a relay
+/// member generation. It is deliberately not serialized to the CRDT recovery
+/// sidecar: a relay recycle reattaches to this live value, while a cold process
+/// starts from the normal controller document input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetainedCanonicalProjection {
+    pub state: Vec<u8>,
+    pub lineage: String,
+    pub last_committed_text: Option<String>,
 }
 
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
@@ -292,11 +291,11 @@ pub struct RelayHub {
     /// registration or update arrives first. Their retained CRDT lineage cannot
     /// be union-merged with a canonical freshly seeded from disk: both lineages
     /// may encode the complete visible document, which would concatenate it.
-    /// Updates remain fenced until an authoritative full-state adopt replaces
-    /// canonical and rebases their hub-side mirrors. This is a reactive
-    /// source-map projection joined to the hub graph, not state inferred from
-    /// RPC arrival order.
-    authoritative_full_state_required: ThreadSafeSourceMap<u64, bool>,
+    /// Updates remain fenced until the controller's retained canonical target
+    /// has been projected to the member. This is a reactive source-map
+    /// projection joined to the hub graph, not state inferred from RPC arrival
+    /// order or recovered from an editor whole-buffer request.
+    canonical_projection_required: ThreadSafeSourceMap<u64, bool>,
     /// Optional live per-node document projection. It shares this hub's
     /// [`ThreadSafeContext`] and is updated at every canonical mutation boundary.
     /// Default-off; see [`CELL_DOC_TREE_CUTOVER_ENV`].
@@ -306,10 +305,10 @@ pub struct RelayHub {
     /// reactive handle stored here must be `Send`; [`ThreadSafeContext`] and the
     /// `Arc`-based [`ThreadSafeSourceMap`]/[`Source`]/[`Computed`] all qualify.
     ctx: ThreadSafeContext,
-    /// False for a hub reconstructed from disk/recovery state; true only after a
-    /// live editor establishes the shared authority lineage. This reactive fact
-    /// prevents command arrival order from selecting authority.
-    live_authority_established: Source<bool>,
+    /// False until the controller canonical has been projected into the current
+    /// relay generation. This reactive fact prevents command arrival order from
+    /// selecting an editor buffer as authority.
+    controller_projection_established: Source<bool>,
     /// Per-member liveness as a keyed reactive family (keyed by `client_id`). This is
     /// the **single** source of truth for whether a member is connected — the former
     /// `Member.live` field is gone. The present set only grows (deferral, not
@@ -349,8 +348,8 @@ pub struct RelayHub {
 struct LivenessCore {
     ctx: ThreadSafeContext,
     liveness: ThreadSafeSourceMap<u64, bool>,
-    authoritative_full_state_required: ThreadSafeSourceMap<u64, bool>,
-    live_authority_established: Source<bool>,
+    canonical_projection_required: ThreadSafeSourceMap<u64, bool>,
+    controller_projection_established: Source<bool>,
     membership_epoch: Source<u64>,
     live_editor_count: Computed<usize>,
     delivery_epoch: Source<u64>,
@@ -484,11 +483,11 @@ impl RelayHub {
         let ctx = ThreadSafeContext::new();
         let membership_epoch = ctx.source(0u64);
         let delivery_epoch = ctx.source(0u64);
-        let live_authority_established = ctx.source(false);
+        let controller_projection_established = ctx.source(false);
         // Cells materialize on `register`; the factory value (`true` = live-on-register)
         // only applies before the explicit `set` in `set_live`.
         let liveness: ThreadSafeSourceMap<u64, bool> = ThreadSafeSourceMap::new(&ctx);
-        let authoritative_full_state_required: ThreadSafeSourceMap<u64, bool> =
+        let canonical_projection_required: ThreadSafeSourceMap<u64, bool> =
             ThreadSafeSourceMap::new(&ctx);
         let delivery_subscription = DeliveryConvergenceSubscription::new(&ctx);
         let live_editor_count = {
@@ -507,8 +506,8 @@ impl RelayHub {
         LivenessCore {
             ctx,
             liveness,
-            authoritative_full_state_required,
-            live_authority_established,
+            canonical_projection_required,
+            controller_projection_established,
             membership_epoch,
             live_editor_count,
             delivery_epoch,
@@ -622,8 +621,8 @@ impl RelayHub {
         let LivenessCore {
             ctx,
             liveness,
-            authoritative_full_state_required,
-            live_authority_established,
+            canonical_projection_required,
+            controller_projection_established,
             membership_epoch,
             live_editor_count,
             delivery_epoch,
@@ -640,10 +639,10 @@ impl RelayHub {
             awareness: AwarenessChannel::new(),
             last_committed_text: None,
             pending_rebootstrap: HashSet::new(),
-            authoritative_full_state_required,
+            canonical_projection_required,
             live_document_projection,
             ctx,
-            live_authority_established,
+            controller_projection_established,
             liveness,
             membership_epoch,
             live_editor_count,
@@ -694,6 +693,31 @@ impl RelayHub {
         }
         hub.last_committed_text = last_committed_text;
         Ok(hub)
+    }
+
+    /// Recreate only the disposable relay around a controller-retained
+    /// canonical target.
+    pub fn from_retained_canonical_projection(
+        canonical_id: u64,
+        projection: &RetainedCanonicalProjection,
+    ) -> Result<Self> {
+        let mut hub = Self::recover_from_projection_with_lineage(
+            canonical_id,
+            &projection.state,
+            Some(&projection.lineage),
+        )?;
+        hub.last_committed_text = projection.last_committed_text.clone();
+        Ok(hub)
+    }
+
+    /// Snapshot the live controller target for a keyed Lazily cell. This is an
+    /// in-memory reactive value, not a persistence or recovery-sidecar API.
+    pub fn retained_canonical_projection(&self) -> RetainedCanonicalProjection {
+        RetainedCanonicalProjection {
+            state: self.canonical.encode_state(),
+            lineage: self.lineage.clone(),
+            last_committed_text: self.last_committed_text.clone(),
+        }
     }
 
     pub fn lineage(&self) -> &str {
@@ -811,27 +835,26 @@ impl RelayHub {
 
     /// Fence a member whose first contact with this hub was an incremental
     /// update from a retained editor generation.
-    pub fn require_authoritative_full_state(&mut self, client_id: u64) {
-        self.authoritative_full_state_required
+    pub fn require_canonical_projection(&mut self, client_id: u64) {
+        self.canonical_projection_required
             .set(&self.ctx, client_id, true);
     }
 
-    /// Whether this controller generation has established canonical authority
-    /// from a live editor rather than merely reconstructing a recovery seed.
-    pub fn live_authority_established(&self) -> bool {
-        self.ctx.get(&self.live_authority_established)
+    /// Whether this relay generation has projected the controller canonical.
+    pub fn controller_projection_established(&self) -> bool {
+        self.ctx.get(&self.controller_projection_established)
     }
 
-    /// Publish that canonical and the live editor now share one authoritative
-    /// lineage.
-    pub fn establish_live_authority(&self) {
-        self.ctx.set(&self.live_authority_established, true);
+    /// Publish that the current relay generation consumes the controller-owned
+    /// canonical projection.
+    pub fn establish_controller_projection(&self) {
+        self.ctx.set(&self.controller_projection_established, true);
     }
 
     /// Whether additive updates from `client_id` must remain quarantined until
-    /// a replace-capable full-state adopt establishes the shared lineage.
-    pub fn awaits_authoritative_full_state(&self, client_id: u64) -> bool {
-        self.authoritative_full_state_required
+    /// the retained controller target is visibly projected to that member.
+    pub fn awaits_canonical_projection(&self, client_id: u64) -> bool {
+        self.canonical_projection_required
             .observe(&self.ctx, &client_id)
             .unwrap_or(false)
     }
@@ -844,7 +867,7 @@ impl RelayHub {
         let removed = self.members.remove(&client_id).is_some();
         if removed {
             self.pending_rebootstrap.remove(&client_id);
-            self.authoritative_full_state_required
+            self.canonical_projection_required
                 .set(&self.ctx, client_id, false);
             // The cell stays present-but-false (deferral, not de-allocation) so it is
             // no longer counted; a later re-register flips the same cell back to true.
@@ -1011,146 +1034,6 @@ impl RelayHub {
         for target in &packet.targets {
             self.deliver(*target, &packet.update)?;
         }
-        Ok(packet)
-    }
-
-    /// Adopt an editor's **authoritative full lazily state** as the canonical,
-    /// lineage-intact — the reattach acute-wedge fix (`#reattach-adopt`).
-    ///
-    /// `full_state` is the editor's whole `ReplicaState::encode_state()` (a
-    /// `serde_json` `Vec<TextOp>` = `delta_since(∅)`, carrying the editor's own
-    /// `OpId`s). The recovered durable canonical can carry **drift** — an op the
-    /// operator already deleted (e.g. `#sy71`) that a mere union-merge of the
-    /// editor's *incremental* update cannot remove (there is no counterpart delete).
-    /// So on reattach the editor's full state is the authority: rebuild the canonical
-    /// **from the editor's ops** (replacing the drifted one), which drops the drift
-    /// AND keeps the editor's `OpId` lineage so later editor deltas still merge
-    /// conflict-free (unlike `apply_canonical_replace`, which mints fresh ids from
-    /// text and would duplicate). Any *other* live members are flagged to rebootstrap
-    /// (the lineage changed under them); on the reattach path there are none
-    /// (`live_editors == 0`).
-    /// Bounded, one-shot reattach adopt (`#reattach-adopt`, the runaway-safe path):
-    /// rebuild the canonical from the editor's authoritative **TEXT** (`O(text)`, not the
-    /// unbounded tombstone op-log that caused the 2026-07-13 runaway). Safe on reattach
-    /// because `live_editors == 0` means no other live member to conflict with a fresh
-    /// lineage. Self-echo guarded: a no-op when the canonical already shows this text (so a
-    /// repeated push can't pump a feedback loop). Any other live members rebootstrap.
-    pub fn adopt_editor_text(&mut self, text: &str) -> Result<BroadcastPacket> {
-        match self.editor_text_adoption_decision(text) {
-            EditorTextAdoptionDecision::AlreadyCurrent => {
-                return Ok(BroadcastPacket {
-                    origin: self.canonical_id,
-                    update: Vec::new(),
-                    targets: Vec::new(),
-                });
-            }
-            EditorTextAdoptionDecision::RetainCanonicalProjection => {
-                return Err(anyhow!(
-                    "editor text adoption deferred: retained canonical projection awaits visible-content receipt"
-                ));
-            }
-            EditorTextAdoptionDecision::AdoptEditorText => {}
-        }
-        let before_text = self.canonical.text();
-        let before = self.canonical.state_vector();
-        self.canonical = ReplicaState::from_text(self.canonical_id, text);
-        self.sync_live_document_projection(&before_text, text);
-        self.rotate_lineage();
-        self.last_committed_text = None;
-        let out = self.canonical.diff(&before)?;
-        let mut targets: Vec<u64> = self
-            .members
-            .keys()
-            .copied()
-            .filter(|id| self.is_live(*id))
-            .collect();
-        targets.sort_unstable();
-        self.pending_rebootstrap.extend(targets.iter().copied());
-        let packet = BroadcastPacket {
-            origin: self.canonical_id,
-            update: out,
-            targets,
-        };
-        self.enqueue_delivery(&packet);
-        Ok(packet)
-    }
-
-    /// Project whether a whole-editor buffer may replace canonical right now.
-    ///
-    /// Delivery convergence is the reactive live-cut projection backed by
-    /// `delivery_epoch`; pending controller fan-out therefore wins over a stale
-    /// request-full-state recovery without consulting SQLite or RPC ordering.
-    pub fn editor_text_adoption_decision(&self, text: &str) -> EditorTextAdoptionDecision {
-        if self.canonical.text() == text {
-            EditorTextAdoptionDecision::AlreadyCurrent
-        } else if self.delivery_converged() {
-            EditorTextAdoptionDecision::AdoptEditorText
-        } else {
-            EditorTextAdoptionDecision::RetainCanonicalProjection
-        }
-    }
-
-    pub fn adopt_editor_full_state(&mut self, full_state: &[u8]) -> Result<BroadcastPacket> {
-        let adopted = ReplicaState::from_encoded(self.canonical_id, full_state)?;
-        // Self-echo guard (`#reattach-adopt`, fixes the 2026-07-13 runaway): if the
-        // editor's state has the SAME visible text as the canonical, adopting changes
-        // nothing — it would only fan an empty delta back to editors, which re-aligned and
-        // re-pushed a growing op-log (77MB→167MB feedback loop). Skip entirely: no replace
-        // (so the canonical never accretes the editor's tombstone bloat), no broadcast, no
-        // rebootstrap. Only a genuine text divergence (real drift to correct) proceeds.
-        let before_text = self.canonical.text();
-        let awaiting_authoritative_members: Vec<u64> = self
-            .authoritative_full_state_required
-            .present_keys()
-            .into_iter()
-            .filter(|client_id| self.awaits_authoritative_full_state(*client_id))
-            .collect();
-        if adopted.text() == before_text && awaiting_authoritative_members.is_empty() {
-            return Ok(BroadcastPacket {
-                origin: self.canonical_id,
-                update: Vec::new(),
-                targets: Vec::new(),
-            });
-        }
-        let before = self.canonical.state_vector();
-        self.canonical = adopted;
-        self.establish_live_authority();
-        // A cold-start member was cloned from the disk-seeded canonical before
-        // we knew the retained editor lineage. Rebase that hub-side mirror onto
-        // the adopted lineage before accepting any later incremental update;
-        // otherwise the mirror would re-introduce the independent disk lineage
-        // on its next diff even though the visible full-state adopt succeeded.
-        let adopted_state = self.canonical.encode_state();
-        for client_id in awaiting_authoritative_members {
-            if let Some(member) = self.members.get_mut(&client_id) {
-                member.replica = ReplicaState::from_encoded(client_id, &adopted_state)?;
-                member.pending.clear();
-            }
-            self.authoritative_full_state_required
-                .set(&self.ctx, client_id, false);
-        }
-        let after_text = self.canonical.text();
-        self.sync_live_document_projection(&before_text, &after_text);
-        self.rotate_lineage();
-        // The adopted state is not a committed-to-disk baseline; clear the marker so
-        // `#staleinmem` re-detects on the next commit rather than trusting stale text.
-        self.last_committed_text = None;
-        let out = self.canonical.diff(&before)?;
-        let mut targets: Vec<u64> = self
-            .members
-            .keys()
-            .copied()
-            .filter(|id| self.is_live(*id))
-            .collect();
-        targets.sort_unstable();
-        // Lineage changed under any live peer → they must REPLACE, not merge.
-        self.pending_rebootstrap.extend(targets.iter().copied());
-        let packet = BroadcastPacket {
-            origin: self.canonical_id,
-            update: out,
-            targets,
-        };
-        self.enqueue_delivery(&packet);
         Ok(packet)
     }
 
@@ -1337,13 +1220,17 @@ impl RelayHub {
     /// idempotent CRDT update and gives the replacement identity a normal
     /// delivery token that it can ACK after projecting the bootstrap.
     pub fn ensure_canonical_projection_receipt(&mut self, client_id: u64) -> Result<bool> {
+        if !self.members.contains_key(&client_id) {
+            return Err(anyhow!("replica {client_id} is not registered"));
+        }
+        self.require_canonical_projection(client_id);
         let expected_content_hash = content_hash(&self.canonical.text());
         let canonical_state = self.canonical.encode_state();
         let canonical_id = self.canonical_id;
         let member = self
             .members
             .get_mut(&client_id)
-            .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
+            .expect("membership checked before canonical projection receipt");
         if member
             .pending
             .back()
@@ -1441,16 +1328,31 @@ impl RelayHub {
                 self.pending_rebootstrap.insert(client_id);
                 return Ok(false);
             }
+            let acknowledged_projection = member
+                .pending
+                .range(..=matched_pos)
+                .any(|update| update.patch_id.starts_with("crdt-bootstrap:"));
             let acknowledged_generation = member.pending[matched_pos].generation;
             member.pending.drain(..=matched_pos);
             member.last_ack_generation = member.last_ack_generation.max(acknowledged_generation);
             self.pending_rebootstrap.remove(&client_id);
+            if acknowledged_projection {
+                self.canonical_projection_required
+                    .set(&self.ctx, client_id, false);
+            }
             // Draining an ACKed run can be the write that converges delivery.
             self.bump_delivery_epoch();
             return Ok(true);
         }
-        member.pending.remove(pos);
+        let acknowledged_projection = member
+            .pending
+            .remove(pos)
+            .is_some_and(|update| update.patch_id.starts_with("crdt-bootstrap:"));
         member.last_ack_generation = member.last_ack_generation.max(generation);
+        if acknowledged_projection {
+            self.canonical_projection_required
+                .set(&self.ctx, client_id, false);
+        }
         self.bump_delivery_epoch();
         Ok(true)
     }
@@ -2018,57 +1920,6 @@ mod tests {
     }
 
     #[test]
-    fn adopt_editor_full_state_drops_canonical_drift_lineage_intact() {
-        // The reattach acute-wedge fix (`#reattach-adopt`): the recovered canonical
-        // carries drift the operator already deleted (`sy71-drift`); the editor's
-        // authoritative full state lacks it. Adopting the editor's full state drops the
-        // drift and keeps the editor's lineage so a later editor delta still merges.
-        let mut hub = RelayHub::from_text(1, "hello\nsy71-drift\n");
-        let editor = ReplicaState::from_text(2, "hello\n");
-        let full_state = editor.encode_state();
-
-        hub.adopt_editor_full_state(&full_state).unwrap();
-        assert_eq!(
-            hub.canonical_text(),
-            "hello\n",
-            "drift dropped — canonical adopts the editor's authoritative full state"
-        );
-
-        // Lineage-intact: a later incremental editor delta merges cleanly (no dup),
-        // because the canonical now carries the editor's OpIds, not fresh-minted ones.
-        let base = editor.state_vector();
-        editor.apply_local_edit(6, 0, "world\n"); // "hello\n" -> "hello\nworld\n"
-        let delta = editor.diff(&base).unwrap();
-        hub.apply_document_op_delta(&delta).unwrap();
-        assert_eq!(
-            hub.canonical_text(),
-            "hello\nworld\n",
-            "later editor delta merged lineage-intact — the drift did not reappear"
-        );
-    }
-
-    #[test]
-    fn adopt_editor_text_is_bounded_drops_drift_and_self_echoes() {
-        // Bounded reattach adopt: rebuild the canonical from the editor's TEXT. Drops drift
-        // (a line the operator deleted) and is O(text) not O(op-log). Self-echoes on same text.
-        let mut hub = RelayHub::from_text(1, "hello\nsy71-drift\n");
-        let packet = hub.adopt_editor_text("hello\n").unwrap();
-        assert!(!packet.update.is_empty(), "a real text change adopts");
-        assert_eq!(
-            hub.canonical_text(),
-            "hello\n",
-            "drift dropped via text rebuild"
-        );
-        // Self-echo: re-adopting the same text is a no-op (no broadcast) — no feedback loop.
-        let echo = hub.adopt_editor_text("hello\n").unwrap();
-        assert!(
-            echo.update.is_empty() && echo.targets.is_empty(),
-            "same-text adopt is a no-op"
-        );
-        assert_eq!(hub.canonical_text(), "hello\n");
-    }
-
-    #[test]
     fn replacement_rotates_lineage_and_quarantines_stale_durable_deltas() {
         let mut hub = RelayHub::from_text(1, "clean\n");
         let old_lineage = hub.lineage().to_string();
@@ -2077,7 +1928,7 @@ mod tests {
         stale_editor.apply_local_edit(6, 0, "resurrected\n");
         let stale_delta = stale_editor.diff(&stale_frontier).unwrap();
 
-        hub.adopt_editor_text("rebuilt\n").unwrap();
+        hub.adopt_authoritative_text("rebuilt\n").unwrap();
         assert_ne!(hub.lineage(), old_lineage);
         assert_eq!(
             hub.apply_document_op_delta_in_lineage(Some(&old_lineage), &stale_delta)
@@ -2103,78 +1954,6 @@ mod tests {
             DocumentOpDeltaOutcome::Applied { changed: true }
         );
         assert_eq!(hub.canonical_text(), "rebuilt\ncurrent\n");
-    }
-
-    #[test]
-    fn adopt_editor_full_state_self_echo_is_a_no_op_no_broadcast() {
-        // Runaway fix (2026-07-13): adopting a state whose visible text already equals the
-        // canonical must NOT replace the canonical or broadcast — otherwise a churned editor
-        // buffer (same text, ever-growing tombstone op-log) pumps an endless adopt→re-align
-        // →re-push feedback loop. Here a "different-lineage same-text" state must be a no-op.
-        let mut hub = RelayHub::from_text(1, "hello world\n");
-        // A separate replica that reaches the SAME text via its own ops (different OpIds,
-        // larger op-log) — the "bloated encode_state with identical text" case.
-        let editor = ReplicaState::new(2);
-        editor.apply_local_edit(0, 0, "hello there\n");
-        editor.apply_local_edit(6, 5, "world"); // "hello there\n" -> "hello world\n"
-        assert_eq!(editor.text(), "hello world\n");
-        let bloated_same_text = editor.encode_state();
-
-        let packet = hub.adopt_editor_full_state(&bloated_same_text).unwrap();
-        assert!(
-            packet.targets.is_empty() && packet.update.is_empty(),
-            "same-text adopt must not broadcast (no fan-back → no feedback loop)"
-        );
-        assert_eq!(hub.canonical_text(), "hello world\n", "text unchanged");
-        // The canonical must NOT have been replaced with the bloated op-log (no accretion):
-        // its state vector still reflects only its own (peer-1) lineage.
-        let sv = hub.canonical.state_vector();
-        assert!(
-            !sv.is_empty(),
-            "canonical keeps its own lineage; it did not adopt the editor's bloated op-log"
-        );
-    }
-
-    #[test]
-    fn repeated_same_text_adopts_converge_without_growth_feedback_loop_gate() {
-        // SimWorld reproduction of the 2026-07-13 runaway: a churning editor buffer whose
-        // op-log grows every align (each align delete-all+reinsert mints fresh tombstones)
-        // but whose TEXT stays the same. Before the self-echo guard, each adopt replaced the
-        // canonical with the bloated op-log AND fanned back → editor re-align → bigger push.
-        // With the guard, every same-text adopt is a no-op: the canonical never grows and
-        // never broadcasts, so the loop converges. This is the gate the plan requires before
-        // re-enabling the FFI push.
-        let mut hub = RelayHub::from_text(1, "stable text\n");
-        let baseline_sv_len = hub.canonical.state_vector().len();
-
-        // A churning editor: 20 rounds, each rebuilding the same text via delete-all+reinsert
-        // (tombstone growth) and pushing its full (ever-larger) encode_state.
-        let editor = ReplicaState::from_text(2, "stable text\n");
-        let mut last_state_len = 0usize;
-        for round in 0..20 {
-            let cur = editor.text();
-            let chars = cur.chars().count() as u32;
-            editor.apply_local_edit(0, chars, "stable text\n"); // same text, +tombstones
-            let bloated = editor.encode_state();
-            assert!(
-                bloated.len() >= last_state_len,
-                "round {round}: editor op-log is growing (the runaway input shape)"
-            );
-            last_state_len = bloated.len();
-
-            let packet = hub.adopt_editor_full_state(&bloated).unwrap();
-            assert!(
-                packet.targets.is_empty() && packet.update.is_empty(),
-                "round {round}: same-text adopt must be a no-op (no fan-back)"
-            );
-        }
-        // The canonical never grew and never changed — the loop is broken.
-        assert_eq!(hub.canonical_text(), "stable text\n");
-        assert_eq!(
-            hub.canonical.state_vector().len(),
-            baseline_sv_len,
-            "canonical did not accrete any of the editor's 20 rounds of tombstone bloat"
-        );
     }
 
     #[test]
@@ -2442,43 +2221,6 @@ mod tests {
         );
         assert!(hub.delivery_converged());
         assert!(hub.pending_rebootstrap_members().is_empty());
-    }
-
-    #[test]
-    fn retained_compact_projection_rejects_stale_whole_editor_adoption_until_visible_ack() {
-        let expanded =
-            "<!-- agent:exchange -->\noperator\nassistant response\n<!-- /agent:exchange -->\n";
-        let compacted = "<!-- agent:exchange -->\n[compacted exchange]\n<!-- /agent:exchange -->\n";
-        let mut hub = RelayHub::from_text(1, expanded);
-        hub.register(2).unwrap();
-
-        hub.apply_canonical_replace(expanded, compacted).unwrap();
-        assert_eq!(
-            hub.editor_text_adoption_decision(expanded),
-            EditorTextAdoptionDecision::RetainCanonicalProjection,
-        );
-        let error = hub.adopt_editor_text(expanded).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("retained canonical projection awaits visible-content receipt")
-        );
-        assert_eq!(hub.canonical_text(), compacted);
-
-        let pending = hub.pending_updates(2).unwrap().pop().unwrap();
-        assert!(
-            hub.ack_delivery_with_content_hash(
-                2,
-                &pending.patch_id,
-                pending.generation,
-                Some(&pending.expected_content_hash),
-            )
-            .unwrap()
-        );
-        assert_eq!(
-            hub.editor_text_adoption_decision(expanded),
-            EditorTextAdoptionDecision::AdoptEditorText,
-        );
     }
 
     #[test]

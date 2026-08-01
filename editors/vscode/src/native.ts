@@ -192,7 +192,6 @@ function resetBindings(): void {
     _reliable_sync_liveness_enqueue = null;
     _reliable_sync_liveness_flush = null;
     _reliable_sync_document_op_push = null;
-    _reliable_sync_text_adopt_push = null;
     _reliable_sync_document_op_flush = null;
     _peer_replicas_missing = null;
     _free_state = null;
@@ -382,7 +381,6 @@ let _is_session_document: any = null;
 let _reliable_sync_liveness_enqueue: any = null;
 let _reliable_sync_liveness_flush: any = null;
 let _reliable_sync_document_op_push: any = null;
-let _reliable_sync_text_adopt_push: any = null;
 let _reliable_sync_document_op_flush: any = null;
 let _peer_replicas_missing: any = null;
 let _free_state: any = null;
@@ -550,11 +548,6 @@ function bindFunctions(): void {
             'int',
             ['str', 'str', 'str'],
         );
-        _reliable_sync_text_adopt_push = lib.func(
-            'agent_doc_reliable_sync_text_adopt_push',
-            'int',
-            ['str', 'str', 'str'],
-        );
         _reliable_sync_document_op_flush = lib.func(
             'agent_doc_reliable_sync_document_op_flush',
             'int',
@@ -563,7 +556,6 @@ function bindFunctions(): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] reliable-sync document wrappers unavailable: ${e.message}`);
         _reliable_sync_document_op_push = null;
-        _reliable_sync_text_adopt_push = null;
         _reliable_sync_document_op_flush = null;
     }
     try {
@@ -1742,13 +1734,14 @@ export function syncTmuxLayoutJson(options: {
 }
 
 /**
- * Report one editor-surface observation and get the derived tmux intent back
- * (`#jbsurfaceswap`).
+ * Legacy native compatibility boundary for publishing one editor-surface
+ * observation (`#jbsurfaceswap`).
  *
  * `surfaceJson` is an `EditorSurface`; the receipt is
  * `{ intent, idle, outcome, error }`. This replaces choosing between
  * {@link focusDocumentPaneJson} and {@link syncTmuxLayoutJson} in the extension:
- * the extension reports, the graph decides.
+ * the Project Controller graph decides. The current extension bypasses this
+ * reloadable library and publishes over its direct existing-controller socket.
  */
 export function editorSurfaceObserveJson(options: {
     projectRoot: string;
@@ -1763,7 +1756,12 @@ export function editorSurfaceObserveJson(options: {
     );
 }
 
-/** Queue an editor observation; controller effects run outside the extension host. */
+/**
+ * Legacy synchronous compatibility publisher.
+ *
+ * No background native task survives this call; the current extension uses its
+ * direct existing-controller socket instead.
+ */
 export function editorSurfaceEnqueueJson(options: {
     projectRoot: string;
     surfaceJson: string;
@@ -1803,7 +1801,8 @@ export function currentDocumentAuthorityJson(projectRoot: string): string | null
 }
 
 /**
- * Release a project root's editor-surface graph — the editor closed the folder.
+ * Legacy native compatibility release. The current extension sends the
+ * generation-fenced retirement directly to the controller.
  */
 export function editorSurfaceForget(projectRoot: string): boolean {
     if (!ensureLoaded(projectRoot)) return false;
@@ -2063,22 +2062,6 @@ export function reliableSyncDocumentOpPush(
         return _reliable_sync_document_op_push(projectRoot, filePath, deltaJson) === 0;
     } catch (err: any) {
         console.warn(`[agent-doc/native] reliable_sync_document_op_push error: ${err.message}`);
-        return false;
-    }
-}
-
-export function reliableSyncTextAdoptPush(
-    projectRoot: string,
-    filePath: string,
-    text: string,
-): boolean {
-    if (!ensureLoaded(projectRoot)) return false;
-    bindFunctions();
-    if (!_reliable_sync_text_adopt_push) return false;
-    try {
-        return _reliable_sync_text_adopt_push(projectRoot, filePath, text) === 0;
-    } catch (err: any) {
-        console.warn(`[agent-doc/native] reliable_sync_text_adopt_push error: ${err.message}`);
         return false;
     }
 }

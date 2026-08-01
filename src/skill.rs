@@ -2971,7 +2971,7 @@ mod tests {
             .find(|(name, _)| *name == "compact-exchange.md")
             .expect("compact-exchange.md not found");
         assert!(content.contains("agent-doc compact <FILE> --component exchange --commit"));
-        assert!(content.contains("binary-owned `agent-doc commit` path"));
+        assert!(content.contains("binary-owned continuation"));
         assert!(content.contains("VCS refresh signal"));
         assert!(content.contains("agent:backlog"));
         assert!(content.contains("agent:queue"));

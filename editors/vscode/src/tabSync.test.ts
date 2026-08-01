@@ -25,7 +25,10 @@ describe('editor surface reporting wiring', () => {
         const start = source.indexOf('function reportCurrentSurface');
         assert.ok(start >= 0, 'extension.ts must define reportCurrentSurface');
         const body = source.slice(start, source.indexOf('function forgetObservedSurfaces', start));
-        assert.ok(body.includes('native.editorSurfaceEnqueueJson({'));
+        assert.ok(body.includes('requestProjectController('));
+        assert.ok(body.includes("command: 'editor_surface_observe'"));
+        assert.ok(body.includes('diagnostic_payload: JSON.stringify(observation)'));
+        assert.strictEqual(body.includes('native.editorSurface'), false);
 
         const tabChangedStart = source.indexOf('function onTabChanged');
         assert.ok(tabChangedStart >= 0, 'extension.ts must define onTabChanged');
@@ -62,7 +65,10 @@ describe('editor surface reporting wiring', () => {
         const start = source.indexOf('export function deactivate');
         assert.ok(start >= 0);
         assert.ok(source.slice(start).includes('forgetObservedSurfaces()'));
-        assert.ok(source.includes('native.editorSurfaceForget(root)'));
+        const forgetStart = source.indexOf('function forgetObservedSurfaces');
+        const forgetBody = source.slice(forgetStart, source.indexOf('function onTabChanged', forgetStart));
+        assert.ok(forgetBody.includes("command: 'editor_surface_forget'"));
+        assert.strictEqual(forgetBody.includes('native.editorSurfaceForget'), false);
     });
 
     it('reports absolute document paths so a derived focus can address them', () => {

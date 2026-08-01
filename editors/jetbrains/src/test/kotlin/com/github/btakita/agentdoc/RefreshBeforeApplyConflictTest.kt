@@ -175,9 +175,10 @@ class RefreshBeforeApplyConflictTest {
         )
         val forwarderFor = functionBody(crdtReplica, "private fun forwarderFor(")
         assertTrue(
-            "a raced editor cut must be rejected before whole-buffer CRDT publication",
-            forwarderFor.indexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") <
-                forwarderFor.indexOf("forwarder.ensureEditorText(initialEditorText)"),
+            "a raced editor cut must be rejected before the controller bootstrap is projected",
+            forwarderFor.contains("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
+                forwarderFor.contains("retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)") &&
+                !forwarderFor.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
         assertTrue(
             "deferred replay scheduling must follow exact editor registration",
@@ -478,11 +479,11 @@ class RefreshBeforeApplyConflictTest {
             "PatchWatcher must wake CRDT drains from the shared typed editor intent",
             patchWatcher.contains("EditorIntent.DeliverCrdtRemote.token"),
         )
-        assertTrue(
-            "CRDT event protocol states must be parsed into an enum instead of compared as free text",
-            patchWatcher.contains("enum class CrdtReplicaEventReason") &&
-                patchWatcher.contains("CrdtReplicaEventReason.fromToken") &&
-                patchWatcher.contains("CrdtReplicaEventReason.RequestFullState"),
+        assertFalse(
+            "delivery events must not select imperative editor recovery branches",
+            patchWatcher.contains("CrdtReplicaEventReason") ||
+                patchWatcher.contains("requestTextAdopt") ||
+                patchWatcher.contains("forceRefreshOpenDocumentReplica"),
         )
         assertFalse(
             "layout detector must not run a fallback polling thread",
@@ -583,20 +584,11 @@ class RefreshBeforeApplyConflictTest {
             forwarder.contains(".agent-doc/supervisor"),
         )
 
-        val cpTransport = forwarder.substringAfter("class CpSocketReplicaTransport(")
-        val textAdopt =
-            functionBody(
-                cpTransport,
-                "override fun pushTextAdopt(filePath: String, text: String)",
-            )
-        assertTrue(
-            "text adopt must be retained before its synchronous controller projection",
-            textAdopt.indexOf("agent_doc_reliable_sync_text_adopt_push") <
-                textAdopt.indexOf("addProperty(\"command\", \"crdt_text_adopt\")"),
-        )
-        assertTrue(
-            "a retained-but-unprojected text adopt must not authorize immediate re-registration",
-            textAdopt.contains("if (response?.ok != true)") && textAdopt.contains("return false"),
+        assertFalse(
+            "CRDT transport must expose no whole-editor adoption request",
+            forwarder.contains("pushTextAdopt") ||
+                forwarder.contains("agent_doc_reliable_sync_text_adopt_push") ||
+                forwarder.contains("\"crdt_text_adopt\""),
         )
     }
 

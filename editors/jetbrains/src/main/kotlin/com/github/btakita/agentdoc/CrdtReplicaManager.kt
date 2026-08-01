@@ -40,7 +40,6 @@ private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
 private const val LOCAL_EDITOR_FLUSH_QUIET_MS = 16L
 private const val LOCAL_EDITOR_READ_RETRY_MS = 25L
-private const val STALE_BASELINE_RECOVERY_QUIET_MS = 150L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
 private const val ACK_RECOVERY_REREGISTER_MIN_INTERVAL_MS = 5_000L
 
@@ -128,16 +127,6 @@ internal fun shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount: Int): B
 internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !backoffScheduled
 
 /**
- * Whole-editor adoption is a recovery authority transition, not a retry.
- * A retained controller projection wins even when the editor has an unsynced
- * operator edit because that boolean does not prove the whole buffer's lineage.
- */
-internal fun shouldAdoptEditorTextUtil(
-    hasUnsyncedOperatorEdit: Boolean,
-    canonicalProjectionRetained: Boolean,
-): Boolean = hasUnsyncedOperatorEdit && !canonicalProjectionRetained
-
-/**
  * `#crdtpushdrain`: a controller-published CRDT remote event is positive evidence
  * that the CP already holds a frontier for this document, so it must bypass the
  * speculative no-op drain backoff instead of being suppressed by it.
@@ -145,17 +134,11 @@ internal fun shouldAdoptEditorTextUtil(
  * The no-op backoff (see [scheduleRemoteDrainAfterBackoff]) exists to stop a
  * *self-driven* drain spin when there is nothing to pull; on an idle document it
  * climbs to [CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS]. That is exactly the state a
- * document sits in when the operator triggers Compact Exchange, so gating the
- * push event behind it stalled every compact/finalize until the binary escalated
- * to `ack_recovery_force_refresh` after `CRDT_ACK_FORCE_REFRESH_AFTER_MS` — a fixed
- * ~2s toll on the hot path. Controller pushes are externally rate-limited (one per
- * `CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS`, only while a write awaits ACK), so draining
- * them eagerly cannot reintroduce the spin.
- *
- * `request_full_state` is excluded because it owns the separate text-adopt path.
+ * document sits in when the operator triggers Compact Exchange, so every
+ * controller projection event drains eagerly. The controller's keyed retained
+ * Lazily projection provides the coalescing boundary.
  */
-internal fun shouldUrgentDrainForRemoteEventUtil(reasonToken: String?): Boolean =
-    reasonToken != "request_full_state"
+internal fun shouldUrgentDrainForRemoteEventUtil(@Suppress("UNUSED_PARAMETER") reasonToken: String?): Boolean = true
 
 internal fun ackRecoveryReregisterDueUtil(
     lastStartedMs: Long?,
@@ -181,6 +164,7 @@ internal enum class RemoteCrdtProjectionMode {
 
 internal enum class RemotePersistReconciliation {
     Persisted,
+    PersistedEditorNormalization,
     RollbackToBefore,
     PreserveAdvancedEditor,
 }
@@ -197,15 +181,46 @@ internal fun remotePersistReconciliationUtil(
     editorAfterSave: String,
     diskAfterSave: String?,
 ): RemotePersistReconciliation = when {
-    editorAfterSave != targetText -> RemotePersistReconciliation.PreserveAdvancedEditor
-    diskAfterSave == targetText -> RemotePersistReconciliation.Persisted
-    diskAfterSave == beforeText -> RemotePersistReconciliation.RollbackToBefore
+    editorAfterSave == targetText && diskAfterSave == targetText ->
+        RemotePersistReconciliation.Persisted
+    editorAfterSave == targetText && diskAfterSave == beforeText ->
+        RemotePersistReconciliation.RollbackToBefore
+    diskAfterSave != null && editorAfterSave == diskAfterSave ->
+        RemotePersistReconciliation.PersistedEditorNormalization
     else -> RemotePersistReconciliation.PreserveAdvancedEditor
 }
+
+internal data class ReplicaRegistrationRetryProjection(
+    val failureCount: Int,
+    val retryAfterMs: Long,
+    val backoffMs: Long,
+)
+
+internal fun nextReplicaRegistrationRetryProjection(
+    previous: ReplicaRegistrationRetryProjection?,
+    nowMs: Long,
+    baseBackoffMs: Long = CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS,
+    maxBackoffMs: Long = CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS,
+): ReplicaRegistrationRetryProjection {
+    val failureCount = ((previous?.failureCount ?: 0) + 1).coerceAtMost(16)
+    val step = (failureCount - 1).coerceAtLeast(0).coerceAtMost(3)
+    val backoffMs = (baseBackoffMs * (1L shl step)).coerceAtMost(maxBackoffMs)
+    return ReplicaRegistrationRetryProjection(
+        failureCount = failureCount,
+        retryAfterMs = nowMs + backoffMs,
+        backoffMs = backoffMs,
+    )
+}
+
+internal fun replicaRegistrationAttemptDueUtil(
+    projection: ReplicaRegistrationRetryProjection?,
+    nowMs: Long,
+): Boolean = projection == null || nowMs >= projection.retryAfterMs
 
 private data class RemotePersistOutcome(
     val diskPersisted: Boolean,
     val editorTextForAck: String?,
+    val editorNormalizedText: String? = null,
 )
 
 /**
@@ -242,23 +257,8 @@ internal fun remoteReplaceStructureAcceptedUtil(
     remoteState: TemplateStructureProjectionState,
 ): Boolean = remoteState == TemplateStructureProjectionState.Exact
 
-internal enum class ReplicaRegistrationMode {
-    ExactTemplate,
-    AuthoritativeEditorBaseline,
-}
-
-internal fun replicaRegistrationModeUtil(
-    editorState: TemplateStructureProjectionState,
-): ReplicaRegistrationMode =
-    if (editorState == TemplateStructureProjectionState.Exact) {
-        ReplicaRegistrationMode.ExactTemplate
-    } else {
-        ReplicaRegistrationMode.AuthoritativeEditorBaseline
-    }
-
 internal enum class RemoteTemplateProjectionDecision {
     QueueRemote,
-    AdoptExactEditorBaseline,
     RetryFailClosed,
 }
 
@@ -270,9 +270,6 @@ internal fun remoteTemplateProjectionDecisionUtil(
 ): RemoteTemplateProjectionDecision = when {
     remoteState == TemplateStructureProjectionState.Exact ->
         RemoteTemplateProjectionDecision.QueueRemote
-    recoveryInFlight -> RemoteTemplateProjectionDecision.RetryFailClosed
-    editorMatchesExpected && editorState == TemplateStructureProjectionState.Exact ->
-        RemoteTemplateProjectionDecision.AdoptExactEditorBaseline
     else -> RemoteTemplateProjectionDecision.RetryFailClosed
 }
 
@@ -282,7 +279,6 @@ internal enum class ReplicaBaselineDecision {
     AcknowledgeRemoteTarget,
     ReplayRemoteTarget,
     RealignShadow,
-    AdoptExactEditor,
     RetryFailClosed,
 }
 
@@ -330,7 +326,7 @@ internal fun replicaBaselineDecisionUtil(
         ReplicaBaselineDecision.RetryFailClosed
     editorMatchesExpected && replicaMatchesExpected -> ReplicaBaselineDecision.ApplyRemote
     replicaMatchesEditor -> ReplicaBaselineDecision.RealignShadow
-    else -> ReplicaBaselineDecision.AdoptExactEditor
+    else -> ReplicaBaselineDecision.RetryFailClosed
 }
 
 internal fun shouldForwardLocalDeltaUtil(replicaText: String?, shadowText: String): Boolean =
@@ -424,6 +420,7 @@ private data class PendingRemoteEditorApply(
 private data class RemoteEditorApplyOutcome(
     val diskPersisted: Boolean,
     val editorText: String?,
+    val editorNormalizedText: String? = null,
 )
 
 private enum class RemoteTextApplyDisposition {
@@ -490,6 +487,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val drainRequestedPaths = ConcurrentHashMap.newKeySet<String>()
     private val registerFailureCounts = ConcurrentHashMap<String, Int>()
     private val registerRetryAfterMs = ConcurrentHashMap<String, Long>()
+    private val registerRetryProjections =
+        ConcurrentHashMap<String, ReplicaRegistrationRetryProjection>()
+    private val registerRetryTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
     private val ackRecoveryReregisterStartedAtMs = ConcurrentHashMap<String, Long>()
     private val consecutiveNoOpReschedules = AtomicInteger(0)
     private val remoteDrainBackoffScheduled = AtomicBoolean(false)
@@ -505,8 +505,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     // permanently orphaned delivery frontier.
     private val pendingRemoteAckReplays =
         ConcurrentHashMap<String, ConcurrentHashMap<String, PendingRemoteAck>>()
-    private val staleBaselineRecoveryTasks =
-        ConcurrentHashMap<String, java.util.concurrent.ScheduledFuture<*>>()
     private val templateGuardRecoveryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryRetryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryFailureCounts = ConcurrentHashMap<String, Int>()
@@ -534,13 +532,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         retainedCanonicalProjectionPaths.clear()
         remoteEditorEffectGenerations.clear()
         pendingRemoteAckReplays.clear()
-        staleBaselineRecoveryTasks.clear()
         templateGuardRecoveryPaths.clear()
         templateGuardRecoveryRetryPaths.clear()
         templateGuardRecoveryFailureCounts.clear()
         drainRequestedPaths.clear()
         registerFailureCounts.clear()
         registerRetryAfterMs.clear()
+        registerRetryProjections.clear()
+        registerRetryTasks.values.forEach { it.cancel(false) }
+        registerRetryTasks.clear()
         ackRecoveryReregisterStartedAtMs.clear()
         forwarders.values.forEach { it.deregister() }
         forwarders.clear()
@@ -730,7 +730,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val text = tryReadDocumentText(document)
                     ?: return@execute
                 chars = text.length
-                shadows[filePath] = text
                 forwarderFor(filePath, text)
                 requestRemoteDrain(filePath, "seed")
             } catch (e: Exception) {
@@ -765,33 +764,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val text = editorText ?: tryReadDocumentText(document)
                     ?: return@attach false
                 chars = text.length
-                // The open IntelliJ Document is the live authority. A forced refresh
-                // must never install a retained whole-document target before the
-                // replacement replica exists: that target may predate unsaved operator
-                // prompts/deletions and saving it here makes the loss durable. Register
-                // from this exact editor cut, then let binary-owned semantic intents
-                // replay granularly over the new baseline.
+                // Registration always opens the controller bootstrap. An existing
+                // editor buffer is a downstream consumer until subsequent DocumentEvent
+                // deltas prove new operator intent.
                 val registrationText = text
                 if (!NativePatching.isAvailable()) {
                     log.warn(
                         "[crdt-replica] open-document replica registration deferred for ${File(filePath).name}; " +
                             "native FFI unavailable",
                     )
+                    recordRegisterFailure(filePath, "native-ffi-unavailable")
                     return@attach false
-            }
-            val registrationState =
-                templateStructureState(
-                    filePath,
-                    registrationText,
-                    TemplateValidationPlane.Lane.Editor,
-                    "replica-registration",
-                )
-            val registrationMode = replicaRegistrationModeUtil(registrationState)
-            if (registrationMode == ReplicaRegistrationMode.AuthoritativeEditorBaseline) {
-                log.warn(
-                    "[crdt-replica] registering authoritative non-exact editor baseline for ${File(filePath).name}; " +
-                        "state=$registrationState retained_replay=exact_structure_guarded operator_action=none",
-                )
             }
                 chars = registrationText.length
                 val forwarder = forwarderFor(
@@ -803,7 +786,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 )
                 (forwarder != null).also { attached ->
                     if (attached) {
-                        shadows[filePath] = registrationText
                         // Queue retained semantic replay behind this registration task.
                         // In await mode the caller can therefore observe registration
                         // before any native reconstruction or EDT mutation begins.
@@ -818,6 +800,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 }
             } catch (e: Exception) {
                 log.debug("[crdt-replica] open-document attach skipped for $filePath: ${e.message}")
+                recordRegisterFailure(filePath, "attach-exception")
                 false
             } finally {
                 logSlow("open-document-attach", filePath, started, details = "chars=$chars force_refresh=$forceRefresh")
@@ -943,7 +926,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         val editorText = tryReadDocumentText(document) ?: return false
         val beforeText = shadows[filePath] ?: run {
-            shadows[filePath] = editorText
             forwarderFor(filePath, editorText)
             return true
         }
@@ -951,26 +933,28 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         shadows[filePath] = editorText
         val forwarder = forwarderFor(filePath, beforeText)
         if (forwarder != null) {
-            if (staleBaselineRecoveryTasks.containsKey(filePath)) {
-                scheduleStaleBaselineRecovery(filePath, document)
+            val replicaText = forwarder.replicaText()
+            if (shouldForwardLocalDeltaUtil(replicaText, beforeText)) {
+                forwarder.forwardLocalDelta(
+                    offset = edit.offsetCodePoints,
+                    deleteLen = edit.deleteCodePoints,
+                    insert = edit.insert,
+                    resultingText = edit.resultingText,
+                )
             } else {
-                val replicaText = forwarder.replicaText()
-                if (shouldForwardLocalDeltaUtil(replicaText, beforeText)) {
-                    forwarder.forwardLocalDelta(
-                        offset = edit.offsetCodePoints,
-                        deleteLen = edit.deleteCodePoints,
-                        insert = edit.insert,
-                        resultingText = edit.resultingText,
-                    )
-                } else {
-                    log.warn(
-                        "[crdt-replica] local delta found a stale native baseline for ${File(filePath).name}; " +
-                            "shadow_hash=${contentHash(beforeText)} " +
-                            "replica_hash=${replicaText?.let(::contentHash) ?: "missing"} " +
-                            "recovery=coalesced_exact_editor_adopt_after_quiet",
-                    )
-                    scheduleStaleBaselineRecovery(filePath, document)
-                }
+                // The controller canonical revision is the whole-document
+                // authority. A stale native replica may not publish its editor
+                // buffer as a replacement baseline: retain the canonical
+                // projection and let the normal remote-delivery effect repair
+                // this consumer.
+                retainedCanonicalProjectionPaths.add(filePath)
+                log.warn(
+                    "[crdt-replica] local delta found a stale native baseline for ${File(filePath).name}; " +
+                        "shadow_hash=${contentHash(beforeText)} " +
+                        "replica_hash=${replicaText?.let(::contentHash) ?: "missing"} " +
+                        "recovery=lazy-controller-canonical-projection",
+                )
+                requestRemoteDrain(filePath, "stale-local-baseline")
             }
         }
         logSlow(
@@ -983,49 +967,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "insert_chars=${edit.insert.length}",
         )
         return true
-    }
-
-    /**
-     * A stale baseline can cover an entire typing burst. Re-registering the
-     * multi-megabyte native state for every queued DocumentEvent both targets
-     * intermediate editor cuts and monopolizes the serialized FFI lane.
-     * Replace the pending task so one exact current editor cut is adopted after
-     * the burst goes quiet.
-     */
-    private fun scheduleStaleBaselineRecovery(filePath: String, document: Document) {
-        lateinit var scheduled: java.util.concurrent.ScheduledFuture<*>
-        scheduled = documentWorkers.forDocument(filePath).schedule(
-            Runnable {
-                try {
-                    if (disposed.get() || staleBaselineRecoveryTasks[filePath] !== scheduled) {
-                        return@Runnable
-                    }
-                    if (retainedCanonicalProjectionPaths.contains(filePath)) {
-                        requestRemoteDrain(filePath, "stale-baseline-canonical-projection-retained")
-                        return@Runnable
-                    }
-                    val editorText = tryReadDocumentText(document)
-                        ?: run {
-                        scheduleStaleBaselineRecovery(filePath, document)
-                        return@Runnable
-                    }
-                    val staleForwarder = forwarders[filePath] ?: return@Runnable
-                    shadows[filePath] = editorText
-                    adoptExactEditorBaseline(
-                        filePath = filePath,
-                        editorText = editorText,
-                        staleForwarder = staleForwarder,
-                        allowPendingLocal = true,
-                        reason = "coalesced-local-delta-baseline-diverged",
-                    )
-                } finally {
-                    staleBaselineRecoveryTasks.remove(filePath, scheduled)
-                }
-            },
-            STALE_BASELINE_RECOVERY_QUIET_MS,
-            TimeUnit.MILLISECONDS,
-        )
-        staleBaselineRecoveryTasks.put(filePath, scheduled)?.cancel(false)
     }
 
     fun requestRemoteDrain(filePath: String? = null, reason: String = "event") {
@@ -1112,47 +1053,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     // *next* controller push is suppressed all over again.
                     consecutiveNoOpReschedules.set(0)
                 }
-            }
-        }
-    }
-
-    /**
-     * Controller-proven reattach recovery. This is intentionally the only path
-     * that sends a bounded text adopt: push the authoritative editor text, then
-     * re-register so the native replica/frontier bootstraps from the rebuilt
-     * canonical before another incremental op can be emitted.
-     */
-    fun requestTextAdopt(filePath: String) {
-        documentWorkers.forDocument(filePath).execute {
-            val hasUnsyncedOperatorEdit = TypingTracker.hasUnsyncedOperatorEdits(filePath)
-            val canonicalProjectionRetained = retainedCanonicalProjectionPaths.contains(filePath)
-            if (!shouldAdoptEditorTextUtil(hasUnsyncedOperatorEdit, canonicalProjectionRetained)) {
-                log.info(
-                    "[reattach-adopt] refused full editor text adopt for ${File(filePath).name}; " +
-                        if (canonicalProjectionRetained) {
-                            "retained canonical projection owns the visible frontier"
-                        } else {
-                            "no unsynced operator edit proves editor-origin content"
-                        },
-                )
-                requestRemoteDrain(filePath, "reattach-cp-projection-only")
-                return@execute
-            }
-            val forwarder = forwarders[filePath] ?: return@execute
-            val editorText = shadows[filePath] ?: return@execute
-            if (!forwarder.pushTextAdopt(editorText)) return@execute
-            if (forwarders[filePath] === forwarder) {
-                val reattached = forwarderFor(
-                    filePath,
-                    editorText,
-                    bypassRegisterBackoff = true,
-                    expectedEditorTextAtSwap = editorText,
-                )
-                log.info(
-                    "[reattach-adopt] bounded text adopted for ${File(filePath).name}; " +
-                        "reattached=${reattached != null} chars=${editorText.length}",
-                )
-                requestRemoteDrain(filePath, "reattach-text-adopt")
             }
         }
     }
@@ -1507,16 +1407,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         deferredEditorText?.let { editorText ->
             log.warn(
-                "[crdt-replica] CP replace deferred to the exact live editor authority for $filePath; " +
+                "[crdt-replica] CP replace retained while the live editor diverges for $filePath; " +
                     "editor_hash=${contentHash(editorText)} canonical_hash=${contentHash(canonical)}",
             )
-            adoptExactEditorBaseline(
-                filePath = filePath,
-                editorText = editorText,
-                staleForwarder = forwarder,
-                allowPendingLocal = false,
-                reason = "replace-delivery-editor-diverged",
-            )
+            retainedCanonicalProjectionPaths.add(filePath)
+            requestRemoteDrain(filePath, "replace-delivery-lazy-canonical-projection")
             return false
         }
         if (installed) {
@@ -1614,137 +1509,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         staleForwarder: CrdtReplicaForwarder,
         remoteState: TemplateStructureProjectionState,
     ): RemoteTextApplyDisposition {
-        val editorText = editorBufferText(filePath)
-        val editorState =
-            editorText?.let {
-                templateStructureState(
-                    filePath,
-                    it,
-                    TemplateValidationPlane.Lane.Editor,
-                    "editor-recovery",
-                )
-            }
-        val decision = remoteTemplateProjectionDecisionUtil(
-            remoteState = remoteState,
-            editorState = editorState,
-            editorMatchesExpected = editorText == expectedText,
-            recoveryInFlight = templateGuardRecoveryPaths.contains(filePath),
-        )
-        if (decision != RemoteTemplateProjectionDecision.AdoptExactEditorBaseline || editorText == null) {
-            log.warn(
-                "[crdt-replica] template-guard recovery deferred for ${File(filePath).name}; " +
-                    "remote_state=$remoteState editor_state=$editorState " +
-                    "editor_matches_expected=${editorText == expectedText} " +
-                    "recovery_in_flight=${templateGuardRecoveryPaths.contains(filePath)} " +
-                    "remote_hash=${contentHash(remoteText)}",
-            )
-            scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-proof-missing")
-            return RemoteTextApplyDisposition.RetryFailClosed
-        }
-        if (!templateGuardRecoveryPaths.add(filePath)) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-recovery-active")
-            return RemoteTextApplyDisposition.RetryFailClosed
-        }
-        try {
-            // Revalidate all mutable evidence at the adopt boundary. A document event
-            // marks local work pending synchronously, before its delta reaches this worker.
-            if (
-                forwarders[filePath] !== staleForwarder ||
-                hasPendingLocal(filePath) ||
-                editorBufferText(filePath) != editorText
-            ) {
-                scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-adopt-fence-raced")
-                return RemoteTextApplyDisposition.RetryFailClosed
-            }
-            if (!staleForwarder.pushTextAdopt(editorText)) {
-                scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-adopt-push-failed")
-                return RemoteTextApplyDisposition.RetryFailClosed
-            }
-            val replacement = forwarderFor(
-                filePath = filePath,
-                initialEditorText = editorText,
-                bypassRegisterBackoff = true,
-                replaceCached = true,
-                expectedEditorTextAtSwap = editorText,
-            )
-            if (replacement == null || replacement === staleForwarder) {
-                scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-reregister-failed")
-                return RemoteTextApplyDisposition.RetryFailClosed
-            }
-            shadows[filePath] = editorText
-            clearTemplateGuardRecoveryBackoff(filePath)
-            log.warn(
-                "[crdt-replica] recovered rejected remote canonical for ${File(filePath).name}; " +
-                    "remote_state=$remoteState editor_chars=${editorText.length} " +
-                    "remote_hash=${contentHash(remoteText)} editor_hash=${contentHash(editorText)} " +
-                    "recovery=exact_editor_adopt_then_atomic_reregister",
-            )
-            requestRemoteDrain(filePath, "template-guard-recovered")
-            return RemoteTextApplyDisposition.Recovered
-        } finally {
-            templateGuardRecoveryPaths.remove(filePath)
-        }
-    }
-
-    private fun adoptExactEditorBaseline(
-        filePath: String,
-        editorText: String,
-        staleForwarder: CrdtReplicaForwarder,
-        allowPendingLocal: Boolean,
-        reason: String,
-    ): Boolean {
-        if (
-            templateStructureState(
-                filePath,
-                editorText,
-                TemplateValidationPlane.Lane.Editor,
-                "editor-adopt",
-            ) != TemplateStructureProjectionState.Exact
-        ) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "$reason-editor-structure-not-exact")
-            return false
-        }
-        if (
-            forwarders[filePath] !== staleForwarder ||
-            (!allowPendingLocal && hasPendingLocal(filePath)) ||
-            editorBufferText(filePath) != editorText
-        ) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "$reason-adopt-fence-raced")
-            return false
-        }
-        if (!staleForwarder.pushTextAdopt(editorText)) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "$reason-adopt-push-failed")
-            return false
-        }
-        if (
-            forwarders[filePath] !== staleForwarder ||
-            (!allowPendingLocal && hasPendingLocal(filePath)) ||
-            editorBufferText(filePath) != editorText
-        ) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "$reason-editor-advanced")
-            return false
-        }
-        val replacement = forwarderFor(
-            filePath = filePath,
-            initialEditorText = editorText,
-            bypassRegisterBackoff = true,
-            replaceCached = true,
-            expectedEditorTextAtSwap = editorText,
-            allowPendingLocalAtSwap = allowPendingLocal,
-        )
-        if (replacement == null || replacement === staleForwarder) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "$reason-reregister-failed")
-            return false
-        }
-        shadows[filePath] = editorText
-        clearTemplateGuardRecoveryBackoff(filePath)
+        retainedCanonicalProjectionPaths.add(filePath)
         log.warn(
-            "[crdt-replica] adopted exact live editor baseline for ${File(filePath).name}; " +
-                "reason=$reason editor_hash=${contentHash(editorText)} " +
-                "recovery=exact_editor_adopt_then_atomic_reregister",
+            "[crdt-replica] rejected malformed remote projection for ${File(filePath).name}; " +
+                "remote_state=$remoteState expected_hash=${contentHash(expectedText)} " +
+                "remote_hash=${contentHash(remoteText)} recovery=lazy-controller-canonical-projection",
         )
-        requestRemoteDrain(filePath, "editor-baseline-adopted")
-        return true
+        requestRemoteDrain(filePath, "template-guard-lazy-canonical-projection")
+        return RemoteTextApplyDisposition.RetryFailClosed
     }
 
     private fun scheduleTemplateGuardRecoveryRetry(filePath: String, reason: String) {
@@ -1866,6 +1638,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     RemoteEditorApplyOutcome(
                         persisted.diskPersisted,
                         persisted.editorTextForAck,
+                        persisted.editorNormalizedText,
                     )
                 } else {
                     RemoteEditorApplyOutcome(false, before)
@@ -1907,6 +1680,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         RemoteEditorApplyOutcome(
                             persisted.diskPersisted,
                             persisted.editorTextForAck,
+                            persisted.editorNormalizedText,
                         )
                     } else {
                         RemoteEditorApplyOutcome(false, pending.targetText)
@@ -2030,14 +1804,31 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 shadows[filePath] = targetText
                 RemotePersistOutcome(true, targetText)
             }
+            RemotePersistReconciliation.PersistedEditorNormalization -> {
+                val normalizedText = document.text
+                shadows[filePath] = normalizedText
+                log.info(
+                    "[crdt-replica] editor save normalized a remote projection for $filePath; " +
+                        "target_hash=${contentHash(targetText)} normalized_hash=${contentHash(normalizedText)} " +
+                        "disk_hash=${diskAfterSave?.let(::contentHash) ?: "missing"} " +
+                        "recovery=project_normalized_editor_text",
+                )
+                RemotePersistOutcome(
+                    diskPersisted = true,
+                    editorTextForAck = normalizedText,
+                    editorNormalizedText = normalizedText,
+                )
+            }
             RemotePersistReconciliation.RollbackToBefore -> {
                 log.warn(
                     "[crdt-replica] remote editor apply did not persist; rolling the exact attempted projection back for $filePath: " +
                         "before_hash=${contentHash(beforeText)} target_hash=${contentHash(targetText)} " +
                         "editor_hash=${contentHash(document.text)} disk_hash=${diskAfterSave?.let(::contentHash) ?: "missing"}",
                 )
-                runUndoableRemoteUpdateCommand(document) {
-                    applyMinimalDocumentEditUtil(document, targetText, beforeText)
+                if (document.text == targetText) {
+                    runUndoableRemoteUpdateCommand(document) {
+                        applyMinimalDocumentEditUtil(document, targetText, beforeText)
+                    }
                 }
                 shadows[filePath] = beforeText
                 if (document.text == beforeText && diskAfterSave == beforeText) {
@@ -2090,8 +1881,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         try {
             documentWorkers.forDocument(pending.filePath).execute {
                 try {
-                    var acked = 0
-                    if (projectionVisible) {
+                        var acked = 0
+                val normalizedText = outcome.editorNormalizedText
+                if (normalizedText != null) {
+                    retainedCanonicalProjectionPaths.add(pending.filePath)
+                    log.info(
+                        "[crdt-replica] editor normalization retained for controller reprojection for " +
+                            "${File(pending.filePath).name}; normalized_hash=${contentHash(normalizedText)}",
+                    )
+                        }
+                        if (projectionVisible) {
                         val activeForwarder = forwarders[pending.filePath]
                         if (activeForwarder != null) {
                             acked = replayPendingRemoteAcks(
@@ -2108,11 +1907,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
             } finally {
                 remoteEditorApplyPaths.remove(pending.filePath)
-                if (projectionVisible) {
+                if (projectionVisible && outcome.editorNormalizedText == null) {
                     retainedCanonicalProjectionPaths.remove(pending.filePath)
                     consecutiveNoOpReschedules.set(0)
-                        requestRemoteDrain(pending.filePath, "remote-editor-apply-complete")
-                    } else {
+                    requestRemoteDrain(
+                        pending.filePath,
+                        "remote-editor-apply-complete",
+                    )
+                } else if (outcome.editorNormalizedText != null) {
+                    requestRemoteDrain(pending.filePath, "remote-editor-normalization-canonical-reproject")
+                } else {
                         val delayMs = nextNoOpRescheduleBackoffMs()
                         log.debug(
                             "[crdt-replica] remote editor projection not yet visible for ${File(pending.filePath).name}; " +
@@ -2231,25 +2035,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             requestRemoteDrain(filePath, "shadow-realigned")
             return false
         }
-        if (decision == ReplicaBaselineDecision.AdoptExactEditor) {
-            log.warn(
-                "[crdt-replica] incoming update deferred while the exact editor baseline replaces a stale native replica for $filePath: " +
-                    "editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$visibleReplicaHash",
-            )
-            adoptExactEditorBaseline(
-                filePath = filePath,
-                editorText = editorText,
-                staleForwarder = forwarder,
-                allowPendingLocal = false,
-                reason = "remote-delivery-baseline-diverged",
-            )
-            return false
-        }
         log.warn(
-            "[crdt-replica] incoming update deferred because editor adoption lacks a stable exact proof for $filePath: " +
+            "[crdt-replica] incoming update retained for lazy canonical projection because the baselines diverged for $filePath: " +
                 "editor_state=$editorState editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$visibleReplicaHash",
         )
-        scheduleTemplateGuardRecoveryRetry(filePath, "editor-baseline-proof-missing")
+        retainedCanonicalProjectionPaths.add(filePath)
+        requestRemoteDrain(filePath, "baseline-diverged-lazy-canonical-projection")
         return false
     }
 
@@ -2400,28 +2191,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 (!allowPendingLocalAtSwap && hasPendingLocal(filePath)))
         ) {
             // Registration can block while the operator keeps typing. Reject
-            // the captured editor cut before ensureEditorText can publish it;
-            // the still-authoritative cached forwarder will drain those local
+            // the captured editor cut before swapping the endpoint; the
+            // still-authoritative cached forwarder will drain those local
             // deltas and a later refresh can retry from a fresh cut.
             forwarder.deregister()
             return null
-        }
-        if (initialEditorText != null && !forwarder.canonicalProjectionRetained) {
-            forwarder.ensureEditorText(initialEditorText)
-        } else if (initialEditorText != null) {
-            log.info(
-                "[crdt-replica] withheld restarted whole-editor publication for " +
-                    "${File(filePath).name}; awaiting canonical bootstrap projection",
-            )
         }
         if (
             expectedEditorTextAtSwap != null &&
             (editorBufferText(filePath) != expectedEditorTextAtSwap ||
                 (!allowPendingLocalAtSwap && hasPendingLocal(filePath)))
         ) {
-            // ensureEditorText can also block. Recheck at the actual swap so a
-            // raced local delta keeps the cached forwarder authoritative until
-            // the serialized local-delta worker has drained it.
+            // Recheck at the actual swap so a raced local delta keeps the cached
+            // forwarder authoritative until the serialized local-delta worker
+            // has drained it.
             forwarder.deregister()
             return null
         }
@@ -2436,6 +2219,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "[crdt-replica] atomically replaced cached forwarder for ${File(filePath).name}; " +
                         "retired_pending_acks=$retiredPendingAcks",
                 )
+                retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)
                 return forwarder
             }
             // The manager worker is serialized, but preserve a concurrently
@@ -2449,7 +2233,36 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return existing
         }
         log.info("[crdt-replica] attached ${File(filePath).name} as $identity")
+        retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)
         return forwarder
+    }
+
+    /**
+     * Registration is controller -> editor projection only. A pre-existing
+     * editor buffer cannot become a whole-document recovery baseline because it
+     * may predate retained queue additions or another editor's acknowledged ops.
+     */
+    private fun retainCanonicalProjectionAfterRegistration(
+        filePath: String,
+        editorText: String?,
+        forwarder: CrdtReplicaForwarder,
+    ) {
+        val canonical = forwarder.replicaText() ?: return
+        shadows[filePath] = canonical
+        if (editorText == null || editorText == canonical) return
+        retainedCanonicalProjectionPaths.add(filePath)
+        log.info(
+            "[crdt-replica] projecting controller bootstrap into ${File(filePath).name}; " +
+                "editor_hash=${contentHash(editorText)} canonical_hash=${contentHash(canonical)} " +
+                "driver=lazy-controller-canonical-projection",
+        )
+        queueRemoteTextApply(
+            filePath = filePath,
+            expectedText = editorText,
+            converged = canonical,
+            forwarder = forwarder,
+            updates = emptyList(),
+        )
     }
 
     private fun refreshReplicaAfterTransportLoss(
@@ -2487,26 +2300,77 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     private fun shouldAttemptRegister(filePath: String): Boolean {
-        val retryAfter = registerRetryAfterMs[filePath] ?: return true
+        val projection = registerRetryProjections[filePath] ?: return true
         val now = System.currentTimeMillis()
-        if (now >= retryAfter) return true
-        log.debug("[crdt-replica] register skipped for $filePath; retry_after_ms=${retryAfter - now}")
+        if (replicaRegistrationAttemptDueUtil(projection, now)) return true
+        log.debug(
+            "[crdt-replica] register skipped for $filePath; " +
+                "retry_after_ms=${projection.retryAfterMs - now}",
+        )
         return false
     }
 
-    private fun recordRegisterFailure(filePath: String) {
+    private fun recordRegisterFailure(filePath: String, reason: String = "controller-register") {
         val now = System.currentTimeMillis()
-        val failureCount = registerFailureCounts.merge(filePath, 1) { old, _ -> (old + 1).coerceAtMost(16) } ?: 1
-        val step = (failureCount - 1).coerceAtLeast(0).coerceAtMost(3)
-        val backoffMs = (CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS * (1L shl step))
-            .coerceAtMost(CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS)
-        registerRetryAfterMs[filePath] = now + backoffMs
-        log.warn("[crdt-replica] register failed for ${File(filePath).name}; failure_count=$failureCount retry_backoff_ms=$backoffMs")
+        val projection =
+            registerRetryProjections.compute(filePath) { _, previous ->
+                nextReplicaRegistrationRetryProjection(previous, now)
+            }!!
+        registerFailureCounts[filePath] = projection.failureCount
+        registerRetryAfterMs[filePath] = projection.retryAfterMs
+        log.warn(
+            "[crdt-replica] register failed for ${File(filePath).name}; " +
+                "reason=$reason failure_count=${projection.failureCount} " +
+                "retry_backoff_ms=${projection.backoffMs}",
+        )
+        scheduleRegisterRetry(filePath, projection.backoffMs)
     }
 
     private fun clearRegisterFailure(filePath: String) {
         registerFailureCounts.remove(filePath)
         registerRetryAfterMs.remove(filePath)
+        registerRetryProjections.remove(filePath)
+        registerRetryTasks.remove(filePath)?.cancel(false)
+    }
+
+    /**
+     * Retain desired open-document registration across controller/native startup
+     * races. The VFS event is only the observation edge; this keyed retry owns
+     * convergence until the open document has an attached replica.
+     */
+    private fun scheduleRegisterRetry(filePath: String, delayMs: Long) {
+        if (disposed.get()) return
+        registerRetryTasks.compute(filePath) { _, existing ->
+            if (existing != null && !existing.isDone) {
+                existing
+            } else {
+                executor.schedule(
+                    {
+                        registerRetryTasks.remove(filePath)
+                        if (
+                            disposed.get() ||
+                            project.isDisposed ||
+                            forwarders[filePath]?.attached == true
+                        ) {
+                            return@schedule
+                        }
+                        runOnEdtNonBlocking {
+                            if (disposed.get() || project.isDisposed) return@runOnEdtNonBlocking
+                            val file =
+                                FileEditorManager.getInstance(project).openFiles
+                                    .firstOrNull { it.path == filePath }
+                                    ?: return@runOnEdtNonBlocking
+                            val document =
+                                FileDocumentManager.getInstance().getDocument(file)
+                                    ?: return@runOnEdtNonBlocking
+                            ensureOpenDocumentReplica(file.path, document, await = false)
+                        }
+                    },
+                    delayMs,
+                    TimeUnit.MILLISECONDS,
+                )
+            }
+        }
     }
 
     private fun markLocalPending(filePath: String) {
@@ -2612,10 +2476,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun requestUrgentRemoteDrain(project: Project, filePath: String, reason: String) {
             instances[project]?.requestUrgentRemoteDrain(filePath, reason)
-        }
-
-        fun requestTextAdopt(project: Project, filePath: String) {
-            instances[project]?.requestTextAdopt(filePath)
         }
 
         /**
@@ -2799,14 +2659,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
          * #ensurereregister: true when some open project already holds a CRDT
          * replica (forwarder) for [filePath].
          *
-         * This is the guard that keeps `ack_recovery_force_refresh` from
-         * replacing live editor authority. A force-refresh re-establishes the
-         * replica from the current document, which is destructive when a
-         * replica already exists and may be mid-flight — hence
-         * `CrdtReplicaAckFrontierTest` forbidding an unconditional
-         * force-refresh on the delivery path. When there is NO forwarder there
-         * is no authority to replace, and re-establishing is the only way out
-         * of the binary's `editor_attached_model_missing` wedge.
+         * This guard prevents needless endpoint replacement while a live
+         * consumer is already projecting the controller bootstrap. When there
+         * is no forwarder, registration reconstructs that downstream consumer
+         * without promoting its editor buffer to whole-document authority.
          */
         fun hasOpenDocumentReplica(filePath: String): Boolean =
             instances.values.any { it.forwarders.containsKey(filePath) }

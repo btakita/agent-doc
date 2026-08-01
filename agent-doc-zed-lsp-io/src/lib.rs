@@ -211,10 +211,13 @@ impl<W: Write> Server<W> {
         }
 
         let before = document.replica.state_vector();
-        let old_len = document.replica.text().chars().count();
+        let replica_text = document.replica.text();
+        let Some(delta) = minimal_text_delta(&replica_text, text) else {
+            return;
+        };
         document
             .replica
-            .apply_local_edit(0, old_len.min(u32::MAX as usize) as u32, text);
+            .apply_local_edit(delta.offset, delta.delete_len, &delta.insert);
         document.shadow = text.to_string();
         if let Ok(update) = document.replica.diff(&before)
             && !update.is_empty()
@@ -277,7 +280,8 @@ impl<W: Write> Server<W> {
         if replica.apply_update(&bootstrap).is_err() {
             return;
         }
-        let document = OpenDocument {
+        let canonical = replica.text();
+        let mut document = OpenDocument {
             uri: uri.to_string(),
             file,
             project_root,
@@ -289,29 +293,34 @@ impl<W: Write> Server<W> {
             pending_apply_target: None,
         };
 
-        // The already-visible buffer is the editor's authoritative local suffix.
-        // Publish only its delta relative to the controller bootstrap.
-        if document.replica.text() != editor_text {
-            let before = document.replica.state_vector();
-            let old_len = document.replica.text().chars().count();
-            document.replica.apply_local_edit(
-                0,
-                old_len.min(u32::MAX as usize) as u32,
-                editor_text,
-            );
-            if let Ok(update) = document.replica.diff(&before)
-                && !update.is_empty()
-            {
-                let _ = controller_replica_request(
-                    &document.project_root,
-                    &document.file,
-                    "replica_update",
-                    &document.identity,
-                    json!({ "update_b64": BASE64_STANDARD.encode(update) }),
-                );
-            }
-        }
+        // Registration bootstraps from the controller-owned canonical revision.
+        // A divergent opening buffer is a downstream delivery target, never an
+        // upstream whole-document replacement.
+        let opening_projection = (canonical != editor_text).then(|| {
+            document.pending_apply_target = Some(canonical.clone());
+            json!({
+                "edit": {
+                    "changes": {
+                        uri: [{
+                            "range": full_document_range(editor_text),
+                            "newText": canonical
+                        }]
+                    }
+                },
+                "label": "agent-doc canonical projection"
+            })
+        });
         self.documents.insert(uri.to_string(), document);
+        if let Some(edit) = opening_projection {
+            let request_id = self.next_request_id;
+            self.next_request_id += 1;
+            let _ = self.send(json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "workspace/applyEdit",
+                "params": edit
+            }));
+        }
     }
 
     fn detach(&mut self, uri: &str) {
@@ -558,6 +567,46 @@ fn full_document_range(text: &str) -> Value {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TextDelta {
+    offset: u32,
+    delete_len: u32,
+    insert: String,
+}
+
+/// Project one full-sync LSP observation into the smallest contiguous
+/// code-point edit. This keeps Zed at parity with the editor adapters that
+/// publish operator deltas and never recover by adopting a whole buffer.
+fn minimal_text_delta(before: &str, after: &str) -> Option<TextDelta> {
+    if before == after {
+        return None;
+    }
+    let before_chars: Vec<char> = before.chars().collect();
+    let after_chars: Vec<char> = after.chars().collect();
+    let mut prefix = 0usize;
+    while prefix < before_chars.len()
+        && prefix < after_chars.len()
+        && before_chars[prefix] == after_chars[prefix]
+    {
+        prefix += 1;
+    }
+    let mut suffix = 0usize;
+    while prefix + suffix < before_chars.len()
+        && prefix + suffix < after_chars.len()
+        && before_chars[before_chars.len() - 1 - suffix]
+            == after_chars[after_chars.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    Some(TextDelta {
+        offset: prefix.min(u32::MAX as usize) as u32,
+        delete_len: (before_chars.len() - prefix - suffix).min(u32::MAX as usize) as u32,
+        insert: after_chars[prefix..after_chars.len() - suffix]
+            .iter()
+            .collect(),
+    })
+}
+
 fn read_lsp_message(reader: &mut impl BufRead) -> Result<Option<Value>> {
     let mut content_length = None;
     loop {
@@ -627,6 +676,34 @@ mod tests {
                 "end": { "line": 1, "character": 3 }
             })
         );
+    }
+
+    #[test]
+    fn full_sync_queue_additions_project_as_incremental_operator_deltas() {
+        let before = "header\n<!-- agent:queue go -->\n- existing\n<!-- /agent:queue -->\n";
+        let after =
+            "header\n<!-- agent:queue go -->\n- existing\n- newly added\n<!-- /agent:queue -->\n";
+        let delta =
+            minimal_text_delta(before, after).expect("queue addition should produce a delta");
+        assert_eq!(delta.delete_len, 0);
+        assert_eq!(delta.insert, "- newly added\n");
+        assert_eq!(
+            before
+                .chars()
+                .take(delta.offset as usize)
+                .collect::<String>()
+                + &delta.insert
+                + &before
+                    .chars()
+                    .skip(delta.offset as usize)
+                    .collect::<String>(),
+            after
+        );
+    }
+
+    #[test]
+    fn full_sync_projection_never_replaces_an_unchanged_buffer() {
+        assert_eq!(minimal_text_delta("same\n", "same\n"), None);
     }
 
     #[test]

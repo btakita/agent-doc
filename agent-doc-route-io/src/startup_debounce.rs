@@ -134,7 +134,7 @@ where
                 // frontier nobody would pull and route deferred at `max_wait`.
                 if let Some(targets) = drain_targets.filter(|_| request_urgent_drain) {
                     last_urgent_drain = Some(Instant::now());
-                    let reason = CrdtReplicaEventReason::AckRecoveryForceRefresh;
+                    let reason = CrdtReplicaEventReason::CanonicalProjection;
                     match signal(file, reason, targets) {
                         Ok(()) => eprintln!(
                             "[route] requested urgent CRDT delivery drain (reason={} targets={targets})",
@@ -216,7 +216,7 @@ mod tests {
 
         assert_eq!(
             signals.into_inner(),
-            vec![(CrdtReplicaEventReason::AckRecoveryForceRefresh, 1)]
+            vec![(CrdtReplicaEventReason::CanonicalProjection, 1)]
         );
         assert!(observations.get() >= 4);
     }
@@ -354,7 +354,7 @@ mod tests {
         );
         assert!(
             signals.iter().all(|(reason, targets)| *reason
-                == CrdtReplicaEventReason::AckRecoveryForceRefresh
+                == CrdtReplicaEventReason::CanonicalProjection
                 && *targets == 2),
             "every retry must carry the same force-refresh reason and live target count"
         );

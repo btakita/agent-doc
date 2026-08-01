@@ -400,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn repair_fragmented_exchange_projects_retained_crdt_target_with_zero_editor_replicas() {
+    fn repair_fragmented_exchange_retains_crdt_target_with_zero_editor_replicas() {
         let dir = setup_project();
         let doc = dir.path().join("session-live-authority.md");
         let snapshot_content = concat!(
@@ -428,7 +428,7 @@ mod tests {
         );
         let stale_disk_projection =
             live_content.replacen("How would CAS wo?", "How would CAS w?", 1);
-        std::fs::write(&doc, stale_disk_projection).unwrap();
+        std::fs::write(&doc, &stale_disk_projection).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
             snapshot_content,
@@ -450,39 +450,57 @@ mod tests {
             "the test editor replica must be removed while editor authority remains"
         );
 
-        let outcome = run(&doc).unwrap();
-        assert_eq!(outcome, RepairOutcome::TemplateNormalized);
-
-        let repaired = std::fs::read_to_string(&doc).unwrap();
+        let err = run(&doc).unwrap_err();
+        assert!(
+            err.downcast_ref::<agent_doc_document_realtime_io::AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "repair must return the typed retained projection when no editor replica can receive it: {err:#}",
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            stale_disk_projection,
+            "repair must not force-project behind editor authority",
+        );
         let authoritative = agent_doc_document_realtime_io::try_resolve_current_document_content(
             &doc,
             "repair_live_authority_test",
         )
         .unwrap();
-        assert_eq!(authoritative, repaired);
+        assert_eq!(authoritative, live_content);
         assert_eq!(
             agent_doc_snapshot_io::load_document_baseline(&doc)
                 .unwrap()
                 .unwrap(),
-            repaired
+            snapshot_content,
+            "a deferred repair must not checkpoint an unacknowledged projection",
         );
+        let pending = agent_doc_document_realtime_io::pending_document_write(&doc)
+            .expect("the exact normalized target must remain retained");
         assert_eq!(
-            repaired.matches("<!-- agent:boundary:").count(),
+            pending
+                .target_content
+                .matches("<!-- agent:boundary:")
+                .count(),
             1,
-            "{repaired}"
-        );
-        assert!(!repaired.contains("How would CAS wo?"), "{repaired}");
-        assert!(!repaired.contains("How would CAS w?"), "{repaired}");
-        assert!(
-            !repaired.contains("duplicated partial response line"),
-            "{repaired}"
+            "{}",
+            pending.target_content,
         );
         assert!(
-        repaired.contains(
-            "Use a lock around compare-and-delete.\n<!-- agent:boundary:turn -->\n<!-- /agent:exchange -->"
-        ),
-        "{repaired}"
-    );
+            !pending.target_content.contains("How would CAS wo?")
+                && !pending.target_content.contains("How would CAS w?")
+                && !pending
+                    .target_content
+                    .contains("duplicated partial response line"),
+            "{}",
+            pending.target_content,
+        );
+        assert!(
+            pending.target_content.contains(
+                "Use a lock around compare-and-delete.\n<!-- agent:boundary:turn -->\n<!-- /agent:exchange -->"
+            ),
+            "{}",
+            pending.target_content,
+        );
     }
 
     #[test]

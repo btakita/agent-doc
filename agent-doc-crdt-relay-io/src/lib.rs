@@ -51,9 +51,7 @@
 use agent_doc_turn::op_log::OpsLogEvent;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
@@ -62,29 +60,23 @@ use serde::{Deserialize, Serialize};
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
 use agent_doc_document_realtime::crdt_relay::{
     AwarenessState, DiskChangeOutcome, DocumentOpDeltaOutcome, PendingReplicaUpdate, RelayHub,
-    ReplicaDeliverySnapshot, mint_client_id,
+    ReplicaDeliverySnapshot, RetainedCanonicalProjection, mint_client_id,
 };
 use agent_doc_document_realtime::watch_authority::{
     WatchAction, WatchDelivery, decide_watch_action,
 };
-use lazily::DurableOutbox;
-
-fn save_crdt_projection_with_lineage(file: &Path, projection: &[u8], lineage: &str) -> Result<()> {
-    agent_doc_snapshot_io::checkpoint_crdt_recovery_projection(file, projection, lineage)?;
-    Ok(())
-}
+use lazily::{DurableOutbox, ThreadSafeContext, ThreadSafeSourceMap};
 
 /// Stable event kinds delivered to Lazily editor replicas.
 /// Strings are a wire encoding only; producers select a closed enum variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CrdtReplicaEventReason {
-    RequestFullState,
     Fanout,
     ResponseCellAdd,
     CpWrite,
     Rebootstrap,
     AckReplay,
-    AckRecoveryForceRefresh,
+    CanonicalProjection,
 }
 
 /// Decision at the controller cold-start boundary for an incoming editor
@@ -97,38 +89,30 @@ pub enum CrdtReplicaEventReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColdStartReplicaUpdateDecision {
     Relay,
-    AwaitAuthoritativeFullState,
+    ReprojectCanonical,
 }
 
 pub const fn decide_cold_start_replica_update(
     registered: bool,
-    live_authority_established: bool,
-    awaiting_authoritative_full_state: bool,
+    controller_projection_established: bool,
+    canonical_projection_pending: bool,
 ) -> ColdStartReplicaUpdateDecision {
-    if registered && live_authority_established && !awaiting_authoritative_full_state {
+    if registered && controller_projection_established && !canonical_projection_pending {
         ColdStartReplicaUpdateDecision::Relay
     } else {
-        ColdStartReplicaUpdateDecision::AwaitAuthoritativeFullState
+        ColdStartReplicaUpdateDecision::ReprojectCanonical
     }
-}
-
-pub const fn cold_start_registration_requires_authoritative_full_state(
-    live_authority_established: bool,
-    retained_frontier_present: bool,
-) -> bool {
-    retained_frontier_present && !live_authority_established
 }
 
 impl CrdtReplicaEventReason {
     pub const fn token(self) -> &'static str {
         match self {
-            Self::RequestFullState => "request_full_state",
             Self::Fanout => "fanout",
             Self::ResponseCellAdd => "response_cell_add",
             Self::CpWrite => "cp_write",
             Self::Rebootstrap => "rebootstrap",
             Self::AckReplay => "ack_replay",
-            Self::AckRecoveryForceRefresh => "ack_recovery_force_refresh",
+            Self::CanonicalProjection => "canonical_projection",
         }
     }
 }
@@ -322,22 +306,6 @@ pub fn process_serves_relay_hub() -> bool {
     PROCESS_SERVES_RELAY_HUB.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// Pure deferral decision for the durable checkpoint, split out from
-/// [`process_serves_relay_hub`] so it is testable WITHOUT mutating the
-/// process-global role.
-///
-/// `#wsflake2`: the first version of this guard was covered by a test that
-/// flipped `PROCESS_SERVES_RELAY_HUB` to false and restored it. Five sibling
-/// tests in this crate call `checkpoint_durable_projection_for_file` and require
-/// it to actually checkpoint, so any of them scheduled inside that window
-/// observed a non-owner process and failed. That is a self-inflicted version of
-/// exactly the load-dependent flakiness `#wsflake2` is about: a test mutating
-/// process-global state is not hermetic no matter how carefully it restores the
-/// value afterward. Keep the decision pure and test it directly.
-pub(crate) fn durable_checkpoint_deferral_reason(serves_hub: bool) -> Option<&'static str> {
-    (!serves_hub).then_some("not_hub_owner")
-}
-
 /// Per-document count of editor replica registrations observed in this process.
 ///
 /// `#ensurewindowsize`: `ensure_document_model` gives a missing-replica editor
@@ -381,6 +349,116 @@ fn replica_registration_count(file: &Path) -> u64 {
         .unwrap_or(0)
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LiveDocumentPathRekeyReport {
+    pub hub_moved: bool,
+    pub replica_identities_moved: usize,
+    pub embedded_route_moved: bool,
+}
+
+fn transition_document_hash(path: &Path) -> Result<String> {
+    if path.exists() {
+        return agent_doc_fs::document_state_hash(path);
+    }
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    Ok(agent_doc_fs::document_state_hash_from_str(
+        &absolute.to_string_lossy(),
+    ))
+}
+
+/// Move the controller's live CRDT identity to a new path without detaching its
+/// existing replicas.
+///
+/// The controller installs an old-path alias immediately after this operation,
+/// so an in-flight request carrying the old path resolves to the moved hub. A
+/// destination hub may be discarded only when it has no members and its
+/// canonical projection is already durable; two genuinely live heads fail
+/// closed instead of being guessed together.
+pub fn rekey_live_document_path(
+    old_path: &Path,
+    new_path: &Path,
+) -> Result<LiveDocumentPathRekeyReport> {
+    let old_hash = transition_document_hash(old_path)?;
+    let new_hash = transition_document_hash(new_path)?;
+    if old_hash == new_hash {
+        return Ok(LiveDocumentPathRekeyReport::default());
+    }
+
+    let (first_hash, second_hash) = if old_hash < new_hash {
+        (&old_hash, &new_hash)
+    } else {
+        (&new_hash, &old_hash)
+    };
+    let first_lock = replica_registration_lock(first_hash)?;
+    let second_lock = replica_registration_lock(second_hash)?;
+    let _first = first_lock.lock();
+    let _second = second_lock.lock();
+
+    let hub_moved = {
+        let mut hubs = hub_registry().lock();
+        let old_hub = hubs.get(&old_hash).cloned();
+        let destination_hub = hubs.get(&new_hash).cloned();
+        if let (Some(old_hub), Some(destination_hub)) = (old_hub.as_ref(), destination_hub.as_ref())
+            && !Arc::ptr_eq(old_hub, destination_hub)
+        {
+            anyhow::ensure!(
+                destination_hub.lock().is_safe_to_evict(),
+                "cannot move live document relay: destination path already has a live CRDT head"
+            );
+            hubs.remove(&new_hash);
+        }
+        match hubs.remove(&old_hash) {
+            Some(handle) => {
+                hubs.insert(new_hash.clone(), handle);
+                true
+            }
+            None => false,
+        }
+    };
+    retained_canonical_projections().rekey(&old_hash, &new_hash);
+
+    let replica_identities_moved = {
+        let mut identities = replica_identity_registry().lock();
+        let moved = identities.remove(&old_hash).unwrap_or_default();
+        let count = moved.len();
+        if !moved.is_empty() {
+            identities.insert(new_hash.clone(), moved);
+        }
+        count
+    };
+
+    let embedded_route_moved = {
+        let mut routes = embedded_relay_route_registry().lock();
+        let moved = routes.remove(&old_hash);
+        if moved {
+            routes.insert(new_hash.clone());
+        }
+        moved
+    };
+    {
+        let mut counts = replica_registration_counts().lock();
+        if let Some(count) = counts.remove(&old_hash) {
+            counts.insert(new_hash.clone(), count);
+        }
+    }
+    {
+        let mut cooldowns = replica_reregister_cooldown_gate().lock();
+        if let Some(last) = cooldowns.remove(&old_hash) {
+            cooldowns.insert(new_hash, last);
+        }
+    }
+
+    Ok(LiveDocumentPathRekeyReport {
+        hub_moved,
+        replica_identities_moved,
+        embedded_route_moved,
+    })
+}
+
 /// Process-global per-document relay-hub registry, keyed by document hash.
 ///
 /// Per-document isolation (`#xdocsuper1/3`): each document's replicas live in
@@ -414,6 +492,45 @@ fn replica_registration_count(file: &Path) -> u64 {
 /// [`hub_handle_or_insert_with`], which release the registry lock before
 /// returning, rather than locking a hub inline under the registry guard.
 type HubHandle = Arc<Mutex<RelayHub>>;
+
+/// Controller-local canonical targets keyed independently of disposable relay
+/// membership. Recreating a hub consumes this Lazily projection instead of
+/// promoting an editor whole buffer or consulting the legacy CRDT sidecar.
+struct RetainedCanonicalProjections {
+    ctx: ThreadSafeContext,
+    values: ThreadSafeSourceMap<String, RetainedCanonicalProjection>,
+}
+
+impl RetainedCanonicalProjections {
+    fn new() -> Self {
+        let ctx = agent_doc_document_realtime::editor_process_scope()
+            .ctx()
+            .clone();
+        let values = ThreadSafeSourceMap::new(&ctx);
+        Self { ctx, values }
+    }
+
+    fn observe(&self, document_hash: &str) -> Option<RetainedCanonicalProjection> {
+        self.values.observe(&self.ctx, &document_hash.to_string())
+    }
+
+    fn retain(&self, document_hash: &str, projection: RetainedCanonicalProjection) {
+        self.values
+            .set(&self.ctx, document_hash.to_string(), projection);
+    }
+
+    fn rekey(&self, old_hash: &str, new_hash: &str) {
+        if let Some(projection) = self.observe(old_hash) {
+            self.retain(new_hash, projection);
+            self.values.remove(&self.ctx, &old_hash.to_string());
+        }
+    }
+}
+
+fn retained_canonical_projections() -> &'static RetainedCanonicalProjections {
+    static PROJECTIONS: OnceLock<RetainedCanonicalProjections> = OnceLock::new();
+    PROJECTIONS.get_or_init(RetainedCanonicalProjections::new)
+}
 
 fn hub_registry() -> &'static Mutex<HashMap<String, HubHandle>> {
     static REGISTRY: OnceLock<Mutex<HashMap<String, HubHandle>>> = OnceLock::new();
@@ -640,9 +757,20 @@ fn replica_identity_registry_has_editor_pid(document_hash: &str, editor_pid: u32
 /// finalize/disk entry points below do).
 pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T> {
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let handle = hub_handle_or_insert_with(&hash, || RelayHub::new(CANONICAL_CLIENT_ID));
+    let retained = retained_canonical_projections().observe(&hash);
+    let retained_hub = retained
+        .as_ref()
+        .map(|projection| {
+            RelayHub::from_retained_canonical_projection(CANONICAL_CLIENT_ID, projection)
+        })
+        .transpose()?;
+    let handle = hub_handle_or_insert_with(&hash, || {
+        retained_hub.unwrap_or_else(|| RelayHub::new(CANONICAL_CLIENT_ID))
+    });
     let mut hub = handle.lock();
-    Ok(f(&mut hub))
+    let result = f(&mut hub);
+    retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+    Ok(result)
 }
 
 /// Run `f` against an already-allocated per-document hub. Unlike
@@ -655,7 +783,9 @@ fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Resu
         return Ok(None);
     };
     let mut hub = handle.lock();
-    Ok(Some(f(&mut hub)))
+    let result = f(&mut hub);
+    retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+    Ok(Some(result))
 }
 
 /// Drop an inactive hub only after its canonical text is known to be durable.
@@ -726,7 +856,18 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
     let hash = agent_doc_fs::document_state_hash(file)?;
     if let Some(handle) = hub_handle(&hash) {
         let mut hub = handle.lock();
-        return Ok(f(&mut hub));
+        let result = f(&mut hub);
+        retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+        return Ok(result);
+    }
+    if let Some(projection) = retained_canonical_projections().observe(&hash) {
+        let recovered =
+            RelayHub::from_retained_canonical_projection(CANONICAL_CLIENT_ID, &projection)?;
+        let handle = hub_handle_or_insert_with(&hash, || recovered);
+        let mut hub = handle.lock();
+        let result = f(&mut hub);
+        retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+        return Ok(result);
     }
     // Seeding reads the whole document, so it happens with no registry lock
     // held; `hub_handle_or_insert_with` only installs the finished hub, and a
@@ -737,7 +878,9 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
         RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text)
     });
     let mut hub = handle.lock();
-    Ok(f(&mut hub))
+    let result = f(&mut hub);
+    retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
+    Ok(result)
 }
 
 /// Allocate the embedded Lazily relay from the current document projection.
@@ -913,7 +1056,7 @@ fn current_text_for_file_with_authority_inner(
     let hash = agent_doc_fs::document_state_hash(file)?;
     let mut handle = hub_handle(&hash);
     if handle.is_none() && recover_missing_from_projection {
-        recover_missing_hub_from_durable_projection(file, &hash)?;
+        recover_missing_hub_from_retained_projection(file, &hash)?;
         handle = hub_handle(&hash);
     }
     // `#relayhubperdoclock`: everything below — the commit barrier, materializing
@@ -1003,50 +1146,29 @@ fn current_text_for_file_with_authority_inner(
     })
 }
 
-fn recover_missing_hub_from_durable_projection(file: &Path, hash: &str) -> Result<bool> {
-    let recovery = match agent_doc_snapshot_io::load_crdt_recovery_projection(file) {
-        Ok(Some(projection)) => projection,
-        Ok(None) => return Ok(false),
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_current_text_projection_recovery_failed file={} authority=multi_replica doc_hash={} reason=load_crdt_error error={} recovery=continue_missing_replica",
-                    file.display(),
-                    hash,
-                    format!("{err:#}").replace('\n', "\\n"),
-                ),
-            );
-            return Ok(false);
-        }
+fn recover_missing_hub_from_retained_projection(file: &Path, hash: &str) -> Result<bool> {
+    let Some(projection) = retained_canonical_projections().observe(hash) else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_current_text_projection_unavailable file={} authority=multi_replica doc_hash={} recovery=await_controller_canonical_projection",
+                file.display(),
+                hash,
+            ),
+        );
+        return Ok(false);
     };
-    match recover_hub_from_projection(file, &recovery.projection, Some(&recovery.lineage)) {
-        Ok(()) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_current_text_projection_recovered file={} authority=multi_replica doc_hash={} bytes={} process_pid={}",
-                    file.display(),
-                    hash,
-                    recovery.projection.len(),
-                    std::process::id(),
-                ),
-            );
-            Ok(true)
-        }
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_current_text_projection_recovery_failed file={} authority=multi_replica doc_hash={} reason=recover_projection_error error={} recovery=continue_missing_replica",
-                    file.display(),
-                    hash,
-                    format!("{err:#}").replace('\n', "\\n"),
-                ),
-            );
-            Ok(false)
-        }
-    }
+    let hub = RelayHub::from_retained_canonical_projection(CANONICAL_CLIENT_ID, &projection)?;
+    hub_handle_or_insert_with(hash, || hub);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_current_text_projection_restored file={} authority=multi_replica doc_hash={} recovery=retained_lazily_projection",
+            file.display(),
+            hash,
+        ),
+    );
+    Ok(true)
 }
 
 /// Ensure the live document model is usable before a hot-path read gives up on
@@ -1155,17 +1277,15 @@ fn ensure_document_model_with_current_text_observer_inner(
     // timeout_ms=400 window_extended=false`, then the plugin's own periodic
     // sweep registered the replica ~100s later and the wedge cleared on its own.
     // The binary must drive that re-registration instead of waiting for the
-    // sweep. `AckRecoveryForceRefresh` is the same typed intent `#bn41` already
-    // uses in the realtime resolve path, which never runs here because this
-    // function bails with `Err` first. `EditorSyncPending` is deliberately
-    // excluded: that hub exists and is mid-flush, and nudging it would discard
-    // un-flushed ops.
+    // sweep. Wake the canonical projection instead of asking the editor to
+    // rebuild or publish a whole-document baseline. `EditorSyncPending` is
+    // deliberately excluded: that hub exists and is mid-flush.
     if matches!(first, CurrentText::EditorAttachedMissingReplica)
         && replica_reregister_cooldown_elapsed(file)
     {
         let reregister = match signal_crdt_replica_event_with_counts(
             file,
-            CrdtReplicaEventReason::AckRecoveryForceRefresh,
+            CrdtReplicaEventReason::CanonicalProjection,
             0,
         ) {
             // `#mrnh`: report FOUND registrations alongside notified ones.
@@ -1708,8 +1828,6 @@ fn register_replica_for_file_incremental_with_liveness(
         bootstrap,
         canonical_state_vector,
         incremental,
-        replacement_projection,
-        request_authoritative_full_state,
         canonical_projection_retained,
         canonical_content_hash,
     ) = with_hub_seeded_from_file(file, |hub| {
@@ -1717,17 +1835,14 @@ fn register_replica_for_file_incremental_with_liveness(
         // Preserve that unsettled visible-write obligation under the new
         // identity, and force a full canonical bootstrap so a stale retained
         // native frontier cannot union-merge over it.
-        let canonical_projection_retained = !hub.delivery_converged();
+        let canonical_projection_retained = (!hub.controller_projection_established()
+            && retained_state_vector.is_some())
+            || !hub.delivery_converged();
         let effective_retained_state_vector = if canonical_projection_retained {
             None
         } else {
             retained_state_vector
         };
-        let cold_start_with_retained_frontier =
-            cold_start_registration_requires_authoritative_full_state(
-                hub.live_authority_established(),
-                effective_retained_state_vector.is_some(),
-            );
         for retired_client_id in &retired_client_ids {
             hub.deregister(*retired_client_id);
         }
@@ -1784,32 +1899,22 @@ fn register_replica_for_file_incremental_with_liveness(
             },
             None => (hub.canonical_encoded_state(), false),
         };
-        if cold_start_with_retained_frontier {
-            hub.require_authoritative_full_state(client_id);
-        } else if effective_retained_state_vector.is_none() {
-            // A new editor accepted this controller generation's canonical
-            // bootstrap, establishing the live authority lineage.
-            hub.establish_live_authority();
-        }
+        // Registration consumes the controller canonical bootstrap. A stale
+        // editor baseline is a projection-consumer fault, never authority for a
+        // whole-document adopt.
+        hub.establish_controller_projection();
         if canonical_projection_retained {
             hub.ensure_canonical_projection_receipt(client_id)?;
         }
-        let replacement_projection = (!superseded_client_ids.is_empty())
-            .then(|| (hub.canonical_encoded_state(), hub.lineage().to_string()));
         let canonical_content_hash = agent_doc_hash::content_hash(&hub.canonical_text());
         Ok::<_, anyhow::Error>((
             bootstrap,
             canonical_state_vector,
             incremental,
-            replacement_projection,
-            hub.awaits_authoritative_full_state(client_id),
             canonical_projection_retained,
             canonical_content_hash,
         ))
     })??;
-    if let Some((projection, lineage)) = replacement_projection {
-        save_crdt_projection_with_lineage(file, &projection, &lineage)?;
-    }
     // Editor attach is an explicit event → drive the reactive open-docs authority.
     mark_editor_open_docs_open(file);
     // Seed the legacy process-exit watcher from durable reliable-sync open pids.
@@ -1818,18 +1923,6 @@ fn register_replica_for_file_incremental_with_liveness(
     // `ensure_document_model` uses this as liveness proof to extend its otherwise
     // very short missing-replica window — see `note_replica_registration`.
     note_replica_registration(file);
-    if request_authoritative_full_state
-        && let Err(err) =
-            signal_crdt_replica_event(file, CrdtReplicaEventReason::RequestFullState, 0)
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "crdt_replica_event_signal_failed file={} reason=request_full_state source=replica_register error={err}",
-                file.display(),
-            ),
-        );
-    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -2010,27 +2103,27 @@ pub fn relay_replica_update_for_file(
     }
     // A replacement controller may receive an incremental update before the
     // editor's registration event reaches the reactive relay projection.
-    // Reattach the live member so liveness heals, but do not union its retained
-    // whole-state lineage into the disk-seeded hub. Keep every additive update
-    // fenced until the editor answers the full-state request; the adopt path then
-    // replaces canonical and rebases the mirror.
-    let (packet, reattached, awaiting_authoritative_full_state) =
+    // Reattach the live member but quarantine that unproven update. The normal
+    // controller-to-editor canonical projection repairs the consumer; the stale
+    // editor baseline is never adopted as whole-document authority.
+    let (packet, reattached, canonical_projection_pending) =
         with_hub_seeded_from_file(file, |hub| -> Result<_> {
             let registered = hub.is_registered(client_id);
             let decision = decide_cold_start_replica_update(
                 registered,
-                hub.live_authority_established(),
-                hub.awaits_authoritative_full_state(client_id),
+                hub.controller_projection_established(),
+                hub.awaits_canonical_projection(client_id),
             );
             match decision {
                 ColdStartReplicaUpdateDecision::Relay => {
                     Ok((Some(hub.relay_update(client_id, update)?), false, false))
                 }
-                ColdStartReplicaUpdateDecision::AwaitAuthoritativeFullState => {
+                ColdStartReplicaUpdateDecision::ReprojectCanonical => {
                     if !registered {
                         hub.register(client_id)?;
                     }
-                    hub.require_authoritative_full_state(client_id);
+                    hub.establish_controller_projection();
+                    hub.ensure_canonical_projection_receipt(client_id)?;
                     Ok((None, !registered, true))
                 }
             }
@@ -2062,29 +2155,29 @@ pub fn relay_replica_update_for_file(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_replica_reattach_on_update file={} authority=multi_replica client_id={} recovery=await_authoritative_full_state dead_members_pruned={}",
+                "crdt_replica_reattach_on_update file={} authority=multi_replica client_id={} recovery=lazy_canonical_projection dead_members_pruned={}",
                 file.display(),
                 client_id,
                 dead_client_ids.len(),
             ),
         );
     }
-    if awaiting_authoritative_full_state {
+    if canonical_projection_pending {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_replica_update_quarantined file={} authority=multi_replica client_id={} recovery=request_authoritative_full_state",
+                "crdt_replica_update_quarantined file={} authority=multi_replica client_id={} recovery=lazy_canonical_projection",
                 file.display(),
                 client_id,
             ),
         );
         if let Err(err) =
-            signal_crdt_replica_event(file, CrdtReplicaEventReason::RequestFullState, 0)
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::CanonicalProjection, 0)
         {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "crdt_replica_event_signal_failed file={} reason=request_full_state error={err}",
+                    "crdt_replica_event_signal_failed file={} reason=canonical_projection error={err}",
                     file.display(),
                 ),
             );
@@ -2220,12 +2313,6 @@ fn apply_response_cell_on_hub(
     } else {
         (0, 0)
     };
-    // The state-backbone fact is appended only after this operation returns, so
-    // make the CRDT mutation restart-durable first.  Persisting while the hub is
-    // locked also prevents two concurrent response cells from writing recovery
-    // projections out of canonical order.
-    let projection = hub.projection_bytes();
-    save_crdt_projection_with_lineage(file, &projection, hub.lineage())?;
     Ok(ResponseCellRelayWrite {
         applied,
         cell_id: outcome.cell_id,
@@ -2342,7 +2429,7 @@ pub fn apply_cp_write_for_file(
         // the whole operation (observed: JB `Compact Exchange` →
         // `crdt_cp_write ... no registered replica yet`, #cpcwritemissingreplica).
         let hash = agent_doc_fs::document_state_hash(file)?;
-        let recovered = recover_missing_hub_from_durable_projection(file, &hash)?;
+        let recovered = recover_missing_hub_from_retained_projection(file, &hash)?;
         match if recovered {
             with_existing_hub(file, |hub| {
                 apply_cp_write_on_hub(hub, file, authority, expected_current, content)
@@ -2354,7 +2441,7 @@ pub fn apply_cp_write_for_file(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "crdt_cp_write_recovered_missing_replica file={} source={} authority=multi_replica doc_hash={} recovery=durable_projection",
+                        "crdt_cp_write_recovered_missing_replica file={} source={} authority=multi_replica doc_hash={} recovery=retained_lazily_projection",
                         file.display(),
                         source,
                         hash,
@@ -2632,360 +2719,50 @@ pub fn checkpoint_durable_projection_for_file(
     file: &Path,
     source: &str,
 ) -> Result<DurableProjectionCheckpoint> {
-    checkpoint_durable_projection_for_file_with_mode(
-        file,
-        source,
-        DurableProjectionMode::Foreground,
-    )
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DurableProjectionMode {
-    Foreground,
-    Background,
-}
-
-fn checkpoint_durable_projection_for_file_with_mode(
-    file: &Path,
-    source: &str,
-    mode: DurableProjectionMode,
-) -> Result<DurableProjectionCheckpoint> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "crdt_durable_checkpoint_skipped file={} source={} authority=git reason=detached",
-                file.display(),
-                source,
-            ),
-        );
         return Ok(DurableProjectionCheckpoint::Detached);
     }
-
-    // `#ensurereplicagensup`: only the process that owns the relay hub can
-    // checkpoint it. `hub_registry()` is process-local and populated solely by
-    // the controller, so a supervisor or CLI process running this path reads an
-    // empty registry, and — because durable liveness says the editor is
-    // attached — that miss surfaces as `editor_attached_model_missing` on every
-    // attempt. Observed on sampleorders.md as repeating
-    // `document_model_ensure_failed ... source=controller_recycle_request:background`
-    // from pids that were not the controller: work that could never succeed,
-    // logged as an editor fault. Defer instead; the hub owner checkpoints at its
-    // own boundaries, and the caller already treats `Deferred` as "continue
-    // without trusting the stale projection".
-    if let Some(reason) = durable_checkpoint_deferral_reason(process_serves_relay_hub()) {
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let Some(projection) = retained_canonical_projections().observe(&document_hash) else {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_durable_checkpoint_deferred file={} source={} reason={reason} process_pid={} (#ensurereplicagensup)",
+                "crdt_projection_observe_deferred file={} source={} reason=controller_projection_unavailable",
                 file.display(),
                 source,
-                std::process::id(),
             ),
         );
         return Ok(DurableProjectionCheckpoint::Deferred {
-            reason: reason.to_string(),
+            reason: "controller_projection_unavailable".to_string(),
         });
-    }
-
-    let current = match mode {
-        DurableProjectionMode::Foreground => current_text_for_file_with_authority(file, authority)?,
-        DurableProjectionMode::Background => ensure_document_model(file, source)?,
     };
-    let (live_editors, delivery_converged) = match current {
-        CurrentText::Detached => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_durable_checkpoint_skipped file={} source={} authority=git reason=authority_flipped_detached",
-                    file.display(),
-                    source,
-                ),
-            );
-            return Ok(DurableProjectionCheckpoint::Detached);
-        }
-        CurrentText::Current {
-            live_editors,
-            delivery_converged,
-            ..
-        } => (live_editors, delivery_converged),
-        CurrentText::EditorAttachedMissingReplica | CurrentText::EditorSyncPending => {
-            return defer_or_fail_durable_projection_checkpoint(
-                file,
-                source,
-                mode,
-                current_text_label(&current),
-            );
-        }
-    };
-    if !delivery_converged {
-        return defer_or_fail_durable_projection_checkpoint(
-            file,
-            source,
-            mode,
-            &format!("delivery_not_converged live_editors={live_editors}"),
-        );
-    }
-
-    let Some((projection, canonical_text, lineage)) = with_existing_hub(file, |hub| {
-        (
-            hub.projection_bytes(),
-            hub.canonical_text(),
-            hub.lineage().to_string(),
-        )
-    })?
-    else {
-        return defer_or_fail_durable_projection_checkpoint(
-            file,
-            source,
-            mode,
-            "missing_hub_after_ready_state",
-        );
-    };
-    let changed =
-        agent_doc_snapshot_io::checkpoint_crdt_recovery_projection(file, &projection, &lineage)?;
+    let projected = RelayHub::from_retained_canonical_projection(CANONICAL_CLIENT_ID, &projection)?;
+    let canonical_text = projected.canonical_text();
+    let live_editors = hub_handle(&document_hash)
+        .map(|handle| handle.lock().live_count())
+        .unwrap_or_default();
     let text_len = canonical_text.len();
     let text_hash = agent_doc_hash::content_hash(&canonical_text);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_durable_checkpoint file={} source={} authority=multi_replica storage=state_db bytes={} changed={} live_editors={} delivery_converged={} text_len={} text_hash={}",
+            "crdt_projection_observed file={} source={} storage=controller_lazily_projection bytes={} live_editors={} text_len={} text_hash={}",
             file.display(),
             source,
-            projection.len(),
-            changed,
+            projection.state.len(),
             live_editors,
-            delivery_converged,
             text_len,
             text_hash,
         ),
     );
     Ok(DurableProjectionCheckpoint::Checkpointed {
-        bytes: projection.len(),
-        changed,
+        bytes: projection.state.len(),
+        changed: false,
         live_editors,
         text_len,
         text_hash,
     })
-}
-
-fn defer_or_fail_durable_projection_checkpoint(
-    file: &Path,
-    source: &str,
-    mode: DurableProjectionMode,
-    reason: &str,
-) -> Result<DurableProjectionCheckpoint> {
-    match mode {
-        DurableProjectionMode::Foreground => {
-            defer_durable_projection_checkpoint(file, source, reason)?;
-            Ok(DurableProjectionCheckpoint::Deferred {
-                reason: reason.to_string(),
-            })
-        }
-        DurableProjectionMode::Background => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_durable_checkpoint_background_blocked file={} source={} reason={}",
-                    file.display(),
-                    source,
-                    reason,
-                ),
-            );
-            anyhow::bail!(
-                "CRDT durable checkpoint background repair blocked for {} before {source}: {reason}",
-                file.display()
-            );
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct DurableProjectionRepairPaths {
-    pending_path: PathBuf,
-    lock_path: PathBuf,
-}
-
-struct DurableProjectionRepairGuard {
-    lock_path: PathBuf,
-}
-
-impl Drop for DurableProjectionRepairGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.lock_path);
-    }
-}
-
-fn durable_projection_repair_paths(file: &Path) -> Result<DurableProjectionRepairPaths> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    let dir = project_root.join(".agent-doc").join("crdt-repair");
-    std::fs::create_dir_all(&dir)?;
-    Ok(DurableProjectionRepairPaths {
-        pending_path: dir.join(format!("{hash}.json")),
-        lock_path: dir.join(format!("{hash}.lock")),
-    })
-}
-
-fn defer_durable_projection_checkpoint(file: &Path, source: &str, reason: &str) -> Result<()> {
-    record_durable_projection_repair_request(file, source, reason)?;
-    spawn_durable_projection_repair(file, source, reason);
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "crdt_durable_checkpoint_deferred file={} source={} reason={} recovery=background_yrs_repair",
-            file.display(),
-            source,
-            reason,
-        ),
-    );
-    Ok(())
-}
-
-fn record_durable_projection_repair_request(file: &Path, source: &str, reason: &str) -> Result<()> {
-    let paths = durable_projection_repair_paths(file)?;
-    let requested_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default();
-    let body = format!(
-        "{{\"file\":\"{}\",\"source\":\"{}\",\"reason\":\"{}\",\"requested_at_secs\":{requested_at}}}",
-        json_string_escape(&file.display().to_string()),
-        json_string_escape(source),
-        json_string_escape(reason),
-    );
-    std::fs::write(&paths.pending_path, body).with_context(|| {
-        format!(
-            "failed to write CRDT durable projection repair request {}",
-            paths.pending_path.display()
-        )
-    })?;
-    Ok(())
-}
-
-fn json_string_escape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-fn clear_durable_projection_repair_request(file: &Path) {
-    if let Ok(paths) = durable_projection_repair_paths(file) {
-        let _ = std::fs::remove_file(paths.pending_path);
-    }
-}
-
-fn acquire_durable_projection_repair_guard(
-    file: &Path,
-) -> Result<Option<DurableProjectionRepairGuard>> {
-    let paths = durable_projection_repair_paths(file)?;
-    const STALE_LOCK_MS: u64 = 30_000;
-    if let Some(metadata) = std::fs::metadata(&paths.lock_path).ok()
-        && let Ok(modified) = metadata.modified()
-        && modified.elapsed().unwrap_or_default() <= std::time::Duration::from_millis(STALE_LOCK_MS)
-    {
-        return Ok(None);
-    }
-    let _ = std::fs::remove_file(&paths.lock_path);
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&paths.lock_path)
-    {
-        Ok(mut lock) => {
-            let _ = lock.write_all(std::process::id().to_string().as_bytes());
-            Ok(Some(DurableProjectionRepairGuard {
-                lock_path: paths.lock_path,
-            }))
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
-        Err(err) => Err(err.into()),
-    }
-}
-
-fn spawn_durable_projection_repair(file: &Path, source: &str, reason: &str) {
-    let file = file.to_path_buf();
-    let source = source.to_string();
-    let reason = reason.to_string();
-    let Some(guard) = acquire_durable_projection_repair_guard(&file)
-        .inspect_err(|err| {
-            agent_doc_ops_log_io::log_op(
-                &file,
-                &format!(
-                    "crdt_durable_checkpoint_background_spawn_skipped file={} source={} reason={} error={:?}",
-                    file.display(),
-                    source,
-                    reason,
-                    err.to_string(),
-                ),
-            );
-        })
-        .ok()
-        .flatten()
-    else {
-        return;
-    };
-    let _ = std::thread::Builder::new()
-        .name("agent-doc-crdt-repair".to_string())
-        .spawn(move || {
-            let _guard = guard;
-            let background_source = format!("{source}:background");
-            match checkpoint_durable_projection_for_file_with_mode(
-                &file,
-                &background_source,
-                DurableProjectionMode::Background,
-            ) {
-                Ok(DurableProjectionCheckpoint::Checkpointed { .. })
-                | Ok(DurableProjectionCheckpoint::Detached) => {
-                    clear_durable_projection_repair_request(&file);
-                    agent_doc_ops_log_io::log_op(
-                        &file,
-                        &format!(
-                            "crdt_durable_checkpoint_background_repaired file={} source={} original_reason={}",
-                            file.display(),
-                            background_source,
-                            reason,
-                        ),
-                    );
-                }
-                Ok(DurableProjectionCheckpoint::Deferred { reason: deferred }) => {
-                    agent_doc_ops_log_io::log_op(
-                        &file,
-                        &format!(
-                            "crdt_durable_checkpoint_background_deferred file={} source={} original_reason={} deferred_reason={}",
-                            file.display(),
-                            background_source,
-                            reason,
-                            deferred,
-                        ),
-                    );
-                }
-                Err(err) => {
-                    agent_doc_ops_log_io::log_op(
-                        &file,
-                        &format!(
-                            "crdt_durable_checkpoint_background_failed file={} source={} original_reason={} error={:?}",
-                            file.display(),
-                            background_source,
-                            reason,
-                            err.to_string(),
-                        ),
-                    );
-                }
-            }
-        });
 }
 
 /// The **authority-gated commit barrier** at the live finalize commit point
@@ -3183,7 +2960,9 @@ pub fn record_committed_baseline_for_file(file: &Path) {
     };
     let _registration_guard = registration_lock.lock();
     if let Some(handle) = hub_handle(&hash) {
-        handle.lock().record_committed_baseline(&on_disk);
+        let mut hub = handle.lock();
+        hub.record_committed_baseline(&on_disk);
+        retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
     }
     evict_hub_if_safe(file, &hash, "committed_baseline");
 }
@@ -3240,62 +3019,6 @@ pub fn adopt_authoritative_text_for_file(file: &Path, text: &str) -> Result<Opti
             changed,
             text.len(),
             agent_doc_hash::content_hash(text),
-        ),
-    );
-    Ok(Some(changed))
-}
-
-/// Adopt an editor's authoritative **full lazily state** as the relay canonical for
-/// `file`, lineage-intact — the reattach acute-wedge fix (`#reattach-adopt`).
-///
-/// `full_state` is the editor's whole compact `ReplicaState::encode_state()`
-/// envelope. Use this (NOT [`apply_document_op_delta_for_file`], which
-/// union-merges) when the editor re-announces after its registration lapsed: the
-/// recovered canonical may carry drift the operator already deleted (`#sy71`) with no
-/// counterpart delete op, so a fold would keep it — adoption replaces the drifted
-/// canonical with the editor's authoritative state, dropping the drift while keeping
-/// the editor's `OpId` lineage. Returns `Ok(Some(text_changed))` when a live relay
-/// model exists, `Ok(None)` headless. The FFI/plugin must send the editor's full
-/// state (not an incremental delta) on reattach for this to be correct.
-pub fn adopt_editor_full_state_for_file(file: &Path, full_state: &[u8]) -> Result<Option<bool>> {
-    let Some(changed) = with_existing_hub(file, |hub| {
-        let before = hub.canonical_text();
-        hub.adopt_editor_full_state(full_state)
-            .map(|_| hub.canonical_text() != before)
-    })?
-    else {
-        return Ok(None);
-    };
-    let changed = changed?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "crdt_editor_full_state_adopted file={} authority=multi_replica changed={} state_len={} recovery=reattach_drop_drift",
-            file.display(),
-            changed,
-            full_state.len(),
-        ),
-    );
-    Ok(Some(changed))
-}
-
-/// Adopt the editor's authoritative **TEXT** as the relay canonical for `file` — the
-/// bounded, runaway-safe reattach path (`#reattach-adopt`). `text` is the editor's document
-/// text (`O(text)`, not the op-log). Rebuilds the canonical from text with a self-echo guard
-/// (`RelayHub::adopt_editor_text`). Returns `Ok(Some(changed))` when a hub exists.
-pub fn adopt_editor_text_for_file(file: &Path, text: &str) -> Result<Option<bool>> {
-    let changed = with_hub(file, |hub| {
-        let before = hub.canonical_text();
-        hub.adopt_editor_text(text)
-            .map(|_| hub.canonical_text() != before)
-    })??;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "crdt_editor_text_adopted file={} authority=multi_replica changed={} text_len={} recovery=reattach_drop_drift_bounded",
-            file.display(),
-            changed,
-            text.len(),
         ),
     );
     Ok(Some(changed))
@@ -4135,13 +3858,15 @@ mod tests {
             "the response cell may commit after the visible editor ACK frontier converges"
         );
 
-        let projection = agent_doc_snapshot_io::load_crdt_recovery_projection(&doc)
-            .unwrap()
-            .expect("response add should durably checkpoint the canonical projection")
-            .projection;
-        let recovered =
-            RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, &projection).unwrap();
-        assert!(recovered.canonical_text().contains(response));
+        assert!(
+            agent_doc_snapshot_io::load_crdt_recovery_projection(&doc)
+                .unwrap()
+                .is_none(),
+            "response delivery must not materialize a CRDT recovery sidecar"
+        );
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert!(hub_registry().lock().remove(&document_hash).is_some());
+        with_hub(&doc, |hub| assert!(hub.canonical_text().contains(response))).unwrap();
 
         let replay = add_response_cell_for_file(&doc, None, response, "test-replay")
             .unwrap()
@@ -4278,6 +4003,61 @@ mod tests {
             assert_eq!(hub.member_text(client_id).unwrap(), on_disk);
         })
         .unwrap();
+    }
+
+    #[test]
+    fn live_relay_identity_follows_a_filesystem_path_transition() {
+        let (dir, old_doc) = temp_doc("mary-elle-zellerbach.md");
+        let old_hash = agent_doc_fs::document_state_hash(&old_doc).unwrap();
+        seed_live_reliable_sync_open(&old_doc.display().to_string());
+        let identity = "intellij:rename-live-replica";
+        register_replica_for_file(&old_doc, identity)
+            .unwrap()
+            .expect("live editor should register before rename");
+        let expected = std::fs::read_to_string(&old_doc).unwrap();
+
+        let new_doc = dir.path().join("mary-ellen-zellerbach.md");
+        std::fs::rename(&old_doc, &new_doc).unwrap();
+        let new_hash = agent_doc_fs::document_state_hash(&new_doc).unwrap();
+        seed_live_reliable_sync_open(&new_doc.display().to_string());
+
+        let report = rekey_live_document_path(&old_doc, &new_doc).unwrap();
+
+        assert_eq!(
+            report,
+            LiveDocumentPathRekeyReport {
+                hub_moved: true,
+                replica_identities_moved: 1,
+                embedded_route_moved: true,
+            },
+        );
+        assert!(
+            !hub_is_allocated(&old_hash),
+            "the removed path must not retain a second canonical head",
+        );
+        assert!(hub_is_allocated(&new_hash));
+        assert!(embedded_relay_route_is_registered_for_file(&new_doc));
+        let current =
+            current_text_for_file_with_authority(&new_doc, CrdtAuthority::MultiReplica).unwrap();
+        match current {
+            CurrentText::Current {
+                text,
+                live_editors,
+                delivery_converged,
+                ..
+            } => {
+                assert_eq!(text, expected);
+                assert_eq!(live_editors, 1);
+                assert!(delivery_converged);
+            }
+            other => panic!("moved relay must remain current, got {other:?}"),
+        }
+        assert!(
+            pull_replica_updates_for_file(&new_doc, identity)
+                .unwrap()
+                .is_some(),
+            "the existing editor identity must remain routable through the new path",
+        );
     }
 
     #[test]
@@ -5063,13 +4843,13 @@ mod tests {
     }
 
     #[test]
-    fn cp_relay_write_recovers_missing_replica_from_durable_projection() {
+    fn cp_relay_write_recovers_missing_replica_from_retained_projection() {
         // Editor attached (authority) but this process has NO registered relay
         // replica — the transient gap after a controller recycle / editor restart
         // that made JB `Compact Exchange` hard-fail with
         // `crdt_cp_write ... no registered replica yet` (#cpcwritemissingreplica).
-        // With a durable state-db projection, the write must recover the hub and
-        // apply rather than aborting.
+        // With the keyed controller projection, the write must recreate the
+        // disposable hub and apply rather than aborting.
         let (_dir, doc) = temp_doc("cp-missing-replica.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
@@ -5080,9 +4860,8 @@ mod tests {
             CurrentText::Current { text, .. } => text,
             other => panic!("expected relay current text, got {other:?}"),
         };
-        // Persist the durable projection, then evict the in-process hub to model the
-        // missing-replica state a recycle/restart leaves behind.
-        checkpoint_durable_projection_for_file(&doc, "test_missing_replica").unwrap();
+        // Evict only the relay membership object. The controller's Lazily target
+        // remains and is the sole recovery input.
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         assert!(
             hub_registry().lock().remove(&hash).is_some(),
@@ -5091,146 +4870,107 @@ mod tests {
         assert!(
             agent_doc_snapshot_io::load_crdt_recovery_projection(&doc)
                 .unwrap()
-                .is_some(),
-            "durable projection must exist for recovery"
+                .is_none(),
+            "relay recovery must not depend on a CRDT sidecar"
         );
 
         let next = format!("{current}\n### Re: recovered — gpt-5\n\nAfter recycle.\n");
         let result = apply_cp_write_for_file(&doc, &current, &next, "test_cp_relay")
             .unwrap()
-            .expect("missing-replica CP write should recover from projection and apply");
+            .expect("missing-replica CP write should recover from Lazily and apply");
         assert!(result.applied);
         with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), next)).unwrap();
     }
 
     #[test]
-    fn relay_update_after_recycle_waits_for_full_state_without_concatenating_lineages() {
-        // A JB editor was open, then the controller recycled. The replacement
-        // process rebuilds its hub from disk under a fresh CRDT lineage while the
-        // editor still retains the prior lineage. Union-applying that editor update
-        // before registration concatenates both complete documents. The first
-        // update must establish membership and request an authoritative full-state
-        // adoption without integrating the stale-lineage update.
-        let (_dir, doc) = temp_doc("relay-reattach.md");
+    fn relay_update_after_recycle_waits_for_controller_projection_receipt() {
+        let (_dir, doc) = temp_doc("relay-lazy-projection.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        let identity = "intellij:reattach";
+        let identity = "intellij:lazy-projection";
         let (client_id, bootstrap) = register_replica_for_file(&doc, identity)
             .unwrap()
             .expect("editor replica should attach");
 
-        // The editor makes a local edit against its FFI replica and would ship the
-        // encoded state to the hub.
-        let replica =
+        let stale_editor =
             agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
-        let base_chars = replica.text().chars().count() as u32;
-        replica.apply_local_edit(
-            base_chars,
-            0,
-            "\n### Re: after recycle — gpt-5\n\nEDITOR EDIT\n",
-        );
-        let editor_update = replica.encode_state();
-        let editor_text = replica.text();
+        let stale_offset = stale_editor.text().chars().count() as u32;
+        stale_editor.apply_local_edit(stale_offset, 0, "\nSTALE WHOLE BUFFER\n");
+        let stale_update = stale_editor.encode_state();
 
-        // Model a cold controller generation: the in-process hub is gone, so the
-        // next event seeds a canonical-only hub from the correct disk text under a
-        // different lineage.
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        assert!(
-            hub_registry().lock().remove(&hash).is_some(),
-            "test setup should evict the live hub"
-        );
-
-        let fan_out = relay_replica_update_for_file(&doc, identity, &editor_update)
-            .expect("a dropped-replica update must establish recovery membership")
-            .expect("editor-attached authority must return a fenced recovery result");
-        assert_eq!(fan_out.origin, client_id);
-        assert!(fan_out.update.is_empty());
-        assert!(fan_out.targets.is_empty());
-        let disk_text = std::fs::read_to_string(&doc).unwrap();
-        with_hub(&doc, |hub| {
-            assert_eq!(
-                hub.live_count(),
-                1,
-                "the recovery fence must restore one live editor membership"
-            );
-            assert_eq!(
-                hub.canonical_text(),
-                disk_text,
-                "the pre-registration update must not union-apply an independent lineage"
-            );
-        })
-        .unwrap();
-
-        // A second incremental frame can race the requested full-state response.
-        // It must stay behind the same fence instead of exploiting the membership
-        // established by the first frame.
-        let repeated = relay_replica_update_for_file(&doc, identity, &editor_update)
-            .unwrap()
-            .expect("the repeated frame should remain a successful quarantined no-op");
-        assert!(repeated.update.is_empty());
-        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), disk_text)).unwrap();
-
-        assert_eq!(
-            adopt_editor_full_state_for_file(&doc, &editor_update).unwrap(),
-            Some(true),
-            "the requested full-state frame must become the live authority"
-        );
-        with_hub(&doc, |hub| {
-            assert_eq!(
-                hub.canonical_text(),
-                editor_text,
-                "full-state recovery must converge to exactly one editor projection"
-            );
-        })
-        .unwrap();
-
-        // The adopt must also rebase the hub-side member mirror. Otherwise its next
-        // legitimate delta would pull the independent disk seed back into canonical.
-        let next_offset = replica.text().chars().count() as u32;
-        replica.apply_local_edit(next_offset, 0, "\nNEXT EDIT\n");
-        let next_update = replica.encode_state();
-        relay_replica_update_for_file(&doc, identity, &next_update)
-            .unwrap()
-            .expect("post-adopt updates should relay normally");
-        with_hub(&doc, |hub| {
-            assert_eq!(
-                hub.canonical_text(),
-                replica.text(),
-                "post-adopt updates must advance exactly one retained editor lineage"
-            );
-        })
-        .unwrap();
-
-        // Exercise the opposite arrival order on another controller generation:
-        // registration lands first with a retained frontier, then its update.
-        // The reactive generation projection—not the RPC order—must still hold
-        // the member behind the full-state fence.
         assert!(hub_registry().lock().remove(&hash).is_some());
-        let registration =
-            register_replica_for_file_incremental(&doc, identity, Some(&replica.state_vector()))
-                .unwrap()
-                .expect("retained registration should establish fenced membership");
-        assert_eq!(registration.client_id, client_id);
-        with_hub(&doc, |hub| {
-            assert!(!hub.live_authority_established());
-            assert!(hub.awaits_authoritative_full_state(client_id));
+
+        let quarantined = relay_replica_update_for_file(&doc, identity, &stale_update)
+            .unwrap()
+            .expect("a cold relay update should return a quarantined no-op");
+        assert!(quarantined.update.is_empty());
+        assert!(quarantined.targets.is_empty());
+
+        let disk_text = std::fs::read_to_string(&doc).unwrap();
+        let pending = with_hub(&doc, |hub| {
+            assert!(hub.controller_projection_established());
+            assert!(hub.awaits_canonical_projection(client_id));
             assert_eq!(hub.canonical_text(), disk_text);
+            hub.pending_updates(client_id).unwrap().pop().unwrap()
         })
         .unwrap();
 
-        let registration_first_update = relay_replica_update_for_file(&doc, identity, &next_update)
-            .unwrap()
-            .expect("registration-first update should be quarantined");
-        assert!(registration_first_update.update.is_empty());
-        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), disk_text)).unwrap();
-        assert_eq!(
-            adopt_editor_full_state_for_file(&doc, &next_update).unwrap(),
-            Some(true),
-        );
+        let projected_editor =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &pending.update)
+                .unwrap();
+        assert_eq!(projected_editor.text(), disk_text);
         with_hub(&doc, |hub| {
-            assert!(hub.live_authority_established());
-            assert_eq!(hub.canonical_text(), replica.text());
+            assert!(
+                hub.ack_delivery_with_content_hash(
+                    client_id,
+                    &pending.patch_id,
+                    pending.generation,
+                    Some(&pending.expected_content_hash),
+                )
+                .unwrap()
+            );
+            assert!(!hub.awaits_canonical_projection(client_id));
+        })
+        .unwrap();
+
+        let projected_frontier = projected_editor.state_vector();
+        let queue_offset = projected_editor.text().chars().count() as u32;
+        projected_editor.apply_local_edit(queue_offset, 0, "\nNEW QUEUE ITEM\n");
+        let queue_delta = projected_editor.diff(&projected_frontier).unwrap();
+        let applied = relay_replica_update_for_file(&doc, identity, &queue_delta)
+            .unwrap()
+            .expect("a post-projection user delta should relay");
+        assert!(!applied.update.is_empty());
+        with_hub(&doc, |hub| {
+            assert!(hub.canonical_text().contains("NEW QUEUE ITEM"));
+            assert!(!hub.canonical_text().contains("STALE WHOLE BUFFER"));
+        })
+        .unwrap();
+
+        assert!(hub_registry().lock().remove(&hash).is_some());
+        let registration = register_replica_for_file_incremental(
+            &doc,
+            identity,
+            Some(&stale_editor.state_vector()),
+        )
+        .unwrap()
+        .expect("registration-first recycle should return controller bootstrap");
+        assert!(registration.canonical_projection_retained);
+        assert!(!registration.incremental);
+        with_hub(&doc, |hub| {
+            assert!(hub.controller_projection_established());
+            assert!(hub.awaits_canonical_projection(client_id));
+        })
+        .unwrap();
+
+        let registration_first_stale = relay_replica_update_for_file(&doc, identity, &stale_update)
+            .unwrap()
+            .expect("registration-first stale update should remain quarantined");
+        assert!(registration_first_stale.update.is_empty());
+        with_hub(&doc, |hub| {
+            assert!(hub.canonical_text().contains("NEW QUEUE ITEM"));
+            assert!(!hub.canonical_text().contains("STALE WHOLE BUFFER"));
         })
         .unwrap();
     }
@@ -5871,63 +5611,31 @@ mod tests {
         );
     }
 
-    /// `#ensurereplicagensup` / `#wsflake2` — a process that does not serve the
-    /// relay hub must defer the durable checkpoint instead of attempting it.
-    ///
-    /// `hub_registry()` is process-local and only the controller populates it, so
-    /// a supervisor or short-lived CLI running that path reads an empty registry
-    /// and — because durable liveness reports the editor attached — reports
-    /// `editor_attached_model_missing` on every attempt. Observed live on
-    /// sampleorders.md as repeating `document_model_ensure_failed ...
-    /// source=controller_recycle_request:background` from non-controller pids.
-    ///
-    /// Tested through the pure decision rather than by toggling the
-    /// process-global role: five sibling tests in this crate call
-    /// `checkpoint_durable_projection_for_file` and need it to actually
-    /// checkpoint, so flipping the global under them turned THIS crate into a
-    /// source of load-dependent flakes.
     #[test]
-    fn durable_checkpoint_defers_when_process_does_not_serve_the_hub() {
-        assert_eq!(
-            durable_checkpoint_deferral_reason(false),
-            Some("not_hub_owner"),
-            "a non-owner must defer rather than attempt an impossible checkpoint"
-        );
-        assert_eq!(
-            durable_checkpoint_deferral_reason(true),
-            None,
-            "the hub owner must still attempt it; an empty registry there is a real transient"
-        );
-    }
-
-    #[test]
-    fn durable_checkpoint_defers_missing_model_to_background_repair() {
+    fn projection_observation_defers_without_creating_a_repair_request() {
         let (_dir, doc) = temp_doc("durable-checkpoint-deferred.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        let repair_paths = durable_projection_repair_paths(&doc).unwrap();
-        std::fs::write(&repair_paths.lock_path, "test-held").unwrap();
 
         let outcome = checkpoint_durable_projection_for_file(&doc, "test_recycle").unwrap();
         match outcome {
             DurableProjectionCheckpoint::Deferred { reason } => {
-                assert_eq!(reason, "editor_attached_model_missing");
+                assert_eq!(reason, "controller_projection_unavailable");
             }
-            other => panic!("expected deferred checkpoint, got {other:?}"),
+            other => panic!("expected deferred projection observation, got {other:?}"),
         }
         assert!(
-            repair_paths.pending_path.exists(),
-            "foreground checkpoint should record a background repair marker"
+            !_dir.path().join(".agent-doc/crdt-repair").exists(),
+            "projection observation must not create a sidecar repair request"
         );
         let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("crdt_durable_checkpoint_deferred")
-                && log.contains("recovery=background_yrs_repair"),
-            "foreground checkpoint should defer .yrs repair:\n{log}"
+            log.contains("crdt_projection_observe_deferred"),
+            "projection observation should report the unavailable cell:\n{log}"
         );
         assert!(
-            !log.contains("document_model_ensure_start"),
-            "foreground checkpoint must not run the publish/poll ensure loop:\n{log}"
+            !log.contains("background_yrs_repair"),
+            "projection observation must not schedule a repair request:\n{log}"
         );
     }
 
@@ -5982,14 +5690,14 @@ mod tests {
     }
 
     #[test]
-    fn editor_attached_durable_checkpoint_writes_recovery_projection() {
+    fn editor_attached_projection_observation_does_not_write_recovery_sidecar() {
         let (_dir, doc) = temp_doc("attached-checkpoint.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
         let editor = mint_client_id("intellij:durable-checkpoint");
         with_hub(&doc, |hub| {
             hub.register(editor).unwrap();
-            hub.local_edit(editor, 0, 0, "checkpointed").unwrap();
+            hub.apply_local(editor, 0, 0, "checkpointed").unwrap();
         })
         .unwrap();
 
@@ -5997,21 +5705,24 @@ mod tests {
 
         match outcome {
             DurableProjectionCheckpoint::Checkpointed {
-                changed: true,
+                changed: false,
                 live_editors: 1,
                 ..
             } => {}
-            other => panic!("expected changed checkpoint, got {other:?}"),
+            other => panic!("expected retained projection observation, got {other:?}"),
         }
-        let projection = agent_doc_snapshot_io::load_crdt_recovery_projection(&doc)
-            .unwrap()
-            .expect("checkpoint writes durable recovery projection")
-            .projection;
-        let recovered = RelayHub::recover_from_projection(1, &projection).unwrap();
         assert!(
-            recovered.canonical_text().contains("checkpointed"),
-            "checkpoint projection must recover the live editor text"
+            agent_doc_snapshot_io::load_crdt_recovery_projection(&doc)
+                .unwrap()
+                .is_none(),
+            "observing the live projection must not materialize a recovery sidecar"
         );
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert!(hub_registry().lock().remove(&document_hash).is_some());
+        with_hub(&doc, |hub| {
+            assert!(hub.canonical_text().contains("checkpointed"));
+        })
+        .unwrap();
     }
 
     #[test]

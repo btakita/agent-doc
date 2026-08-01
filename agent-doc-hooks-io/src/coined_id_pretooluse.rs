@@ -16,8 +16,34 @@
 //! ordinary shell commands are never blocked. Anything unrecognized is allowed —
 //! a hook that guesses wrong costs the operator a turn, so it fails open.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+
+const C_FAMILY_EXTENSIONS: &[&str] = &[
+    "c", "cc", "cpp", "cu", "cuh", "cxx", "h", "hh", "hpp", "hxx", "inc", "inl", "ipp", "m", "mm",
+    "tpp",
+];
+const C_FAMILY_PREPROCESSOR_DIRECTIVES: &[&str] = &[
+    "define",
+    "elif",
+    "elifdef",
+    "elifndef",
+    "else",
+    "embed",
+    "endif",
+    "error",
+    "if",
+    "ifdef",
+    "ifndef",
+    "import",
+    "include",
+    "include_next",
+    "line",
+    "pragma",
+    "undef",
+    "warning",
+];
 
 /// Decision returned to the harness.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,7 +126,8 @@ pub fn pretooluse_decision(
     let Some(text) = persisted_text_for_tool(tool_name, tool_input) else {
         return PreToolUseDecision::Allow;
     };
-    let coined = agent_doc_turn::coined_ids::coined_ids(&text, known_ids);
+    let scan_text = coined_id_scan_text(tool_name, tool_input, &text);
+    let coined = agent_doc_turn::coined_ids::coined_ids(&scan_text, known_ids);
     if coined.is_empty() {
         return PreToolUseDecision::Allow;
     }
@@ -127,6 +154,51 @@ pub fn pretooluse_decision(
              an existing id, or drop the tag from the text."
         ),
     }
+}
+
+fn coined_id_scan_text<'a>(
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+    text: &'a str,
+) -> Cow<'a, str> {
+    if tool_name == "Bash" || !is_c_family_target(tool_input) {
+        return Cow::Borrowed(text);
+    }
+
+    let mut sanitized = None;
+    let mut offset = 0usize;
+    for segment in text.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        let trimmed = line.trim_start_matches([' ', '\t']);
+        let leading_len = line.len() - trimmed.len();
+        let Some(after_hash) = trimmed.strip_prefix('#') else {
+            offset += segment.len();
+            continue;
+        };
+        let directive = after_hash
+            .trim_start_matches([' ', '\t'])
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphabetic() || *ch == '_')
+            .collect::<String>();
+        if C_FAMILY_PREPROCESSOR_DIRECTIVES.contains(&directive.as_str()) {
+            sanitized
+                .get_or_insert_with(|| text.to_string())
+                .replace_range(offset + leading_len..offset + leading_len + 1, " ");
+        }
+        offset += segment.len();
+    }
+
+    sanitized.map_or(Cow::Borrowed(text), Cow::Owned)
+}
+
+fn is_c_family_target(tool_input: &serde_json::Value) -> bool {
+    tool_input
+        .get("file_path")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|path| Path::new(path).extension())
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|extension| C_FAMILY_EXTENSIONS.contains(&extension.as_str()))
 }
 
 /// Tracked ids for a document: every component EXCEPT `exchange`.
@@ -286,6 +358,63 @@ mod tests {
             pretooluse_decision("Edit", &input, &known(&["fr79"]), true),
             PreToolUseDecision::Allow
         );
+    }
+
+    #[test]
+    fn c_family_preprocessor_directives_are_not_coined_ids() {
+        let input = json!({
+            "file_path": "/repo/include/wire.hpp",
+            "content": concat!(
+                "#ifndef WIRE_HPP\n",
+                "#define WIRE_HPP\n",
+                "#include <cstdint>\n",
+                "#if defined(__cplusplus)\n",
+                "#pragma once\n",
+                "#endif\n",
+            )
+        });
+
+        assert_eq!(
+            pretooluse_decision("Write", &input, &known(&[]), true),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    #[test]
+    fn c_family_source_still_blocks_real_coined_ids() {
+        let input = json!({
+            "file_path": "/repo/include/wire.hpp",
+            "content": "#include <cstdint>\n// #codecfix is not tracked\n"
+        });
+
+        match pretooluse_decision("Write", &input, &known(&[]), true) {
+            PreToolUseDecision::Deny { reason } => {
+                assert!(reason.contains("#codecfix"), "{reason}");
+                assert!(!reason.contains("#include,"), "{reason}");
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preprocessor_words_outside_directive_position_or_c_family_files_remain_ids() {
+        for input in [
+            json!({
+                "file_path": "/repo/notes.md",
+                "content": "#include is a tracked-work tag here"
+            }),
+            json!({
+                "file_path": "/repo/src/wire.cpp",
+                "content": "// #include is a tracked-work tag here"
+            }),
+        ] {
+            match pretooluse_decision("Write", &input, &known(&[]), true) {
+                PreToolUseDecision::Deny { reason } => {
+                    assert!(reason.contains("#include"), "{reason}");
+                }
+                other => panic!("expected deny, got {other:?}"),
+            }
+        }
     }
 
     /// `old_string` is pre-existing content. Scanning it would block an edit that

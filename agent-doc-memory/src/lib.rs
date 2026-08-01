@@ -71,6 +71,7 @@ pub struct QueueStrikeMatch {
 
 /// Conservative auto-strike threshold for free-text queue heads.
 pub const QUEUE_STRIKE_THRESHOLD: f64 = 1.6;
+const SEMANTIC_COMPLETION_THRESHOLD: f64 = 0.8;
 
 pub fn queue_prompt_target_id(text: &str) -> Option<String> {
     let marker = text.find('#')?;
@@ -130,9 +131,9 @@ pub fn semantic_completion_matches(
     let mut seen = BTreeSet::new();
     let mut matches = Vec::new();
     for candidate in candidates {
-        let ranked = rank_events(&candidate.text, &done_events);
+        let ranked = rank_task_equivalence_events(&candidate.text, &done_events);
         for result in ranked {
-            if result.score < 0.8 {
+            if result.score < SEMANTIC_COMPLETION_THRESHOLD {
                 break;
             }
             if candidate.item_id.is_some() && candidate.item_id == result.item_id {
@@ -207,10 +208,10 @@ pub fn semantic_queue_strike_matches(
             continue;
         }
 
-        let best_done = rank_events(&candidate.text, &done_events)
+        let best_done = rank_task_equivalence_events(&candidate.text, &done_events)
             .into_iter()
             .next();
-        let best_backlog = rank_events(&candidate.text, &backlog_events)
+        let best_backlog = rank_task_equivalence_events(&candidate.text, &backlog_events)
             .into_iter()
             .next();
         let chosen = match (best_done, best_backlog) {
@@ -296,12 +297,28 @@ pub fn display_path(path: &Path) -> String {
 }
 
 pub fn rank_events(query: &str, events: &[MemoryEvent]) -> Vec<MemorySearchResult> {
+    rank_events_with_policy(query, events, true)
+}
+
+fn rank_task_equivalence_events(query: &str, events: &[MemoryEvent]) -> Vec<MemorySearchResult> {
+    // A task body can legitimately cite the id of the parent task that discovered
+    // it. General memory search boosts those references so navigation finds the
+    // parent, but equivalence checks must not reinterpret provenance as proof that
+    // the parent completed the newly filed child.
+    rank_events_with_policy(query, events, false)
+}
+
+fn rank_events_with_policy(
+    query: &str,
+    events: &[MemoryEvent],
+    boost_matching_item_id: bool,
+) -> Vec<MemorySearchResult> {
     let query_tokens = tokenize(query);
     let query_lower = query.trim().to_ascii_lowercase();
     let mut ranked = events
         .iter()
         .filter_map(|event| {
-            let score = score_event(&query_tokens, &query_lower, event);
+            let score = score_event(&query_tokens, &query_lower, event, boost_matching_item_id);
             (score > 0.0).then(|| search_result(score, event))
         })
         .collect::<Vec<_>>();
@@ -504,7 +521,12 @@ pub fn pending_state_str(state: PendingState) -> &'static str {
     }
 }
 
-fn score_event(query_tokens: &BTreeSet<String>, query_lower: &str, event: &MemoryEvent) -> f64 {
+fn score_event(
+    query_tokens: &BTreeSet<String>,
+    query_lower: &str,
+    event: &MemoryEvent,
+    boost_matching_item_id: bool,
+) -> f64 {
     let event_text = format!(
         "{} {} {}",
         event.source_ref,
@@ -528,7 +550,8 @@ fn score_event(query_tokens: &BTreeSet<String>, query_lower: &str, event: &Memor
     if !query_lower.is_empty() && event_lower.contains(query_lower) {
         score += 1.0;
     }
-    if let Some(item_id) = event.metadata.get("item_id")
+    if boost_matching_item_id
+        && let Some(item_id) = event.metadata.get("item_id")
         && query_tokens.contains(&item_id.to_ascii_lowercase())
     {
         score += 1.5;
@@ -723,6 +746,33 @@ mod tests {
     }
 
     #[test]
+    fn semantic_completion_does_not_treat_a_referenced_parent_id_as_completion() {
+        let candidates = vec![completion_candidate(
+            "backlog",
+            "doc#backlog:jsoncodec",
+            Some("jsoncodec"),
+            "Implement the reference JSON codec. Found while closing #codecparity.",
+        )];
+        let events = vec![done_event(
+            "doc#done:codecparity",
+            "codecparity",
+            "Add executable JSON and MessagePack codec conformance fixtures.",
+        )];
+
+        let general_search = rank_events(&candidates[0].text, &events);
+        assert!(
+            general_search
+                .first()
+                .is_some_and(|result| result.score >= 0.8),
+            "the generic search ranker should reproduce the misleading id-boosted match"
+        );
+        assert!(
+            semantic_completion_matches(&candidates, &events, 5).is_empty(),
+            "a completed parent that merely led to a new child obligation is not completion proof"
+        );
+    }
+
+    #[test]
     fn semantic_queue_strike_prefers_done_over_equal_backlog_match() {
         let candidates = vec![queue_candidate(
             3,
@@ -749,6 +799,30 @@ mod tests {
         assert_eq!(matches[0].matched_kind, QueueStrikeMatchKind::Done);
         assert_eq!(matches[0].candidate_index, 3);
         assert_eq!(matches[0].matched_id.as_deref(), Some("cachefix"));
+    }
+
+    #[test]
+    fn semantic_queue_strike_does_not_consume_a_child_that_references_its_parent() {
+        let prompt = "Implement the reference JSON codec. Found while closing #codecparity.";
+        let candidates = vec![queue_candidate(0, prompt, false)];
+        let events = vec![done_event(
+            "doc#done:codecparity",
+            "codecparity",
+            "Add executable JSON and MessagePack codec conformance fixtures.",
+        )];
+
+        let general_search = rank_events(prompt, &events);
+        assert!(
+            general_search
+                .first()
+                .is_some_and(|result| result.score >= QUEUE_STRIKE_THRESHOLD),
+            "the generic search ranker should reproduce the unsafe id-boosted strike"
+        );
+        assert!(
+            semantic_queue_strike_matches(&candidates, &events, QUEUE_STRIKE_THRESHOLD, 5,)
+                .is_empty(),
+            "a referenced completed parent must not consume a newly filed child prompt"
+        );
     }
 
     #[test]

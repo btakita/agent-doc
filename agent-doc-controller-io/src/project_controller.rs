@@ -2029,10 +2029,11 @@ struct ControllerDocumentGraphs {
     /// Waiting and conflict states deliberately project no effect.
     retained_transition_effect:
         lazily::ThreadSafeComputedMap<String, Option<RetainedTransitionEffect>>,
-    /// Controller-local receipt for the exact effect frontier. Delivery
-    /// version and controller generation are part of the typed identity, so a
-    /// changed frontier can retry while an unchanged one stays one-shot.
-    retained_transition_effect_applied:
+    /// Controller-local record of the exact successfully published effect
+    /// frontier. Delivery version and controller generation are part of the
+    /// typed identity, so a changed frontier can retry while an unchanged one
+    /// stays one-shot.
+    retained_transition_published_frontier:
         lazily::ThreadSafeSourceMap<String, Option<RetainedTransitionEffect>>,
     /// Durable compact continuation whose retained document write has reached
     /// the projected authority+disk fixed point.
@@ -2562,19 +2563,19 @@ impl RetainedWriteSettleSink {
 
     /// Project a typed derived recovery identity into the existing
     /// captured-finalize state-plane channel.
-    fn resume(&self, document_hash: &str, signal: &RetainedResumeSignal) {
+    fn resume(&self, document_hash: &str, signal: &RetainedResumeSignal) -> bool {
         let Some(runtime) = self.runtime.upgrade() else {
             // A replacement controller will reconstruct the same Computed
             // signal after replica registration; retain the durable intent.
-            return;
+            return false;
         };
         let Ok(Some(projection)) = runtime.document_state_projection(document_hash) else {
-            return;
+            return false;
         };
         if !retained_resume_signal_matches_projection(signal, &projection) {
             // The durable projection advanced between derivation and effect
             // application. The new projection will invalidate the Computed.
-            return;
+            return false;
         }
         rpc::publish_captured_finalize_wake(&runtime, &projection, signal.action.reason());
         agent_doc_ops_log_io::log_op(
@@ -2589,6 +2590,7 @@ impl RetainedWriteSettleSink {
                 signal.controller_generation,
             ),
         );
+        true
     }
 
     /// Materialize one derived retained target in the controller-owned CRDT
@@ -2794,7 +2796,7 @@ impl ControllerDocumentGraphs {
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_transition_state: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_transition_effect: lazily::ThreadSafeComputedMap::new(&ctx),
-            retained_transition_effect_applied: lazily::ThreadSafeSourceMap::new(&ctx),
+            retained_transition_published_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
             compact_resume: lazily::ThreadSafeComputedMap::new(&ctx),
             compact_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
             queue_authority: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -3117,7 +3119,7 @@ impl ControllerDocumentGraphs {
         document_hash: &str,
     ) -> Option<RetainedTransitionEffect> {
         let state = self.retained_transition_state.clone();
-        let applied = self.retained_transition_effect_applied.clone();
+        let published_frontier = self.retained_transition_published_frontier.clone();
         let effect = self.retained_transition_effect.get_or_insert_with(
             &self.ctx,
             document_hash.to_string(),
@@ -3127,13 +3129,15 @@ impl ControllerDocumentGraphs {
                     .then(|| state.observe(ctx, key))
                     .flatten()
                     .and_then(|state| state.effect());
-                let applied = applied
+                let published_frontier = published_frontier
                     .contains_key(ctx, key)
-                    .then(|| applied.observe(ctx, key))
+                    .then(|| published_frontier.observe(ctx, key))
                     .flatten()
                     .flatten();
                 match candidate {
-                    Some(candidate) if applied.as_ref() != Some(&candidate) => Some(candidate),
+                    Some(candidate) if published_frontier.as_ref() != Some(&candidate) => {
+                        Some(candidate)
+                    }
                     _ => None,
                 }
             },
@@ -3593,7 +3597,7 @@ impl ControllerDocumentGraphs {
         let key = document_hash.to_string();
         let effect_map = self.retained_transition_effect.clone();
         let delivery = self.retained_delivery.clone();
-        let applied = self.retained_transition_effect_applied.clone();
+        let published_frontier = self.retained_transition_published_frontier.clone();
         let sink = self.settle_sink.clone();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
@@ -3609,20 +3613,21 @@ impl ControllerDocumentGraphs {
                     else {
                         return;
                     };
-                    applied.set(ctx, effect_key.clone(), Some(projected_effect));
+                    published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
                     delivery.set(ctx, effect_key.clone(), Some(observation));
                 }
                 RetainedTransitionEffect::ApplyTarget(transition) => {
                     if sink.project_retained_transition(&effect_key, transition) {
-                        applied.set(ctx, effect_key.clone(), Some(projected_effect));
+                        published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
                     }
                 }
                 RetainedTransitionEffect::ResumeCloseout(signal) => {
-                    // Consume the exact frontier before publishing the wake.
-                    // Publishing updates another graph and may synchronously
-                    // invalidate this Computed.
-                    applied.set(ctx, effect_key.clone(), Some(projected_effect.clone()));
-                    sink.resume(&effect_key, signal);
+                    // Advance the frontier only after publication. A stale or
+                    // missing continuation remains eligible for a later
+                    // projection edge.
+                    if sink.resume(&effect_key, signal) {
+                        published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
+                    }
                 }
             }
         });
@@ -3836,23 +3841,23 @@ fn retained_resume_signal_matches_projection(
     signal: &RetainedResumeSignal,
     projection: &agent_doc_state_backbone::DocumentStateProjection,
 ) -> bool {
-    projection
-        .document
-        .pending_write
+    let Some(intent) = projection.document.pending_write.as_ref() else {
+        return false;
+    };
+    if intent.intent_id != signal.intent_id
+        || !intent.target_hash.eq_ignore_ascii_case(&signal.target_hash)
+    {
+        return false;
+    }
+    intent
+        .continuation
         .as_ref()
-        .is_some_and(|intent| {
-            intent.intent_id == signal.intent_id
-                && intent.target_hash.eq_ignore_ascii_case(&signal.target_hash)
+        .or(projection.closeout.captured_response.as_ref())
+        .is_some_and(|capture| {
+            capture.cycle_id == signal.cycle_id
+                && capture.capture_id == signal.capture_id
+                && capture.response_sha256 == signal.response_sha256
         })
-        && projection
-            .closeout
-            .captured_response
-            .as_ref()
-            .is_some_and(|capture| {
-                projection.closeout.cycle_id.as_deref() == Some(signal.cycle_id.as_str())
-                    && capture.capture_id == signal.capture_id
-                    && capture.response_sha256 == signal.response_sha256
-            })
 }
 
 /// Project a document's retained-write intent into the facts settlement needs.
@@ -12511,6 +12516,26 @@ agent:queue\n\
             &signal,
             &projection
         ));
+        let mut recycled = projection.clone();
+        recycled.closeout.cycle_id = Some("cycle-2".into());
+        recycled.closeout.captured_response = None;
+        assert!(
+            retained_resume_signal_matches_projection(&signal, &recycled),
+            "the effect fence must follow the retained transition continuation, not current-cycle state",
+        );
+        recycled
+            .document
+            .pending_write
+            .as_mut()
+            .unwrap()
+            .continuation
+            .as_mut()
+            .unwrap()
+            .capture_id = "different-capture".into();
+        assert!(
+            !retained_resume_signal_matches_projection(&signal, &recycled),
+            "a genuinely different retained continuation must remain fenced",
+        );
     }
 
     #[test]

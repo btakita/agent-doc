@@ -35,8 +35,8 @@ the database.
 
 **Policy owner:** A Project Controller `ProcessScope` owns editor-surface
 observations, derived layout/focus intent, document-authority subscriptions,
-effect receipts, and the durable sink. Editor adapters own only collection of
-IDE facts and display of controller projections.
+published-effect frontiers, and the durable sink. Editor adapters own only
+collection of IDE facts and display of controller projections.
 
 **Allowed SQLite exceptions:** Explicit offline administration, migration, and
 repair commands may open the database only after proving that the Project
@@ -76,7 +76,7 @@ IDE events
   -> EditorSurfaceObservation Source (Project Controller ProcessScope)
   -> surface/tmux/authority Computeds
   -> Focus-or-Sync Effect
-  -> effect receipt Source
+  -> published-effect frontier Source
   -> projection subscription
   -> editor in-memory display/cache
 
@@ -143,7 +143,7 @@ Status: complete.
 - Add typed editor observation ingress to the controller protocol.
 - Instantiate the editor-surface Lazily graph in the controller `ProcessScope`.
 - Move tmux observation and derived focus/sync effects behind that owner.
-- Make observation revisions, stale generations, and effect receipts explicit.
+- Make observation revisions, stale generations, and published-effect frontiers explicit.
 
 Exit: the editor sends facts; only the controller derives automatic intent.
 

@@ -37,7 +37,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 
 - VS Code must preserve the same no-replay safety boundary as JetBrains for stale visible editor state. Active-typing debounce timeouts may leave a file-watch patch queued for another idle attempt, but once an apply-proof check observes that the editor generation or text changed after patch planning, the extension must fail the payload back to binary retry accounting without scheduling a delayed replay of that same patch file.
 - Lazily current is observed from open/change/save/heartbeat events. No filesystem signal participates in current-document authority or recovery.
-- VS Code consumes typed `save_document` messages from its PID-scoped editor socket. The handler must require an already-open markdown document, wait for typing idle, call `TextDocument.save()`, and publish the saved text through `agent_doc_editor_content_applied_for_editor_v1` with `lazily_transport_receipts_v1` for the supplied `patch_id`. It records `missing_file`, `missing_document`, `saved`, and `failed` through the shared `agent_doc_record_editor_surface_event` FFI schema. It must not write `.agent-doc/ack-content`, open a closed document as proof of a live buffer, or use this path for full-document replacement or reconnect reread repair. Missing lazily receipt support is an incompatible plugin/native-library version error.
+- VS Code has no `save_document` socket intent or save signal. It publishes full visible CRDT state after local/remote integration and after ordinary document saves; the controller derives persistence convergence from those projections.
 
 ## Project Controller Event Compatibility
 

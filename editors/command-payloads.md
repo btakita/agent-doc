@@ -40,9 +40,8 @@ target path is the lazily command envelope.
 | Run Agent Doc | `editor_route` | `agent-doc.editor_route.v1` | JB `CpRouteClient` submits `editor_command_submit_async` and polls `editor_command_status`; VS Code raw `controller.sock` `editor_route` |
 | Sync Tmux Layout / Load Window | `sync_tmux_layout` | `agent-doc.sync_tmux_layout.v1` | JB `CpRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
 | Focus handoff | `focus_document_pane` | `agent-doc.focus_document_pane.v1` | JB `CpRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
-| Save document | `save_document` | `agent-doc.save_document.v1` | file signal / socket IPC |
 | Session status/clear/restart/doctor | `session_command` | `agent-doc.session_command.v1` | editor-spawned CLI |
-| CRDT replica register/update/pull/ack | `crdt_replica` | `agent-doc.crdt_replica.v1` | controller `crdt_replica` custom envelope |
+| CRDT replica register/update/pull/projection | `crdt_replica` | `agent-doc.crdt_replica.v1` | controller `crdt_replica` custom envelope |
 
 ## Payload schemas
 
@@ -105,26 +104,6 @@ Idempotency key: `"<project-root>:<document-path>:focus"`.
 | `active_window_guard` | boolean | Only focus if the target window is active |
 | `missing_pane_policy` | enum string | `observe_only` (legacy/default) or `resume_latest`; first-party editor focus uses `resume_latest` so selecting a document whose actor pane died resumes that document before focusing it |
 
-### `agent-doc.save_document.v1`
-
-Idempotency key: `"<document-path>:save:<patch_id>"` for projection-bearing
-saves, or `"<document-path>:save-only:<save_request_id>"` for recovery saves.
-
-| Field | Type | Notes |
-|---|---|---|
-| `document_path` | string | Document to save |
-| `patch_id` | string (optional) | Patch id being persisted. When absent, the editor saves its open buffer without publishing a native content projection. Missing-replica recovery requires the applied save receipt and then sends `observe_lazily_current` to the same endpoint; it does not promote the saved disk cut to live authority. |
-| `save_request_id` | string (optional) | Unique request identity for a save-only recovery request |
-| `expected_generation` | integer ≥ 0 | Generation the caller expects on disk |
-| `expected_hash` | string \| null | Expected content hash before write (fail-closed guard) |
-
-The post-save `observe_lazily_current` is a terminal synchronization point: its
-applied receipt means the editor force-registered the current buffer and
-published Lazily current. A freshly installed CLI may retry this paired
-observation against the same-protocol listener build reported by the endpoint,
-but only after that endpoint returned the applied save receipt. General
-observation and document-mutation intents remain build-fenced.
-
 ### `agent-doc.session_command.v1`
 
 Idempotency key: `"<document-path>:session:<subcommand>"`.
@@ -144,12 +123,12 @@ terminal outcome is still a causal receipt.
 
 Idempotency key: the replica op's own id.
 
-Wraps the existing `crdt_replica` op body (register / update / pull / ack); a
-delta pull carries `expected_content_hash`, and current clients return the
-visible editor buffer's SHA-256 as `content_hash` in the ACK. A generation ACK
-whose content hash differs remains pending and requests canonical re-bootstrap;
-it cannot open the disk-materialization barrier. The command envelope adds the
-command id, generation guard, and
+Wraps the existing `crdt_replica` op body (register / update / pull /
+projection); a delta pull carries `expected_content_hash`, and current clients
+publish the visible editor buffer's SHA-256 as `content_hash`. A state projection
+whose content hash differs simply leaves delivery pending; it cannot open the
+disk-materialization barrier or request canonical re-bootstrap. The command
+envelope adds the command id, generation guard, and
 receipt projection so replica traffic shares the same reconnect story. The
 existing `Snapshot` / `Delta` / `CrdtSync` state plane is not replaced — this is
 the additive command sibling.

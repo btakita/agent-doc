@@ -99,9 +99,6 @@ class SilentTransport implements ReplicaTransport {
     async pullUpdates() {
         return [];
     }
-    async ackUpdate(): Promise<boolean> {
-        return true;
-    }
     async deregister(): Promise<void> {}
 }
 

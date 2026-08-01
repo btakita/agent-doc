@@ -349,6 +349,30 @@ pub enum StateFact {
         #[serde(default)]
         intent_source: DocumentWriteSource,
     },
+    /// Durable continuation for a compact projection whose editor-visible and
+    /// disk projections have not converged yet.
+    ///
+    /// Compact admission owns archive creation and target construction. The
+    /// controller graph owns the later authority+disk readiness join and
+    /// completion effect, so the initiating RPC never has to wait, poll, or be
+    /// called again after an editor observation.
+    DocumentCompactProjectionRetained {
+        document_hash: String,
+        continuation_id: String,
+        file: String,
+        live_content: String,
+        committed_content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_component: Option<String>,
+        commit: bool,
+    },
+    /// Receipt from the compact completion effect. Identity matching prevents a
+    /// delayed completion from clearing a newer compact continuation.
+    DocumentCompactProjectionSettled {
+        document_hash: String,
+        continuation_id: String,
+        settled_hash: String,
+    },
     QueueHeadSelected {
         document_hash: String,
         node_key: String,
@@ -877,6 +901,8 @@ impl StateFact {
             | Self::DocumentAuthorityObserved { document_hash, .. }
             | Self::DocumentWriteDeferred { document_hash, .. }
             | Self::DocumentWriteConverged { document_hash, .. }
+            | Self::DocumentCompactProjectionRetained { document_hash, .. }
+            | Self::DocumentCompactProjectionSettled { document_hash, .. }
             | Self::QueueHeadSelected { document_hash, .. }
             | Self::QueueHeadDeferred { document_hash, .. }
             | Self::QueueHeadCompleted { document_hash, .. }
@@ -969,7 +995,9 @@ impl StateFact {
             | Self::DocumentDiskWriteObserved { .. }
             | Self::DocumentAuthorityObserved { .. }
             | Self::DocumentWriteDeferred { .. }
-            | Self::DocumentWriteConverged { .. } => StateDomain::Document,
+            | Self::DocumentWriteConverged { .. }
+            | Self::DocumentCompactProjectionRetained { .. }
+            | Self::DocumentCompactProjectionSettled { .. } => StateDomain::Document,
             Self::QueueHeadSelected { .. }
             | Self::QueueHeadDeferred { .. }
             | Self::QueueHeadCompleted { .. }
@@ -1033,6 +1061,10 @@ impl StateFact {
             Self::DocumentAuthorityObserved { .. } => "document_authority_observed",
             Self::DocumentWriteDeferred { .. } => "document_write_deferred",
             Self::DocumentWriteConverged { .. } => "document_write_converged",
+            Self::DocumentCompactProjectionRetained { .. } => {
+                "document_compact_projection_retained"
+            }
+            Self::DocumentCompactProjectionSettled { .. } => "document_compact_projection_settled",
             Self::QueueHeadSelected { .. } => "queue_head_selected",
             Self::QueueHeadDeferred { .. } => "queue_head_deferred",
             Self::QueueHeadCompleted { .. } => "queue_head_completed",
@@ -1689,6 +1721,37 @@ impl DocumentStateProjection {
                     })
                 {
                     self.document.pending_external_disk = None;
+                }
+            }
+            StateFact::DocumentCompactProjectionRetained {
+                continuation_id,
+                file,
+                live_content,
+                committed_content,
+                target_component,
+                commit,
+                ..
+            } => {
+                self.document.pending_compact_projection =
+                    Some(DocumentCompactProjectionContinuation {
+                        continuation_id: continuation_id.clone(),
+                        file: file.clone(),
+                        live_content: live_content.clone(),
+                        committed_content: committed_content.clone(),
+                        target_component: target_component.clone(),
+                        commit: *commit,
+                    });
+            }
+            StateFact::DocumentCompactProjectionSettled {
+                continuation_id, ..
+            } => {
+                if self
+                    .document
+                    .pending_compact_projection
+                    .as_ref()
+                    .is_some_and(|pending| pending.continuation_id == *continuation_id)
+                {
+                    self.document.pending_compact_projection = None;
                 }
             }
             StateFact::QueueHeadSelected {
@@ -2857,6 +2920,11 @@ pub struct DocumentProjection {
     pub pending_write_journal: Vec<DocumentWriteIntentProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_external_disk: Option<DocumentWriteIntentProjection>,
+    /// Compact work admitted before editor-visible and disk projections reached
+    /// the same version. This content-bearing continuation survives controller
+    /// replacement and is consumed only by its identity-matched effect receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_compact_projection: Option<DocumentCompactProjectionContinuation>,
     /// Monotone counter behind `DocumentWriteIntentProjection::ordinal` and
     /// [`ConvergedWriteProjection::ordinal`]. Advanced by every write fact the
     /// projection applies, so replay assigns the same ordinals every time.
@@ -2921,6 +2989,17 @@ pub struct DocumentWriteIntentProjection {
     /// projections written before this field deserialize as ordinal 0.
     #[serde(default)]
     pub ordinal: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentCompactProjectionContinuation {
+    pub continuation_id: String,
+    pub file: String,
+    pub live_content: String,
+    pub committed_content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_component: Option<String>,
+    pub commit: bool,
 }
 
 impl DocumentProjection {

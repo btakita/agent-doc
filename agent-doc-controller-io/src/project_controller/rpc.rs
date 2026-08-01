@@ -79,10 +79,9 @@ static CAPTURED_FINALIZE_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
 /// gets a generous ceiling.
 const CONTROLLER_COMMIT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(120);
-/// A native editor save is an effect request, not a second convergence loop.
-/// Give the editor a short window to publish the exact raw projection; if it
-/// does not, the retained closeout remains resumable and the caller retries.
-const CONTROLLER_COMMIT_NATIVE_SAVE_SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
+/// Compact may include archive and commit effects after editor/disk state
+/// converges; the initiating RPC only admits that work and may therefore span
+/// archive construction without polling for an editor receipt.
 const CONTROLLER_COMPACT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(300);
 static EMBEDDED_NATIVE_HOST: AtomicBool = AtomicBool::new(false);
 thread_local! {
@@ -91,7 +90,7 @@ thread_local! {
     ///
     /// The embedded delivery-await path used to pass `None` into the rolling
     /// upgrade policy even though it was executing inside the controller. That
-    /// made build-skewed editor listeners receive ACK replay forever without
+    /// made build-skewed editor listeners miss projection recovery without
     /// either side of the skew being replaced. Keep this weak and thread-local:
     /// the runtime owns the relay and must not be kept alive by a recovery
     /// callback, while test actors may replace it between threads.
@@ -714,6 +713,37 @@ pub fn request_crdt_replica(
         },
         CONTROLLER_RPC_TIMEOUT,
     )
+}
+
+/// Publish one editor's complete visible projection.
+///
+/// This is state ingress, not a delivery receipt: the controller derives both
+/// cumulative relay delivery and retained-write settlement from the projected
+/// content hash. `disk_persisted` is true only when the editor has observed the
+/// same revision after its native save completed.
+pub fn observe_editor_document_projection(
+    project_root: &Path,
+    file: &Path,
+    identity: &str,
+    content_hash: &str,
+    disk_persisted: bool,
+    source: &str,
+) -> Result<bool> {
+    let response = request_crdt_replica(
+        project_root,
+        file,
+        serde_json::json!({
+            "method": "replica_projection",
+            "identity": identity,
+            "content_hash": content_hash,
+            "disk_persisted": disk_persisted,
+            "source": source,
+        }),
+    )?;
+    Ok(response
+        .get("projected")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false))
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -4257,20 +4287,6 @@ pub struct DeliveryConvergenceStatus {
     pub observed: bool,
     pub converged: bool,
     pub version: u64,
-    #[serde(default)]
-    pub recovery_signal_observed: bool,
-    #[serde(default)]
-    pub force_refresh_sent: bool,
-}
-
-/// Replica-wakeup policy carried by one long-lived convergence subscription.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct DeliveryConvergenceRecovery {
-    pub live_editors: usize,
-    pub elapsed_ms: u64,
-    pub signal_interval_ms: u64,
-    pub force_refresh_after_ms: u64,
-    pub force_refresh_sent: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4387,6 +4403,11 @@ pub fn record_visible_write_commit_candidate_for_project_file(
         request,
     ) {
         Ok(proof) => Ok(proof),
+        Err(controller_err) if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) => {
+            Err(controller_err).context(
+                "embedded editor client cannot persist a visible-write receipt without the Project Controller",
+            )
+        }
         Err(controller_err) => record_visible_write_commit_candidate_direct(
             project_root,
             &canonical,
@@ -4468,11 +4489,15 @@ pub fn visible_write_commit_candidate_for_patch_file(
             return status.proof;
         }
     }
-    visible_write_commit_candidate_for_patch_from_projection(
-        &load_state_backbone_projection(&project_root).ok()?,
-        &canonical,
-        patch_id,
-    )
+    if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
+        None
+    } else {
+        visible_write_commit_candidate_for_patch_from_projection(
+            &load_state_backbone_projection(&project_root).ok()?,
+            &canonical,
+            patch_id,
+        )
+    }
 }
 
 /// `#lazily-hot-path` W1 — await the visible-write receipt for `patch_id` instead of
@@ -4533,7 +4558,7 @@ pub fn await_delivery_convergence_for_file(
     file: &Path,
     wait: std::time::Duration,
 ) -> Result<Option<DeliveryConvergenceStatus>> {
-    request_delivery_convergence_for_file(file, None, wait, None)
+    request_delivery_convergence_for_file(file, None, wait)
 }
 
 /// Await the first delivery-convergence input change after `after_version`.
@@ -4544,306 +4569,53 @@ pub fn await_delivery_convergence_change_for_file(
     file: &Path,
     after_version: u64,
     wait: std::time::Duration,
-    recovery: Option<DeliveryConvergenceRecovery>,
 ) -> Result<Option<DeliveryConvergenceStatus>> {
-    request_delivery_convergence_for_file(file, Some(after_version), wait, recovery)
+    request_delivery_convergence_for_file(file, Some(after_version), wait)
 }
 
 /// Await delivery convergence in the process that owns the relay hub.
 ///
 /// Both the controller RPC handler and embedded-relay callers use this helper,
-/// so the subscription and ACK-recovery timers have one implementation.
+/// so the state-change subscription has one implementation.
 pub fn await_local_delivery_convergence_change_for_file(
     file: &Path,
     after_version: Option<u64>,
     wait: std::time::Duration,
-    recovery: Option<DeliveryConvergenceRecovery>,
 ) -> Result<Option<DeliveryConvergenceStatus>> {
-    let runtime = local_controller_runtime();
-    await_local_delivery_convergence_change_for_file_inner(
-        file,
-        after_version,
-        wait,
-        recovery,
-        runtime.as_deref(),
-    )
+    await_local_delivery_convergence_change_for_file_inner(file, after_version, wait)
 }
 
+#[cfg(test)]
 fn local_controller_runtime() -> Option<Arc<ControllerRuntime>> {
     LOCAL_CONTROLLER_RUNTIME.with(|slot| slot.borrow().as_ref().and_then(std::sync::Weak::upgrade))
-}
-
-/// Ask the policy-owning controller to repair a build-skewed editor route.
-///
-/// A caller that merely sees an IPC handshake mismatch cannot safely decide
-/// which side is stale. The controller can: its bootstrap identity proves
-/// whether it should recycle itself; otherwise the editor listener is asked to
-/// hot-reload. This is shared by ACK recovery and the native-save closeout
-/// effect, so neither invents a second rolling-upgrade policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum IpcBuildMismatchRecovery {
-    ControllerRecycleRequested,
-    EditorReloadRequested,
-    Deferred,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct IpcBuildMismatchRecoveryPayload {
-    editor_pid: u64,
-    editor_id: String,
-    source: String,
-}
-
-pub fn recover_editor_ipc_build_mismatch_for_file(
-    file: &Path,
-    editor_pid: u64,
-    editor_id: &str,
-    source: &str,
-) -> Result<IpcBuildMismatchRecovery> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    if let Some(runtime) = local_controller_runtime() {
-        return recover_editor_ipc_build_mismatch_with_runtime(
-            &canonical, &runtime, editor_pid, editor_id, source,
-        );
-    }
-
-    // Standalone `session-check` runs in a short-lived CLI process, while the
-    // relay and rolling-upgrade facts belong to the project controller. Route
-    // the decision to that owner instead of assuming the editor is stale from
-    // the caller's handshake error.
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let payload = IpcBuildMismatchRecoveryPayload {
-        editor_pid,
-        editor_id: editor_id.to_string(),
-        source: source.to_string(),
-    };
-    request_controller_with_timeout(
-        &project_root,
-        ControllerRequest {
-            command: "ipc_build_mismatch_recover".to_string(),
-            file: Some(canonical),
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: Some("document_realtime_native_save".to_string()),
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(serde_json::to_string(&payload)?),
-        },
-        CONTROLLER_RPC_TIMEOUT,
-    )
-}
-
-fn recover_editor_ipc_build_mismatch_with_runtime(
-    canonical: &Path,
-    runtime: &ControllerRuntime,
-    editor_pid: u64,
-    editor_id: &str,
-    source: &str,
-) -> Result<IpcBuildMismatchRecovery> {
-    if controller_binary_is_stale(runtime) {
-        runtime.request_recycle_urgent();
-        agent_doc_ops_log_io::log_op(
-            canonical,
-            &format!(
-                "controller_ipc_build_mismatch_recovery file={} source={} action=urgent_idle_recycle editor_pid={editor_pid}",
-                canonical.display(),
-                source,
-            ),
-        );
-        return Ok(IpcBuildMismatchRecovery::ControllerRecycleRequested);
-    }
-
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(canonical);
-    let requested = agent_doc_ipc_io::send_reload_library_to_editor(
-        &project_root,
-        editor_pid,
-        editor_id,
-        env!("CARGO_PKG_VERSION"),
-    )?;
-    agent_doc_ops_log_io::log_op(
-        canonical,
-        &format!(
-            "controller_ipc_build_mismatch_recovery file={} source={} action=editor_reload requested={} editor_pid={editor_pid}",
-            canonical.display(),
-            source,
-            requested,
-        ),
-    );
-    Ok(if requested {
-        IpcBuildMismatchRecovery::EditorReloadRequested
-    } else {
-        IpcBuildMismatchRecovery::Deferred
-    })
-}
-
-fn handle_ipc_build_mismatch_recover(
-    runtime: &ControllerRuntime,
-    request: ControllerRequest,
-) -> Result<IpcBuildMismatchRecovery> {
-    let file = request_file(&request)?;
-    let payload: IpcBuildMismatchRecoveryPayload = serde_json::from_str(
-        request
-            .diagnostic_payload
-            .as_deref()
-            .context("ipc_build_mismatch_recover requires diagnostic payload")?,
-    )
-    .context("decode ipc_build_mismatch_recover payload")?;
-    recover_editor_ipc_build_mismatch_with_runtime(
-        &file,
-        runtime,
-        payload.editor_pid,
-        &payload.editor_id,
-        &payload.source,
-    )
 }
 
 fn await_local_delivery_convergence_change_for_file_inner(
     file: &Path,
     after_version: Option<u64>,
     wait: std::time::Duration,
-    recovery: Option<DeliveryConvergenceRecovery>,
-    runtime: Option<&ControllerRuntime>,
 ) -> Result<Option<DeliveryConvergenceStatus>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let wait = wait.min(CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX);
-    let started = Instant::now();
-    let deadline = started.checked_add(wait);
-    let mut recovery_signal_observed = false;
-    let mut force_refresh_sent = recovery.is_some_and(|recovery| recovery.force_refresh_sent);
-    let mut next_signal = recovery
-        .map(|recovery| started + Duration::from_millis(recovery.signal_interval_ms.max(1)));
-    let mut force_refresh_at = recovery.and_then(|recovery| {
-        (!recovery.force_refresh_sent).then(|| {
-            started
-                + Duration::from_millis(
-                    recovery
-                        .force_refresh_after_ms
-                        .saturating_sub(recovery.elapsed_ms),
-                )
-        })
-    });
-
-    loop {
-        let now = Instant::now();
-        let slice_deadline = [deadline, next_signal, force_refresh_at]
-            .into_iter()
-            .flatten()
-            .min();
-        let slice = slice_deadline
-            .map(|deadline| deadline.saturating_duration_since(now))
-            .unwrap_or(wait);
-        let Some(witness) = agent_doc_crdt_relay_io::await_delivery_convergence_for_file(
-            &canonical,
-            after_version,
-            slice,
-        )?
-        else {
-            return Ok(None);
-        };
-        if witness.converged
-            || after_version.is_some_and(|after| witness.version != after)
-            || deadline.is_some_and(|deadline| Instant::now() >= deadline)
-            || recovery.is_none()
-        {
-            return Ok(Some(DeliveryConvergenceStatus {
-                observed: true,
-                converged: witness.converged,
-                version: witness.version,
-                recovery_signal_observed,
-                force_refresh_sent,
-            }));
-        }
-
-        let now = Instant::now();
-        let force_refresh_due =
-            !force_refresh_sent && force_refresh_at.is_some_and(|deadline| now >= deadline);
-        let signal_due = force_refresh_due || next_signal.is_some_and(|deadline| now >= deadline);
-        if signal_due {
-            let recovery = recovery.expect("signal timers require recovery policy");
-            let reason = if force_refresh_due {
-                force_refresh_sent = true;
-                force_refresh_at = None;
-                agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection
-            } else {
-                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckReplay
-            };
-            if let Ok(outcome) = agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
-                &canonical,
-                reason,
-                recovery.live_editors,
-            ) {
-                // A live route plus exact durable target retention is enough
-                // to continue delivery asynchronously. Successful IPC is not
-                // required here: build skew and a temporarily unreachable
-                // listener are precisely the recovery cases this loop owns.
-                // Keep zero-route recovery fail-closed.
-                recovery_signal_observed |= outcome.found > 0;
-                if !outcome.build_mismatches.is_empty()
-                    && let Some(runtime) = runtime
-                {
-                    let mut upgrade_requested = false;
-                    for route in &outcome.build_mismatches {
-                        match recover_editor_ipc_build_mismatch_with_runtime(
-                            &canonical,
-                            runtime,
-                            route.editor_pid,
-                            &route.editor_id,
-                            "crdt_ack_recovery",
-                        ) {
-                            Ok(IpcBuildMismatchRecovery::ControllerRecycleRequested)
-                            | Ok(IpcBuildMismatchRecovery::EditorReloadRequested) => {
-                                upgrade_requested = true;
-                            }
-                            Ok(IpcBuildMismatchRecovery::Deferred) => {}
-                            Err(error) => agent_doc_ops_log_io::log_op(
-                                &canonical,
-                                &format!(
-                                    "controller_crdt_ack_recovery_upgrade file={} action=deferred editor_pid={} error={error:#}",
-                                    canonical.display(),
-                                    route.editor_pid,
-                                ),
-                            ),
-                        }
-                    }
-                    recovery_signal_observed |= upgrade_requested;
-                    if upgrade_requested {
-                        agent_doc_ops_log_io::log_op(
-                            &canonical,
-                            &format!(
-                                "controller_crdt_ack_recovery_upgrade file={} action=rolling_upgrade_requested mismatched_routes={}",
-                                canonical.display(),
-                                outcome.build_mismatches.len(),
-                            ),
-                        );
-                        // Close this long-poll connection immediately. A stale
-                        // controller needs an exact zero-client cut to recycle;
-                        // a reloading editor needs the next request to negotiate
-                        // against its replacement listener.
-                        return Ok(Some(DeliveryConvergenceStatus {
-                            observed: true,
-                            converged: witness.converged,
-                            version: witness.version,
-                            recovery_signal_observed,
-                            force_refresh_sent,
-                        }));
-                    }
-                }
-            }
-            next_signal = Some(now + Duration::from_millis(recovery.signal_interval_ms.max(1)));
-        }
-    }
+    let Some(witness) = agent_doc_crdt_relay_io::await_delivery_convergence_for_file(
+        &canonical,
+        after_version,
+        wait,
+    )?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(DeliveryConvergenceStatus {
+        observed: true,
+        converged: witness.converged,
+        version: witness.version,
+    }))
 }
 
 fn request_delivery_convergence_for_file(
     file: &Path,
     after_version: Option<u64>,
     wait: std::time::Duration,
-    recovery: Option<DeliveryConvergenceRecovery>,
 ) -> Result<Option<DeliveryConvergenceStatus>> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
@@ -4852,7 +4624,6 @@ fn request_delivery_convergence_for_file(
     let payload = serde_json::json!({
         "wait_ms": u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
         "after_version": after_version,
-        "recovery": recovery,
     });
     let request = ControllerRequest {
         command: "delivery_convergence_await".to_string(),
@@ -6318,68 +6089,21 @@ fn controller_commit_projection_decision(
 }
 
 fn ensure_controller_commit_projection_saved(
-    bootstrap: &ControllerBootstrap,
     canonical: &Path,
     barrier_ready: bool,
 ) -> Result<bool> {
-    let (decision, current) = controller_commit_projection_decision(canonical, barrier_ready)?;
-    match decision {
-        ControllerCommitProjectionDecision::Ready => return Ok(true),
-        ControllerCommitProjectionDecision::AwaitConvergence => return Ok(false),
-        ControllerCommitProjectionDecision::NativeSaveRequired => {}
+    let (decision, _) = controller_commit_projection_decision(canonical, barrier_ready)?;
+    let ready = decision == ControllerCommitProjectionDecision::Ready;
+    if !ready {
+        agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "controller_commit_projection_pending file={} decision={decision:?} driver=editor_document_state_projection request_sent=false",
+                canonical.display(),
+            ),
+        );
     }
-
-    let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } = current else {
-        return Ok(false);
-    };
-    let target_hash = agent_doc_hash::content_hash(&text);
-    let Some(registration) = live_editor_registration_for_file(canonical)? else {
-        return Ok(false);
-    };
-    if !agent_doc_ipc_io::is_listener_active_for_pid(&bootstrap.project_root, registration.pid) {
-        return Ok(false);
-    }
-    let patch_id = format!("controller-commit-save-{target_hash}");
-    let path = canonical.to_string_lossy();
-    if !agent_doc_ipc_io::send_save_document_to_editor(
-        &bootstrap.project_root,
-        registration.pid,
-        &registration.editor_id,
-        &path,
-        &patch_id,
-    )? {
-        return Ok(false);
-    }
-
-    let deadline = Instant::now() + CONTROLLER_COMMIT_NATIVE_SAVE_SETTLE_TIMEOUT;
-    loop {
-        let (decision, latest) = controller_commit_projection_decision(canonical, true)?;
-        if decision == ControllerCommitProjectionDecision::Ready {
-            agent_doc_ops_log_io::log_op(
-                canonical,
-                &format!(
-                    "controller_commit_native_save_converged file={} patch_id={} target_hash={} disk_write=false",
-                    canonical.display(),
-                    patch_id,
-                    target_hash,
-                ),
-            );
-            return Ok(true);
-        }
-        if matches!(
-            latest,
-            agent_doc_crdt_relay_io::CurrentText::Current { ref text, .. }
-                if agent_doc_hash::content_hash(text) != target_hash
-        ) {
-            // The operator edited during the save. Preserve that newer authority
-            // and let a later retry save its revision; never commit the old one.
-            return Ok(false);
-        }
-        if Instant::now() >= deadline {
-            return Ok(false);
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
+    Ok(ready)
 }
 
 /// Perform the git commit for a document from inside the controller process. This
@@ -6413,7 +6137,7 @@ fn handle_commit_document_rpc(
     // mutations; skipping this distinct save proof lost queue strikes.
     let barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
     let disk_projection_ready =
-        ensure_controller_commit_projection_saved(bootstrap, &canonical, barrier_ready)?;
+        ensure_controller_commit_projection_saved(&canonical, barrier_ready)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -6475,6 +6199,10 @@ fn handle_compact_document_rpc(
         ),
     );
     runtime_effects()?.compact_document(&canonical, invocation)?;
+    // Compact may admit a durable continuation from inside the runtime port.
+    // Rehydrate that state into the same per-document Lazily graph before this
+    // RPC returns; no caller retry or editor receipt drives the continuation.
+    runtime.refresh_memory()?;
     Ok(serde_json::json!({ "executed_by": "cp" }))
 }
 
@@ -6708,31 +6436,53 @@ fn log_controller_current_text_result(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+enum ControllerCrdtReplicaMethod {
+    #[serde(rename = "replica_register")]
+    Register,
+    #[serde(rename = "replica_deregister")]
+    Deregister,
+    #[serde(rename = "replica_update")]
+    Update,
+    #[serde(rename = "replica_projection")]
+    Projection,
+    #[serde(rename = "replica_pull")]
+    Pull,
+    #[serde(rename = "replica_awareness")]
+    Awareness,
+}
+
+impl ControllerCrdtReplicaMethod {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Register => "replica_register",
+            Self::Deregister => "replica_deregister",
+            Self::Update => "replica_update",
+            Self::Projection => "replica_projection",
+            Self::Pull => "replica_pull",
+            Self::Awareness => "replica_awareness",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ControllerCrdtReplicaPayload {
-    method: String,
+    method: ControllerCrdtReplicaMethod,
     identity: Option<String>,
     #[serde(default)]
     state_vector_b64: Option<String>,
     update_b64: Option<String>,
-    patch_id: Option<String>,
-    generation: Option<u64>,
     content_hash: Option<String>,
+    /// The projected revision has completed the editor's native save and is
+    /// therefore also the editor-observed disk projection.
+    #[serde(default)]
+    disk_persisted: bool,
     awareness_b64: Option<String>,
     source: Option<String>,
     /// Process identity of an editor sidecar that cannot publish liveness
     /// through the native editor FFI.
     #[serde(default)]
     editor_pid: Option<u32>,
-    /// `#ackeditorstamps`: editor-side wall-clock epoch ms for the first three
-    /// moments of the delivery-ACK round trip. Absent from any replica that has
-    /// not been updated, so every consumer must treat them as optional.
-    #[serde(default)]
-    pulled_at_ms: Option<u64>,
-    #[serde(default)]
-    applied_at_ms: Option<u64>,
-    #[serde(default)]
-    receipt_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -6966,7 +6716,8 @@ fn handle_crdt_replica_rpc(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .context("CRDT replica payload missing identity")?;
-    let method_name = payload.method.as_str();
+    let method = payload.method;
+    let method_name = method.label();
     let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
@@ -6986,7 +6737,7 @@ fn handle_crdt_replica_rpc(
     // preceding fixed point, not the cycle-opening merge snapshot: otherwise a
     // stop→resume marker edit is indistinguishable from the stale marker that
     // the preceding frontmatter edit just overrode.
-    let previous_text = if method_name == "replica_update" {
+    let previous_text = if method == ControllerCrdtReplicaMethod::Update {
         match agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
             &canonical, authority,
         )? {
@@ -6998,8 +6749,8 @@ fn handle_crdt_replica_rpc(
     } else {
         None
     };
-    let data = controller_crdt_replica_data(runtime, &canonical, method_name, identity, &payload)?;
-    if replica_method_changes_delivery_frontier(method_name)
+    let data = controller_crdt_replica_data(runtime, &canonical, method, identity, &payload)?;
+    if replica_method_changes_delivery_frontier(method)
         && let Some(runtime) = runtime
         && let Err(error) =
             observe_retained_delivery_after_replica_event(runtime, &canonical, authority)
@@ -7017,8 +6768,10 @@ fn handle_crdt_replica_rpc(
             ),
         );
     }
-    if method_name == "replica_update"
-        && let Some(runtime) = runtime
+    if matches!(
+        method,
+        ControllerCrdtReplicaMethod::Update | ControllerCrdtReplicaMethod::Projection
+    ) && let Some(runtime) = runtime
         && let Err(error) = observe_retained_write_authority_from_live_model(runtime, &canonical)
     {
         // The editor mutation is already accepted. Settlement observation is
@@ -7032,7 +6785,48 @@ fn handle_crdt_replica_rpc(
             ),
         );
     }
-    if method_name == "replica_update"
+    if method == ControllerCrdtReplicaMethod::Projection
+        && payload.disk_persisted
+        && let Some(runtime) = runtime
+        && let Some(projected_hash) = payload.content_hash.as_deref()
+    {
+        match agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
+            &canonical, authority,
+        ) {
+            Ok(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })
+                if agent_doc_hash::content_hash(&text).eq_ignore_ascii_case(projected_hash) =>
+            {
+                if let Err(error) = observe_retained_write_native_save(runtime, &canonical, &text) {
+                    agent_doc_ops_log_io::log_op(
+                        &canonical,
+                        &format!(
+                            "retained_write_disk_projection_deferred file={} source=replica_projection reason={error:#}",
+                            canonical.display(),
+                        ),
+                    );
+                }
+            }
+            Ok(_) => {
+                agent_doc_ops_log_io::log_op(
+                    &canonical,
+                    &format!(
+                        "retained_write_disk_projection_ignored file={} source=replica_projection reason=authority_hash_mismatch projected_hash={projected_hash}",
+                        canonical.display(),
+                    ),
+                );
+            }
+            Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    &canonical,
+                    &format!(
+                        "retained_write_disk_projection_deferred file={} source=replica_projection reason={error:#}",
+                        canonical.display(),
+                    ),
+                );
+            }
+        }
+    }
+    if method == ControllerCrdtReplicaMethod::Update
         && let Some(runtime) = runtime
         && let Err(error) = observe_realtime_steering_after_replica_update(
             bootstrap,
@@ -7068,14 +6862,14 @@ fn handle_crdt_replica_rpc(
     Ok(data)
 }
 
-fn replica_method_changes_delivery_frontier(method_name: &str) -> bool {
+fn replica_method_changes_delivery_frontier(method: ControllerCrdtReplicaMethod) -> bool {
     matches!(
-        method_name,
-        "replica_register"
-            | "replica_deregister"
-            | "replica_update"
-            | "replica_pull"
-            | "replica_ack"
+        method,
+        ControllerCrdtReplicaMethod::Register
+            | ControllerCrdtReplicaMethod::Deregister
+            | ControllerCrdtReplicaMethod::Update
+            | ControllerCrdtReplicaMethod::Projection
+            | ControllerCrdtReplicaMethod::Pull
     )
 }
 
@@ -8027,12 +7821,12 @@ fn validate_editor_route_layout_args(args: &[String]) -> Result<Vec<String>> {
 fn controller_crdt_replica_data(
     runtime: Option<&ControllerRuntime>,
     canonical: &Path,
-    method_name: &str,
+    method: ControllerCrdtReplicaMethod,
     identity: &str,
     payload: &ControllerCrdtReplicaPayload,
 ) -> Result<serde_json::Value> {
-    match method_name {
-        "replica_register" => {
+    match method {
+        ControllerCrdtReplicaMethod::Register => {
             let durable_projection_retained = runtime
                 .map(|runtime| retained_write_observation_basis(runtime, canonical))
                 .transpose()?
@@ -8091,7 +7885,7 @@ fn controller_crdt_replica_data(
                 None => Ok(crdt_replica_refused_data("detached_authority")),
             }
         }
-        "replica_deregister" => {
+        ControllerCrdtReplicaMethod::Deregister => {
             let removed = match payload.editor_pid {
                 Some(editor_pid) => agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
                     canonical, identity, editor_pid,
@@ -8100,7 +7894,7 @@ fn controller_crdt_replica_data(
             };
             Ok(serde_json::json!({ "removed": removed }))
         }
-        "replica_update" => {
+        ControllerCrdtReplicaMethod::Update => {
             let update_b64 = payload
                 .update_b64
                 .as_deref()
@@ -8130,7 +7924,21 @@ fn controller_crdt_replica_data(
                 None => Ok(crdt_replica_refused_data("detached_authority")),
             }
         }
-        "replica_pull" => {
+        ControllerCrdtReplicaMethod::Projection => {
+            let content_hash = payload
+                .content_hash
+                .as_deref()
+                .context("CRDT replica projection payload missing content_hash")?;
+            match agent_doc_crdt_relay_io::observe_replica_projection_for_file(
+                canonical,
+                identity,
+                content_hash,
+            )? {
+                Some(projected) => Ok(serde_json::json!({ "projected": projected })),
+                None => Ok(crdt_replica_refused_data("detached_authority")),
+            }
+        }
+        ControllerCrdtReplicaMethod::Pull => {
             if let Some(canonical_text) =
                 agent_doc_crdt_relay_io::pull_rebootstrap_for_file(canonical, identity)?
             {
@@ -8167,47 +7975,7 @@ fn controller_crdt_replica_data(
                 None => Ok(crdt_replica_refused_data("detached_authority")),
             }
         }
-        "replica_ack" => {
-            let patch_id = payload
-                .patch_id
-                .as_deref()
-                .context("CRDT replica ack payload missing patch_id")?;
-            let generation = payload
-                .generation
-                .context("CRDT replica ack payload missing generation")?;
-            // `#ackeditorstamps`: stamp the fourth moment — the binary observing
-            // the receipt — before the ack is applied, so the reported leg is the
-            // transport, not the relay's own bookkeeping.
-            let observed_at_ms = editor_ack_observed_at_ms();
-            let editor_profile = render_editor_ack_profile(
-                payload.pulled_at_ms,
-                payload.applied_at_ms,
-                payload.receipt_at_ms,
-                observed_at_ms,
-            );
-            match agent_doc_crdt_relay_io::ack_replica_update_for_file_with_content_hash(
-                canonical,
-                identity,
-                patch_id,
-                generation,
-                payload.content_hash.as_deref(),
-            )? {
-                Some(acknowledged) => {
-                    if let Some(profile) = editor_profile {
-                        agent_doc_ops_log_io::log_op(
-                            canonical,
-                            &format!(
-                                "crdt_replica_ack_editor_profile file={} patch_id={patch_id} generation={generation} acknowledged={acknowledged} profile=[{profile}]",
-                                canonical.display(),
-                            ),
-                        );
-                    }
-                    Ok(serde_json::json!({ "acknowledged": acknowledged }))
-                }
-                None => Ok(crdt_replica_refused_data("detached_authority")),
-            }
-        }
-        "replica_awareness" => {
+        ControllerCrdtReplicaMethod::Awareness => {
             let awareness_b64 = payload
                 .awareness_b64
                 .as_deref()
@@ -8237,64 +8005,7 @@ fn controller_crdt_replica_data(
                 None => Ok(crdt_replica_refused_data("detached_authority")),
             }
         }
-        other => anyhow::bail!("unsupported CRDT replica method `{other}`"),
     }
-}
-
-fn editor_ack_observed_at_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or(0)
-}
-
-/// Decompose the delivery-ACK round trip into its three editor-side legs
-/// (`#ackeditorstamps`).
-///
-/// The binary's own `profile=[state=Nms]` breakdown attributes a wait among the
-/// states the binary can see, which leaves the editor opaque: an
-/// `delivery_ack_pending=11000ms` could be a late delivery, a slow apply, or a
-/// fast apply with a slow receipt, and those have nothing in common as fixes.
-/// Two hypotheses about this same latency were each disproved the instant a log
-/// line carried an attribution field, so emit the legs rather than a total.
-///
-/// Legs are only rendered when both of their endpoints are stamped. An
-/// unstamped end (an older plugin, or a self-echo ACK that never went through
-/// the buffer) renders nothing for that leg — a missing leg is a fact, whereas
-/// substituting `0` would silently report the epoch as a timestamp. The whole
-/// profile is `None` when no leg is derivable, so an un-updated replica adds no
-/// log noise.
-///
-/// The two ends are different processes, so a leg can be negative under clock
-/// skew; it is reported as `skew` rather than clamped to `0`, because a clamped
-/// zero reads as "instant" and would be the wrong conclusion.
-fn render_editor_ack_profile(
-    pulled_at_ms: Option<u64>,
-    applied_at_ms: Option<u64>,
-    receipt_at_ms: Option<u64>,
-    observed_at_ms: u64,
-) -> Option<String> {
-    fn leg(name: &str, from: Option<u64>, to: Option<u64>) -> Option<String> {
-        let (from, to) = (from?, to?);
-        Some(match to.checked_sub(from) {
-            Some(delta) => format!("{name}={delta}ms"),
-            None => format!("{name}=skew"),
-        })
-    }
-
-    let legs: Vec<String> = [
-        leg("received_to_applied", pulled_at_ms, applied_at_ms),
-        leg("applied_to_receipt", applied_at_ms, receipt_at_ms),
-        leg("receipt_to_observed", receipt_at_ms, Some(observed_at_ms)),
-        // The end-to-end editor leg, so a profile missing its middle stamp
-        // (self-echo ACK) still bounds the editor half.
-        leg("received_to_observed", pulled_at_ms, Some(observed_at_ms)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    (!legs.is_empty()).then(|| legs.join(" "))
 }
 
 fn base64_standard_encode(bytes: &[u8]) -> String {
@@ -11029,9 +10740,6 @@ pub(crate) fn handle_request_locked(
         "closeout_cycle_progress_await" => controller_envelope(
             handle_closeout_cycle_progress_await(runtime.as_ref(), request),
         ),
-        "ipc_build_mismatch_recover" => {
-            controller_envelope(handle_ipc_build_mismatch_recover(runtime.as_ref(), request))
-        }
         "command_plane_submit" => {
             // #af88 B enforcement: a command-plane submit persists facts (the
             // durable sink), so refuse it when the caller proves this controller
@@ -14392,7 +14100,7 @@ fn controller_serves_replica(path: &str) -> bool {
 /// in one process, and it returns the instant convergence lands.
 pub(crate) fn handle_delivery_convergence_await(
     _bootstrap: &ControllerBootstrap,
-    runtime: &ControllerRuntime,
+    _runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<DeliveryConvergenceStatus> {
     let file = request_file(&request)?;
@@ -14412,25 +14120,15 @@ pub(crate) fn handle_delivery_convergence_await(
             .get("after_version")
             .and_then(serde_json::Value::as_u64)
     });
-    let recovery = payload
-        .as_ref()
-        .and_then(|payload| payload.get("recovery"))
-        .cloned()
-        .filter(|value| !value.is_null())
-        .and_then(|value| serde_json::from_value::<DeliveryConvergenceRecovery>(value).ok());
     Ok(await_local_delivery_convergence_change_for_file_inner(
         &canonical,
         after_version,
         wait,
-        recovery,
-        Some(runtime),
     )?
     .unwrap_or(DeliveryConvergenceStatus {
         observed: false,
         converged: false,
         version: 0,
-        recovery_signal_observed: false,
-        force_refresh_sent: recovery.is_some_and(|recovery| recovery.force_refresh_sent),
     }))
 }
 
@@ -14723,14 +14421,16 @@ fn close_stale_start_session_pane_alias(
 }
 
 fn document_ids_equivalent(project_root: &Path, left: &str, right: &str) -> bool {
-    let left = left.trim();
-    let right = right.trim();
-    if left == right {
+    let trimmed_left = left.trim();
+    let trimmed_right = right.trim();
+    if trimmed_left == trimmed_right {
         return true;
     }
-    let left = agent_doc_session_actor_io::canonical_document_id_in(project_root, left);
-    let right = agent_doc_session_actor_io::canonical_document_id_in(project_root, right);
-    left == right
+    let canonical_left =
+        agent_doc_session_actor_io::canonical_document_id_in(project_root, trimmed_left);
+    let canonical_right =
+        agent_doc_session_actor_io::canonical_document_id_in(project_root, trimmed_right);
+    canonical_left == canonical_right
 }
 
 fn supervisor_report_matches_existing_lease(
@@ -25288,17 +24988,17 @@ mod tests {
     }
 
     #[test]
-    fn embedded_delivery_recovery_has_the_policy_owning_controller_runtime() {
+    fn embedded_delivery_subscription_has_the_local_projection_runtime() {
         let dir = tempfile::TempDir::new().unwrap();
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
 
         install_local_document_projection_reader(&runtime);
 
         let installed =
-            local_controller_runtime().expect("embedded ACK recovery must see its controller");
+            local_controller_runtime().expect("embedded subscription must see its controller");
         assert!(
             Arc::ptr_eq(&installed, &runtime),
-            "the embedded relay must not drop rolling-upgrade recovery to runtime=None"
+            "the embedded relay must observe the local reactive projection runtime"
         );
     }
 
@@ -25325,37 +25025,6 @@ mod tests {
         })
         .join()
         .expect("request worker");
-    }
-
-    #[test]
-    #[cfg(feature = "test-support")]
-    fn standalone_build_mismatch_recovery_routes_to_the_controller_policy_owner() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let file = dir.path().join("session.md");
-        std::fs::write(&file, "# session\n").unwrap();
-        let _actor = start_state_actor_for_tests(dir.path()).unwrap();
-        LOCAL_CONTROLLER_RUNTIME.with(|slot| {
-            *slot.borrow_mut() = None;
-        });
-
-        let error = recover_editor_ipc_build_mismatch_for_file(
-            &file,
-            u64::from(std::process::id()),
-            "missing-test-listener",
-            "standalone_native_save_test",
-        )
-        .expect_err("the controller should reach the absent editor listener");
-        let detail = format!("{error:#}");
-        assert!(
-            !detail.contains("unknown controller command")
-                && !detail.contains("controller_runtime_unavailable"),
-            "standalone recovery must cross controller RPC before the expected listener failure: {detail}"
-        );
-        assert!(
-            detail.contains("IPC") || detail.contains("socket") || detail.contains("connect"),
-            "the terminal failure should come from the absent editor endpoint: {detail}"
-        );
     }
 
     /// Carry-forward guardrail for this migrated seam (`#lazily-hot-path`): once a
@@ -25868,6 +25537,26 @@ mod tests {
                 ),
             "this document must project without a registration oracle; got {:?}",
             status.registrations
+        );
+    }
+
+    #[test]
+    fn crdt_replica_wire_method_is_an_exhaustive_typed_label() {
+        let payload: ControllerCrdtReplicaPayload = serde_json::from_value(serde_json::json!({
+            "method": "replica_projection",
+            "identity": "zed:test",
+            "content_hash": "abc",
+            "disk_persisted": true
+        }))
+        .unwrap();
+        assert_eq!(payload.method, ControllerCrdtReplicaMethod::Projection);
+        assert!(payload.disk_persisted);
+        assert!(
+            serde_json::from_value::<ControllerCrdtReplicaPayload>(serde_json::json!({
+                "method": "replica_projection_typo",
+                "identity": "zed:test"
+            }))
+            .is_err()
         );
     }
 }

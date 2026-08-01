@@ -137,7 +137,7 @@ class RefreshBeforeApplyConflictTest {
         assertTrue(reconcile.contains("RemotePersistOutcome(false, null)"))
         assertTrue(replace.contains("before,"))
         assertTrue(replace.contains("replace-delivery-persist-rollback"))
-        assertTrue(delta.contains("persisted.editorTextForAck"))
+        assertTrue(delta.contains("persisted.editorTextForProjection"))
         assertTrue(
             "memory-only projection must remain visible without entering disk persistence",
             delta.contains("RemoteEditorApplyOutcome(false, pending.targetText)"),
@@ -393,7 +393,11 @@ class RefreshBeforeApplyConflictTest {
             turnRefresher.contains("TURN_STATE_DRAIN_YIELD_MS"),
         )
         assertTrue(
-            "banner refresher must observe the native authority cache",
+            "banner refresher must read the controller-owned in-memory projection",
+            turnRefresher.contains("CpRouteClient.documentTurnAuthority"),
+        )
+        assertFalse(
+            "banner refresher must not enter the reloadable native library",
             turnRefresher.contains("NativeAdminControls.documentAuthority"),
         )
         assertTrue(

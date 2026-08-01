@@ -131,7 +131,7 @@ pub struct BroadcastPacket {
     pub targets: Vec<u64>,
 }
 
-/// One supervisor-to-editor delivery awaiting an explicit editor ACK.
+/// One supervisor-to-editor delivery awaiting a matching visible-state projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingReplicaUpdate {
     pub patch_id: String,
@@ -139,7 +139,7 @@ pub struct PendingReplicaUpdate {
     pub target: u64,
     pub generation: u64,
     /// Hash of the canonical visible text the editor must actually show before
-    /// this delivery may advance the ACK frontier. Generation alone proves only
+    /// this delivery may advance the projection frontier. Generation alone proves only
     /// that a frame was handled, not that the native replica and editor buffer
     /// converged (#crdt-content-ack).
     pub expected_content_hash: String,
@@ -1357,6 +1357,55 @@ impl RelayHub {
         Ok(true)
     }
 
+    /// Project one editor's complete visible document observation into its
+    /// delivery frontier.
+    ///
+    /// Unlike the legacy per-update ACK protocol, the editor does not retain
+    /// transport tokens or replay receipts. Its ordinary full-buffer state
+    /// observation is a Source. Matching a queued target (or the causally newer
+    /// controller canonical) proves the whole represented prefix and advances
+    /// the delivery projection cumulatively.
+    pub fn observe_delivery_projection(
+        &mut self,
+        client_id: u64,
+        visible_content_hash: &str,
+    ) -> Result<bool> {
+        let canonical_content_hash = content_hash(&self.canonical.text());
+        let member = self
+            .members
+            .get_mut(&client_id)
+            .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
+        if member.pending.is_empty() {
+            return Ok(visible_content_hash == canonical_content_hash);
+        }
+        let matched_pos = member
+            .pending
+            .iter()
+            .rposition(|update| update.expected_content_hash == visible_content_hash)
+            .or_else(|| {
+                (visible_content_hash == canonical_content_hash)
+                    .then(|| member.pending.len().saturating_sub(1))
+            });
+        let Some(matched_pos) = matched_pos else {
+            self.pending_rebootstrap.insert(client_id);
+            return Ok(false);
+        };
+        let acknowledged_projection = member
+            .pending
+            .range(..=matched_pos)
+            .any(|update| update.patch_id.starts_with("crdt-bootstrap:"));
+        let projected_generation = member.pending[matched_pos].generation;
+        member.pending.drain(..=matched_pos);
+        member.last_ack_generation = member.last_ack_generation.max(projected_generation);
+        self.pending_rebootstrap.remove(&client_id);
+        if acknowledged_projection {
+            self.canonical_projection_required
+                .set(&self.ctx, client_id, false);
+        }
+        self.bump_delivery_epoch();
+        Ok(true)
+    }
+
     /// `#lazily-hot-path` Theme A — convergence together with the version of the
     /// inputs it was folded from.
     ///
@@ -2295,6 +2344,24 @@ mod tests {
             .unwrap(),
             "a plugin may still ACK each item after the first cumulative receipt drains the batch"
         );
+    }
+
+    #[test]
+    fn visible_state_projection_cumulatively_settles_delivery_without_update_acks() {
+        let mut hub = RelayHub::from_text(1, "base\n");
+        hub.register(2).unwrap();
+        hub.apply_canonical_replace("base\n", "base\none\n")
+            .unwrap();
+        hub.apply_canonical_replace("base\none\n", "base\none\ntwo\n")
+            .unwrap();
+
+        assert_eq!(hub.pending_updates(2).unwrap().len(), 2);
+        assert!(
+            hub.observe_delivery_projection(2, &content_hash("base\none\ntwo\n"))
+                .unwrap()
+        );
+        assert!(hub.pending_updates(2).unwrap().is_empty());
+        assert!(hub.delivery_converged());
     }
 
     #[test]

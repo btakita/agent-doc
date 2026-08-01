@@ -43,10 +43,10 @@
 //!   the per-document hub registry ([`with_hub`]).
 //! - **Wired:** editor-replica lifecycle and delta transport through the
 //!   supervisor IPC family (`replica_register`, `replica_update`, `replica_pull`,
-//!   `replica_ack`, `replica_deregister`). Fan-out is target-owned: peer updates
+//!   `replica_projection`, `replica_deregister`). Fan-out is target-owned: peer updates
 //!   remain queued until the target editor applies them to its FFI replica/buffer
-//!   and ACKs the delivery. The commit barrier refuses a MultiReplica closeout
-//!   while any live target has unacknowledged delivery.
+//!   and publishes its complete visible projection. The commit barrier refuses a
+//!   MultiReplica closeout while any live target has unprojected delivery.
 
 use agent_doc_turn::op_log::OpsLogEvent;
 use parking_lot::Mutex;
@@ -75,7 +75,6 @@ pub enum CrdtReplicaEventReason {
     ResponseCellAdd,
     CpWrite,
     Rebootstrap,
-    AckReplay,
     CanonicalProjection,
 }
 
@@ -111,7 +110,6 @@ impl CrdtReplicaEventReason {
             Self::ResponseCellAdd => "response_cell_add",
             Self::CpWrite => "cp_write",
             Self::Rebootstrap => "rebootstrap",
-            Self::AckReplay => "ack_replay",
             Self::CanonicalProjection => "canonical_projection",
         }
     }
@@ -2499,8 +2497,8 @@ pub fn apply_cp_write_for_file(
 }
 
 /// Pull supervisor-to-editor updates queued for this replica. The returned
-/// updates remain pending until [`ack_replica_update_for_file`] confirms the
-/// editor applied them.
+/// updates remain pending until [`observe_replica_projection_for_file`] proves
+/// the editor's complete visible state covers them.
 pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Option<ReplicaPull>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
@@ -2584,53 +2582,40 @@ pub fn pull_rebootstrap_for_file(file: &Path, identity: &str) -> Result<Option<S
     Ok(text)
 }
 
-/// ACK one pulled update after the editor applied it to the local document
-/// replica/buffer.
-pub fn ack_replica_update_for_file(
+/// Publish one editor's complete visible state into the relay delivery
+/// projection.
+///
+/// This is state ingress, not a per-update command receipt: the editor reports
+/// the same full-buffer observation it already emits for current-document
+/// authority, and the hub derives which queued generations that state covers.
+pub fn observe_replica_projection_for_file(
     file: &Path,
     identity: &str,
-    patch_id: &str,
-    generation: u64,
-) -> Result<Option<bool>> {
-    ack_replica_update_for_file_with_content_hash(file, identity, patch_id, generation, None)
-}
-
-/// Hash-qualified variant of [`ack_replica_update_for_file`]. Current editor
-/// plugins send the visible editor text hash so a handled CRDT generation cannot
-/// be mistaken for actual convergence. `None` is accepted only for compatibility
-/// with an older plugin during the crash-safe install handoff.
-pub fn ack_replica_update_for_file_with_content_hash(
-    file: &Path,
-    identity: &str,
-    patch_id: &str,
-    generation: u64,
-    applied_content_hash: Option<&str>,
+    visible_content_hash: &str,
 ) -> Result<Option<bool>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
-    let Some(acknowledged) = with_existing_hub(file, |hub| {
-        hub.ack_delivery_with_content_hash(client_id, patch_id, generation, applied_content_hash)
+    let Some(projected) = with_existing_hub(file, |hub| {
+        hub.observe_delivery_projection(client_id, visible_content_hash)
     })?
     else {
         return Ok(None);
     };
-    let acknowledged = acknowledged?;
+    let projected = projected?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_replica_ack file={} authority=multi_replica client_id={} patch_id={} generation={} content_hash={} acknowledged={}",
+            "crdt_replica_projection_observed file={} authority=multi_replica client_id={} content_hash={} projected={}",
             file.display(),
             client_id,
-            patch_id,
-            generation,
-            applied_content_hash.unwrap_or("legacy-unverified"),
-            acknowledged,
+            visible_content_hash,
+            projected,
         ),
     );
-    Ok(Some(acknowledged))
+    Ok(Some(projected))
 }
 
 /// Push an ephemeral awareness/presence update for an editor replica through the
@@ -3842,14 +3827,8 @@ mod tests {
         assert!(!pull.updates.is_empty());
         for update in pull.updates {
             assert_eq!(
-                ack_replica_update_for_file_with_content_hash(
-                    &doc,
-                    identity,
-                    &update.patch_id,
-                    update.generation,
-                    Some(&update.expected_content_hash),
-                )
-                .unwrap(),
+                observe_replica_projection_for_file(&doc, identity, &update.expected_content_hash,)
+                    .unwrap(),
                 Some(true),
             );
         }
@@ -4144,12 +4123,10 @@ mod tests {
             .expect("old editor should receive the canonical suffix");
         for update in pull.updates {
             assert_eq!(
-                ack_replica_update_for_file_with_content_hash(
+                observe_replica_projection_for_file(
                     &doc,
                     "intellij:incremental-old",
-                    &update.patch_id,
-                    update.generation,
-                    Some(&update.expected_content_hash),
+                    &update.expected_content_hash,
                 )
                 .unwrap(),
                 Some(true),
@@ -4231,12 +4208,10 @@ mod tests {
             registration.canonical_content_hash
         );
         assert_eq!(
-            ack_replica_update_for_file_with_content_hash(
+            observe_replica_projection_for_file(
                 &doc,
                 replacement_identity,
-                &receipt.patch_id,
-                receipt.generation,
-                Some(&receipt.expected_content_hash),
+                &receipt.expected_content_hash,
             )
             .unwrap(),
             Some(true),
@@ -4375,12 +4350,10 @@ mod tests {
             .expect("replacement should receive the retained visible receipt");
         for update in pull.updates {
             assert_eq!(
-                ack_replica_update_for_file_with_content_hash(
+                observe_replica_projection_for_file(
                     &doc,
                     &replacement_identity,
-                    &update.patch_id,
-                    update.generation,
-                    Some(&update.expected_content_hash),
+                    &update.expected_content_hash,
                 )
                 .unwrap(),
                 Some(true),

@@ -33,11 +33,10 @@ class CrdtReplicaReadActionTest {
 
         val forwarderSwap = source.substringAfter("if (forwarders.replace(filePath, cached, forwarder))")
             .substringBefore("return forwarder")
-        val retireIndex = forwarderSwap.indexOf("clearPendingRemoteAcks(filePath)")
-        assertTrue("a successful replica swap must retire the old ACK frontier", retireIndex >= 0)
         assertTrue(
-            "ACK retirement must happen before the old member is deregistered",
-            forwarderSwap.indexOf("cached.deregister()") > retireIndex,
+            "a successful replica swap must deregister the old member without an ACK sidecar",
+            forwarderSwap.contains("cached.deregister()") &&
+                !forwarderSwap.contains("clearPendingRemoteAcks"),
         )
     }
 

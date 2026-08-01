@@ -22,7 +22,6 @@ pub enum EditorIntent {
     /// flock-serialized full-text rewrite for the queue consume sites.
     ApplyStructuralOp,
     Reposition,
-    SaveDocument,
     RefreshContent,
     ObserveLazilyCurrent,
     DeliverCrdtRemote,
@@ -36,7 +35,6 @@ impl EditorIntent {
             Self::ApplyCanonical => "apply_canonical",
             Self::ApplyStructuralOp => "apply_structural_op",
             Self::Reposition => "reposition",
-            Self::SaveDocument => "save_document",
             Self::RefreshContent => "refresh_content",
             Self::ObserveLazilyCurrent => "observe_lazily_current",
             Self::DeliverCrdtRemote => "deliver_crdt_remote",
@@ -869,34 +867,6 @@ pub fn reposition_message(
     message
 }
 
-/// Build an editor save request payload.
-pub fn save_document_message(file: &str, patch_id: &str) -> serde_json::Value {
-    serde_json::json!({
-        "type": EditorIntent::SaveDocument.as_str(),
-        "file": file,
-        "patch_id": patch_id,
-    })
-}
-
-/// Build an editor-owned save request that deliberately does not publish a
-/// patch/content projection.
-///
-/// This narrow form recovers the current document when an editor listener is
-/// alive but its native CRDT projection bridge is temporarily unavailable.
-/// First-party editors treat an absent `patch_id` as a save-only operation: an
-/// applied receipt proves their document save API completed, after which the
-/// caller may read the exact editor-written disk cut.
-pub fn save_document_without_projection_message(
-    file: &str,
-    save_request_id: &str,
-) -> serde_json::Value {
-    serde_json::json!({
-        "type": EditorIntent::SaveDocument.as_str(),
-        "file": file,
-        "save_request_id": save_request_id,
-    })
-}
-
 /// Build a full content refresh payload.
 pub fn refresh_content_message(
     file: &str,
@@ -1198,9 +1168,9 @@ mod tests {
         is_socket_receipt_timeout_error, is_socket_status_error, message_is_reload_library,
         message_requests_early_receipt, normalization_repair_patch_message,
         observe_lazily_current_message, patch_message, pending_callback_from_request,
-        queue_convergence_message, refresh_content_message, reload_lib_message, reposition_message,
-        save_document_message, save_document_without_projection_message, validate_ipc_hello,
-        validate_ipc_hello_ack, vcs_refresh_message, vcs_refresh_probe_message,
+        queue_convergence_message, refresh_content_message, reload_lib_message,
+        reposition_message, validate_ipc_hello, validate_ipc_hello_ack, vcs_refresh_message,
+        vcs_refresh_probe_message,
     };
 
     #[test]
@@ -1536,28 +1506,6 @@ mod tests {
             effective_unmatched_for_patch_payload(" body ", 0, 0),
             "body"
         );
-    }
-
-    #[test]
-    fn save_document_message_is_typed_and_readonly() {
-        let message = save_document_message("/tmp/plan.md", "save-123");
-
-        assert_eq!(message["type"], "save_document");
-        assert_eq!(message["file"], "/tmp/plan.md");
-        assert_eq!(message["patch_id"], "save-123");
-        assert!(message.get("content").is_none());
-        assert!(message.get("patches").is_none());
-    }
-
-    #[test]
-    fn save_document_without_projection_omits_patch_id() {
-        let message = save_document_without_projection_message("/tmp/plan.md", "save-only-123");
-
-        assert_eq!(message["type"], "save_document");
-        assert_eq!(message["file"], "/tmp/plan.md");
-        assert_eq!(message["save_request_id"], "save-only-123");
-        assert!(message.get("patch_id").is_none());
-        assert!(message.get("content").is_none());
     }
 
     #[test]

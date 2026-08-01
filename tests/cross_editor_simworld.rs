@@ -328,7 +328,7 @@ impl PluginProtocolHarness {
         Ok(())
     }
 
-    fn pull_and_ack(&mut self) -> anyhow::Result<usize> {
+    fn pull_and_project(&mut self) -> anyhow::Result<usize> {
         let data = request(
             &self.project_root,
             &self.file,
@@ -348,31 +348,19 @@ impl PluginProtocolHarness {
         for update in updates {
             let encoded = decode_field(update, "update_b64")?;
             self.replica.apply_update(&encoded)?;
-            let patch_id = update["patch_id"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("replica pull omitted patch_id: {update}"))?;
-            let generation = update["generation"]
-                .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("replica pull omitted generation: {update}"))?;
             let content_hash = agent_doc_hash::content_hash(&self.replica.text());
-            let expected_content_hash =
-                update["expected_content_hash"].as_str().ok_or_else(|| {
-                    anyhow::anyhow!("replica pull omitted expected_content_hash: {update}")
-                })?;
-            let _historical_delivery_hash = expected_content_hash;
-            let ack = request(
+            let projection = request(
                 &self.project_root,
                 &self.file,
                 self.kind,
-                "replica_ack",
+                "replica_projection",
                 serde_json::Map::from_iter([
-                    ("patch_id".to_string(), Value::String(patch_id.to_string())),
-                    ("generation".to_string(), Value::from(generation)),
                     ("content_hash".to_string(), Value::String(content_hash)),
+                    ("disk_persisted".to_string(), Value::Bool(false)),
                 ]),
             )?;
-            if ack["acknowledged"] != Value::Bool(true) {
-                anyhow::bail!("replica ACK was not accepted: {ack}");
+            if projection["projected"] != Value::Bool(true) {
+                anyhow::bail!("replica projection was not accepted: {projection}");
             }
         }
         self.pushed_state_vector = self.replica.state_vector();
@@ -477,7 +465,7 @@ fn assert_harness_matches_shipped_plugin_sources(manifest_dir: &Path) {
         assert!(source.contains("replica_register"));
         assert!(source.contains("replica_update"));
         assert!(source.contains("replica_pull"));
-        assert!(source.contains("replica_ack"));
+        assert!(source.contains("replica_projection"));
         assert!(source.contains("replica_deregister"));
         assert!(source.contains("controller.sock"));
     }
@@ -539,8 +527,8 @@ fn cross_editor_plugin_protocol_harnesses_peer_through_real_agent_doc_controller
         .edit_without_pulling(frontier, vscode.kind.marker())
         .unwrap();
     for _ in 0..3 {
-        jetbrains.pull_and_ack().unwrap();
-        vscode.pull_and_ack().unwrap();
+        jetbrains.pull_and_project().unwrap();
+        vscode.pull_and_project().unwrap();
     }
     assert_eq!(jetbrains.text(), vscode.text());
     assert!(jetbrains.text().contains("jetbrains-harness"));
@@ -560,15 +548,15 @@ fn cross_editor_plugin_protocol_harnesses_peer_through_real_agent_doc_controller
         Some(retained),
     )
     .unwrap();
-    jetbrains.pull_and_ack().unwrap();
-    vscode.pull_and_ack().unwrap();
+    jetbrains.pull_and_project().unwrap();
+    vscode.pull_and_project().unwrap();
     assert_eq!(jetbrains.text(), vscode.text());
     assert!(vscode.text().contains("while-vscode-offline"));
 
     let ops = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log")).unwrap();
     assert!(ops.contains("source=jetbrains_plugin"));
     assert!(ops.contains("source=vscode_plugin"));
-    assert!(ops.contains("method=replica_ack"));
+    assert!(ops.contains("method=replica_projection"));
 
     let _ = jetbrains.disconnect().unwrap();
     let _ = vscode.disconnect().unwrap();
@@ -699,7 +687,7 @@ fn native_plugin_harnesses_peer_through_real_agent_doc_controller() {
     let ops = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log")).unwrap();
     assert!(ops.contains("source=jetbrains_plugin"));
     assert!(ops.contains("source=vscode_plugin"));
-    assert!(ops.contains("method=replica_ack"));
+    assert!(ops.contains("method=replica_projection"));
 
     jetbrains.shutdown().unwrap();
     vscode.shutdown().unwrap();

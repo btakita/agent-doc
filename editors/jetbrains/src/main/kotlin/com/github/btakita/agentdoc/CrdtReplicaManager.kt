@@ -41,7 +41,6 @@ private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
 private const val LOCAL_EDITOR_FLUSH_QUIET_MS = 16L
 private const val LOCAL_EDITOR_READ_RETRY_MS = 25L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
-private const val ACK_RECOVERY_REREGISTER_MIN_INTERVAL_MS = 5_000L
 
 /**
  * `#ctrlkillreregister` Tier 3: minimum gap between whole-editor missing-replica
@@ -56,15 +55,11 @@ private const val PEER_REPLICA_PULL_MIN_INTERVAL_MS = 5_000L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS = 30_000L
 private const val CRDT_IDLE_WORKER_WARN_MS = 1_000L
 private const val CRDT_DRAIN_BACKOFF_REASON = "backoff-resume"
+private const val PROJECTION_RECOVERY_REREGISTER_MIN_INTERVAL_MS = 5_000L
 // Delivery routability is a component-level fact, not merely an IDE-process
 // fact. Refresh from the same serialized executor that pulls/applies/ACKs CRDT
 // deliveries: if that worker stalls, this heartbeat stalls too and Rust stops
 // targeting it while continuing to protect its possibly-unsaved buffer.
-
-private data class PendingRemoteAck(
-    val forwarder: CrdtReplicaForwarder,
-    val update: ReplicaRemoteUpdate,
-)
 
 private data class RemoteEditorEffectToken(
     val generation: Long,
@@ -81,49 +76,9 @@ internal fun remoteEditorEffectTokenCurrentUtil(
         endpointMatches &&
         endpointBacked
 
-internal data class RemoteAckReplayPlan(
-    val candidate: ReplicaRemoteUpdate,
-    val acknowledgedThroughGeneration: Long,
-)
-
-/**
- * Pick one oldest delivery as the cumulative ACK carrier. The controller
- * matches [visibleContentHash] against the newest represented pending target
- * and drains the entire prefix atomically, so replaying every historical
- * generation only creates head-of-line blocking while the editor is typing.
- *
- * No matching target means there is no visible-content proof and therefore no
- * ACK to send. Sending the oldest delivery with an unrelated editor hash asks
- * the controller to rebootstrap the replica and turns a deferred projection
- * into a reconnect feedback loop.
- */
-internal fun remoteAckReplayPlanUtil(
-    updates: Collection<ReplicaRemoteUpdate>,
-    visibleContentHash: String,
-): RemoteAckReplayPlan? {
-    val acknowledgedThrough = updates.asSequence()
-        .filter { it.expectedContentHash == visibleContentHash }
-        .maxOfOrNull { it.generation }
-        ?: return null
-    val candidate = updates.asSequence()
-        .filter { it.generation <= acknowledgedThrough }
-        .minWithOrNull(compareBy<ReplicaRemoteUpdate> { it.generation }.thenBy { it.patchId })
-        ?: return null
-    return RemoteAckReplayPlan(candidate, acknowledgedThrough)
-}
-
-/**
- * An unacknowledged visible frontier owns the delivery slot. Pulling again while
- * that frontier is retained only returns the same controller delivery and would
- * decode the same (potentially multi-megabyte) CRDT update into the replica on
- * every drain cycle. Let the existing no-op drain backoff retry the ACK first.
- */
-internal fun shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount: Int): Boolean =
-    pendingAckCount == 0
-
-/** A retained ACK frontier owns the retry cadence. File-watcher and editor
+/** A retained delivery frontier owns the retry cadence. File-watcher and editor
  * events may add work while backoff is active, but must not bypass that gate
- * and hammer the controller with the same rejected ACK. */
+ * and hammer the controller with the same unresolved projection. */
 internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !backoffScheduled
 
 /**
@@ -140,17 +95,17 @@ internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !b
  */
 internal fun shouldUrgentDrainForRemoteEventUtil(@Suppress("UNUSED_PARAMETER") reasonToken: String?): Boolean = true
 
-internal fun ackRecoveryReregisterDueUtil(
+internal fun projectionRecoveryReregisterDueUtil(
     lastStartedMs: Long?,
     nowMs: Long,
-    minIntervalMs: Long = ACK_RECOVERY_REREGISTER_MIN_INTERVAL_MS,
+    minIntervalMs: Long = PROJECTION_RECOVERY_REREGISTER_MIN_INTERVAL_MS,
 ): Boolean =
     lastStartedMs == null ||
         nowMs < lastStartedMs ||
         nowMs - lastStartedMs >= minIntervalMs
 
 @Suppress("UNUSED_PARAMETER")
-internal fun shouldAcknowledgeVisibleRemoteDeliveryUtil(
+internal fun shouldProjectVisibleRemoteDeliveryUtil(
     editorText: String?,
     targetText: String,
     diskPersisted: Boolean,
@@ -219,7 +174,7 @@ internal fun replicaRegistrationAttemptDueUtil(
 
 private data class RemotePersistOutcome(
     val diskPersisted: Boolean,
-    val editorTextForAck: String?,
+    val editorTextForProjection: String?,
     val editorNormalizedText: String? = null,
 )
 
@@ -276,7 +231,7 @@ internal fun remoteTemplateProjectionDecisionUtil(
 internal enum class ReplicaBaselineDecision {
     ApplyRemote,
     ApplyRemoteRepair,
-    AcknowledgeRemoteTarget,
+    ProjectRemoteTarget,
     ReplayRemoteTarget,
     RealignShadow,
     RetryFailClosed,
@@ -311,7 +266,7 @@ internal fun replicaBaselineDecisionUtil(
     recoveryInFlight ->
         ReplicaBaselineDecision.RetryFailClosed
     editorMatchesRemoteTarget && replicaMatchesEditor ->
-        ReplicaBaselineDecision.AcknowledgeRemoteTarget
+        ReplicaBaselineDecision.ProjectRemoteTarget
     canonicalProjectionRetained && replicaMatchesRemoteTarget ->
         ReplicaBaselineDecision.ReplayRemoteTarget
     canonicalProjectionRetained && replicaMatchesExpected ->
@@ -414,7 +369,6 @@ private data class PendingRemoteEditorApply(
     val expectedText: String,
     val targetText: String,
     val effectToken: RemoteEditorEffectToken,
-    val acknowledgements: List<PendingRemoteAck>,
 )
 
 private data class RemoteEditorApplyOutcome(
@@ -430,17 +384,14 @@ private enum class RemoteTextApplyDisposition {
 }
 
 /**
- * Oldest baseline + newest converged text + acknowledgement union. This merge
- * is associative, so RelayCell can conflate any producer/drain schedule without
- * losing the durable acknowledgements covered by the final visible state.
+ * Oldest baseline + newest converged text. Full visible-state projection makes
+ * the final text itself the cumulative delivery proof.
  */
 private val REMOTE_EDITOR_APPLY_MERGE = MergePolicy(
     name = "RemoteEditorApply",
     merge = { old: PendingRemoteEditorApply, latest: PendingRemoteEditorApply ->
         latest.copy(
             expectedText = old.expectedText,
-            acknowledgements = (old.acknowledgements + latest.acknowledgements)
-                .distinctBy { it.update.patchId },
         )
     },
     commutative = false,
@@ -452,7 +403,7 @@ private val REMOTE_EDITOR_APPLY_MERGE = MergePolicy(
  *
  * The manager is intentionally thin: local edits are forwarded to [CrdtReplicaForwarder],
  * remote updates are pulled from the CP document model, and document mutation uses the same
- * minimal-edit helper as IPC patches. A remote mutation is saved before acknowledgement only
+ * minimal-edit helper as IPC patches. A remote mutation is projected as disk-persisted only
  * when raw disk still equals the guarded editor baseline or the converged target; novel external
  * disk text rejects the apply instead of being overwritten.
  */
@@ -490,7 +441,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val registerRetryProjections =
         ConcurrentHashMap<String, ReplicaRegistrationRetryProjection>()
     private val registerRetryTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
-    private val ackRecoveryReregisterStartedAtMs = ConcurrentHashMap<String, Long>()
+    private val projectionRecoveryReregisterStartedAtMs = ConcurrentHashMap<String, Long>()
     private val consecutiveNoOpReschedules = AtomicInteger(0)
     private val remoteDrainBackoffScheduled = AtomicBoolean(false)
     private val remoteEditorApplies =
@@ -498,13 +449,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val remoteEditorApplyScheduled = AtomicBoolean(false)
     private val remoteEditorApplyPaths = ConcurrentHashMap.newKeySet<String>()
     private val retainedCanonicalProjectionPaths = ConcurrentHashMap.newKeySet<String>()
-    // An editor apply and its controller ACK cross two different queues (EDT ->
-    // replica worker -> controller socket). Keep the ACK as Lazily-style retained
-    // state until the controller accepts the exact current editor-content proof.
-    // A socket/controller recycle must not turn a successful visible apply into a
-    // permanently orphaned delivery frontier.
-    private val pendingRemoteAckReplays =
-        ConcurrentHashMap<String, ConcurrentHashMap<String, PendingRemoteAck>>()
     private val templateGuardRecoveryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryRetryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryFailureCounts = ConcurrentHashMap<String, Int>()
@@ -531,7 +475,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         remoteEditorApplyPaths.clear()
         retainedCanonicalProjectionPaths.clear()
         remoteEditorEffectGenerations.clear()
-        pendingRemoteAckReplays.clear()
         templateGuardRecoveryPaths.clear()
         templateGuardRecoveryRetryPaths.clear()
         templateGuardRecoveryFailureCounts.clear()
@@ -541,7 +484,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         registerRetryProjections.clear()
         registerRetryTasks.values.forEach { it.cancel(false) }
         registerRetryTasks.clear()
-        ackRecoveryReregisterStartedAtMs.clear()
+        projectionRecoveryReregisterStartedAtMs.clear()
         forwarders.values.forEach { it.deregister() }
         forwarders.clear()
         shadows.clear()
@@ -564,13 +507,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     /**
      * Claim the next Tier 3 pull window, or report that a recent pull already covers
-     * this caller. Reuses [ackRecoveryReregisterDueUtil]'s interval rule; only the
+     * this caller. Reuses [projectionRecoveryReregisterDueUtil]'s interval rule; only the
      * window differs, because one pull is authoritative for every document.
      */
     private fun beginPeerReplicaPull(): Boolean {
         val nowMs = System.currentTimeMillis()
         val lastMs = lastPeerReplicaPullAtMs.get()
-        if (!ackRecoveryReregisterDueUtil(
+        if (!projectionRecoveryReregisterDueUtil(
                 lastStartedMs = lastMs.takeIf { it > 0L },
                 nowMs = nowMs,
                 minIntervalMs = PEER_REPLICA_PULL_MIN_INTERVAL_MS,
@@ -581,11 +524,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         return lastPeerReplicaPullAtMs.compareAndSet(lastMs, nowMs)
     }
 
-    private fun beginAckRecoveryReregister(filePath: String): Boolean {
+    private fun beginProjectionRecoveryReregister(filePath: String): Boolean {
         val nowMs = System.currentTimeMillis()
         var due = false
-        ackRecoveryReregisterStartedAtMs.compute(filePath) { _, lastStartedMs ->
-            if (ackRecoveryReregisterDueUtil(lastStartedMs, nowMs)) {
+        projectionRecoveryReregisterStartedAtMs.compute(filePath) { _, lastStartedMs ->
+            if (projectionRecoveryReregisterDueUtil(lastStartedMs, nowMs)) {
                 due = true
                 nowMs
             } else {
@@ -606,11 +549,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             if (managerForFilePath(filePath) !== this) return
             if (!CrdtReplicaManager.isOperatorDocumentEvent(filePath, event)) {
                 // A remote CRDT apply mutates the IntelliJ Document before its
-                // visible-content ACK is queued back onto this worker. Replacing
-                // the replica from this listener would run ahead of that ACK,
+                // visible-content projection reaches this worker. Replacing
+                // the replica from this listener would run ahead of that projection,
                 // retire its retained frontier, and make the controller deliver
                 // the same canonical edit again. The remote apply path updates
-                // the shadow and requests its own post-ACK drain.
+                // the shadow and schedules its own post-projection drain.
                 if (CrdtReplicaManager.isApplyingRemote(filePath)) return
                 // A clean File Cache Conflict reload may be the operator
                 // accepting a Lazily-retained external disk candidate. Resolve
@@ -1025,7 +968,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     /**
      * Foreground delivery recovery for a controller write that is already
-     * retained in the existing replica's ACK frontier. This deliberately
+     * retained in the existing replica's delivery frontier. This deliberately
      * bypasses only the background no-op drain timer: it neither clears that
      * timer nor replaces the replica. Re-registering from the visible editor
      * here would publish the pre-delivery buffer back into canonical and undo
@@ -1127,26 +1070,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         var updateCount = 0
         var selfEchoCount = 0
         var peerUpdateCount = 0
-        var ackCount = 0
         var queuedForEditor = false
         var deliveryKind = "deltas"
         var usefulWork = 0
         if (hasPendingLocal(filePath) || remoteEditorApplyPaths.contains(filePath)) return 0
         try {
             val expectedText = shadows[filePath] ?: return 0
-            // Retry an ACK that lost its controller round-trip before pulling more
-            // work. The proof is always recomputed from the current editor buffer;
-            // stale remembered text is never allowed to acknowledge a newer cut.
-            ackCount += replayPendingRemoteAcks(filePath, forwarder)
-            usefulWork = ackCount
-            val pendingAckCount = pendingRemoteAckCount(filePath, forwarder)
-            if (!shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount)) {
-                log.debug(
-                    "[crdt-replica] remote pull deferred for ${File(filePath).name}; " +
-                        "pending_ack_frontier=$pendingAckCount acked=$ackCount",
-                )
-                return usefulWork
-            }
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs
             // the corrected canonical only when the editor buffer still matches
             // the local replica baseline; normal deltas are merged into the native
@@ -1177,15 +1106,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (hasPendingLocal(filePath)) break
                 if (!shouldApplyRemoteCrdtUpdateUtil(update, forwarder.clientId)) {
                     selfEchoCount++
-                    // Self-echo still needs visible-content proof: the operator's
-                    // local delta may have reached canonical while the editor
-                    // buffer moved again before this pull.
-                    val visibleText = editorBufferText(filePath) ?: expectedText
-                    if (forwarder.ackRemoteUpdate(update, visibleText)) {
-                        ackCount++
-                    } else {
-                        rememberPendingRemoteAck(filePath, PendingRemoteAck(forwarder, update))
-                    }
+                    TypingTracker.observeLazilyCurrentNow(filePath)
                     continue
                 }
                 peerUpdateCount++
@@ -1220,75 +1141,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     }
                 }
             }
-            usefulWork = peerUpdateCount + ackCount
+            usefulWork = peerUpdateCount
         } finally {
             logSlow(
                 "remote-drain-file",
                 filePath,
                 started,
                 warnMs = if (usefulWork == 0) CRDT_IDLE_WORKER_WARN_MS else CRDT_WORKER_WARN_MS,
-                details = "delivery=$deliveryKind updates=$updateCount peer=$peerUpdateCount self=$selfEchoCount acked=$ackCount queued=$queuedForEditor",
+                details = "delivery=$deliveryKind updates=$updateCount peer=$peerUpdateCount self=$selfEchoCount queued=$queuedForEditor",
             )
         }
         return usefulWork
-    }
-
-    private fun remoteAckKey(update: ReplicaRemoteUpdate): String =
-        "${update.patchId}:${update.generation}"
-
-    private fun rememberPendingRemoteAck(filePath: String, ack: PendingRemoteAck) {
-        pendingRemoteAckReplays
-            .computeIfAbsent(filePath) { ConcurrentHashMap() }[remoteAckKey(ack.update)] = ack
-    }
-
-    private fun rememberPendingRemoteAcks(filePath: String, updates: List<PendingRemoteAck>) {
-        for (ack in updates) rememberPendingRemoteAck(filePath, ack)
-    }
-
-    private fun clearPendingRemoteAcks(filePath: String): Int =
-        pendingRemoteAckReplays.remove(filePath)?.size ?: 0
-
-    private fun pendingRemoteAckCount(filePath: String, forwarder: CrdtReplicaForwarder): Int =
-        pendingRemoteAckReplays[filePath]
-            ?.values
-            ?.count { it.forwarder === forwarder }
-            ?: 0
-
-    private fun replayPendingRemoteAcks(
-        filePath: String,
-        forwarder: CrdtReplicaForwarder,
-        knownVisibleText: String? = null,
-        appliedAtMs: Long = 0L,
-    ): Int {
-        val pending = pendingRemoteAckReplays[filePath] ?: return 0
-        // A completed EDT apply may race a forced member replacement. Drop
-        // acknowledgements from the retired identity instead of replaying them
-        // through the replacement member.
-        for ((key, ack) in pending.entries) {
-            if (ack.forwarder !== forwarder) pending.remove(key, ack)
-        }
-        if (pending.isEmpty()) {
-            pendingRemoteAckReplays.remove(filePath, pending)
-            return 0
-        }
-        val visibleText = knownVisibleText ?: editorBufferText(filePath) ?: return 0
-        val plan = remoteAckReplayPlanUtil(
-            pending.values.map { it.update },
-            contentHash(visibleText),
-        ) ?: return 0
-        if (!forwarder.ackRemoteUpdate(plan.candidate, visibleText, appliedAtMs)) return 0
-
-        var acknowledged = 0
-        for ((key, ack) in pending.entries) {
-            if (
-                ack.update.generation <= plan.acknowledgedThroughGeneration &&
-                pending.remove(key, ack)
-            ) {
-                acknowledged++
-            }
-        }
-        if (pending.isEmpty()) pendingRemoteAckReplays.remove(filePath, pending)
-        return acknowledged
     }
 
     /**
@@ -1483,7 +1346,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         generation = effectGeneration,
                         endpoint = forwarder,
                     ),
-                acknowledgements = updates.map { PendingRemoteAck(forwarder, it) },
             ),
         )
         if (outcome != IngressOutcome.Blocked && outcome != IngressOutcome.Dropped) {
@@ -1637,7 +1499,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         )
                     RemoteEditorApplyOutcome(
                         persisted.diskPersisted,
-                        persisted.editorTextForAck,
+                        persisted.editorTextForProjection,
                         persisted.editorNormalizedText,
                     )
                 } else {
@@ -1679,7 +1541,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             )
                         RemoteEditorApplyOutcome(
                             persisted.diskPersisted,
-                            persisted.editorTextForAck,
+                            persisted.editorTextForProjection,
                             persisted.editorNormalizedText,
                         )
                     } else {
@@ -1815,7 +1677,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 )
                 RemotePersistOutcome(
                     diskPersisted = true,
-                    editorTextForAck = normalizedText,
+                    editorTextForProjection = normalizedText,
                     editorNormalizedText = normalizedText,
                 )
             }
@@ -1840,7 +1702,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val editorText = document.text
                 shadows[filePath] = editorText
                 log.warn(
-                    "[crdt-replica] remote editor persistence diverged from both exact planes; preserving the advanced editor and withholding ACK for $filePath: " +
+                    "[crdt-replica] remote editor persistence diverged from both exact planes; preserving the advanced editor and withholding disk-persisted projection for $filePath: " +
                         "before_hash=${contentHash(beforeText)} target_hash=${contentHash(targetText)} " +
                         "editor_hash=${contentHash(editorText)} disk_hash=${diskAfterSave?.let(::contentHash) ?: "missing"} " +
                         "document_unsaved=${FileDocumentManager.getInstance().isDocumentUnsaved(document)} " +
@@ -1856,7 +1718,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         outcome: RemoteEditorApplyOutcome,
         started: Long,
     ) {
-        val projectionVisible = shouldAcknowledgeVisibleRemoteDeliveryUtil(
+        val projectionVisible = shouldProjectVisibleRemoteDeliveryUtil(
             outcome.editorText,
             pending.targetText,
             outcome.diskPersisted,
@@ -1866,57 +1728,38 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             pending.filePath,
             started,
             warnMs = CRDT_EDT_WARN_MS,
-            details = "target_chars=${pending.targetText.length} visible=$projectionVisible disk_persisted=${outcome.diskPersisted} coalesced_updates=${pending.acknowledgements.size}",
+            details = "target_chars=${pending.targetText.length} visible=$projectionVisible disk_persisted=${outcome.diskPersisted}",
         )
         if (disposed.get()) return
-        // `#ackeditorstamps`: the buffer apply is complete here — the second of the
-        // four ACK stamps. Taken before the executor hop so the hop's own latency
-        // lands in the applied->receipt leg where it belongs, not inside the apply.
-        val appliedAtMs = System.currentTimeMillis()
-        if (projectionVisible) {
-            // Retain before crossing back to the worker. If executor submission or
-            // the socket ACK fails, the next drain replays it idempotently.
-            rememberPendingRemoteAcks(pending.filePath, pending.acknowledgements)
-        }
         try {
             documentWorkers.forDocument(pending.filePath).execute {
                 try {
-                        var acked = 0
-                val normalizedText = outcome.editorNormalizedText
-                if (normalizedText != null) {
-                    retainedCanonicalProjectionPaths.add(pending.filePath)
-                    log.info(
-                        "[crdt-replica] editor normalization retained for controller reprojection for " +
-                            "${File(pending.filePath).name}; normalized_hash=${contentHash(normalizedText)}",
-                    )
-                        }
-                        if (projectionVisible) {
-                        val activeForwarder = forwarders[pending.filePath]
-                        if (activeForwarder != null) {
-                            acked = replayPendingRemoteAcks(
-                            pending.filePath,
-                            activeForwarder,
-                                outcome.editorText,
-                                appliedAtMs,
-                            )
-                        }
+                    val normalizedText = outcome.editorNormalizedText
+                    if (normalizedText != null) {
+                        retainedCanonicalProjectionPaths.add(pending.filePath)
+                        log.info(
+                            "[crdt-replica] editor normalization retained for controller reprojection for " +
+                                "${File(pending.filePath).name}; normalized_hash=${contentHash(normalizedText)}",
+                        )
+                    }
+                    if (projectionVisible) {
+                        TypingTracker.observeLazilyCurrentNow(pending.filePath)
                     }
                     log.debug(
                         "[crdt-replica] remote editor apply completed for ${File(pending.filePath).name}; " +
-                            "visible=$projectionVisible disk_persisted=${outcome.diskPersisted} acked=$acked coalesced_updates=${pending.acknowledgements.size}",
+                            "visible=$projectionVisible disk_persisted=${outcome.diskPersisted} projection_published=$projectionVisible",
                     )
-            } finally {
-                remoteEditorApplyPaths.remove(pending.filePath)
-                if (projectionVisible && outcome.editorNormalizedText == null) {
-                    retainedCanonicalProjectionPaths.remove(pending.filePath)
-                    consecutiveNoOpReschedules.set(0)
-                    requestRemoteDrain(
-                        pending.filePath,
-                        "remote-editor-apply-complete",
-                    )
-                } else if (outcome.editorNormalizedText != null) {
-                    requestRemoteDrain(pending.filePath, "remote-editor-normalization-canonical-reproject")
-                } else {
+                } finally {
+                    remoteEditorApplyPaths.remove(pending.filePath)
+                    if (projectionVisible && outcome.editorNormalizedText == null) {
+                        retainedCanonicalProjectionPaths.remove(pending.filePath)
+                        consecutiveNoOpReschedules.set(0)
+                    } else if (outcome.editorNormalizedText != null) {
+                        requestRemoteDrain(
+                            pending.filePath,
+                            "remote-editor-normalization-canonical-reproject",
+                        )
+                    } else {
                         val delayMs = nextNoOpRescheduleBackoffMs()
                         log.debug(
                             "[crdt-replica] remote editor projection not yet visible for ${File(pending.filePath).name}; " +
@@ -1979,20 +1822,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val expectedHash = contentHash(expectedText)
         val visibleReplicaHash = replicaHash ?: "missing"
         if (
-            decision == ReplicaBaselineDecision.AcknowledgeRemoteTarget &&
+            decision == ReplicaBaselineDecision.ProjectRemoteTarget &&
             editorRemoteGeneration != null
         ) {
-            val acknowledgedUpdates =
-                updates.filter { it.generation <= editorRemoteGeneration }
             shadows[filePath] = editorText
-            rememberPendingRemoteAcks(
-                filePath,
-                acknowledgedUpdates.map { PendingRemoteAck(forwarder, it) },
-            )
-            val acknowledged = replayPendingRemoteAcks(filePath, forwarder, editorText)
+            TypingTracker.observeLazilyCurrentNow(filePath)
             log.info(
-                "[crdt-replica] acknowledged an already-visible remote target for $filePath: " +
-                    "editor_hash=$editorHash generation=$editorRemoteGeneration acked=$acknowledged",
+                "[crdt-replica] projected an already-visible remote target for $filePath: " +
+                    "editor_hash=$editorHash generation=$editorRemoteGeneration",
             )
             return false
         }
@@ -2210,14 +2047,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         if (replaceCached && cached != null) {
             if (forwarders.replace(filePath, cached, forwarder)) {
-                // The replacement is now authoritative. Retire the prior
-                // member's retained ACK frontier only after the successful
-                // swap so a failed registration keeps the working lineage.
-                val retiredPendingAcks = clearPendingRemoteAcks(filePath)
                 cached.deregister()
                 log.info(
-                    "[crdt-replica] atomically replaced cached forwarder for ${File(filePath).name}; " +
-                        "retired_pending_acks=$retiredPendingAcks",
+                    "[crdt-replica] atomically replaced cached forwarder for ${File(filePath).name}",
                 )
                 retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)
                 return forwarder
@@ -2240,7 +2072,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     /**
      * Registration is controller -> editor projection only. A pre-existing
      * editor buffer cannot become a whole-document recovery baseline because it
-     * may predate retained queue additions or another editor's acknowledged ops.
+     * may predate retained queue additions or another editor's projected ops.
      */
     private fun retainCanonicalProjectionAfterRegistration(
         filePath: String,
@@ -2494,7 +2326,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
          * repair. The controller subtracts what its process-local hub can actually
          * serve, which is the only fact that separates "registered" from "registered
          * and backed". Re-register storms are already bounded by
-         * [beginAckRecoveryReregister]'s coalescing window.
+         * [beginProjectionRecoveryReregister]'s coalescing window.
          *
          * A null answer means the question could not be asked (old cdylib, controller
          * unreachable). Only then does this fall back to the compatibility sweep, so
@@ -2604,18 +2436,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val fileName = file.name
                 ApplicationManager.getApplication().executeOnPooledThread {
                     if (project.isDisposed) return@executeOnPooledThread
-                    if (!manager.beginAckRecoveryReregister(resolvedFilePath)) {
+                    if (!manager.beginProjectionRecoveryReregister(resolvedFilePath)) {
                         manager.log.info(
-                            "[crdt-replica] coalesced delivery-ack re-register for $fileName reason=$reason",
+                            "[crdt-replica] coalesced projection-recovery re-register for $fileName reason=$reason",
                         )
                         manager.requestUrgentRemoteDrain(
                             resolvedFilePath,
-                            "ack-recovery-reregister-coalesced",
+                            "projection-recovery-reregister-coalesced",
                         )
                         return@executeOnPooledThread
                     }
                     manager.log.info(
-                        "[crdt-replica] forcing delivery-ack re-register for $fileName reason=$reason",
+                        "[crdt-replica] forcing projection-recovery re-register for $fileName reason=$reason",
                     )
                     manager.ensureOpenDocumentReplica(
                         resolvedFilePath,

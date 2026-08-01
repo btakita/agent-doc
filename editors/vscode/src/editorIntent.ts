@@ -5,7 +5,6 @@ export const EditorIntent = {
      * canonical replace. Carries `node_patches` only (`#crdtstructops` Phase C). */
     ApplyStructuralOp: 'apply_structural_op',
     Reposition: 'reposition',
-    SaveDocument: 'save_document',
     RefreshContent: 'refresh_content',
     ObserveLazilyCurrent: 'observe_lazily_current',
     DeliverCrdtRemote: 'deliver_crdt_remote',

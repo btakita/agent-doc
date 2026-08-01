@@ -206,23 +206,32 @@ fn spawn_crdt_delivery_pump(
                             );
                             return;
                         }
-                        if let Err(err) =
-                            agent_doc_crdt_relay_io::ack_replica_update_for_file_with_content_hash(
-                                &canonical,
-                                &identity,
-                                &update.patch_id,
-                                update.generation,
-                                Some(&update.expected_content_hash),
-                            )
-                        {
-                            eprintln!(
-                                "test CRDT delivery pump failed to ACK {}: {err:#}",
-                                canonical.display()
-                            );
-                            return;
+                        let visible_hash = agent_doc_hash::content_hash(&replica.text());
+                        match agent_doc_crdt_relay_io::observe_replica_projection_for_file(
+                            &canonical,
+                            &identity,
+                            &visible_hash,
+                        ) {
+                            Ok(Some(true)) => {}
+                            Ok(result) => {
+                                eprintln!(
+                                    "test CRDT delivery pump projection did not settle {}: result={result:?} visible_hash={} expected_hash={}",
+                                    canonical.display(),
+                                    visible_hash,
+                                    update.expected_content_hash,
+                                );
+                                return;
+                            }
+                            Err(err) => {
+                                eprintln!(
+                                    "test CRDT delivery pump failed to project visible state for {}: {err:#}",
+                                    canonical.display()
+                                );
+                                return;
+                            }
                         }
                         // Model the editor's native save as a separate step
-                        // after delivery ACK. Production settlement must still
+                        // after visible-state projection. Production settlement must still
                         // observe the exact disk projection and revalidate the
                         // canonical editor version before it can commit.
                         if let Err(err) = std::fs::write(&canonical, replica.text()) {

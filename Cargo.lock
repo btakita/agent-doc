@@ -457,6 +457,7 @@ dependencies = [
  "agent-doc-session-accretion-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
+ "agent-doc-state-backbone",
  "agent-doc-template",
  "agent-doc-template-io",
  "agent-doc-test-support",
@@ -1495,7 +1496,6 @@ name = "agent-doc-preflight-runtime-io"
 version = "0.35.109"
 dependencies = [
  "agent-doc-commit-io",
- "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-diff",
@@ -1503,10 +1503,8 @@ dependencies = [
  "agent-doc-document-realtime-io",
  "agent-doc-frontmatter",
  "agent-doc-hash",
- "agent-doc-ipc-io",
  "agent-doc-ops-log-io",
  "agent-doc-preflight-io",
- "agent-doc-project-root-io",
  "agent-doc-queue",
  "agent-doc-reliable-sync-io",
  "agent-doc-repair-io",
@@ -1519,7 +1517,6 @@ dependencies = [
  "agent-doc-write-converge-io",
  "anyhow",
  "tempfile",
- "uuid",
 ]
 
 [[package]]

@@ -51,24 +51,24 @@ pub enum VisibleWriteDecision {
 
 /// Admission for a CP-authored CRDT write while a previous canonical frontier
 /// may still be in flight to editor replicas. A new write is backpressured until
-/// all live editors ACK the visible frontier; callers may coalesce queued intent
+/// every live editor projects the visible frontier; callers may coalesce queued intent
 /// to the latest target while waiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CrdtWriteAdmission {
     ApplyLatest,
-    WaitForDeliveryAck,
+    WaitForDeliveryProjection,
 }
 
 pub const fn decide_crdt_write_admission(delivery_converged: bool) -> CrdtWriteAdmission {
     if delivery_converged {
         CrdtWriteAdmission::ApplyLatest
     } else {
-        CrdtWriteAdmission::WaitForDeliveryAck
+        CrdtWriteAdmission::WaitForDeliveryProjection
     }
 }
 
 /// Evidence available when the bounded foreground wait for an editor delivery
-/// ACK expires. Canonical retention and editor visibility are deliberately
+/// projection observation expires. Canonical retention and editor visibility are deliberately
 /// separate facts: a retained target may finish delivery asynchronously, but a
 /// missing or superseded target must still fail closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4711,7 +4711,7 @@ Working.
 fn crdt_write_admission_backpressures_until_visible_ack() {
     assert_eq!(
         decide_crdt_write_admission(false),
-        CrdtWriteAdmission::WaitForDeliveryAck,
+        CrdtWriteAdmission::WaitForDeliveryProjection,
     );
     assert_eq!(
         decide_crdt_write_admission(true),

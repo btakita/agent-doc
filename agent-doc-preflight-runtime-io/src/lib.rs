@@ -530,9 +530,10 @@ pub fn detect_route_queue_snapshot_commit_boundary_recoverable(
 /// `#ipctruncrecover`: reconcile an IPC-truncated working tree from the live editor
 /// buffer instead of bailing the layout guard.
 ///
-/// Returns `Ok(true)` only when it actually recovered (flushed the editor buffer to
-/// disk, verified it preserved HEAD's committed `exchange`, and reset the snapshot to
-/// HEAD). Returns `Ok(false)` when recovery is not safely possible.
+/// Returns `Ok(true)` only when the editor's normal full-state projection has
+/// already converged through both visible authority and disk, preserves HEAD's
+/// committed `exchange`, and permits resetting the snapshot to HEAD. It never
+/// requests an editor save. Returns `Ok(false)` while projection is pending.
 pub fn recover_ipc_truncated_worktree_from_editor_buffer(
     file: &Path,
     rc: &agent_doc_run_context_io::CycleContext,
@@ -552,10 +553,6 @@ pub fn recover_ipc_truncated_worktree_from_editor_buffer(
     let Ok(canonical) = file.canonicalize() else {
         return Ok(false);
     };
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-
-    let patch_id = uuid::Uuid::new_v4().to_string();
-    let path_str = canonical.to_string_lossy().to_string();
     let lazily_current = agent_doc_crdt_relay_io::current_text_for_file(&canonical)?;
     let (authority_state, delivery_converged) = match &lazily_current {
         agent_doc_crdt_relay_io::CurrentText::Detached => ("detached", true),
@@ -579,37 +576,32 @@ pub fn recover_ipc_truncated_worktree_from_editor_buffer(
     if !delivery_converged {
         return Ok(false);
     }
-    let Some(registration) =
-        agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)?
+    let agent_doc_crdt_relay_io::CurrentText::Current {
+        text: projected, ..
+    } = lazily_current
     else {
         return Ok(false);
     };
-    if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid) {
-        return Ok(false);
-    }
-    match agent_doc_ipc_io::send_save_document_to_editor(
-        &project_root,
-        registration.pid,
-        &registration.editor_id,
-        &path_str,
-        &patch_id,
-    ) {
-        Ok(true) => {}
-        Ok(false) | Err(_) => return Ok(false),
-    }
-    if poll_save_document_visible_write_receipt(&project_root, &canonical, &patch_id)?.is_none() {
+    let disk = std::fs::read_to_string(&canonical).with_context(|| {
+        format!(
+            "failed to read projected disk cut for {}",
+            canonical.display()
+        )
+    })?;
+    if disk != projected {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "ipc_truncation_recover_rejected file={} save_document=unproven_visible_write patch_id={}",
+                "ipc_truncation_recover_pending file={} visible_hash={} disk_hash={} driver=state_projection",
                 file.display(),
-                patch_id
+                agent_doc_hash::content_hash(&projected),
+                agent_doc_hash::content_hash(&disk),
             ),
         );
         return Ok(false);
     }
 
-    let flushed = resolve_current_preflight_document(&canonical, "ipc_truncation_recover")?;
+    let flushed = projected;
     if !editor_buffer_preserved_head_exchange(&flushed, &head) {
         agent_doc_ops_log_io::log_op(
             file,
@@ -628,11 +620,11 @@ pub fn recover_ipc_truncated_worktree_from_editor_buffer(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ipc_truncation_recovered_from_editor_buffer file={} flushed_len={} head_len={} patch_id={}",
+            "ipc_truncation_recovered_from_editor_projection file={} projected_len={} head_len={} content_hash={} driver=state_projection",
             file.display(),
             flushed.len(),
             head.len(),
-            patch_id
+            agent_doc_hash::content_hash(&flushed),
         ),
     );
     eprintln!(
@@ -640,20 +632,6 @@ pub fn recover_ipc_truncated_worktree_from_editor_buffer(
         file.display()
     );
     Ok(true)
-}
-
-fn poll_save_document_visible_write_receipt(
-    project_root: &Path,
-    file: &Path,
-    patch_id: &str,
-) -> Result<Option<String>> {
-    agent_doc_write_converge_io::poll_visible_write_text_lazily_event_or_projection(
-        file,
-        project_root,
-        patch_id,
-        std::time::Duration::from_secs(6),
-        std::time::Duration::from_millis(100),
-    )
 }
 
 #[cfg(test)]

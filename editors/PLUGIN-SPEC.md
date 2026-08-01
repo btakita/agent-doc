@@ -45,8 +45,8 @@ socket with:
 }
 ```
 
-Registration, current-value observation, remote CRDT delivery, ACKs, and
-visibility receipts use the reliable-sync Lazily plane. Endpoint discovery is
+Registration, current-value observation, remote CRDT delivery, and visible
+state projections use the reliable-sync Lazily plane. Endpoint discovery is
 PID-scoped so a stale listener from another editor process cannot receive a
 delivery.
 
@@ -62,7 +62,6 @@ Rust, JetBrains, and VS Code use the same `EditorIntent` names:
 |---|---|
 | `apply_canonical` | Apply a narrow canonical mutation to Lazily current |
 | `reposition` | Move the exchange boundary without changing user text |
-| `save_document` | Save the already-open current buffer through the editor API |
 | `refresh_content` | Republish the already-open editor value to Lazily |
 | `observe_lazily_current` | Return current value, generation, and causal proof |
 | `deliver_crdt_remote` | Integrate a remote Lazily change |
@@ -115,10 +114,12 @@ The plugin does not parse markdown, merge components, normalize duplicated
 scaffolds, or decide which side wins. Those decisions are shared native-model
 operations so every editor implements the same semantics.
 
-## 6. Save, reconnect, and reload
+## 6. Persistence, reconnect, and reload
 
-`save_document` saves the already-open buffer and publishes the resulting
-Lazily current hash and disk-projection receipt. It never replaces the buffer.
+Persistence is a state projection, not an editor command. The plugin publishes
+the visible CRDT state and its ordinary platform save lifecycle makes the disk
+projection observable; the controller derives convergence without requesting a
+save or receiving a per-operation ACK.
 
 On reconnect, the editor republishes its current value and generation. The
 controller rebases pending intents from `state.db`; the plugin must not reread
@@ -168,9 +169,9 @@ focus-neutral.
 
 - Log every rejection with intent id, document, expected/current generation,
   editor member, and reason.
-- Keep failures visible in the editor; never silently acknowledge them.
+- Keep failures visible in the editor; never silently accept them.
 - Never treat timeout, socket disappearance, file save, or process exit as an
-  inferred delivery ACK.
+  inferred visible-state projection.
 - Recovery retries are bounded and resume the durable state-machine phase.
 - Structural ambiguity and two-sided concurrent edits are rebase inputs, not a
   reason to elect disk or replace the buffer.

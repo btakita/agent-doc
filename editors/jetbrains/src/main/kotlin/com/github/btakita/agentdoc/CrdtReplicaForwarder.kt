@@ -316,31 +316,21 @@ class CrdtReplicaForwarder(
         return delivery
     }
 
-    /**
-     * ACK only after the caller has applied [applyRemoteUpdate]'s text to the
-     * visible editor buffer. The content hash turns the ACK into convergence
-     * proof; a generation alone proves only that a frame was handled.
-     */
-    fun ackRemoteUpdate(
-        update: ReplicaRemoteUpdate,
-        appliedText: String?,
-        appliedAtMs: Long = 0L,
-    ): Boolean {
+    /** Publish the editor's complete visible/disk state projection. */
+    fun projectVisibleState(text: String, diskPersisted: Boolean = false): Boolean {
         if (!attached) return false
         val started = System.nanoTime()
-        val appliedContentHash = appliedText?.let(::sha256Text)
-        return transport.ackUpdate(
+        val contentHash = sha256Text(text)
+        return transport.projectState(
             filePath,
             identity,
-            update.patchId,
-            update.generation,
-            appliedContentHash,
-            ReplicaAckStamps(pulledAtMs = update.pulledAtMs, appliedAtMs = appliedAtMs),
+            contentHash,
+            diskPersisted,
         ).also {
             logSlow(
-                "transport.ackUpdate",
+                "transport.projectState",
                 started,
-                details = "patch_id=${update.patchId} generation=${update.generation} expected_hash=${update.expectedContentHash ?: "legacy"} applied_hash=${appliedContentHash ?: "unavailable"} ok=$it",
+                details = "content_hash=$contentHash disk_persisted=$diskPersisted ok=$it",
             )
         }
     }
@@ -420,37 +410,13 @@ data class ReplicaRemoteUpdate(
     val expectedContentHash: String? = null,
     val update: ByteArray,
     /**
-     * Wall-clock ms at which this replica RECEIVED the intent, stamped where the
-     * pull response is parsed. First of the four ACK round-trip stamps
-     * (`#ackeditorstamps`): received -> applied to buffer -> receipt emitted ->
-     * binary observes the receipt. Without it, a `delivery_ack_pending=11000ms`
-     * profile cannot tell a late delivery from a slow apply from a slow receipt.
+     * Wall-clock ms at which this replica received the intent, stamped where the
+     * pull response is parsed. This distinguishes controller-to-editor transport
+     * delay from buffer-apply and projected-state settlement latency.
      * `0` means unstamped (a test transport, or a path with no pull).
      */
     val pulledAtMs: Long = 0L,
 )
-
-/**
- * Editor-side halves of the delivery-ACK round trip (`#ackeditorstamps`).
- *
- * The binary already profiles its own wait states, so an 11s
- * `delivery_ack_pending` is attributed to the wait but not decomposed: it cannot
- * distinguish "the plugin received the intent late" from "applied it slowly"
- * from "applied it fast and was slow to emit the receipt". These are wall-clock
- * epoch ms because the two ends are different processes; the controller stamps
- * the fourth (observed) moment when the ACK lands.
- *
- * `0` means unstamped and is rendered as unknown rather than as a delta from the
- * epoch — a fabricated 1.7-trillion-ms delta is worse than a gap.
- */
-data class ReplicaAckStamps(
-    val pulledAtMs: Long = 0L,
-    val appliedAtMs: Long = 0L,
-) {
-    companion object {
-        val UNSTAMPED = ReplicaAckStamps()
-    }
-}
 
 private fun sha256Text(text: String): String =
     MessageDigest.getInstance("SHA-256")
@@ -519,14 +485,12 @@ interface ReplicaTransport {
     fun pullDelivery(filePath: String, identity: String): ReplicaPullDelivery =
         ReplicaPullDelivery.Deltas(pullUpdates(filePath, identity))
 
-    /** `replica_ack`: confirm a pulled update has been applied to the local editor. */
-    fun ackUpdate(
+    /** `replica_projection`: publish complete visible/disk state. */
+    fun projectState(
         filePath: String,
         identity: String,
-        patchId: String,
-        generation: Long,
-        contentHash: String? = null,
-        stamps: ReplicaAckStamps = ReplicaAckStamps.UNSTAMPED,
+        contentHash: String,
+        diskPersisted: Boolean,
     ): Boolean = false
 
     /** `replica_deregister`. */
@@ -687,27 +651,18 @@ class CpSocketReplicaTransport(
         }
     }
 
-    override fun ackUpdate(
+    override fun projectState(
         filePath: String,
         identity: String,
-        patchId: String,
-        generation: Long,
-        contentHash: String?,
-        stamps: ReplicaAckStamps,
+        contentHash: String,
+        diskPersisted: Boolean,
     ): Boolean {
-        // `#ackeditorstamps`: the receipt moment is stamped here, at the send, not
-        // by the caller — this is the last instant the editor half owns.
-        val receiptAtMs = System.currentTimeMillis()
-        val request = controllerRequest("replica_ack", filePath, identity) {
-            it.addProperty("patch_id", patchId)
-            it.addProperty("generation", generation)
-            if (contentHash != null) it.addProperty("content_hash", contentHash)
-            if (stamps.pulledAtMs > 0L) it.addProperty("pulled_at_ms", stamps.pulledAtMs)
-            if (stamps.appliedAtMs > 0L) it.addProperty("applied_at_ms", stamps.appliedAtMs)
-            it.addProperty("receipt_at_ms", receiptAtMs)
+        val request = controllerRequest("replica_projection", filePath, identity) {
+            it.addProperty("content_hash", contentHash)
+            it.addProperty("disk_persisted", diskPersisted)
         }
         val response = send(request) ?: return false
-        return response.ok && (response.data?.get("acknowledged")?.asBoolean ?: false)
+        return response.ok && (response.data?.get("projected")?.asBoolean ?: false)
     }
 
     override fun deregister(filePath: String, identity: String) {
@@ -930,6 +885,6 @@ class NativeReplicaNode : ReplicaNode {
 
 /*
  * Production live hookup lives in CrdtReplicaManager: it owns the DocumentListener,
- * CP socket transport, pull/ACK loop, and minimal editor-buffer apply.
+ * CP socket transport, pull/projection loop, and minimal editor-buffer apply.
  * This file stays the testable seam around the native replica node and transport.
  */

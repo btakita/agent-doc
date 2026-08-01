@@ -75,7 +75,8 @@ fun main() {
                     var allAcked = true
                     updates.forEach { update ->
                         val text = active.applyRemoteUpdate(update.update)
-                        allAcked = active.ackRemoteUpdate(update, text) && allAcked
+                        allAcked =
+                            (text?.let { active.projectVisibleState(it) } == true) && allAcked
                     }
                     reply {
                         addProperty("ok", allAcked)

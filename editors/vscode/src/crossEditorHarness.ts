@@ -70,7 +70,9 @@ async function handle(command: HarnessCommand): Promise<boolean> {
       const receipts: Array<Record<string, unknown>> = [];
       for (const update of updates) {
         const text = forwarder.applyRemoteUpdate(update.update);
-        const acknowledged = await forwarder.ackRemoteUpdate(update, text ?? undefined);
+        const projected = text == null
+          ? false
+          : await forwarder.projectVisibleState(text);
         receipts.push({
           patchId: update.patchId,
           generation: update.generation,
@@ -78,9 +80,9 @@ async function handle(command: HarnessCommand): Promise<boolean> {
           appliedContentHash: text == null
             ? null
             : createHash('sha256').update(text, 'utf8').digest('hex'),
-          acknowledged,
+          projected,
         });
-        allAcked = acknowledged && allAcked;
+        allAcked = projected && allAcked;
       }
       reply({
         ok: allAcked,

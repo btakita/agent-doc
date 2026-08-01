@@ -83,9 +83,8 @@ class CrdtReplicaForwarderTest {
         val sentUpdates = mutableListOf<ByteArray>()
         val sentLineages = mutableListOf<String?>()
         val pendingUpdates = mutableListOf<ReplicaRemoteUpdate>()
-        val ackedUpdates = mutableListOf<String>()
-        val ackedContentHashes = mutableListOf<String?>()
-        val ackedStamps = mutableListOf<ReplicaAckStamps>()
+        val projectedContentHashes = mutableListOf<String>()
+        val projectedDiskStates = mutableListOf<Boolean>()
 
         override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
             return register(filePath, identity, null)
@@ -122,18 +121,15 @@ class CrdtReplicaForwarderTest {
         override fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> =
             pendingUpdates.toList()
 
-        override fun ackUpdate(
+        override fun projectState(
             filePath: String,
             identity: String,
-            patchId: String,
-            generation: Long,
-            contentHash: String?,
-            stamps: ReplicaAckStamps,
+            contentHash: String,
+            diskPersisted: Boolean,
         ): Boolean {
-            ackedUpdates.add("$patchId:$generation")
-            ackedContentHashes.add(contentHash)
-            ackedStamps.add(stamps)
-            pendingUpdates.removeIf { it.patchId == patchId && it.generation == generation }
+            projectedContentHashes.add(contentHash)
+            projectedDiskStates.add(diskPersisted)
+            pendingUpdates.clear()
             return true
         }
 
@@ -314,7 +310,7 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
-    fun `remote pull applies only after caller acks the applied update`() {
+    fun `remote pull projects complete visible state after apply`() {
         val node = FakeNode()
         val transport = CapturingTransport()
         transport.pendingUpdates.add(
@@ -332,66 +328,14 @@ class CrdtReplicaForwarderTest {
         val pulled = fwd.pullRemoteUpdates()
         assertEquals(1, pulled.size)
         assertEquals("FROM-PEER", fwd.applyRemoteUpdate(pulled[0].update))
-        assertTrue(fwd.ackRemoteUpdate(pulled[0], "FROM-PEER"))
+        assertTrue(fwd.projectVisibleState("FROM-PEER"))
 
-        assertEquals(listOf("crdt:1:2:1:1"), transport.ackedUpdates)
         assertEquals(
             listOf("a6c6f01a3d023a48fd52677f25b60502ea1c596e76c6e5ae91b5216d4d035841"),
-            transport.ackedContentHashes,
+            transport.projectedContentHashes,
         )
+        assertEquals(listOf(false), transport.projectedDiskStates)
         assertTrue(transport.pendingUpdates.isEmpty())
-    }
-
-    @Test
-    fun `the ack carries the editor-side stamps the binary cannot observe`() {
-        // #ackeditorstamps: the binary can time its own wait and the moment the
-        // receipt lands, but "received" and "applied to buffer" happen inside the
-        // plugin. If the ACK does not carry them, an 11s delivery_ack_pending
-        // stays one opaque number instead of three legs with different fixes.
-        val node = FakeNode()
-        val transport = CapturingTransport()
-        val pulledAtMs = 1_700_000_000_000L
-        transport.pendingUpdates.add(
-            ReplicaRemoteUpdate(
-                patchId = "crdt:1:2:1",
-                origin = 1L,
-                target = 2L,
-                generation = 1L,
-                update = "FROM-PEER".toByteArray(),
-                pulledAtMs = pulledAtMs,
-            ),
-        )
-        val fwd = CrdtReplicaForwarder("plan.md", "intellij:2", node, transport)
-        fwd.register()
-
-        val pulled = fwd.pullRemoteUpdates()
-        assertEquals("FROM-PEER", fwd.applyRemoteUpdate(pulled[0].update))
-        val appliedAtMs = pulledAtMs + 400L
-        assertTrue(fwd.ackRemoteUpdate(pulled[0], "FROM-PEER", appliedAtMs))
-
-        assertEquals(
-            "both editor-side moments must reach the transport, not just the applied one",
-            listOf(ReplicaAckStamps(pulledAtMs = pulledAtMs, appliedAtMs = appliedAtMs)),
-            transport.ackedStamps,
-        )
-
-        // A caller that cannot name the apply moment (self-echo: the update never
-        // crossed the buffer) must leave it UNSTAMPED rather than substitute a
-        // clock read, or the profile reports a fabricated apply of ~0ms.
-        transport.pendingUpdates.add(
-            ReplicaRemoteUpdate(
-                patchId = "crdt:1:2:2",
-                origin = 1L,
-                target = 2L,
-                generation = 2L,
-                update = "SELF-ECHO".toByteArray(),
-                pulledAtMs = pulledAtMs,
-            ),
-        )
-        val echo = fwd.pullRemoteUpdates().last()
-        assertTrue(fwd.ackRemoteUpdate(echo, "FROM-PEER"))
-        assertEquals(0L, transport.ackedStamps.last().appliedAtMs)
-        assertEquals(pulledAtMs, transport.ackedStamps.last().pulledAtMs)
     }
 
     @Test

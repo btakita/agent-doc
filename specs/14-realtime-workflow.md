@@ -53,7 +53,7 @@ may originate editor-to-CP document state. A whole-buffer reload, file-cache
 refresh, force-refresh attachment, or mutation performed while applying a CP
 projection is non-operator state and must never be adopted into the canonical
 document. When such a projection differs, the CP canonical is re-applied to the
-editor and acknowledged only after the visible text hash converges.
+editor; convergence is derived only after the visible text hash matches.
 If disk and editor state disagree, the binary must converge through the editor,
 wait for proven relay delivery, or fail closed. It must not use a direct disk
 write as an automatic recovery behind the editor. There is no full live-buffer
@@ -176,26 +176,21 @@ owner has zero registered replicas remains a content-bearing deferred delivery,
 not a partial response and not a repair request. It records the exact editor/disk
 base and complete target, requests stale-supervisor recovery, and leaves disk
 unchanged. Once a replica reattaches, terminal verification may automatically
-resume that same target through the ordinary CRDT delivery/ACK barrier only when
+resume that same target through the ordinary CRDT delivery-projection barrier only when
 canonical authority equals committed `HEAD`, disk still equals the retained base,
 and the retained hashes and bytes match exactly. Any newer editor or disk content
 invalidates automatic resumption and fails closed.
 
-The same retained-delivery rule applies when an attached editor has not crossed
-its visible ACK frontier before the foreground deadline. If canonical CRDT
-authority still equals the exact complete target, the relay receipt proves that
-target was applied, and the asynchronous recovery signal was accepted, the
-foreground write completes as `retained_async_editor_delivery`; the editor retry
-continues without a force-disk write, controller recycle, or another finalize.
-Canonical loss, a mismatched receipt, or a missing recovery signal remains a hard
-failure. Retry admission is single-flight: external CRDT events may record more
-work, but cannot start another drain while the adapter's bounded ACK backoff is
-active.
+The same retained-delivery rule applies when an attached editor has not yet
+published the matching visible-state projection. The write remains a successful
+retained continuation. No foreground recovery signal, replay request, refresh,
+or re-registration command is emitted; a later projection invalidates the
+derived settlement Computed and resumes the eligible Effect.
 
 The delivery receipt is a proof of one frontier, not a lock on canonical
 authority. A live editor delta may advance canonical text between that receipt
 and disk projection. The document actor must retain the original projection base
-and complete target and re-enter the same CRDT replace/ACK operation against the
+and complete target and re-enter the same CRDT replace/projection operation against the
 advanced frontier. This is an internal rebase of one semantic intent: response
 and backlog mutations apply at most once, operator text survives, and no new
 capture/finalize/force-disk operation is admitted. A bounded foreground retry may
@@ -450,36 +445,36 @@ registration therefore returns an opaque `lineage`; JetBrains and VS Code attach
 it to each durable document-op frame. Whole-document rebuild/adopt operations
 rotate the lineage. A receiver applies only a matching-lineage frame. A stale
 lineage, or an unscoped legacy frame after rotation, is terminally quarantined
-and ACKed so retry cannot duplicate the exchange, resurrect a queue tombstone,
+and quarantined so retry cannot duplicate the exchange, resurrect a queue tombstone,
 or wedge the reliable-sync cursor. The lineage is checkpointed beside the `.yrs`
 projection with that projection's SHA-256; recovery preserves it only when the
 hash matches and otherwise mints a new fail-closed lineage.
 
-   **Content-qualified ACK.** Every delta item also carries the SHA-256
+   **Full-state delivery projection.** Every delta item also carries the SHA-256
    `expected_content_hash` of the canonical visible target. After applying the
    delta to its native replica *and* installing the converged text in the editor,
-   the plugin sends the visible buffer's `content_hash` with `replica_ack`.
+   the plugin publishes the visible buffer's `content_hash` with
+   `replica_projection`.
    Generation equality alone is not convergence: a hash mismatch retains the
    delivery, flags the member for the replace-capable bootstrap above, and keeps
-   disk materialization closed. Older plugins may omit the hash only during the
-   rolling install compatibility window. Hash-qualified receipts are cumulative:
-when an editor coalesces generations and proves the final target for generation
-N, the relay atomically advances every older pending generation through N.
+   disk materialization closed. The observation is cumulative: when an editor
+   coalesces generations and proves the final target for generation N, the relay
+   derives and advances every older pending generation through N.
 
-JetBrains retains a content-qualified ACK after the visible editor apply until
-the controller accepts it. Retry recomputes the proof from the current editor
-buffer; remembered text is never accepted as proof. Transport only wakes the
-controller-owned Lazily delivery projection. A missing or mismatched receipt
-leaves that exact canonical revision pending and re-projects it to the editor;
+JetBrains, VS Code, and Zed publish their current full-buffer projection after
+visible apply and again after native save, with `disk_persisted` distinguishing
+those two observed states. There is no retained per-update ACK sidecar or ACK
+replay request. A missing or mismatched projection leaves that exact canonical
+revision pending and re-projects it to the editor;
 it never requests an editor full state, force-refreshes, or re-registers from the
 editor buffer. In particular, a stale native baseline quarantines the local
 delta and schedules a pull of the current controller canonical projection.
 
 The deferred candidate remains retained as an ordered semantic intent, and the
 per-document settlement graph resumes persistence and closeout only when its
-derived content-qualified receipt is current. Process exit, controller recycle,
+derived projected state is current. Process exit, controller recycle,
 or a same-target finalize retry therefore cannot lose or duplicate the response.
-No foreground caller polls that graph or waits through an ACK-recovery barrier:
+No foreground caller polls that graph or waits through a recovery barrier:
 pending is a successful retained state, while unsaved divergent editor text is
 an explicit conflict. The controller's canonical text remains the only
 whole-document authority throughout recovery.
@@ -488,10 +483,10 @@ Deferred agent mutations are an ordered, content-bearing intent journal rather
 than one replaceable whole-document target. Each entry retains its expected cut
 and target bytes. Reconnect replays every entry in order over the current
 operator cut, and convergence of entry N settles only the journal prefix through
-N; a late ACK for an older entry cannot clear a newer mutation. This is required
+N; an older projection cannot clear a newer mutation. This is required
 for same-component changes such as backlog add followed by backlog mark: even if
 the later target was composed from a stale base, replay preserves both changes.
-When an unacknowledged response is already visible with later operator text, that
+When a response awaiting projection is already visible with later operator text, that
 response intent counts as applied before later entries are replayed, so an
 ours-wins exchange conflict cannot erase the operator text.
 
@@ -508,7 +503,7 @@ disk read authority and never requires an agent-managed library reload.
 
 Exact target bytes are not sufficient settlement proof for a semantic rebase
 intent. The non-capture byte-equality fast path is limited to delivery-only
-reasons (missing replica, stale delivery worker, or pending delivery ACK). An
+reasons (missing replica, stale delivery worker, or pending delivery projection). An
 intent that merged an unsaved editor cut, extended reconnect lineage, or awaits
 an external-source decision remains retained until its operator-cut causality is
 proved; reaching canonical authority and disk cannot bless a stale resurrection.
@@ -541,7 +536,7 @@ remains the authority/fallback when an op epoch is unavailable.
 Document-scoped editor actions must not create cross-document authority edges.
 In particular, JetBrains Compact Exchange saves only its selected document
 before routing; `saveAllDocuments()` is forbidden because it can synchronously
-wake an unrelated document's retained delivery and surface that ACK failure as
+wake an unrelated document's retained delivery and surface that projection failure as
 the selected document's compact result.
 
 When the deferred reconnect result differs from the open JetBrains document, a
@@ -553,11 +548,11 @@ the clean target `VirtualFile` stamp before mutation and must save the installed
 canonical bytes through `FileDocumentManager` before registration can advertise
 that frontier. Only after the visible buffer, disk projection, and reconnect
 target agree may registration seed and atomically swap the replacement member.
-After every editor ACK, the controller compares disk bytes and skips its legacy
-atomic projection when the editor already saved the same canonical bytes; an
-identical post-ACK rewrite is forbidden because changing only the file stamp can
+After every editor state projection, the controller compares disk bytes and
+skips its legacy atomic projection when the editor already saved the same
+canonical bytes; an identical rewrite is forbidden because changing only the file stamp can
 raise JetBrains File Cache Conflict. This ordering prevents queue-consume or other
-post-response targets from being ACKed by a target-only replica while stale IDEA
+post-response targets from being accepted from a target-only replica while stale IDEA
 text later replays an older boundary or queue state.
 
 ### Turn-State Projection To The Plugin
@@ -631,7 +626,7 @@ realtime authority rules.
 | `DiskDriftObserved` | Live editor buffer plus current file as operator inputs | Disk changed outside the owning editor, such as a pluginless editor save, while an editor listener owns the document. | Reconcile disk and editor operator edits through the owner, or fail closed. |
 | `AgentDeltaReady` | Prior source-of-truth plus structured agent intent | The binary has an agent-owned operation candidate, such as appending a response or compacting `agent:exchange`. | Call `agent-doc-merge` with the latest realtime document. |
 | `MergePlanned` | Latest source-of-truth plus merge output | The pure merge core produced a patch plan or merged document that preserves operator text. | Deliver the plan through the owning transport. |
-| `ApplyInFlight` | Pre-apply source-of-truth remains authoritative | A patch/write has been sent but delivery is not proven. | Wait for ACK/content proof, retry through the owner, or fail closed. |
+| `ApplyInFlight` | Pre-apply source-of-truth remains authoritative | A patch/write has been sent but delivery is not proven. | Wait for a matching visible-state projection, or fail closed. |
 | `AppliedVerified` | Post-apply source-of-truth | The owner-visible document contains the agent operation and preserves observed operator text. | Save backup state and commit. |
 | `ConflictBlocked` | Current source-of-truth | Merge or delivery could not prove preservation of operator text. | Leave the document untouched and report/retry later. |
 
@@ -671,7 +666,7 @@ invent a near-duplicate free-text flag.
 A deferred response target also cannot overrule a newer `ApplyInFlight` CP
 frontier that already contains the latest complete response. That newer live
 target supersedes the deferred assistant tail and rebases reconnect proof on the
-exact failed-ACK target. An unchanged editor cut receives the live target
+exact failed-projection target. An unchanged editor cut receives the live target
 directly; if the operator appended prompt nodes afterward, semantic response-tail
 reconciliation preserves those prompts while removing the superseded response
 and canonicalizing one terminal boundary.
@@ -1157,7 +1152,7 @@ Implementations must keep tests for these cases:
 - out-of-band disk writes while an editor owns the document reconcile with the
   live editor buffer or fail closed before any agent response lands;
 - lazily visible-write drift cannot reset operator-visible file content;
-- an editor ACK persists its full visible content in Lazily, and a legacy
+- an editor state projection persists its full visible content in Lazily, and a legacy
   hash-only `already_applied` receipt cannot authorize current-buffer
   publication; the controller reprojects its retained canonical revision;
 - an editor-owned write with zero registered replicas retains its full target

@@ -9,7 +9,6 @@ import * as native from './native.js';
 import * as stateMirror from './stateMirror.js';
 import { createEditorApplyProof, isEditorApplyProofCurrent } from './patchGuard.js';
 import { EditorIntent } from './editorIntent.js';
-import { processSaveDocumentIntent } from './saveDocumentIntent.js';
 import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement } from './patchPlan.js';
 import {
     buildCrossSessionClaimArgs,
@@ -2252,6 +2251,12 @@ class PatchWatcher implements vscode.Disposable {
             listDocuments: () => this.currentProjectMarkdownSnapshots(projectRoot),
             currentText: (filePath) => this.currentOpenDocumentText(filePath),
             applyText: (filePath, text, expectedText) => this.applyCrdtReplicaText(filePath, text, expectedText),
+            observeProjection: (filePath) => {
+                const document = vscode.workspace.textDocuments.find(
+                    (candidate) => candidate.uri.fsPath === filePath,
+                );
+                if (document) this.observeLazilyCurrentNow(document, projectRoot);
+            },
             normalizeTemplateStructure: (text) => native.normalizeTemplateStructure(text, projectRoot),
             logger: {
                 debug: (message) => this.outputChannel.appendLine(message),
@@ -2453,40 +2458,6 @@ class PatchWatcher implements vscode.Disposable {
                 if (!filePath) return 0;
                 this.crdtReplicas?.requestRemoteDrain(filePath);
                 return 1;
-            case EditorIntent.SaveDocument: {
-                const patchId = typeof message.patch_id === 'string' ? message.patch_id : undefined;
-                return processSaveDocumentIntent(filePath, {
-                    fileExists: (candidate) => fs.existsSync(candidate),
-                    findOpenDocument: (candidate) => vscode.workspace.textDocuments.find(
-                        (document) => document.uri.fsPath === candidate,
-                    ),
-                    publishSavedContent: (candidate, content) => this.writeEditorContentProjection(
-                        patchId,
-                        candidate,
-                        content,
-                        projectRoot,
-                    ),
-                    observeSavedContent: (document) => this.observeLazilyCurrentNow(
-                        document as vscode.TextDocument,
-                        projectRoot,
-                    ),
-                    recordOutcome: (candidate, status) => {
-                        native.recordEditorSurfaceEvent(
-                            projectRoot,
-                            EDITOR_ID,
-                            candidate,
-                            'vcs_refresh_save',
-                            EditorIntent.SaveDocument,
-                            EditorIntent.SaveDocument,
-                            patchId,
-                            status,
-                        );
-                    },
-                    reportFailure: (candidate, error) => this.outputChannel.appendLine(
-                        `PatchWatcher: save_document failed for ${candidate}: ${error instanceof Error ? error.message : String(error)}`,
-                    ),
-                });
-            }
             case EditorIntent.RefreshVcs:
                 if (filePath) await refreshVcsForFile(filePath);
                 return 1;
@@ -2706,6 +2677,8 @@ class PatchWatcher implements vscode.Disposable {
         if (!document) return false;
         const currentContent = document.getText();
         if (currentContent === targetContent) {
+            if (document.isDirty && !(await document.save())) return false;
+            this.observeLazilyCurrentNow(document, this.projectRootPath);
             return true;
         }
         if (currentContent !== expectedContent) {
@@ -2722,7 +2695,11 @@ class PatchWatcher implements vscode.Disposable {
             this.outputChannel.appendLine(`PatchWatcher: CRDT remote update requires template-structure repair for ${filePath}; rejecting to keep replica state coherent`);
             return false;
         }
-        return this.applyMinimalTextEdit(document, targetContent);
+        if (!(await this.applyMinimalTextEdit(document, targetContent))) return false;
+        if (!(await document.save())) return false;
+        if (document.getText() !== targetContent) return false;
+        this.observeLazilyCurrentNow(document, projectRoot);
+        return true;
     }
 
     private currentOpenDocumentText(filePath: string): string | null {

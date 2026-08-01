@@ -4,13 +4,12 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class CrdtReplicaAckFrontierTest {
+class CrdtReplicaProjectionFrontierTest {
     @Test
-    fun `remote editor projection keeps its replica until the visible ack runs`() {
+    fun `remote editor projection keeps its replica until visible state is published`() {
         val sourcePath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
@@ -23,37 +22,6 @@ class CrdtReplicaAckFrontierTest {
 
         assertTrue(listener.contains(remoteApplyGuard))
         assertTrue(listener.indexOf(remoteApplyGuard) < listener.indexOf(forcedRefresh))
-    }
-
-    @Test
-    fun `one oldest ack carries proof for the newest matching visible frontier`() {
-        val updates = listOf(
-            update(generation = 3, expectedHash = "first"),
-            update(generation = 4, expectedHash = "middle"),
-            update(generation = 5, expectedHash = "visible"),
-        )
-
-        val plan = remoteAckReplayPlanUtil(updates, "visible")!!
-
-        assertEquals(3L, plan.candidate.generation)
-        assertEquals(5L, plan.acknowledgedThroughGeneration)
-    }
-
-    @Test
-    fun `unpublished visible text sends no ack and cannot trigger rebootstrap`() {
-        val updates = listOf(
-            update(generation = 11, expectedHash = "older"),
-            update(generation = 12, expectedHash = "newer"),
-        )
-
-        assertNull(remoteAckReplayPlanUtil(updates, "not-yet-published"))
-    }
-
-    @Test
-    fun `a retained ack frontier blocks another delivery pull`() {
-        assertFalse(shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount = 1))
-        assertFalse(shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount = 3))
-        assertTrue(shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount = 0))
     }
 
     @Test
@@ -179,21 +147,21 @@ class CrdtReplicaAckFrontierTest {
     @Test
     fun `visible canonical projection is acknowledged independently of disk persistence`() {
         assertTrue(
-            shouldAcknowledgeVisibleRemoteDeliveryUtil(
+            shouldProjectVisibleRemoteDeliveryUtil(
                 editorText = "canonical",
                 targetText = "canonical",
                 diskPersisted = false,
             ),
         )
         assertTrue(
-            shouldAcknowledgeVisibleRemoteDeliveryUtil(
+            shouldProjectVisibleRemoteDeliveryUtil(
                 editorText = "canonical",
                 targetText = "canonical",
                 diskPersisted = true,
             ),
         )
         assertFalse(
-            shouldAcknowledgeVisibleRemoteDeliveryUtil(
+            shouldProjectVisibleRemoteDeliveryUtil(
                 editorText = "operator edit",
                 targetText = "canonical",
                 diskPersisted = true,
@@ -404,7 +372,7 @@ class CrdtReplicaAckFrontierTest {
         ).forEach { validationState ->
             assertEquals(
                 "delivery ACK must depend on exact target visibility, not validation=$validationState",
-                ReplicaBaselineDecision.AcknowledgeRemoteTarget,
+                ReplicaBaselineDecision.ProjectRemoteTarget,
                 replicaBaselineDecisionUtil(
                     editorState = validationState,
                     editorMatchesExpected = false,

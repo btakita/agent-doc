@@ -50,7 +50,7 @@ use state_store::{
 };
 #[cfg(test)]
 use state_store::{ProjectionDiagnosticInsert, insert_projection_diagnostic_with_metadata};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -1374,6 +1374,15 @@ pub struct ControllerAnsweredFreeTextStrikeInvocation {
     pub node_keys: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllerCompactProjectionCompletion {
+    pub file: PathBuf,
+    pub live_content: String,
+    pub committed_content: String,
+    pub target_component: Option<String>,
+    pub commit: bool,
+}
+
 pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     fn consume_queue_prompt_force_disk(
         &self,
@@ -1422,6 +1431,13 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         file: &Path,
         invocation: ControllerCompactDocumentInvocation,
     ) -> Result<()>;
+
+    /// Apply the snapshot/commit Effect selected by a durable compact
+    /// continuation after the document projection clears its retained write.
+    fn complete_compact_projection(
+        &self,
+        invocation: ControllerCompactProjectionCompletion,
+    ) -> Result<String>;
 }
 
 static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();
@@ -1521,6 +1537,13 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         _invocation: ControllerCompactDocumentInvocation,
     ) -> Result<()> {
         anyhow::bail!("project controller test runtime does not compact documents")
+    }
+
+    fn complete_compact_projection(
+        &self,
+        invocation: ControllerCompactProjectionCompletion,
+    ) -> Result<String> {
+        Ok(agent_doc_hash::content_hash(&invocation.live_content))
     }
 
     fn sync_tmux_layout(
@@ -2001,6 +2024,14 @@ struct ControllerDocumentGraphs {
     /// application one-shot for an exact delivery frontier instead of relying
     /// on an effect scheduler's global drain behavior.
     retained_resume_applied: lazily::ThreadSafeSourceMap<String, Option<RetainedResumeSignal>>,
+    /// Durable compact continuation whose retained document write has reached
+    /// the projected authority+disk fixed point.
+    compact_resume: lazily::ThreadSafeComputedMap<
+        String,
+        Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation>,
+    >,
+    /// Controller-local receipt for the exact compact continuation Effect.
+    compact_resume_applied: lazily::ThreadSafeSourceMap<String, Option<String>>,
     /// Authoritative markdown is ingress state. Terminal queue lifecycle facts
     /// are derived beside the durable document projection instead of being
     /// recorded by whichever mutation path happened to observe a strike.
@@ -2035,6 +2066,8 @@ struct ControllerDocumentGraphs {
     /// lifetime so later replica events and controller activation invalidate
     /// the same subscription.
     retained_resume_effects: Mutex<BTreeMap<String, lazily::Effect>>,
+    /// One durable compact-completion Effect per document.
+    compact_resume_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// One answered-free-text projection Effect per document.
     answered_free_text_strike_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// One durable queue-completion projection Effect per document.
@@ -2139,7 +2172,6 @@ impl ControllerDocumentAuthorityGraph {
         )
     }
 
-    #[cfg(test)]
     fn projection(
         &self,
         document_hash: &str,
@@ -2374,6 +2406,70 @@ impl RetainedWriteSettleSink {
         );
     }
 
+    fn complete_compact(
+        &self,
+        document_hash: &str,
+        continuation: &agent_doc_state_backbone::DocumentCompactProjectionContinuation,
+    ) -> bool {
+        let Some(runtime) = self.runtime.upgrade() else {
+            return false;
+        };
+        let Ok(Some(projection)) = runtime.document_state_projection(document_hash) else {
+            return false;
+        };
+        if projection.document.pending_write.is_some()
+            || projection
+                .document
+                .pending_compact_projection
+                .as_ref()
+                .is_none_or(|pending| pending.continuation_id != continuation.continuation_id)
+        {
+            return false;
+        }
+        let invocation = ControllerCompactProjectionCompletion {
+            file: PathBuf::from(&continuation.file),
+            live_content: continuation.live_content.clone(),
+            committed_content: continuation.committed_content.clone(),
+            target_component: continuation.target_component.clone(),
+            commit: continuation.commit,
+        };
+        let settled_hash = match runtime_effects()
+            .and_then(|effects| effects.complete_compact_projection(invocation))
+        {
+            Ok(settled_hash) => settled_hash,
+            Err(error) => {
+                eprintln!(
+                    "[controller] compact projection completion failed for {document_hash}: {error:#}"
+                );
+                return false;
+            }
+        };
+        let event = agent_doc_state_backbone::StateEvent::new(
+            format!(
+                "compact-projection-settled:{document_hash}:{}",
+                continuation.continuation_id
+            ),
+            agent_doc_state_backbone::StateFact::DocumentCompactProjectionSettled {
+                document_hash: document_hash.to_string(),
+                continuation_id: continuation.continuation_id.clone(),
+                settled_hash,
+            },
+        );
+        if let Err(error) = append_state_event(&self.project_root, &event) {
+            eprintln!(
+                "[controller] compact projection receipt append failed for {document_hash}: {error:#}"
+            );
+            return false;
+        }
+        if let Err(error) = runtime.apply_state_event(&event) {
+            eprintln!(
+                "[controller] compact projection receipt apply failed for {document_hash}: {error:#}"
+            );
+            return false;
+        }
+        true
+    }
+
     /// Persist terminal queue lifecycle facts selected by the controller's
     /// queue-completion projection. Applying each event feeds the receipt back
     /// into `projection`, so the Computed candidate disappears durably.
@@ -2448,6 +2544,8 @@ impl ControllerDocumentGraphs {
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_resume: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
+            compact_resume: lazily::ThreadSafeComputedMap::new(&ctx),
+            compact_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
             queue_authority: lazily::ThreadSafeSourceMap::new(&ctx),
             answered_free_text_strike: lazily::ThreadSafeComputedMap::new(&ctx),
             answered_free_text_strike_submitted: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -2456,6 +2554,7 @@ impl ControllerDocumentGraphs {
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
             settle_effects: Mutex::new(BTreeMap::new()),
             retained_resume_effects: Mutex::new(BTreeMap::new()),
+            compact_resume_effects: Mutex::new(BTreeMap::new()),
             answered_free_text_strike_effects: Mutex::new(BTreeMap::new()),
             queue_completion_effects: Mutex::new(BTreeMap::new()),
             settle_sink: Arc::new(OnceLock::new()),
@@ -2479,12 +2578,13 @@ impl ControllerDocumentGraphs {
             project_root,
             runtime: Arc::downgrade(runtime),
         });
-        let document_hashes = self
+        let mut document_hashes = self
             .settle_effects
             .lock()
             .keys()
             .cloned()
-            .collect::<Vec<_>>();
+            .collect::<BTreeSet<_>>();
+        document_hashes.extend(self.compact_resume_effects.lock().keys().cloned());
         self.ctx.batch(|ctx| {
             for document_hash in document_hashes {
                 self.settle_generation.set(ctx, document_hash, 1);
@@ -2521,6 +2621,10 @@ impl ControllerDocumentGraphs {
             .as_ref()
             .and_then(|document| document.closeout.captured_response.as_ref())
             .is_some();
+        let has_compact_continuation = projection
+            .as_ref()
+            .and_then(|document| document.document.pending_compact_projection.as_ref())
+            .is_some();
         let closeout_cycle_id = projection
             .as_ref()
             .and_then(|document| document.closeout.cycle_id.clone());
@@ -2551,6 +2655,9 @@ impl ControllerDocumentGraphs {
         }
         if has_captured_response {
             self.current_answered_free_text_strike(document_hash);
+        }
+        if has_compact_continuation {
+            self.current_compact_resume(document_hash);
         }
     }
 
@@ -2749,6 +2856,39 @@ impl ControllerDocumentGraphs {
             },
         );
         self.ensure_retained_resume_effect(document_hash);
+        signal
+    }
+
+    fn current_compact_resume(
+        &self,
+        document_hash: &str,
+    ) -> Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation> {
+        let projection = self.projection.clone();
+        let settle_generation = self.settle_generation.clone();
+        let applied = self.compact_resume_applied.clone();
+        let signal = self.compact_resume.get_or_insert_with(
+            &self.ctx,
+            document_hash.to_string(),
+            move |ctx, key| {
+                let _projection_present = projection.contains_key(ctx, key);
+                let _generation_present = settle_generation.contains_key(ctx, key);
+                let _applied_present = applied.contains_key(ctx, key);
+                let candidate = compact_resume_signal(
+                    projection.observe(ctx, key).flatten().as_ref(),
+                    settle_generation.observe(ctx, key).unwrap_or_default(),
+                );
+                match candidate {
+                    Some(candidate)
+                        if applied.observe(ctx, key).flatten().as_deref()
+                            != Some(candidate.continuation_id.as_str()) =>
+                    {
+                        Some(candidate)
+                    }
+                    _ => None,
+                }
+            },
+        );
+        self.ensure_compact_resume_effect(document_hash);
         signal
     }
 
@@ -3036,6 +3176,48 @@ impl ControllerDocumentGraphs {
         effects.insert(key, effect);
     }
 
+    fn ensure_compact_resume_effect(&self, document_hash: &str) {
+        if self
+            .compact_resume_effects
+            .lock()
+            .contains_key(document_hash)
+        {
+            return;
+        }
+        let key = document_hash.to_string();
+        let signal_map = self.compact_resume.clone();
+        let settle_generation = self.settle_generation.clone();
+        let applied = self.compact_resume_applied.clone();
+        let sink = self.settle_sink.clone();
+        let effect_key = key.clone();
+        let effect = self.ctx.effect(move |ctx| {
+            let _generation_present = settle_generation.contains_key(ctx, &effect_key);
+            let _generation = settle_generation
+                .observe(ctx, &effect_key)
+                .unwrap_or_default();
+            let Some(continuation) = signal_map.observe(ctx, &effect_key).flatten() else {
+                return;
+            };
+            let Some(sink) = sink.get() else {
+                return;
+            };
+            if sink.complete_compact(&effect_key, &continuation) {
+                applied.set(
+                    ctx,
+                    effect_key.clone(),
+                    Some(continuation.continuation_id.clone()),
+                );
+            }
+        });
+        let mut effects = self.compact_resume_effects.lock();
+        if effects.contains_key(&key) {
+            drop(effects);
+            self.ctx.dispose_effect(&effect);
+            return;
+        }
+        effects.insert(key, effect);
+    }
+
     /// Subscribe durable queue completion to the authoritative markdown
     /// projection. Mutation, cleanup, and preflight callers cannot forget a
     /// companion lifecycle write because they do not own that decision.
@@ -3182,6 +3364,20 @@ fn retained_resume_signal(
         delivery_version: delivery.delivery_version,
         controller_generation,
     })
+}
+
+fn compact_resume_signal(
+    projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    controller_generation: u64,
+) -> Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation> {
+    if controller_generation == 0 {
+        return None;
+    }
+    let projection = projection?;
+    if projection.document.pending_write.is_some() {
+        return None;
+    }
+    projection.document.pending_compact_projection.clone()
 }
 
 fn retained_resume_signal_matches_projection(
@@ -3338,11 +3534,6 @@ impl ControllerRuntime {
         self.recycle_requested.store(true, Ordering::SeqCst);
     }
 
-    fn request_recycle_urgent(&self) {
-        self.recycle_urgent.store(true, Ordering::SeqCst);
-        self.recycle_requested.store(true, Ordering::SeqCst);
-    }
-
     fn recycle_urgent(&self) -> bool {
         self.recycle_urgent.load(Ordering::SeqCst)
     }
@@ -3386,6 +3577,15 @@ impl ControllerRuntime {
     fn release_document_turn_authority_subscription(&self, document_hash: &str, document_id: &str) {
         self.document_authority_graph
             .release_subscription(document_hash, document_id);
+    }
+
+    fn document_turn_authority_projection(
+        &self,
+        document_hash: &str,
+        document_id: &str,
+    ) -> agent_doc_turn::cp_projection::TurnProjection {
+        self.document_authority_graph
+            .projection(document_hash, document_id)
     }
 
     fn apply_actor_store_write(&self, write: &agent_doc_controller::actor::ActorStoreWrite) {
@@ -11614,6 +11814,45 @@ agent:queue\n\
             &signal,
             &projection
         ));
+    }
+
+    #[test]
+    fn compact_resume_is_derived_only_after_the_retained_write_clears() {
+        let document_hash = "doc-compact-resume";
+        let mut projection = agent_doc_state_backbone::DocumentStateProjection::new(document_hash);
+        let deferred =
+            deferred_document_write_event(document_hash, "compact-intent", "compact-target");
+        projection.apply_fact(&deferred.fact);
+        projection.apply_fact(
+            &agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                document_hash: document_hash.to_string(),
+                continuation_id: "compact-continuation".to_string(),
+                file: "/work/task.md".to_string(),
+                live_content: "live compact target".to_string(),
+                committed_content: "committed compact target".to_string(),
+                target_component: Some("exchange".to_string()),
+                commit: true,
+            },
+        );
+
+        assert!(compact_resume_signal(Some(&projection), 0).is_none());
+        assert!(
+            compact_resume_signal(Some(&projection), 1).is_none(),
+            "admission alone cannot run snapshot/commit before write convergence"
+        );
+
+        projection.apply_fact(
+            &agent_doc_state_backbone::StateFact::DocumentWriteConverged {
+                document_hash: document_hash.to_string(),
+                intent_id: "compact-intent".to_string(),
+                target_hash: "compact-target".to_string(),
+                source: "editor_document_state_projection".to_string(),
+                intent_source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
+            },
+        );
+        let continuation = compact_resume_signal(Some(&projection), 1).unwrap();
+        assert_eq!(continuation.continuation_id, "compact-continuation");
+        assert!(continuation.commit);
     }
 
     #[test]

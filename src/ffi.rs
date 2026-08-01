@@ -359,12 +359,13 @@ fn resolve_admin_root(
 pub unsafe extern "C" fn agent_doc_lazily_current_observed_v1(
     file_path: *const c_char,
     content: *const c_char,
-    _editor_id: *const c_char,
+    editor_id: *const c_char,
     _editor_kind: *const c_char,
     _editor_version: *const c_char,
     _capabilities_csv: *const c_char,
     no_unsaved_operator_edits: i32,
 ) {
+    mark_embedded_editor_host();
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(path) => path,
         Err(_) => return,
@@ -373,18 +374,40 @@ pub unsafe extern "C" fn agent_doc_lazily_current_observed_v1(
         Ok(text) => text,
         Err(_) => return,
     };
-    if no_unsaved_operator_edits == 0
-        && agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(text, Path::new(path))
-        && let Err(err) =
-            agent_doc_document_realtime_io::clear_pending_external_disk_decision_on_editor_edit(
-                std::path::Path::new(path),
+    let editor_id = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+        Ok(editor_id) => editor_id,
+        Err(_) => return,
+    };
+    let file = Path::new(path);
+    if agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(text, file)
+        && let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
+    {
+        let disk_persisted =
+            std::fs::read(file).is_ok_and(|disk| disk.as_slice() == text.as_bytes());
+        if let Err(err) =
+            agent_doc_controller_io::project_controller::observe_editor_document_projection(
+                &project_root,
+                file,
+                editor_id,
+                &agent_doc_hash::content_hash(text),
+                disk_persisted,
+                "editor_document_state_projection",
+            )
+        {
+            eprintln!("[ffi] could not publish editor document projection for {path}: {err:#}");
+        }
+        if no_unsaved_operator_edits == 0
+            && let Err(err) = observe_editor_current_from_ffi(
+                &project_root,
+                file,
                 text,
                 "operator_editor_content_advanced",
             )
-    {
-        eprintln!(
-            "[deferred-write] could not reconcile operator editor authority for {path}: {err}"
-        );
+        {
+            eprintln!(
+                "[deferred-write] could not reconcile operator editor authority for {path}: {err}"
+            );
+        }
     }
 }
 
@@ -400,6 +423,7 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
     file_path: *const c_char,
     editor_id: *const c_char,
 ) {
+    mark_embedded_editor_host();
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(path) => path,
         Err(_) => return,
@@ -411,11 +435,8 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
     agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_closed(path);
     if agent_doc_reliable_sync_io::plane_editor_live_for_path(path) == Some(false) {
         let file = std::path::Path::new(path);
-        if let Err(err) =
-            agent_doc_document_realtime_io::materialize_last_editor_close_through_authority(
-                file,
-                "last_editor_closed",
-            )
+        if let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
+            && let Err(err) = document_closed_from_ffi(&project_root, file)
         {
             eprintln!("[ffi] last editor close projection failed for {path}: {err:#}");
         }
@@ -926,6 +947,7 @@ fn record_lazily_visible_write_receipt(
     content_str: &str,
     source: &str,
 ) -> anyhow::Result<()> {
+    mark_embedded_editor_host();
     let proof =
         agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_project_file(
             project_root,
@@ -950,6 +972,7 @@ fn record_editor_patch_receipt(
     actor_generation: u64,
     rejected_reason: Option<&str>,
 ) -> i32 {
+    mark_embedded_editor_host();
     let canonical = Path::new(file_path)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(file_path));
@@ -1799,8 +1822,241 @@ fn ffi_git_commit(file: &std::path::Path) -> bool {
 /// Caller must free with `agent_doc_free_string`.
 #[unsafe(no_mangle)]
 pub extern "C" fn agent_doc_version() -> *mut c_char {
-    agent_doc_controller_io::project_controller::mark_embedded_native_host();
+    mark_embedded_editor_host();
     CString::new(env!("CARGO_PKG_VERSION")).unwrap().into_raw()
+}
+
+#[inline]
+fn mark_embedded_editor_host() {
+    // Unit tests exercise the legacy pure/local adapters without an IDE host.
+    // Every shipped cdylib entrypoint that can cross the controller boundary
+    // calls this before doing so.
+    #[cfg(not(test))]
+    {
+        agent_doc_sqlite::state_store::forbid_state_db_connections_for_process();
+        agent_doc_controller_io::project_controller::mark_embedded_native_host();
+    }
+}
+
+fn observe_editor_current_from_ffi(
+    project_root: &Path,
+    file: &Path,
+    editor_content: &str,
+    source: &str,
+) -> anyhow::Result<()> {
+    #[cfg(not(test))]
+    {
+        let Some(document) =
+            agent_doc_controller_io::project_controller::document_state_projection_existing(
+                project_root,
+                file,
+            )?
+        else {
+            return Ok(());
+        };
+        let Some(pending) = document.document.pending_external_disk else {
+            return Ok(());
+        };
+        let editor_hash = agent_doc_hash::content_hash(editor_content);
+        let supersedes = if pending.expected_hash.is_empty() {
+            !editor_hash.eq_ignore_ascii_case(&pending.target_hash)
+        } else {
+            agent_doc_document_realtime::external_disk_decision(
+                &pending.expected_hash,
+                &pending.target_hash,
+                &editor_hash,
+            ) == agent_doc_document_realtime::ExternalDiskDecision::EditorSupersedes
+        };
+        if supersedes {
+            append_editor_convergence_from_ffi(project_root, file, pending, &editor_hash, source)?;
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    {
+        let _ = project_root;
+        agent_doc_document_realtime_io::clear_pending_external_disk_decision_on_editor_edit(
+            file,
+            editor_content,
+            source,
+        )
+        .map(|_| ())
+    }
+}
+
+fn document_closed_from_ffi(project_root: &Path, file: &Path) -> anyhow::Result<bool> {
+    #[cfg(not(test))]
+    {
+        // Reliable-sync Close membership is already sent to the controller,
+        // which owns last-editor-close projection. The native library must not
+        // independently materialize that durable transition.
+        let _ = (project_root, file);
+        Ok(false)
+    }
+    #[cfg(test)]
+    {
+        let _ = project_root;
+        agent_doc_document_realtime_io::materialize_last_editor_close_through_authority(
+            file,
+            "last_editor_closed",
+        )
+    }
+}
+
+struct EditorReconnectProjection {
+    content: Option<String>,
+    external_disk_pending: bool,
+}
+
+fn editor_reconnect_projection_from_ffi(
+    project_root: &Path,
+    file: &Path,
+    editor_content: &str,
+) -> anyhow::Result<EditorReconnectProjection> {
+    #[cfg(not(test))]
+    {
+        let Some(document) =
+            agent_doc_controller_io::project_controller::document_state_projection_existing(
+                project_root,
+                file,
+            )?
+        else {
+            return Ok(EditorReconnectProjection {
+                content: None,
+                external_disk_pending: false,
+            });
+        };
+        let editor_hash = agent_doc_hash::content_hash(editor_content);
+        if let Some(pending) = document.document.pending_external_disk {
+            return match agent_doc_document_realtime::external_disk_decision(
+                &pending.expected_hash,
+                &pending.target_hash,
+                &editor_hash,
+            ) {
+                agent_doc_document_realtime::ExternalDiskDecision::AcceptedInEditor => {
+                    Ok(EditorReconnectProjection {
+                        content: Some(pending.target_content),
+                        external_disk_pending: true,
+                    })
+                }
+                agent_doc_document_realtime::ExternalDiskDecision::PendingUserDecision => {
+                    Ok(EditorReconnectProjection {
+                        content: None,
+                        external_disk_pending: true,
+                    })
+                }
+                agent_doc_document_realtime::ExternalDiskDecision::EditorSupersedes => {
+                    append_editor_convergence_from_ffi(
+                        project_root,
+                        file,
+                        pending,
+                        &editor_hash,
+                        "editor_reconnect_superseded_external_disk",
+                    )?;
+                    Ok(EditorReconnectProjection {
+                        content: None,
+                        external_disk_pending: false,
+                    })
+                }
+            };
+        }
+        let pending = document
+            .document
+            .pending_write_journal
+            .last()
+            .cloned()
+            .or(document.document.pending_write);
+        Ok(EditorReconnectProjection {
+            content: pending.and_then(|pending| {
+                editor_hash
+                    .eq_ignore_ascii_case(&pending.target_hash)
+                    .then_some(pending.target_content)
+            }),
+            external_disk_pending: false,
+        })
+    }
+    #[cfg(test)]
+    {
+        let _ = project_root;
+        let content = agent_doc_document_realtime_io::deferred_document_write_reconnect_content(
+            file,
+            editor_content,
+        )?;
+        let external_disk_pending =
+            agent_doc_document_realtime_io::pending_external_disk_candidate(file).is_some();
+        Ok(EditorReconnectProjection {
+            content,
+            external_disk_pending,
+        })
+    }
+}
+
+fn deferred_write_reconnect_propagated_from_ffi(
+    project_root: &Path,
+    file: &Path,
+    editor_content: &str,
+) -> anyhow::Result<bool> {
+    #[cfg(not(test))]
+    {
+        let Some(document) =
+            agent_doc_controller_io::project_controller::document_state_projection_existing(
+                project_root,
+                file,
+            )?
+        else {
+            return Ok(false);
+        };
+        let Some(pending) = document.document.pending_external_disk else {
+            return Ok(false);
+        };
+        let editor_hash = agent_doc_hash::content_hash(editor_content);
+        if !editor_hash.eq_ignore_ascii_case(&pending.target_hash) {
+            return Ok(false);
+        }
+        append_editor_convergence_from_ffi(
+            project_root,
+            file,
+            pending,
+            &editor_hash,
+            "editor_crdt_reconnect_propagated",
+        )?;
+        Ok(true)
+    }
+    #[cfg(test)]
+    {
+        let _ = project_root;
+        agent_doc_document_realtime_io::clear_pending_external_disk_decision_after_editor_propagation(
+            file,
+            editor_content,
+            "editor_crdt_reconnect_propagated",
+        )
+    }
+}
+
+#[cfg(not(test))]
+fn append_editor_convergence_from_ffi(
+    project_root: &Path,
+    file: &Path,
+    pending: agent_doc_state_backbone::DocumentWriteIntentProjection,
+    target_hash: &str,
+    source: &str,
+) -> anyhow::Result<()> {
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    let event = StateEvent::new(
+        format!(
+            "document-write-converged-{document_hash}-{}",
+            pending.intent_id
+        ),
+        StateFact::DocumentWriteConverged {
+            document_hash,
+            intent_id: pending.intent_id,
+            target_hash: target_hash.to_string(),
+            source: source.to_string(),
+            intent_source: pending.source,
+        },
+    );
+    append_editor_state_event_from_ffi(project_root, file, &event)?;
+    Ok(())
 }
 
 /// Process-global lazily state-backbone event ledger backing the FFI
@@ -2027,17 +2283,12 @@ fn deferred_write_reconnect_candidate(
     file: &std::path::Path,
     editor_content: &str,
 ) -> Option<String> {
-    match agent_doc_document_realtime_io::deferred_document_write_reconnect_content(
-        file,
-        editor_content,
-    ) {
-        Ok(Some(content)) => Some(content),
-        Ok(None)
-            if agent_doc_document_realtime_io::pending_external_disk_candidate(file).is_some() =>
-        {
-            None
-        }
-        Ok(None) => match agent_doc_capture_io::load_active(file) {
+    mark_embedded_editor_host();
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    match editor_reconnect_projection_from_ffi(&project_root, file, editor_content) {
+        Ok(projection) if projection.content.is_some() => projection.content,
+        Ok(projection) if projection.external_disk_pending => None,
+        Ok(_) => match agent_doc_capture_io::load_active(file) {
             Ok(Some(capture))
                 if capture.committed_at.is_none()
                     && capture.discarded_at.is_none()
@@ -2130,17 +2381,20 @@ pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_propagated(
     file_path: *const c_char,
     editor_content: *const c_char,
 ) -> i32 {
+    mark_embedded_editor_host();
     let Ok(path) = (unsafe { CStr::from_ptr(file_path) }).to_str() else {
         return 0;
     };
     let Ok(content) = (unsafe { CStr::from_ptr(editor_content) }).to_str() else {
         return 0;
     };
-    match agent_doc_document_realtime_io::clear_pending_external_disk_decision_after_editor_propagation(
-        std::path::Path::new(path),
-        content,
-        "editor_crdt_reconnect_propagated",
-    ) {
+    let file = Path::new(path);
+    let result = agent_doc_project_root_io::project_root_containing(file)
+        .context("no project root for propagated reconnect")
+        .and_then(|project_root| {
+            deferred_write_reconnect_propagated_from_ffi(&project_root, file, content)
+        });
+    match result {
         Ok(cleared) => i32::from(cleared),
         Err(err) => {
             eprintln!("[deferred-write] propagated settlement failed for {path}: {err}");
@@ -2300,6 +2554,7 @@ fn enqueue_liveness_ops(
     document_hash: &str,
     ops: &[agent_doc_reliable_sync_io::liveness::LivenessOp],
 ) -> anyhow::Result<()> {
+    mark_embedded_editor_host();
     let frame = agent_doc_reliable_sync_io::liveness::encode_liveness_frame(ops)?;
     agent_doc_controller_io::project_controller::enqueue_reliable_sync_frame(
         project_root,
@@ -2312,6 +2567,7 @@ fn enqueue_liveness_ops(
 }
 
 fn flush_liveness_endpoint(project_root: &Path, document_hash: &str) -> anyhow::Result<u64> {
+    mark_embedded_editor_host();
     Ok(
         agent_doc_controller_io::project_controller::flush_reliable_sync_channel(
             project_root,
@@ -2334,6 +2590,7 @@ fn enqueue_document_push_frame(
     file_path: &Path,
     frame: lazily::IpcMessage,
 ) -> anyhow::Result<()> {
+    mark_embedded_editor_host();
     let channel_hash = document_op_channel_hash(file_path);
     agent_doc_controller_io::project_controller::enqueue_reliable_sync_frame(
         project_root,
@@ -2346,6 +2603,7 @@ fn enqueue_document_push_frame(
 }
 
 fn flush_document_push_endpoint(project_root: &Path, file_path: &Path) -> anyhow::Result<()> {
+    mark_embedded_editor_host();
     let channel_hash = document_op_channel_hash(file_path);
     agent_doc_controller_io::project_controller::flush_reliable_sync_channel(
         project_root,

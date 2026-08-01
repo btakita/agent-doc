@@ -128,12 +128,14 @@ class TypingTrackerEdtBudgetTest {
 
         assertTrue(
             "project startup must seed already-open markdown buffers with a Lazily registration",
-            lifecycle.contains("TypingTracker.reportOpenMarkdownDocuments(project)"),
+            lifecycle.contains("TypingTracker.reportOpenMarkdownDocuments(project)") &&
+                lifecycle.contains("CrdtReplicaManager.ensureOpenDocumentReplicas(project, \"plugin-startup\")"),
         )
         assertTrue(
             "file-open events must seed newly opened markdown buffers with a Lazily registration",
             lifecycle.contains("override fun fileOpened(source: FileEditorManager, file: VirtualFile)") &&
-                lifecycle.contains("TypingTracker.scheduleOpenDocumentReport(file)"),
+                lifecycle.contains("TypingTracker.scheduleOpenDocumentReport(file)") &&
+                lifecycle.contains("CrdtReplicaManager.ensureOpenDocumentReplica("),
         )
         assertTrue(
             "file-close events must publish this editor's reliable-sync close",
@@ -197,7 +199,7 @@ class TypingTrackerEdtBudgetTest {
         )
         val reloadIntentBody = watcher
             .substringAfter("EditorIntent.ReloadLibrary.token -> {")
-            .substringBefore("EditorIntent.SaveDocument.token -> {")
+            .substringBefore("else -> {")
         assertTrue(
             "JetBrains reload intents must enter the application-wide generation handoff",
             reloadIntentBody.contains("NativeReloadCoordinator.requestReload(libVersion)") &&
@@ -537,12 +539,11 @@ class TypingTrackerEdtBudgetTest {
                 !forwarderForBody.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
         assertTrue(
-            "visible editor applies must retain failed delivery ACKs and replay them from the current buffer",
-            source.contains("pendingRemoteAckReplays") &&
-                source.contains("rememberPendingRemoteAcks(pending.filePath, pending.acknowledgements)") &&
-                source.contains("replayPendingRemoteAcks(filePath, forwarder)") &&
-                source.contains("shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount)") &&
-                source.contains("val visibleText = editorBufferText(filePath)"),
+            "visible editor applies must publish complete state without an ACK sidecar",
+            source.contains("TypingTracker.observeLazilyCurrentNow(pending.filePath)") &&
+                !source.contains("pendingRemoteAckReplays") &&
+                !source.contains("rememberPendingRemoteAcks") &&
+                !source.contains("replayPendingRemoteAcks"),
         )
         val remoteDrainBody = source.substringAfter("private fun drainRemoteUpdatesFor")
             .substringBefore("/**\n     * D2")

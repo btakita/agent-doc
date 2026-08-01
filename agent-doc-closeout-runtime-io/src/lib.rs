@@ -869,7 +869,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                 );
             if current != disk && response_materialized {
                 match agent_doc_document_realtime_io::
-                    settle_acknowledged_captured_projection_through_authority(
+                    settle_projected_captured_response_through_authority(
                         file,
                         &capture.response_body,
                         CapturedFinalizeSource::NativeSaveWithoutRetainedIntent.as_str(),
@@ -1314,7 +1314,7 @@ mod tests {
         );
         assert!(
             body.contains("CapturedFinalizeSource::NativeSaveWithoutRetainedIntent")
-                && body.contains("settle_acknowledged_captured_projection_through_authority",),
+                && body.contains("settle_projected_captured_response_through_authority",),
             "authority/disk divergence after intent retirement must reach the native-save effect"
         );
         assert!(

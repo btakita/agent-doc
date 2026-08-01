@@ -39,6 +39,7 @@ agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.35
 agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.35.109" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.109" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.109" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.109" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.35.109" }
 agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.35.109" }
 agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.109" }

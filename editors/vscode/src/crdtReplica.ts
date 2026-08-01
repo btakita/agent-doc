@@ -55,12 +55,11 @@ export interface ReplicaTransport {
     /** D2: fetch the pending delivery, distinguishing additive deltas from a replace
      * delivery (out-of-band deletion re-bootstrap). Defaults to wrapping pullUpdates. */
     pullDelivery?(filePath: string, identity: string): Promise<ReplicaPullDelivery>;
-    ackUpdate(
+    projectState?(
         filePath: string,
         identity: string,
-        patchId: string,
-        generation: number,
-        contentHash?: string,
+        contentHash: string,
+        diskPersisted: boolean,
     ): Promise<boolean>;
     deregister(filePath: string, identity: string): Promise<void>;
 }
@@ -157,7 +156,7 @@ export function remoteTemplateProjectionDecision(
 export type ReplicaBaselineDecision =
     | 'apply-remote'
     | 'apply-remote-repair'
-    | 'acknowledge-remote-target'
+    | 'project-remote-target'
     | 'replay-remote-target'
     | 'realign-shadow'
     | 'retry-fail-closed';
@@ -184,7 +183,7 @@ export function replicaBaselineDecision(
 ): ReplicaBaselineDecision {
     if (recoveryInFlight) return 'retry-fail-closed';
     if (editorState === 'exact' && editorMatchesRemoteTarget && replicaMatchesEditor) {
-        return 'acknowledge-remote-target';
+        return 'project-remote-target';
     }
     if (editorMatchesExpected && replicaMatchesRemoteTarget) return 'replay-remote-target';
     if (editorState !== 'exact' && editorMatchesExpected) return 'apply-remote-repair';
@@ -196,34 +195,6 @@ export function replicaBaselineDecision(
 
 export function shouldForwardLocalDelta(replicaText: string | null, shadowText: string): boolean {
     return replicaText === shadowText;
-}
-
-interface PendingRemoteAck {
-    forwarder: CrdtReplicaForwarder;
-    update: ReplicaRemoteUpdate;
-}
-
-export interface RemoteAckReplayPlan {
-    candidate: ReplicaRemoteUpdate;
-    acknowledgedThroughGeneration: number;
-}
-
-/**
- * Select an ACK carrier only when the visible editor hash proves a retained
- * delivery frontier. An unrelated visible hash must remain a retry, never a
- * controller rebootstrap request.
- */
-export function remoteAckReplayPlan(
-    updates: readonly ReplicaRemoteUpdate[],
-    visibleContentHash: string,
-): RemoteAckReplayPlan | null {
-    const matching = updates.filter((update) => update.expectedContentHash === visibleContentHash);
-    if (matching.length === 0) return null;
-    const acknowledgedThroughGeneration = Math.max(...matching.map((update) => update.generation));
-    const candidate = updates
-        .filter((update) => update.generation <= acknowledgedThroughGeneration)
-        .sort((a, b) => a.generation - b.generation || a.patchId.localeCompare(b.patchId))[0];
-    return candidate ? { candidate, acknowledgedThroughGeneration } : null;
 }
 
 export function utf16RangeToCodePoints(
@@ -358,19 +329,17 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
             : { kind: 'unavailable', reason: 'controller_socket_unavailable' };
     }
 
-    async ackUpdate(
+    async projectState(
         filePath: string,
         identity: string,
-        patchId: string,
-        generation: number,
-        contentHash?: string,
+        contentHash: string,
+        diskPersisted: boolean,
     ): Promise<boolean> {
-        const response = await this.send(this.controllerRequest('replica_ack', filePath, identity, {
-            patch_id: patchId,
-            generation,
-            ...(contentHash ? { content_hash: contentHash } : {}),
+        const response = await this.send(this.controllerRequest('replica_projection', filePath, identity, {
+            content_hash: contentHash,
+            disk_persisted: diskPersisted,
         }));
-        return !!(response?.ok && isRecord(response.data) && response.data.acknowledged === true);
+        return !!(response?.ok && isRecord(response.data) && response.data.projected === true);
     }
 
     async deregister(filePath: string, identity: string): Promise<void> {
@@ -589,14 +558,13 @@ export class CrdtReplicaForwarder {
             .then((updates) => ({ kind: 'deltas', updates }));
     }
 
-    ackRemoteUpdate(update: ReplicaRemoteUpdate, appliedText?: string): Promise<boolean> {
-        if (!this.attached) return Promise.resolve(false);
-        return this.transport.ackUpdate(
+    projectVisibleState(text: string, diskPersisted = false): Promise<boolean> {
+        if (!this.attached || !this.transport.projectState) return Promise.resolve(false);
+        return this.transport.projectState(
             this.filePath,
             this.identity,
-            update.patchId,
-            update.generation,
-            appliedText === undefined ? undefined : sha256(appliedText),
+            sha256(text),
+            diskPersisted,
         );
     }
 
@@ -622,6 +590,7 @@ export interface CrdtReplicaManagerOptions {
     listDocuments: () => ReplicaDocumentSnapshot[];
     currentText: (filePath: string) => string | null;
     applyText: (filePath: string, text: string, expectedText: string) => Promise<boolean>;
+    observeProjection?: (filePath: string) => void;
     normalizeTemplateStructure?: (text: string) => string | null;
     /**
      * `#ctrlkillreregister` Tier 3 — ask the controller which of this editor's
@@ -643,7 +612,6 @@ export class CrdtReplicaManager {
     private readonly forwarders = new Map<string, CrdtReplicaForwarder>();
     private readonly attaching = new Map<string, Promise<CrdtReplicaForwarder | null>>();
     private readonly applyingRemote = new Set<string>();
-    private readonly pendingRemoteAcks = new Map<string, Map<string, PendingRemoteAck>>();
     private readonly replicaRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private readonly replicaRetryFailureCounts = new Map<string, number>();
     private readonly pendingLocalEdits = new Map<string, number>();
@@ -691,7 +659,6 @@ export class CrdtReplicaManager {
         for (const timer of this.replicaRetryTimers.values()) clearTimeout(timer);
         this.replicaRetryTimers.clear();
         this.replicaRetryFailureCounts.clear();
-        this.pendingRemoteAcks.clear();
         this.applyingRemote.clear();
         for (const forwarder of this.forwarders.values()) {
             void forwarder.deregister();
@@ -792,7 +759,6 @@ export class CrdtReplicaManager {
     async handleDocumentClosed(filePath: string): Promise<void> {
         this.shadows.delete(filePath);
         this.attaching.delete(filePath);
-        this.clearPendingRemoteAcks(filePath);
         this.clearReplicaRetryBackoff(filePath);
         const forwarder = this.forwarders.get(filePath);
         this.forwarders.delete(filePath);
@@ -986,11 +952,6 @@ export class CrdtReplicaManager {
             const forwarder = this.forwarders.get(filePath);
             if (!forwarder) continue;
             if (this.hasPendingLocal(filePath)) continue;
-            await this.replayPendingRemoteAcks(filePath, forwarder);
-            if (this.pendingRemoteAckCount(filePath, forwarder) > 0) {
-                this.logger.debug(`[crdt-replica] remote pull deferred for ${filePath}; retained delivery ACK is still pending`);
-                continue;
-            }
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs the
             // corrected canonical wholesale; a normal delta batch merges before one
             // editor projection so duplicate pull/apply loops cannot amplify work.
@@ -1014,8 +975,8 @@ export class CrdtReplicaManager {
                 if (this.hasPendingLocal(filePath)) break;
                 if (!shouldApplyRemoteUpdate(update, forwarder.currentClientId)) {
                     const visibleText = this.currentEditorText(filePath) ?? this.shadows.get(filePath);
-                    if (!(await forwarder.ackRemoteUpdate(update, visibleText))) {
-                        this.rememberPendingRemoteAck(filePath, { forwarder, update });
+                    if (visibleText != null) {
+                        await forwarder.projectVisibleState(visibleText);
                     }
                     continue;
                 }
@@ -1067,82 +1028,12 @@ export class CrdtReplicaManager {
             const visibleText = this.currentEditorText(filePath);
             if (!projected || visibleText !== converged) return false;
             this.shadows.set(filePath, converged);
-            for (const update of updates) {
-                this.rememberPendingRemoteAck(filePath, { forwarder, update });
-            }
-            await this.replayPendingRemoteAcks(filePath, forwarder, converged);
+            await forwarder.projectVisibleState(converged);
+            this.options.observeProjection?.(filePath);
             return true;
         } finally {
             this.applyingRemote.delete(filePath);
         }
-    }
-
-    private remoteAckKey(update: ReplicaRemoteUpdate): string {
-        return `${update.patchId}:${update.generation}`;
-    }
-
-    private rememberPendingRemoteAck(filePath: string, ack: PendingRemoteAck): void {
-        let pending = this.pendingRemoteAcks.get(filePath);
-        if (!pending) {
-            pending = new Map<string, PendingRemoteAck>();
-            this.pendingRemoteAcks.set(filePath, pending);
-        }
-        pending.set(this.remoteAckKey(ack.update), ack);
-        this.scheduleReplicaRetry(filePath, 'delivery-ack-retained');
-    }
-
-    private pendingRemoteAckCount(filePath: string, forwarder: CrdtReplicaForwarder): number {
-        const pending = this.pendingRemoteAcks.get(filePath);
-        if (!pending) return 0;
-        return Array.from(pending.values()).filter((ack) => ack.forwarder === forwarder).length;
-    }
-
-    private clearPendingRemoteAcks(filePath: string): number {
-        const pending = this.pendingRemoteAcks.get(filePath);
-        this.pendingRemoteAcks.delete(filePath);
-        return pending?.size ?? 0;
-    }
-
-    private async replayPendingRemoteAcks(
-        filePath: string,
-        forwarder: CrdtReplicaForwarder,
-        knownVisibleText?: string,
-    ): Promise<number> {
-        const pending = this.pendingRemoteAcks.get(filePath);
-        if (!pending) return 0;
-        for (const [key, ack] of pending) {
-            if (ack.forwarder !== forwarder) pending.delete(key);
-        }
-        if (pending.size === 0) {
-            this.pendingRemoteAcks.delete(filePath);
-            return 0;
-        }
-        const visibleText = knownVisibleText ?? this.currentEditorText(filePath);
-        if (visibleText == null) {
-            this.scheduleReplicaRetry(filePath, 'delivery-ack-editor-unavailable');
-            return 0;
-        }
-        const visibleHash = sha256(visibleText);
-        const updates = Array.from(pending.values()).map((ack) => ack.update);
-        const plan = remoteAckReplayPlan(updates, visibleHash);
-        if (!plan) {
-            this.scheduleReplicaRetry(filePath, 'delivery-ack-not-visible');
-            return 0;
-        }
-        if (!(await forwarder.ackRemoteUpdate(plan.candidate, visibleText))) {
-            this.scheduleReplicaRetry(filePath, 'delivery-ack-pending');
-            return 0;
-        }
-        let acknowledged = 0;
-        for (const [key, ack] of pending) {
-            if (ack.update.generation <= plan.acknowledgedThroughGeneration) {
-                pending.delete(key);
-                acknowledged += 1;
-            }
-        }
-        if (pending.size === 0) this.pendingRemoteAcks.delete(filePath);
-        if (this.pendingRemoteAckCount(filePath, forwarder) === 0) this.clearReplicaRetryBackoff(filePath);
-        return acknowledged;
     }
 
     private templateStructureState(text: string): TemplateStructureProjectionState {
@@ -1251,11 +1142,9 @@ export class CrdtReplicaManager {
             return null;
         }
         this.forwarders.set(filePath, replacement);
-        const retiredPendingAcks = this.clearPendingRemoteAcks(filePath);
         await staleForwarder.deregister();
         this.logger.debug(
-            `[crdt-replica] atomically replaced cached forwarder for ${filePath}; ` +
-            `retired_pending_acks=${retiredPendingAcks}`,
+            `[crdt-replica] atomically replaced cached forwarder for ${filePath}`,
         );
         return replacement;
     }
@@ -1298,18 +1187,13 @@ export class CrdtReplicaManager {
             }
             return true;
         }
-        if (decision === 'acknowledge-remote-target' && editorRemoteGeneration != null) {
-            const acknowledgedUpdates = updates.filter(
-                (update) => update.generation <= editorRemoteGeneration,
-            );
+        if (decision === 'project-remote-target' && editorRemoteGeneration != null) {
             this.shadows.set(filePath, editorText);
-            for (const update of acknowledgedUpdates) {
-                this.rememberPendingRemoteAck(filePath, { forwarder, update });
-            }
-            const acknowledged = await this.replayPendingRemoteAcks(filePath, forwarder, editorText);
+            await forwarder.projectVisibleState(editorText);
+            this.options.observeProjection?.(filePath);
             this.logger.debug(
-                `[crdt-replica] acknowledged an already-visible remote target for ${filePath}: ` +
-                `editor_hash=${editorHash} generation=${editorRemoteGeneration} acked=${acknowledged}`,
+                `[crdt-replica] projected an already-visible remote target for ${filePath}: ` +
+                `editor_hash=${editorHash} generation=${editorRemoteGeneration}`,
             );
             return false;
         }

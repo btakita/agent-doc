@@ -17,13 +17,6 @@ use std::time::Duration;
 
 const PULL_INTERVAL: Duration = Duration::from_millis(250);
 
-#[derive(Debug, Clone)]
-struct RemoteAck {
-    patch_id: String,
-    generation: u64,
-    expected_content_hash: String,
-}
-
 struct OpenDocument {
     uri: String,
     file: PathBuf,
@@ -32,7 +25,6 @@ struct OpenDocument {
     client_id: u64,
     replica: ReplicaState,
     shadow: String,
-    pending_remote: Vec<RemoteAck>,
     pending_apply_target: Option<String>,
 }
 
@@ -154,6 +146,11 @@ impl<W: Write> Server<W> {
                     self.did_change(params);
                 }
             }
+            Some("textDocument/didSave") => {
+                if let Some(params) = message.get("params") {
+                    self.did_save(params);
+                }
+            }
             Some("textDocument/didClose") => {
                 if let Some(uri) = message
                     .pointer("/params/textDocument/uri")
@@ -206,7 +203,7 @@ impl<W: Write> Server<W> {
         document.pending_apply_target = None;
         if document.replica.text() == text {
             document.shadow = text.to_string();
-            acknowledge_visible_remote(document);
+            publish_replica_projection(document, false);
             return;
         }
 
@@ -230,6 +227,22 @@ impl<W: Write> Server<W> {
                 json!({ "update_b64": BASE64_STANDARD.encode(update) }),
             );
         }
+        publish_replica_projection(document, false);
+    }
+
+    fn did_save(&mut self, params: &Value) {
+        let Some(uri) = params.pointer("/textDocument/uri").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(document) = self.documents.get_mut(uri) else {
+            return;
+        };
+        if let Some(text) = params.get("text").and_then(Value::as_str)
+            && text != document.shadow
+        {
+            return;
+        }
+        publish_replica_projection(document, true);
     }
 
     fn reconcile_mode(&mut self, uri: &str, text: &str) {
@@ -289,9 +302,9 @@ impl<W: Write> Server<W> {
             client_id,
             replica,
             shadow: editor_text.to_string(),
-            pending_remote: Vec::new(),
             pending_apply_target: None,
         };
+        publish_replica_projection(&document, false);
 
         // Registration bootstraps from the controller-owned canonical revision.
         // A divergent opening buffer is a downstream delivery target, never an
@@ -388,28 +401,6 @@ impl<W: Write> Server<W> {
                 if document.replica.apply_update(&bytes).is_err() {
                     continue;
                 }
-                let Some(patch_id) = update.get("patch_id").and_then(Value::as_str) else {
-                    continue;
-                };
-                let Some(generation) = update.get("generation").and_then(Value::as_u64) else {
-                    continue;
-                };
-                let Some(expected_content_hash) =
-                    update.get("expected_content_hash").and_then(Value::as_str)
-                else {
-                    continue;
-                };
-                if !document
-                    .pending_remote
-                    .iter()
-                    .any(|pending| pending.patch_id == patch_id)
-                {
-                    document.pending_remote.push(RemoteAck {
-                        patch_id: patch_id.to_string(),
-                        generation,
-                        expected_content_hash: expected_content_hash.to_string(),
-                    });
-                }
                 changed = true;
             }
             if !changed {
@@ -417,7 +408,7 @@ impl<W: Write> Server<W> {
             }
             let target = document.replica.text();
             if target == document.shadow {
-                acknowledge_visible_remote(document);
+                publish_replica_projection(document, false);
                 continue;
             }
             if document.pending_apply_target.as_deref() == Some(&target) {
@@ -464,37 +455,17 @@ impl<W: Write> Server<W> {
     }
 }
 
-fn acknowledge_visible_remote(document: &mut OpenDocument) {
-    if document.pending_remote.is_empty() {
-        return;
-    }
-    let visible_hash = agent_doc_hash::content_hash(&document.shadow);
-    let Some(candidate) = document
-        .pending_remote
-        .iter()
-        .filter(|pending| pending.expected_content_hash == visible_hash)
-        .max_by_key(|pending| pending.generation)
-        .cloned()
-    else {
-        return;
-    };
-    if controller_replica_request(
+fn publish_replica_projection(document: &OpenDocument, disk_persisted: bool) {
+    let _ = controller_replica_request(
         &document.project_root,
         &document.file,
-        "replica_ack",
+        "replica_projection",
         &document.identity,
         json!({
-            "patch_id": candidate.patch_id,
-            "generation": candidate.generation,
-            "content_hash": visible_hash
+            "content_hash": agent_doc_hash::content_hash(&document.shadow),
+            "disk_persisted": disk_persisted
         }),
-    )
-    .is_ok()
-    {
-        document
-            .pending_remote
-            .retain(|pending| pending.generation > candidate.generation);
-    }
+    );
 }
 
 fn controller_replica_request(

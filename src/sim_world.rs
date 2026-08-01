@@ -11144,7 +11144,7 @@ impl SimEditor {
         Ok(())
     }
 
-    /// Pull every pending peer delivery through the same relay/ACK contract the
+    /// Pull every pending peer delivery through the same full-state projection contract the
     /// production plugins use. Returns the number of remote deliveries applied.
     fn pull_peer_updates(&mut self) -> Result<usize> {
         let Some(pull) = agent_doc_crdt_relay_io::pull_replica_updates_for_file(
@@ -11157,25 +11157,21 @@ impl SimEditor {
         let mut applied = 0;
         for update in pull.updates {
             self.replica.apply_update(&update.update)?;
-            let acknowledged =
-                agent_doc_crdt_relay_io::ack_replica_update_for_file_with_content_hash(
-                    &self.path,
-                    &self.replica_identity,
-                    &update.patch_id,
-                    update.generation,
-                    Some(&update.expected_content_hash),
-                )?
-                .ok_or_else(|| anyhow!("SimEditor ACK refused under detached authority"))?;
-            if !acknowledged {
-                return Err(anyhow!(
-                    "SimEditor relay did not acknowledge generation {}",
-                    update.generation
-                ));
-            }
             applied += 1;
         }
         if applied > 0 {
             self.buffer = self.replica.text();
+            let projected = agent_doc_crdt_relay_io::observe_replica_projection_for_file(
+                &self.path,
+                &self.replica_identity,
+                &agent_doc_hash::content_hash(&self.buffer),
+            )?
+            .ok_or_else(|| anyhow!("SimEditor projection refused under detached authority"))?;
+            if !projected {
+                return Err(anyhow!(
+                    "SimEditor relay did not project its coalesced visible state"
+                ));
+            }
             self.dirty = true;
             self.generation += 1;
         }
@@ -12555,7 +12551,7 @@ mod crdt_relay_sim {
             .expect("first canonical write");
         assert_eq!(
             decide_crdt_write_admission(world.hub.delivery_converged()),
-            CrdtWriteAdmission::WaitForDeliveryAck,
+            CrdtWriteAdmission::WaitForDeliveryProjection,
             "a second write must not stack behind an unacknowledged editor delivery",
         );
         assert_eq!(

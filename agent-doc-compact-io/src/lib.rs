@@ -61,13 +61,10 @@
 //!   editor-op epoch into its semantic input cut. The originally observed bytes remain the
 //!   convergence compare-and-swap base, and the epoch is cleared only after the compact write and
 //!   snapshot succeed (`#compactcachedeletetombstone`).
-//! - Before an editor-IPC `--commit` closeout, `flush_editor_buffer_to_disk_after_compact` asks the
-//!   live editor to save its converged buffer to disk (`save_document` IPC) so the working-tree file
-//!   converges to the compacted content. The plugin applies convergence patches to the in-memory
-//!   Document and never saves, so without this flush HEAD can hold the summary while the disk file
-//!   still holds the pre-compact content — the "JB Compact Exchange left an uncommitted summary"
-//!   defect (`#jb-compact-editor-buffer-flush`). Fail-open: the authoritative snapshot is still
-//!   committed and verified.
+//! - When the editor-visible and disk projections have not converged, compaction records a durable
+//!   continuation containing the live/commit targets. The controller's Lazily graph completes
+//!   snapshot/commit after the editor publishes the same saved revision; compact never sends a
+//!   `save_document` request or polls disk for an imperative receipt.
 //! - `apply_compacted_document` is the single replacement boundary used by inline, full component,
 //!   and partial component compaction.
 //!
@@ -90,9 +87,8 @@
 //!   working-tree file is still committable (`#jb-compact-commit-editor-ipc-async`)
 //! - compact_commit_lands_head_when_snapshot_replayed_stale: authoritative-content commit lands the
 //!   compacted content in HEAD even when a CRDT replay reverted the on-disk snapshot to pre-compact
-//! - compact_with_commit_flushes_editor_buffer_to_disk: an editor-IPC `--commit` compaction against a
-//!   buffer-only live editor (applies to the buffer, never saves) leaves the working-tree file equal
-//!   to HEAD because the closeout flushes the editor buffer to disk (`#jb-compact-editor-buffer-flush`)
+//! - compact_with_commit_retains_projection_without_requesting_an_editor_save: a buffer-only editor
+//!   retains the exact continuation and leaves HEAD/disk unchanged until saved state is projected
 //! - compact_commit_fails_closed_when_head_cannot_land: `--commit` fails closed with a recovery
 //!   command instead of silently leaving uncommitted compaction drift (`#jb-compact-commit-left-uncommitted`)
 //! - component_compact_uses_guarded_direct_write_when_patches_dir_exists: compact does not emit a
@@ -715,30 +711,11 @@ fn run_in_controller_scoped(
         return Ok(());
     }
     if !targets.settled {
+        retain_compact_projection(file, &targets, component_name, commit)?;
         eprintln!(
             "[compact] canonical target retained; lazy editor delivery projection will settle it"
         );
         return Ok(());
-    }
-
-    // `#jb-compact-editor-buffer-flush`: CRDT convergence now requests and proves
-    // the owning editor's native save. Keep this older targeted flush as a
-    // defense-in-depth path for legacy editor-IPC convergence that updated only
-    // the live in-memory buffer. Flush it before the re-read and commit. Otherwise
-    // the selective commit compares the stale pre-compact working tree against the
-    // compacted snapshot, treats the snapshot as historical exchange drift, and
-    // repairs it back to HEAD, leaving HEAD and disk pre-compact (the "JB Compact
-    // Exchange left an uncommitted summary" defect). Fail-open: if the editor
-    // cannot flush, `commit_compacted_authoritative` / `compact_dirty` still stage
-    // the authoritative snapshot and verify HEAD.
-    if commit && !force_disk {
-        let disk_is_pre_compact = effects
-            .force_disk_document_content(file, "compact_pre_commit_disk_flush_probe")
-            .map(|disk| disk == observed_write_base_content)
-            .unwrap_or(false);
-        if disk_is_pre_compact {
-            flush_editor_buffer_to_disk_after_compact(file, &targets.live, effects);
-        }
     }
 
     if component_name.is_none() || component_name == Some("exchange") {
@@ -941,6 +918,115 @@ fn compact_dirty(
         )
 }
 
+fn retain_compact_projection(
+    file: &Path,
+    targets: &CompactDocumentTargets,
+    target_component: Option<&str>,
+    commit: bool,
+) -> Result<()> {
+    let canonical = file
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", file.display()))?;
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let continuation_id = format!(
+        "compact-projection-{}-{}",
+        agent_doc_hash::content_hash(&targets.live),
+        uuid::Uuid::new_v4(),
+    );
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!("{document_hash}:{continuation_id}"),
+        agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+            document_hash,
+            continuation_id: continuation_id.clone(),
+            file: canonical.to_string_lossy().into_owned(),
+            live_content: targets.live.clone(),
+            committed_content: targets.committed.clone(),
+            target_component: target_component.map(ToOwned::to_owned),
+            commit,
+        },
+    );
+    agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)?;
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "compact_projection_retained file={} continuation_id={} live_hash={} committed_hash={} commit={} driver=state_projection",
+            canonical.display(),
+            continuation_id,
+            agent_doc_hash::content_hash(&targets.live),
+            agent_doc_hash::content_hash(&targets.committed),
+            commit,
+        ),
+    );
+    Ok(())
+}
+
+/// Complete a compact continuation after the controller projection proves the
+/// retained write has converged through both live authority and disk.
+///
+/// This is an Effect port: it validates the current state again, projects the
+/// snapshot/commit, and returns the exact settled hash for the durable receipt.
+pub fn complete_retained_projection(
+    file: &Path,
+    live_content: &str,
+    committed_content: &str,
+    target_component: Option<&str>,
+    commit: bool,
+) -> Result<String> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        let effects = runtime_effects()?;
+        let authority =
+            effects.current_document_content(file, "compact_projection_completion_authority")?;
+        let disk = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read disk projection for {}", file.display()))?;
+        anyhow::ensure!(
+            authority == disk,
+            "compact projection is not converged: authority hash {} differs from disk hash {}",
+            agent_doc_hash::content_hash(&authority),
+            agent_doc_hash::content_hash(&disk),
+        );
+
+        let mut targets = CompactDocumentTargets {
+            live: live_content.to_string(),
+            committed: committed_content.to_string(),
+            settled: true,
+        };
+        if authority != targets.live {
+            let target = target_component
+                .context("compact projection authority advanced for an inline compact target")?;
+            targets = targets.rebase_onto_authoritative_siblings(&authority, target)?;
+        }
+        anyhow::ensure!(
+            authority == targets.live,
+            "compact projection authority does not contain the retained compact target",
+        );
+
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &targets.committed,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        if target_component.is_none() || target_component == Some("exchange") {
+            agent_doc_session_accretion_io::record_recent_exchange_compaction(file)?;
+        }
+        if commit {
+            commit_compacted_authoritative(file, &targets.committed, &targets.live)?;
+        }
+        let settled_hash = agent_doc_hash::content_hash(&targets.live);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "compact_projection_completed file={} settled_hash={} committed_hash={} commit={} driver=state_projection_effect",
+                file.display(),
+                settled_hash,
+                agent_doc_hash::content_hash(&targets.committed),
+                commit,
+            ),
+        );
+        Ok(settled_hash)
+    })
+}
+
 /// Commit a compaction, staging the authoritative in-memory compacted content.
 ///
 /// `#jb-compact-commit-left-uncommitted`: the live "JB Compact Exchange left
@@ -1094,123 +1180,6 @@ fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Resu
         );
     }
     Ok(())
-}
-
-/// `#jb-compact-editor-buffer-flush`: converge the working-tree disk file with
-/// the compacted editor buffer before an editor-IPC compaction commit.
-///
-/// The editor-IPC convergence in `apply_compacted_document` replaces the live
-/// editor's in-memory buffer through the plugin's Document API; the plugin does
-/// **not** save (unlike a normal response append, a compaction has no `(HEAD)`
-/// markers to preserve in the working tree). So after the `--commit` closeout
-/// stages the compacted snapshot into HEAD, the working-tree file on disk still
-/// holds the pre-compact content and `git status` reports the document dirty —
-/// the operator sees "Compact Exchange left an uncommitted summary" even though
-/// HEAD is already correct.
-///
-/// Ask the live editor to flush its buffer to disk with the same `save_document`
-/// IPC that `preflight` uses to resolve `live_prompt_drift`, then wait (bounded)
-/// for the working-tree file to stop matching `pre_compact`. The plugin saves the
-/// buffer it already converged, so disk converges before the commit stages it.
-/// Returns `true` once disk matches the compacted content. Fail-open:
-/// `commit_compacted_authoritative` still verifies HEAD after the commit and fails
-/// closed if the compacted content did not land.
-fn flush_editor_buffer_to_disk_after_compact(
-    file: &Path,
-    expected_content: &str,
-    effects: &dyn CompactRuntimeEffects,
-) -> bool {
-    let canonical = match file.canonicalize() {
-        Ok(canonical) => canonical,
-        Err(e) => {
-            eprintln!(
-                "[compact] warning: could not resolve {} to flush the editor buffer after compact: {e}",
-                file.display()
-            );
-            return false;
-        }
-    };
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let path_str = canonical.to_string_lossy().to_string();
-    let patch_id = format!("compact-flush-{}", uuid::Uuid::new_v4());
-
-    if compact_disk_matches_expected(&canonical, expected_content, effects) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "compact_editor_buffer_flush file={} patch_id={} transport=already_disk",
-                file.display(),
-                patch_id
-            ),
-        );
-        return true;
-    }
-
-    let Some(registration) =
-        agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)
-            .ok()
-            .flatten()
-    else {
-        return false;
-    };
-    if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid) {
-        return false;
-    }
-    let flushed = agent_doc_ipc_io::send_save_document_to_editor(
-        &project_root,
-        registration.pid,
-        &registration.editor_id,
-        &path_str,
-        &patch_id,
-    );
-
-    if let Err(e) = flushed {
-        eprintln!(
-            "[compact] warning: editor buffer flush after compact failed for {} (working tree may lag HEAD until the editor saves): {e}",
-            file.display()
-        );
-        return false;
-    }
-
-    // The typed `save_document` intent responds after saving; the CP receipt is applied
-    // asynchronously, so poll the working tree until the flush lands (or time out).
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
-    loop {
-        if compact_disk_matches_expected(&canonical, expected_content, effects) {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "compact_editor_buffer_flush file={} patch_id={} transport=save_document",
-                    file.display(),
-                    patch_id
-                ),
-            );
-            return true;
-        }
-        if std::time::Instant::now() >= deadline {
-            eprintln!(
-                "[compact] warning: editor buffer flush requested for {} but the working tree still lags after 1s; the commit will fall back to the authoritative snapshot",
-                file.display()
-            );
-            return false;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-}
-
-fn compact_disk_matches_expected(
-    file: &Path,
-    expected_content: &str,
-    effects: &dyn CompactRuntimeEffects,
-) -> bool {
-    effects
-        .force_disk_document_content(file, "compact_editor_buffer_flush_disk_poll")
-        .is_ok_and(|disk| {
-            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&disk)
-                == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-                    expected_content,
-                )
-        })
 }
 
 fn closeout_compact_with_commit(file: &Path) -> Result<()> {
@@ -1627,6 +1596,21 @@ fn apply_compacted_document(
                     file.display()
                 )
             });
+        }
+        let disk_projection = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read disk projection for {}", file.display()))?;
+        if disk_projection != targets.live {
+            targets.settled = false;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "compact_disk_projection_pending file={} live_hash={} disk_hash={} action=retain_without_snapshot_or_commit driver=lazy_projection",
+                    file.display(),
+                    agent_doc_hash::content_hash(&targets.live),
+                    agent_doc_hash::content_hash(&disk_projection),
+                ),
+            );
+            return Ok(targets);
         }
 
         // #compact-independent-cells: editor/CRDT convergence may legitimately
@@ -4971,9 +4955,21 @@ mod tests {
         }
     }
 
-    fn record_compact_lazily_receipt(file: &Path, patch_id: &str, content: &str) -> Option<()> {
-        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
-            file, patch_id, content, "compact_test",
+    fn record_compact_lazily_projection(
+        file: &Path,
+        content: &str,
+        disk_persisted: bool,
+    ) -> Option<()> {
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let project_root = agent_doc_fs::find_project_root(&canonical)?;
+        let identity = format!("{COMPACT_TEST_EDITOR_ID}:{}", canonical.display());
+        agent_doc_controller_io::project_controller::observe_editor_document_projection(
+            &project_root,
+            &canonical,
+            &identity,
+            &agent_doc_hash::content_hash(content),
+            disk_persisted,
+            "compact_test_projection",
         )
         .ok()?;
         Some(())
@@ -5008,7 +5004,7 @@ mod tests {
                             _ => std::fs::read_to_string(file_path).ok()?,
                         };
                     std::fs::write(file_path, &content).ok()?;
-                    record_compact_lazily_receipt(Path::new(file_path), patch_id, &content)?;
+                    record_compact_lazily_projection(Path::new(file_path), &content, true)?;
                     return Some(
                         serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
                             .to_string(),
@@ -5045,7 +5041,7 @@ mod tests {
                         .publish(Path::new(file_path), &content)
                         .ok()?;
                     let _ = std::fs::write(file_path, &content);
-                    record_compact_lazily_receipt(Path::new(file_path), patch_id, &content)?;
+                    record_compact_lazily_projection(Path::new(file_path), &content, true)?;
                 }
                 Some(
                     serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
@@ -5100,13 +5096,8 @@ mod tests {
                         };
                         std::fs::write(file_path, &content).ok()?;
                         let receipt_file = Path::new(file_path).to_path_buf();
-                        let receipt_patch_id = patch_id.to_string();
                         std::thread::spawn(move || {
-                            let _ = record_compact_lazily_receipt(
-                                &receipt_file,
-                                &receipt_patch_id,
-                                &content,
-                            );
+                            let _ = record_compact_lazily_projection(&receipt_file, &content, true);
                         });
                         Some(
                             serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
@@ -5136,22 +5127,29 @@ mod tests {
                             if !buffers.contains_key(file_path) {
                                 buffers.insert(
                                     file_path.to_string(),
-                                    CompactTestEditorBuffer::attach(
+                                    CompactTestEditorBuffer::attach_with_delivery_pump(
                                         Path::new(file_path),
                                         COMPACT_TEST_EDITOR_ID,
                                         payload.get("baseline")?.as_str()?,
+                                        false,
                                     )
                                     .ok()?,
                                 );
                             }
+                            let previous_visible = buffers.get(file_path)?.content.clone();
                             buffers
                                 .get_mut(file_path)?
                                 .publish(Path::new(file_path), &content)
                                 .ok()?;
-                            record_compact_lazily_receipt(
+                            // This fixture models a visible editor apply whose
+                            // native save has not happened yet. Keep raw disk at
+                            // the exact pre-apply baseline even if compatibility
+                            // test plumbing mirrored the patch there.
+                            std::fs::write(file_path, previous_visible.as_bytes()).ok()?;
+                            record_compact_lazily_projection(
                                 Path::new(file_path),
-                                patch_id,
                                 &content,
+                                false,
                             )?;
                         }
                         Some(
@@ -5165,13 +5163,11 @@ mod tests {
     }
 
     #[test]
-    fn compact_with_commit_flushes_editor_buffer_to_disk() {
-        // #jb-compact-editor-buffer-flush: a live editor applies the compact
-        // convergence to its in-memory buffer and does NOT save. Without the
-        // flush, the selective commit sees a stale pre-compact working tree, so
-        // HEAD never lands the summary and the working tree stays dirty — the
-        // "JB Compact Exchange left an uncommitted summary" defect.
-        use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
+    fn compact_with_commit_retains_projection_without_requesting_an_editor_save() {
+        // A buffer-only editor has not projected the compacted revision to
+        // disk. Compact admission must retain the exact continuation and return;
+        // it must not issue a save request, snapshot, or commit ahead of the
+        // editor's later full-state projection.
         use std::fs;
 
         let dir = tempfile::tempdir().unwrap();
@@ -5202,8 +5198,13 @@ mod tests {
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        let _initial_editor =
-            CompactTestEditorBuffer::attach(&file, COMPACT_TEST_EDITOR_ID, doc).unwrap();
+        let _initial_editor = CompactTestEditorBuffer::attach_with_delivery_pump(
+            &file,
+            COMPACT_TEST_EDITOR_ID,
+            doc,
+            false,
+        )
+        .unwrap();
         git(root, &["add", "session.md"]);
         git(root, &["commit", "-q", "-m", "seed"]);
 
@@ -5222,35 +5223,69 @@ mod tests {
             let ops_log =
                 fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
             eprintln!("compact_with_commit_flushes_editor_buffer_to_disk ops log:\n{ops_log}");
-            panic!("editor-IPC compact --commit must succeed: {err:?}");
+            panic!("editor-IPC compact --commit admission must succeed: {err:?}");
         }
 
         let head = agent_doc_git_io::revision::show_head(&file)
             .unwrap()
             .unwrap();
         assert!(
-            head.contains("Compacted summary."),
-            "HEAD should hold the compacted summary:\n{head}"
+            !head.contains("Compacted summary."),
+            "HEAD must remain unchanged before the editor save projection:\n{head}"
         );
-
-        // The working-tree file on disk must equal HEAD — no uncommitted summary.
         let disk = fs::read_to_string(&file).unwrap();
-        assert_eq!(
-            normalize_transient_agent_doc_markers(&disk),
-            normalize_transient_agent_doc_markers(&head),
-            "working tree must equal HEAD after compact once the editor buffer is flushed:\ndisk:\n{disk}\n---\nhead:\n{head}"
-        );
+        assert_eq!(disk, doc);
+
+        let ledger =
+            agent_doc_controller_io::project_controller::load_state_event_ledger(root).unwrap();
+        assert!(ledger.events().iter().any(|event| matches!(
+            &event.fact,
+            agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                live_content,
+                committed_content,
+                commit: true,
+                ..
+            } if live_content.contains("Compacted summary.")
+                && committed_content.contains("Compacted summary.")
+        )));
 
         let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            (ops_log.contains("compact_editor_buffer_flush")
-                && (ops_log.contains("transport=save_document")
-                    || ops_log.contains("transport=already_disk")))
-                || (ops_log.contains("native_editor_save_settled")
-                    && ops_log.contains("transport=crdt_editor_native_save"))
-                || ops_log.contains("compact_writeback file=")
-                    && ops_log.contains("transport=crdt_relay"),
-            "compact --commit must converge the editor buffer to disk:\n{ops_log}"
+            ops_log.contains("compact_projection_retained")
+                && !ops_log.contains("compact_editor_buffer_flush")
+                && !ops_log.contains("native_editor_save"),
+            "compact admission must wait on state projection without an imperative save:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn retained_projection_completion_checkpoints_only_after_state_converges() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        git(root, &["init", "-q"]);
+
+        let file = root.join("session.md");
+        let live = concat!(
+            "---\nagent_doc_session: compact-completion\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Compacted status.\n",
+            "<!-- /agent:status -->\n",
+        );
+        fs::write(&file, live).unwrap();
+
+        let settled_hash =
+            complete_retained_projection(&file, live, live, Some("status"), false).unwrap();
+
+        assert_eq!(settled_hash, agent_doc_hash::content_hash(live));
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&file)
+                .unwrap()
+                .as_deref(),
+            Some(live),
         );
     }
 

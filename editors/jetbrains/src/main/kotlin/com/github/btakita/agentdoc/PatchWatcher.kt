@@ -28,7 +28,6 @@ private enum class EditorIntent(val token: String) {
     /// canonical replace. Carries `node_patches` only (`#crdtstructops` Phase C).
     ApplyStructuralOp("apply_structural_op"),
     Reposition("reposition"),
-    SaveDocument("save_document"),
     RefreshContent("refresh_content"),
     ObserveLazilyCurrent("observe_lazily_current"),
     DeliverCrdtRemote("deliver_crdt_remote"),
@@ -499,67 +498,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                 NativeReloadCoordinator.requestReload(libVersion)
                 APPLY_APPLIED
             }
-            EditorIntent.SaveDocument.token -> {
-                val file = extractStringField(json, "file") ?: return APPLY_FAILED
-                val patchId = extractStringField(json, "patch_id")
-                if (saveDocumentViaDocument(file, patchId)) {
-                    recordDocumentActivity(file, "socket-save-document")
-                    APPLY_APPLIED
-                } else {
-                    APPLY_FAILED
-                }
-            }
             else -> {
                 LOG.warn("[socket] Unknown message type: $type")
                 APPLY_FAILED
             }
         }
-    }
-
-    /**
-     * Flush the editor-owned markdown buffer to disk and publish the exact saved
-     * content as an editor-owned content projection. This is intentionally not a full-content apply:
-     * the plugin does not replace the buffer, it only asks the editor platform to
-     * save the open document that already owns the user's visible text.
-     */
-    private fun saveDocumentViaDocument(filePath: String, patchId: String?): Boolean {
-        var savedContent: String? = null
-        var surfaceStatus = "failed"
-        ApplicationManager.getApplication().invokeAndWait {
-            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
-            if (targetFile == null) {
-                LOG.warn("[socket] save_document rejected: target file not found for $filePath")
-                surfaceStatus = "missing_file"
-                return@invokeAndWait
-            }
-            val fdm = FileDocumentManager.getInstance()
-            val document = fdm.getDocument(targetFile)
-            if (document == null) {
-                LOG.warn("[socket] save_document rejected: no document for $filePath")
-                surfaceStatus = "missing_document"
-                return@invokeAndWait
-            }
-
-            try {
-                fdm.saveDocument(document)
-                savedContent = document.text
-                surfaceStatus = "saved"
-                LOG.info("[socket] save_document flushed ${savedContent?.length ?: 0} chars for $filePath")
-            } catch (e: Exception) {
-                LOG.warn("[socket] save_document failed for $filePath", e)
-            }
-        }
-
-        recordEditorSurfaceOps(
-            filePath,
-            "vcs_refresh_save",
-            "save_document",
-            "save_document",
-            patchId,
-            surfaceStatus,
-        )
-        val content = savedContent ?: return false
-        return writeEditorContentProjection(patchId, content, filePath)
     }
 
     /**

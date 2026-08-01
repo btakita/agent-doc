@@ -40,11 +40,12 @@ describe('patchGuard', () => {
         const guardSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'patchGuard.ts'), 'utf8');
         assert.ok(source.includes('`ipc-${process.pid}.sock`'));
         assert.ok(source.includes('case EditorIntent.ApplyCanonical:'));
-        assert.ok(source.includes('case EditorIntent.SaveDocument:'));
+        assert.strictEqual(source.includes('case EditorIntent.SaveDocument:'), false);
         for (const forbidden of [
             '.agent-doc/patches',
             'claimed-patches',
             'save-document.signal',
+            'save_document',
             'crdt-replica-events',
         ]) {
             assert.strictEqual(source.includes(forbidden), false, forbidden);

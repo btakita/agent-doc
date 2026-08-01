@@ -158,22 +158,11 @@ it('VS Code receives CRDT events and renders the controller-owned in-memory turn
         assert.strictEqual(publisher.includes('.save('), false);
     });
 
-    it('VS Code records every save_document outcome through the shared native surface ABI', () => {
+    it('VS Code has no imperative save-document socket handler', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
-        const intent = fs.readFileSync(path.join(__dirname, '..', 'src', 'saveDocumentIntent.ts'), 'utf-8');
-        const start = source.indexOf('case EditorIntent.SaveDocument:');
-        assert.ok(start >= 0, 'save_document socket handler should exist');
-        const end = source.indexOf('case EditorIntent.RefreshVcs:', start);
-        assert.ok(end > start, 'save_document handler should precede refresh_vcs');
-        const handler = source.slice(start, end);
-
-        assert.ok(handler.includes('return processSaveDocumentIntent(filePath, {'));
-        assert.ok(handler.includes('native.recordEditorSurfaceEvent('));
-        for (const status of ['missing_file', 'missing_document', 'saved', 'failed']) {
-            assert.ok(intent.includes(`'${status}'`), `save_document should record ${status}`);
-        }
-        assert.ok(handler.includes('publishSavedContent:'));
-        assert.ok(handler.includes('observeSavedContent:'));
+        assert.strictEqual(source.includes('case EditorIntent.SaveDocument:'), false);
+        assert.strictEqual(source.includes('processSaveDocumentIntent'), false);
+        assert.strictEqual(source.includes('save_document failed'), false);
     });
 
     it('VS Code refreshes only the repository containing the requested file', () => {

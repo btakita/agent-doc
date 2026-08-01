@@ -18588,7 +18588,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "ReplicaDeregister",
         "ReplicaUpdate",
         "ReplicaPull",
-        "ReplicaAck",
+        "ReplicaProjection",
         "ReplicaAwareness",
         "CrdtCurrentText",
         "default_current_text_source",
@@ -18605,7 +18605,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "replica_register",
         "replica_update",
         "replica_pull",
-        "replica_ack",
+        "replica_projection",
         "replica_awareness",
         "crdt_current_text",
         "crdt_checkpoint",
@@ -18671,7 +18671,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent_doc_crdt_relay_io::relay_replica_update_for_file(",
         "agent_doc_crdt_relay_io::pull_rebootstrap_for_file(",
         "agent_doc_crdt_relay_io::pull_replica_updates_for_file(",
-        "agent_doc_crdt_relay_io::ack_replica_update_for_file(",
+        "agent_doc_crdt_relay_io::observe_replica_projection_for_file(",
         "agent_doc_crdt_relay_io::set_replica_awareness_for_file(",
         "agent_doc_crdt_relay_io::commit_barrier_for_file(",
         "agent_doc_crdt_relay_io::record_committed_baseline_for_file(",
@@ -20872,11 +20872,10 @@ fn test_agent_doc_preflight_runtime_io_owns_ipc_truncation_recovery_graph() {
 
     for required in [
         "pub fn recover_ipc_truncated_worktree_from_editor_buffer(",
-        "fn poll_save_document_visible_write_receipt(",
-        "agent_doc_ipc_io::send_save_document_to_editor(",
-        "agent_doc_write_converge_io::poll_visible_write_text_lazily_event_or_projection(",
+        "agent_doc_crdt_relay_io::current_text_for_file(&canonical)?",
+        "ipc_truncation_recover_pending file=",
         "editor_buffer_preserved_head_exchange(",
-        "ipc_truncation_recovered_from_editor_buffer file=",
+        "ipc_truncation_recovered_from_editor_projection file=",
     ] {
         assert!(
             preflight_runtime.contains(required),
@@ -20884,13 +20883,7 @@ fn test_agent_doc_preflight_runtime_io_owns_ipc_truncation_recovery_graph() {
         );
     }
 
-    for required_dep in [
-        "agent-doc-document =",
-        "agent-doc-ipc-io =",
-        "agent-doc-project-root-io =",
-        "agent-doc-session-check-io =",
-        "uuid =",
-    ] {
+    for required_dep in ["agent-doc-document =", "agent-doc-session-check-io ="] {
         assert!(
             preflight_runtime_manifest.contains(required_dep),
             "agent-doc-preflight-runtime-io should declare IPC truncation recovery dependency: {required_dep}"
@@ -20900,6 +20893,7 @@ fn test_agent_doc_preflight_runtime_io_owns_ipc_truncation_recovery_graph() {
     for forbidden in [
         "fn recover_ipc_truncated_worktree_from_editor_buffer(",
         "fn poll_save_document_visible_write_receipt(",
+        "agent_doc_ipc_io::send_save_document_to_editor(",
         "agent_doc_debounce::await_editor_sync_barrier(",
         "editor_buffer_preserved_head_exchange(",
     ] {
@@ -20909,6 +20903,11 @@ fn test_agent_doc_preflight_runtime_io_owns_ipc_truncation_recovery_graph() {
         );
     }
 
+    assert!(
+        !preflight_runtime.contains("send_save_document_to_editor(")
+            && !preflight_runtime.contains("poll_save_document_visible_write_receipt("),
+        "preflight truncation recovery must consume normal state projection without requesting or polling an editor save"
+    );
     assert!(
         preflight_runtime.contains("recover_ipc_truncated_worktree_from_editor_buffer(file, rc)?"),
         "preflight runtime sequencing should call the focused IPC truncation recovery helper"
@@ -23927,7 +23926,6 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "pub fn patch_message(",
         "pub fn queue_convergence_message(",
         "pub fn reposition_message(",
-        "pub fn save_document_message(",
         "pub fn refresh_content_message(",
         "pub enum EditorIntent",
         "pub fn vcs_refresh_message(",
@@ -24335,13 +24333,12 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             && ipc_io_source.contains("classify_socket_receipt")
             && ipc_io_source.contains("early_receipt_tagged_message")
             && ipc_io_source.contains("message_requests_early_receipt")
-            && ipc_io_source.contains("save_document_message")
             && ipc_io_source.contains("vcs_refresh_message")
             && ipc_io_source.contains("interprocess::local_socket")
             && ipc_io_source.contains("pub type OpsLogger")
             && ipc_io_source.contains("pub mod editor_target;")
             && ipc_io_source.contains("pub fn start_listener_with_logger")
-            && ipc_io_source.contains("pub fn send_save_document_to_editor"),
+            && !ipc_io_source.contains("send_save_document"),
         "agent-doc-ipc-io should own PID-scoped socket transport while importing protocol vocabulary"
     );
     for forbidden in [
@@ -24358,7 +24355,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "fn patch_message(",
         "fn queue_convergence_message(",
         "fn reposition_message(",
-        "fn save_document_message(",
+        "save_document_message(",
         "fn refresh_content_message(",
         "fn publish_live_buffer_message(",
         "fn vcs_refresh_message(",
@@ -24446,7 +24443,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     assert!(
         ipc_io_source.contains("pub fn start_listener_with_logger")
             && ipc_io_source.contains("pub fn send_message_to_pid(")
-            && ipc_io_source.contains("pub fn send_save_document_to_editor(")
+            && !ipc_io_source.contains("send_save_document")
             && ipc_io_source.contains("pub fn send_observe_lazily_current_to_editor("),
         "agent-doc-ipc-io should own PID-scoped socket listener and intent transport"
     );
@@ -24463,7 +24460,6 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "FFI should call cancellable focused IPC IO directly, inject the ops-log sink, wake listeners during native reload quiescence, and read the Project Controller state-backbone projection (sidecars demoted, #sidecardemote) for editor-facing turn projection"
     );
     for relative in [
-        "agent-doc-preflight-runtime-io/src/lib.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-write-runtime-io/src/ipc.rs",
         "agent-doc-write-ipc-io/src/transport.rs",
@@ -24475,6 +24471,13 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             "{relative} should call focused IPC IO directly instead of an orchestration facade"
         );
     }
+    let preflight_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
+    assert!(
+        !preflight_runtime.contains("agent_doc_ipc_io::")
+            && !preflight_runtime.contains("crate::ipc_socket::"),
+        "preflight recovery should consume reactive document projection without any editor IPC request"
+    );
 
     let callback_source =
         fs::read_to_string(manifest_dir.join("agent-doc-callback-io/src/lib.rs")).unwrap();
@@ -25191,7 +25194,7 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() 
         "impl agent_doc_diff_io::DocumentBaselineStore for DiffBaselineStore",
         "pub fn delete_recovery_projection_and_clear_baseline(",
         "pub fn ensure_initial_snapshot(",
-        "pub fn try_migrate_renamed(",
+        "pub fn detect_document_path_transition(",
         "pub fn checkpoint_undo_content(",
         "pub fn load_undo_content(",
         "pub fn clear_undo_content(",
@@ -25204,8 +25207,6 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() 
         "StateFact::CrdtRecoveryProjectionCleared",
         "agent_doc_project_root_io::project_root_containing(",
         "agent_doc_session_registry_io::lookup_entry_in(",
-        "agent_doc_sqlite::state_store::rekey_document_state_in_db(",
-        "agent_doc_session_registry_io::update_session_file_in(",
     ] {
         assert!(
             snapshot_io.contains(required),
@@ -25217,6 +25218,9 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() 
         "find_snapshot_hash_for_session",
         "migrate_state_files_for_hash",
         "session_id_from_content(&snapshot_content)",
+        "merge_document_state_for_path_transition_in_db",
+        "rekey_actor_document_path_in_db",
+        "update_session_file_in",
     ] {
         assert!(
             !snapshot_io.contains(forbidden),
@@ -25246,8 +25250,10 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_without_sidecar_fallback() 
     for required in [
         "pub struct DocumentStateRekeyReport",
         "pub fn rekey_document_state_in_db(",
+        "pub fn merge_document_state_for_path_transition_in_db(",
+        "pub fn rekey_actor_document_path_in_db(",
         ".pointer_mut(\"/fact/document_hash\")",
-        "DELETE FROM state_event_peer_acks WHERE document_hash = ?1",
+        "DELETE FROM state_event_peer_acks",
     ] {
         assert!(
             sqlite_store.contains(required),
@@ -25601,9 +25607,10 @@ fn test_agent_doc_compact_io_routes_document_reads_through_runtime_authority() {
         "fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String>",
         "effects.current_document_content(file, \"compact_run_initial\")",
         "effects.force_disk_document_content(file, \"compact_run_initial_force_disk\")",
-        "effects\n            .force_disk_document_content(file, \"compact_pre_commit_disk_flush_probe\")",
         "effects\n        .force_disk_document_content(file, \"compact_post_write_disk_verify\")",
-        "effects\n        .force_disk_document_content(file, \"compact_editor_buffer_flush_disk_poll\")",
+        "let disk_projection = std::fs::read_to_string(file)",
+        "\"compact_disk_projection_pending file={}",
+        "pub fn complete_retained_projection(",
     ] {
         assert!(
             compact_source.contains(required),
@@ -31897,7 +31904,7 @@ fn retained_write_boundary_flags_are_typed_at_development_call_sites() {
             && session_check
                 .contains("CapturedFinalizeSource::NativeSaveWithoutRetainedIntent")
             && !session_check.contains(
-                "settle_acknowledged_captured_projection_through_authority(\n                file,\n                \"session_check_capture_without_retained_intent_native_save\"",
+                "settle_projected_captured_response_through_authority(\n                file,\n                \"session_check_capture_without_retained_intent_native_save\"",
             ),
         "captured-finalize native-save siblings must remain typed at call sites",
     );

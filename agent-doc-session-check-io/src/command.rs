@@ -1840,7 +1840,7 @@ fn retained_pending_write_message(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RetainedPendingGuidance {
     ReopenEditor,
-    AwaitCapturedReplayAck,
+    AwaitCapturedReplayProjection,
     CommitConvergedProjection,
     AwaitDelivery,
 }
@@ -1853,7 +1853,7 @@ fn retained_pending_guidance(
     let guidance = if !editor_live {
         RetainedPendingGuidance::ReopenEditor
     } else if converged_but_unsettleable && captured_closeout {
-        RetainedPendingGuidance::AwaitCapturedReplayAck
+        RetainedPendingGuidance::AwaitCapturedReplayProjection
     } else if converged_but_unsettleable {
         RetainedPendingGuidance::CommitConvergedProjection
     } else {
@@ -1868,13 +1868,13 @@ fn retained_pending_guidance(
              automatically. The capture is durable in CRDT/Lazily state, so it is not \
              at risk while you do that."
         }
-        RetainedPendingGuidance::AwaitCapturedReplayAck => {
+        RetainedPendingGuidance::AwaitCapturedReplayProjection => {
             " NOTE: authority and disk currently agree on bytes that do NOT contain \
              the captured response, while the exact captured replay remains retained \
              for editor delivery. `agent-doc commit` cannot succeed from this state \
              because there is no response body in its staged snapshot. Do not run \
              `commit`, submit another replay/closeout payload, or force disk; the \
-             existing replay must become visible and receive its editor ACK first."
+             existing replay must become visible in the editor projection first."
         }
         RetainedPendingGuidance::CommitConvergedProjection => {
             " NOTE: authority and disk have ALREADY converged and still do not \

@@ -114,7 +114,7 @@ Two required components do not exist today and must be built for goal (2)/(3):
   separate process. On settled `.md` change → `route_file_change` (`src/main.rs:751`) →
   `FileWatchChangeObserved` StateFact → SQLite. No consumer.
 - **Editor write channels:** (a) replica delta channel (editor⇄CP⇄peers via `ReplicaUpdate`/
-  `ReplicaPull`/`ReplicaAck`, forwarder polls ~4×/s); (b) patch-file channel
+  `ReplicaPull`/`ReplicaProjection`, forwarder polls ~4×/s); (b) patch-file channel
   (`.agent-doc/patches/<hash>.json`, `PatchWatcher.kt`). Neither is triggered by disk change.
 - **Authority order:** live editor buffer > in-memory canonical > disk > git baseline.
   `reconcile_current_doc` (`read_authority.rs:69`) is the per-cycle picker. Plugin's own

@@ -159,7 +159,7 @@ mod tests {
             r#"{"method":"replica_deregister","file":"plan.md","identity":"intellij:1234"}"#,
             r#"{"method":"replica_update","file":"plan.md","identity":"vscode:99","update_b64":"AAEC"}"#,
             r#"{"method":"replica_pull","file":"plan.md","identity":"vscode:99"}"#,
-            r#"{"method":"replica_ack","file":"plan.md","identity":"vscode:99","patch_id":"crdt:1:2:3","generation":3}"#,
+            r#"{"method":"replica_projection","file":"plan.md","identity":"vscode:99","content_hash":"abc"}"#,
             r#"{"method":"replica_awareness","file":"plan.md","identity":"vscode:99","awareness_b64":"e30="}"#,
             r#"{"method":"crdt_current_text","file":"plan.md","source":"resolve_current_doc"}"#,
             r#"{"method":"crdt_checkpoint","file":"plan.md","source":"admin_reload_lib"}"#,

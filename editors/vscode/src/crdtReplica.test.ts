@@ -7,7 +7,6 @@ import {
     parseRegisterResponse,
     matchingRemoteTargetGeneration,
     replicaBaselineDecision,
-    remoteAckReplayPlan,
     remoteTemplateProjectionDecision,
     shouldApplyRemoteUpdate,
     shouldForwardLocalDelta,
@@ -65,13 +64,13 @@ class FakeNode implements ReplicaNode {
 class FakeTransport implements ReplicaTransport {
     broadcasts: Array<{ filePath: string; identity: string; update: Uint8Array }> = [];
     pending: ReplicaRemoteUpdate[] = [];
-    acked: Array<{ patchId: string; generation: number; contentHash?: string }> = [];
+    projected: Array<{ contentHash: string; diskPersisted: boolean }> = [];
     deregistered: string[] = [];
     broadcastGate: Promise<void> | undefined;
     registerCount = 0;
     pullCount = 0;
     unavailablePulls = 0;
-    ackFailures = 0;
+    projectionFailures = 0;
 
     async register(
         _filePath: string,
@@ -101,19 +100,18 @@ class FakeTransport implements ReplicaTransport {
         return { kind: 'deltas', updates: this.pending };
     }
 
-    async ackUpdate(
+    async projectState(
         _filePath: string,
         _identity: string,
-        patchId: string,
-        generation: number,
-        contentHash?: string,
+        contentHash: string,
+        diskPersisted: boolean,
     ): Promise<boolean> {
-        if (this.ackFailures > 0) {
-            this.ackFailures -= 1;
+        if (this.projectionFailures > 0) {
+            this.projectionFailures -= 1;
             return false;
         }
-        this.acked.push({ patchId, generation, contentHash });
-        this.pending = this.pending.filter((update) => update.patchId !== patchId);
+        this.projected.push({ contentHash, diskPersisted });
+        this.pending = [];
         return true;
     }
 
@@ -164,32 +162,6 @@ describe('crdt replica manager', () => {
         );
         await forwarder.deregister();
         assert.strictEqual(forwarder.ownershipPhase, 'detached');
-    });
-
-    it('requires visible-content proof before replaying a retained ACK', () => {
-        const updates: ReplicaRemoteUpdate[] = [
-            {
-                patchId: 'crdt:1:42:11',
-                origin: 1,
-                target: 42,
-                generation: 11,
-                expectedContentHash: 'older',
-                update: Buffer.from([1]),
-            },
-            {
-                patchId: 'crdt:1:42:12',
-                origin: 1,
-                target: 42,
-                generation: 12,
-                expectedContentHash: 'visible',
-                update: Buffer.from([2]),
-            },
-        ];
-
-        assert.strictEqual(remoteAckReplayPlan(updates, 'not-yet-visible'), null);
-        const plan = remoteAckReplayPlan(updates, 'visible');
-        assert.strictEqual(plan?.candidate.generation, 11);
-        assert.strictEqual(plan?.acknowledgedThroughGeneration, 12);
     });
 
 it('applies peer remote updates but suppresses self echoes', () => {
@@ -320,7 +292,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         manager.dispose();
     });
 
-    it('ACKs a pulled remote update only after the converged text is applied', async () => {
+    it('projects visible state only after the converged text is applied', async () => {
         const node = new FakeNode('base');
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
@@ -352,10 +324,9 @@ it('applies peer remote updates but suppresses self echoes', () => {
         await manager.drainRemoteUpdates();
 
         assert.deepStrictEqual(applied, [{ text: 'remote text', expectedText: 'base' }]);
-        assert.deepStrictEqual(transport.acked, [{
-            patchId: 'crdt:1:2:3',
-            generation: 3,
+        assert.deepStrictEqual(transport.projected, [{
             contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+            diskPersisted: false,
         }]);
     });
 
@@ -409,12 +380,12 @@ it('applies peer remote updates but suppresses self echoes', () => {
         manager.dispose();
     });
 
-    it('retains a failed ACK frontier and does not pull or decode the delivery again', async () => {
+    it('reprojects visible state after transient projection transport failure', async () => {
         const node = new FakeNode('base');
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
         let editorText = 'base';
-        transport.ackFailures = 2;
+        transport.projectionFailures = 2;
         transport.pending = [{
             patchId: 'crdt:1:42:13',
             origin: 1,
@@ -442,11 +413,11 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.strictEqual(node.updates.length, 1);
 
         await manager.drainRemoteUpdates();
-        assert.strictEqual(transport.pullCount, 1);
+        assert.strictEqual(transport.pullCount, 2);
         assert.strictEqual(node.updates.length, 1);
 
         await manager.drainRemoteUpdates();
-        assert.strictEqual(transport.pullCount, 2);
+        assert.strictEqual(transport.pullCount, 3);
         assert.strictEqual(node.updates.length, 1);
         manager.dispose();
     });
@@ -551,7 +522,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         );
         assert.strictEqual(
             replicaBaselineDecision('exact', false, false, true, true, true, false),
-            'acknowledge-remote-target',
+            'project-remote-target',
         );
         assert.strictEqual(
             replicaBaselineDecision('exact', false, false, true, false, false, false),
@@ -569,7 +540,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.strictEqual(shouldForwardLocalDelta('stale', 'before'), false);
     });
 
-    it('reprojects CPC state over unproven buffer divergence before ACKing', async () => {
+    it('reprojects CPC state over unproven buffer divergence before publishing state', async () => {
   const node = new FakeNode('base');
   const transport = new FakeTransport();
   const filePath = '/work/plan.md';
@@ -607,10 +578,9 @@ it('applies peer remote updates but suppresses self echoes', () => {
     { text: 'remote text', expectedText: 'base' },
     { text: 'remote text', expectedText: 'stale cache projection' },
   ]);
-  assert.deepStrictEqual(transport.acked, [{
-    patchId: 'crdt:1:42:8',
-    generation: 8,
+  assert.deepStrictEqual(transport.projected, [{
     contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+    diskPersisted: false,
   }]);
         manager.dispose();
     });
@@ -649,15 +619,14 @@ it('applies peer remote updates but suppresses self echoes', () => {
 
         assert.strictEqual(editorText, 'remote text');
         assert.deepStrictEqual(node.updates, []);
-        assert.deepStrictEqual(transport.acked, [{
-            patchId: 'crdt:1:42:9',
-            generation: 9,
+        assert.deepStrictEqual(transport.projected, [{
             contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+            diskPersisted: false,
         }]);
         manager.dispose();
     });
 
-    it('ACKs self-echo remote updates without applying text', async () => {
+    it('projects self-echo visible state without applying text', async () => {
         const node = new FakeNode('base');
         const transport = new FakeTransport();
         const applied: string[] = [];
@@ -686,10 +655,9 @@ it('applies peer remote updates but suppresses self echoes', () => {
 
         assert.deepStrictEqual(applied, []);
         assert.deepStrictEqual(node.updates, []);
-        assert.deepStrictEqual(transport.acked, [{
-            patchId: 'crdt:42:42:5',
-            generation: 5,
+        assert.deepStrictEqual(transport.projected, [{
             contentHash: 'cae662172fd450bb0cd710a769079c05bfc5d8e35efa6576edc7d0377afdd4a2',
+            diskPersisted: false,
         }]);
     });
 
@@ -732,7 +700,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.strictEqual(transport.broadcasts.length, 1);
     });
 
-    it('does not ACK a pulled remote update when editor application fails', async () => {
+    it('does not project a pulled remote update when editor application fails', async () => {
         const node = new FakeNode('base');
         const transport = new FakeTransport();
         let editorText = 'base';
@@ -756,7 +724,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.strictEqual(await manager.attachDocument('/work/plan.md', 'base'), true);
         await manager.drainRemoteUpdates();
 
-        assert.deepStrictEqual(transport.acked, []);
+        assert.deepStrictEqual(transport.projected, []);
         manager.dispose();
     });
 
@@ -800,17 +768,16 @@ it('applies peer remote updates but suppresses self echoes', () => {
 
         await manager.drainRemoteUpdates();
         assert.deepStrictEqual(applied, []);
-        assert.deepStrictEqual(transport.acked, []);
+        assert.deepStrictEqual(transport.projected, []);
 
         releaseBroadcast();
         await localForward;
         await manager.drainRemoteUpdates();
 
         assert.deepStrictEqual(applied, ['remote text']);
-        assert.deepStrictEqual(transport.acked, [{
-            patchId: 'crdt:1:42:7',
-            generation: 7,
+        assert.deepStrictEqual(transport.projected, [{
             contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+            diskPersisted: false,
         }]);
     });
 

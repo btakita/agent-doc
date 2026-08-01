@@ -103,23 +103,21 @@ and against this live project: preprocessor directives allowed, untracked id den
 agent-doc CI run `30718871518` is in progress; local evidence above.
 
 This closes the finding I filed two cycles ago while verifying the C-preprocessor false positive. That one was fixed upstream; this one was the reason the first one was hard to see.
-<!-- agent:boundary:222607b0 -->
+<!-- agent:boundary:602b410b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#coinedpretooluseguard]
-- ~~do [#bugcoinedpretooluse]~~
-- do [#lazilycppexcuses]
-- ⏭️ do [#lzcppmsgpackwire]
-- do [#lzmsgpackseven]
-- do [#lzreadmelinkrot]
-- do [#lzvacuousrun]
-- do [#lzscenariobodyskip]
-- do [#lzspecscenarioids]
-- do [#lzassertionblockschema]
-- do [#lzdependencyavailability]
+- 🚧 📌 do [#lazilycppexcuses]
+- 📌 do [#lzcppmsgpackwire]
+- 📌 do [#lzmsgpackseven]
+- 📌 do [#lzreadmelinkrot]
+- 📌 do [#lzvacuousrun]
+- 📌 do [#lzscenariobodyskip]
+- 📌 do [#lzspecscenarioids]
+- 📌 do [#lzassertionblockschema]
+- 📌 do [#lzdependencyavailability]
 - 📌 do [#lzcpptranscribedrunners]
 - 📌 do [#lzreactdtsgate]
 - 📌 do [#lzegress]
@@ -133,7 +131,7 @@ This closes the finding I filed two cycles ago while verifying the C-preprocesso
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilycppexcuses] lazily-cpp still excuses distributed/crdt_sync_frames.json in KNOWN_UNCOVERED, but the reason that entry was written for is gone: it said replaying wire needs an encoder first, and json_codec.hpp is that encoder as of #lzcppjsoncodec. What is missing now is only a runner. Work: replay conformance/distributed/crdt_sync_frames.json through decode_json and encode_json in tests/test_distributed_conformance.cpp or a sibling, delete the KNOWN_UNCOVERED entry, and raise MIN_FIXTURES in scripts/check-conformance-coverage.sh in the same change. An excuse whose stated cause has been fixed is the exact rot that ledger exists to prevent.
+- [ ] 🚧 [#lazilycppexcuses] lazily-cpp still excuses distributed/crdt_sync_frames.json in KNOWN_UNCOVERED, but the reason that entry was written for is gone: it said replaying wire needs an encoder first, and json_codec.hpp is that encoder as of #lzcppjsoncodec. What is missing now is only a runner. Work: replay conformance/distributed/crdt_sync_frames.json through decode_json and encode_json in tests/test_distributed_conformance.cpp or a sibling, delete the KNOWN_UNCOVERED entry, and raise MIN_FIXTURES in scripts/check-conformance-coverage.sh in the same change. An excuse whose stated cause has been fixed is the exact rot that ledger exists to prevent.
 - [ ] [#lzcppmsgpackwire] lazily-cpp ships a MessagePack codec that is NOT protocol.md's msgpack, which is worse than not having one because the file made it read as implemented and coverage.json would have shown a check. The spec frame is externally tagged, Snapshot mapping to its body, over named-field maps whose keys match the json schema; include/lazily/codec.hpp writes an INTERNALLY tagged envelope with type and value keys, gives NodeState and IpcValue integer kind discriminators instead of the Payload and Inline external tags, and also ships a positional array form protocol.md excludes outright. A peer that negotiated msgpack with lazily-cpp would not decode its frames. Two honest exits: align codec.hpp to the spec frame and replay codec/frame_roundtrip_msgpack.json, or keep it as a private codec, rename it so nothing implies the msgpack token, and drop msgpack from anything cpp advertises. coverage.json marks it partial until then. Depends on #lzcppjsoncodec only for the fixture-reading seam, not for the wire itself.
 - [ ] [#lzmsgpackseven] Seven bindings (py, kt, js, dart, zig, go, cs) carve out msgpack, a protocol.md MUST, and each now names codec/frame_roundtrip_msgpack.json in its KNOWN_UNCOVERED with a reason. Closing one means encoding and decoding IpcMessage as an externally-tagged frame over named-field MessagePack maps whose keys match the json schema, keeping the omit-when-absent rule for the optional NodeKey uniform with json, replaying the fixture through it, deleting the KNOWN_UNCOVERED entry, and flipping that binding's mark on the msgpack row of coverage.json. tests/codec_roundtrip_conformance.rs in lazily-rs is the reference runner shape, including the schema-less decode of its own output that pins the named-field rule: a positional encoder round-trips every value correctly and is still non-conforming, so a value-only check cannot see it.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.

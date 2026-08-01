@@ -40,13 +40,13 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): do [#tsrenameast1]; do [#tsrenameast2]; do [#tsrenameast3] / do [#tsrenameast4]; 2 more
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): do [#astgrepstructural]; ast-grep as the core, and more langu...
-<!-- agent:boundary:9b9d2e2b -->
+<!-- agent:boundary:92c81be9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#finishsymbolkind]
+- 🚧 do [#finishsymbolkind]
 - do [#wsdq]
 - do [#jzs7]
 <!-- /agent:queue -->
@@ -57,7 +57,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#finishsymbolkind] Finish the symbol-kind narrowing for Python and Kotlin, the two indexed languages still at a flat identifier set. Both have the Rust field_identifier shape via a different node: Python spells obj.foo as an identifier under attribute, Kotlin as an identifier under navigation_expression, so renaming a module-level def/fun still rewrites every same-named attribute access. The rule is the one already used three times — accept the position only when it is the callee of a call — but unlike Rust, Python and Kotlin index methods as functions too, so the callee case is a real target and must be kept. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
+- [ ] 🚧 [#finishsymbolkind] Finish the symbol-kind narrowing for Python and Kotlin, the two indexed languages still at a flat identifier set. Both have the Rust field_identifier shape via a different node: Python spells obj.foo as an identifier under attribute, Kotlin as an identifier under navigation_expression, so renaming a module-level def/fun still rewrites every same-named attribute access. The rule is the one already used three times — accept the position only when it is the callee of a call — but unlike Rust, Python and Kotlin index methods as functions too, so the callee case is a real target and must be kept. Plan: tasks/software/plan-tsift-rename-symbol-ast.md
 - [ ] [#wsdq] release + publish + install
 - [ ] [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->

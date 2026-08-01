@@ -805,14 +805,16 @@ over that authority whether the operator cut is still unsaved or has already
 reached disk. The binary then requests native editor save itself. Operator
 Ctrl+S, preflight repair, recapture, and force-disk are not recovery steps.
 - A retained `post_commit_reposition` target may be superseded by a newer
-  structurally valid converged editor projection that already contains the
-  captured response. Replica ingress publishes that full projection as a
-  `Source`; a controller `Computed` derives a typed materialized-capture
-  reconcile action, and one controller `Effect` publishes it to the shared
-  supervisor state plane. Repeated observations and multiple supervisors are
-  deduplicated by the exact controller-generation/delivery-version action
-  identity. Ordinary divergent writes and malformed projections derive no
-  action.
+structurally valid converged editor projection that already contains the
+captured response. The deferred transition pins its owning cycle/capture
+continuation when the event ledger is projected, so later closeout cycles and
+supervisor recycling cannot replace the evidence used by the transition.
+Replica ingress publishes the full visible projection as a `Source`; a
+controller `Computed` derives a typed materialized-capture reconcile action,
+and one controller `Effect` publishes it to the shared supervisor state plane.
+Repeated observations and multiple supervisors are deduplicated by the exact
+controller-generation/delivery-version action identity. Ordinary divergent
+writes and malformed projections derive no action.
 - Repeating that retained replay with the original content-bearing merge base is
 idempotent per component. An unsplittable exchange race is isolated to the
 exchange leaf; it cannot re-merge an already-composed queue as flat text.

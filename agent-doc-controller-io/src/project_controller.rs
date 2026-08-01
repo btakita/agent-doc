@@ -3752,8 +3752,11 @@ fn derive_retained_resume_signal(
     controller_generation: u64,
 ) -> Option<RetainedResumeSignal> {
     let intent = projection.document.pending_write.as_ref()?;
-    let capture = projection.closeout.captured_response.as_ref()?;
-    let cycle_id = projection.closeout.cycle_id.as_deref()?;
+    let capture = intent
+        .continuation
+        .as_ref()
+        .or(projection.closeout.captured_response.as_ref())?;
+    let cycle_id = capture.cycle_id.as_str();
     let action = if delivery
         .content_hash
         .eq_ignore_ascii_case(&intent.target_hash)
@@ -12281,8 +12284,15 @@ agent:queue\n\
         };
 
         let idle = agent_doc_state_backbone::DocumentStateProjection::new("doc-retained-idle");
-        let mut target_without_capture = transition.clone();
-        target_without_capture.closeout.captured_response = None;
+        let mut recycled_cycle = transition.clone();
+        recycled_cycle.closeout.captured_response = None;
+        let mut legacy_target_without_capture = recycled_cycle.clone();
+        legacy_target_without_capture
+            .document
+            .pending_write
+            .as_mut()
+            .unwrap()
+            .continuation = None;
         let mut materialized = transition.clone();
         materialized.document.pending_write.as_mut().unwrap().source =
             agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition;
@@ -12366,8 +12376,16 @@ agent:queue\n\
                 "resume_closeout",
             ),
             (
-                "target visible without captured closeout",
-                Some(target_without_capture),
+                "target visible after the current cycle capture was recycled",
+                Some(recycled_cycle),
+                Some(delivery(target, 1, true)),
+                1,
+                "target_visible",
+                "resume_closeout",
+            ),
+            (
+                "legacy target visible without any retained continuation",
+                Some(legacy_target_without_capture),
                 Some(delivery(target, 1, true)),
                 1,
                 "target_visible",

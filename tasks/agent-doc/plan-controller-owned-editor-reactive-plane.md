@@ -219,7 +219,10 @@ response projections and yields one typed recovery action:
 - `ResumeExactDelivery` when the converged visible projection is the retained
   byte target;
 - `ReconcileMaterializedCapture` when a converged newer projection already
-  contains the captured response for a retained post-commit reposition.
+contains the captured response for a retained post-commit reposition.
+- The retained Base → Target projection pins the cycle/capture continuation
+that produced it. It never consults a later current-cycle capture after
+checkpoint, abandonment, or supervisor recycling.
 
 The controller `Effect` publishes the exact action identity through the shared
 captured-finalize state-plane channel. All running supervisors observe that

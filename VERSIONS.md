@@ -9,13 +9,19 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 _JetBrains plugin 0.2.334; VS Code extension 0.2.64; Zed extension 0.1.0._
 
 - **Retained delivery now has one exhaustive typed state table and one Effect
-  boundary.** Durable Base → Target facts, current delivery, live membership,
-  convergence, and controller generation reduce to a single
-  `RetainedTransitionState`; only activation observation, guarded target apply,
-  and closeout resume project effects. Controller startup now binds its listener
-  before restored liveness publishes missing-replica targets, so a returning
-  editor projection cannot race an unopened socket and strand closeout in
-  `AwaitingDelivery`.
+boundary.** Durable Base → Target facts, current delivery, live membership,
+convergence, and controller generation reduce to a single
+`RetainedTransitionState`; only activation observation, guarded target apply,
+and closeout resume project effects. Controller startup now binds its listener
+before restored liveness publishes missing-replica targets, so a returning
+editor projection cannot race an unopened socket and strand closeout in
+`AwaitingDelivery`.
+- **Each retained transition pins the continuation that produced it.** Event
+replay copies the owning cycle/capture projection into the Base → Target intent,
+so a later cycle checkpoint, abandonment, or supervisor recycle cannot make an
+older transition consult unrelated current-cycle state. Existing retained
+events gain the continuation during projection replay; no sidecar migration or
+new acknowledgement request is required.
 - **Retained transitions now flow back into attached editors as guarded
 reactive projections.** The controller derives a transition only when the
   current visible projection still byte-matches its recorded base, then a

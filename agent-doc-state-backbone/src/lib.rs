@@ -1357,15 +1357,19 @@ impl DocumentStateProjection {
     }
 
     pub fn retained_captured_response_write(&self) -> Option<&DocumentWriteIntentProjection> {
-        let capture = self.closeout.captured_response.as_ref()?;
-        if self.captured_response_terminally_proven(capture) {
-            return None;
-        }
         let retains_capture = |pending: &&DocumentWriteIntentProjection| {
-            agent_doc_turn::response_replay::response_materialized_in_content(
-                &capture.response_body,
-                &pending.target_content,
-            ) && !self.write_intent_converged(pending)
+            pending
+                .continuation
+                .as_ref()
+                .or(self.closeout.captured_response.as_ref())
+                .is_some_and(|capture| {
+                    !self.captured_response_terminally_proven(capture)
+                        && agent_doc_turn::response_replay::response_materialized_in_content(
+                            &capture.response_body,
+                            &pending.target_content,
+                        )
+                        && !self.write_intent_converged(pending)
+                })
         };
 
         self.document
@@ -1640,6 +1644,13 @@ impl DocumentStateProjection {
                 reason,
                 ..
             } => {
+                // Pin the continuation that owns this Base -> Target transition.
+                // `closeout.captured_response` is a moving projection: a later
+                // cycle may replace or clear it while this write remains retained.
+                // Copying it into the intent makes replay reconstruct the exact
+                // continuation from the event order without adding a sidecar or a
+                // second imperative receipt.
+                let continuation = self.closeout.captured_response.clone();
                 let pending = DocumentWriteIntentProjection {
                     intent_id: intent_id.clone(),
                     expected_hash: expected_hash.clone(),
@@ -1648,6 +1659,7 @@ impl DocumentStateProjection {
                     target_content: target_content.clone(),
                     source: source.clone(),
                     reason: reason.clone(),
+                    continuation,
                     ordinal: self.document.next_write_fact_ordinal(),
                 };
                 if *reason == DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor {
@@ -2978,6 +2990,13 @@ pub struct DocumentWriteIntentProjection {
     pub target_content: String,
     pub source: DocumentWriteSource,
     pub reason: DocumentWriteDeferredReason,
+    /// Capture/turn continuation that produced this retained transition.
+    ///
+    /// This is projected from the preceding `ResponseCaptured` fact when the
+    /// deferred-write fact is replayed. It deliberately lives with the
+    /// transition instead of consulting the mutable current-cycle closeout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<CapturedResponseProjection>,
     /// Monotone ordinal the projection assigns to every write fact it applies
     /// (`#adwritesourceenum`).
     ///
@@ -7803,6 +7822,16 @@ mod tests {
                 .retained_captured_response_write()
                 .map(|pending| pending.intent_id.as_str()),
             Some("intent-retained"),
+        );
+        assert_eq!(
+            retained
+                .document
+                .pending_write
+                .as_ref()
+                .and_then(|pending| pending.continuation.as_ref())
+                .map(|capture| (capture.cycle_id.as_str(), capture.capture_id.as_str())),
+            Some((cycle_1, "capture-retained")),
+            "a retained transition pins its own continuation instead of following the current cycle",
         );
 
         // `#convergedderived` — the same retained entry must stop being retained the

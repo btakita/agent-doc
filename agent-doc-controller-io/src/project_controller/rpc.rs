@@ -7349,12 +7349,41 @@ fn replica_method_changes_delivery_frontier(method: ControllerCrdtReplicaMethod)
     )
 }
 
-fn observe_retained_delivery_after_replica_event(
-    runtime: &ControllerRuntime,
+pub(super) fn current_registered_retained_delivery_projection(
+    project_root: &Path,
+    document_hash: &str,
+) -> Result<Option<RetainedDeliveryObservation>> {
+    let registry = agent_doc_session_registry_io::load_in(project_root)?;
+    for entry in registry.values() {
+        let requested = PathBuf::from(&entry.file);
+        let candidate = if requested.is_absolute() {
+            requested
+        } else {
+            project_root.join(requested)
+        };
+        let canonical = resolve_controller_path_alias(&PathBuf::from(
+            tmux_router::registry::canonical_registry_key_in(
+                project_root,
+                &candidate.to_string_lossy(),
+            ),
+        ));
+        if agent_doc_hash::document_id_for_path(&canonical) != document_hash {
+            continue;
+        }
+        let authority = crdt_authority_for_file(&canonical.to_string_lossy());
+        if !authority.editor_attached() {
+            return Ok(None);
+        }
+        return retained_delivery_observation_for_file(&canonical, authority);
+    }
+    Ok(None)
+}
+
+fn retained_delivery_observation_for_file(
     canonical: &Path,
     authority: agent_doc_document_realtime::crdt_authority::CrdtAuthority,
-) -> Result<()> {
-    let observation =
+) -> Result<Option<RetainedDeliveryObservation>> {
+    Ok(
         match agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
             canonical, authority,
         )? {
@@ -7375,7 +7404,16 @@ fn observe_retained_delivery_after_replica_event(
             agent_doc_crdt_relay_io::CurrentText::Detached
             | agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
             | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => None,
-        };
+        },
+    )
+}
+
+fn observe_retained_delivery_after_replica_event(
+    runtime: &ControllerRuntime,
+    canonical: &Path,
+    authority: agent_doc_document_realtime::crdt_authority::CrdtAuthority,
+) -> Result<()> {
+    let observation = retained_delivery_observation_for_file(canonical, authority)?;
     let document_hash = agent_doc_hash::document_id_for_path(canonical);
     runtime.document_retained_write_observe_delivery(&document_hash, observation);
     Ok(())

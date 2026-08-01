@@ -2013,6 +2013,15 @@ struct ControllerDocumentGraphs {
     /// post-event relay state into this Source; retained closeout wake
     /// eligibility is derived from it beside the durable document projection.
     retained_delivery: lazily::ThreadSafeSourceMap<String, Option<RetainedDeliveryObservation>>,
+    /// A durable retained intent with no controller-local delivery Source
+    /// derives one graph-activation hydration. Its Effect observes the
+    /// already-retained CRDT projection; it does not request editor work.
+    retained_delivery_hydration:
+        lazily::ThreadSafeComputedMap<String, Option<RetainedDeliveryHydrationProjection>>,
+    /// Controller-local receipt for one successfully observed activation
+    /// projection.
+    retained_delivery_hydrated:
+        lazily::ThreadSafeSourceMap<String, Option<RetainedDeliveryHydrationProjection>>,
     /// Controller-generation activation edge. A reconstructed graph first
     /// hydrates its durable inputs, then the sink installation advances this
     /// Source so already-satisfied effects rerun with a live durable sink.
@@ -2081,6 +2090,8 @@ struct ControllerDocumentGraphs {
     /// lifetime so later replica events and controller activation invalidate
     /// the same subscription.
     retained_resume_effects: Mutex<BTreeMap<String, lazily::Effect>>,
+    /// One activation hydration Effect per retained document.
+    retained_delivery_hydration_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// One guarded retained-target projection Effect per document.
     retained_transition_effects: Mutex<BTreeMap<String, lazily::Effect>>,
     /// One durable compact-completion Effect per document.
@@ -2308,6 +2319,12 @@ struct RetainedDeliveryObservation {
     delivery_version: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RetainedDeliveryHydrationProjection {
+    intent_id: String,
+    controller_generation: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RetainedResumeAction {
     ResumeExactDelivery,
@@ -2421,6 +2438,41 @@ impl RetainedWriteSettleSink {
         }
         if let Err(e) = runtime.apply_state_event(&event) {
             eprintln!("[controller] retained-write settle apply failed for {document_hash}: {e}");
+        }
+    }
+
+    /// Observe the already-retained editor/CRDT projection when a replacement
+    /// controller activates after the editor's most recent replica event.
+    fn hydrate_retained_delivery(
+        &self,
+        document_hash: &str,
+    ) -> Option<RetainedDeliveryObservation> {
+        match rpc::current_registered_retained_delivery_projection(
+            &self.project_root,
+            document_hash,
+        ) {
+            Ok(Some(observation)) => {
+                agent_doc_ops_log_io::log_op(
+                    &self.project_root,
+                    &format!(
+                        "retained_delivery_hydrated_from_projection document_hash={document_hash} content_hash={} delivery_version={} live_editors={}",
+                        agent_doc_hash::content_hash(&observation.content),
+                        observation.delivery_version,
+                        observation.live_editors,
+                    ),
+                );
+                Some(observation)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    &self.project_root,
+                    &format!(
+                        "retained_delivery_hydration_deferred document_hash={document_hash} error={error:#}"
+                    ),
+                );
+                None
+            }
         }
     }
 
@@ -2654,6 +2706,8 @@ impl ControllerDocumentGraphs {
             authority: lazily::ThreadSafeSourceMap::new(&ctx),
             disk: lazily::ThreadSafeSourceMap::new(&ctx),
             retained_delivery: lazily::ThreadSafeSourceMap::new(&ctx),
+            retained_delivery_hydration: lazily::ThreadSafeComputedMap::new(&ctx),
+            retained_delivery_hydrated: lazily::ThreadSafeSourceMap::new(&ctx),
             settle_generation: lazily::ThreadSafeSourceMap::new(&ctx),
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_resume: lazily::ThreadSafeComputedMap::new(&ctx),
@@ -2670,6 +2724,7 @@ impl ControllerDocumentGraphs {
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
             settle_effects: Mutex::new(BTreeMap::new()),
             retained_resume_effects: Mutex::new(BTreeMap::new()),
+            retained_delivery_hydration_effects: Mutex::new(BTreeMap::new()),
             retained_transition_effects: Mutex::new(BTreeMap::new()),
             compact_resume_effects: Mutex::new(BTreeMap::new()),
             answered_free_text_strike_effects: Mutex::new(BTreeMap::new()),
@@ -2702,6 +2757,12 @@ impl ControllerDocumentGraphs {
             .cloned()
             .collect::<BTreeSet<_>>();
         document_hashes.extend(self.compact_resume_effects.lock().keys().cloned());
+        document_hashes.extend(
+            self.retained_delivery_hydration_effects
+                .lock()
+                .keys()
+                .cloned(),
+        );
         self.ctx.batch(|ctx| {
             for document_hash in document_hashes {
                 self.settle_generation.set(ctx, document_hash, 1);
@@ -2768,6 +2829,7 @@ impl ControllerDocumentGraphs {
             // installation advances `settle_generation` once the runtime is
             // safely inside its Arc.
             self.current_verdict(document_hash);
+            self.current_retained_delivery_hydration(document_hash);
             self.current_retained_resume(document_hash);
             self.current_retained_transition(document_hash);
         }
@@ -2938,6 +3000,56 @@ impl ControllerDocumentGraphs {
         // fired from the `set` above. Either way no caller decides to settle.
         self.ensure_settle_effect(document_hash);
         verdict
+    }
+
+    fn current_retained_delivery_hydration(
+        &self,
+        document_hash: &str,
+    ) -> Option<RetainedDeliveryHydrationProjection> {
+        let projection = self.projection.clone();
+        let delivery = self.retained_delivery.clone();
+        let settle_generation = self.settle_generation.clone();
+        let applied = self.retained_delivery_hydrated.clone();
+        let hydration = self.retained_delivery_hydration.get_or_insert_with(
+            &self.ctx,
+            document_hash.to_string(),
+            move |ctx, key| {
+                // `observe` cannot subscribe to an entry that is not materialized yet.
+                // Observe membership first so a replacement controller recomputes when
+                // any cold retained-transition input appears.
+                let transition = projection
+                    .contains_key(ctx, key)
+                    .then(|| projection.observe(ctx, key))
+                    .flatten()
+                    .flatten();
+                let delivery = delivery
+                    .contains_key(ctx, key)
+                    .then(|| delivery.observe(ctx, key))
+                    .flatten()
+                    .flatten();
+                let controller_generation = settle_generation
+                    .contains_key(ctx, key)
+                    .then(|| settle_generation.observe(ctx, key))
+                    .flatten()
+                    .unwrap_or_default();
+                let applied = applied
+                    .contains_key(ctx, key)
+                    .then(|| applied.observe(ctx, key))
+                    .flatten()
+                    .flatten();
+                let candidate = retained_delivery_hydration_projection(
+                    transition.as_ref(),
+                    delivery.as_ref(),
+                    controller_generation,
+                );
+                match candidate {
+                    Some(candidate) if applied.as_ref() != Some(&candidate) => Some(candidate),
+                    _ => None,
+                }
+            },
+        );
+        self.ensure_retained_delivery_hydration_effect(document_hash);
+        hydration
     }
 
     fn current_retained_resume(&self, document_hash: &str) -> Option<RetainedResumeSignal> {
@@ -3282,6 +3394,47 @@ impl ControllerDocumentGraphs {
         effects.insert(key, effect);
     }
 
+    /// Subscribe graph activation to the already-retained CRDT projection.
+    ///
+    /// The Computed decides whether hydration is missing. The Effect only
+    /// observes current replica state and publishes that immutable observation
+    /// into the delivery Source.
+    fn ensure_retained_delivery_hydration_effect(&self, document_hash: &str) {
+        if self
+            .retained_delivery_hydration_effects
+            .lock()
+            .contains_key(document_hash)
+        {
+            return;
+        }
+        let key = document_hash.to_string();
+        let hydration_map = self.retained_delivery_hydration.clone();
+        let delivery = self.retained_delivery.clone();
+        let applied = self.retained_delivery_hydrated.clone();
+        let sink = self.settle_sink.clone();
+        let effect_key = key.clone();
+        let effect = self.ctx.effect(move |ctx| {
+            let Some(hydration) = hydration_map.observe(ctx, &effect_key).flatten() else {
+                return;
+            };
+            let Some(sink) = sink.get() else {
+                return;
+            };
+            let Some(observation) = sink.hydrate_retained_delivery(&effect_key) else {
+                return;
+            };
+            applied.set(ctx, effect_key.clone(), Some(hydration));
+            delivery.set(ctx, effect_key.clone(), Some(observation));
+        });
+        let mut effects = self.retained_delivery_hydration_effects.lock();
+        if effects.contains_key(&key) {
+            drop(effects);
+            self.ctx.dispose_effect(&effect);
+            return;
+        }
+        effects.insert(key, effect);
+    }
+
     /// Subscribe the closeout wake to typed retained-delivery eligibility.
     ///
     /// Replica RPCs are boundary ingress only. They never decide to resume a
@@ -3526,6 +3679,21 @@ impl ControllerDocumentGraphs {
         }
         effects.insert(key, effect);
     }
+}
+
+fn retained_delivery_hydration_projection(
+    projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    delivery: Option<&RetainedDeliveryObservation>,
+    controller_generation: u64,
+) -> Option<RetainedDeliveryHydrationProjection> {
+    if controller_generation == 0 || delivery.is_some() {
+        return None;
+    }
+    let intent = projection?.document.pending_write.as_ref()?;
+    Some(RetainedDeliveryHydrationProjection {
+        intent_id: intent.intent_id.clone(),
+        controller_generation,
+    })
 }
 
 fn retained_transition_projection(
@@ -12127,6 +12295,34 @@ agent:queue\n\
         assert!(
             retained_transition_projection(Some(&projection), Some(&delivery), 1).is_none(),
             "structurally invalid targets remain fail-closed"
+        );
+    }
+
+    #[test]
+    fn controller_activation_derives_delivery_hydration_without_requesting_an_ack() {
+        let projection = retained_resume_projection("doc-retained-hydration");
+        let hydration = retained_delivery_hydration_projection(Some(&projection), None, 7).unwrap();
+        assert_eq!(hydration.intent_id, "intent-1");
+        assert_eq!(hydration.controller_generation, 7);
+        assert!(
+            retained_delivery_hydration_projection(Some(&projection), None, 0).is_none(),
+            "a graph without its Effect sink cannot hydrate"
+        );
+        assert!(
+            retained_delivery_hydration_projection(
+                Some(&projection),
+                Some(&RetainedDeliveryObservation {
+                    file: PathBuf::from("/work/task.md"),
+                    content: Arc::from("target"),
+                    content_hash: "target".to_string(),
+                    live_editors: 1,
+                    delivery_converged: true,
+                    delivery_version: 1,
+                }),
+                7,
+            )
+            .is_none(),
+            "an existing Source observation needs no activation hydration"
         );
     }
 

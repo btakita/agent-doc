@@ -774,9 +774,13 @@ reconnect or delivery must pass the shared document structural validator
 before becoming an editor projection. This includes singleton components,
 balanced component markers, and at most one live exchange boundary marker.
 - Retained delivery is a Lazily projection over the durable target, current
-  authority text, live replica membership, and transport availability. Its
-  Effect may publish once for the current generation; receipts feed evidence
-  back into the inputs but never create an imperative retry loop.
+authority text, live replica membership, and transport availability. Its
+Effect may publish once for the current generation; receipts feed evidence
+back into the inputs but never create an imperative retry loop.
+- A replacement controller hydrates that delivery projection from the
+already-retained registered editor/CRDT state. The hydration Effect only
+observes controller-owned state and publishes a generation-scoped receipt; it
+does not ask an editor to resend content or acknowledge a request.
 - If current authority consists of a structurally valid document through the
   terminal `agent:done` close followed only by text provably duplicated from
   managed content, the settlement projection may remove that trailing debris

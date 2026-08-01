@@ -28,12 +28,49 @@ gated: npm security-key user presence required
 Compacted content:
 - Archived 3 response topic(s): do [#bugcoinedpretooluse]; do [#coinedpretooluseguard]; do [#lazilycppexcuses]
 - Prior summary/context: prior compacted content: Archived 14 response topic(s): do [#lzbenchbudgetheadroom]; do [#lzinteroppeerci]; #lzcheckc...
-<!-- agent:boundary:1ab22854 -->
+
+### Re: do [#coveragejsonscores] — a shipped mark now has to cite a fixture the binding replays, and three could not — opus-5
+
+Done, pushed, CI green. lazily-spec `d0b3fc1`-range, kt `3072525`, superproject `543a06b96`.
+
+**The rule.** A row MAY carry `"fixtures": [...]`. `scripts/check-coverage-claims.mjs` then refuses a ✅ on that row unless the binding replays **every** cited fixture — read from that binding's own committed ledger (`KNOWN_UNCOVERED`, plus `REQUIRED_AREAS` where it declares one), never from a claim in lazily-spec.
+
+`~` is exempt on purpose. It is a *visibly qualified* mark and the honest place to record "implemented, but not this wire" — lazily-cpp's msgpack codec is exactly that. The mark that misleads a reader is the unqualified one, so that is the one that has to be backed.
+
+**The audit found four unbacked claims across six annotated rows.** The item predicted cpp would not be the only one; it wasn't.
+
+| Finding | What it actually was | Resolution |
+|---|---|---|
+| Kotlin ✅ on the json reference codec | `CodecConformanceTest.kt` **does** replay it — but `codec` was absent from lazily-kt's `REQUIRED_AREAS`, so deleting that runner would have left its guard green | fixed the guard; **the mark stands** |
+| Dart ✅ on "IPC wire — Snapshot + Delta + CrdtSync" | `distributed/crdt_sync_frames.json` is in lazily-dart's `KNOWN_UNCOVERED` | downgraded to `~` |
+| Rust ✅ on "Causal receipts" | `receipts/causal_receipts.json` — lazily-rs's own reason is "No runner at all" | downgraded to `~` |
+| Zig ✅ on "Message-passing + RPC command plane" | all eight `message-passing/*` fixtures are in lazily-zig's `KNOWN_UNCOVERED` | downgraded to `~` |
+
+The Kotlin one is the most interesting: it is the *same* hole cpp had before `#lzcppjsoncodec` — an area kept out of `REQUIRED_AREAS`, so a whole area could go unreplayed without appearing in any gap list. The replay existed and nothing required it.
+
+**Proof the guard is not decorative.** Four mutation probes, all caught:
+
+- restoring Rust's unbacked ✅ → flagged by name
+- citing a fixture not in the corpus → flagged
+- hiding one sibling checkout → `--require-all` refused the partial audit
+- removing the codec fixture from Kotlin's manifest → kt's guard went red, so the new area requirement bites
+
+**Wired in.** `make check` in lazily-spec, and CI, which clones the nine sibling ledgers sparsely. `--require-all` refuses to pass on a partial audit — a checkout that silently stops cloning one binding would otherwise keep reporting green for every claim it never read. **CI confirms `9/9 binding ledgers read`**, so the guard is really running there, not skipping. All five lazily-spec gates pass locally including Lean.
+
+**Two things I deliberately did not cite, and why.**
+
+`Reliable sync` (row 42) reads ✅ in **all nine** bindings, while `reliable-sync/coalesce_bounds_outbox.json` and `liveness_lease_eviction.json` are in **all nine** `KNOWN_UNCOVERED` lists. Citing it would flag every column at once. That is a real finding, but the resolution is a family-wide decision — implement the two fixtures nine times, or downgrade the row — not something to settle by quietly annotating a JSON file at the end of a long cycle. Filed.
+
+Root-level fixtures (`arena_blob.json`, `snapshot_*`, `delta_*`) **cannot be cited at all**: they have no area, and the two area-scoped guards exclude them from their audit entirely, so the rule cannot answer honestly for them. That leaves "Shared-memory blob path" and the Snapshot/Delta half of the IPC-wire row still unbacked. I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Filed, together with a smaller one: Dart's `crdt_sync_frames.json` entry carries no reason of its own — it inherited the comment above it — in a ledger that requires one per entry.
+
+Last cycle's lazily-cpp CI is green (`30720210025`). Exchange is large (queue active, so noting rather than compacting).
+<!-- agent:boundary:ae6bdb85 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#coveragejsonscores]~~
 - 📌 do [#lzcppmsgpackwire]
 - 📌 do [#lzmsgpackseven]
 - 📌 do [#lzreadmelinkrot]
@@ -55,7 +92,8 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#coveragejsonscores] coverage.json scores having the TYPES, not speaking the WIRE, and cannot tell them apart. The row 'IPC wire - Snapshot + Delta + CrdtSync' has read shipped for C++ the entire time lazily-cpp could not encode or decode a single one of those frames in the json reference codec, and the CrdtSync plane rows read shipped while distributed/crdt_sync_frames.json sat in KNOWN_UNCOVERED. A binding gets the mark for defining the structs and driving them in-process; nothing ties the mark to a replay. That is the same failure the per-fixture ledger exists to prevent, one level up, and it is why both cpp codec gaps stayed invisible across a family-wide audit. Work: decide what a wire-bearing row MEANS - the honest options are to split each such row into a types half and a wire half, or to require that a shipped mark on a wire row cite at least one conformance fixture the binding actually replays, checked by scripts/sync-coverage.mjs against the per-binding manifests rather than by hand. Then re-audit every wire-bearing row across all nine bindings, because cpp is unlikely to be the only one holding a mark it cannot back.
+- [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
+- [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.
 - [ ] [#lzcppmsgpackwire] lazily-cpp ships a MessagePack codec that is NOT protocol.md's msgpack, which is worse than not having one because the file made it read as implemented and coverage.json would have shown a check. The spec frame is externally tagged, Snapshot mapping to its body, over named-field maps whose keys match the json schema; include/lazily/codec.hpp writes an INTERNALLY tagged envelope with type and value keys, gives NodeState and IpcValue integer kind discriminators instead of the Payload and Inline external tags, and also ships a positional array form protocol.md excludes outright. A peer that negotiated msgpack with lazily-cpp would not decode its frames. Two honest exits: align codec.hpp to the spec frame and replay codec/frame_roundtrip_msgpack.json, or keep it as a private codec, rename it so nothing implies the msgpack token, and drop msgpack from anything cpp advertises. coverage.json marks it partial until then. Depends on #lzcppjsoncodec only for the fixture-reading seam, not for the wire itself.
 - [ ] [#lzmsgpackseven] Seven bindings (py, kt, js, dart, zig, go, cs) carve out msgpack, a protocol.md MUST, and each now names codec/frame_roundtrip_msgpack.json in its KNOWN_UNCOVERED with a reason. Closing one means encoding and decoding IpcMessage as an externally-tagged frame over named-field MessagePack maps whose keys match the json schema, keeping the omit-when-absent rule for the optional NodeKey uniform with json, replaying the fixture through it, deleting the KNOWN_UNCOVERED entry, and flipping that binding's mark on the msgpack row of coverage.json. tests/codec_roundtrip_conformance.rs in lazily-rs is the reference runner shape, including the schema-less decode of its own output that pins the named-field rule: a positional encoder round-trips every value correctly and is still non-conforming, so a value-only check cannot see it.
 - [ ] [#lzvacuousrun] Rungs 2, 3 and 4 all reason about fixtures the run OPENED, so a run that opens ZERO fixtures reports three greens over nothing. Found in lazily-py while closing #lzguardsnotinci and verified concretely there: CI=true pytest tests/test_star_import.py gave 3 passed with every conformance guard satisfied, because an empty opened-set has nothing to complain about. py closed it with a vacuity check in pytest_sessionfinish that fails when the opened set is empty under CI. The same shape appeared independently in lazily-cs as OK-over-nothing output - rung 1 prints coverage OK 0/0 for an empty corpus listing and rung 4 prints 0/0 scenarios across 0 opened fixtures, both exiting 0 - and in lazily-js, lazily-go, lazily-dart and lazily-rs as the coverage script exiting 0 with a SKIP line when the sibling corpus is absent. lazily-cpp is the one binding already immune, because the MIN_FIXTURES and MIN_SCENARIOS floors it added under #lzscenariocoverage fire on an empty manifest. Port a positive-evidence floor to the other eight: every guard must assert it examined a non-zero, expected-magnitude population before it is allowed to report OK. Mutation-check by pointing each suite at an empty corpus and confirming red.

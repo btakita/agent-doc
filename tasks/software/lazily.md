@@ -66,7 +66,44 @@ To be exact about what I proved: the fail-open code path is certain from reading
 I did not fix it here, and the reason is not effort. Deciding what "document momentarily unreadable" should do — deny, or bounded-retry-then-deny — changes the behaviour of a hook that gates every tool call in every live pane, and `src/agent-doc` is currently carrying another session's in-progress refactor across 20+ files in 14 crates. I can commit one clean file with `--only`, but I cannot `cargo install` the result without publishing that session's unfinished work into every pane's PATH, and a hook fix that is committed but not installed protects nothing. Filed at the top of backlog with the root cause and the proposed shape.
 
 Exchange is at 478 lines / 14 sections; queue stays active.
-<!-- agent:boundary:bdfd0763 -->
+
+### Re: do [#coinedpretooluseguard] — the guard no longer opens when its ledger is unreadable — opus-5
+
+Fixed, built from a clean commit, installed, and proven live. `agent-doc` `4f3f4d2c4`, superproject `594136261`.
+
+**The defect.** `handle_pretooluse` mapped `None` → `Allow`, and five distinct conditions funnelled into that one `None`: no pane scope, no project root, a session registry that would not open, a registered document that would not read, a document that would not parse. The last three are *transient* — the session document and `state.db` are rewritten continuously by the write pipeline, the CRDT relay, and every other live pane — so the guard silently switched itself off under exactly the contention where ids get coined.
+
+**The fix.** `DocumentIds` splits the collapsed `None` three ways:
+
+| Case | Meaning | Decision |
+|---|---|---|
+| `Ungoverned` | no pane, no project, no registry on disk, or a registry that read cleanly and holds no document for this pane | **Allow** — an unrelated repo is none of the guard's business |
+| `Known(ids)` | the ledger answered | unchanged |
+| `Unavailable{file, cause}` | the ledger *should* have answered and did not | **Deny**, after 5 reads spaced 20ms, naming the file and the cause |
+
+Failing closed stays narrow on purpose. With an unreadable ledger the comparison basis becomes the empty set, so text carrying **no id-shaped token is still allowed**, and the C-family preprocessor sanitization still runs first. Without that, every write during a document rewrite would be refused and the guard would be unusable — the over-correction is as bad as the hole.
+
+One deliberate behaviour change beyond the bug: a registry entry pointing at a document that no longer reads is now `Unavailable`, not `Ungoverned`. A stale registry entry should be loud, not a silent off-switch.
+
+**Proof.** 31/31 in `agent-doc-hooks-io`; both directions mutation-checked:
+
+- reverting `Unavailable` to `Allow` (the original defect) reddens `an_unreadable_ledger_refuses_a_tagged_write`
+- widening the denial to any write reddens `an_unreadable_ledger_still_allows_an_untagged_write` and `..._c_preprocessor_directives`
+
+Then live, against a scratch project with a deliberately corrupt `.agent-doc/state.db`, using the **installed** binary:
+
+- corrupt ledger + tagged write → **exit 2**, "the ledger that would vouch for them could not be read"
+- corrupt ledger + untagged write → exit 0
+- corrupt ledger + `.hpp` full of `#ifndef`/`#define`/`#include` → exit 0
+
+and against this live project: preprocessor directives allowed, untracked id denied, tracked id allowed, non-project cwd allowed.
+
+**Build discipline.** `src/agent-doc` was carrying another session's refactor when I started, so I committed only my one file, built `--release` from a git worktree under `src/` (so the `../tmux-router` path dep resolves), and installed with `agent-doc binary-install` — atomic rename, live process inodes preserved. Worktree removed. That session has since committed everything; the tree is clean at `4f3f4d2c4`. I did **not** ship a cdylib: this change is binary-only, and a `reload_library` fan-out mid-refactor is not something to do as a side effect. `.bin/agent-doc` was already dangling before this cycle and I left it that way — the local install profile writes elsewhere.
+
+agent-doc CI run `30718871518` is in progress; local evidence above.
+
+This closes the finding I filed two cycles ago while verifying the C-preprocessor false positive. That one was fixed upstream; this one was the reason the first one was hard to see.
+<!-- agent:boundary:222607b0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -96,7 +133,6 @@ Exchange is at 478 lines / 14 sections; queue stays active.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#coinedpretooluseguard] agent-doc: the coined-id PreToolUse guard is FAIL-OPEN and intermittently lets an untracked id through. handle_pretooluse computes known = active_document_for(cwd, pane).and_then(known_ids_for_document) and maps None to Allow; known_ids_for_document is two .ok()? in a row, read_to_string then element::parse. So 'this cwd has no agent-doc document', 'the document was unreadable for a moment' and 'the document did not parse for a moment' all collapse to the same None and all mean allow. Observed live on 2026-08-01: two consecutive Write calls carrying an untracked id were permitted and one landed on disk in src/lazily-cpp, while the identical payload fed to the hook directly denies with exit 2 every time and a retry a minute later denied correctly. The session document is rewritten constantly by the write pipeline and the CRDT relay and state.db is contended across several live panes, so a transient None is reachable under exactly the load where the guard matters most. Work: distinguish 'no document resolved here' from 'resolved but temporarily unreadable'. The second should bounded-retry with a short backoff and then DENY rather than allow, and the hook should say which arm it took so a miss is visible instead of silent. Add a regression case per arm. Not fixed in the discovering cycle because src/agent-doc is carrying another session's in-progress refactor across 20-plus files, so the change cannot be cargo-installed without publishing that WIP, and an uninstalled hook fix protects nothing.
 - [ ] [#lazilycppexcuses] lazily-cpp still excuses distributed/crdt_sync_frames.json in KNOWN_UNCOVERED, but the reason that entry was written for is gone: it said replaying wire needs an encoder first, and json_codec.hpp is that encoder as of #lzcppjsoncodec. What is missing now is only a runner. Work: replay conformance/distributed/crdt_sync_frames.json through decode_json and encode_json in tests/test_distributed_conformance.cpp or a sibling, delete the KNOWN_UNCOVERED entry, and raise MIN_FIXTURES in scripts/check-conformance-coverage.sh in the same change. An excuse whose stated cause has been fixed is the exact rot that ledger exists to prevent.
 - [ ] [#lzcppmsgpackwire] lazily-cpp ships a MessagePack codec that is NOT protocol.md's msgpack, which is worse than not having one because the file made it read as implemented and coverage.json would have shown a check. The spec frame is externally tagged, Snapshot mapping to its body, over named-field maps whose keys match the json schema; include/lazily/codec.hpp writes an INTERNALLY tagged envelope with type and value keys, gives NodeState and IpcValue integer kind discriminators instead of the Payload and Inline external tags, and also ships a positional array form protocol.md excludes outright. A peer that negotiated msgpack with lazily-cpp would not decode its frames. Two honest exits: align codec.hpp to the spec frame and replay codec/frame_roundtrip_msgpack.json, or keep it as a private codec, rename it so nothing implies the msgpack token, and drop msgpack from anything cpp advertises. coverage.json marks it partial until then. Depends on #lzcppjsoncodec only for the fixture-reading seam, not for the wire itself.
 - [ ] [#lzmsgpackseven] Seven bindings (py, kt, js, dart, zig, go, cs) carve out msgpack, a protocol.md MUST, and each now names codec/frame_roundtrip_msgpack.json in its KNOWN_UNCOVERED with a reason. Closing one means encoding and decoding IpcMessage as an externally-tagged frame over named-field MessagePack maps whose keys match the json schema, keeping the omit-when-absent rule for the optional NodeKey uniform with json, replaying the fixture through it, deleting the KNOWN_UNCOVERED entry, and flipping that binding's mark on the msgpack row of coverage.json. tests/codec_roundtrip_conformance.rs in lazily-rs is the reference runner shape, including the schema-less decode of its own output that pins the named-field rule: a positional encoder round-trips every value correctly and is still non-conforming, so a value-only check cannot see it.

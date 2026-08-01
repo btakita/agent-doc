@@ -21,9 +21,9 @@ replay copies the owning cycle/capture projection into the Base → Target inten
 so a later cycle checkpoint, abandonment, or supervisor recycle cannot make an
 older transition consult unrelated current-cycle state. Existing retained
 events gain the continuation during projection replay; no sidecar migration or
-new acknowledgement request is required. The final effect fence validates that
-same pinned continuation, and its one-shot published frontier advances only
-after the wake is successfully published.
+new acknowledgement request is required. The final effect fence and
+supervisor-wake payload use that same pinned continuation, and the one-shot
+published frontier advances only after the wake is successfully published.
 - **Retained transitions now flow back into attached editors as guarded
 reactive projections.** The controller derives a transition only when the
   current visible projection still byte-matches its recorded base, then a

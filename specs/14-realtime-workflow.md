@@ -812,8 +812,9 @@ supervisor recycling cannot replace the evidence used by the transition.
 Replica ingress publishes the full visible projection as a `Source`; a
 controller `Computed` derives a typed materialized-capture reconcile action,
 and one controller `Effect` publishes it to the shared supervisor state plane.
-The effect revalidates the pinned transition continuation and advances its
-published frontier only after publication succeeds.
+The effect revalidates the pinned transition continuation, builds the
+supervisor wake from that continuation rather than the current closeout cycle,
+and advances its published frontier only after publication succeeds.
 Repeated observations and multiple supervisors are deduplicated by the exact
 controller-generation/delivery-version action identity. Ordinary divergent
 writes and malformed projections derive no action.

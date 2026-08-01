@@ -2577,7 +2577,16 @@ impl RetainedWriteSettleSink {
             // application. The new projection will invalidate the Computed.
             return false;
         }
-        rpc::publish_captured_finalize_wake(&runtime, &projection, signal.action.reason());
+        if !rpc::publish_pinned_captured_finalize_wake(
+            &runtime,
+            document_hash,
+            &signal.cycle_id,
+            &signal.capture_id,
+            &signal.response_sha256,
+            signal.action.reason(),
+        ) {
+            return false;
+        }
         agent_doc_ops_log_io::log_op(
             &self.project_root,
             &format!(
@@ -12787,7 +12796,7 @@ agent:queue\n\
                 .document_graphs
                 .current_retained_resume(&document_hash)
                 .is_none(),
-            "the controller-local receipt deduplicates the shared recovery action"
+            "the controller-local published frontier deduplicates the shared recovery action"
         );
 
         runtime
@@ -12799,6 +12808,31 @@ agent:queue\n\
                 .current_retained_resume(&document_hash)
                 .is_none(),
             "repeated supervisor-visible projections cannot republish the same frontier"
+        );
+    }
+
+    #[test]
+    fn pinned_retained_wake_does_not_consult_the_current_closeout_cycle() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+
+        assert!(rpc::publish_pinned_captured_finalize_wake(
+            &runtime,
+            &document_hash,
+            "retained-cycle",
+            "retained-capture",
+            "retained-response-sha",
+            "retained_materialized_capture_reconcile_reactive",
+        ));
+        let wakes = runtime.captured_finalize_wakes.lock();
+        let wake = wakes.get(&document_hash).unwrap();
+        assert_eq!(wake.cycle_id, "retained-cycle");
+        assert_eq!(wake.capture_id, "retained-capture");
+        assert_eq!(wake.response_sha256, "retained-response-sha");
+        assert_eq!(
+            wake.reason,
+            "retained_materialized_capture_reconcile_reactive"
         );
     }
 

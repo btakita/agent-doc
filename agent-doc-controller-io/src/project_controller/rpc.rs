@@ -16688,23 +16688,41 @@ pub(super) fn publish_captured_finalize_wake(
     runtime: &ControllerRuntime,
     projection: &agent_doc_state_backbone::DocumentStateProjection,
     reason: &str,
-) {
+) -> bool {
     let Some(capture) = projection.closeout.captured_response.as_ref() else {
-        return;
+        return false;
     };
     let Some(cycle_id) = projection.closeout.cycle_id.as_deref() else {
-        return;
+        return false;
     };
+    publish_pinned_captured_finalize_wake(
+        runtime,
+        &projection.document_hash,
+        cycle_id,
+        &capture.capture_id,
+        &capture.response_sha256,
+        reason,
+    )
+}
+
+pub(super) fn publish_pinned_captured_finalize_wake(
+    runtime: &ControllerRuntime,
+    document_hash: &str,
+    cycle_id: &str,
+    capture_id: &str,
+    response_sha256: &str,
+    reason: &str,
+) -> bool {
     let payload = CapturedFinalizeWakeProjection {
-        document_hash: projection.document_hash.clone(),
+        document_hash: document_hash.to_string(),
         cycle_id: cycle_id.to_string(),
-        capture_id: capture.capture_id.clone(),
-        response_sha256: capture.response_sha256.clone(),
+        capture_id: capture_id.to_string(),
+        response_sha256: response_sha256.to_string(),
         reason: reason.to_string(),
     };
     let snapshot = {
         let mut wakes = runtime.captured_finalize_wakes.lock();
-        wakes.insert(projection.document_hash.clone(), payload);
+        wakes.insert(document_hash.to_string(), payload);
         CapturedFinalizeWakeSnapshot {
             wakes: wakes.clone(),
         }
@@ -16736,9 +16754,11 @@ pub(super) fn publish_captured_finalize_wake(
     if let Err(error) = result {
         eprintln!(
             "[controller] captured-finalize wake projection failed for {}: {error:#}",
-            projection.document_hash
+            document_hash
         );
+        return false;
     }
+    true
 }
 
 pub(super) fn clear_captured_finalize_wake(runtime: &ControllerRuntime, document_hash: &str) {

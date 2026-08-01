@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 1f5b2d57-c114-4e4d-88c4-dd9057d75cdc
+resume: 17b41e7b-2df9-42ec-8a28-879b1f729d43
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -35,56 +35,65 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260801-043053.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260801-050221.md`*
 
 Compacted content:
-- Archived 5 response topic(s): do [#tsrenameast1]; do [#tsrenameast2]; do [#tsrenameast3] / do [#tsrenameast4]; 2 more
-- Prior summary/context: prior compacted content: Archived 10 response topic(s): do [#astgrepstructural]; ast-grep as the core, and more langu...
+- Archived 1 response topic(s): do [#finishsymbolkind]
+- Prior summary/context: prior compacted content: Archived 5 response topic(s): do [#tsrenameast1]; do [#tsrenameast2]; do [#tsrenameast3] / d...
 
-### Re: do [#finishsymbolkind] — opus-5
+### Re: do [#zigthirdindexed] — opus-5
 
-Already landed by the prior cycle in tsift `36e669d`; that cycle committed the code
-but never closed the item out. This turn verified it and closed it.
+> **Queue prompt:**
+>
+> do [#zigthirdindexed]
 
-**What is in the fix.** `occurrence_matches_target` gained a Python and a Kotlin arm
-in `packages/tsift-graph/src/rename.rs`. Python drops an `identifier` that is the
-`attribute` field of an `attribute` node; Kotlin drops a non-first `identifier` under
-`navigation_expression`. Both keep it when the enclosing attribute/navigation
-expression is the `function` of a call, because both languages index methods as
-callables — so `panel.widget_count()` is renamed and `panel.widget_count` is not.
-The two conformance fixtures in `semantic_edit.rs` were widened to assert the method
-declaration, the direct call, the method call, and the untouched member read
-individually rather than by count.
 
-**Verification.** `make check` in `src/tsift` is green, exit 0, no failures, and both
-new tests ran by name (`python_callable_narrowing_keeps_method_calls_but_skips_attribute_reads`,
-`kotlin_callable_narrowing_keeps_method_calls_but_skips_navigation_reads`). CI run
-`30684057240` is still in progress, so this closeout rests on local evidence.
+Done, and it turned into a correction of the two grammars that shipped first. The
+code landed last cycle; this cycle is the closeout that the retained-write wedge
+blocked, so the commits below are already pushed.
 
-**One defect fixed here.** That commit de-indented three continuation blocks in
-`VERSIONS.md` out of the bullet they belong to, so they rendered as top-level
-paragraphs. Restored in `582d7c4`, gitlink bumped in `d1fb343`.
+**Zig, by the opposite rule.** Copying the callee-only narrowing to Zig would have
+been a silent under-rename, not a fix. Zig has no import-into-namespace form —
+`@import("m.zig").name` and `Type.name` are the only ways to name another file's
+declaration, and both are `field_expression` members — so the callee rule would
+rename a `const` or an uncalled function and leave every cross-file reference
+behind. Zig is narrowed by the *receiver* instead: a member survives when the
+receiver chain roots in an `@import` binding or a container type (in Zig a
+container type is also its namespace), and is dropped when the receiver is an
+ordinary value, where the member is a struct field. `container_field` names are
+dropped for every resolved target, since the Zig symbol query never produces one.
 
-**Scope note, filed rather than fixed.** The item called Python and Kotlin "the two
-indexed languages still at a flat identifier set" — Zig is a third. It is a real gap,
-but not a mechanical copy of the same rule: Zig has no import-into-namespace, so
-`@import("m.zig").foo` is the *only* cross-file reference form, and it is a
-`field_expression` member. The callee-only rule would drop every cross-file reference
-of a renamed const or struct — silent under-rename on a cross-file rename path. That
-needs receiver resolution (is the object a module or a value?), which is a design
-decision, so it is at the top of the backlog with the same caveat noted for the
-Python/Kotlin `mod.CONST` case the shipped rule already drops.
+**The same question was already open, and already wrong, in Python and Kotlin.**
+Writing the receiver rule made both defects concrete rather than hypothetical:
 
-Unrelated to this document: preflight reports the installed `agent-doc` binary is one
-commit behind. `src/agent-doc` has a dirty tree from another session, so I did not
-build over it.
-<!-- agent:boundary:6fffd799 -->
+- Python dropped `mod.name`. That *is* the module-level binding when `mod` is an
+  imported module, and `import mod` is half of how Python spells a cross-module
+  reference — on a rename path that is cross-file. It renamed the definition and
+  left every reader broken. Now kept when the receiver roots in an `import`-bound
+  name, alias-aware, and `import pkg.mod` correctly binds `pkg`.
+- Kotlin dropped `Panel.widgetCount` and `Registry.widgetCount`, which reach a
+  companion or `object` member the index holds as a declaration. Now kept when the
+  receiver names a `class`/`object`/`interface` declared in the file.
+
+**Verification.** `make check` green, exit 0, no failures, no clippy warnings. Each
+of the four new tests was mutation-checked: disabling its own guard reddens it and
+nothing else, so none is a false green. The cross-language conformance fixtures for
+Zig, Python, and Kotlin were widened to assert renamed *and* untouched positions
+individually. Landed in tsift `13e4cd7`, gitlink `45b7989`, plan note `68c1d84`.
+
+**What is left, stated plainly.** A receiver whose binding lives in *another* file
+cannot be resolved from one parse tree, so Zig and Kotlin still fall back to the
+callee rule there. For Kotlin that residue is qualified access to an imported type,
+not the common path — an `import` binds a bare identifier the walk never touched.
+Closing it needs the call graph, not the grammar, which is phase 2's machinery
+applied to occurrences rather than to files.
+<!-- agent:boundary:aa447644 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#zigthirdindexed]
+- ~~do [#zigthirdindexed]~~
 - do [#wsdq]
 - do [#jzs7]
 <!-- /agent:queue -->
@@ -95,7 +104,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#zigthirdindexed] Zig is a third indexed language with a flat identifier node set, and it is deliberately left un-narrowed. Zig has no import-into-namespace form, so every cross-file reference to another module's symbol is the member of a field_expression. Applying the Python/Kotlin callee-only rule there would silently drop every cross-file reference of a renamed const, struct, or non-called function, which is exactly the under-rename the module doc warns against. Decide the receiver-resolution rule first: narrowing a member position needs to know whether the object is a module namespace or a value. The same open question applies to the already-shipped Python and Kotlin rules, which today drop a module-qualified read such as mod.CONST.
 - [ ] [#wsdq] release + publish + install
 - [ ] [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->

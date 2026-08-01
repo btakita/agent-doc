@@ -2021,13 +2021,13 @@ struct ControllerDocumentGraphs {
         String,
         agent_doc_state_backbone::retained_write::SettlementVerdict,
     >,
-    /// Exact captured-closeout identity that may resume now. Delivery ingress
-    /// and durable intent/capture state are Sources; this is the shared
-    /// decision plane, not an ACK callback.
+    /// Typed captured-closeout recovery identity that may run now. Delivery
+    /// ingress and durable intent/capture state are Sources; this is the
+    /// shared decision plane, not an ACK callback.
     retained_resume: lazily::ThreadSafeComputedMap<String, Option<RetainedResumeSignal>>,
     /// Controller-local receipt for an applied wake signal. Effects may update
     /// other Lazily state while projecting a wake, so this Source makes
-    /// application one-shot for an exact delivery frontier instead of relying
+    /// application one-shot for a typed delivery frontier instead of relying
     /// on an effect scheduler's global drain behavior.
     retained_resume_applied: lazily::ThreadSafeSourceMap<String, Option<RetainedResumeSignal>>,
     /// Durable compact continuation whose retained document write has reached
@@ -2289,14 +2289,33 @@ struct RetainedWriteSettleSink {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RetainedDeliveryObservation {
+    content: Arc<str>,
     content_hash: String,
     live_editors: usize,
     delivery_converged: bool,
     delivery_version: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetainedResumeAction {
+    ResumeExactDelivery,
+    ReconcileMaterializedCapture,
+}
+
+impl RetainedResumeAction {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::ResumeExactDelivery => "retained_delivery_reactive",
+            Self::ReconcileMaterializedCapture => {
+                "retained_materialized_capture_reconcile_reactive"
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RetainedResumeSignal {
+    action: RetainedResumeAction,
     intent_id: String,
     target_hash: String,
     cycle_id: String,
@@ -2382,7 +2401,7 @@ impl RetainedWriteSettleSink {
         }
     }
 
-    /// Project an exact derived resume identity into the existing
+    /// Project a typed derived recovery identity into the existing
     /// captured-finalize state-plane channel.
     fn resume(&self, document_hash: &str, signal: &RetainedResumeSignal) {
         let Some(runtime) = self.runtime.upgrade() else {
@@ -2398,11 +2417,12 @@ impl RetainedWriteSettleSink {
             // application. The new projection will invalidate the Computed.
             return;
         }
-        rpc::publish_captured_finalize_wake(&runtime, &projection, "retained_delivery_reactive");
+        rpc::publish_captured_finalize_wake(&runtime, &projection, signal.action.reason());
         agent_doc_ops_log_io::log_op(
             &self.project_root,
             &format!(
-                "retained_closeout_woken_from_derived_delivery document_hash={document_hash} intent_id={} target_hash={} cycle_id={} capture_id={} controller_generation={}",
+                "retained_closeout_woken_from_derived_delivery document_hash={document_hash} action={:?} intent_id={} target_hash={} cycle_id={} capture_id={} controller_generation={}",
+                signal.action,
                 signal.intent_id,
                 signal.target_hash,
                 signal.cycle_id,
@@ -3135,7 +3155,7 @@ impl ControllerDocumentGraphs {
         effects.insert(key, effect);
     }
 
-    /// Subscribe the closeout wake to exact retained-delivery eligibility.
+    /// Subscribe the closeout wake to typed retained-delivery eligibility.
     ///
     /// Replica RPCs are boundary ingress only. They never decide to resume a
     /// closeout; updating the delivery Source invalidates this Computed and
@@ -3167,7 +3187,7 @@ impl ControllerDocumentGraphs {
             let Some(sink) = sink.get() else {
                 return;
             };
-            // Consume this exact frontier before projecting the wake. The wake
+            // Consume this typed frontier before projecting the wake. The wake
             // itself updates another Lazily graph; acknowledging first makes
             // the next effect drain observe `None` rather than re-emitting.
             applied.set(ctx, effect_key.clone(), Some(signal.clone()));
@@ -3353,15 +3373,33 @@ fn retained_resume_signal(
     let capture = projection.closeout.captured_response.as_ref()?;
     let cycle_id = projection.closeout.cycle_id.as_deref()?;
     let delivery = delivery?;
-    if delivery.live_editors == 0
-        || !delivery.delivery_converged
-        || !delivery
-            .content_hash
-            .eq_ignore_ascii_case(&intent.target_hash)
-    {
+    if delivery.live_editors == 0 || !delivery.delivery_converged {
         return None;
     }
+    let action = if delivery
+        .content_hash
+        .eq_ignore_ascii_case(&intent.target_hash)
+    {
+        RetainedResumeAction::ResumeExactDelivery
+    } else if intent.source == agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition
+        && agent_doc_element::element::structural_corruption_reason(&delivery.content).is_none()
+        && agent_doc_turn::response_replay::response_materialized_in_content(
+            &capture.response_body,
+            delivery.content.as_ref(),
+        )
+    {
+        // A post-commit reposition carries layout cleanup, not a missing
+        // response body. If a newer converged projection already contains the
+        // durable response, wake the owner supervisor's authority-safe
+        // reconciliation rather than waiting forever for the obsolete byte
+        // target. The supervisor still validates canonical structure and
+        // canonical/disk equality before it can retire the retained intent.
+        RetainedResumeAction::ReconcileMaterializedCapture
+    } else {
+        return None;
+    };
     Some(RetainedResumeSignal {
+        action,
         intent_id: intent.intent_id.clone(),
         target_hash: intent.target_hash.clone(),
         cycle_id: cycle_id.to_string(),
@@ -11774,9 +11812,10 @@ agent:queue\n\
     }
 
     #[test]
-    fn retained_resume_is_an_exact_computed_delivery_gate() {
+    fn retained_resume_is_a_typed_computed_delivery_gate() {
         let projection = retained_resume_projection("doc-retained-resume");
         let exact = RetainedDeliveryObservation {
+            content: Arc::from("target"),
             content_hash: "target".to_string(),
             live_editors: 1,
             delivery_converged: true,
@@ -11814,6 +11853,7 @@ agent:queue\n\
             retained_resume_signal(
                 Some(&projection),
                 Some(&RetainedDeliveryObservation {
+                    content: Arc::from("other"),
                     content_hash: "other".to_string(),
                     ..exact.clone()
                 }),
@@ -11823,6 +11863,7 @@ agent:queue\n\
         );
 
         let signal = retained_resume_signal(Some(&projection), Some(&exact), 1).unwrap();
+        assert_eq!(signal.action, RetainedResumeAction::ResumeExactDelivery);
         assert_eq!(signal.intent_id, "intent-1");
         assert_eq!(signal.target_hash, "target");
         assert_eq!(signal.cycle_id, "cycle-1");
@@ -11831,6 +11872,53 @@ agent:queue\n\
             &signal,
             &projection
         ));
+    }
+
+    #[test]
+    fn retained_post_commit_reposition_reacts_to_a_materialized_newer_projection() {
+        let mut projection = retained_resume_projection("doc-retained-reposition");
+        projection.document.pending_write.as_mut().unwrap().source =
+            agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition;
+        let materialized = RetainedDeliveryObservation {
+            content: Arc::from("operator queue edit\nresponse body\n"),
+            content_hash: "newer-projection".to_string(),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 9,
+        };
+
+        let signal = retained_resume_signal(Some(&projection), Some(&materialized), 1).unwrap();
+        assert_eq!(
+            signal.action,
+            RetainedResumeAction::ReconcileMaterializedCapture
+        );
+        assert_eq!(signal.delivery_version, 9);
+
+        projection.document.pending_write.as_mut().unwrap().source =
+            agent_doc_state_backbone::DocumentWriteSource::PendingWrite;
+        assert!(
+            retained_resume_signal(Some(&projection), Some(&materialized), 1).is_none(),
+            "ordinary divergent writes cannot be treated as a settled reposition"
+        );
+    }
+
+    #[test]
+    fn retained_post_commit_reposition_does_not_wake_for_malformed_visible_content() {
+        let mut projection = retained_resume_projection("doc-retained-malformed");
+        projection.document.pending_write.as_mut().unwrap().source =
+            agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition;
+        let malformed = RetainedDeliveryObservation {
+            content: Arc::from("response body\n-->\n"),
+            content_hash: "malformed-projection".to_string(),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 10,
+        };
+
+        assert!(
+            retained_resume_signal(Some(&projection), Some(&malformed), 1).is_none(),
+            "structurally invalid visible authority stays blocked for operator-safe recovery"
+        );
     }
 
     #[test]
@@ -11895,6 +11983,7 @@ agent:queue\n\
         runtime.document_graphs.observe_retained_delivery(
             &document_hash,
             Some(RetainedDeliveryObservation {
+                content: Arc::from("target"),
                 content_hash: "target".to_string(),
                 live_editors: 1,
                 delivery_converged: true,
@@ -11909,6 +11998,62 @@ agent:queue\n\
     }
 
     #[test]
+    fn retained_materialized_capture_is_published_once_for_all_supervisor_subscribers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+        capture_response(&runtime, dir.path(), &document_hash);
+        let mut event =
+            deferred_document_write_event(&document_hash, "post-commit-reposition", "old-target");
+        let agent_doc_state_backbone::StateFact::DocumentWriteDeferred { source, .. } =
+            &mut event.fact
+        else {
+            unreachable!();
+        };
+        *source = agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition;
+        append_state_event(dir.path(), &event).unwrap();
+        runtime.apply_state_event(&event).unwrap();
+
+        let materialized = RetainedDeliveryObservation {
+            content: Arc::from("operator queue edit\nresponse body\n"),
+            content_hash: "newer-projection".to_string(),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 12,
+        };
+        runtime
+            .document_graphs
+            .observe_retained_delivery(&document_hash, Some(materialized.clone()));
+
+        assert_eq!(
+            runtime
+                .captured_finalize_wakes
+                .lock()
+                .get(&document_hash)
+                .map(|wake| wake.reason.as_str()),
+            Some("retained_materialized_capture_reconcile_reactive")
+        );
+        assert!(
+            runtime
+                .document_graphs
+                .current_retained_resume(&document_hash)
+                .is_none(),
+            "the controller-local receipt deduplicates the shared recovery action"
+        );
+
+        runtime
+            .document_graphs
+            .observe_retained_delivery(&document_hash, Some(materialized));
+        assert!(
+            runtime
+                .document_graphs
+                .current_retained_resume(&document_hash)
+                .is_none(),
+            "repeated supervisor-visible projections cannot republish the same frontier"
+        );
+    }
+
+    #[test]
     fn retained_resume_reacts_when_the_intent_arrives_after_delivery() {
         let dir = tempfile::TempDir::new().unwrap();
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
@@ -11917,6 +12062,7 @@ agent:queue\n\
         runtime.document_retained_write_observe_delivery(
             &document_hash,
             Some(RetainedDeliveryObservation {
+                content: Arc::from("target"),
                 content_hash: "target".to_string(),
                 live_editors: 1,
                 delivery_converged: true,
@@ -11971,6 +12117,7 @@ agent:queue\n\
         runtime.document_retained_write_observe_delivery(
             &document_hash,
             Some(RetainedDeliveryObservation {
+                content: Arc::from("target"),
                 content_hash: "target".to_string(),
                 live_editors: 1,
                 delivery_converged: true,

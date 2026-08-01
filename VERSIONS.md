@@ -8,9 +8,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 _JetBrains plugin 0.2.332; VS Code extension 0.2.64; Zed extension 0.1.0._
 
+- **Running supervisors now coordinate retained closeout recovery through the
+controller's reactive state plane.** Replica ingress publishes the full
+converged visible projection, a typed `Computed` distinguishes exact delivery
+from a post-commit reposition whose captured response is already materialized,
+and one deduplicated Effect wakes the owning supervisor. Newer operator queue
+edits are preserved; malformed or ordinary divergent projections remain
+blocked without force-disk, refresh, no-op edits, or stale-target replay.
 - **Controller request workers now read the local reactive document projection.**
-  Spawned request workers inherit controller identity and the in-process
-  projection reader, so Compact Exchange cannot recursively call its own
+Spawned request workers inherit controller identity and the in-process
+projection reader, so Compact Exchange cannot recursively call its own
   controller and time out behind the state transition it is handling.
 - **A plain Run Agent Doc trigger now coalesces behind the active closeout
   owner.** Explicit prompt payloads remain durably queued, while a payload-free

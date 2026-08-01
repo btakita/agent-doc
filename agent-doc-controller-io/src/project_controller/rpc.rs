@@ -7365,6 +7365,7 @@ fn observe_retained_delivery_after_replica_event(
                 delivery_version,
                 semantics: _,
             } => Some(RetainedDeliveryObservation {
+                content: Arc::from(text.as_str()),
                 content_hash: agent_doc_hash::content_hash(&text),
                 live_editors,
                 delivery_converged,

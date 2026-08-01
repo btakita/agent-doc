@@ -204,7 +204,38 @@ Status: complete.
 - Run `make check`, `make tmux-ci`, the JetBrains plugin tests/build, and the
   VS Code extension tests/build.
 - Install the non-fat local build once after verification, then inspect the
-  latest GitHub Actions CI run.
+latest GitHub Actions CI run.
+
+### S6 — Cross-supervisor retained-closeout recovery
+
+Status: complete.
+
+The project controller is the coordination point for every supervisor in the
+project. Replica ingress publishes the complete visible document projection,
+including its content and delivery frontier, into a controller `Source`. A
+`Computed` combines that projection with the durable retained-write and captured
+response projections and yields one typed recovery action:
+
+- `ResumeExactDelivery` when the converged visible projection is the retained
+  byte target;
+- `ReconcileMaterializedCapture` when a converged newer projection already
+  contains the captured response for a retained post-commit reposition.
+
+The controller `Effect` publishes the exact action identity through the shared
+captured-finalize state-plane channel. All running supervisors observe that
+channel, but only the document-owning supervisor's single-flight worker applies
+the existing authority-safe reconcile. The action identity includes the
+controller generation and delivery version, so repeated observations and
+multiple subscriptions do not duplicate work.
+
+Structural ambiguity, zero live replicas, unconverged delivery, missing captured
+response content, and ordinary divergent writes derive no action. They remain
+visible blocked state and never trigger force-disk, stale-target replay, or an
+editor overwrite.
+
+Exit: a retained post-commit reposition whose response is already present in a
+newer converged editor projection wakes and settles automatically without an
+imperative editor ACK, no-op edit, manual refresh, or supervisor-specific poll.
 
 ## Verification
 
@@ -246,9 +277,13 @@ The minimum regression proof is stronger than “no crash”:
 - VS Code `npm run vscode:prepublish`: passed.
 - Focused Rust surface/controller/FFI suites: passed.
 - `native_reload_handoff`: two controller-backed native generations quiesce and
-  unload with no plugin SQLite descriptors or deleted library mappings.
+unload with no plugin SQLite descriptors or deleted library mappings.
 - `native_sqlite_boundary`: missing-controller automatic FFI paths cannot
-  touch or bootstrap `state.db`.
+touch or bootstrap `state.db`.
+- Retained-closeout controller tests cover exact delivery, materialized
+post-commit reposition, malformed visible authority, action deduplication, and
+both intent/delivery arrival orders.
+- `make check` and `make tmux-ci`: passed after S6.
 
 ## Out of scope
 

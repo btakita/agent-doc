@@ -1,6 +1,6 @@
 # Plan — lazy document delivery projection
 
-Status: accepted for implementation
+Status: implemented and verified
 
 ## Incident
 

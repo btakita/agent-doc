@@ -142,6 +142,38 @@ is the callee of a call. That exception is required because both languages index
 methods as callables. Regression tests and conformance fixtures keep method
 declarations and calls while leaving same-named member reads untouched.
 
+**Kotlin's type-qualified members repaired in `#zigthirdindexed`.** The same
+receiver idea, narrower: `Panel.widgetCount` and `Registry.widgetCount` reach a
+companion or `object` member the index holds, so the callee-only rule dropped
+declarations it should have renamed. A receiver declared in another file is
+still unresolvable from one parse tree; that residue is qualified access to an
+imported type, not the common path, which in Kotlin is an `import` binding a
+bare identifier the walk never touched.
+
+**Python's module-qualified reads repaired in `#zigthirdindexed`.** The
+attribute rule from `#finishsymbolkind` dropped `mod.name` along with
+`obj.name`, but when `mod` is an imported module that attribute *is* the
+module-level binding — and `import mod` is half of how Python spells a
+cross-module reference, on a rename path that is cross-file. It renamed the
+definition and left every reader broken, which is the exact failure the walk's
+own doc comment says is worse than over-renaming. A Python attribute is now kept
+whenever its receiver chain roots in an `import`-bound name.
+
+**Extended to Zig in `#zigthirdindexed`, by the opposite rule.** Zig is a third
+grammar with a flat `identifier` set, but copying the callee-only rule to it
+would have been a silent under-rename, not a fix. Zig has no
+import-into-namespace form: `@import("m.zig").name` and `Type.name` are the only
+ways to name another file's declaration, and both are `field_expression`
+members, so the callee rule would rename a `const` or an uncalled function and
+drop every cross-file reference to it. Zig is narrowed by the *receiver*
+instead — a member is kept when the receiver chain roots in an `@import` binding
+or a container type (which in Zig is also a namespace), and dropped when the
+receiver is an ordinary value, where the member is a struct field. The callee
+exception survives for that value case. `container_field` names are dropped for
+every resolved target, because the Zig symbol query never produces one. This is
+the first place where the same defect shape demanded a different rule, and it is
+the reason the item was filed rather than folded into `#finishsymbolkind`.
+
 **Closed in `#narrowidentifierkind`,** and the diagnosis above was half right.
 The fix was not the graph scoping from phase 2 — that resolves *which files* a
 rename touches, not which occurrences within one. What it needed was the

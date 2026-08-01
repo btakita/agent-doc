@@ -14665,16 +14665,14 @@ pub(crate) fn handle_delivery_convergence_await(
             .get("after_version")
             .and_then(serde_json::Value::as_u64)
     });
-    Ok(await_local_delivery_convergence_change_for_file_inner(
-        &canonical,
-        after_version,
-        wait,
-    )?
-    .unwrap_or(DeliveryConvergenceStatus {
-        observed: false,
-        converged: false,
-        version: 0,
-    }))
+    Ok(
+        await_local_delivery_convergence_change_for_file_inner(&canonical, after_version, wait)?
+            .unwrap_or(DeliveryConvergenceStatus {
+                observed: false,
+                converged: false,
+                version: 0,
+            }),
+    )
 }
 
 pub(crate) fn handle_visible_write_materialized_carry_forward_observed(

@@ -158,9 +158,8 @@ const CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY:
 const CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS: u64 = 1_800;
 #[cfg(not(test))]
 const CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS: u64 = 8_000;
-const _: () = assert!(
-    CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS > CRDT_PROJECTION_FALLBACK_BACKOFF_MAX_MS
-);
+const _: () =
+    assert!(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS > CRDT_PROJECTION_FALLBACK_BACKOFF_MAX_MS);
 #[derive(Debug)]
 pub struct AwaitEditorReplicaNoDiskWrite(String);
 
@@ -751,7 +750,7 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConve
     }
 }
 
-fn observe_fresh_lazily_current_text(file: &Path, source: &str) -> Result<Option<String>> {
+fn observe_fresh_lazily_current_text(file: &Path, _source: &str) -> Result<Option<String>> {
     #[cfg(any(test, feature = "test-support"))]
     const PUBLISH_TIMEOUT_MS: u64 = 100;
     #[cfg(not(any(test, feature = "test-support")))]
@@ -759,10 +758,6 @@ fn observe_fresh_lazily_current_text(file: &Path, source: &str) -> Result<Option
 
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let timeout = std::time::Duration::from_millis(PUBLISH_TIMEOUT_MS);
-    agent_doc_crdt_relay_io::request_lazily_current_observation_with_timeout(
-        &canonical, source, timeout,
-    )?;
-
     let deadline = std::time::Instant::now() + timeout;
     loop {
         if let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } =
@@ -1630,11 +1625,8 @@ pub fn settle_retained_captured_projection_through_authority(
 
     let mut disk = resolve_disk_current_document_content(path, source)?;
     if disk != canonical {
-        let Some(projected) = settle_projected_captured_response_through_authority(
-            path,
-            captured_response,
-            source,
-        )?
+        let Some(projected) =
+            settle_projected_captured_response_through_authority(path, captured_response, source)?
         else {
             return Ok(false);
         };

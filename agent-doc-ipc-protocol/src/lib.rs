@@ -1168,9 +1168,8 @@ mod tests {
         is_socket_receipt_timeout_error, is_socket_status_error, message_is_reload_library,
         message_requests_early_receipt, normalization_repair_patch_message,
         observe_lazily_current_message, patch_message, pending_callback_from_request,
-        queue_convergence_message, refresh_content_message, reload_lib_message,
-        reposition_message, validate_ipc_hello, validate_ipc_hello_ack, vcs_refresh_message,
-        vcs_refresh_probe_message,
+        queue_convergence_message, refresh_content_message, reload_lib_message, reposition_message,
+        validate_ipc_hello, validate_ipc_hello_ack, vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]

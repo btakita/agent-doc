@@ -240,40 +240,6 @@ const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 60;
 #[cfg(not(test))]
 const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 400;
 
-/// `#ensurereregister` — minimum spacing between missing-replica re-registration
-/// requests for one document.
-///
-/// The nudge is cheap to send but NOT cheap to serve: each one drives a full
-/// editor-side re-attach (observed ~250-300ms for a 60k-char document, with a
-/// fresh client id and the prior generation fenced). Ensure runs once per
-/// preflight, and preflights can arrive about once a second during a drain, so
-/// an unspaced nudge turns a persistent wedge into a re-registration storm that
-/// fences a live generation every second. Space them so a wedge that outlives
-/// one request degrades to occasional retries instead.
-const REPLICA_REREGISTER_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(10);
-
-fn replica_reregister_cooldown_gate() -> &'static Mutex<HashMap<String, std::time::Instant>> {
-    static LAST: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
-    LAST.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// True when a re-registration request for `file` is allowed now; records the
-/// attempt when it is.
-fn replica_reregister_cooldown_elapsed(file: &Path) -> bool {
-    let Ok(key) = agent_doc_fs::document_state_hash(file) else {
-        return true;
-    };
-    let mut gate = replica_reregister_cooldown_gate().lock();
-    let now = std::time::Instant::now();
-    match gate.get(&key) {
-        Some(last) if now.duration_since(*last) < REPLICA_REREGISTER_COOLDOWN => false,
-        _ => {
-            gate.insert(key, now);
-            true
-        }
-    }
-}
-
 /// `#ensurereplicagensup` — whether THIS process serves the relay hub.
 ///
 /// `hub_registry()` is process-local and populated only by the process running
@@ -443,13 +409,6 @@ pub fn rekey_live_document_path(
             counts.insert(new_hash.clone(), count);
         }
     }
-    {
-        let mut cooldowns = replica_reregister_cooldown_gate().lock();
-        if let Some(last) = cooldowns.remove(&old_hash) {
-            cooldowns.insert(new_hash, last);
-        }
-    }
-
     Ok(LiveDocumentPathRekeyReport {
         hub_moved,
         replica_identities_moved,
@@ -1174,12 +1133,9 @@ fn recover_missing_hub_from_retained_projection(file: &Path, hash: &str) -> Resu
 ///
 /// This is intentionally narrower than the commit barrier: it does not treat
 /// markdown or filesystem sidecars as authoritative. When the editor owns the
-/// document but Lazily current is missing or not converged, it asks the editor to
-/// observe Lazily current via the read-only `observe_lazily_current` IPC path and
-/// waits for a bounded interval. It never restores an editor-attached
-/// hub from durable projection because that would make stale restart state race
-/// the live buffer. Callers surface the bounded failure until the editor
-/// republishes.
+/// document but Lazily current is missing or not converged, it observes the
+/// retained projection and live relay until either reactive source reaches a
+/// usable fixed point. No editor request or registration command is emitted.
 pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
     let authority = authority_for_file(&file.display().to_string());
     let first = current_text_for_file_with_authority(file, authority)?;
@@ -1255,63 +1211,42 @@ fn ensure_document_model_with_current_text_observer_inner(
             first_label,
         ),
     );
+    if let Some(observer) = observe_recovery_current_text.as_mut() {
+        match observer() {
+            Ok(current @ (CurrentText::Detached | CurrentText::Current { .. })) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "document_model_ensure_ready file={} source={} initial_state={} final_state={} recovery=retained_lazily_projection",
+                        file.display(),
+                        source,
+                        first_label,
+                        current_text_label(&current),
+                    ),
+                );
+                return Ok(current);
+            }
+            Ok(CurrentText::EditorAttachedMissingReplica | CurrentText::EditorSyncPending) => {}
+            Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "document_model_ensure_projection_observer_deferred file={} source={} initial_state={} reason={error:#}",
+                        file.display(),
+                        source,
+                        first_label,
+                    ),
+                );
+            }
+        }
+    }
     let ensure_timeout_ms = if matches!(first, CurrentText::EditorAttachedMissingReplica) {
         DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS
     } else {
         DOCUMENT_MODEL_ENSURE_TIMEOUT_MS
     };
-    request_lazily_current_observation_with_timeout(
-        file,
-        source,
-        std::time::Duration::from_millis(ensure_timeout_ms),
-    )?;
 
-    // `#ensurereregister`: a missing-replica ensure used to wait for a republish
-    // it never asked for. An observation request only asks the editor "what is
-    // your current text" — an editor that holds the document but has NO replica
-    // has nothing to answer with, so it stays silent and every attempt fails at
-    // the short window. Observed live on agent-doc-bugs2.md: four back-to-back
-    // ensures a second apart, all `final_state=editor_attached_model_missing
-    // timeout_ms=400 window_extended=false`, then the plugin's own periodic
-    // sweep registered the replica ~100s later and the wedge cleared on its own.
-    // The binary must drive that re-registration instead of waiting for the
-    // sweep. Wake the canonical projection instead of asking the editor to
-    // rebuild or publish a whole-document baseline. `EditorSyncPending` is
-    // deliberately excluded: that hub exists and is mid-flush.
-    if matches!(first, CurrentText::EditorAttachedMissingReplica)
-        && replica_reregister_cooldown_elapsed(file)
-    {
-        let reregister = match signal_crdt_replica_event_with_counts(
-            file,
-            CrdtReplicaEventReason::CanonicalProjection,
-            0,
-        ) {
-            // `#mrnh`: report FOUND registrations alongside notified ones.
-            // `notified == 0` used to be logged unconditionally as
-            // `no_live_registration` — "Lazily reports the editor attached, yet
-            // the liveness plane holds no registration to send to" — but that
-            // is only true when `found == 0`. With `found > 0` and every IPC
-            // send failing, `notified` is also 0, and the plane DOES hold the
-            // registration the controller reports as `live_editors=1`. Those
-            // are opposite faults (a stale attachment inside agent-doc versus a
-            // delivery failure to a real editor) and conflating them is what
-            // pointed this investigation at bootstrap payload size and
-            // generation fencing instead of at delivery.
-            Ok(outcome) => outcome.diagnosis(),
-            Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
-        };
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "document_model_ensure_replica_reregister file={} source={} reregister={} (#ensurereregister)",
-                file.display(),
-                source,
-                reregister,
-            ),
-        );
-    }
-
-    // Bound how long we wait for the editor to republish. A persistent missing
+    // Bound how long we wait for the observed projection to advance. A persistent missing
     // replica must fail closed: neither disk nor a durable restart projection can
     // prove the current unsaved editor cut. `EditorSyncPending` keeps the full
     // window because a hub already exists with un-flushed ops worth waiting for.
@@ -1483,92 +1418,6 @@ fn current_text_label(current: &CurrentText) -> &'static str {
         CurrentText::EditorAttachedMissingReplica => "editor_attached_model_missing",
         CurrentText::EditorSyncPending => "editor_sync_pending",
         CurrentText::Current { .. } => "current",
-    }
-}
-
-pub fn request_lazily_current_observation_with_timeout(
-    file: &Path,
-    source: &str,
-    timeout: std::time::Duration,
-) -> Result<()> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let path_str = canonical.to_string_lossy().to_string();
-    let doc_hash =
-        agent_doc_fs::document_state_hash(&canonical).unwrap_or_else(|e| format!("hash_error:{e}"));
-    let _ = reliable_sync_editor_live_for_file(&canonical);
-    let registration = agent_doc_reliable_sync_io::global_liveness_plane()
-        .lock()
-        .projection()
-        .live_registrations(&agent_doc_hash::document_id_for_path(&canonical))
-        .into_iter()
-        .max_by_key(|registration| registration.timestamp_ms);
-    let listener_active = registration.as_ref().is_some_and(|registration| {
-        agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid)
-    });
-    let observation_result = if let Some(registration) = registration.as_ref()
-        && listener_active
-    {
-        agent_doc_ipc_io::send_observe_lazily_current_to_editor_with_timeout(
-            &project_root,
-            registration.pid,
-            &registration.editor_id,
-            &path_str,
-            timeout,
-        )
-    } else {
-        Ok(false)
-    };
-    match observation_result {
-        Ok(true) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "lazily_current_observation_requested file={} canonical={} source={} transport=editor_ipc project_root={} listener_active={} doc_hash={} process_pid={}",
-                    file.display(),
-                    canonical.display(),
-                    source,
-                    project_root.display(),
-                    listener_active,
-                    doc_hash,
-                    std::process::id(),
-                ),
-            );
-            Ok(())
-        }
-        Ok(false) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "lazily_current_observation_transport_unavailable file={} canonical={} source={} transport=none project_root={} listener_active={} doc_hash={} process_pid={} recovery=continue_waiting_for_lazily_current",
-                    file.display(),
-                    canonical.display(),
-                    source,
-                    project_root.display(),
-                    listener_active,
-                    doc_hash,
-                    std::process::id(),
-                ),
-            );
-            Ok(())
-        }
-        Err(e) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "lazily_current_observation_request_error file={} canonical={} source={} transport=editor_ipc project_root={} listener_active={} doc_hash={} process_pid={} error={} recovery=continue_waiting_for_lazily_current",
-                    file.display(),
-                    canonical.display(),
-                    source,
-                    project_root.display(),
-                    listener_active,
-                    doc_hash,
-                    std::process::id(),
-                    e,
-                ),
-            );
-            Ok(())
-        }
     }
 }
 
@@ -5276,89 +5125,31 @@ mod tests {
         );
     }
 
-    /// `#ensurereregister` — a missing-replica ensure must ASK the editor to
-    /// re-register, not merely wait for a republish nobody requested.
-    ///
-    /// Live regression (agent-doc-bugs2.md): four back-to-back ensures a second
-    /// apart all failed at the short window with
-    /// `final_state=editor_attached_model_missing window_extended=false`, and the
-    /// wedge only cleared ~100s later when the JetBrains plugin ran its own
-    /// periodic registration sweep. Nothing in the ensure path had ever nudged
-    /// it, so queue maintenance could not persist for the whole interval.
+    /// Model ensure is a projection observer. Missing and syncing replicas both
+    /// fail closed without emitting a re-registration or editor-content request.
     #[test]
-    fn ensure_document_model_requests_replica_reregistration_for_missing_replica() {
-        let (_dir, doc) = temp_doc("ensure-model-reregister-missing-replica.md");
+    fn ensure_document_model_does_not_request_editor_recovery() {
+        let (_dir, doc) = temp_doc("ensure-model-reactive-projection.md");
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         hub_registry().lock().remove(&hash);
 
-        let err = ensure_document_model_with_current_text_observer(
-            &doc,
-            "test_reregister_missing_replica",
+        for state in [
             CurrentText::EditorAttachedMissingReplica,
-            || Ok(CurrentText::EditorAttachedMissingReplica),
-        )
-        .expect_err("a never-registering editor must still fail closed");
-        assert!(format!("{err:#}").contains("editor authority stayed"));
-
-        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("document_model_ensure_replica_reregister")
-                && log.contains("(#ensurereregister)"),
-            "missing-replica ensure must request replica re-registration, got:\n{log}"
-        );
-    }
-
-    /// `#ensurereregister` — a persistent wedge must not become a re-registration
-    /// storm. Each nudge costs the editor a full re-attach (~250-300ms, new
-    /// client id, prior generation fenced), and preflights arrive about once a
-    /// second during a drain, so back-to-back ensures for the same document must
-    /// collapse to a single request.
-    #[test]
-    fn ensure_document_model_spaces_repeated_replica_reregistration_requests() {
-        let (_dir, doc) = temp_doc("ensure-model-reregister-cooldown.md");
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        hub_registry().lock().remove(&hash);
-
-        for _ in 0..3 {
+            CurrentText::EditorSyncPending,
+        ] {
             let _ = ensure_document_model_with_current_text_observer(
                 &doc,
-                "test_reregister_cooldown",
-                CurrentText::EditorAttachedMissingReplica,
-                || Ok(CurrentText::EditorAttachedMissingReplica),
+                "test_reactive_projection",
+                state.clone(),
+                || Ok(state.clone()),
             );
         }
 
         let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        let requests = log
-            .matches("document_model_ensure_replica_reregister")
-            .count();
-        assert_eq!(
-            requests, 1,
-            "three back-to-back ensures must send one nudge, got {requests}:\n{log}"
-        );
-    }
-
-    /// `#ensurereregister` — `EditorSyncPending` is a hub that already exists and
-    /// is mid-flush. Nudging it with a force-refresh would discard un-flushed
-    /// ops, so the re-registration request must be scoped to the missing-replica
-    /// case only.
-    #[test]
-    fn ensure_document_model_does_not_request_reregistration_while_sync_pending() {
-        let (_dir, doc) = temp_doc("ensure-model-reregister-sync-pending.md");
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        hub_registry().lock().remove(&hash);
-
-        let _ = ensure_document_model_with_current_text_observer(
-            &doc,
-            "test_reregister_sync_pending",
-            CurrentText::EditorSyncPending,
-            || Ok(CurrentText::EditorSyncPending),
-        );
-
-        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            !log.contains("document_model_ensure_replica_reregister"),
-            "sync-pending ensure must not force-refresh a live mid-flush hub, got:\n{log}"
+            !log.contains("document_model_ensure_replica_reregister")
+                && !log.contains("lazily_current_observation_requested"),
+            "projection observation must not send recovery commands, got:\n{log}"
         );
     }
 

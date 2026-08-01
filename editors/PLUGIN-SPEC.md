@@ -63,7 +63,7 @@ Rust, JetBrains, and VS Code use the same `EditorIntent` names:
 | `apply_canonical` | Apply a narrow canonical mutation to Lazily current |
 | `reposition` | Move the exchange boundary without changing user text |
 | `refresh_content` | Republish the already-open editor value to Lazily |
-| `observe_lazily_current` | Return current value, generation, and causal proof |
+| `observe_lazily_current` | Legacy compatibility input only; current runtimes observe the Lazily projection and emit no request |
 | `deliver_crdt_remote` | Integrate a remote Lazily change |
 | `refresh_vcs` | Refresh VCS decoration for the required absolute `file` after a durable commit |
 | `reload_library` | Reload a compatible native library only when the adapter can prove a safe boundary; otherwise require process restart |

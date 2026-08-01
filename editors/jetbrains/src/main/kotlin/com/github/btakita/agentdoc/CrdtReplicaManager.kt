@@ -1203,7 +1203,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (hasPendingLocal(filePath)) break
                 if (!shouldApplyRemoteCrdtUpdateUtil(update, forwarder.clientId)) {
                     selfEchoCount++
-                    TypingTracker.observeLazilyCurrentNow(filePath)
+                    val visibleText = editorBufferText(filePath) ?: expectedText
+                    if (!forwarder.projectVisibleState(visibleText)) {
+                        requestRemoteDrain(filePath, "self-echo-projection-retry")
+                    }
                     continue
                 }
                 peerUpdateCount++
@@ -1830,6 +1833,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (disposed.get()) return
         try {
             documentWorkers.forDocument(pending.filePath).execute {
+                var projectionPublished = false
                 try {
                     val normalizedText = outcome.editorNormalizedText
                     if (normalizedText != null) {
@@ -1839,16 +1843,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                                 "${File(pending.filePath).name}; normalized_hash=${contentHash(normalizedText)}",
                         )
                     }
-                    if (projectionVisible) {
-                        TypingTracker.observeLazilyCurrentNow(pending.filePath)
-                    }
+                    projectionPublished =
+                        projectionVisible &&
+                            outcome.editorText?.let { visibleText ->
+                                pending.effectToken.endpoint.projectVisibleState(
+                                    visibleText,
+                                    outcome.diskPersisted,
+                                )
+                            } == true
                     log.debug(
                         "[crdt-replica] remote editor apply completed for ${File(pending.filePath).name}; " +
-                            "visible=$projectionVisible disk_persisted=${outcome.diskPersisted} projection_published=$projectionVisible",
+                            "visible=$projectionVisible disk_persisted=${outcome.diskPersisted} projection_published=$projectionPublished",
                     )
+                    if (!projectionPublished && projectionVisible) {
+                        requestRemoteDrain(
+                            pending.filePath,
+                            "remote-editor-state-projection-retry",
+                        )
+                    }
                 } finally {
                     remoteEditorApplyPaths.remove(pending.filePath)
-                    if (projectionVisible && outcome.editorNormalizedText == null) {
+                    if (projectionPublished && outcome.editorNormalizedText == null) {
                         retainedCanonicalProjectionPaths.remove(pending.filePath)
                         consecutiveNoOpReschedules.set(0)
                     } else if (outcome.editorNormalizedText != null) {
@@ -1923,7 +1938,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             editorRemoteGeneration != null
         ) {
             shadows[filePath] = editorText
-            TypingTracker.observeLazilyCurrentNow(filePath)
+            if (!forwarder.projectVisibleState(editorText)) {
+                requestRemoteDrain(filePath, "already-visible-state-projection-retry")
+            }
             log.info(
                 "[crdt-replica] projected an already-visible remote target for $filePath: " +
                     "editor_hash=$editorHash generation=$editorRemoteGeneration",

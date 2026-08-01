@@ -298,7 +298,7 @@ object TypingTracker : DocumentListener {
             filePath = filePath,
             document = document,
             drainEditorOps = false,
-            requireAuthority = true,
+            requireReplica = true,
         )
     }
 
@@ -374,7 +374,7 @@ object TypingTracker : DocumentListener {
                 filePath = filePath,
                 document = emittedDocument,
                 drainEditorOps = true,
-                requireAuthority = false,
+                requireReplica = false,
             )
         } catch (_: UnsatisfiedLinkError) {
             // older cdylib without the compatibility content-report ABI; skip
@@ -410,12 +410,12 @@ object TypingTracker : DocumentListener {
         filePath: String,
         document: com.intellij.openapi.editor.Document,
         drainEditorOps: Boolean,
-        requireAuthority: Boolean,
+        requireReplica: Boolean,
     ): Boolean {
         return try {
             val text = tryReadDocumentText(document)
             if (text == null) {
-                if (!requireAuthority) {
+                if (!requireReplica) {
                     scheduleFullContentReport(filePath, document)
                 }
                 return false
@@ -430,15 +430,15 @@ object TypingTracker : DocumentListener {
                 unsyncedLocalEditPaths.remove(filePath)
             }
             val noUnsavedOperatorEdits = !unsaved || filePath !in unsyncedLocalEditPaths
-            if (requireAuthority) {
-                val replicaRefreshAccepted = CrdtReplicaManager.ensureReplicaForOpenDocument(
+            if (requireReplica) {
+                val replicaAvailable = CrdtReplicaManager.ensureReplicaForOpenDocument(
                     filePath = filePath,
                     document = document,
                     editorText = text,
                     await = true,
-                    forceRefresh = true,
+                    forceRefresh = false,
                 )
-                if (!replicaRefreshAccepted) return false
+                if (!replicaAvailable) return false
             }
             lib.agent_doc_lazily_current_observed_v1(
                 filePath,
@@ -449,7 +449,7 @@ object TypingTracker : DocumentListener {
                 EDITOR_CAPABILITIES,
                 if (noUnsavedOperatorEdits) 1 else 0,
             )
-            if (!requireAuthority) {
+            if (!requireReplica) {
                 CrdtReplicaManager.ensureReplicaForOpenDocument(
                     filePath = filePath,
                     document = document,

@@ -46,7 +46,6 @@ const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferred_clear";
 const CONTEXT_CLEAR_SOURCE_QUEUE_SLASH: &str = "queue_slash_command";
 const CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET: &str = "supervisor_background_context_reset";
 const ZERO_REPLICA_IDLE_WATCH_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
-const ZERO_REPLICA_IDLE_REPAIR_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
 static ZERO_REPLICA_IDLE_WATCH_LAST_PROBE: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
@@ -607,18 +606,6 @@ fn disk_queue_authority_allowed(editor_attached: bool) -> bool {
     !editor_attached
 }
 
-fn idle_watch_replica_recovery_needed(
-    current: &anyhow::Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
-) -> bool {
-    matches!(
-        current,
-        Ok(Some(
-            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
-                | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
-        ))
-    )
-}
-
 fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
     // `#idlewatchdetacheddisk`: when no live editor plugin owns the document,
     // disk is authoritative — a controller CRDT model read resolves back to disk
@@ -677,17 +664,9 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
             file,
             "idle_watch_active_queue_head",
         );
-    if idle_watch_replica_recovery_needed(&current) {
-        // A missing model is a repair trigger, not merely an unavailable read.
-        // Request one targeted editor observation, then let the existing 30-second
-        // backoff suppress further work. This repairs transparent controller
-        // restarts without turning the idle watcher into a poller.
-        let _ = agent_doc_crdt_relay_io::request_lazily_current_observation_with_timeout(
-            file,
-            "idle_watch_missing_replica_recovery",
-            ZERO_REPLICA_IDLE_REPAIR_TIMEOUT,
-        );
-    }
+    // Missing relay state is observed, never repaired imperatively from the
+    // idle watcher. The retained projection and stable editor replica drive the
+    // same Computed on their next state edge.
     let (content, transition, queue_unresolved_prompts) = match current {
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
             text,
@@ -4505,23 +4484,6 @@ mod tests {
     fn attached_editor_never_allows_disk_queue_authority() {
         assert!(disk_queue_authority_allowed(false));
         assert!(!disk_queue_authority_allowed(true));
-    }
-
-    #[test]
-    fn idle_watch_repairs_only_explicit_missing_or_sync_pending_replicas() {
-        assert!(idle_watch_replica_recovery_needed(&Ok(Some(
-            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
-        ))));
-        assert!(idle_watch_replica_recovery_needed(&Ok(Some(
-            agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
-        ))));
-        assert!(!idle_watch_replica_recovery_needed(&Ok(Some(
-            agent_doc_crdt_relay_io::CurrentText::Detached
-        ))));
-        assert!(!idle_watch_replica_recovery_needed(&Ok(None)));
-        assert!(!idle_watch_replica_recovery_needed(&Err(anyhow::anyhow!(
-            "controller unavailable"
-        ))));
     }
 
     fn context_clear_projection_with_source(

@@ -242,7 +242,7 @@ class TypingTrackerEdtBudgetTest {
                 !publishBody.contains(".runReadAction") &&
                 publishBody.contains("return reportFullContentNow(") &&
                 publishBody.contains("drainEditorOps = false") &&
-                publishBody.contains("requireAuthority = true"),
+                publishBody.contains("requireReplica = true"),
         )
 
         val reporterBody = tracker.substringAfter("private fun reportFullContentNow")
@@ -254,8 +254,9 @@ class TypingTrackerEdtBudgetTest {
                 reporterBody.contains("CrdtReplicaManager.ensureReplicaForOpenDocument") &&
                 reporterBody.contains("await = true") &&
                 reporterBody.contains("await = false") &&
-                reporterBody.contains("forceRefresh = true") &&
-                reporterBody.contains("if (!replicaRefreshAccepted) return false") &&
+                reporterBody.contains("forceRefresh = false") &&
+                !reporterBody.contains("forceRefresh = true") &&
+                reporterBody.contains("if (!replicaAvailable) return false") &&
                 reporterBody.contains("if (drainEditorOps)"),
         )
     }
@@ -540,7 +541,8 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "visible editor applies must publish complete state without an ACK sidecar",
-            source.contains("TypingTracker.observeLazilyCurrentNow(pending.filePath)") &&
+            source.contains("pending.effectToken.endpoint.projectVisibleState(") &&
+                source.contains("outcome.diskPersisted") &&
                 !source.contains("pendingRemoteAckReplays") &&
                 !source.contains("rememberPendingRemoteAcks") &&
                 !source.contains("replayPendingRemoteAcks"),

@@ -24,15 +24,16 @@ document.
 ### Invariant
 
 For an attached document, the controller's canonical document projection is the
-only whole-document authority. An editor observation may acknowledge or reject a
-specific projected revision, but it may never replace canonical state merely
+only whole-document authority. An editor publishes its current visible
+projection; the graph derives whether that state equals, precedes, or conflicts
+with the desired revision. The editor may never replace canonical state merely
 because its local baseline is stale. A quarantined stale delta cannot mutate
 canonical text.
 
 ### Owner
 
 The project controller `ProcessScope` owns one keyed Lazily graph per document.
-That graph owns the canonical target, editor delivery receipt, retained
+That graph owns the canonical target, editor visible projection, retained
 settlement verdict, and any closeout continuation. Editor plugins are thin
 projection consumers. Disk is a settlement sink, not a competing live authority.
 
@@ -41,7 +42,8 @@ projection consumers. Disk is a settlement sink, not a competing live authority.
 | Input transition | Derived projection | Effect |
 | --- | --- | --- |
 | Agent/compact mutation accepted | Canonical revision becomes desired; delivery is pending | Queue exact canonical replace/delta for attached editors |
-| Editor applies exact revision | Content-qualified delivery receipt advances | Persist the exact canonical target and resume the captured closeout |
+| Editor visible projection equals the exact revision | Derived convergence advances | Persist the exact canonical target and resume the captured closeout |
+| Retained target is absent and visible projection still equals its expected base | Guarded target projection becomes eligible | Compare-and-project the retained target through the CRDT relay |
 | Editor reports a stale baseline | Delivery remains pending; stale delta is quarantined | Re-project current canonical revision to that editor |
 | Editor has unsaved divergent text | Conflict remains explicit and unsettled | Do not adopt, merge, save, snapshot, or commit |
 | Editor detaches and disk authority is proven | Detached-disk settlement becomes eligible | Persist through the normal detached authority path |
@@ -52,7 +54,7 @@ projection consumers. Disk is a settlement sink, not a competing live authority.
 ```text
 canonical mutation SourceMap
   + editor membership/endpoint SourceMap
-  + visible receipt SourceMap
++ visible document projection SourceMap
   + disk observation SourceMap
         |
         v
@@ -88,7 +90,7 @@ runtime document authority must neither hydrate from nor checkpoint them.
 ### Allowed surfaces
 
 - Controller canonical text plus revision/lineage.
-- Content-qualified editor delivery receipts.
+- Content-qualified editor visible projections.
 - Lazily-derived retained settlement and closeout continuation.
 - Replace-capable controller-to-editor delivery that preserves unsaved operator
   conflicts by refusing to clobber them.
@@ -109,7 +111,8 @@ recovery.
 - Zed opening buffers never replace the controller bootstrap; full-sync
   `didChange` notifications are reduced to the smallest causal text delta before
   publication.
-- An unacknowledged compact target returns as retained/pending without the
+- A compact target not yet present in the visible projection returns as
+  retained/pending without the
   eight-second recovery request barrier.
 - Compact does not checkpoint a CRDT recovery sidecar.
 - A malformed component projection is rejected before publication; route/tmux

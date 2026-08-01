@@ -6,8 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.35.109
 
-_JetBrains plugin 0.2.332; VS Code extension 0.2.64; Zed extension 0.1.0._
+_JetBrains plugin 0.2.334; VS Code extension 0.2.64; Zed extension 0.1.0._
 
+- **Retained targets now flow back into attached editors as guarded reactive
+  projections.** The controller derives a target only when the current visible
+  projection still byte-matches the retained write's expected base, then a
+  per-document Effect submits it through the CRDT relay's compare-and-project
+  guard. The editor's later full-content projection is cumulative convergence
+  proof; there is no editor ACK request, force refresh, reload-from-disk step, or
+  forced disk write. Divergent operator typing and malformed targets remain
+  fail-closed.
 - **Running supervisors now coordinate retained closeout recovery through the
 controller's reactive state plane.** Replica ingress publishes the full
 converged visible projection, a typed `Computed` distinguishes exact delivery

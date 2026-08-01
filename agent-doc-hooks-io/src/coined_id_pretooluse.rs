@@ -45,6 +45,37 @@ const C_FAMILY_PREPROCESSOR_DIRECTIVES: &[&str] = &[
     "warning",
 ];
 
+/// How many times to re-read the ledger before concluding it is unreadable.
+///
+/// The session document and the session registry are rewritten continuously by
+/// the write pipeline, the CRDT relay, and every other live pane, so a failed
+/// read is far more often a moment of contention than a real absence. Five
+/// attempts at 20ms rides out a rewrite without making a `PreToolUse` hook
+/// perceptibly slow.
+const LEDGER_READ_ATTEMPTS: u32 = 5;
+const LEDGER_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// What the guard could learn about the document governing this tool call.
+///
+/// The three cases exist because collapsing them is the defect (`#coinedpretooluseguard`):
+/// "no document governs this call" and "a document governs it but its ledger
+/// could not be read" used to produce the same `None`, and `None` meant *allow*.
+/// A guard that opens whenever its ledger is momentarily unreadable is not a
+/// guard — and it opens precisely under the contention where ids are most
+/// likely to be flying around.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocumentIds {
+    /// No agent-doc document governs this call: no pane scope, not a project,
+    /// or this pane owns no session document. Nothing to check against, so a
+    /// write is none of the guard's business.
+    Ungoverned,
+    /// Tracked ids read from the governing document (and its `.done.md` archives).
+    Known(BTreeSet<String>),
+    /// A document governs this call and its ledger could not be read. The guard
+    /// fails CLOSED here, but only for text that actually carries an id.
+    Unavailable { file: PathBuf, cause: String },
+}
+
 /// Decision returned to the harness.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreToolUseDecision {
@@ -117,17 +148,27 @@ pub fn is_commit_command(command: &str) -> bool {
 pub fn pretooluse_decision(
     tool_name: &str,
     tool_input: &serde_json::Value,
-    known_ids: &BTreeSet<String>,
-    document_resolved: bool,
+    ids: &DocumentIds,
 ) -> PreToolUseDecision {
-    if !document_resolved {
+    if matches!(ids, DocumentIds::Ungoverned) {
         return PreToolUseDecision::Allow;
     }
     let Some(text) = persisted_text_for_tool(tool_name, tool_input) else {
         return PreToolUseDecision::Allow;
     };
     let scan_text = coined_id_scan_text(tool_name, tool_input, &text);
-    let coined = agent_doc_turn::coined_ids::coined_ids(&scan_text, known_ids);
+    // With an unreadable ledger every tag is unvouched-for by definition, so the
+    // empty set is the honest comparison basis. It also keeps the fail-closed
+    // blast radius exactly as small as it should be: text carrying no id-shaped
+    // token is still allowed, because there is nothing a ledger could have said
+    // about it. C-family preprocessor directives were already sanitized above,
+    // so a header full of `#include` is not collateral either.
+    let empty = BTreeSet::new();
+    let known = match ids {
+        DocumentIds::Known(known) => known,
+        _ => &empty,
+    };
+    let coined = agent_doc_turn::coined_ids::coined_ids(&scan_text, known);
     if coined.is_empty() {
         return PreToolUseDecision::Allow;
     }
@@ -145,6 +186,19 @@ pub fn pretooluse_decision(
             .unwrap_or("this file")
             .to_string()
     };
+    if let DocumentIds::Unavailable { file, cause } = ids {
+        return PreToolUseDecision::Deny {
+            reason: format!(
+                "[agent-doc] blocked: this {tool_name} would write id(s) {names} into {target}, and \
+                 the ledger that would vouch for them could not be read after \
+                 {LEDGER_READ_ATTEMPTS} attempts ({file}: {cause}). Refusing rather than allowing: \
+                 a guard that opens whenever its ledger is momentarily unreadable does not guard \
+                 anything, and contention is exactly when ids get coined. Retry once the document \
+                 settles, or drop the tag from the text.",
+                file = file.display(),
+            ),
+        };
+    }
     PreToolUseDecision::Deny {
         reason: format!(
             "[agent-doc] blocked: this {tool_name} would write coined id(s) {names} into {target}, \
@@ -205,9 +259,11 @@ fn is_c_family_target(tool_input: &serde_json::Value) -> bool {
 ///
 /// `exchange` holds responses, so including it would let an id the agent just
 /// wrote in prose vouch for the same id being written into source.
-pub fn known_ids_for_document(file: &Path) -> Option<BTreeSet<String>> {
-    let content = std::fs::read_to_string(file).ok()?;
-    let components = agent_doc_element::element::parse(&content).ok()?;
+pub fn known_ids_for_document(file: &Path) -> Result<BTreeSet<String>, String> {
+    let content =
+        std::fs::read_to_string(file).map_err(|err| format!("reading the document: {err}"))?;
+    let components = agent_doc_element::element::parse(&content)
+        .map_err(|err| format!("parsing the document: {err}"))?;
     let mut known = BTreeSet::new();
     for component in components
         .iter()
@@ -227,7 +283,7 @@ pub fn known_ids_for_document(file: &Path) -> Option<BTreeSet<String>> {
             known.extend(agent_doc_turn::coined_ids::extract_tags(&archived));
         }
     }
-    Some(known)
+    Ok(known)
 }
 
 /// Candidate `<stem>.done.md` archives for a document.
@@ -283,6 +339,65 @@ pub fn active_document_for(cwd: &Path, pane: Option<&str>) -> Option<PathBuf> {
     file.exists().then_some(file)
 }
 
+/// Resolve the ids this call must be checked against, retrying transient
+/// failures before giving up (`#coinedpretooluseguard`).
+///
+/// Every `Ungoverned` return below is a case where no ledger could exist:
+/// no pane scope, no project root, no registry on disk, or a registry that read
+/// cleanly and holds no document for this pane. Everything else — a registry
+/// that exists but would not open, a registered document that will not read or
+/// parse — is `Unavailable`, because the ledger *should* have answered and did
+/// not. That distinction is the whole fix; before it, all of them were `None`
+/// and `None` meant allow.
+pub fn document_ids(cwd: &Path, pane: Option<&str>) -> DocumentIds {
+    let Some(pane) = pane else {
+        return DocumentIds::Ungoverned;
+    };
+    let Some(root) = agent_doc_fs::find_project_root(cwd) else {
+        return DocumentIds::Ungoverned;
+    };
+    // A project with no registry on disk has no ledger to be unavailable, so an
+    // ordinary repo can never be denied by this guard.
+    if !agent_doc_session_registry_io::registry_path_in(&root).exists() {
+        return DocumentIds::Ungoverned;
+    }
+
+    let mut subject = root.clone();
+    let mut cause = "the ledger did not resolve".to_string();
+    for attempt in 0..LEDGER_READ_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(LEDGER_RETRY_BACKOFF);
+        }
+        let registry = match agent_doc_session_registry_io::load_in(&root) {
+            Ok(registry) => registry,
+            Err(err) => {
+                cause = format!("opening the session registry: {err}");
+                continue;
+            }
+        };
+        // The registry read cleanly. If it holds nothing for this pane, the pane
+        // genuinely owns no document — that is an answer, not a failure.
+        let Some(entry) = registry.values().find(|entry| entry.pane == pane) else {
+            return DocumentIds::Ungoverned;
+        };
+        let file = PathBuf::from(&entry.file);
+        let file = if file.is_absolute() {
+            file
+        } else {
+            root.join(file)
+        };
+        subject = file.clone();
+        match known_ids_for_document(&file) {
+            Ok(known) => return DocumentIds::Known(known),
+            Err(err) => cause = err,
+        }
+    }
+    DocumentIds::Unavailable {
+        file: subject,
+        cause,
+    }
+}
+
 /// `PreToolUse` entry point: read the harness payload on stdin, decide, and
 /// report. Exit status 2 with the reason on stderr is how Claude Code blocks a
 /// tool call; every other path exits 0 so the guard can never wedge a turn.
@@ -308,12 +423,8 @@ pub fn handle_pretooluse() -> anyhow::Result<()> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
     let pane = std::env::var("TMUX_PANE").ok();
-    let known =
-        active_document_for(&cwd, pane.as_deref()).and_then(|file| known_ids_for_document(&file));
-    let decision = match &known {
-        Some(known) => pretooluse_decision(tool_name, tool_input, known, true),
-        None => PreToolUseDecision::Allow,
-    };
+    let ids = document_ids(&cwd, pane.as_deref());
+    let decision = pretooluse_decision(tool_name, tool_input, &ids);
     if let PreToolUseDecision::Deny { reason } = decision {
         eprintln!("{reason}");
         std::process::exit(2);
@@ -337,7 +448,7 @@ mod tests {
             "file_path": "/repo/src/rpc.rs",
             "new_string": "// `#orphandrain` — controller-side drain\nfn tick() {}"
         });
-        let decision = pretooluse_decision("Edit", &input, &known(&["fr79"]), true);
+        let decision = pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&["fr79"])));
         match decision {
             PreToolUseDecision::Deny { reason } => {
                 assert!(reason.contains("#orphandrain"), "{reason}");
@@ -355,7 +466,7 @@ mod tests {
             "new_string": "// `#fr79` — orphan strike is wired"
         });
         assert_eq!(
-            pretooluse_decision("Edit", &input, &known(&["fr79"]), true),
+            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&["fr79"]))),
             PreToolUseDecision::Allow
         );
     }
@@ -375,7 +486,7 @@ mod tests {
         });
 
         assert_eq!(
-            pretooluse_decision("Write", &input, &known(&[]), true),
+            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))),
             PreToolUseDecision::Allow
         );
     }
@@ -387,7 +498,7 @@ mod tests {
             "content": "#include <cstdint>\n// #codecfix is not tracked\n"
         });
 
-        match pretooluse_decision("Write", &input, &known(&[]), true) {
+        match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))) {
             PreToolUseDecision::Deny { reason } => {
                 assert!(reason.contains("#codecfix"), "{reason}");
                 assert!(!reason.contains("#include,"), "{reason}");
@@ -408,7 +519,7 @@ mod tests {
                 "content": "// #include is a tracked-work tag here"
             }),
         ] {
-            match pretooluse_decision("Write", &input, &known(&[]), true) {
+            match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))) {
                 PreToolUseDecision::Deny { reason } => {
                     assert!(reason.contains("#include"), "{reason}");
                 }
@@ -427,7 +538,7 @@ mod tests {
             "new_string": "// rewritten line"
         });
         assert_eq!(
-            pretooluse_decision("Edit", &input, &known(&[]), true),
+            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&[]))),
             PreToolUseDecision::Allow
         );
     }
@@ -436,7 +547,7 @@ mod tests {
     #[test]
     fn a_git_commit_carrying_a_coined_id_is_blocked() {
         let input = json!({"command": "git commit -q -m 'fix(queue): #madeup thing'"});
-        match pretooluse_decision("Bash", &input, &known(&[]), true) {
+        match pretooluse_decision("Bash", &input, &DocumentIds::Known(known(&[]))) {
             PreToolUseDecision::Deny { reason } => {
                 assert!(reason.contains("#madeup"), "{reason}");
                 assert!(reason.contains("commit message"), "{reason}");
@@ -455,7 +566,11 @@ mod tests {
             "echo 'see #madeup'",
         ] {
             assert_eq!(
-                pretooluse_decision("Bash", &json!({ "command": command }), &known(&[]), true),
+                pretooluse_decision(
+                    "Bash",
+                    &json!({ "command": command }),
+                    &DocumentIds::Known(known(&[]))
+                ),
                 PreToolUseDecision::Allow,
                 "must not block: {command}"
             );
@@ -476,7 +591,11 @@ mod tests {
     fn read_only_tools_are_not_inspected() {
         for tool in ["Read", "Grep", "Glob", "WebFetch"] {
             assert_eq!(
-                pretooluse_decision(tool, &json!({"pattern": "#madeup"}), &known(&[]), true),
+                pretooluse_decision(
+                    tool,
+                    &json!({"pattern": "#madeup"}),
+                    &DocumentIds::Known(known(&[]))
+                ),
                 PreToolUseDecision::Allow
             );
         }
@@ -532,14 +651,108 @@ mod tests {
         );
     }
 
-    /// With no resolvable document there is no id universe, so blocking would be
-    /// a guess. Fail open — a wrong block costs the operator a turn.
+    /// No document governs the call, so there is no id universe to check
+    /// against. Fail open — the guard is none of an unrelated repo's business.
     #[test]
-    fn an_unresolved_document_never_blocks() {
+    fn an_ungoverned_call_never_blocks() {
         let input = json!({"file_path": "/x.rs", "new_string": "// #madeup"});
         assert_eq!(
-            pretooluse_decision("Edit", &input, &known(&[]), false),
+            pretooluse_decision("Edit", &input, &DocumentIds::Ungoverned),
             PreToolUseDecision::Allow
+        );
+    }
+
+    fn unavailable() -> DocumentIds {
+        DocumentIds::Unavailable {
+            file: PathBuf::from("/repo/plan.md"),
+            cause: "reading the document: Resource temporarily unavailable".to_string(),
+        }
+    }
+
+    /// The defect this rung exists for: a governing document whose ledger cannot
+    /// be read used to be indistinguishable from no document at all, and both
+    /// meant allow. An id that nothing can vouch for must be refused, not waved
+    /// through because the ledger happened to be busy.
+    #[test]
+    fn an_unreadable_ledger_refuses_a_tagged_write() {
+        let input = json!({
+            "file_path": "/repo/src/rpc.rs",
+            "new_string": "// #madeup — coined while the ledger was unreadable"
+        });
+        match pretooluse_decision("Edit", &input, &unavailable()) {
+            PreToolUseDecision::Deny { reason } => {
+                assert!(reason.contains("#madeup"), "{reason}");
+                assert!(reason.contains("/repo/plan.md"), "{reason}");
+                assert!(
+                    reason.contains("could not be read"),
+                    "the reason must say the ledger was unreadable, not that the id is \
+                     untracked — they are different failures: {reason}"
+                );
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    /// Failing closed must stay narrow. Text carrying no id-shaped token has
+    /// nothing a ledger could have vouched for, so an unreadable ledger is
+    /// irrelevant to it — otherwise every write during a document rewrite would
+    /// be refused and the guard would be unusable.
+    #[test]
+    fn an_unreadable_ledger_still_allows_an_untagged_write() {
+        let input = json!({
+            "file_path": "/repo/src/rpc.rs",
+            "new_string": "fn tick() { drain(); }"
+        });
+        assert_eq!(
+            pretooluse_decision("Edit", &input, &unavailable()),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// The C-family sanitization runs before the ledger is consulted, so an
+    /// unreadable ledger must not resurrect the preprocessor false positive.
+    #[test]
+    fn an_unreadable_ledger_still_allows_c_preprocessor_directives() {
+        let input = json!({
+            "file_path": "/repo/include/wire.hpp",
+            "content": "#ifndef WIRE_HPP\n#define WIRE_HPP\n#include <cstdint>\n#endif\n"
+        });
+        assert_eq!(
+            pretooluse_decision("Write", &input, &unavailable()),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// A read-only tool cannot make a tag durable, so an unreadable ledger is
+    /// not a reason to refuse it either.
+    #[test]
+    fn an_unreadable_ledger_still_allows_read_only_tools() {
+        assert_eq!(
+            pretooluse_decision("Grep", &json!({"pattern": "#madeup"}), &unavailable()),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// A project with no registry on disk has no ledger that could be
+    /// unavailable, so an ordinary repo is never denied by this guard.
+    #[test]
+    fn a_project_without_a_registry_is_ungoverned() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        assert_eq!(
+            document_ids(dir.path(), Some("%1")),
+            DocumentIds::Ungoverned
+        );
+    }
+
+    /// A registered document that will not read is UNAVAILABLE, not ungoverned.
+    /// Before the fix this was the widest hole: the registry pointed at a file,
+    /// the read failed for a moment, and the guard silently switched itself off.
+    #[test]
+    fn a_registered_document_that_cannot_be_read_is_unavailable() {
+        assert_eq!(
+            known_ids_for_document(Path::new("/nonexistent/definitely/not/here.md")),
+            Err("reading the document: No such file or directory (os error 2)".to_string())
         );
     }
 }

@@ -59,19 +59,24 @@ enum ExistingStartupRegistrationDecision<'a> {
 fn decide_existing_startup_registration<'a>(
     existing_pane: Option<&'a str>,
     existing_alive: bool,
-    live_owner: Option<&str>,
+    live_owner: Option<&'a str>,
 ) -> ExistingStartupRegistrationDecision<'a> {
+    // Runtime ownership is stronger than the registry row. In particular, a
+    // route/sync pass can observe an alive but stale registry pane while the
+    // same document's route-owned supervisor is still running in a different
+    // pane. Reuse that proven owner before allocating anything; otherwise the
+    // new launcher starts, discovers the old supervisor, and correctly refuses
+    // only after leaving a duplicate shell pane behind.
+    if let Some(live_owner) = live_owner {
+        return ExistingStartupRegistrationDecision::Reuse(live_owner);
+    }
     let Some(existing_pane) = existing_pane else {
         return ExistingStartupRegistrationDecision::None;
     };
     if !existing_alive {
         return ExistingStartupRegistrationDecision::None;
     }
-    if live_owner == Some(existing_pane) {
-        ExistingStartupRegistrationDecision::Reuse(existing_pane)
-    } else {
-        ExistingStartupRegistrationDecision::IgnoreStale(existing_pane)
-    }
+    ExistingStartupRegistrationDecision::IgnoreStale(existing_pane)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -525,11 +530,11 @@ pub fn auto_start_in_session_with_lock_mode(
     let existing_alive = existing_registration
         .as_deref()
         .is_some_and(|existing| tmux.pane_alive(existing));
-    let live_owner = if existing_alive {
-        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
-    } else {
-        None
-    };
+    // Resolve the runtime owner independently of the registry. A missing or
+    // stale row must not suppress live-owner discovery and turn autostart into
+    // a duplicate-pane allocator.
+    let live_owner =
+        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id);
     match decide_existing_startup_registration(
         existing_registration.as_deref(),
         existing_alive,
@@ -1234,13 +1239,25 @@ mod tests {
     }
 
     #[test]
+    fn startup_registration_decision_reuses_runtime_owner_over_stale_registry_pane() {
+        assert_eq!(
+            decide_existing_startup_registration(Some("%7"), true, Some("%9")),
+            ExistingStartupRegistrationDecision::Reuse("%9")
+        );
+        assert_eq!(
+            decide_existing_startup_registration(None, false, Some("%9")),
+            ExistingStartupRegistrationDecision::Reuse("%9")
+        );
+        assert_eq!(
+            decide_existing_startup_registration(Some("%7"), false, Some("%9")),
+            ExistingStartupRegistrationDecision::Reuse("%9")
+        );
+    }
+
+    #[test]
     fn startup_registration_decision_ignores_alive_unowned_registry_pane() {
         assert_eq!(
             decide_existing_startup_registration(Some("%7"), true, None),
-            ExistingStartupRegistrationDecision::IgnoreStale("%7")
-        );
-        assert_eq!(
-            decide_existing_startup_registration(Some("%7"), true, Some("%9")),
             ExistingStartupRegistrationDecision::IgnoreStale("%7")
         );
     }
@@ -1252,7 +1269,7 @@ mod tests {
             ExistingStartupRegistrationDecision::None
         );
         assert_eq!(
-            decide_existing_startup_registration(Some("%7"), false, Some("%7")),
+            decide_existing_startup_registration(Some("%7"), false, None),
             ExistingStartupRegistrationDecision::None
         );
     }

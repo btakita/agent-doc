@@ -35,56 +35,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260801-041254.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260801-044700.md`*
 
 Compacted content:
-- Archived 13 response topic(s): completed queue items and closeout churn; JetBrains native subscription CPU churn; Open-tab authority readiness and editor/tmux latency; 10 more
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): Response; Response; Response
-❯ 🚧 Are these issues in tsift.md now fixed? If not please fix: #spec-test-build-install-commit-push
-```
-● #applysamesymbol is implemented, verified, and pushed. The document write is deferred to the controller again — though this time the response section, the strike, and the follow-up are already visible on disk; only the git commit is
-  pending.
-
-  Landed — tsift adb5c56, gitlink ae84e4ef6. make check exit 0, 1659 tests, clippy clean. Last cycle's CI came back green; this cycle's run is in progress.
-
-  The narrowing now covers TypeScript, TSX, JavaScript, and JSX. property_identifier spans an object-literal key, a class method, and a member access — none is the module-level binding a rename resolves to — so all three are dropped, and
-  type_identifier is kept only for a type rename.
-
-  The prediction I filed the item under was wrong, and that's what turned it into a fix. I'd written that { beta } shorthand is "genuinely undecidable… likely needs the shadow refusal." It isn't. The token is both the property name and a
-  read of the binding, and there's a spelling where both survive — the one the shorthand already desugars to. Live on the installed binary:
-
-  function gamma(v) { return v; }        <- renamed
-  const keyed = { beta: 1 };             <- key untouched
-  const shorthand = { beta: gamma };     <- expanded, not overwritten
-  class Panel { beta() { return 2; } }   <- method untouched
-  const total = keyed.beta + gamma(3);   <- member read untouched, call renamed
-
-  Refusing there would have blocked an ordinary re-export — worse than either option I thought I was choosing between.
-
-  const { beta } = mod is deliberately left as an in-place span rename: the token reads a property off mod and declares a local, so the right rewrite depends on whether mod is the module whose export changed. That's the common case and
-  already works; expanding would break it. There's a test asserting it is not expanded.
-
-  Four mutations checked in both directions — re-accepting property_identifier, disabling the expansion, expanding the destructuring form too, and accepting type_identifier for callables — each reddening a specific row. The JS-like
-  conformance fixtures now each carry an object key, a class method, and a member access, so the table catches this class rather than only the unit tests.
-
-  On the deferral: respond reaped #applysamesymbol, consumed the queue head, and prepended the follow-up — all of which are visible in the document now. session-check reports authority and disk still diverging with the editor-save receipt
-  pending, and instructs against re-sending, forcing disk, or recycling. This is the third cycle in a row with the same deferral, and the previous two both resolved cleanly at the next preflight, so I'm treating it the same way rather than
-  intervening.
-
-  Follow-up filed at the queue head (#finishsymbolkind): Python and Kotlin are the last two indexed languages on a flat identifier set, with the same defect through different nodes (identifier under attribute / navigation_expression). They
-  need one twist the others didn't — both index methods as functions, so the callee position is a genuine rename target and must be kept rather than dropped.
-```
-
-### Re: Are these issues in tsift.md now fixed? — gpt-5
-
-Yes. The missing Python/Kotlin symbol-kind narrowing is implemented in tsift commit `36e669d658ef6982b1f851b6c4962705c00e9c49`, recorded by the superproject in `18bfede97`, and pushed. `packages/tsift-graph/src/rename.rs` now drops Python attribute and Kotlin navigation member reads while retaining callable positions; the CLI conformance fixtures, AST-edit specification, and version notes cover the behavior.
-
-Verification is complete: both targeted rename tests passed, the final `make check` passed, the installed `tsift` reports `0.1.78`, and GitHub Actions run `30684057240` completed successfully. A later documentation-indentation repair is separately running in CI and does not change this result.
-
-I also installed committed Agent Doc source `e5a0af2fd` from an isolated clean worktree, preserving the concurrent dirty controller/editor work in `src/agent-doc`. The binary, native library, and matching JetBrains package installed successfully. The controller now maps the installed inode; this document's older route supervisor has been waiting on this open response-cycle fence and can recycle at the idle boundary created by this closeout.
-
-The admission churn was procedural: the connected admission already opened the lightweight cycle, and running legacy preflight again repaired/reopened that same cycle. This closeout deliberately uses the existing cycle once, with no second preflight and no replay of completed work. The legacy gated install-verification item is moved out of backlog into review, and the exact duplicate review candidate `#crde` is resolved against completed item `#5bzd`.
-<!-- agent:boundary:3ef71d88 -->
+- Archived 1 response topic(s): Are these issues in tsift.md now fixed?
+- Prior summary/context: prior compacted content: Archived 13 response topic(s): completed queue items and closeout churn; JetBrains native su...
+<!-- agent:boundary:bf77a198 -->
 <!-- /agent:exchange -->
 ## Queue
 

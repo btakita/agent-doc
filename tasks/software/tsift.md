@@ -87,14 +87,46 @@ callee rule there. For Kotlin that residue is qualified access to an imported ty
 not the common path — an `import` binds a bare identifier the walk never touched.
 Closing it needs the call graph, not the grammar, which is phase 2's machinery
 applied to occurrences rather than to files.
-<!-- agent:boundary:aa447644 -->
+
+### Re: do [#wsdq] — opus-5
+
+Gated, not done. A second session is editing `packages/tsift-graph/src/rename.rs` in
+this same checkout right now — its working copy adds a `RenameOccurrenceEvidence`
+type that feeds indexed call-edge lines into the occurrence walk, which is the
+graph-backed answer to the cross-file receiver residue the previous item left open.
+
+Two reasons that blocks a release rather than merely complicating one. A crates.io
+version is permanent — yankable, not removable — and a local `make check` cannot
+produce valid evidence for the release tree while another session's half-finished
+change sits in it. Verifying only through CI on the pushed tag would mean tagging
+first and finding out after.
+
+I had already applied the mechanical `0.1.78` → `0.1.79` bump across 45 files
+(workspace manifests, `Cargo.lock`, `packages/opencode-tsift/package.json`, the
+`v=` stamps in `AGENTS.md` / `runbooks/code-navigation.md` / the OpenCode command
+files that `opencode_npm_package_matches_init_command_shortcuts` asserts against,
+and a `## 0.1.79` heading over the accumulated Unreleased block). I reverted all of
+it. Leaving 45 modified files in a tree someone else is actively committing from
+invites exactly the cross-session contamination that `git commit --only` exists to
+prevent. Re-applying it is a two-minute mechanical step once the tree is quiet.
+
+Unblocks when the other session's `rename.rs` work is committed. The natural release
+then carries both halves of the receiver story — the syntactic rule from
+`#zigthirdindexed` and their graph-backed evidence — instead of splitting them
+across two versions.
+
+Also closed out here: the `#zigthirdindexed` response from the previous cycle was
+stuck at `write_applied` with no terminal commit. The body and the queue strike were
+already on disk; a bare `write --commit` retired the retained intent and `preflight`
+persisted the reap. That landed as `1a678b2ec`. Its CI run `30719216281` is green.
+<!-- agent:boundary:c50adc2b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#zigthirdindexed]~~
-- do [#wsdq]
+- 🚧 do [#wsdq]
 - do [#jzs7]
 <!-- /agent:queue -->
 <!--
@@ -104,7 +136,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#wsdq] release + publish + install
+- [ ] 🚧 [#wsdq] release + publish + install
 - [ ] [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->
 

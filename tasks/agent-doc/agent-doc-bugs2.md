@@ -124,6 +124,28 @@ Implemented and released the realtime-steering observable-set work in agent-doc 
 
 The full local `make check` suite passed, and 0.35.115 was committed, tagged, pushed, and installed. The subsequent 0.35.116 release also fixed the post-install controller-promotion replica race that had deferred this closeout, and the live replica is now present in the replacement controller.
 
+Completed the design pass and committed it as `e25a76b1f`:
+
+- Plan: `tasks/agent-doc/plan-selection-scoped-run-agent-doc.md`
+- Non-empty editor selections become a typed `selection_prompt.v1` command; empty selections retain whole-document Run Agent Doc.
+- The controller admits a stable prompt node before deriving idle dispatch versus active-turn aggregate steering.
+- Selection prompts are exchange state, not automatic `agent:queue` entries.
+- Plugins need no extra acknowledgement: terminal `applied` includes the prompt ID plus CRDT generation/content receipt; transport acceptance alone is not completion.
+- Responses link by prompt IDs, with a primary parent and an addressed-prompt set, so headings, adjacency, `(HEAD)`, `❯`, or in-progress markers cannot corrupt threading.
+- JetBrains and VS Code capture selection before any asynchronous boundary and use the same controller command.
+- The existing `agent-doc prompt` permission-prompt behavior remains compatible while positional text and `--stdin` add semantic prompt submission.
+- Controller promotion/recycle resumes incomplete prompt effects by command identity.
+- The dev-harness matrix covers dedupe, recycle between acceptance and CRDT visibility, aggregate steering, no queue insertion, response attachment, prefix corruption, both editors, and CLI compatibility.
+
+Terminology correction: there is no separate “legacy markdown” format. The current flat `❯` / `### Re:` syntax is the readable markdown compatibility projection; the design adds stable node identities and edges beneath it.
+
+Verification: `git diff --check -- tasks/agent-doc/plan-selection-scoped-run-agent-doc.md` passed. This was a documentation-only design cycle; the preceding 0.35.116 release already passed the full local `make check`.
+
+### Re: #promptselect — gpt-5
+
+> **Queue prompt:**
+>
+> do [#promptselect]
 ### Re: #promptselect — gpt-5
 
 Completed the design pass and committed it as `e25a76b1f`:
@@ -142,13 +164,12 @@ Completed the design pass and committed it as `e25a76b1f`:
 Terminology correction: there is no separate “legacy markdown” format. The current flat `❯` / `### Re:` syntax is the readable markdown compatibility projection; the design adds stable node identities and edges beneath it.
 
 Verification: `git diff --check -- tasks/agent-doc/plan-selection-scoped-run-agent-doc.md` passed. This was a documentation-only design cycle; the preceding 0.35.116 release already passed the full local `make check`.
-<!-- agent:boundary:ba2cdf25:agent-doc-bugs2 -->
+<!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#steeringobservableset]~~
-- do [#promptselect]
+- ~~do [#promptselect]~~
 - do [#realtimesalient]
 - do [#multilineheadbullet]
 - do [#compacttombgc]
@@ -163,7 +184,6 @@ Verification: `git diff --check -- tasks/agent-doc/plan-selection-scoped-run-age
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
 - [ ] [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
 - [ ] [#multilineheadbullet] [focused-cycle] Make multiline `---` queue prompts addressable — SHARPENED 2026-07-19. Damage is already PREVENTED (#qconsumenostrike fail-closed guard, 5b3761dfc); this is the remaining correctness half. Refined finding: the ENTRY model already handles multiline correctly — document_queue::parse surfaces the multiline head as a Prompt (preflight lists it), mark_first_n_prompts_completed targets it, and render emits Completed multiline as `~~~done` fences. The mismatch is that markdown_ast::item_nodes (used for IPC node ops and AST-keyed consume) enumerates only list items, so it returns the NEIGHBOUR for the same logical head — observed as node_ops=[queue:1:neighbour:0] while consumed_text was the multiline head. So the fix is to reconcile the two ENUMERATORS, not the entry model: either teach item_nodes the `---` block shape, or render multiline heads with a bullet + indented continuation that both round-trips through parse_spans and yields a node. Needs one clean reproduction to confirm which of the two paths actually mutated the document in the observed strikes.
 - [ ] [#compacttombgc] [recommended] Fenced Compact Exchange CRDT epoch — RE-SCOPED 2026-07-19 away from tombstone GC. The #bootstrapsize measurement (crdt_sync.rs) on a real 57KB document found 88,630 ops and ZERO tombstones, so TextCrdt tombstone GC would reclaim nothing on the observed shape; the payload is pre-compaction INSERT history. The valuable half is the epoch itself: rebootstrap attached replicas from the compacted snapshot and reject/component-rebase older-epoch deltas, which discards that insert history — the only mechanism that makes compaction actually shrink the register bootstrap. Keep tombstone GC as a trailing step for delete-heavy documents, not the headline. Still needs the all-replica stability frontier before any epoch fence is safe.

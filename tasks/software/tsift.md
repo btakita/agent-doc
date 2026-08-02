@@ -87,14 +87,34 @@ One thing that only showed up once the insertion point could move: collisions ha
 **Live proof**, since the emitter has twice now agreed with itself and disagreed with the language: `panel.outer(4)` still returns `12` in Python after extracting through `self.scale`, `outer(4)` still returns `8` in JavaScript, the GDScript sibling `func` lands inside the class at the right tab depth, and a `this`-bearing range refuses by name through the CLI rather than emitting a function with a different receiver. I also mutation-checked the new assertions — disabling the climb and disabling the `self`-first ordering each redden the test.
 
 Next head is `#extractloopbreak`.
+
+### Re: do [#extractloopbreak] — opus-5
+
+> **Queue prompt:**
+>
+> do [#extractloopbreak]
+
+
+Done, tsift `2ddd73c`. `make check` green; the `#extractfrommethod` CI run was still in progress when this one pushed.
+
+`return` and `yield` escape unconditionally — no signature carries them — but `break` and `continue` were being treated the same way, and they are not the same question. A range holding a whole loop takes that loop's `break` with it and nothing changes. Only a range holding the loop's *body* leaves the construct the branch binds to behind. The old rule refused both, which meant declining the most ordinary extraction there is: pull a loop out of a function.
+
+The check now counts what stands between the branch and the edge of the selection — enclosing loops, and in JavaScript enclosing `switch`es, which `break` also binds to. That second one matters: a loop-depth test alone would still have refused a self-contained `switch`, and a `switch` is exactly the shape people want to hoist. A **labelled** branch ignores that nesting and jumps to its label, so it is checked against the labels the range itself carries: `break outer` from inside the inner loop refuses when `outer:` stays behind and plans when it moves too.
+
+I mutation-checked all three arms — restoring the old unconditional refusal, dropping the `switch` from the binding set, and making labelled branches never escape each redden the tests.
+
+**Live:** extracting a whole `for` loop with a `break` still returns `3` for the same input; extracting a whole `switch` with a `break` still maps `1`→`"one"` and `2`→`"other"`; extracting only the loop's body still refuses by name.
+
+One thing the tests made concrete that is worth noting for the next reader: extract only the loop and leave `total = 0` behind, and `total` becomes both a parameter *and* a return — the accumulator gets passed in and handed back. That is correct, and it is also a signal the range was drawn one line too high. Widening it to include the initialization gives the signature you actually wanted.
+
+Next head is `#deciderustspells`, which you have annotated with a question about implementing `T` / `&T` / `&mut T` support directly. I'll take that up as the decision's framing rather than answering around it.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#extractfrommethod]~~
-- do [#extractloopbreak]
+- ~~do [#extractloopbreak]~~
 - do [#deciderustspells]: Please describe the decision. Could we implement the prerequisites for phase 1 derivation directly by adding T, &T, and &mut T support in tsift?
 <!-- /agent:queue -->
 <!--
@@ -105,7 +125,6 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#deciderustspells] Decide how Rust spells extract_function before writing any Rust code: a caller-supplied signature, or a closure that infers. Rust cannot use the phase 1 derivation directly because choosing T, &T, or &mut T needs types tsift does not have, and guessing emits code that parses and does not build. A closure is correct without types but changes borrow behaviour and cannot be pub; a caller-supplied signature is honest but moves the hard part to the caller. Write the rationale, then implement. Plan: tasks/software/plan-tsift-extract-function.md
-- [ ] [#extractloopbreak] Narrow the control-flow escape refusal: break and continue only escape when their loop is outside the selected range. A range containing a whole for or while loop refuses today even though hoisting it is safe, which is the most common false refusal in the phase 1 list. return and yield stay unconditional. Plan: tasks/software/plan-tsift-extract-function.md
 - [/] [#8wqk] Register crates.io GitHub Trusted Publishing for every post-baseline tsift workspace crate through the operator browser/passkey flow, then verify a tag release publishes without the local token
 <!-- /agent:backlog -->
 

@@ -47,6 +47,20 @@ blocked without force-disk, refresh, no-op edits, or stale-target replay.
 Spawned request workers inherit controller identity and the in-process
 projection reader, so Compact Exchange cannot recursively call its own
   controller and time out behind the state transition it is handling.
+- **Compact Exchange now has an end-to-end exact-projection regression.** A
+  retained `compact --commit` continuation remains blocked with only one
+  projection plane, completes once authority and disk project the exact target,
+  and records one identity-fenced Effect receipt even when that projection is
+  replayed.
+- **Same-closeout queue ingress preserves ordered batches.** Equal-priority
+  `--backlog-add` follow-ups now retain their top-down backlog order in the queue
+  projection; generated ids no longer act as an accidental lexical scheduling
+  tie-break.
+- **Exact retained continuations inherit their live closeout.** Once authority
+  projects the pinned cycle/capture/response identity as ready, the captured
+  continuation atomically succeeds the still-live foreground owner instead of
+  waiting for its five-minute lease and an idle retry. Ordinary capture wakes
+  and stale identities remain mutually exclusive.
 - **A plain Run Agent Doc trigger now coalesces behind the active closeout
   owner.** Explicit prompt payloads remain durably queued, while a payload-free
   trigger no longer competes with or fails against an authoritative response

@@ -4271,6 +4271,7 @@ pub fn ensure_controller_running_for_file(file: &Path) -> Result<()> {
 }
 
 pub use agent_doc_state_backbone::{
+    CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME, CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE,
     CloseoutOwnerClaimOutcome, CloseoutOwnerClaimRequest, CloseoutOwnerProjection,
 };
 pub const CLOSEOUT_OWNER_LEASE_SECS: u64 = agent_doc_state_backbone::CLOSEOUT_OWNER_LEASE_SECS;
@@ -13194,8 +13195,32 @@ fn run_closeout_owner_claim(
     file: &Path,
     claim: agent_doc_state_backbone::CloseoutOwnerClaimRequest,
 ) -> Result<agent_doc_state_backbone::CloseoutOwnerClaimOutcome> {
-    use agent_doc_state_backbone::{CloseoutOwnerClaimOutcome, StateFact};
+    use agent_doc_state_backbone::{
+        CloseoutOwnerClaimAuthorization, CloseoutOwnerClaimOutcome, StateFact,
+    };
     let document_hash = agent_doc_hash::document_id_for_path(file);
+    // The wake is a Lazily state-plane projection produced only after exact
+    // retained Base -> Target convergence. Read it before the state-memory
+    // lock, then validate its full capture identity inside the pure backbone
+    // transition. Ordinary response-captured wakes never authorize a handoff.
+    let authorization =
+        if claim.role == agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME {
+            runtime
+                .captured_finalize_wakes
+                .lock()
+                .get(&document_hash)
+                .filter(|wake| wake.reason == super::RETAINED_DELIVERY_REACTIVE_REASON)
+                .map(
+                    |wake| CloseoutOwnerClaimAuthorization::RetainedContinuation {
+                        cycle_id: wake.cycle_id.clone(),
+                        capture_id: wake.capture_id.clone(),
+                        response_sha256: wake.response_sha256.clone(),
+                    },
+                )
+                .unwrap_or_default()
+        } else {
+            CloseoutOwnerClaimAuthorization::Exclusive
+        };
 
     let (outcome, recycle) = {
         let mut memory = runtime.memory.lock();
@@ -13239,7 +13264,15 @@ fn run_closeout_owner_claim(
                 ),
             );
         }
-        let outcome = current.decide_owner_claim(&claim, current_owner_alive);
+        let ordinary_outcome = current.decide_owner_claim(&claim, current_owner_alive);
+        let outcome = current.decide_owner_claim_with_authorization(
+            &claim,
+            current_owner_alive,
+            &authorization,
+        );
+        let retained_handoff =
+            matches!(ordinary_outcome, CloseoutOwnerClaimOutcome::HeldByOther(_))
+                && matches!(&outcome, CloseoutOwnerClaimOutcome::Acquired(_));
         if let CloseoutOwnerClaimOutcome::Acquired(owner) = &outcome {
             let event = agent_doc_state_backbone::StateEvent::new(
                 format!(
@@ -13261,6 +13294,18 @@ fn run_closeout_owner_claim(
             append_state_event(&bootstrap.project_root, &event)?;
             memory.state_ledger.append(event.clone());
             memory.state_projection.apply(&event);
+            if retained_handoff {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "closeout_owner_transition_projected file={} cycle_id={} owner_id={} role={} source=exact_retained_continuation",
+                        file.display(),
+                        owner.cycle_id,
+                        owner.owner_id,
+                        owner.role,
+                    ),
+                );
+            }
         }
         let recycle = memory.state_projection.project_supervisor_recycle();
         (outcome, recycle)
@@ -22410,6 +22455,91 @@ mod tests {
                 ref owner_id,
                 ..
             }) if owner_id == "owner-2"
+        ));
+    }
+
+    #[test]
+    fn exact_retained_wake_transitions_the_live_foreground_closeout_owner() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
+            .unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let capture = agent_doc_state_backbone::StateEvent::new(
+            "capture-for-owner-handoff",
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.clone(),
+                cycle_id: cycle.cycle_id.clone(),
+                capture_id: "capture-1".into(),
+                response_sha256: "response-1".into(),
+                response_body: Some("response body".into()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        );
+        append_state_event(dir.path(), &capture).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+
+        let foreground = run_closeout_owner_claim(
+            &bootstrap,
+            &runtime,
+            &doc,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle.cycle_id.clone()),
+                owner_id: "foreground-1".into(),
+                owner_pid: std::process::id(),
+                role: agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.into(),
+                now_secs: 10,
+                lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: false,
+            },
+        )
+        .unwrap();
+        assert!(matches!(foreground, CloseoutOwnerClaimOutcome::Acquired(_)));
+
+        let captured_request = || CloseoutOwnerClaimRequest {
+            expected_cycle_id: Some(cycle.cycle_id.clone()),
+            owner_id: "captured-resume-1".into(),
+            owner_pid: std::process::id(),
+            role: agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME.into(),
+            now_secs: 20,
+            lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+            allow_dead_owner_takeover: false,
+        };
+        assert!(matches!(
+            run_closeout_owner_claim(&bootstrap, &runtime, &doc, captured_request(),).unwrap(),
+            CloseoutOwnerClaimOutcome::HeldByOther(_)
+        ));
+
+        assert!(publish_pinned_captured_finalize_wake(
+            &runtime,
+            &document_hash,
+            &cycle.cycle_id,
+            "capture-1",
+            "response-1",
+            super::RETAINED_DELIVERY_REACTIVE_REASON,
+        ));
+        assert!(matches!(
+            run_closeout_owner_claim(
+                &bootstrap,
+                &runtime,
+                &doc,
+                captured_request(),
+            )
+            .unwrap(),
+            CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
+                ref owner_id,
+                ref role,
+                ..
+            }) if owner_id == "captured-resume-1"
+                && role == agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME
         ));
     }
 

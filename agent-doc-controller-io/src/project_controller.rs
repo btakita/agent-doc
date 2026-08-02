@@ -2313,10 +2313,12 @@ enum RetainedResumeAction {
     ReconcileMaterializedCapture,
 }
 
+const RETAINED_DELIVERY_REACTIVE_REASON: &str = "retained_delivery_reactive";
+
 impl RetainedResumeAction {
     fn reason(self) -> &'static str {
         match self {
-            Self::ResumeExactDelivery => "retained_delivery_reactive",
+            Self::ResumeExactDelivery => RETAINED_DELIVERY_REACTIVE_REASON,
             Self::ReconcileMaterializedCapture => {
                 "retained_materialized_capture_reconcile_reactive"
             }
@@ -12795,6 +12797,101 @@ agent:queue\n\
         let continuation = compact_resume_signal(Some(&projection), 1).unwrap();
         assert_eq!(continuation.continuation_id, "compact-continuation");
         assert!(continuation.commit);
+    }
+
+    #[test]
+    fn exact_editor_projection_receipt_completes_retained_compact_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        let target_content = "# Session\n\nCompacted exchange.\n";
+        let target_hash = agent_doc_hash::content_hash(target_content);
+        let continuation_id = "compact-continuation";
+
+        defer_document_write(
+            &runtime,
+            dir.path(),
+            &document_hash,
+            "compact-intent",
+            &target_hash,
+        );
+        let retained = agent_doc_state_backbone::StateEvent::new(
+            format!("{document_hash}:{continuation_id}"),
+            agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                document_hash: document_hash.clone(),
+                continuation_id: continuation_id.to_string(),
+                file: file.to_string_lossy().into_owned(),
+                live_content: target_content.to_string(),
+                committed_content: target_content.to_string(),
+                target_component: Some("exchange".to_string()),
+                commit: true,
+            },
+        );
+        append_state_event(dir.path(), &retained).unwrap();
+        runtime.apply_state_event(&retained).unwrap();
+
+        runtime.document_retained_write_observe_authority(
+            &document_hash,
+            &file,
+            observation(&target_hash),
+        );
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("compact-intent"),
+            "one projection plane cannot release compact closeout"
+        );
+
+        runtime.document_retained_write_observe_disk(
+            &document_hash,
+            &file,
+            observation(&target_hash),
+        );
+        let projection = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        assert!(
+            projection.document.pending_write.is_none(),
+            "the exact authority+disk projection must settle the retained write"
+        );
+        assert!(
+            projection.document.pending_compact_projection.is_none(),
+            "settlement must reactively run and receipt the compact completion Effect"
+        );
+
+        let settled_count = || {
+            load_state_event_ledger(dir.path())
+                .unwrap()
+                .events()
+                .iter()
+                .filter(|event| {
+                    matches!(
+                        &event.fact,
+                        agent_doc_state_backbone::StateFact::DocumentCompactProjectionSettled {
+                            continuation_id: settled_id,
+                            ..
+                        } if settled_id == continuation_id
+                    )
+                })
+                .count()
+        };
+        assert_eq!(settled_count(), 1);
+
+        runtime.document_retained_write_observe_authority(
+            &document_hash,
+            &file,
+            observation(&target_hash),
+        );
+        runtime.document_retained_write_observe_disk(
+            &document_hash,
+            &file,
+            observation(&target_hash),
+        );
+        assert_eq!(
+            settled_count(),
+            1,
+            "replayed exact projection receipts cannot duplicate compact completion"
+        );
     }
 
     #[test]

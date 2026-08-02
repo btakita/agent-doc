@@ -476,7 +476,11 @@ pub fn enqueue_actionable_ids_in_content(
     let ranks = collect_backlog_priority_ranks(&components, content);
     let deps = collect_after_deps(&components, content);
     let block: HashSet<String> = fresh.iter().cloned().collect();
-    fresh.sort_by_key(|id| (ranks.get(id).copied().unwrap_or(u8::MAX), id.clone()));
+    // `sort_by_key` is stable, so equal-priority items retain the order supplied
+    // by the backlog projection. Do not add the id as a tie-break: generated ids
+    // are identity, not scheduling metadata, and lexicographic id order can invert
+    // a deliberately ordered batch of `--backlog-add` follow-ups.
+    fresh.sort_by_key(|id| ranks.get(id).copied().unwrap_or(u8::MAX));
     let mut ordered: Vec<String> = Vec::with_capacity(fresh.len());
     let mut placed: HashSet<String> = HashSet::new();
     // Insert each id after any in-block prerequisite it declares. Bounded to
@@ -1003,7 +1007,35 @@ mod tests {
         assert!(
             a < b && b < c,
             "a declared `after=` edge is a hard constraint and must beat a better \
-             priority= rank and the filed order:\n{updated}"
+priority= rank and the filed order:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn enqueue_preserves_backlog_order_for_equal_priority_batch() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#registerextractfunction] phase 2\n",
+            "- [ ] [#deciderustspells] phase 3\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let updated = enqueue_actionable_ids_in_content(
+            content,
+            &["registerextractfunction".into(), "deciderustspells".into()],
+            FollowUpQueuePlacement::Prepend,
+        )
+        .unwrap()
+        .expect("both equal-priority follow-ups must enqueue");
+
+        let phase_2 = updated.find("- do [#registerextractfunction]").unwrap();
+        let phase_3 = updated.find("- do [#deciderustspells]").unwrap();
+        assert!(
+            phase_2 < phase_3,
+            "equal-priority queue ingress must preserve backlog/batch order:\n{updated}"
         );
     }
 

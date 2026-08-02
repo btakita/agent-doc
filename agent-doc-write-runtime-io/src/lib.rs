@@ -545,8 +545,12 @@ impl WriteCloseoutOwnerRole {
 
     fn as_str(self) -> &'static str {
         match self {
-            Self::ForegroundFinalize => "foreground_finalize",
-            Self::CapturedFinalizeResume => "captured_finalize_resume",
+            Self::ForegroundFinalize => {
+                agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE
+            }
+            Self::CapturedFinalizeResume => {
+                agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME
+            }
         }
     }
 

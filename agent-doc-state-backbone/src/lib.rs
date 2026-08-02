@@ -3830,6 +3830,26 @@ impl CloseoutProjection {
         request: &CloseoutOwnerClaimRequest,
         current_owner_alive: Option<bool>,
     ) -> CloseoutOwnerClaimOutcome {
+        self.decide_owner_claim_with_authorization(
+            request,
+            current_owner_alive,
+            &CloseoutOwnerClaimAuthorization::Exclusive,
+        )
+    }
+
+    /// Decide a closeout-owner transition from the current projection.
+    ///
+    /// Ordinary callers are mutually exclusive. The one exception is an exact
+    /// retained continuation: once the reactive document projection proves the
+    /// pinned capture ready, its captured-finalize worker continues the same
+    /// logical closeout instead of competing with the foreground worker that
+    /// created it.
+    pub fn decide_owner_claim_with_authorization(
+        &self,
+        request: &CloseoutOwnerClaimRequest,
+        current_owner_alive: Option<bool>,
+        authorization: &CloseoutOwnerClaimAuthorization,
+    ) -> CloseoutOwnerClaimOutcome {
         let Some(cycle_id) = self.cycle_id.as_deref() else {
             return CloseoutOwnerClaimOutcome::CycleSuperseded;
         };
@@ -3850,6 +3870,7 @@ impl CloseoutProjection {
         // the full lease — a timeout standing in for a fact already known.
         if let Some(owner) = self.owner.as_ref()
             && owner.owner_id != request.owner_id
+            && !authorization.authorizes_retained_continuation_handoff(self, owner, request)
             && owner
                 .release_reason(
                     cycle_id,
@@ -4195,6 +4216,49 @@ pub struct CloseoutOwnerClaimRequest {
     pub lease_secs: u64,
     #[serde(default)]
     pub allow_dead_owner_takeover: bool,
+}
+
+pub const CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE: &str = "foreground_finalize";
+pub const CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME: &str = "captured_finalize_resume";
+
+/// Projection-derived authority for a closeout owner transition.
+///
+/// This is deliberately not a field on [`CloseoutOwnerClaimRequest`]: callers
+/// cannot request a handoff. The controller derives it from the exact retained
+/// continuation projection and the state backbone validates its capture
+/// identity against the current cycle.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum CloseoutOwnerClaimAuthorization {
+    #[default]
+    Exclusive,
+    RetainedContinuation {
+        cycle_id: String,
+        capture_id: String,
+        response_sha256: String,
+    },
+}
+
+impl CloseoutOwnerClaimAuthorization {
+    fn authorizes_retained_continuation_handoff(
+        &self,
+        closeout: &CloseoutProjection,
+        owner: &CloseoutOwnerProjection,
+        request: &CloseoutOwnerClaimRequest,
+    ) -> bool {
+        let Self::RetainedContinuation {
+            cycle_id,
+            capture_id,
+            response_sha256,
+        } = self
+        else {
+            return false;
+        };
+        owner.role == CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE
+            && request.role == CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME
+            && closeout.cycle_id.as_deref() == Some(cycle_id.as_str())
+            && closeout.capture_id.as_deref() == Some(capture_id.as_str())
+            && closeout.response_sha256.as_deref() == Some(response_sha256.as_str())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5927,6 +5991,8 @@ mod tests {
         let mut projection = CloseoutProjection {
             cycle_id: Some("cycle-1".into()),
             phase: Some(CyclePhase::ResponseCaptured),
+            capture_id: Some("capture-1".into()),
+            response_sha256: Some("response-1".into()),
             ..CloseoutProjection::default()
         };
         let request = CloseoutOwnerClaimRequest {
@@ -5978,6 +6044,82 @@ mod tests {
         );
         assert!(projection.owner_release_matches("cycle-1", "foreground-1"));
         assert!(!projection.owner_release_matches("cycle-1", "recovery-1"));
+    }
+
+    #[test]
+    fn exact_retained_continuation_transitions_foreground_owner_without_a_lease_wait() {
+        let foreground = CloseoutOwnerProjection {
+            cycle_id: "cycle-1".into(),
+            owner_id: "foreground-1".into(),
+            owner_pid: 101,
+            role: CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.into(),
+            claimed_secs: 10,
+            expires_secs: 310,
+        };
+        let projection = CloseoutProjection {
+            cycle_id: Some("cycle-1".into()),
+            phase: Some(CyclePhase::WriteApplied),
+            capture_id: Some("capture-1".into()),
+            response_sha256: Some("response-1".into()),
+            owner: Some(foreground.clone()),
+            ..CloseoutProjection::default()
+        };
+        let resume = CloseoutOwnerClaimRequest {
+            expected_cycle_id: Some("cycle-1".into()),
+            owner_id: "captured-resume-1".into(),
+            owner_pid: 202,
+            role: CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME.into(),
+            now_secs: 20,
+            lease_secs: 30,
+            allow_dead_owner_takeover: false,
+        };
+        let exact = CloseoutOwnerClaimAuthorization::RetainedContinuation {
+            cycle_id: "cycle-1".into(),
+            capture_id: "capture-1".into(),
+            response_sha256: "response-1".into(),
+        };
+
+        assert_eq!(
+            projection.decide_owner_claim(&resume, Some(true)),
+            CloseoutOwnerClaimOutcome::HeldByOther(foreground.clone()),
+            "ordinary recovery must remain mutually exclusive"
+        );
+        assert!(matches!(
+            projection.decide_owner_claim_with_authorization(&resume, Some(true), &exact),
+            CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
+                ref owner_id,
+                owner_pid: 202,
+                ..
+            }) if owner_id == "captured-resume-1"
+        ));
+
+        for authorization in [
+            CloseoutOwnerClaimAuthorization::RetainedContinuation {
+                cycle_id: "cycle-old".into(),
+                capture_id: "capture-1".into(),
+                response_sha256: "response-1".into(),
+            },
+            CloseoutOwnerClaimAuthorization::RetainedContinuation {
+                cycle_id: "cycle-1".into(),
+                capture_id: "capture-old".into(),
+                response_sha256: "response-1".into(),
+            },
+            CloseoutOwnerClaimAuthorization::RetainedContinuation {
+                cycle_id: "cycle-1".into(),
+                capture_id: "capture-1".into(),
+                response_sha256: "response-old".into(),
+            },
+        ] {
+            assert_eq!(
+                projection.decide_owner_claim_with_authorization(
+                    &resume,
+                    Some(true),
+                    &authorization,
+                ),
+                CloseoutOwnerClaimOutcome::HeldByOther(foreground.clone()),
+                "stale continuation identity must not displace a live owner"
+            );
+        }
     }
 
     #[test]

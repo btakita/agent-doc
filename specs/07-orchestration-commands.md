@@ -433,9 +433,11 @@ Semantics:
   Adds and ungates record a mutation-scoped `pending_actionable_ids` set. After
   current-head consumption, closeout insert-only mirrors exactly that set into
   the explicit queue, ordering the new block by hard `after=#id` dependencies
-  before priority and preserving every existing queue byte. It never sweeps all
-  open backlog ids at closeout, because doing so would resurrect unrelated
-  operator-deleted queue entries.
+  before priority and preserving every existing queue byte. Equal-priority items
+  retain backlog document order, which is also the caller's top-down order for a
+  repeated `--backlog-add` batch; generated ids are never scheduling tie-breakers.
+  It never sweeps all open backlog ids at closeout, because doing so would
+  resurrect unrelated operator-deleted queue entries.
 - `agent:backlog` and the legacy `pending` alias may carry the attribute; the
   first queue-tagged component's mode wins and active ids from every queue-tagged
   source are taken in document order. `agent:icebox queue` warns and does not

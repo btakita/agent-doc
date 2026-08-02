@@ -94,9 +94,12 @@ Each of these produces a typed refusal naming the invariant, never a patch:
 - The range is not a contiguous run of siblings in one block (it straddles an
   `if`/`else` boundary, starts mid-statement, or spans two functions).
 - The range is not inside a function at all.
-- Control flow escapes the range: `return`, `break`, `continue`, `yield`, or a
-  bare `raise` that the enclosing function catches. Hoisting any of these
-  changes what the statement does, and no signature can carry it.
+- Control flow escapes the range: `return` or `yield` always; `break` and
+  `continue` only when the loop — or, in JS, the `switch` — they bind to stays
+  behind, and a labelled branch only when its label does. A range holding a
+  whole loop takes that loop's `break` with it and nothing changes. (Narrowed
+  in `#extractloopbreak`, tsift `2ddd73c`; `raise`/`throw` is not on the list
+  at all, since an exception propagates through a call frame unchanged.)
 - The range assigns to a name declared `global` or `nonlocal` in `F`.
 - More than one name is assigned in `R` and read after it *and* the range also
   produces a control-flow effect — the tuple return cannot carry both.

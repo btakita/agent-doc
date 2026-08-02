@@ -30,6 +30,23 @@ pub trait BoundaryRepositionEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
 }
 
+fn reposition_snapshot_boundary(snap_content: &str) -> String {
+    let prompt_canonicalized = canonicalize_answered_prompt_prefixes(snap_content);
+    let boundary_id =
+        agent_doc_element_boundary::boundary::find_boundary_id(&prompt_canonicalized, "exchange");
+    agent_doc_template::reposition_boundary_to_end_clean_with_id(
+        &prompt_canonicalized,
+        boundary_id.as_deref(),
+    )
+}
+
+fn reposition_working_boundary(working: &str, committed_boundary_id: Option<&str>) -> String {
+    agent_doc_template::reposition_boundary_to_end_preserve_head_with_id(
+        working,
+        committed_boundary_id,
+    )
+}
+
 /// Reposition boundary in snapshot AND working tree deterministically.
 ///
 /// After commit, moves the boundary to the end of exchange in both the
@@ -46,8 +63,7 @@ pub fn reposition_boundary_in_snapshot(
     let mut changed = false;
 
     if let Ok(Some(snap_content)) = effects.load_snapshot(file) {
-        let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&snap_content);
-        let new_snap = agent_doc_template::reposition_boundary_to_end_clean(&prompt_canonicalized);
+        let new_snap = reposition_snapshot_boundary(&snap_content);
         if new_snap != snap_content {
             match effects.save_snapshot(file, &new_snap) {
                 Ok(()) => {
@@ -71,6 +87,9 @@ pub fn reposition_boundary_in_snapshot(
 
     if let Ok(working) = effects.read_to_string(file) {
         let snapshot_after_reposition = effects.load_snapshot(file).ok().flatten();
+        let committed_boundary_id = snapshot_after_reposition.as_deref().and_then(|snapshot| {
+            agent_doc_element_boundary::boundary::find_boundary_id(snapshot, "exchange")
+        });
         let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&working);
         let normalize_prefix_lines = snapshot_after_reposition
             .as_deref()
@@ -90,11 +109,8 @@ pub fn reposition_boundary_in_snapshot(
             )
         };
         let repositioned =
-            agent_doc_template::reposition_boundary_to_end_preserve_head(&prefix_repaired);
+            reposition_working_boundary(&prefix_repaired, committed_boundary_id.as_deref());
         if repositioned != working {
-            let committed_boundary_id = snapshot_after_reposition.as_deref().and_then(|snapshot| {
-                agent_doc_element_boundary::boundary::find_boundary_id(snapshot, "exchange")
-            });
             if effects.ipc_listener_active(file) {
                 let delivery = effects.request_editor_boundary_reposition(
                     file,
@@ -139,13 +155,59 @@ pub fn reposition_boundary_in_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::BoundaryRepositionDelivery;
+    use super::{
+        BoundaryRepositionDelivery, reposition_snapshot_boundary, reposition_working_boundary,
+    };
 
     #[test]
     fn retained_boundary_target_is_not_visible_delivery_proof() {
         assert!(BoundaryRepositionDelivery::Delivered.marks_visible_delivery());
         assert!(!BoundaryRepositionDelivery::RetainedForRetry.marks_visible_delivery());
         assert!(!BoundaryRepositionDelivery::Unavailable.marks_visible_delivery());
+    }
+
+    #[test]
+    fn commit_retry_preserves_boundary_identity_and_reaches_a_fixed_point() {
+        let snapshot = "\
+## Exchange
+
+<!-- agent:exchange patch=append -->
+response
+<!-- agent:boundary:stable123 -->
+new prompt
+<!-- /agent:exchange -->
+";
+
+        let first = reposition_snapshot_boundary(snapshot);
+        let second = reposition_snapshot_boundary(&first);
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first.matches("<!-- agent:boundary:stable123 -->").count(),
+            1
+        );
+        assert!(
+            first.contains(
+                "new prompt\n<!-- agent:boundary:stable123 -->\n<!-- /agent:exchange -->"
+            )
+        );
+    }
+
+    #[test]
+    fn working_projection_reuses_committed_boundary_identity() {
+        let working = "\
+## Exchange
+
+<!-- agent:exchange patch=append -->
+response
+<!-- agent:boundary:stable123 -->
+<!-- /agent:exchange -->
+";
+
+        assert_eq!(
+            reposition_working_boundary(working, Some("stable123")),
+            working
+        );
     }
 }
 

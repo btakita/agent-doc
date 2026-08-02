@@ -809,6 +809,10 @@ structurally valid converged editor projection that already contains the
 captured response. The deferred transition pins its owning cycle/capture
 continuation when the event ledger is projected, so later closeout cycles and
 supervisor recycling cannot replace the evidence used by the transition.
+Commit-time boundary normalization preserves that transition's existing
+boundary identity. Re-observing the same snapshot or working projection is a
+fixed point: it must not mint a new boundary, publish a replacement target, or
+restart editor delivery after the retained target has converged.
 Replica ingress publishes the full visible projection as a `Source`; a
 controller `Computed` derives a typed materialized-capture reconcile action,
 and one controller `Effect` publishes it to the shared supervisor state plane.

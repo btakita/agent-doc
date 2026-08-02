@@ -5218,6 +5218,7 @@ Duplicate replay should stay live.
             <!-- agent:exchange patch=append -->\n\
             ### Re: test — opus-4-6 (HEAD)\nResponse.\n\
             <!-- agent:boundary:oldid123 -->\n\
+            later prompt\n\
             <!-- /agent:exchange -->\n";
         let doc = root.join("plan.md");
         fs::write(&doc, doc_content).unwrap();
@@ -5266,9 +5267,15 @@ Duplicate replay should stay live.
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
+        assert_eq!(
+            snap.matches("<!-- agent:boundary:oldid123 -->").count(),
+            1,
+            "snapshot reposition should preserve the projected boundary identity"
+        );
         assert!(
-            !snap.contains("oldid123"),
-            "snapshot boundary should be repositioned"
+            snap.contains(
+                "later prompt\n<!-- agent:boundary:oldid123 -->\n<!-- /agent:exchange -->"
+            )
         );
         assert!(
             snap.contains("### Re: test — opus-4-6\n"),
@@ -5282,9 +5289,15 @@ Duplicate replay should stay live.
 
         // Working tree is normalized because this test has no Lazily editor.
         let working = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            working.matches("<!-- agent:boundary:oldid123 -->").count(),
+            1,
+            "legacy socket listener must not replace the projected boundary identity"
+        );
         assert!(
-            !working.contains("oldid123"),
-            "legacy socket listener must not claim editor authority"
+            working.contains(
+                "later prompt\n<!-- agent:boundary:oldid123 -->\n<!-- /agent:exchange -->"
+            )
         );
         assert!(
             working.contains("### Re: test — opus-4-6 (HEAD)\n"),
@@ -5326,6 +5339,7 @@ Duplicate replay should stay live.
             <!-- agent:exchange patch=append -->\n\
             ### Re: test — opus-4-6 (HEAD)\nResponse.\n\
             <!-- agent:boundary:oldid456 -->\n\
+            later prompt\n\
             <!-- /agent:exchange -->\n";
         let doc = root.join("plan.md");
         fs::write(&doc, doc_content).unwrap();
@@ -5366,9 +5380,15 @@ Duplicate replay should stay live.
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
+        assert_eq!(
+            snap.matches("<!-- agent:boundary:oldid456 -->").count(),
+            1,
+            "snapshot reposition should preserve the projected boundary identity"
+        );
         assert!(
-            !snap.contains("oldid456"),
-            "snapshot boundary should be repositioned"
+            snap.contains(
+                "later prompt\n<!-- agent:boundary:oldid456 -->\n<!-- /agent:exchange -->"
+            )
         );
         assert!(
             snap.contains("### Re: test — opus-4-6\n"),
@@ -5383,9 +5403,15 @@ Duplicate replay should stay live.
         // With no Lazily editor attached, the working tree is the detached
         // projection and is normalized directly.
         let working = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            working.matches("<!-- agent:boundary:oldid456 -->").count(),
+            1,
+            "legacy patches directory must not replace the projected boundary identity"
+        );
         assert!(
-            !working.contains("oldid456"),
-            "legacy patches directory must not claim editor authority"
+            working.contains(
+                "later prompt\n<!-- agent:boundary:oldid456 -->\n<!-- /agent:exchange -->"
+            )
         );
         assert!(
             working.contains("### Re: test — opus-4-6 (HEAD)\n"),
@@ -5431,6 +5457,7 @@ Duplicate replay should stay live.
             <!-- agent:exchange patch=append -->\n\
             ### Re: test — opus-4-6 (HEAD)\nResponse.\n\
             <!-- agent:boundary:oldid789 -->\n\
+            later prompt\n\
             <!-- /agent:exchange -->\n";
         let doc = root.join("plan.md");
         fs::write(&doc, doc_content).unwrap();
@@ -5461,9 +5488,15 @@ Duplicate replay should stay live.
         );
 
         let working = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            working.matches("<!-- agent:boundary:oldid789 -->").count(),
+            1,
+            "direct reposition should preserve the projected boundary identity"
+        );
         assert!(
-            !working.contains("oldid789"),
-            "working tree should be rewritten when no editor IPC is available"
+            working.contains(
+                "later prompt\n<!-- agent:boundary:oldid789 -->\n<!-- /agent:exchange -->"
+            )
         );
         assert!(
             working.contains("### Re: test — opus-4-6 (HEAD)"),

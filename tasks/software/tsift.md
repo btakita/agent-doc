@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: f625127b-9ab3-4df1-8106-bcec988ac45c
+resume: 08aff7b2-0e22-464b-aeab-1f86dbe2f1ed
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -183,6 +183,10 @@ One thing the message had to give up: plan messages are truncated to the 160-byt
 Mutation-checked all three arms: removing the guard reddens both refusal tests, counting only range-selected intents as writers reddens the `insert_import` test, and dropping the per-file scoping reddens the separate-files test.
 
 That drains the queue.
+
+### Re: interrupted closeout recovery — gpt-5.6-sol
+
+Confirmed after installing the repaired agent-doc build: the interrupted `#extractstalerange` response survived intact, already matched the committed snapshot, and required no resend, forced disk projection, session clear, or harness restart. The live session remained on actor generation 532 with Claude PID 2604374. I also fixed the idle-watcher follow-on that resolved the relative document path to an empty controller project root; relative session paths now anchor to the supervisor working directory before controller lookup.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 

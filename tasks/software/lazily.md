@@ -75,14 +75,47 @@ Two design points worth recording, because both are traps:
 **Verification.** `make check` green in all ten repos. CI green on lazily-spec, js, kt, go, zig, cpp, dart, cs; rs and py still in progress at write time on the format/CI-reach follow-up commits (both green locally). Landing this needed two CI-only fixes: lazily-rs's `ci-reach` guard demanded a CI step for the new `make check` target, and lazily-py's `ruff format` / lazily-dart's `dart analyze --fatal-infos` rejected the new files.
 
 One thing I did **not** do: nothing here widens a binding's identity type. The clause explicitly permits a narrower exact range, so go/kt/cpp keeping `int64` and js keeping `number` are conforming — they refuse rather than substitute, which is the whole point.
+
+### Re: do [#lzkeynullstrict] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzkeynullstrict]
+
+
+Done across ten repos. Your read of the asymmetry was exactly right, and it held in every diverging binding — but one of the three was worse than "stricter than the reference implementation".
+
+**The clause.** protocol.md § NodeKey now says: *omit-when-absent binds the ENCODER; a decoder MUST accept both the omitted field and an explicit `key: null`, and read both as absent — refusing neither and **constructing a key from neither**.* The old wording ("a decoder that sees no `key` field treats it as absent") settled the omitted form and left the null form undefined, which is where the divergence lived.
+
+**The audit — three defects, not two.**
+
+| Binding | Before |
+|---|---|
+| rs, go, js, dart, cs, cpp | already lenient |
+| **py** | **refused** — `"key" in d` is true for the null form, so `None` reached `NodeKey.from_wire` and raised `NodeKeyError: node key path is empty` |
+| **zig** | **refused** — `error.ExpectedString` |
+| **kt** | **silently wrong** — `JsonNull` *is* a `JsonPrimitive` in kotlinx and its `.content` is the string `"null"`, so `as? JsonPrimitive` matched and the node decoded carrying a real, wire-stable key literally named `null` — which then re-encoded as `"key": "null"` |
+
+Kotlin is why the clause says *MUST NOT construct a key from it* and not just *MUST NOT refuse*: a decoder that invents an entry address is worse than one that fails loudly, and a refusal-only rule would have called it conforming. That node would have addressed a phantom collection entry on the peer.
+
+**Your asymmetry note was load-bearing.** In all three, the `CrdtOp.key` site was correct in the same file — kt tested `is JsonNull` explicitly, zig `switch`ed on `.null`, py used `d.get("key")` and compared against `None` — because a `CrdtOp` always writes the field. Each binding had the right code one field over. In kt the two `NodeSnapshot`/`NodeAdd` sites were separate expressions, so a fix applied to one would have left the other inventing keys; all three sites now route through one helper per binding.
+
+**The fixture.** `conformance/codec/nodekey_null_leniency.json` — 2 fields (`NodeSnapshot`, `NodeAdd`) × 3 wire forms (omitted / explicit null / a real key) × 2 codecs = 12 scenarios, replayed by all nine bindings.
+
+One design point beyond what the item asked for: **the fixture pins the RE-ENCODED field set, not just the decoded value.** Reading `key: null` as absent is only half the rule — a binding that writes it straight back out has a correct decoded value and a non-conforming encoder, and no assertion over a decoded object can see that (a typed `Option`/`?NodeKey` cannot distinguish "absent" from "present and null"). Each runner re-encodes under the scenario's *own* codec and inspects the produced frame schema-lessly, because omit-when-absent is a per-encoder decision — `#lzmsgpackparity` was precisely a msgpack encoder writing `key: null` while json omitted it. The `present` scenarios are the anti-vacuity control: a runner that reports "absent" without decoding satisfies every null case trivially, so each runner pins its decoded-key count exactly.
+
+**Schema fix.** `snapshot.json` and `delta.json` carried a bare `NodeKey` `$ref` for this field, which made a frame the clause now *requires* decoders to accept schema-invalid — pushing a decoder-leniency question into wire validity. Both are now `oneOf [null, NodeKey]`, matching what `distributed.json` already did for `CrdtOp`. Same class of mistake as `PeerId`'s 2^53−1 maximum last cycle, one field over.
+
+**Verification.** `make check` green in all ten repos. Every runner mutation-checked in both directions — flipping a `null` scenario's expected key to the string `"null"` reddens each one, which is the exact shape of the old Kotlin behaviour; flipping `reencoded_key_field_present` reddens the encoder half separately. CI green on spec, py, js, kt, go, zig, dart, cs; **rs and cpp still in progress** at write time (both green locally). Landing this also needed a `dart format` / `ruff format` / `zig fmt` / `cargo fmt` pass and a lazily-rs CI step for the new `make check` target.
+
+One caution worth recording: Gradle's test task treats `../lazily-spec/conformance` as outside its declared inputs, so a mutation check that edits the corpus and re-runs `./gradlew test` can report UP-TO-DATE and pass. It needs `--rerun-tasks`. Both `#lzkeynullstrict` and `#lzspecdecoderbound` were re-verified that way.
 <!-- agent:boundary:ebcdbd84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzspecdecoderbound]~~
-- 🚧 do [#lzkeynullstrict]
+- ~~do [#lzkeynullstrict]~~
 - 📌 do [#lzreadmelinkrot]
 - 📌 do [#lzvacuousrun]
 - 📌 do [#lzscenariobodyskip]
@@ -102,7 +135,6 @@ One thing I did **not** do: nothing here widens a binding's identity type. The c
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzkeynullstrict] The shared json decode path rejects an explicit key of null on NodeSnapshot, but a conforming peer may legally send one. Surfaced by the lazily-zig agent while mutation-checking #lzmsgpackseven, and it is not zig-only because it lives in the value-tree decode both codecs now share. protocol.md says a self-describing codec OMITS an absent optional NodeKey, and every binding's encoder does. It does not say a decoder may refuse the null form: a serde-based peer that simply did not apply skip_serializing_if emits key null, and rmp_serde's own decoder accepts it and reads it as absent. lazily-zig's NodeSnapshot.fromJson errors instead, which makes it stricter than the reference implementation on a frame the reference implementation produces. Note the asymmetry that makes this easy to get wrong: CrdtOp.key is ALWAYS written as null when unset and every decoder must read that back as absent, so the null form is already required reading one field over. Work: settle whether omit-when-absent is an encoder rule only, say so explicitly in protocol.md, then audit all nine decoders for NodeSnapshot and DeltaOp NodeAdd and make them accept both the omitted and the null form while continuing to emit only the omitted one. Add a fixture scenario carrying the null form so the leniency is replayed rather than asserted in prose.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

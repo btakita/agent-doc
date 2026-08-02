@@ -63,13 +63,41 @@ Zig's `signaling_conformance.zig:349` `else => unreachable`, the lead we carried
 **One method note worth keeping.** The py sweep's first pass reported five false "still green" mutation results — stale `__pycache__` let pytest reuse pre-mutation bytecode when mutate and restore landed inside the same filesystem second. Only the re-run with `PYTHONDONTWRITEBYTECODE=1` and the cache cleared per case is reported above. A mutation check that can't invalidate its own build is just another false green, one level up.
 
 Queued the js/cs/rs sweep at the top of the backlog. Those three were marked "already have theirs" on the strength of the chains we happened to inspect, not an audit — and the six repos we did audit averaged twelve fail-opens apiece.
+
+### Re: do [#nevergotsystematic] — opus-5
+
+Done. The premise held: all three had been marked "already have theirs" on the strength of the chains we happened to inspect, and a systematic audit found **98 more fail-opens**.
+
+| repo | fixed | commit | suite | CI |
+|---|---|---|---|---|
+| js | 40 | `c271814` | 581 tests, 118/118 scenarios | green |
+| cs | 34 | `33ab72f` | 249 tests, Debug + Release | green |
+| rs | 24 | `956a36a` | 6018 passed, + release profile | green |
+
+Superproject pointer bump: `f9d39c8b8`. `lazily-spec` clean throughout — every mutation was runner-side.
+
+**174 fail-opens across nine bindings.** The sweep is complete.
+
+Each agent built a real AST analyzer rather than grepping — TypeScript compiler API for js, Roslyn for cs, `syn` for rs — and each ran a *separate* corpus-vocabulary cross-check for class 3, collecting every discriminator value the fixtures actually carry and reporting the ones no runner names as a literal. That second pass is what found the class the AST cannot see, and it found the same four drivers in all three repos that it found in the six before: `windowing` tumbling/sliding count, `rateshape` sample_count and probabilistic_sample. Four bindings, then three more. Seven of nine shipped the identical bug because the runners were written from the same shape.
+
+**The "already fail-closed" record was half right, which is why it survived.** lazily-rs is the clean case: 71 `match` chains already panic on the unmatched value. Every single fail-open there was a *different* syntax — if/else tails, `==` binaries against a literal where a third value exists, and unread discriminators. Whoever checked this repo checked `match` and was right about `match`. The audit was scoped to the shape we already knew about, and the shapes we didn't know about were the ones that were broken.
+
+**A negative test that passed for the wrong reason.** `signaling_negative_conformance.rs:54` dispatched on `direction` and returned `Err` on an unrecognised value — into a loop asserting `is_err()`. A misspelled direction passed the rejection test because the *runner* didn't recognise it, never because the codec rejected the frame. `test/signaling.test.js:37` had the same shape in js. A fail-open inside a negative test doesn't skip an assertion; it satisfies one.
+
+**Two mutation checks reported "survived" and both were the harness, not the code.**
+
+The rs pass reported all five stdlib sites as surviving. `cargo test` was filtered on `timer`/`timeout`/`revision_barrier`, but that file has exactly two tests with neither name — the filter matched zero tests and cargo exited 0. The cs pass first mutated a delta op the corpus doesn't carry, so the mutation never reached the arm it was aiming at; re-aimed at a value the corpus does carry, it went red. Neither was the stale-cache route we hit in py last cycle, and that's the point worth keeping: *a mutation check has at least three ways to report a false green* — stale artifact, a filter that selects nothing, and a probe aimed at a value the corpus never produces. All three exit 0 and look identical from outside. The cs agent's guard is the generalizable one: it asserted the test assembly's mtime advanced, which also caught two "RED" results that were actually compile failures from warnings-as-errors.
+
+**The corpus corrected us again.** cs's new `field` guard went red immediately on the real fixtures: `nodekey_null_leniency.json` spells the delta case `node_add`, not `delta`. That's the second binding to learn this from a guard — dart hit it last cycle. The bare ternary could not have surfaced it in either.
+
+Queued the library-side audit. This whole sweep looked at runners only, and cs came back with five concrete unassessed sites in `src/Lazily`. rs flagged two of its own and argued both are deliberate wire leniency — which is exactly why it needs a per-site verdict rather than a blanket conversion, and why an intentional default deserves a fixture pinning it. From the outside, a documented leniency and a forgotten `_ => {}` look the same.
 <!-- agent:boundary:ebcdbd84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#nevergotsystematic]
+- do [#failclosedsweep]
 - 📌 do [#lzassertionblockschema]
 - 📌 do [#lzdependencyavailability]
 - 📌 do [#lzcpptranscribedrunners]
@@ -85,7 +113,7 @@ Queued the js/cs/rs sweep at the top of the backlog. Those three were marked "al
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#nevergotsystematic] js, cs and rs never got the systematic fail-closed dispatch sweep the other six just got (#failcloseddispatch). They were recorded as "already have theirs" on the strength of the specific chains inspected during #lzscenariobodyskip, not an exhaustive audit. The six repos that WERE swept found 8-36 fail-opens each, including whole classes nobody had looked for: expectation-side ternaries that silently change what is being asserted, drivers that never read the discriminator at all and replay every op as one variant, and final else arms that assume the last variant. Assume the same density in js, cs and rs until proven otherwise. Do the same sweep: enumerate every dispatch chain keyed on fixture data via an AST pass rather than grep, fail closed naming the unknown value, and mutation-check each site by feeding a discriminator no arm names.
+- [ ] [#failclosedsweep] The fail-closed sweep audited conformance RUNNERS in all nine bindings and never looked at the LIBRARIES. lazily-cs surfaced concrete unassessed sites while closing #nevergotsystematic: IngressCore.cs:450/1053/1140, DurableOutbox.cs:301, AsyncSourceMap.cs:191, plus several `_ =>`-defaulting switch expressions. lazily-rs flagged two of its own and argued both are deliberate: ipc.rs:71 BlobBackendKind::from_str maps an unknown backend to Shm as documented wire forward-compat, and statechart.rs:215-225 defaults an unknown state kind to Atomic as documented parse leniency. That is the whole question - in a runner a silent default is always a bug, but in a library it is sometimes the wire contract, so each site needs a per-site verdict rather than a blanket conversion. Audit the library dispatch surface in all nine bindings the same way (AST pass, not grep), and for each silent default either document it as intentional leniency with the wire reason, or fail it closed. Where it IS intentional, add a conformance fixture that pins the leniency, because an undocumented default and a deliberate one are indistinguishable from the outside.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

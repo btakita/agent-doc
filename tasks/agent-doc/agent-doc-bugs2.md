@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019fc100-5ee9-72c0-9df8-2bfa2b52eb51
+resume: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -164,12 +164,31 @@ Completed the design pass and committed it as `e25a76b1f`:
 Terminology correction: there is no separate “legacy markdown” format. The current flat `❯` / `### Re:` syntax is the readable markdown compatibility projection; the design adds stable node identities and edges beneath it.
 
 Verification: `git diff --check -- tasks/agent-doc/plan-selection-scoped-run-agent-doc.md` passed. This was a documentation-only design cycle; the preceding 0.35.116 release already passed the full local `make check`.
+
+### Re: Closeout corruption fixes and `#bugbacklogdropped` — gpt-5.6
+
+Yes—the `#bugbacklogdropped` code defect is fixed in the corrected agent-doc 0.35.118 release. The failure occurred because streamed closeout could encounter a retained editor-delivery barrier before durably recording the typed `--backlog-add` / `--backlog-edit` plan. Capture recovery therefore retained the response body but had no mutation envelope to replay. Stream closeout now captures the complete semantic plan before its first live-authority resolution; replay applies that same response-plus-tracked-work envelope or fails closed.
+
+This release also addresses the contributing closeout factors reported across Haiven, Lazily, and tsift:
+
+- Transport receipt is admission only. Successful editor closeout requires the exact visible editor hash/generation receipt; CRDT generation alone is insufficient.
+- Concurrent operator edits are rebased from the canonical base onto the exact visible result instead of replacing the editor buffer.
+- Binary-owned preflight runs from the harness hook, avoiding agent-authored preflight command loops.
+- Retained writes, controller promotion, mid-turn recycle, and tmux/editor layout reconciliation are modeled as reactive effects with durable intent.
+- The agent-doc development harness now enforces that mutation-plan capture precedes authority resolution, and its self-test proves the guard detects ordering drift.
+
+Verification: focused regression tests and authority/static guards pass; the complete local `make check` gate passes (8,541-test workspace plus packaging/contracts). Commit `336e0d780` is on `main`; existing tag `v0.35.118` was moved to that commit before publication; the stale tag workflow was canceled and the corrected release workflow started. Per operator instruction, I did not wait for CI. `make install` installed binary 0.35.118, the matching native library, skills, and JetBrains plugin 0.2.338; supervisors/controllers were marked for idle-boundary recycle.
+
+The existing `haiven-dev.md` occurrence is still visibly unchecked in its uncommitted editor-owned buffer because it belongs to the already-damaged pre-fix cycle. I did not force disk, synthesize an editor ACK, or edit behind the controller. Restart IDEA to activate the installed plugin generation; once that retained buffer converges, the item can be closed using the corrected binary. Future closeouts cannot silently recover only the response while dropping the backlog plan.
+
+Terminology remains corrected: “legacy Markdown” was an invented label, not an agent-doc format. The precise compatibility surface is the readable flat `❯` / `### Re:` projection over typed prompt/response state.
+
+`#realtimesalient` remains open: this cycle fixed closeout durability and corruption, not the separate feature for replaceable mid-turn salient nodes.
 <!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#promptselect]~~
 - do [#realtimesalient]
 - do [#multilineheadbullet]
 - do [#compacttombgc]

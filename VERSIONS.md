@@ -4,6 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.113
+
+_JetBrains plugin 0.2.335; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Connected MCP closeout is pinned to one admitted response cycle.** The
+  integration contract now drives `agent_doc_admit` through plan, component
+  read, and `agent_doc_finalize`, then proves the terminal committed cycle id
+  is the original admitted id and no `repaired stale preflight_started`
+  recovery occurred. Connected clients can therefore trust
+  `preflight_required=false` without opening a second legacy preflight cycle.
+
 ## 0.35.112
 
 _JetBrains plugin 0.2.335; VS Code extension 0.2.64; Zed extension 0.1.0._

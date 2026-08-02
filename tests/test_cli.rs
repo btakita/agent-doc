@@ -526,7 +526,7 @@ fn mcp_serve_handles_initialize_list_and_read() {
 }
 
 #[test]
-fn mcp_serve_handles_admit_and_plan() {
+fn mcp_serve_admit_plan_read_finalize_uses_one_cycle() {
     let tmp = tempfile::TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     let content = template_doc(
@@ -561,21 +561,50 @@ fn mcp_serve_handles_admit_and_plan() {
             }
         }
     });
+    let read = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "agent_doc_read",
+            "arguments": {
+                "file": doc.display().to_string(),
+                "component": "exchange"
+            }
+        }
+    });
+    let finalize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+            "name": "agent_doc_finalize",
+            "arguments": {
+                "file": doc.display().to_string(),
+                "response": "<!-- patch:exchange -->\n### Re: Connected closeout - gpt-5\nbody\n<!-- /patch:exchange -->\n",
+                "no_followups": true
+            }
+        }
+    });
 
     let assert = agent_doc_cmd()
         .current_dir(tmp.path())
         .args(["mcp", "serve"])
-        .write_stdin(format!("{admit}\n{plan}\n"))
+        .write_stdin(format!("{admit}\n{plan}\n{read}\n{finalize}\n"))
         .assert()
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
     let responses: Vec<serde_json::Value> = stdout
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
 
-    assert_eq!(responses.len(), 2);
+    assert_eq!(responses.len(), 4);
     assert_eq!(responses[0]["result"]["isError"], false);
+    let admitted_cycle_id = responses[0]["result"]["structuredContent"]["admission"]["cycle_id"]
+        .as_str()
+        .expect("admit should return a cycle id");
     assert_eq!(
         responses[0]["result"]["structuredContent"]["admission"]["source"],
         "admit"
@@ -589,6 +618,22 @@ fn mcp_serve_handles_admit_and_plan() {
         responses[1]["result"]["structuredContent"]["plan"]["execution_scope"],
         "normal"
     );
+    assert_eq!(responses[2]["result"]["isError"], false);
+    assert_eq!(
+        responses[2]["result"]["structuredContent"]["component"],
+        "exchange"
+    );
+    assert_eq!(responses[3]["result"]["isError"], false);
+    assert!(
+        !stderr.contains("repaired stale preflight_started"),
+        "connected read/plan/finalize must not repair or replace the admitted cycle:\n{stderr}"
+    );
+
+    let state = agent_doc_cycle_state_io::load(&doc)
+        .unwrap()
+        .expect("finalize should leave terminal cycle state");
+    assert_eq!(state.cycle_id, admitted_cycle_id);
+    assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 }
 
 #[test]

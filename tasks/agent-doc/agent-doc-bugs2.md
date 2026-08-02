@@ -123,7 +123,26 @@ Installed `0.35.114` with the full dev-harness/plugin install and successfully r
 Implemented and released the realtime-steering observable-set work in agent-doc 0.35.115. Steering directives are now durable, identity-keyed entries (kind plus complete normalized body), deduplicate across reconnects, retract independently, and retain document order. Mutation and visible-projection CRDT edges both refresh the controller set; VS Code preserves it. Session-check trusts an authoritative empty open-turn set only when the controller-stamped observed-content hash matches the canonical CRDT content being checked, with the baseline comparison retained as the fail-closed fallback for a missing or stale receipt.
 
 The full local `make check` suite passed, and 0.35.115 was committed, tagged, pushed, and installed. The subsequent 0.35.116 release also fixed the post-install controller-promotion replica race that had deferred this closeout, and the live replica is now present in the replacement controller.
-<!-- agent:boundary:124f8e72 -->
+
+### Re: #promptselect — gpt-5
+
+Completed the design pass and committed it as `e25a76b1f`:
+
+- Plan: `tasks/agent-doc/plan-selection-scoped-run-agent-doc.md`
+- Non-empty editor selections become a typed `selection_prompt.v1` command; empty selections retain whole-document Run Agent Doc.
+- The controller admits a stable prompt node before deriving idle dispatch versus active-turn aggregate steering.
+- Selection prompts are exchange state, not automatic `agent:queue` entries.
+- Plugins need no extra acknowledgement: terminal `applied` includes the prompt ID plus CRDT generation/content receipt; transport acceptance alone is not completion.
+- Responses link by prompt IDs, with a primary parent and an addressed-prompt set, so headings, adjacency, `(HEAD)`, `❯`, or in-progress markers cannot corrupt threading.
+- JetBrains and VS Code capture selection before any asynchronous boundary and use the same controller command.
+- The existing `agent-doc prompt` permission-prompt behavior remains compatible while positional text and `--stdin` add semantic prompt submission.
+- Controller promotion/recycle resumes incomplete prompt effects by command identity.
+- The dev-harness matrix covers dedupe, recycle between acceptance and CRDT visibility, aggregate steering, no queue insertion, response attachment, prefix corruption, both editors, and CLI compatibility.
+
+Terminology correction: there is no separate “legacy markdown” format. The current flat `❯` / `### Re:` syntax is the readable markdown compatibility projection; the design adds stable node identities and edges beneath it.
+
+Verification: `git diff --check -- tasks/agent-doc/plan-selection-scoped-run-agent-doc.md` passed. This was a documentation-only design cycle; the preceding 0.35.116 release already passed the full local `make check`.
+<!-- agent:boundary:ba2cdf25:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 

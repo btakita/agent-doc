@@ -306,16 +306,54 @@ Two things worth recording:
 `make check` green in all ten. CI green on nine with my exact SHAs — `cc60bef` `7400430` `204e9e8` `0b132c4` `7cdd4aa` `14dcac5` `ed2ff20` `48dd67f` `07b6380`; lazily-cpp still in progress at write time.
 
 **What I did not do, and why.** The item also asks to "settle on one spelling across the corpus" on the premise that 28 fixtures use `name` and three stdlib ones use `id`. That is stale: it is **7 fixtures / 50 scenarios on `id`** — including all four `codec/` fixtures — against **27 / 75 on `name`**. Neither is a rounding error, and canonicalizing on either rebinds 125 ledger entries across ten repositories at once. That is a naming decision with a real blast radius, not a cleanup that falls out of closing this hole, so I left the resolution order `id`-else-`name` and filed the decision separately with the corrected numbers. The hazard the item actually names — a reorder silently rebinding the ledger — is gone either way: no scenario resolves positionally anymore, and nothing can.
+
+### Re: do [#recommendedconformanceco] — opus-5
+
+> **Queue prompt:**
+>
+> do [#recommendedconformanceco]
+
+
+**`id` is canonical. `name` is demoted to an optional human label.** Swept across lazily-spec and all nine bindings; every repo is green and pushed.
+
+Three things decided it, and none of them is taste:
+
+1. `schemas/stdlib-fixture.schema.json` already *requires* `id` and, being `additionalProperties: false`, *forbids* `name`. Canonicalizing on `name` would mean versioning a published `$id` schema to make the corpus legal against itself.
+2. Resolution is `id`-else-`name` in all nine bindings, so wherever both exist `id` is already the key the ledger records. The four codec fixtures carry both, spelled identically.
+3. 35 of the 75 name-only scenarios used a **prose sentence** as their name — `"folds whole subtree; edit recomputes only ancestor chain, not siblings"`. A ledger keyed on prose silently rebinds on a copy-edit. That is the same failure a positional id has, one level up, and `#lzspecscenarioids` already closed it for positions.
+
+**The ledger churn was smaller than the estimate.** Adding `id` is purely additive — `name` stays, so nothing that dispatches on it broke. The 40 scenarios whose name was already a slug took that slug **verbatim**, so their resolved key did not move at all. Only 35 keys changed, each to a curated snake_case id. The corpus is now 125 scenarios across 35 fixtures, all identified.
+
+**One premise in the item was wrong, and finding out cost five red suites.** "All excuse lists are empty so nothing names a scenario by id today" is true of the *excuse* lists, but **runner lookups** hardcode the resolved key. lazily-kt, lazily-dart, lazily-rs and lazily-go all addressed scenarios by prose sentence and went red the moment the key moved:
+
+> `no scenario resolves to id 'merge algebra is order and duplication independent'. Present: [merge_is_order_and_duplication_independent, ...]`
+
+That is the hazard arriving on schedule, which is an argument for `id` rather than against the change.
+
+**What each binding needed:**
+
+| repo | change |
+| --- | --- |
+| lazily-spec | 75 scenarios given an `id`; `scenario-identity-check` now demands a unique snake_case `id` instead of accepting `id`-or-`name`; lazily-zig added to the vendored-mirror table |
+| lazily-rs | prose lookups repointed; `scenario_by_name` renamed to `scenario_by_id` |
+| lazily-go | `Id` field added to 8 strict-decode scenario structs, `"id"` added to 5 `consumeKeys` lists, lookups matched on `Id`, ledger fed the real id instead of `""` |
+| lazily-kt / lazily-dart / lazily-cs | prose lookups repointed; the C# dispatch switched from `name` to `id` |
+| lazily-cpp | `id` added to the distributed runner's known-scenario-key set |
+| lazily-zig | vendored fixture subset re-synced — it was drifting silently, because its own drift test only fires when the Zig suite runs |
+| lazily-py | `_scenario` helpers keyed on `id`; the `observationally_equal` cross-reference keyed on `id` |
+
+**The guard is mutation-checked in four directions** — missing `id`, prose `id`, duplicate `id` within a fixture, empty corpus — and each one reddens it.
+
+**Verification:** `make check` green in all ten repos (lazily-spec, rs, py, js, go, kt, dart, zig, cpp, cs) plus lazily-react. Two of the reds were formatting-only (`clang-format`, `dart format`) and are fixed. Committed and pushed to every repo; superproject gitlinks bumped for the nine that moved. CI is queued or in progress on all of them, so this closeout rests on local evidence.
+
+Session note: the exchange is at 286 lines / 8 response sections, but the queue is active, so I kept draining rather than stopping to compact.
 <!-- agent:boundary:ebcdbd84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#recommendedconformanceco]
-- ~~do [#recommendedlazilyscripts]~~
-- ~~📌 do [#lzscenariobodyskip]~~
-- ~~📌 do [#lzspecscenarioids]~~
+- ~~do [#recommendedconformanceco]~~
 - 📌 do [#lzassertionblockschema]
 - 📌 do [#lzdependencyavailability]
 - 📌 do [#lzcpptranscribedrunners]
@@ -331,7 +369,6 @@ Two things worth recording:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedconformanceco] [recommended] The conformance corpus identifies scenarios two ways and nothing decides which is canonical: 7 fixtures / 50 scenarios use id (including all four codec fixtures and the three stdlib ones), 27 fixtures / 75 scenarios use name. Resolution is id-else-name in all nine bindings, so the spelling is invisible until someone changes it - and changing it rebinds every affected ledger entry in ten repositories at once, because the ledger records the RESOLVED id. Two options: add id to the 75 name-only scenarios (resolution prefers id, so every one of those 75 ledger entries changes to whatever id is coined), or rename id to name in the 50 id-carrying scenarios (smaller corpus diff but breaks every runner that reads scenario.id in a dispatch chain or label - codec and stdlib runners in all nine bindings do). Neither is urgent: the positional-fallback hazard is closed (#lzspecscenarioids), all excuse lists are empty so nothing names a scenario by id today, and the guards recompute both sides together so a change stays green. Decide the spelling deliberately, then do it in one sweep with lazily-spec first.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

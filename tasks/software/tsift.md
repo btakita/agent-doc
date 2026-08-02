@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: f3b99a4a-4604-44aa-93b7-d1ef338d9328
+resume: f24bab55-5bc5-4ad8-af25-9ac03a96471f
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -69,6 +69,27 @@ That contradicts the standing note that a Trusted Publisher was registered for a
 npm OIDC, for contrast, published unattended without complaint.
 
 One piece of housekeeping I left alone: preflight has been warning `legacy_gated_in_backlog` every cycle — `#8wqk` still lives in `agent:backlog` rather than `agent:review`. `agent-doc migrate` moves it, but that reshapes the document outside this cycle's write boundary, so it's your call whether to run it.
+How do we fix tsift-astgrep publishing?
+
+### Re: How do we fix tsift-astgrep publishing? — opus-5
+
+Fixed, and the diagnosis was smaller than I made it sound last cycle.
+
+**It was one crate, not a broad gap.** I queried crates.io for the trusted-publishing config of all 26 crates in the publish list. Twenty-five had one, at `btakita/tsift:release.yml`. `tsift-astgrep` had an empty array — the only crate of 26 that was never registered.
+
+The config ids tell the story: 10871–10893 is the 2026-06-19 batch of 23, and `tsift-local-model` (10989) and `tsift-kg` (10990) were added later when someone noticed those two. `tsift-astgrep` was simply skipped in the original run. Nothing was revoked and crates.io didn't change its scoping — the standing note was right in spirit and off by one crate, and my "nothing is known about the other 23" last cycle was pessimism, not evidence. Reading it took one API call.
+
+**Registered it:** `POST /api/v1/trusted_publishing/github_configs`, crate `tsift-astgrep`, `btakita/tsift`, `release.yml`, no environment → config `15019`, verified by re-reading. The next tag should publish all 26 through OIDC with no token.
+
+One thing worth recording for the next time this comes up: **the API token cannot read this.** `GET .../github_configs?crate=X` with `Authorization: <token>` returns 403 — the trusted-publishing endpoints want a browser session cookie. So this is a chromium-bridge job against your logged-in crates.io tab, both to read and to write. I borrowed a search tab and put it back.
+
+**The second half — why nobody knew.** tsift `446101b`. The publish loop skips a crate already on the registry, and every release through v0.1.79 was published by hand *before* the tag went up. So the job logged 26 skips and went green having exchanged an OIDC token for no work at all. It has been reporting success for doing nothing since trusted publishing was turned on; v0.1.80 was the first release that gave it real work, and it failed on the third crate.
+
+The loop now counts uploads and skips, prints `published=N skipped=M`, and annotates a run that uploaded nothing as proving nothing about trusted publishing. I verified both arms by extracting the step body and simulating: all-skip prints `published=0 skipped=26` and emits the warning, all-new prints `published=26 skipped=0` and doesn't.
+
+**Fail-fast on the first error I left alone deliberately.** The list is in dependency order, so a crate that can't publish makes everything downstream of it unpublishable too — continuing past `tsift-astgrep` would have produced 23 more failures that all say the same thing. The problem was never that it stopped; it was that a green run had been meaning nothing for months.
+
+`#8wqk` is closed — the registration it was gating is done for all 26 crates. The real proof is the next tag, which will either print `published=26` or tell us exactly which crate is still missing.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
@@ -83,7 +104,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#8wqk] Register crates.io GitHub Trusted Publishing for the 24 tsift workspace crates the OIDC token is NOT valid for. v0.1.80 was the first release CI actually attempted to publish (every earlier green publish job was 26 'already exists; skipping' no-ops after a local token publish): it uploaded tsift-core and tsift-md-ast, then 403'd on tsift-astgrep with 'The provided access token is not valid for crate', and the loop has no per-crate tolerance so the remaining 23 were never attempted. Contradicts the 2026-06-19 note claiming all 23 were registered — cause unknown. Verify by cutting a tag with nothing pre-published.
 <!-- /agent:backlog -->
 
 ## Review

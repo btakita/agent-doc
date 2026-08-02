@@ -315,6 +315,35 @@ pub fn apply_session_id_assignment(
     Some(new_id.to_string())
 }
 
+/// Remove a fresh-conversation id assignment before an exact resume.
+///
+/// A supervisor keeps `fresh_args` so it can restart without inheriting resume
+/// selectors. For harnesses such as Claude those same args may carry the
+/// deterministic id minted for the fresh conversation. Reusing that assignment
+/// alongside an exact resume is contradictory (`--session-id` + `--resume`) and
+/// causes the harness to exit before presenting a prompt.
+fn strip_session_id_assignment(assignment: &SessionIdAssignment, args: &mut Vec<String>) {
+    let SessionIdAssignment::Flag(flag) = assignment else {
+        return;
+    };
+    let joined_prefix = format!("{flag}=");
+    let mut retained = Vec::with_capacity(args.len());
+    let mut iter = std::mem::take(args).into_iter();
+    while let Some(arg) = iter.next() {
+        if arg == *flag {
+            // The assignment flag consumes its following id. A malformed bare
+            // flag is removed too; exact resume supplies the only valid id.
+            iter.next();
+            continue;
+        }
+        if arg.starts_with(&joined_prefix) {
+            continue;
+        }
+        retained.push(arg);
+    }
+    *args = retained;
+}
+
 /// Where a harness records the transcript of a conversation it can resume.
 ///
 /// `#resumestale`: distinct from the discovery mechanism this replaced
@@ -564,9 +593,11 @@ impl HarnessConfig {
         fresh_args: &[String],
         id: &str,
     ) -> Result<Option<Vec<String>>> {
+        let mut fresh_args = fresh_args.to_vec();
+        strip_session_id_assignment(&self.session_id_assignment, &mut fresh_args);
         match &self.resume_behavior {
             ResumeBehavior::AppendFlag(flag) => {
-                let mut args = fresh_args.to_vec();
+                let mut args = fresh_args;
                 args.push(flag.clone());
                 args.push(id.to_string());
                 Ok(Some(args))
@@ -574,10 +605,10 @@ impl HarnessConfig {
             ResumeBehavior::PrependSubcommand(subcommand) => {
                 let prefix = vec![subcommand.clone(), id.to_string()];
                 if self.binary == "codex" {
-                    return Ok(Some(codex_resume_restart_args(&prefix, fresh_args)?));
+                    return Ok(Some(codex_resume_restart_args(&prefix, &fresh_args)?));
                 }
                 let mut args = prefix;
-                args.extend(fresh_args.iter().cloned());
+                args.extend(fresh_args);
                 Ok(Some(args))
             }
             ResumeBehavior::Unsupported => Ok(None),
@@ -4461,6 +4492,36 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
         );
         assert_eq!(args, ["--resume", "existing-conv"]);
         assert!(!args.iter().any(|a| a == "--session-id"));
+    }
+
+    /// The supervisor's reusable fresh launch args carry the id minted for that
+    /// fresh conversation. Exact resume owns the next launch identity and must
+    /// remove both split and joined forms before appending `--resume`.
+    #[test]
+    fn exact_claude_resume_removes_fresh_session_id_assignment() {
+        for fresh in [
+            vec![
+                "--model".to_string(),
+                "opus".to_string(),
+                "--session-id".to_string(),
+                "fresh-uuid".to_string(),
+            ],
+            vec![
+                "--model".to_string(),
+                "opus".to_string(),
+                "--session-id=fresh-uuid".to_string(),
+            ],
+        ] {
+            let args = HarnessConfig::claude()
+                .exact_resume_args(&fresh, "existing-uuid")
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                args,
+                ["--model", "opus", "--resume", "existing-uuid"],
+                "exact resume must contain one conversation selector"
+            );
+        }
     }
 
     /// An operator-supplied `--session-id` wins, like every other launch arg.

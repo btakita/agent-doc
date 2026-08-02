@@ -949,7 +949,7 @@ pub fn run_with_reap_policy_and_resume(
     }
     let mut restart_count: u32 = 0;
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
-    let mut failed_resume_tracker = FailedResumeTracker::default();
+    let mut failed_restart_tracker = FailedRestartTracker::default();
     let mut child_launch_count: u32 = 0;
     let _actor_context = agent_doc_run_context_io::actor_context(canonical.clone());
     let supervisor_exit_reason = loop {
@@ -1670,7 +1670,7 @@ pub fn run_with_reap_policy_and_resume(
             session_lineage.clear_proven_missing(&stale_id);
             session_lineage.begin_fresh(None);
             policy.reset();
-            failed_resume_tracker.reset();
+            failed_restart_tracker.reset();
             first_run = true;
             // A resumed conversation already owns its document context. A new
             // Codex conversation does not, so submit the document trigger once
@@ -1725,11 +1725,11 @@ pub fn run_with_reap_policy_and_resume(
         );
         let clean_exit_before_prompt =
             supervisor_clean_exit_before_prompt_seen(auto_trigger, prompt_visible_once);
-        if matches!(
-            auto_trigger_outcome,
-            AutoTriggerOutcome::Sent | AutoTriggerOutcome::NotNeeded
-        ) {
-            failed_resume_tracker.reset();
+        if prompt_visible_once {
+            // A visible prompt proves this launch established a usable child.
+            // Merely deciding that no auto-trigger was needed is not success:
+            // argument/configuration errors can exit cleanly before any prompt.
+            failed_restart_tracker.reset();
         }
 
         // Forwarded operator Ctrl+C is an intentional shutdown request, not a
@@ -1792,18 +1792,23 @@ pub fn run_with_reap_policy_and_resume(
                         }
                     }
                     SupervisorCleanExitResolution::RestartContinue => {
-                        let recent_failures = if failed_resume {
+                        let recent_failures = if failed_resume || clean_exit_before_prompt {
                             let now = Instant::now();
-                            let recent_failures = failed_resume_tracker.record(now);
+                            let recent_failures = failed_restart_tracker.record(now);
                             log_event(
                                 &mut session_log,
                                 &format!(
-                                    "resume_restart_failed pane={} harness={} outcome={} recent_failures={} window_secs={} restart_count={}",
+                                    "restart_handoff_failed pane={} harness={} kind={} outcome={} recent_failures={} window_secs={} restart_count={}",
                                     pane_id,
                                     harness.binary,
+                                    if clean_exit_before_prompt {
+                                        "clean_exit_before_prompt"
+                                    } else {
+                                        "resume_handoff"
+                                    },
                                     auto_trigger_outcome.as_str(),
                                     recent_failures,
-                                    FAILED_RESUME_WINDOW.as_secs(),
+                                    FAILED_RESTART_WINDOW.as_secs(),
                                     restart_count
                                 ),
                             );
@@ -1884,12 +1889,21 @@ pub fn run_with_reap_policy_and_resume(
                                     "resume_failure_prompt",
                                 );
                                 raw_mode.suspend();
-                                eprintln!(
-                                    "\n{} failed to re-establish a prompt after resume {} times in the last {}s.",
-                                    harness.binary,
-                                    recent_failures,
-                                    FAILED_RESUME_WINDOW.as_secs()
-                                );
+                                if clean_exit_before_prompt {
+                                    eprintln!(
+                                        "\n{} exited before establishing a prompt {} times in the last {}s.",
+                                        harness.binary,
+                                        recent_failures,
+                                        FAILED_RESTART_WINDOW.as_secs()
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "\n{} failed to re-establish a prompt after resume {} times in the last {}s.",
+                                        harness.binary,
+                                        recent_failures,
+                                        FAILED_RESTART_WINDOW.as_secs()
+                                    );
+                                }
                                 match prompt_for_restart_or_quit(
                                     &mut session_log,
                                     "resume_failure",

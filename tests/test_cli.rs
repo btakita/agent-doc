@@ -19147,8 +19147,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum SupervisorPromptDecision",
         "pub enum SupervisorCleanExitResolution",
         "pub enum SupervisorRestartContinueExitStrategy",
-        "pub const FAILED_RESUME_WINDOW",
-        "pub struct FailedResumeTracker",
+        "pub const FAILED_RESTART_WINDOW",
+        "pub struct FailedRestartTracker",
         "pub fn classify_supervisor_prompt_input",
         "pub fn supervisor_policy_exit_code",
         "pub fn supervisor_clean_exit_resolution",
@@ -19203,8 +19203,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "fn policy_exit_code_for_supervisor",
         "enum CleanExitResolution",
         "enum RestartContinueExitStrategy",
-        "struct FailedResumeTracker",
-        "const FAILED_RESUME_THRESHOLD",
+        "struct FailedRestartTracker",
+        "const FAILED_RESTART_THRESHOLD",
         "fn clean_exit_resolution",
         "fn restart_continue_exit_strategy",
         "fn resume_handoff_failed",
@@ -19224,7 +19224,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         start_source.contains("classify_supervisor_prompt_input")
             && start_source.contains("SupervisorPromptDecision")
             && start_source.contains("supervisor_policy_exit_code")
-            && start_source.contains("FailedResumeTracker")
+            && start_source.contains("FailedRestartTracker")
             && start_run_source.contains("supervisor_policy_exit_code(")
             && start_run_source.contains("supervisor_clean_exit_resolution(")
             && start_run_source.contains("restart_continue_exit_strategy(")

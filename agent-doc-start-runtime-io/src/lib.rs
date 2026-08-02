@@ -157,7 +157,7 @@ use agent_doc_supervisor::auto_trigger::{
 #[cfg(test)]
 use agent_doc_supervisor::config::AgentLaunchArgsSources;
 use agent_doc_supervisor::crash_policy::{
-    CrashPolicy, FAILED_RESUME_WINDOW, FailedResumeTracker, RestartAction,
+    CrashPolicy, FAILED_RESTART_WINDOW, FailedRestartTracker, RestartAction,
     SupervisorCleanExitResolution, SupervisorPromptDecision, SupervisorRestartContinueExitStrategy,
     SupervisorState, classify_supervisor_prompt_input, format_exit_provenance_fields,
     forwarded_ctrl_c_interrupt_exit, restart_continue_exit_strategy,

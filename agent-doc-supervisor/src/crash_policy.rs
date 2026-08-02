@@ -133,19 +133,19 @@ pub enum SupervisorRestartContinueExitStrategy {
     PromptUser,
 }
 
-/// Window for escalating repeated failed resume handoffs to an operator prompt.
-pub const FAILED_RESUME_WINDOW: Duration = Duration::from_secs(15 * 60);
+/// Window for escalating repeated failed child launches or resume handoffs.
+pub const FAILED_RESTART_WINDOW: Duration = Duration::from_secs(15 * 60);
 
-/// Failed resume handoffs within [`FAILED_RESUME_WINDOW`] before prompting.
-pub const FAILED_RESUME_THRESHOLD: usize = 2;
+/// Failed launches/handoffs within [`FAILED_RESTART_WINDOW`] before prompting.
+pub const FAILED_RESTART_THRESHOLD: usize = 2;
 
-/// Bounded tracker for recent failed resume handoffs.
+/// Bounded tracker for recent child launches that never established a prompt.
 #[derive(Debug, Default)]
-pub struct FailedResumeTracker {
+pub struct FailedRestartTracker {
     events: VecDeque<Instant>,
 }
 
-impl FailedResumeTracker {
+impl FailedRestartTracker {
     pub fn record(&mut self, now: Instant) -> usize {
         self.events.push_back(now);
         self.prune(now);
@@ -157,7 +157,7 @@ impl FailedResumeTracker {
     }
 
     fn prune(&mut self, now: Instant) {
-        let cutoff = now.checked_sub(FAILED_RESUME_WINDOW).unwrap_or(now);
+        let cutoff = now.checked_sub(FAILED_RESTART_WINDOW).unwrap_or(now);
         while let Some(front) = self.events.front() {
             if *front < cutoff {
                 self.events.pop_front();
@@ -190,7 +190,7 @@ pub fn restart_continue_exit_strategy(
     ctrl_c_forwarded_interrupt: bool,
     failed_resume: bool,
     ctrl_d_forwarded: bool,
-    recent_failed_resumes: usize,
+    recent_failed_restarts: usize,
     clean_exit_before_prompt: bool,
 ) -> SupervisorRestartContinueExitStrategy {
     if ctrl_c_forwarded_interrupt {
@@ -199,11 +199,13 @@ pub fn restart_continue_exit_strategy(
     if ctrl_d_forwarded {
         return SupervisorRestartContinueExitStrategy::CtrlDPromptUser;
     }
+    if (failed_resume || clean_exit_before_prompt)
+        && recent_failed_restarts >= FAILED_RESTART_THRESHOLD
+    {
+        return SupervisorRestartContinueExitStrategy::PromptUser;
+    }
     if clean_exit_before_prompt {
         return SupervisorRestartContinueExitStrategy::RestartFresh;
-    }
-    if failed_resume && recent_failed_resumes >= FAILED_RESUME_THRESHOLD {
-        return SupervisorRestartContinueExitStrategy::PromptUser;
     }
     if failed_resume {
         return SupervisorRestartContinueExitStrategy::RestartFresh;
@@ -642,7 +644,15 @@ mod tests {
     #[test]
     fn restart_continue_strategy_prompts_after_repeated_failed_resumes() {
         assert_eq!(
-            restart_continue_exit_strategy(false, true, false, FAILED_RESUME_THRESHOLD, false,),
+            restart_continue_exit_strategy(false, true, false, FAILED_RESTART_THRESHOLD, false,),
+            SupervisorRestartContinueExitStrategy::PromptUser
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_prompts_after_repeated_pre_prompt_clean_exits() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, false, FAILED_RESTART_THRESHOLD, true,),
             SupervisorRestartContinueExitStrategy::PromptUser
         );
     }
@@ -672,10 +682,10 @@ mod tests {
     }
 
     #[test]
-    fn failed_resume_tracker_prunes_old_events() {
-        let mut tracker = FailedResumeTracker::default();
+    fn failed_restart_tracker_prunes_old_events() {
+        let mut tracker = FailedRestartTracker::default();
         let now = Instant::now();
-        tracker.record(now - FAILED_RESUME_WINDOW - Duration::from_secs(1));
+        tracker.record(now - FAILED_RESTART_WINDOW - Duration::from_secs(1));
         tracker.record(now - Duration::from_secs(5));
         let count = tracker.record(now);
         assert_eq!(count, 2, "only recent failures should remain in the window");

@@ -68,7 +68,7 @@ the controller before its live process scope accepts ingress.
 | Layout differs and passive sync is safe | Derive `Sync`; run generation-fenced sync effect | Pending, then applied/preserved/failed receipt |
 | Controller unavailable | Do not launch, query SQLite, or infer drift | Unavailable; retry only from later ingress/reconnect |
 | Client disconnects or reloads | Retire that client's membership generation | Disconnected; no native state survives reload |
-| Explicit operator action | Execute the named imperative RPC | Request/response result |
+| Explicit operator action | Validate the named intent and publish its typed command fact; an Effect owns any stateful consequence | Request/response result plus projected receipt |
 | Durable sink fails | Keep live projection authoritative and mark sink backpressure | Degraded durability, live state unchanged |
 
 ### Evidence inputs
@@ -101,7 +101,9 @@ settled durable projection
 Reactive semantics do not require a special wire format. Observation
 publication and projection subscriptions may use RPC framing, but automatic
 editor messages are typed facts, not imperative focus/sync commands. Manual
-operator actions remain imperative RPCs.
+operator actions may remain imperative RPC entrypoints; once admitted, any
+state mutation or lifecycle coordination is expressed as a typed fact and
+derived Effect rather than a second command-specific state path.
 
 Controller-local effects do not self-RPC. They append inside the owning request,
 and the request boundary refreshes the same live graph before the external

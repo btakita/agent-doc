@@ -7810,6 +7810,45 @@ fn codex_child_termination_restarts_exact_orchard_conversation() {
 }
 
 #[test]
+fn claude_child_termination_replaces_fresh_session_assignment_with_exact_resume() {
+    use agent_doc_supervisor::session_lineage::HarnessSessionLineage;
+
+    // A fresh Claude child is assigned a deterministic conversation id. When
+    // that child later terminates, the supervisor reuses its fresh-launch
+    // policy args but must replace the assignment with the document's exact
+    // lineage instead of emitting the contradictory
+    // `--session-id <fresh> --resume <existing>` pair.
+    let mut lineage = HarnessSessionLineage::new(
+        Some("orchard-conversation".into()),
+        Some("older-conversation".into()),
+    );
+    assert_eq!(lineage.active_id(), Some("orchard-conversation"));
+    assert!(!lineage.observe_projected_id(Some("older-conversation")));
+
+    let fresh_args = vec![
+        "--dangerously-skip-permissions".to_string(),
+        "--model".to_string(),
+        "opus".to_string(),
+        "--session-id".to_string(),
+        "fresh-conversation".to_string(),
+    ];
+    let args = agent_doc_harness::HarnessConfig::claude()
+        .exact_resume_args(
+            &fresh_args,
+            lineage.active_id().expect("controller lineage"),
+        )
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        args.windows(2)
+            .any(|window| window == ["--resume", "orchard-conversation"])
+    );
+    assert!(!args.iter().any(|arg| arg == "--session-id"));
+    assert!(!args.iter().any(|arg| arg == "--continue"));
+}
+
+#[test]
 fn pure_codex_thread_does_not_inherit_orchard_agent_doc_work() {
     use agent_doc_codex_hook_io::SessionState;
     use agent_doc_queue::queue_continuation::QueueContinuation;

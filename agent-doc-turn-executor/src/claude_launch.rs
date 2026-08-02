@@ -69,6 +69,7 @@ fn append_claude_session_args(
     model: Option<&str>,
 ) {
     if let Some(sid) = session_id {
+        strip_claude_fresh_session_id(args);
         args.push("--resume".to_string());
         args.push(sid.to_string());
     } else if fork {
@@ -83,6 +84,22 @@ fn append_claude_session_args(
 
     args.push("--append-system-prompt".to_string());
     args.push(CLAUDE_SESSION_DOCUMENT_PROMPT.to_string());
+}
+
+fn strip_claude_fresh_session_id(args: &mut Vec<String>) {
+    let mut retained = Vec::with_capacity(args.len());
+    let mut iter = std::mem::take(args).into_iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--session-id" {
+            iter.next();
+            continue;
+        }
+        if arg.starts_with("--session-id=") {
+            continue;
+        }
+        retained.push(arg);
+    }
+    *args = retained;
 }
 
 #[cfg(test)]
@@ -163,6 +180,29 @@ mod tests {
         assert!(
             args.windows(2).any(|w| w[0] == "--append-system-prompt"
                 && w[1].contains("interactive session document"))
+        );
+    }
+
+    #[test]
+    fn exact_resume_replaces_fresh_session_id_assignment() {
+        let args = claude_json_args(
+            &[
+                "-p".into(),
+                "--session-id".into(),
+                "fresh-session".into(),
+                "--permission-mode".into(),
+                "acceptEdits".into(),
+            ],
+            Some("existing-session"),
+            false,
+            None,
+        );
+
+        assert!(!args.iter().any(|arg| arg == "--session-id"));
+        assert!(!args.iter().any(|arg| arg.starts_with("--session-id=")));
+        assert!(
+            args.windows(2)
+                .any(|window| window == ["--resume", "existing-session"])
         );
     }
 

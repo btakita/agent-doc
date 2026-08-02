@@ -184,6 +184,30 @@ The existing `haiven-dev.md` occurrence is still visibly unchecked in its uncomm
 Terminology remains corrected: “legacy Markdown” was an invented label, not an agent-doc format. The precise compatibility surface is the readable flat `❯` / `### Re:` projection over typed prompt/response state.
 
 `#realtimesalient` remains open: this cycle fixed closeout durability and corruption, not the separate feature for replaceable mid-turn salient nodes.
+
+### Re: Response
+
+Implemented, tested, installed, and folded into agent-doc 0.35.118.
+
+Key fixes:
+
+- Resync is now registry/liveness cleanup only. It no longer bulk-promotes registered stash panes. The JetBrains “Resync / Fix Sessions” action follows cleanup by publishing one exact-visible `caller_kind=resync` generation to the retained controller, so the reactive plane is the sole layout writer. A bare CLI `agent-doc sync` now fails closed without explicit `--col` instead of replaying stale/cross-root layout state.
+- Added deterministic SimWorld coverage for the reported Haiven 2 → 5 → 3 pane oscillation. Repeated resync preserves exactly two visible panes and leaves unrelated documents parked in stash.
+- Added `agent-doc backlog <FILE> reopen <ID> --queue`, with one tracked-work transaction across inline/external `agent:done`, open backlog, and the queue. It removes stale completion evidence, preserves the newest archived text/continuation, and creates exactly one live queue directive without rewriting unrelated queue bytes.
+- Kept component classification in the pure tracked-work model rather than the file-I/O adapter, enforced by the architecture test.
+- Corrected the shared closeout help/error: strict `respond`/`finalize` requires an assistant response body; tracked-work-only commits are explicitly routed to `agent-doc write --commit ... --backlog-only`.
+- The existing 0.35.118 visible-generation fix remains the answer to `missing_replica`: the editor adapter must prove the exact controller target hash, rebuild its stale native replica, reject raced operator edits, and then acknowledge. Controller receipt or CRDT generation alone is not sufficient proof of operator-visible delivery.
+
+Verification and live repair:
+
+- Full `make check` passed twice after the final changes (8,549 workspace tests plus doctests, clippy, simulator, development harness, Lean, and TLA checks). Focused Rust and JetBrains tests also passed.
+- `make install` atomically installed the 0.35.118 binary/library, projected skills, queued safe-boundary supervisor/controller recycling, and installed JetBrains plugin 0.2.338 into four detected IDE installations. JetBrains still requires a restart to activate the package-level Kotlin generation on unavailable live endpoints.
+- Installed `resync --fix` was exercised live: `0:agent-doc` stayed at exactly two panes and all five parked panes stayed in `0:stash`.
+- Haiven canonical editor authority now shows `#deadscratchclean` open and the queue begins with `do [#deadscratchclean]`. Its disk commit remains controller-owned behind the already-accepted retained delivery; I did not resend, force disk, or repeat session-check.
+- Monster Rod Holders now has `#accessoriesspendredirect` at the top of backlog; `#accessories-zero-return-exclusions` is reaped and its queue directive struck. Both Haiven and Monster project controllers accepted explicit two-phase recycle requests.
+- Pushed commits `ffbd2c62c` and `89469ec61`; `main` and the moved `v0.35.118` tag point at `89469ec61`. CI is running and Release is queued; I did not wait for either.
+
+The pre-existing local edits to `AGENTS.md` and `runbooks/code-navigation.md` were preserved and left uncommitted.
 <!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue

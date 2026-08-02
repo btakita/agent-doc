@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 005a26d8-0d7b-4527-a8c7-22e18cbb5b70
+resume: 8cad65b6-561b-46c6-8ba7-a56c690a9f67
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -129,15 +129,65 @@ Verification is green: local `make check` completed with an explicit exit 0; mai
 The first Release attempt exposed separate per-crate crates.io OIDC configuration drift at `tsift-astgrep`. That was not a code or package failure. I completed the authorized 0.1.79 workspace publication in dependency order with the local publish-scoped credential, then reran the failed job; its idempotent version-exists projection skipped every published crate and closed green. I filed the durable OIDC parity work as an operator-gated follow-up because the repository runbook requires per-crate crates.io browser/passkey registration; a publish receipt must not be misrepresented as a trusted-publisher configuration receipt.
 
 The Agent Doc retained-closeout/session-identity work is installed and pushed (`a568674f0`), its isolated CI fixture correction is pushed (`797fd6a88`), all 8,495 local tests passed, and CI run 30728947238 is green. This response is closing through the binary-owned reactive finalize projection—no direct document edit, retained sidecar, manual `write --commit`, or editor ACK command. `#jzs7` remains the next active queue item and is not being claimed complete here.
-<!-- agent:boundary:5d1c16fb -->
+
+### Re: do [#jzs7] — opus-5
+
+Planned and phase 1 implemented. Plan: `tasks/software/plan-tsift-extract-function.md`.
+
+**What makes this unlike every intent that exists.** Every current semantic edit
+selects a *named* thing — a symbol row, a heading, an ast-grep pattern — and rewrites
+at or around it. An extraction selects a run of sibling statements, which has no
+name, no symbol row, and no single AST node, so `target_handle` cannot express it.
+`SemanticEditIntent` gains a one-based `start_line`/`end_line`, refused for every
+other kind so a stray range cannot silently widen an edit that resolved its target
+by name. Like `structural_rewrite`, it dispatches ahead of the family split, because
+there is no symbol to resolve.
+
+**The derivation, and the rule that matters.** The output is two edits that have to
+agree: a new function whose signature is derived from the selection, and a call whose
+arguments come from the same derivation. Parameters are names read before the range
+assigns them that are bound in the enclosing function; returns are names the range
+assigns that are read after it. A module-scope name is *neither* — threading a module
+global through a parameter compiles and quietly changes what the new function closes
+over. That is the failure this intent is organized against: a rename that misses an
+occurrence breaks the build loudly, and a wrong parameter list does not.
+
+Everything else refuses by name — not a contiguous run of siblings in one block, not
+inside a function, control flow escaping the range, assigning a `global`/`nonlocal`
+name, and a new name that already binds in scope.
+
+**Python only, and that is the plan, not a shortcut.** The derivation is
+language-general; the emitter is not. A signature is only derivable without type
+information in a language that does not spell one. Rust cannot be registered the same
+way — `T` vs `&T` vs `&mut T` needs types tsift does not have, and guessing emits code
+that parses and does not build. So Python carries its own kinds list rather than
+widening the shared script family, which is the same refusal-by-registration rule that
+already keeps `structural_rewrite` off languages with no compiled grammar.
+
+**Verification.** `make check` green, exit 0, no failures. All 14 new tests ran by
+name. Every analysis rule was mutation-checked against its own guard — the
+read-before-assign ordering, the module-scope collision, the control-flow refusal, the
+returns rule, and the call/def agreement each redden exactly one test when disabled.
+The first version of the ordering test was a **false green**: it asserted a name was
+not a parameter, but that name was not bound outside the range either, so the
+assertion held for the wrong reason. It is rewritten against a source where the name
+*is* bound outside, and now fails under mutation. The end-to-end CLI test also
+reparses the emitted file, so an extraction that produced invalid Python would fail
+rather than report success.
+
+Landed in tsift `5a04c25`, gitlink `8187df1`, plan `604783a`. CI run `30730401966` is
+queued.
+
+Phases 2 (untyped family) and 3 (the Rust spelling decision) are queued as their own
+backlog items, so a partial landing reads as a partial landing.
+<!-- agent:boundary:418669e8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#zigthirdindexed]~~
-- ~~do [#wsdq]~~
-- 🚧 do [#jzs7]
+- do [#registerextractfunction]
+- do [#deciderustspells]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -146,8 +196,9 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#registerextractfunction] Register extract_function for the untyped family — GDScript and the JS-like grammars — reusing the phase 1 derivation with a per-language emitter for the def/function/func spelling and the indentation or brace block. Registration should be a kinds-table entry plus a conformance fixture row, the same shape phase 3 of the rename plan settled on. Plan: tasks/software/plan-tsift-extract-function.md
+- [ ] [#deciderustspells] Decide how Rust spells extract_function before writing any Rust code: a caller-supplied signature, or a closure that infers. Rust cannot use the phase 1 derivation directly because choosing T, &T, or &mut T needs types tsift does not have, and guessing emits code that parses and does not build. A closure is correct without types but changes borrow behaviour and cannot be pub; a caller-supplied signature is honest but moves the hard part to the caller. Write the rationale, then implement. Plan: tasks/software/plan-tsift-extract-function.md
 - [/] [#8wqk] Register crates.io GitHub Trusted Publishing for every post-baseline tsift workspace crate through the operator browser/passkey flow, then verify a tag release publishes without the local token
-- [ ] 🚧 [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->
 
 ## Review

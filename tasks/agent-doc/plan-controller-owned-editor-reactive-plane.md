@@ -224,10 +224,12 @@ contains the captured response for a retained post-commit reposition.
 that produced it. It never consults a later current-cycle capture after
 checkpoint, abandonment, or supervisor recycling.
 
-The controller `Effect` publishes the exact action identity through the shared
-captured-finalize state-plane channel. All running supervisors observe that
-channel, but only the document-owning supervisor's single-flight worker applies
-the existing authority-safe reconcile. The action identity includes the
+The controller `Effect` handles the two actions differently. Exact delivery
+publishes the pinned continuation identity through the shared captured-finalize
+state-plane channel, where only the document-owning supervisor's single-flight
+worker resumes the still-open closeout. A materialized post-commit reposition is
+already owned by a terminal cycle, so the Effect appends its convergence fact
+directly and never wakes response replay. Action identity includes the
 controller generation and delivery version, so repeated observations and
 multiple subscriptions do not duplicate work.
 

@@ -2394,6 +2394,7 @@ enum RetainedTransitionEffect {
     ObserveCurrentDelivery(RetainedDeliveryActivation),
     ApplyTarget(RetainedTransitionProjection),
     ResumeCloseout(RetainedResumeSignal),
+    SettleMaterializedCapture(RetainedResumeSignal),
 }
 
 impl RetainedTransitionState {
@@ -2408,10 +2409,10 @@ impl RetainedTransitionState {
             Self::TargetVisible {
                 resume: Some(signal),
                 ..
-            }
-            | Self::ReconcileMaterializedCapture(signal) => {
-                Some(RetainedTransitionEffect::ResumeCloseout(signal.clone()))
-            }
+            } => Some(RetainedTransitionEffect::ResumeCloseout(signal.clone())),
+            Self::ReconcileMaterializedCapture(signal) => Some(
+                RetainedTransitionEffect::SettleMaterializedCapture(signal.clone()),
+            ),
             Self::NoProjection
             | Self::Idle
             | Self::AwaitingController { .. }
@@ -2501,11 +2502,11 @@ impl RetainedWriteSettleSink {
         target_hash: &str,
         source: &str,
         intent_source: &agent_doc_state_backbone::DocumentWriteSource,
-    ) {
+    ) -> bool {
         let Some(runtime) = self.runtime.upgrade() else {
             // The controller is shutting down; the intent stays retained and the
             // next controller derives the same verdict from the same ledger.
-            return;
+            return false;
         };
         let event = agent_doc_state_backbone::StateEvent::new(
             format!("document-write-converged-{document_hash}-{intent_id}"),
@@ -2519,11 +2520,13 @@ impl RetainedWriteSettleSink {
         );
         if let Err(e) = append_state_event(&self.project_root, &event) {
             eprintln!("[controller] retained-write settle append failed for {document_hash}: {e}");
-            return;
+            return false;
         }
         if let Err(e) = runtime.apply_state_event(&event) {
             eprintln!("[controller] retained-write settle apply failed for {document_hash}: {e}");
+            return false;
         }
+        true
     }
 
     /// Observe the already-retained editor/CRDT projection when a replacement
@@ -2596,6 +2599,59 @@ impl RetainedWriteSettleSink {
                 signal.target_hash,
                 signal.cycle_id,
                 signal.capture_id,
+                signal.controller_generation,
+            ),
+        );
+        true
+    }
+
+    /// Retire an obsolete post-commit reposition once the converged editor
+    /// projection already contains the pinned response continuation.
+    ///
+    /// This is settlement of a derived state, not another finalize attempt:
+    /// the owning cycle is already terminal and replaying its body would turn
+    /// harmless layout residue into an operator-blocking duplicate closeout.
+    fn settle_materialized_capture(
+        &self,
+        document_hash: &str,
+        signal: &RetainedResumeSignal,
+    ) -> bool {
+        let Some(runtime) = self.runtime.upgrade() else {
+            return false;
+        };
+        let Ok(Some(projection)) = runtime.document_state_projection(document_hash) else {
+            return false;
+        };
+        if signal.action != RetainedResumeAction::ReconcileMaterializedCapture
+            || !retained_resume_signal_matches_projection(signal, &projection)
+        {
+            return false;
+        }
+        let Some(intent) = projection.document.pending_write.as_ref() else {
+            return false;
+        };
+        if intent.source != agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition {
+            return false;
+        }
+        let source = "controller_retained_materialized_capture_settlement_effect";
+        if !self.settle(
+            document_hash,
+            &intent.intent_id,
+            &intent.target_hash,
+            source,
+            &intent.source,
+        ) {
+            return false;
+        }
+        agent_doc_ops_log_io::log_op(
+            &self.project_root,
+            &format!(
+                "retained_materialized_capture_settled_reactively document_hash={document_hash} intent_id={} target_hash={} cycle_id={} capture_id={} delivery_version={} controller_generation={}",
+                signal.intent_id,
+                signal.target_hash,
+                signal.cycle_id,
+                signal.capture_id,
+                signal.delivery_version,
                 signal.controller_generation,
             ),
         );
@@ -3408,13 +3464,15 @@ impl ControllerDocumentGraphs {
                 return;
             };
             let source = "controller_retained_write_settlement_effect";
-            sink.settle(
+            if !sink.settle(
                 &effect_key,
                 &intent_id,
                 &retained_target_hash,
                 source,
                 &intent_source,
-            );
+            ) {
+                return;
+            }
             agent_doc_ops_log_io::log_op(
                 &sink.project_root,
                 &format!(
@@ -3638,6 +3696,11 @@ impl ControllerDocumentGraphs {
                         published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
                     }
                 }
+                RetainedTransitionEffect::SettleMaterializedCapture(signal) => {
+                    if sink.settle_materialized_capture(&effect_key, signal) {
+                        published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
+                    }
+                }
             }
         });
         let mut effects = self.retained_transition_effects.lock();
@@ -3785,10 +3848,9 @@ fn derive_retained_resume_signal(
     {
         // A post-commit reposition carries layout cleanup, not a missing
         // response body. If a newer converged projection already contains the
-        // durable response, wake the owner supervisor's authority-safe
-        // reconciliation rather than waiting forever for the obsolete byte
-        // target. The supervisor still validates canonical structure and
-        // canonical/disk equality before it can retire the retained intent.
+        // durable response, the reactive settlement Effect can retire the
+        // obsolete layout transition directly. The already-terminal owner
+        // cycle must not replay its response body through the supervisor.
         RetainedResumeAction::ReconcileMaterializedCapture
     } else {
         return None;
@@ -4221,6 +4283,10 @@ impl ControllerRuntime {
                 Some("response_captured")
             }
             agent_doc_state_backbone::StateFact::WriteApplied { .. } => Some("write_applied"),
+            agent_doc_state_backbone::StateFact::DocumentWriteConverged {
+                intent_source: agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition,
+                ..
+            } => None,
             agent_doc_state_backbone::StateFact::DocumentWriteConverged { .. } => {
                 Some("document_write_converged")
             }
@@ -11756,8 +11822,8 @@ agent:queue\n\
     }
     #[test]
     #[ignore = "global /proc preparing-controller sweep: would reap the per-project M3 \
-                sentinel tests' processes under nextest concurrency. Runs in the \
-                `make check` --ignored leg, where it is the only such sweeper."]
+                sentinel tests' processes under nextest concurrency. Runs serially in \
+                the `make tmux-ci` ignored-test leg."]
     fn all_projects_reaper_reaps_aged_cross_project_preparing_sentinel() {
         // The all-projects API takes no project_root: it must discover this wedged
         // Preparing controller purely from `/proc` and reap it keyed to its OWN root.
@@ -12271,6 +12337,9 @@ agent:queue\n\
             Some(RetainedTransitionEffect::ObserveCurrentDelivery(_)) => "observe_current_delivery",
             Some(RetainedTransitionEffect::ApplyTarget(_)) => "apply_target",
             Some(RetainedTransitionEffect::ResumeCloseout(_)) => "resume_closeout",
+            Some(RetainedTransitionEffect::SettleMaterializedCapture(_)) => {
+                "settle_materialized_capture"
+            }
         }
     }
 
@@ -12411,7 +12480,7 @@ agent:queue\n\
                 Some(delivery("operator queue edit\nresponse body\n", 1, true)),
                 1,
                 "reconcile_materialized_capture",
-                "resume_closeout",
+                "settle_materialized_capture",
             ),
             (
                 "legacy transition has no base",
@@ -12755,7 +12824,7 @@ agent:queue\n\
     }
 
     #[test]
-    fn retained_materialized_capture_is_published_once_for_all_supervisor_subscribers() {
+    fn retained_materialized_capture_is_settled_without_supervisor_replay() {
         let dir = tempfile::TempDir::new().unwrap();
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
         let (_file, document_hash) = retained_test_document(&dir);
@@ -12770,6 +12839,7 @@ agent:queue\n\
         *source = agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition;
         append_state_event(dir.path(), &event).unwrap();
         runtime.apply_state_event(&event).unwrap();
+        rpc::clear_captured_finalize_wake(&runtime, &document_hash);
 
         let materialized = RetainedDeliveryObservation {
             file: PathBuf::from("/work/task.md"),
@@ -12783,20 +12853,24 @@ agent:queue\n\
             .document_graphs
             .observe_retained_delivery(&document_hash, Some(materialized.clone()));
 
-        assert_eq!(
-            runtime
+        assert!(
+            !runtime
                 .captured_finalize_wakes
                 .lock()
-                .get(&document_hash)
-                .map(|wake| wake.reason.as_str()),
-            Some("retained_materialized_capture_reconcile_reactive")
+                .contains_key(&document_hash),
+            "a terminal post-commit reposition is settlement, not a finalize wake"
+        );
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash),
+            None,
+            "the reactive settlement effect must retire the obsolete reposition"
         );
         assert!(
             runtime
                 .document_graphs
                 .current_retained_resume(&document_hash)
                 .is_none(),
-            "the controller-local published frontier deduplicates the shared recovery action"
+            "settlement must not leave a supervisor replay candidate"
         );
 
         runtime
@@ -12807,7 +12881,7 @@ agent:queue\n\
                 .document_graphs
                 .current_retained_resume(&document_hash)
                 .is_none(),
-            "repeated supervisor-visible projections cannot republish the same frontier"
+            "repeated delivery projections cannot recreate the settled transition"
         );
     }
 

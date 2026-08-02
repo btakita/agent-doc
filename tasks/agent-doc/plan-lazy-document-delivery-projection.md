@@ -43,6 +43,7 @@ projection consumers. Disk is a settlement sink, not a competing live authority.
 | --- | --- | --- |
 | Agent/compact mutation accepted | Canonical revision becomes desired; delivery is pending | Queue exact canonical replace/delta for attached editors |
 | Editor visible projection equals the exact revision | Derived convergence advances | Persist the exact canonical target and resume the captured closeout |
+| Newer converged projection already contains a terminal cycle's response and the retained write is only post-commit repositioning | Materialized capture reconciliation becomes eligible | Append convergence and retire the obsolete transition without replaying the response |
 | Retained transition is pending and visible projection still equals its recorded base | Guarded transition projection becomes eligible | Compare-and-project the transition's target through the CRDT relay |
 | Editor reports a stale baseline | Delivery remains pending; stale delta is quarantined | Re-project current canonical revision to that editor |
 | Editor has unsaved divergent text | Conflict remains explicit and unsettled | Do not adopt, merge, save, snapshot, or commit |
@@ -54,8 +55,9 @@ The implementation represents this table as one `RetainedTransitionState` enum:
 `AwaitingLiveEditor`, `AwaitingConvergence`, `ApplyTarget`, `TargetVisible`,
 `ReconcileMaterializedCapture`, or a typed `Conflict`. A second Computed projects
 at most one `RetainedTransitionEffect`: observe the current delivery, apply
-Target, or resume closeout. This makes every waiting/conflict row explicitly
-effect-free and lets a single table test cover the state/effect product.
+Target, resume an open closeout, or settle a materialized terminal capture. This
+makes every waiting/conflict row explicitly effect-free and lets a single table
+test cover the state/effect product.
 
 ### Reactive topology
 

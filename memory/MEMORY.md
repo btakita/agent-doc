@@ -7,15 +7,18 @@
 - **Concurrency/shared tree** — don't force; commit+push to OWN remote: [force-push](feedback_concurrent_sessions_force_push_shared_superproject.md), [refactor churn](feedback_concurrent_agent_doc_refactor_session_build_coordination.md), [JB pane](feedback_jb_run_agentdoc_route_owned_pane_processing_prompt_collision.md), [DEV stalls closeout](reference_concurrent_agentdoc_dev_session_stalls_closeout_recycle.md).
 - [bugs2.done.md=ARCHIVE](reference_agent_doc_bugs2_done_is_archive_not_session.md); [boundary accum worktree-only](feedback_boundary_accum_worktree_only_ipc_repair_checkout_head.md).
 - **Stale-plugin wedges**: [buffer behind → restart, force-disk, commit, reset](reference_agent_doc_stale_plugin_heartbeat_forcedisk_recovery.md); [ACK loop → `reload-lib` + `write --commit`](reference_agent_doc_stale_plugin_ack_wedge_reload_lib_unwedge.md).
-- **[Authority = document CONCATENATED with itself](reference_agent_doc_doubled_canonical_target_wedges_all_recovery.md)** — `duplicate_singleton_component` blocks EVERY recovery incl. `--force-disk`; `exchange list` still works. Don't touch state.db.
+- **[Authority = document CONCATENATED with itself](reference_agent_doc_doubled_canonical_target_wedges_all_recovery.md)** — `duplicate_singleton_component` blocks EVERY recovery incl. `--force-disk`; may be PARTIAL and `exchange list` may fail too. **Hand-aligning disk to the authority invites it.** Escape: strike the head + `[x]` the item by hand, `git commit --only`. Don't touch state.db.
 - **Duplicate boundary markers** hard-fail preflight AND session-check — [no self-heal](reference_agent_doc_recovery_replay_duplicate_boundary_wedges_integrity_gate.md).
 - **Compact commits, doc stays uncompacted**: [`patch <FILE> exchange` with HEAD's body](reference_agent_doc_compact_committed_but_visible_rewrite_deferred.md) — reload-lib does NOT flush; never `write --commit`.
+- **Backticks in `--backlog-add` corrupt the item + coin a new id** — [struck original, live orphan, false "handled"](reference_agent_doc_backticks_in_backlog_add_corrupt_item_and_coin_new_id.md); repair via `--backlog-edit`.
+- **Coined-id guard: both defects FIXED** — [C-preprocessor false positive + the fail-open ledger hole](reference_agent_doc_coined_id_hook_blocks_c_preprocessor_directives.md); lesson: "cannot check" sharing a return with "nothing to check" always fails open.
 - **`state.db` clobbered** ⇒ EVERY doc dies: [header bytes 0-103](reference_agent_doc_state_db_header_clobbered_by_tracing_on_controller_recycle.md), [debug tracing](reference_agent_doc_state_db_overwritten_by_debug_tracing.md) — check `head -c 16`; printed `pkill` kills OTHER sessions.
 - **Retained `pending_write` on a SUPERSEDED hash**: [`commit <FILE>` clears it](reference_agent_doc_retained_pending_write_superseded_hash_agent_doc_commit.md) — everything else refuses; never force-disk.
 - **"deferred: authority_unavailable" ⇒ mutations may ALREADY be on disk**: [read the doc before retrying](reference_agent_doc_deferred_write_may_have_already_applied_mutations.md) — blind retry dies on the duplicate-id guard; and `session-check ok` does NOT prove `--done`/`--backlog-add` applied.
 - **Gate deadlock** (all three refuse): [`reset --from-current --preserve-session` + id-bearing `### Re:`](reference_agent_doc_gate_deadlock_reset_from_current_and_id_bearing_re_block.md).
+- **Renaming the session doc mid-cycle**: [deadlocks the new path AND scrambles exchange order](reference_agent_doc_rename_session_doc_midcycle_scrambles_exchange.md) — body above the prompt, orphaned `### Re:`; `session-check ok` does NOT catch it. Read the exchange after recovery.
 - **Resurrected deleted queue head**: [stale overlay.yrs + wedged controller](reference_agent_doc_dangling_queue_head_resurrect_baseline_overlay_and_controller_model_wedge.md) — recycle defers → kill `controller serve` pid.
-- **`write_applied`, commit refuses "direct patchback"**: [guard misfires on the binary's OWN write](reference_agent_doc_write_applied_no_terminal_patchback_guard_misfire.md) — hand `git commit --only`.
+- **`write_applied`, commit refuses "direct patchback"**: [guard misfires on the binary's OWN write](reference_agent_doc_write_applied_no_terminal_patchback_guard_misfire.md) — bare `write --commit` (no stdin) THEN `preflight`; hand `git commit --only` only as fallback.
 
 ## agent-doc Project Intent
 
@@ -58,11 +61,14 @@
 - [coverage.json is hot multi-session](reference_lazily_coverage_json_hot_multisession_file.md) — one commit per binding. [Queue `go` overrides queue:stop](feedback_queue_go_marker_overrides_stop_churn.md) — remove `go` AND set stop.
 - **[Signal clause 3](reference_lazily_signal_clause3_welded_eagerness.md)** — welded eagerness into slot invalidation; 2–3× compute. go blocked on consuming cascade.
 - **[3 ways to report green while testing nothing](reference_lazily_conformance_delivery_three_failure_modes.md)** — REPAIRED. **Always assert fixtures ran.**
+- **[A new canonical fixture reddens ALL NINE bindings](reference_lazily_spec_new_canonical_fixture_reddens_all_nine.md)** — budget ~10 repos, not 1; mirrors don't gate, the coverage guards do.
+- **[A JSON fixture can't carry a >2^53 expectation as a number](reference_conformance_fixture_cannot_carry_its_own_expectation_as_a_json_number.md)** — the loading parser rounds it; wire=text/hex, expectation=decimal string.
 
 ## Decisions
 
 - **[Runners assert the LIBRARY, not runner bookkeeping](feedback_conformance_tests_drive_real_behavior_not_runner_bookkeeping.md)** — counters inside the library's call path; mutation-check each.
 - **[Use the AST, never regex, for source edits](feedback_use_ast_not_regex_for_source_edits.md)** — `tsift edit-intents --apply --verify`; regex ate match arms.
+- **[Shared `lazily-spec` corpus: a mutation probe reddens EVERY other binding](reference_lazily_spec_shared_corpus_concurrent_mutation_probes.md)** — scratch-copy + `LAZILY_SPEC_CONFORMANCE_DIR`, never edit in place.
 - **[NEVER run two subagents against one repo](feedback_never_dispatch_concurrent_agents_into_one_repo.md)** — one `git reset`s the other's work; clean `git status` ≠ proof.
 - **[Discuss naming to convergence BEFORE editing](feedback_discuss_naming_before_applying.md)** — 5 mid-discussion renames caused cross-repo churn.
 - [Refactor-spiral guardrails](user_refactor_spiral_pattern_guardrails.md); [note ≠ endorsement](feedback_askuserquestion_no_option_confirm_actual_choice.md); [plain not jargon](feedback_explain_decisions_plainly_not_jargon.md); [no sycophancy](feedback_no_sycophancy.md); [don't oversimplify](feedback_no_oversimplify.md); [priorities](user_communication_priorities.md).
@@ -78,6 +84,7 @@
 - **Concurrent-deploy (clobber-immune)**: [worktree as source](reference_efs_worktree_as_deploy_and_commit_source_clobber_immune.md), [string-grep verify](reference_efs_verify_deploy_via_string_grep.md), [deploy from main](reference_efs_deploy_from_main_checkout_not_fresh_install_worktree.md), [commit only yours](feedback_efs_commit_only_your_files_via_temp_index_compare_and_swap.md).
 - **[Worktree deploy CAN carry worktree-local `lib/` edits](reference_efs_worktree_deploy_with_lib_local_workspace_links.md)** — mirror node_modules per-entry + rebuild `@btakita` links relative to the worktree at app/ AND every `lib/*/node_modules`; isolation proof = content-hashed asset names.
 - **[Guard tests slice a FIXED byte window of source](reference_efs_fixed_window_source_grep_tests_break_on_comments.md)** — a new comment pushes the guarded call out; slice to the end of the function.
+- **[Workers Logs drops an Error's header line; a sim endpoint the real service lacks is a permanent false green](reference_workers_logs_drops_error_header_and_sim_fake_endpoint_false_green.md)** — `console.error(msg, err)` printed bare frames; TMO has NO payment-schedule endpoint (it rides inline on the loan's `Fields[]`).
 - **[Pipeline routes ANY unknown loan status into "Available Deals"](reference_efs_pipeline_unknown_status_falls_into_available_deals.md)** — prod stores `Application Declined`, code knows only `Denied`; admin column ≠ lender feed (which filters `investment_deals.status`, never loan status).
 - [Doc-type catalogue](reference_efs_document_type_catalogue_locations.md) — `dt_*` = seed migration + 4 mirrors. [Drive portal](reference_efs_local_portal_drive_recipe.md), [lender on PROD](reference_efs_prod_lender_login_verify_recipe.md).
 

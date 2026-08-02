@@ -19,6 +19,7 @@ agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.109" }
 agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.109" }
 agent-doc-session-registry = { path = "../agent-doc-session-registry", version = "0.35.109" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.109" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.109" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.109" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.109" }
 anyhow = "1"

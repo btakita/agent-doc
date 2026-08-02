@@ -44,6 +44,28 @@ append-only ownership-generation provenance.
 
 Last-call-wins: any `claim` overwrites the previous mapping for that document's session UUID.
 
+**Session identity ownership:** A frontmatter session UUID names one document,
+not whichever registry row happens to be visited first. The first durable
+`DocumentSessionIdentityObserved` event owns the identity; ordering is the
+controller's global event sequence with canonical document key as a
+deterministic tie-breaker. Start publishes the observation and projects this
+fact before pane lookup:
+
+| Projected claim | Start transition |
+| --- | --- |
+| Unclaimed | Keep the document UUID and register it |
+| Owned by this canonical document | Keep the UUID and reuse/rebind this document's actor |
+| Owned by another canonical document | Assign this copied document a fresh UUID through document authority, then continue routing |
+
+Registration independently rejects the third state while holding the registry
+lock. This is the race fence: no legacy route may create parallel ownership
+after projection. For identities created before the typed event existed, the
+current registry owner seeds exactly one compatibility observation; all later
+decisions use durable event order. Supervisor recycling and registry pruning
+therefore cannot change the owner. Session lookup uses that same owner rule, so
+an old duplicate cannot select an arbitrary sibling supervisor while it is
+being repaired.
+
 **Canonical same-document claim reuse:** `claim` must judge "is this pane already mine?" by canonical document identity, not by an incidental caller path. The registry key is a canonical file path, not a session UUID. Re-claiming the same live pane for the same document, including submodule-relative `entry.file` shapes, must remain idempotent and must not provision a duplicate pane.
 
 **Cross-session claim guard:** `claim` may bind to a pane in the operator's current tmux session even when the configured project `tmux_session` points at another still-live session. This is a live-session override, not a config rewrite: the configured value remains unchanged, and it is still the fallback when the current session is not the active `agent-doc` session. Other cross-session claims are invalid unless the configured project session is stale or the user explicitly passes `--force`.

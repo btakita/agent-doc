@@ -318,6 +318,16 @@ pub enum StateFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         editor_id: Option<String>,
     },
+    /// A document was observed carrying one session identity.
+    ///
+    /// Event order, not the mutable registry projection, determines the owner
+    /// when copied markdown documents contain the same UUID. This fact is never
+    /// cleared by supervisor recycling or pane deregistration.
+    DocumentSessionIdentityObserved {
+        document_hash: String,
+        canonical_path: String,
+        session_id: String,
+    },
     DocumentWriteDeferred {
         document_hash: String,
         intent_id: String,
@@ -899,6 +909,7 @@ impl StateFact {
             | Self::FileWatchChangeObserved { document_hash, .. }
             | Self::DocumentDiskWriteObserved { document_hash, .. }
             | Self::DocumentAuthorityObserved { document_hash, .. }
+            | Self::DocumentSessionIdentityObserved { document_hash, .. }
             | Self::DocumentWriteDeferred { document_hash, .. }
             | Self::DocumentWriteConverged { document_hash, .. }
             | Self::DocumentCompactProjectionRetained { document_hash, .. }
@@ -994,6 +1005,7 @@ impl StateFact {
             | Self::FileWatchChangeObserved { .. }
             | Self::DocumentDiskWriteObserved { .. }
             | Self::DocumentAuthorityObserved { .. }
+            | Self::DocumentSessionIdentityObserved { .. }
             | Self::DocumentWriteDeferred { .. }
             | Self::DocumentWriteConverged { .. }
             | Self::DocumentCompactProjectionRetained { .. }
@@ -1059,6 +1071,7 @@ impl StateFact {
             Self::FileWatchChangeObserved { .. } => "file_watch_change_observed",
             Self::DocumentDiskWriteObserved { .. } => "document_disk_write_observed",
             Self::DocumentAuthorityObserved { .. } => "document_authority_observed",
+            Self::DocumentSessionIdentityObserved { .. } => "document_session_identity_observed",
             Self::DocumentWriteDeferred { .. } => "document_write_deferred",
             Self::DocumentWriteConverged { .. } => "document_write_converged",
             Self::DocumentCompactProjectionRetained { .. } => {
@@ -1633,6 +1646,11 @@ impl DocumentStateProjection {
                 ) {
                     self.reject_stale(StateDomain::Document, StateOwner::DocumentWriter);
                 }
+            }
+            StateFact::DocumentSessionIdentityObserved { .. } => {
+                // This fact projects across documents from global ledger order.
+                // The per-document projection intentionally has no mutable
+                // ownership cell that recycling could reset.
             }
             StateFact::DocumentWriteDeferred {
                 intent_id,

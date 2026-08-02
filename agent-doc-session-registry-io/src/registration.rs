@@ -16,8 +16,9 @@
 //! - `register_with_pid` queries the pane's window and delegates to `register_full`.
 //! - `register_supervisor` records the authoritative supervisor PID +
 //!   supervisor instance identity for a live pane owner.
-//! - `register_full` enforces single-session-per-pane by evicting stale entries that
-//!   share the same pane before inserting the new `SessionEntry`.
+//! - `register_full` rejects a session identity already owned by another document,
+//!   then enforces single-session-per-pane by evicting stale entries that share the
+//!   same pane before inserting the new `SessionEntry`.
 //! - When the same session UUID is rebound to a different pane, `register_full`
 //!   best-effort appends supervisor session-log rebind events before the new
 //!   pane registration lands.
@@ -25,8 +26,9 @@
 //! - Registry snapshot IO is not self-locking. Any read-modify-write cycle must
 //!   acquire `RegistryLock` first; prefer `tmux_router::with_registry` for safe
 //!   cycles.
-//! - `register_full` guarantees at most one registry entry per pane ID; pre-existing
-//!   entries pointing to the same pane are removed before the new entry is inserted.
+//! - `register_full` guarantees at most one document per session identity and at
+//!   most one registry entry per pane ID; pre-existing entries pointing to the same
+//!   pane are removed before the new entry is inserted.
 //!
 //! ## Evals
 //! - registry_multiple_sessions_isolated: two entries with distinct pane IDs round-trip
@@ -460,6 +462,23 @@ fn register_full_internal(
     let registry_key = session_registry::canonical_registry_key_in(base_dir, file);
     let supervisor_instance_id = supervisor_instance_id.unwrap_or_default().to_string();
 
+    let identity_claim = session_registry_io::durable_session_identity_claim_in(
+        base_dir,
+        session_id,
+        Path::new(file),
+    )?
+    .unwrap_or_else(|| {
+        session_registry::session_identity_claim(base_dir, registry, session_id, file)
+    });
+    if let session_registry::SessionIdentityClaim::Conflicting(owner) = identity_claim {
+        anyhow::bail!(
+            "refusing duplicate session identity {session_id} for {file}: first durable owner is {} in pane {} (registered {})",
+            owner.file,
+            owner.pane,
+            owner.started,
+        );
+    }
+
     // Enforce single session per pane: remove stale entries pointing to same pane
     let stale_keys = session_registry::remove_stale_pane_bindings(registry, pane_id, session_id);
     log_stale_registry_keys(&stale_keys, pane_id);
@@ -765,6 +784,51 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let reg = session_registry_io::load_in(dir.path()).unwrap();
         assert!(reg.is_empty());
+    }
+
+    #[test]
+    fn registration_rejects_session_identity_owned_by_another_document() {
+        let dir = TempDir::new().unwrap();
+        let mut registry = SessionRegistry::new();
+        let owner_file = dir.path().join("original.md");
+        let copy_file = dir.path().join("copy.md");
+        session_registry::insert_registry_entry(
+            dir.path(),
+            &mut registry,
+            session_registry::RegistryEntryFields {
+                session_id: "copied-session",
+                pane_id: "%8",
+                file: &owner_file.display().to_string(),
+                pid: 8,
+                cwd: &dir.path().display().to_string(),
+                started: "2026-08-02T01:29:54Z",
+                window: "@8",
+                supervisor_instance_id: "supervisor-8",
+            },
+        );
+
+        let error = register_full_internal(
+            dir.path(),
+            &mut registry,
+            "copied-session",
+            "%9",
+            &copy_file.display().to_string(),
+            9,
+            "@9",
+            &dir.path().display().to_string(),
+            Some("supervisor-9"),
+            "start",
+            "session_start",
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("refusing duplicate session identity")
+        );
+        assert!(error.to_string().contains("original.md"));
+        assert_eq!(registry.len(), 1);
     }
 
     #[test]

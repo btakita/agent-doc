@@ -14788,8 +14788,12 @@ fn test_agent_doc_session_registry_owns_registry_mutation_policy() {
     for required in [
         "pub struct RegistryEntryFields",
         "pub struct RegistryReplacement",
+        "pub struct SessionIdentityOwner",
+        "pub enum SessionIdentityClaim",
         "pub fn canonical_registry_key_in(",
         "pub fn session_key(",
+        "pub fn session_identity_owner(",
+        "pub fn session_identity_claim(",
         "pub fn session_pane(",
         "pub fn session_entry(",
         "pub fn remove_session_by_id(",
@@ -14798,7 +14802,7 @@ fn test_agent_doc_session_registry_owns_registry_mutation_policy() {
         "pub fn registry_entry(",
         "pub fn insert_registry_entry(",
         "pub fn replace_registry_entry(",
-        "find_registry_key_by_session_id(registry, session_id)",
+        "session_identity_owner(registry, session_id)",
         "entry_session_id(key, entry) != session_id",
     ] {
         assert!(
@@ -22628,7 +22632,7 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
         registry_source.contains("use tmux_router::registry::{")
             && registry_source.contains("canonical_registry_key_in")
             && registry_source.contains("entry_session_id")
-            && registry_source.contains("find_registry_key_by_session_id"),
+            && registry_source.contains("session_identity_owner(registry, session_id)"),
         "agent-doc-session-registry should adapt tmux-router registry policy directly"
     );
 

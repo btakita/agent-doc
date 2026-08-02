@@ -2129,6 +2129,7 @@ dependencies = [
  "agent-doc-session-actor-io",
  "agent-doc-session-registry",
  "agent-doc-sqlite",
+ "agent-doc-state-backbone",
  "agent-doc-supervisor",
  "agent-doc-tmux-io",
  "anyhow",

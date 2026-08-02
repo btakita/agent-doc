@@ -45,6 +45,134 @@ pub struct StartRuntime {
     pub post_start_document_model_ensure: bool,
 }
 
+#[derive(Debug)]
+struct SessionIdentityRekey {
+    previous_session_id: String,
+    owner: agent_doc_session_registry_io::SessionIdentityOwner,
+}
+
+#[derive(Debug)]
+struct ResolvedStartSessionIdentity {
+    content: String,
+    session_id: String,
+    rekey: Option<SessionIdentityRekey>,
+}
+
+fn publish_session_identity_observation_with(
+    project_root: &Path,
+    file: &Path,
+    session_id: &str,
+    publish: &mut impl FnMut(&Path, &agent_doc_state_backbone::StateEvent) -> Result<bool>,
+) -> Result<()> {
+    let resolved_file = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        project_root.join(file)
+    };
+    let canonical = std::fs::canonicalize(&resolved_file).unwrap_or(resolved_file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!(
+            "document-session-identity:{}:{}",
+            document_hash,
+            agent_doc_hash::content_hash(session_id)
+        ),
+        agent_doc_state_backbone::StateFact::DocumentSessionIdentityObserved {
+            document_hash,
+            canonical_path: canonical.display().to_string(),
+            session_id: session_id.to_string(),
+        },
+    );
+    publish(project_root, &event)?;
+    Ok(())
+}
+
+fn resolve_start_session_identity_with_publisher(
+    project_root: &Path,
+    file: &Path,
+    content: String,
+    session_id: String,
+    mut publish: impl FnMut(&Path, &agent_doc_state_backbone::StateEvent) -> Result<bool>,
+) -> Result<ResolvedStartSessionIdentity> {
+    if agent_doc_session_registry_io::durable_session_identity_claim_in(
+        project_root,
+        &session_id,
+        file,
+    )?
+    .is_none()
+    {
+        let compatibility_claim = agent_doc_session_registry_io::session_identity_claim_in(
+            project_root,
+            &session_id,
+            file,
+        )?;
+        let compatibility_owner = match compatibility_claim {
+            agent_doc_session_registry_io::SessionIdentityClaim::OwnedByDocument(owner)
+            | agent_doc_session_registry_io::SessionIdentityClaim::Conflicting(owner) => {
+                Some(owner)
+            }
+            agent_doc_session_registry_io::SessionIdentityClaim::Unclaimed => None,
+        };
+        if let Some(owner) = compatibility_owner
+            && !owner.file.is_empty()
+        {
+            publish_session_identity_observation_with(
+                project_root,
+                Path::new(&owner.file),
+                &session_id,
+                &mut publish,
+            )?;
+        }
+    }
+    publish_session_identity_observation_with(project_root, file, &session_id, &mut publish)?;
+    let Some(claim) = agent_doc_session_registry_io::durable_session_identity_claim_in(
+        project_root,
+        &session_id,
+        file,
+    )?
+    else {
+        anyhow::bail!(
+            "session identity observation for {} was published but is absent from the durable projection",
+            file.display()
+        );
+    };
+    let agent_doc_session_registry_io::SessionIdentityClaim::Conflicting(owner) = claim else {
+        return Ok(ResolvedStartSessionIdentity {
+            content,
+            session_id,
+            rekey: None,
+        });
+    };
+
+    let previous_session_id = session_id;
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let content = frontmatter::set_session_id(&content, &session_id)?;
+    publish_session_identity_observation_with(project_root, file, &session_id, &mut publish)?;
+    Ok(ResolvedStartSessionIdentity {
+        content,
+        session_id,
+        rekey: Some(SessionIdentityRekey {
+            previous_session_id,
+            owner,
+        }),
+    })
+}
+
+fn resolve_start_session_identity(
+    project_root: &Path,
+    file: &Path,
+    content: String,
+    session_id: String,
+) -> Result<ResolvedStartSessionIdentity> {
+    resolve_start_session_identity_with_publisher(
+        project_root,
+        file,
+        content,
+        session_id,
+        agent_doc_controller_io::project_controller::publish_state_event,
+    )
+}
+
 pub fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
     if let Some(f) = log {
         let _ = writeln!(f, "[{}] {}", timestamp(), msg);
@@ -328,10 +456,23 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
     agent_doc_frontmatter_io::session::require_agent_doc_document(&content, file)?;
     let (updated_content, session_id) =
         agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)?;
-    let generated_session_uuid = updated_content != content;
-    if generated_session_uuid && post_start_document_model_ensure {
+    let assigned_missing_session_uuid = updated_content != content;
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
+        });
+    let resolved_identity =
+        resolve_start_session_identity(&project_root, file, updated_content, session_id)?;
+    let updated_content = resolved_identity.content;
+    let session_id = resolved_identity.session_id;
+    let rekeyed_session_identity = resolved_identity.rekey;
+    let document_identity_changed =
+        assigned_missing_session_uuid || rekeyed_session_identity.is_some();
+    if document_identity_changed && post_start_document_model_ensure {
         anyhow::bail!(
-            "cannot generate a session UUID for {} while editor authority is attached but the live document model is unavailable; save or reload the editor buffer, then retry start",
+            "cannot change the session UUID for {} while editor authority is attached but the live document model is unavailable; save or reload the editor buffer, then retry start",
             file.display()
         );
     }
@@ -351,18 +492,33 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
         &rc.ssh_context(),
     )?;
     let global_config = agent_doc_config::load().unwrap_or_default();
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
-        });
     let mut session_log = open_session_log(&canonical, &session_id);
-    if generated_session_uuid {
+    if assigned_missing_session_uuid {
         start_console_status(
             &mut session_log,
             route_owned,
             format!("Generated session UUID: {session_id}"),
+        );
+    }
+    if let Some(rekey) = rekeyed_session_identity {
+        let message = format!(
+            "session_identity_rekeyed file={} previous_session_id={} new_session_id={} owner_file={} owner_pane={} owner_registered={}",
+            file.display(),
+            rekey.previous_session_id,
+            session_id,
+            rekey.owner.file,
+            rekey.owner.pane,
+            rekey.owner.started,
+        );
+        log_event(&mut session_log, &message);
+        agent_doc_ops_log_io::log_op(file, &message);
+        start_console_status(
+            &mut session_log,
+            route_owned,
+            format!(
+                "[start] copied session identity belonged to {}; assigned a fresh identity",
+                rekey.owner.file
+            ),
         );
     }
 
@@ -1092,6 +1248,68 @@ mod tests {
         // fall back to the whole id instead of panicking on a char boundary.
         let multibyte = "sessioné-xyz"; // 'é' is 2 bytes, spanning bytes 7..9
         assert_eq!(session_id_short(multibyte), multibyte);
+    }
+
+    #[test]
+    fn copied_document_session_identity_is_rekeyed_before_start_routing() {
+        let dir = tempfile::tempdir().unwrap();
+        let owner_file = dir.path().join("original.md");
+        let copy_file = dir.path().join("copy.md");
+        let copied_session = "38ba225e-ceae-4baa-aa17-8a7edec36148";
+        let mut registry = tmux_router::Registry::new();
+        let owner_key = tmux_router::registry::canonical_registry_key_in(
+            dir.path(),
+            &owner_file.display().to_string(),
+        );
+        registry.insert(
+            owner_key,
+            tmux_router::RegistryEntry {
+                pane: "%88".to_string(),
+                pid: 88,
+                cwd: dir.path().display().to_string(),
+                started: "2026-08-02T01:29:54Z".to_string(),
+                session_id: copied_session.to_string(),
+                file: owner_file.display().to_string(),
+                window: "@27".to_string(),
+                supervisor_instance_id: "supervisor-88".to_string(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
+        let content =
+            format!("---\nagent_doc_session: {copied_session}\nagent: codex\n---\n\n# Copy\n");
+
+        let resolved = resolve_start_session_identity_with_publisher(
+            dir.path(),
+            &copy_file,
+            content,
+            copied_session.to_string(),
+            agent_doc_controller_io::project_controller::append_state_event_for_test,
+        )
+        .unwrap();
+
+        assert_ne!(resolved.session_id, copied_session);
+        assert_eq!(
+            frontmatter::session_id_from_content(&resolved.content).as_deref(),
+            Some(resolved.session_id.as_str())
+        );
+        let rekey = resolved.rekey.unwrap();
+        assert_eq!(rekey.previous_session_id, copied_session);
+        assert_eq!(rekey.owner.file, owner_file.display().to_string());
+        assert!(rekey.owner.started.starts_with("state-event:"));
+
+        agent_doc_session_registry_io::save_in(dir.path(), &tmux_router::Registry::new()).unwrap();
+        let owner_content =
+            format!("---\nagent_doc_session: {copied_session}\nagent: codex\n---\n\n# Original\n");
+        let owner_after_registry_recycle = resolve_start_session_identity_with_publisher(
+            dir.path(),
+            &owner_file,
+            owner_content,
+            copied_session.to_string(),
+            agent_doc_controller_io::project_controller::append_state_event_for_test,
+        )
+        .unwrap();
+        assert_eq!(owner_after_registry_recycle.session_id, copied_session);
+        assert!(owner_after_registry_recycle.rekey.is_none());
     }
 
     #[test]

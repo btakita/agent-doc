@@ -3426,6 +3426,30 @@ pub fn load_recent_state_events_by_fact_type_from_db(
     Ok(events)
 }
 
+/// Load one typed fact stream across documents in durable event order.
+///
+/// Cross-document projections such as session-identity ownership must preserve
+/// the controller's global append order; querying each document separately
+/// would discard the ordering fact that resolves a collision.
+pub fn load_state_events_by_fact_type_from_db(
+    conn: &Connection,
+    fact_type: &str,
+) -> Result<Vec<StateEventStatus>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp
+        FROM state_events
+        WHERE fact_type = ?1
+        ORDER BY id
+        "#,
+    )?;
+    let mut events = Vec::new();
+    for row in stmt.query_map(params![fact_type], state_event_status_from_row)? {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
 // ---------------------------------------------------------------------------
 // Actor writes.
 // ---------------------------------------------------------------------------

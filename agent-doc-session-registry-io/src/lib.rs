@@ -5,9 +5,14 @@
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tmux_router::registry::canonical_registry_key_in;
 use tmux_router::registry::normalize_registry;
 use tmux_router::{Registry, RegistryEntry, RegistryLock};
+
+pub use agent_doc_session_registry::{
+    SessionIdentityClaim, SessionIdentityObservation, SessionIdentityOwner,
+};
 
 pub mod dispatch_registry;
 pub mod registration;
@@ -92,6 +97,76 @@ pub fn lookup_file_entry_in(base_dir: &Path, file: &Path) -> Result<Option<Regis
     let registry = load_in(base_dir)?;
     let registry_key = canonical_registry_key_in(base_dir, &file.display().to_string());
     Ok(registry.get(&registry_key).cloned())
+}
+
+/// Project the durable ownership claim for a document-carried session identity.
+///
+/// A copied markdown document can carry another document's session UUID. The
+/// first durable registration owns that identity; later documents must receive
+/// a fresh identity before any pane, actor, or supervisor lookup is attempted.
+pub fn session_identity_claim_in(
+    base_dir: &Path,
+    session_id: &str,
+    file: &Path,
+) -> Result<agent_doc_session_registry::SessionIdentityClaim> {
+    if let Some(claim) = durable_session_identity_claim_in(base_dir, session_id, file)? {
+        return Ok(claim);
+    }
+    let registry = load_in(base_dir)?;
+    Ok(agent_doc_session_registry::session_identity_claim(
+        base_dir,
+        &registry,
+        session_id,
+        &file.display().to_string(),
+    ))
+}
+
+/// Project session identity ownership from the immutable typed event stream.
+///
+/// `None` is the compatibility state for identities first registered before
+/// `document_session_identity_observed` existed.
+pub fn durable_session_identity_claim_in(
+    base_dir: &Path,
+    session_id: &str,
+    file: &Path,
+) -> Result<Option<SessionIdentityClaim>> {
+    let conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
+        base_dir,
+        Duration::from_secs(2),
+    )?;
+    let events = agent_doc_sqlite::state_store::load_state_events_by_fact_type_from_db(
+        &conn,
+        "document_session_identity_observed",
+    )?;
+    let mut observations = Vec::with_capacity(events.len());
+    for status in events {
+        let event: agent_doc_state_backbone::StateEvent =
+            serde_json::from_str(&status.payload_json).with_context(|| {
+                format!(
+                    "invalid document-session identity event {} at sequence {}",
+                    status.event_id, status.sequence
+                )
+            })?;
+        if let agent_doc_state_backbone::StateFact::DocumentSessionIdentityObserved {
+            document_hash,
+            canonical_path,
+            session_id,
+        } = event.fact
+        {
+            observations.push(SessionIdentityObservation {
+                sequence: status.sequence,
+                document_hash,
+                file: canonical_path,
+                session_id,
+            });
+        }
+    }
+    Ok(agent_doc_session_registry::durable_session_identity_claim(
+        base_dir,
+        &observations,
+        session_id,
+        &file.display().to_string(),
+    ))
 }
 
 /// Remove a session from CWD's registry under the registry lock.

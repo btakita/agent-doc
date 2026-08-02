@@ -18,6 +18,7 @@ agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.109" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.109" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.109" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.109" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.109" }
 agent-doc-hooks-io = { path = "../agent-doc-hooks-io", version = "0.35.109" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.109" }
@@ -45,6 +46,5 @@ tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.109" }
 agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.109" }
 tempfile = "3"

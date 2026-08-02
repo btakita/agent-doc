@@ -40,6 +40,35 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): do [#registerextractfunction]; do [#extractfrommethod]; do [#extractloopbreak]; 3 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): do [#zigthirdindexed]; do [#wsdq]; 0.1.79 released, published,...
+
+### Re: release + publish — opus-5
+
+> **Queue prompt:**
+>
+> release + publish
+
+
+**0.1.80 is out.** Tag `v0.1.80`, tsift `e2d3b88`, `make check` green at the bumped version, installed locally (`tsift 0.1.80`). All 26 crates on crates.io at 0.1.80, `opencode-tsift` 0.1.80 on npm, GitHub release with 6 assets.
+
+The release entry is the `extract_function` family — the first range-selected edit intent, seven languages, one analysis — with this cycle's stale-line-range batch refusal folded in.
+
+**The part worth reporting: the crates.io publish job failed, and finding out why corrected a standing assumption.**
+
+It uploaded `tsift-core` and `tsift-md-ast`, then stopped dead on the third crate:
+
+```
+403 Forbidden: The provided access token is not valid for crate `tsift-astgrep`
+```
+
+The loop has no per-crate tolerance, so the remaining 23 were never attempted. I finished the publish locally with the token from `passage`, in dependency order, skipping what was already up.
+
+What makes this more than a one-off: **every previous release's green publish job had published nothing.** I read the v0.1.79 job log — all 26 steps are `"<crate> v0.1.79 already exists on crates.io; skipping"`, because the crates had been published locally with a token before the tag was pushed. The job has been reporting success for doing nothing, which is why the OIDC gap only surfaced now, on the first release that actually gave it work to do.
+
+That contradicts the standing note that a Trusted Publisher was registered for all 23 crates with only two outstanding. I can't tell you the cause — the registrations may never have applied, may have been removed, or crates.io's token scoping may have changed. What's established is the observed scope: the exchanged token is valid for `tsift-core` and `tsift-md-ast` and not for `tsift-astgrep`, and nothing is known about the other 23 because the run never reached them. I've rewritten `#8wqk` to say that, and the only way to learn the real scope is to cut a tag with nothing pre-published and see how far the job gets.
+
+npm OIDC, for contrast, published unattended without complaint.
+
+One piece of housekeeping I left alone: preflight has been warning `legacy_gated_in_backlog` every cycle — `#8wqk` still lives in `agent:backlog` rather than `agent:review`. `agent-doc migrate` moves it, but that reshapes the document outside this cycle's write boundary, so it's your call whether to run it.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
@@ -54,7 +83,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#8wqk] Register crates.io GitHub Trusted Publishing for every post-baseline tsift workspace crate through the operator browser/passkey flow, then verify a tag release publishes without the local token
+- [/] [#8wqk] Register crates.io GitHub Trusted Publishing for the 24 tsift workspace crates the OIDC token is NOT valid for. v0.1.80 was the first release CI actually attempted to publish (every earlier green publish job was 26 'already exists; skipping' no-ops after a local token publish): it uploaded tsift-core and tsift-md-ast, then 403'd on tsift-astgrep with 'The provided access token is not valid for crate', and the loop has no per-crate tolerance so the remaining 23 were never attempted. Contradicts the 2026-06-19 note claiming all 23 were registered — cause unknown. Verify by cutting a tag with nothing pre-published.
 <!-- /agent:backlog -->
 
 ## Review

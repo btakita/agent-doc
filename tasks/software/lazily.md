@@ -28,13 +28,48 @@ gated: npm security-key user presence required
 Compacted content:
 - Archived 10 response topic(s): do [#lzspecdecoderbound]; do [#lzkeynullstrict]; do [#lzreadmelinkrot]; 7 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): do [#coveragejsonscores]; do [#lzcppmsgpackwire]; do [#lzcppco...
+
+### Re: do [#failcloseddispatch] — opus-5
+
+Done in all six remaining bindings. One agent per repo, six repos, no overlap.
+
+**76 fail-open dispatch chains found and closed**, every one mutation-checked by feeding a discriminator value no arm names, every one confirmed red before the mutation was reverted.
+
+| repo | fixed | commit | suite | CI |
+|---|---|---|---|---|
+| go | 8 | `0cd58a9` | 129/138 fixtures, 118/118 scenarios | green |
+| py | 25 | `6d924be` | 686 passed, 134/138 fixtures | green |
+| kt | 24 | `6819ac6` | 423 tests, 118/118 scenarios | green |
+| dart | 16 (30 sites) | `bca5750` | 657 tests, 118/118 scenarios | green |
+| zig | 16 | `97afb05` | 916 tests × 3 pinned toolchains | green |
+| cpp | 12 + 20 asserts | `4cdb143` | 55 tests, 99/103 scenarios | green |
+
+Superproject pointer bump: `d952e9139`. `lazily-spec` was never edited — every mutation ran against a scratch corpus or a temporary runner-source edit, and the shared corpus is byte-identical and clean.
+
+**The defect was bigger than the shape we named.** We went looking for a missing `default:` and found three classes:
+
+- *Expectation-side dispatch.* The nastiest. `test_coordination_conformance.cpp:120` dispatched on the expected `role`; an unrecognised spelling didn't skip the assertion, it silently **changed which assertion ran** — the fixture said one thing and the runner checked another and passed. Same shape in cpp membership/resilience/service, and in dart's `durability` chains, which compared the observed durability against a value the fixture never named.
+- *The discriminator nobody read.* Ten drivers across py, kt, zig and dart replayed every op as a single variant while a `type` field sat unread in the fixture. `windowing` tumbling/sliding counts, `rateshape` sample_count and probabilistic_sample, in four bindings each. Those runners were not dispatching at all.
+- *The assumed last variant.* The `assert(policy == "Max")` shape, in every spelling: Kotlin `else -> tick(now)`, Dart `direction != 'client'` running the server codec, Zig bare `else`, Python `else: assert res.is_ignore` — where `resync_gap_converge.json` carries no `Ignore` frame at all, so that arm had never once executed.
+
+**Two corrections to the record.**
+
+`c264241`'s commit message says NDEBUG compiles the cpp asserts out. It doesn't: `tests/CMakeLists.txt` adds `-UNDEBUG`, and the generated flags are `-O3 -std=c++17 -UNDEBUG`. Those asserts fire today, including in the Release default. They were one build-flag edit from vanishing and they named nothing when they fired, so converting them was right — but they were not live false greens, and the cpp finds that *were* live are the silent-default class instead.
+
+Zig's `signaling_conformance.zig:349` `else => unreachable`, the lead we carried, is **not** this defect class. It switches on a tagged union already narrowed by the enclosing prong, not on fixture data. It's now an explicit error return anyway — `unreachable` is unchecked UB under ReleaseFast and a runner should not spell a refusal in a form that only traps in Debug — but no fixture value can reach it, so that one change is unverified by execution. Stated plainly rather than counted as a mutation-checked fix.
+
+**One real corpus bug fell out.** `nodekey_null_leniency`'s non-snapshot field is spelled `node_add`, not `delta`. The dart fail-open had been hiding which value it was actually handling.
+
+**One method note worth keeping.** The py sweep's first pass reported five false "still green" mutation results — stale `__pycache__` let pytest reuse pre-mutation bytecode when mutate and restore landed inside the same filesystem second. Only the re-run with `PYTHONDONTWRITEBYTECODE=1` and the cache cleared per case is reported above. A mutation check that can't invalidate its own build is just another false green, one level up.
+
+Queued the js/cs/rs sweep at the top of the backlog. Those three were marked "already have theirs" on the strength of the chains we happened to inspect, not an audit — and the six repos we did audit averaged twelve fail-opens apiece.
 <!-- agent:boundary:ebcdbd84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
--t 🚧 do [#lzscenariobodyskip]
+- do [#nevergotsystematic]
 - 📌 do [#lzassertionblockschema]
 - 📌 do [#lzdependencyavailability]
 - 📌 do [#lzcpptranscribedrunners]
@@ -50,7 +85,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#failcloseddispatch] Fail-closed dispatch chains across the conformance runners (#lzscenariobodyskip part 2). Every scenario dispatch chain must error on an unmatched shape instead of falling through — an unmatched arm still BOOKS the scenario, because the payload was handed over before the dispatch, so the ledger cannot see it: the scenario WAS replayed, just as something the fixture never named. js, cs and rs already have theirs, and two concrete fail-opens are now fixed (lazily-go reencodedNodeFields switched on scenario codec with no default, leaving generic nil; lazily-cpp merge-policy chain ended in assert(policy == "Max"), which NDEBUG compiles out so a release build replayed Max for ANY unknown policy). REMAINING: audit the rest of go, py, kt, dart, zig, cpp — dart has switch chains in test/command_conformance_test.dart and test/collections_extra_conformance_test.dart, zig has "else => unreachable" at src/lazily/signaling_conformance.zig:349, and kt when-blocks were not audited. Mutation-check each by feeding a discriminator value no arm names.
+- [ ] [#nevergotsystematic] js, cs and rs never got the systematic fail-closed dispatch sweep the other six just got (#failcloseddispatch). They were recorded as "already have theirs" on the strength of the specific chains inspected during #lzscenariobodyskip, not an exhaustive audit. The six repos that WERE swept found 8-36 fail-opens each, including whole classes nobody had looked for: expectation-side ternaries that silently change what is being asserted, drivers that never read the discriminator at all and replay every op as one variant, and final else arms that assume the last variant. Assume the same density in js, cs and rs until proven otherwise. Do the same sweep: enumerate every dispatch chain keyed on fixture data via an AST pass rather than grep, fail closed naming the unknown value, and mutation-check each site by feeding a discriminator no arm names.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

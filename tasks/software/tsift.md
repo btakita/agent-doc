@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -40,7 +40,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): do [#zigthirdindexed]; do [#wsdq]; 0.1.79 released, published, and installed; 1 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): do [#finishsymbolkind]
-<!-- agent:boundary:ea410e4f -->
+<!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue

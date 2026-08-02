@@ -93,19 +93,55 @@ Blast radius is narrower than it first reads. The repo is private, both deployed
 Two follow-ups queued: `#efs-dev-vars-local-rotate` for the local-dev password that is still recoverable from EFS history, and the censible item above.
 
 Unrelated, for whoever owns it: preflight reports the installed `agent-doc` binary is missing commit `55dd1851d`. I did not run `make install` in `src/agent-doc` — pane `%72` is holding that repo.
+
+### Re: do [#efs-dev-vars-local-rotate] — opus-5
+
+Rotated. The local-dev `ADMIN_GLOBAL_PASSWORD` is new, and the leaked value is dead everywhere it was live.
+
+**Confirmed the exposure first (hashes only, never printed the values):**
+
+| source | sha256[:12] |
+|---|---|
+| `.dev.vars` (before rotation) | `42df2acf` |
+| `.dev.vars.example` @ `5ad74a66`…`ccf41967` | `42df2acf` — **match** |
+| `.dev.vars.example` @ `3a2bfe30` (placeholder) | `e2988059` |
+| `.dev.vars.production` | `7bde7267` — unaffected |
+| `.dev.vars.staging` | `725041499` — unaffected |
+
+So the backlog item was right: the working-copy value was byte-identical to what sat tracked in `.dev.vars.example` from `5ad74a66` through `ccf41967`, and prod/staging were never affected.
+
+**One thing the item missed: `passage` held the same value.** `btak/equityfundingsource/admin_global_password` hashed to `42df2acf` too, so rotating `.dev.vars` alone would have left the two out of sync. Rotated both.
+
+**AUTH_SECRET re-verified, still no action needed.** The committed example value (`fc3a4667`) matches none of `.dev.vars` (`9835a0cc`), `.dev.vars.production` (`908fa5cc`), or `.dev.vars.staging` (`d9badd98`).
+
+**What changed:** new 32-char base64url value written to `.dev.vars` (gitignored, mode `600`, all 9 keys intact, no malformed lines) and to `passage btak/equityfundingsource/admin_global_password`. Both now hash to `dae5c7e2`. Nothing tracked changed — `git status` in the submodule is clean, so there is no commit for this.
+
+**Live verification against `wrangler dev` on :8787**, using the `/admin/signup` global-password gate with an email that already exists (so the request cannot mutate anything):
+
+- new value → **409 "already exists"** — passed the gate, env value loaded
+- old leaked value → **403 "global admin password you entered is incorrect"**
+
+Local D1 unchanged afterward (5 users, 0 rows with the probe name). `make check` green: 2285 tests across 199 files, 0 fail, worker build succeeded.
+
+**History-purge decision: don't purge.** The repo is private with a single remote and one non-owner-facing collaborator surface, the value was local-dev-only, and it is now rotated, so the historical blob is dead credential material. A `filter-repo` rewrite plus force-push across every clone and the superproject submodule pointer costs more than it buys.
+
+**One loose end worth knowing about.** A full-tree scan found the old value still on disk in `.claude/worktrees/playful-strolling-wilkinson/.dev.vars.example` — a stale Claude Code worktree pinned at `8c6434ec` (2026-07-10), which predates the `3a2bfe30` placeholder fix. That branch is also **pushed to origin** as `worktree-playful-strolling-wilkinson`, so the value is at a live branch tip, not just deep history. It is dead now that the value is rotated, but the branch is 3 weeks behind main and looks like leftover scratch. I did not delete it — that is your call. Filed as a backlog recommendation.
+
+**Also worth flagging, since it nearly broke this audit:** `grep -rlF` and `git grep -lF` both returned *nothing* for a value sitting in `.dev.vars` in the same directory. The RTK wrapper swallowed the hits. A `python3` `os.walk` scan of the same tree found both files immediately. A security scan that silently reports "no exposure" is worse than no scan, so I extended the RTK false-pass memory to cover grep and corrected its "use grep to confirm" advice.
 <!-- agent:boundary:3972fcb2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#efs-dev-vars-local-rotate]
+- do [#recommendedprunestale]
+- ~~do [#efs-dev-vars-local-rotate]~~
 - do [#censible-env-committed-creds]
-- ⏭️ do [#tmo-prod-schedule-artifact-confirm]
+- do [#tmo-prod-schedule-artifact-confirm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#efs-dev-vars-local-rotate] Rotate the local-dev ADMIN_GLOBAL_PASSWORD in src/equityfundingsource-dev/.dev.vars. Its value is byte-identical to the one that sat in the tracked .dev.vars.example from 2026-04-23 through 3a2bfe30, so it is in git history for anyone with repo access even though the working copy is now a placeholder. Production and staging values differ and are unaffected. Pick a new value, write it into .dev.vars only, and decide whether the history is worth purging - the repo is private and the value is local-dev-only, so a filter-repo rewrite plus force-push across every clone is probably not worth it. AUTH_SECRET does not need this: the committed example value never matched .dev.vars, .dev.vars.production, or .dev.vars.staging.
+- [ ] [#recommendedprunestale] [recommended] Prune stale EFS worktree branch `worktree-playful-strolling-wilkinson` (local worktree at src/equityfundingsource-dev/.claude/worktrees/ + pushed origin branch, pinned at 8c6434ec 2026-07-10, ~3 weeks behind main). Its tracked .dev.vars.example still carries the pre-3a2bfe30 ADMIN_GLOBAL_PASSWORD — now dead since #efs-dev-vars-local-rotate, so this is cleanup, not exposure. Check whether the branch holds unique work before `git worktree remove` + `git push origin --delete`.
 - [ ] [#censible-env-committed-creds] Sibling-repo fallout from the same gap: censible-core commits real env files, not just samples. apps/finegar-etl/.env carries FACTSET_FTP_LOGIN plus a 39-char FACTSET_FTP_PASSWORD, and .env.sample carries a 26-char SESSION_KEY. Repo is private (btakita/censible-core) and the project looks dormant, so the first question is whether the FactSet FTP account still exists. If it does, rotate with FactSet and drop the credential out of the tracked file; if it does not, replace both with placeholders so the pattern does not get copied forward. Do this from a censible-core session, not from EFS. Checked and clean: every other sibling tracks only .env.sample / .env.example with placeholder values; presence SERVICE_API_JWT_TOKEN is a 16-char dev placeholder.
 - [ ] [#tmo-prod-schedule-artifact-confirm] Confirm the first schedule-bearing PRODUCTION TMO backup artifact. Production went live on 20d7a416 at 2026-08-01T04:16Z, but tmo_backup_interval_hours is 24 and the last run was 2026-07-31T17:00:53Z on the old build, so the next daily job around 2026-08-01T17:00Z is the first artifact that can carry payment schedules. Check: read tmo_backup_last_key and tmo_backup_last_status from production platform_settings, confirm the key advanced to a 2026-08-01 object and status is complete, then pull that object from R2 bucket equityfundingsource-tmo-cache-production and count schedule rows - expect roughly 12 of 31 loans to carry one, versus 0 on every prior artifact. Sandbox already measured 34 rows over 26 loans. Unblocks #tmo-clone-apply, which needs a schedule-bearing clone source. Do not read the artifact contents into the transcript - it holds production PII; count and discard.
 <!-- /agent:backlog -->

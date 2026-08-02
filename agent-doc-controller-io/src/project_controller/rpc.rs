@@ -9892,15 +9892,18 @@ pub(crate) fn serve_with_options(
         .set_nonblocking(ListenerNonblockingMode::Accept)
         .context("failed to set project controller listener nonblocking")?;
     // P4: rebuild every controller-acknowledged liveness fact only after the
-    // replacement socket is bound. Restoration derives missing-replica targets
-    // and signals editors immediately; binding first lets their full projection
-    // queue on the listener and become a delivery Source edge when the serve
-    // loop starts. Signalling before bind could lose the sole edge that moves a
-    // retained transition out of `AwaitingDelivery`.
+    // controller can receive the editor's full projection. A stable controller
+    // owns the public socket already, so it may signal immediately after bind.
+    // A handoff replacement is bound only on its private socket here: signalling
+    // now would make the editor publish into the predecessor's public generation
+    // and promotion would discard that replica (`#installrecycle-replica-race`).
+    // Preparing replacements therefore hydrate liveness now but defer the
+    // recovery effect until `promote_handoff` observes this exact pid+generation
+    // through the public socket.
     //
     // Sender frames may already have been pruned after their ACK; the receiver
     // journal is therefore the recycle authority, not a lease scan.
-    restore_reliable_sync_liveness(&durable_project_root)?;
+    restore_reliable_sync_liveness(&durable_project_root, handoff_state)?;
     // #s4b: install the OS process-exit watcher on the process-global
     // editor-attachment registry so `authority_for_file` reads reactive state
     // and editor crashes publish a bounded-latency liveness transition.
@@ -9980,6 +9983,10 @@ pub(crate) fn serve_with_options(
                         Ok(()) => {
                             handoff_temp_socket = None;
                             sock = public_sock.clone();
+                            let recovery_root = project_root.to_path_buf();
+                            std::thread::spawn(move || {
+                                project_editor_replica_rebuilds(&recovery_root);
+                            });
                             std::thread::sleep(CONNECT_POLL);
                             continue;
                         }
@@ -11346,6 +11353,15 @@ pub(crate) fn handle_request_locked(
             state.handoff_state = ControllerHandoffState::Stable;
             state.handoff_started_at = None;
             write_bootstrap_state(&state)?;
+            let project_root = state.project_root.clone();
+            let expected_pid = state.pid;
+            let expected_generation = state.controller_generation;
+            drop(state);
+            schedule_editor_replica_rebuild_after_promotion(
+                project_root,
+                expected_pid,
+                expected_generation,
+            );
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "retire_after_handoff" => {
@@ -12295,7 +12311,10 @@ fn restored_reliable_sync_projects() -> &'static parking_lot::Mutex<BTreeSet<Pat
 /// Rebuild the in-memory liveness plane from facts the receiver committed before
 /// acknowledging them. This is intentionally idempotent: CRDT joins and cursor
 /// maxima make duplicate hydration harmless.
-fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
+fn restore_reliable_sync_liveness(
+    project_root: &Path,
+    handoff_state: ControllerHandoffState,
+) -> Result<()> {
     let project_key = project_root
         .canonicalize()
         .unwrap_or_else(|_| project_root.to_path_buf());
@@ -12359,12 +12378,71 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
         for pid in dead_open_pids {
             record_reliable_sync_editor_exit(&recovery_root, pid);
         }
-        request_editor_replica_rebuild_after_restart(&recovery_root);
-        // Arm the Tier 2 reactive path from boot as well, so later
-        // registrations are covered without another explicit call site.
-        publish_editor_replica_rebuild_targets(&recovery_root);
+        if handoff_state == ControllerHandoffState::Stable {
+            project_editor_replica_rebuilds(&recovery_root);
+        } else {
+            agent_doc_ops_log_io::log_op(
+                &recovery_root,
+                "controller_restart_editor_replica_rebuild_deferred reason=handoff_not_public",
+            );
+        }
     });
     Ok(())
+}
+
+fn project_editor_replica_rebuilds(project_root: &Path) {
+    request_editor_replica_rebuild_after_restart(project_root);
+    // Arm the Tier 2 reactive path from boot as well, so later registrations
+    // are covered without another explicit call site.
+    publish_editor_replica_rebuild_targets(project_root);
+}
+
+fn public_controller_matches_generation(
+    status: &ControllerStatus,
+    expected_pid: u32,
+    expected_generation: u64,
+) -> bool {
+    status.active
+        && status.pid == Some(expected_pid)
+        && status.controller_generation == Some(expected_generation)
+        && status
+            .handoff_state
+            .unwrap_or(ControllerHandoffState::Stable)
+            == ControllerHandoffState::Stable
+}
+
+fn schedule_editor_replica_rebuild_after_promotion(
+    project_root: PathBuf,
+    expected_pid: u32,
+    expected_generation: u64,
+) {
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + HANDOFF_CONNECT_WAIT;
+        loop {
+            if status(&project_root).is_ok_and(|status| {
+                public_controller_matches_generation(&status, expected_pid, expected_generation)
+            }) {
+                agent_doc_ops_log_io::log_op(
+                    &project_root,
+                    &format!(
+                        "controller_promotion_editor_replica_rebuild_ready pid={expected_pid} generation={expected_generation}"
+                    ),
+                );
+                project_editor_replica_rebuilds(&project_root);
+                return;
+            }
+            if Instant::now() >= deadline {
+                agent_doc_ops_log_io::log_op(
+                    &project_root,
+                    &format!(
+                        "controller_promotion_editor_replica_rebuild_deferred pid={expected_pid} generation={expected_generation} reason=public_generation_not_observed"
+                    ),
+                );
+                return;
+            }
+            std::thread::sleep(CONNECT_POLL);
+        }
+    });
 }
 
 /// `#ctrlkillreregister` — ask every surviving editor to rebuild its replica once the
@@ -26462,7 +26540,7 @@ mod tests {
             .find("set_nonblocking(ListenerNonblockingMode::Accept)")
             .expect("controller listener readiness");
         let liveness_restored = serve
-            .find("restore_reliable_sync_liveness(&durable_project_root)?")
+            .find("restore_reliable_sync_liveness(&durable_project_root, handoff_state)?")
             .expect("reliable-sync liveness restoration");
 
         assert!(
@@ -26482,13 +26560,51 @@ mod tests {
             .find("std::thread::spawn(move ||")
             .expect("post-hydration recovery effect thread");
         let editor_signal = restore
-            .find("request_editor_replica_rebuild_after_restart(&recovery_root)")
-            .expect("editor replica recovery effect");
+            .find("if handoff_state == ControllerHandoffState::Stable")
+            .expect("stable-public-generation gate");
+        let deferred_signal = restore
+            .find("controller_restart_editor_replica_rebuild_deferred")
+            .expect("preparing handoff deferral");
         assert!(
-            durable_fold < async_effects && async_effects < editor_signal,
+            durable_fold < async_effects
+                && async_effects < editor_signal
+                && editor_signal < deferred_signal,
             "startup must hydrate liveness synchronously, then move potentially blocking editor \
-             IPC effects off the controller accept path"
+             IPC effects off the controller accept path and gate them on public authority"
         );
+
+        let promote = &source[source
+            .find("\"promote_handoff\" =>")
+            .expect("handoff promotion handler")..];
+        assert!(
+            promote.contains("schedule_editor_replica_rebuild_after_promotion("),
+            "handoff promotion must schedule a generation-qualified editor replica rebuild"
+        );
+        let promotion_recovery = &source[source
+            .find("fn schedule_editor_replica_rebuild_after_promotion(")
+            .expect("promotion recovery scheduler")..];
+        let public_generation = promotion_recovery
+            .find("public_controller_matches_generation(")
+            .expect("public generation predicate");
+        let rebuild = promotion_recovery
+            .find("project_editor_replica_rebuilds(&project_root)")
+            .expect("post-promotion rebuild effect");
+        assert!(
+            public_generation < rebuild,
+            "the replacement must observe its own public pid+generation before rebuilding replicas"
+        );
+    }
+
+    #[test]
+    fn editor_replica_rebuild_public_generation_predicate_is_exact() {
+        let mut status =
+            active_controller_status_with_handoff_state(ControllerHandoffState::Stable);
+
+        assert!(public_controller_matches_generation(&status, 42, 7));
+        assert!(!public_controller_matches_generation(&status, 41, 7));
+        assert!(!public_controller_matches_generation(&status, 42, 8));
+        status.handoff_state = Some(ControllerHandoffState::Preparing);
+        assert!(!public_controller_matches_generation(&status, 42, 7));
     }
 
     #[test]

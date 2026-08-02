@@ -686,11 +686,11 @@ pub fn answered_free_text_head_node_keys(
         {
             continue;
         }
-        let is_drain_target_marker_head =
-            crate::queue_response::head_carries_in_progress_marker(text);
-        if !is_drain_target_marker_head
-            && !crate::queue_response::free_text_head_answered_by_response(response_body, text)
-        {
+        // `#bugautostruck`: the in-progress marker proves only which queue head
+        // was selected for this cycle. It is not evidence that the response
+        // addressed that head. Require the same exact quoted-prompt proof for
+        // marked and unmarked free-text heads.
+        if !crate::queue_response::free_text_head_answered_by_response(response_body, text) {
             continue;
         }
         if let Some(baseline) = baseline

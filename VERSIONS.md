@@ -4,6 +4,23 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.116
+
+_JetBrains plugin 0.2.336; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Controller recycle rebuilds editor replicas only after public promotion.**
+  Private handoff replacements still hydrate durable reliable-sync
+  registrations, but defer editor rebuild effects until the public socket
+  reports their exact stable pid and generation. Editor projections can no
+  longer land in the predecessor during install-driven or aggressive mid-turn
+  recycle and disappear at promotion, leaving captured responses stranded
+  behind `missing_replica`.
+- **A selected free-text queue head is not automatically answered.** The
+  in-progress marker now proves selection only. Striking still requires exact
+  labeled queue-prompt evidence in the response plus stable-baseline membership,
+  so `#bugautostruck` cannot remove an unanswered FPE review or other free-text
+  work. The controller and queue regressions are part of the local dev harness.
+
 ## 0.35.115
 
 _JetBrains plugin 0.2.336; VS Code extension 0.2.64; Zed extension 0.1.0._

@@ -4,7 +4,7 @@
 //! already-read document/response text; file IO and lifecycle mutations stay in
 //! orchestration.
 
-use agent_doc_document::queue_projection::{IN_PROGRESS_MARKER, strip_priority_markers};
+use agent_doc_document::queue_projection::strip_priority_markers;
 use anyhow::Result;
 
 pub fn queue_prompt_done_id(text: &str) -> Option<String> {
@@ -474,16 +474,6 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
         }
     }
     false
-}
-
-/// True when a queue head's text carries the in-progress marker at its head
-/// (after optional leading whitespace). The binary stamps this marker on the
-/// cycle's drain target during preflight queue maintenance
-/// (`set_first_prompt_in_progress`), so it is the binary's own authoritative record
-/// of "the head this cycle is working" -- used by `#qheadstrikeauto` to auto-strike
-/// an answered free-text drain target without depending on agent prose formatting.
-pub fn head_carries_in_progress_marker(text: &str) -> bool {
-    text.trim_start().starts_with(IN_PROGRESS_MARKER)
 }
 
 /// The prose prefix of a free-text queue head used for answer-matching: every

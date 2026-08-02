@@ -3046,21 +3046,19 @@ mod core_tests {
     }
 
     #[test]
-    fn marker_head_struck_without_blockquote_quote_qheadstrikeauto() {
-        // #qheadstrikeauto: the cycle's drain target carries the in-progress `🚧`
-        // marker (stamped by preflight `set_first_prompt_in_progress`). A committed
-        // response that answers it in PLAIN PROSE — never quoting it as a
-        // `> **Queue prompt:**` blockquote — must still strike it. The strike is
-        // keyed off the binary's drain-target marker identity, not agent prose
-        // (operator: "the binary should do this automatically...not the agent").
+    fn marker_head_requires_exact_response_evidence_bugautostruck() {
+        // #bugautostruck: `🚧` records selection, not completion. The reported
+        // security-client and FPE-research heads were selected but ignored in
+        // their responses, then incorrectly struck as "answered this cycle."
+        // Even when the head existed before the turn, unrelated response prose
+        // must leave it active.
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue go -->\n",
             "- 🚧 My free-text queue items are not immediately struck as if they are addressed.\n",
             "<!-- /agent:queue -->\n",
         );
-        // Plain-prose response with NO blockquote echo of the head: the legacy
-        // prose/blockquote answer-match returns false for this head...
+        let baseline = content;
         let prose_only = "### Re: fixed it — opus\n\nI addressed the queue-strike behavior and shipped the fix.\n";
         assert!(
             !agent_doc_queue::queue_response::free_text_head_answered_by_response(
@@ -3069,20 +3067,17 @@ mod core_tests {
             ),
             "precondition: a plain-prose response must NOT prose-match the head"
         );
-        // ...but the drain-target marker path strikes it on a committed response.
-        let keys = answered_free_text_head_node_keys(content, prose_only, None).unwrap();
-        assert_eq!(
-            keys.len(),
-            1,
-            "the 🚧 drain-target marker head must be struck on a committed response: {keys:?}"
+        let keys = answered_free_text_head_node_keys(content, prose_only, Some(baseline)).unwrap();
+        assert!(
+            keys.is_empty(),
+            "a selected-but-unanswered 🚧 head must remain active: {keys:?}"
         );
     }
 
     #[test]
-    fn marker_head_not_struck_when_absent_from_baseline_qheadstrikeauto() {
-        // The marker path still respects the #qstrikeexplain Phase 2 baseline gate:
-        // a 🚧 head that first appeared this turn (an in-flight operator edit) is
-        // deferred, never same-cycle struck.
+    fn answered_marker_head_not_struck_when_absent_from_baseline() {
+        // Exact response evidence still respects the #qstrikeexplain Phase 2
+        // baseline gate: a 🚧 head that first appeared this turn is deferred.
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue go -->\n",
@@ -3095,8 +3090,8 @@ mod core_tests {
             "- some entirely different earlier queue line about another topic\n",
             "<!-- /agent:queue -->\n",
         );
-        let prose_only = "### Re: fixed it — opus\n\nDone.\n";
-        let gated = answered_free_text_head_node_keys(content, prose_only, Some(baseline)).unwrap();
+        let gated =
+            answered_free_text_head_node_keys(content, FTSTRIKE_RESPONSE, Some(baseline)).unwrap();
         assert!(
             gated.is_empty(),
             "a 🚧 marker head absent from the pre-turn baseline must not be struck: {gated:?}"

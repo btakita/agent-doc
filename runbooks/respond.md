@@ -41,6 +41,11 @@ free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
 
+An in-progress marker on a free-text head records selection, not completion
+(`#bugautostruck`). It never replaces the exact `> **Queue prompt:**` evidence.
+If the response does not actually quote and answer that head, closeout must leave
+it active even when the marker was added earlier in the cycle.
+
 **Already-complete or backlog-tracked free-text heads auto-strike (`#qftbklgstrike`).**
 Separately from the exchange-answer strike above, preflight queue maintenance
 auto-strikes a live free-text head when a deterministic scorer proves the work is

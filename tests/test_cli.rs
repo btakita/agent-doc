@@ -4652,7 +4652,6 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_response.rs")).unwrap();
     for required in [
         "pub fn normalize_for_answer_match",
-        "pub fn head_carries_in_progress_marker",
         "pub fn free_text_head_match_prose",
         "pub fn free_text_head_answered_by_response",
         "pub fn free_text_head_present_in_baseline",
@@ -4662,6 +4661,10 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
             "agent-doc-queue must own free-text queue response proof policy: {required}"
         );
     }
+    assert!(
+        !queue_response.contains("pub fn head_carries_in_progress_marker"),
+        "selection markers are not response proof policy (#bugautostruck)"
+    );
 
     for relative in [
         "agent-doc-queue-io/src/queue_consume.rs",
@@ -4690,10 +4693,10 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
     assert!(
         queue_consume_policy.contains("free_text_head_answered_by_response")
             && queue_consume_policy.contains("free_text_head_present_in_baseline")
-            && queue_consume_policy.contains("head_carries_in_progress_marker")
+            && !queue_consume_policy.contains("head_carries_in_progress_marker")
             && !queue_consume_policy.contains("free_text_head_match_prose")
             && !queue_consume_policy.contains("normalize_for_answer_match"),
-        "agent-doc-queue::queue_consume should call focused free-text queue response proof policy directly"
+        "agent-doc-queue::queue_consume should require focused response proof directly and never admit selection-marker proof"
     );
 
     let queue_io_consume =

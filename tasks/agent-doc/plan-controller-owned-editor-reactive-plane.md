@@ -26,6 +26,12 @@ actorless bootstrap and SQLite access into the embedded editor process.
 Native reload made that leak fatal by allowing an editor-owned SQLite mapping
 to overlap the database/WAL lifecycle of other processes.
 
+The Haiven `write_applied` incident exposed the complementary boundary failure:
+an automatic foreground writer appended `DocumentWriteDeferred` directly to
+SQLite. The durable replay saw the retained Target, but the already-running
+controller graph did not. Editor delivery had converged; terminal closeout
+could not run because its Computed had no retained-transition input.
+
 ## Architecture contract
 
 **Invariant:** During normal runtime, only the Project Controller process may
@@ -37,6 +43,13 @@ the database.
 observations, derived layout/focus intent, document-authority subscriptions,
 published-effect frontiers, and the durable sink. Editor adapters own only
 collection of IDE facts and display of controller projections.
+
+**Ingress owner:** Every automatic state producer publishes a typed
+`StateEvent` to the controller. The controller appends and applies the event
+before replying. The raw ledger append is crate-private; only isolated
+projector fixtures can reach an explicitly test-named durable seam. A failed
+controller publication fails closed and cannot fall back to a direct SQLite
+write.
 
 **Allowed SQLite exceptions:** Explicit offline administration, migration, and
 repair commands may open the database only after proving that the Project
@@ -89,6 +102,10 @@ Reactive semantics do not require a special wire format. Observation
 publication and projection subscriptions may use RPC framing, but automatic
 editor messages are typed facts, not imperative focus/sync commands. Manual
 operator actions remain imperative RPCs.
+
+Controller-local effects do not self-RPC. They append inside the owning request,
+and the request boundary refreshes the same live graph before the external
+receipt is returned.
 
 ### Imperative extraction audit
 

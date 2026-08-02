@@ -5488,7 +5488,7 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
     Ok(true)
 }
 
-pub fn append_state_event(
+pub(crate) fn append_state_event(
     project_root: &Path,
     event: &agent_doc_state_backbone::StateEvent,
 ) -> Result<bool> {
@@ -5504,6 +5504,18 @@ pub fn append_state_event(
             payload_json: &payload_json,
         },
     )
+}
+
+/// Direct durable-ledger insertion for isolated projector fixtures.
+///
+/// Runtime code must use [`publish_state_event`] so the controller appends and
+/// applies the fact to its live reactive graph in the same serialized turn.
+#[doc(hidden)]
+pub fn append_state_event_for_test(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    append_state_event(project_root, event)
 }
 
 pub fn load_state_event_ledger(

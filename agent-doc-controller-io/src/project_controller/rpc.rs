@@ -2334,11 +2334,75 @@ fn document_path_transition_request(
     })
 }
 
+/// Publish one state fact through the controller-owned reactive projection.
+///
+/// Automatic runtime producers must use this ingress instead of appending the
+/// durable ledger directly. The controller appends and applies the event in one
+/// serialized turn. A controller-local producer uses the cold append seam to
+/// avoid self-IPC; the enclosing controller request refreshes the live graph
+/// before replying to its external caller.
+pub fn publish_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    if agent_doc_state_wire::in_controller_request() {
+        return append_state_event(project_root, event);
+    }
+    request_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "state_event_append".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("automatic_state_source".to_string()),
+            reason: Some("reactive_state_publication".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(event)?),
+        },
+        CONTROLLER_RPC_TIMEOUT,
+    )
+}
+
+/// Publish a typed fact only when this project already has a live controller.
+///
+/// Passive editor ingress and isolated tests use this form when they must not
+/// become controller lifecycle owners.
+pub fn publish_state_event_existing(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "state_event_append".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("passive_state_source".to_string()),
+            reason: Some("reactive_state_publication".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(event)?),
+        },
+        CONTROLLER_RPC_TIMEOUT,
+    )
+}
+
 /// Publish one editor-produced state fact to an already-running controller.
 ///
 /// The editor library may keep an ephemeral rendering cache, but the controller
 /// is the only process allowed to append the durable projection ledger.
-pub fn append_editor_state_event_existing(
+pub fn publish_editor_state_event_existing(
     project_root: &Path,
     file: &Path,
     event: &agent_doc_state_backbone::StateEvent,
@@ -4848,7 +4912,6 @@ pub fn record_visible_write_commit_candidate_for_project_file(
     source: &str,
 ) -> Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let commit_candidate_hash = visible_write_commit_candidate_hash(candidate_content);
     let model_revision = next_visible_write_model_revision(project_root, &canonical);
     let payload = VisibleWriteCommitCandidatePayload {
@@ -4874,24 +4937,16 @@ pub fn record_visible_write_commit_candidate_for_project_file(
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(&payload)?),
     };
-    match request_controller::<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection>(
+    request_controller::<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection>(
         project_root,
         request,
-    ) {
-        Ok(proof) => Ok(proof),
-        Err(controller_err) if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) => {
-            Err(controller_err).context(
-                "embedded editor client cannot persist a visible-write receipt without the Project Controller",
-            )
-        }
-        Err(controller_err) => record_visible_write_commit_candidate_direct(
-            project_root,
-            &canonical,
-            &document_hash,
-            &payload,
-            &controller_err,
-        ),
-    }
+    )
+    .with_context(|| {
+        format!(
+            "visible-write receipt for {} requires controller-owned reactive publication",
+            canonical.display()
+        )
+    })
 }
 
 pub fn visible_write_commit_candidate_applied_for_file(
@@ -13901,49 +13956,6 @@ fn visible_write_commit_candidate_events(
     (generation_event, applied_event, proof_event)
 }
 
-fn record_visible_write_commit_candidate_direct(
-    project_root: &Path,
-    canonical: &Path,
-    document_hash: &str,
-    payload: &VisibleWriteCommitCandidatePayload,
-    controller_err: &anyhow::Error,
-) -> Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
-    let (generation_event, applied_event, proof_event) =
-        visible_write_commit_candidate_events(document_hash, payload);
-    let generation_inserted = append_state_event(project_root, &generation_event)?;
-    let applied_inserted = append_state_event(project_root, &applied_event)?;
-    let candidate_inserted = append_state_event(project_root, &proof_event)?;
-    let projection = load_state_backbone_projection(project_root)?;
-    let proof = visible_write_commit_candidate_from_projection(
-        &projection,
-        canonical,
-        &payload.commit_candidate_hash,
-    )
-    .with_context(|| {
-        format!(
-            "durable visible write event did not fold for {} candidate={}",
-            canonical.display(),
-            payload.commit_candidate_hash
-        )
-    })?;
-    agent_doc_ops_log_io::log_op(
-        canonical,
-        &format!(
-            "visible_write_commit_candidate_durable_event_recorded file={} patch_id={} model_revision={} commit_candidate_hash={} source={} generation_inserted={} applied_inserted={} candidate_inserted={} authority=state_backbone recovery=controller_reconcile controller_error={}",
-            canonical.display(),
-            payload.patch_id,
-            proof.model_revision,
-            proof.commit_candidate_hash,
-            proof.source,
-            generation_inserted,
-            applied_inserted,
-            candidate_inserted,
-            compact_controller_error(controller_err)
-        ),
-    );
-    Ok(proof)
-}
-
 fn visible_write_commit_candidate_from_projection(
     projection: &agent_doc_state_backbone::StateBackboneProjection,
     file: &Path,
@@ -21588,6 +21600,60 @@ mod tests {
     }
 
     #[test]
+    fn state_event_ingress_applies_to_live_projection_before_returning() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let event = agent_doc_state_backbone::StateEvent::new(
+            "reactive-ingress-retained-write",
+            agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                document_hash: document_hash.clone(),
+                intent_id: "intent-reactive-ingress".to_string(),
+                expected_hash: "base".to_string(),
+                expected_content: Some("# Session\n".to_string()),
+                target_hash: "target".to_string(),
+                target_content: "# Session\n\n### Re: done\n".to_string(),
+                source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
+                reason:
+                    agent_doc_state_backbone::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            },
+        );
+        let request = ControllerRequest {
+            command: "state_event_append".to_string(),
+            file: Some(doc),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("test_state_source".to_string()),
+            reason: Some("prove_live_projection_ingress".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&event).unwrap()),
+        };
+
+        assert!(handle_state_event_append(&bootstrap, &runtime, request).unwrap());
+        let projected = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .expect("the live graph must observe the event before publication returns");
+        assert_eq!(
+            projected
+                .document
+                .pending_write
+                .as_ref()
+                .map(|intent| intent.intent_id.as_str()),
+            Some("intent-reactive-ingress")
+        );
+    }
+
+    #[test]
     fn command_plane_submit_dispatch_reaches_closeout_authority_and_returns_receipt() {
         // `#lzdurablesink` live transport (server half): a `command_plane_submit`
         // controller request carries a `CommandSubmit` envelope, the dispatch
@@ -22199,57 +22265,6 @@ mod tests {
             "project controller command `dispatch` failed: failed_stage=queue_paused"
         );
         assert!(!controller_transport_drop_is_retryable(&command_err));
-    }
-
-    #[test]
-    fn visible_write_commit_candidate_direct_durable_event_reconciles_without_controller() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
-        let doc = dir.path().join("tasks/session.md");
-        let content = "before\n### Re: done\n";
-        std::fs::write(&doc, content).unwrap();
-        let canonical = doc.canonicalize().unwrap();
-        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-        let commit_candidate_hash = visible_write_commit_candidate_hash(content);
-        let payload = VisibleWriteCommitCandidatePayload {
-            patch_id: "patch-direct-durable".to_string(),
-            model_revision: 7,
-            editor_visible_hash: commit_candidate_hash.clone(),
-            commit_candidate_hash: commit_candidate_hash.clone(),
-            commit_candidate_content: content.to_string(),
-            source: "test_direct_durable".to_string(),
-        };
-
-        let proof = record_visible_write_commit_candidate_direct(
-            dir.path(),
-            &canonical,
-            &document_hash,
-            &payload,
-            &anyhow::anyhow!("controller unavailable"),
-        )
-        .unwrap();
-
-        assert_eq!(proof.patch_id, "patch-direct-durable");
-        assert_eq!(proof.model_revision, 7);
-        assert_eq!(proof.commit_candidate_hash, commit_candidate_hash);
-
-        let reconciled =
-            visible_write_commit_candidate_for_patch_file(&canonical, "patch-direct-durable")
-                .expect("durable lazily event should reconcile without a live controller");
-        assert_eq!(
-            reconciled.commit_candidate_hash,
-            proof.commit_candidate_hash
-        );
-        assert_eq!(
-            reconciled.commit_candidate_content.as_deref(),
-            Some(content)
-        );
-
-        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("visible_write_commit_candidate_durable_event_recorded"));
-        assert!(ops_log.contains("authority=state_backbone"));
-        assert!(ops_log.contains("recovery=controller_reconcile"));
     }
 
     #[test]

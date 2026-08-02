@@ -2272,7 +2272,7 @@ fn test_cli_ops_diagnose_gathers_cycle_artifacts() {
     )
     .unwrap();
     let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-    agent_doc_controller_io::project_controller::append_state_event(
+    agent_doc_controller_io::project_controller::append_state_event_for_test(
         root,
         &agent_doc_state_backbone::StateEvent::new(
             "diagnosis-cycle-a",
@@ -27598,7 +27598,7 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
         "CLI watch effects",
         &[
             "agent_doc_watch_io::observe_document_event",
-            "agent_doc_controller_io::project_controller::append_state_event",
+            "agent_doc_controller_io::project_controller::publish_state_event",
             "document_actor_in",
         ],
     );
@@ -27619,6 +27619,45 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
             "pub type DocumentWatchGate",
             "pub use agent_doc_document_realtime::watch_authority",
         ],
+    );
+}
+
+#[test]
+fn test_automatic_state_event_routes_use_controller_reactive_ingress() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for relative in [
+        "agent-doc-document-realtime-io/src/lib.rs",
+        "agent-doc-preflight-io/src/lib.rs",
+        "agent-doc-compact-io/src/lib.rs",
+        "agent-doc-queue-io/src/queue_consume.rs",
+        "src/main.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("project_controller::publish_state_event"),
+            "{relative} must publish automatic facts through the live controller"
+        );
+    }
+
+    let controller =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/project_controller.rs"))
+            .unwrap();
+    assert!(
+        controller.contains("pub(crate) fn append_state_event("),
+        "the raw durable append must remain private to controller-io"
+    );
+    assert!(
+        !controller.contains("\npub fn append_state_event("),
+        "external runtime crates must not regain a raw durable append route"
+    );
+
+    let rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    assert!(
+        !rpc.contains("record_visible_write_commit_candidate_direct"),
+        "visible-write publication must fail closed instead of bypassing the live projection"
     );
 }
 

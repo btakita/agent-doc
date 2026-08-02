@@ -338,7 +338,7 @@ fn record_selected_queue_head(root: &Path, doc: &Path, content: &str, prompt_tex
             hosting_epoch: None,
         },
     );
-    project_controller::append_state_event(root, &event).unwrap();
+    project_controller::append_state_event_for_test(root, &event).unwrap();
 }
 
 fn template_doc_with_model() -> String {

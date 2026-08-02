@@ -315,7 +315,7 @@ impl QueueConsumptionProofEffects for QueueConsumptionProofRuntimeEffects {
         project_root: &Path,
         event: &agent_doc_state_backbone::StateEvent,
     ) -> Result<bool> {
-        agent_doc_controller_io::project_controller::append_state_event(project_root, event)
+        publish_reactive_state_event(project_root, event)
     }
 
     fn log_op(&self, file: &Path, message: &str) {
@@ -329,6 +329,22 @@ impl QueueConsumptionProofEffects for QueueConsumptionProofRuntimeEffects {
 
 const QUEUE_CONSUMPTION_PROOF_EFFECTS: QueueConsumptionProofRuntimeEffects =
     QueueConsumptionProofRuntimeEffects;
+
+#[cfg(not(test))]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    agent_doc_controller_io::project_controller::publish_state_event(project_root, event)
+}
+
+#[cfg(test)]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    agent_doc_controller_io::project_controller::append_state_event_for_test(project_root, event)
+}
 
 pub fn record_queue_consumption_proofs(
     file: &Path,

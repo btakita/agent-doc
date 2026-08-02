@@ -1473,7 +1473,8 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(root, &event).unwrap();
+        agent_doc_controller_io::project_controller::append_state_event_for_test(root, &event)
+            .unwrap();
     }
 
     #[test]

@@ -69,7 +69,7 @@ pub fn record_starting_actor_timeout(
             log_line: log_line.to_string(),
         },
     );
-    if crate::project_controller::append_state_event(&project_root, &event)? {
+    if publish_reactive_state_event(&project_root, &event)? {
         Ok(StartingActorTimeoutLogDecision::NewTimeout)
     } else {
         Ok(StartingActorTimeoutLogDecision::DuplicateTimeout)
@@ -136,8 +136,24 @@ fn clear_starting_actor_timeout_record_inner(
             generation: facts.generation,
         },
     );
-    crate::project_controller::append_state_event(&project_root, &event)?;
+    publish_reactive_state_event(&project_root, &event)?;
     Ok(())
+}
+
+#[cfg(not(test))]
+fn publish_reactive_state_event(
+    project_root: &std::path::Path,
+    event: &StateEvent,
+) -> Result<bool> {
+    crate::project_controller::publish_state_event(project_root, event)
+}
+
+#[cfg(test)]
+fn publish_reactive_state_event(
+    project_root: &std::path::Path,
+    event: &StateEvent,
+) -> Result<bool> {
+    crate::project_controller::append_state_event(project_root, event)
 }
 
 #[cfg(test)]

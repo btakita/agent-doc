@@ -946,7 +946,7 @@ fn retain_compact_projection(
             commit,
         },
     );
-    agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)?;
+    publish_reactive_state_event(&project_root, &event)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -959,6 +959,22 @@ fn retain_compact_projection(
         ),
     );
     Ok(())
+}
+
+#[cfg(not(test))]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    agent_doc_controller_io::project_controller::publish_state_event(project_root, event)
+}
+
+#[cfg(test)]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    agent_doc_controller_io::project_controller::append_state_event_for_test(project_root, event)
 }
 
 /// Complete a compact continuation after the controller projection proves the

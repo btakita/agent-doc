@@ -3293,9 +3293,7 @@ pub fn record_document_write_provenance(path: &Path, content: &str) {
             actor: "agent".to_string(),
         },
     );
-    if let Err(e) =
-        agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
-    {
+    if let Err(e) = publish_reactive_state_event(&project_root, &event) {
         eprintln!(
             "[write] WARNING: failed to record write provenance for {}: {}",
             path.display(),
@@ -3398,7 +3396,7 @@ fn record_document_authority(
             editor_id,
         },
     );
-    match agent_doc_controller_io::project_controller::append_state_event(&project_root, &event) {
+    match publish_reactive_state_event(&project_root, &event) {
         Ok(_) => {
             observations.insert(canonical, observation);
         }
@@ -3422,12 +3420,8 @@ fn record_document_authority(
 pub fn pending_document_write(
     file: &Path,
 ) -> Option<agent_doc_state_backbone::DocumentWriteIntentProjection> {
-    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-    agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
-        .ok()?
-        .document(&document_hash)?
+    agent_doc_cycle_state_io::load_document_projection(file)
+        .ok()??
         .document
         .pending_write
         .clone()
@@ -3443,12 +3437,8 @@ pub fn superseding_closeout_stage(
     file: &Path,
     intent: &agent_doc_state_backbone::DocumentWriteIntentProjection,
 ) -> Option<agent_doc_state_backbone::CloseoutStage> {
-    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-    agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
-        .ok()?
-        .document(&document_hash)?
+    agent_doc_cycle_state_io::load_document_projection(file)
+        .ok()??
         .document
         .superseding_closeout_stage(intent)
 }
@@ -3460,15 +3450,9 @@ pub fn superseding_closeout_stage(
 pub fn pending_document_write_journal(
     file: &Path,
 ) -> Vec<agent_doc_state_backbone::DocumentWriteIntentProjection> {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
-        return Vec::new();
-    };
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-    let Some(document) =
-        agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
-            .ok()
-            .and_then(|projection| projection.document(&document_hash).cloned())
+    let Some(document) = agent_doc_cycle_state_io::load_document_projection(file)
+        .ok()
+        .flatten()
     else {
         return Vec::new();
     };
@@ -3485,12 +3469,8 @@ pub fn pending_document_write_journal(
 pub fn pending_external_disk_candidate(
     file: &Path,
 ) -> Option<agent_doc_state_backbone::DocumentWriteIntentProjection> {
-    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-    agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
-        .ok()?
-        .document(&document_hash)?
+    agent_doc_cycle_state_io::load_document_projection(file)
+        .ok()??
         .document
         .pending_external_disk
         .clone()
@@ -3557,20 +3537,15 @@ fn pending_external_disk_candidate_for_target(
 }
 
 fn durable_visible_write_content_proves_target(file: &Path, content: &str) -> bool {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
-        return false;
-    };
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let candidate_hash = agent_doc_hash::content_hash(
         &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content),
     );
-    agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
+    agent_doc_cycle_state_io::load_document_projection(file)
         .ok()
-        .and_then(|projection| {
-            projection
-                .document(&document_hash)
-                .and_then(|document| document.applied_visible_write_candidate(&candidate_hash))
+        .flatten()
+        .and_then(|document| {
+            document
+                .applied_visible_write_candidate(&candidate_hash)
                 .cloned()
         })
         .and_then(|candidate| candidate.commit_candidate_content)
@@ -3860,13 +3835,12 @@ fn ensure_deferred_document_write_intent_with_mode(
             reason,
         },
     );
-    agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
-        .with_context(|| {
-            format!(
-                "failed to retain deferred document write in Lazily state for {}",
-                file.display()
-            )
-        })?;
+    publish_reactive_state_event(&project_root, &event).with_context(|| {
+        format!(
+            "failed to retain deferred document write in Lazily state for {}",
+            file.display()
+        )
+    })?;
     // Append the successor before settling its progressive reconnect
     // predecessor. A crash can therefore leave both intents for historical
     // filtering, but can never lose the only durable target.
@@ -4170,13 +4144,12 @@ pub fn retain_external_disk_candidate_without_editor_cut(
             reason: DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
         },
     );
-    agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
-        .with_context(|| {
-            format!(
-                "failed to retain external disk candidate without editor cut for {}",
-                file.display()
-            )
-        })?;
+    publish_reactive_state_event(&project_root, &event).with_context(|| {
+        format!(
+            "failed to retain external disk candidate without editor cut for {}",
+            file.display()
+        )
+    })?;
     Ok(intent_id)
 }
 
@@ -4507,14 +4480,37 @@ fn append_document_write_converged_event(
             intent_source: pending.source,
         },
     );
-    agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
-        .with_context(|| {
-            format!(
-                "failed to settle deferred document write in Lazily state for {}",
-                file.display()
-            )
-        })?;
+    publish_reactive_state_event(&project_root, &event).with_context(|| {
+        format!(
+            "failed to settle deferred document write in Lazily state for {}",
+            file.display()
+        )
+    })?;
     Ok(())
+}
+
+#[cfg(not(test))]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    agent_doc_controller_io::project_controller::publish_state_event(project_root, event)
+}
+
+#[cfg(test)]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    // Unit fixtures intentionally exercise the pure durable projector without
+    // launching a second agent-doc process. Production has no direct route.
+    agent_doc_controller_io::project_controller::publish_state_event_existing(project_root, event)
+        .or_else(|_| {
+            agent_doc_controller_io::project_controller::append_state_event_for_test(
+                project_root,
+                event,
+            )
+        })
 }
 
 /// Settle every older deferred target after an exact repair projection. Deferred
@@ -7471,8 +7467,11 @@ mod tests {
                     reason: DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
                 },
             );
-            agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event)
-                .unwrap();
+            agent_doc_controller_io::project_controller::append_state_event_for_test(
+                dir.path(),
+                &event,
+            )
+            .unwrap();
         }
         assert_eq!(pending_document_write_journal(&file).len(), 4);
         let doubled = format!("{trusted}{trusted}");
@@ -9523,7 +9522,7 @@ mod tests {
                     reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
                 },
             );
-            agent_doc_controller_io::project_controller::append_state_event(
+            agent_doc_controller_io::project_controller::append_state_event_for_test(
                 file.parent().unwrap(),
                 &event,
             )
@@ -9636,7 +9635,7 @@ mod tests {
                     },
                 },
             );
-            agent_doc_controller_io::project_controller::append_state_event(
+            agent_doc_controller_io::project_controller::append_state_event_for_test(
                 file.parent().unwrap(),
                 &event,
             )
@@ -10214,7 +10213,7 @@ mod tests {
                 reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
             file.parent().unwrap(),
             &event,
         )
@@ -10754,7 +10753,7 @@ mod tests {
                     reason,
                 },
             );
-            agent_doc_controller_io::project_controller::append_state_event(
+            agent_doc_controller_io::project_controller::append_state_event_for_test(
                 file.parent().unwrap(),
                 &event,
             )
@@ -10810,7 +10809,7 @@ mod tests {
                 reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
             file.parent().unwrap(),
             &event,
         )
@@ -11373,8 +11372,11 @@ mod tests {
             ),
         ] {
             let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
-            agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
-                .expect("append visible-write proof event");
+            agent_doc_controller_io::project_controller::append_state_event_for_test(
+                &project_root,
+                &event,
+            )
+            .expect("append visible-write proof event");
         }
     }
 

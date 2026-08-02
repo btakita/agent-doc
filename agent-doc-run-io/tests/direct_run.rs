@@ -182,7 +182,8 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(root, &event).unwrap();
+        agent_doc_controller_io::project_controller::append_state_event_for_test(root, &event)
+            .unwrap();
     }
 
     #[test]
@@ -338,8 +339,11 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event)
-            .unwrap();
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
+            dir.path(),
+            &event,
+        )
+        .unwrap();
 
         assert_eq!(
             active_queue_prompt_state(&doc).unwrap(),
@@ -486,8 +490,11 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event)
-            .unwrap();
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
+            dir.path(),
+            &event,
+        )
+        .unwrap();
 
         assert_eq!(
             active_queue_prompt_state(&doc).unwrap(),
@@ -541,8 +548,11 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &selected)
-            .unwrap();
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
+            dir.path(),
+            &selected,
+        )
+        .unwrap();
         let deferred = agent_doc_state_backbone::StateEvent::new(
             "typed-deferred-stop-head",
             agent_doc_state_backbone::StateFact::QueueHeadDeferred {
@@ -552,8 +562,11 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &deferred)
-            .unwrap();
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
+            dir.path(),
+            &deferred,
+        )
+        .unwrap();
 
         assert_eq!(
             active_queue_prompt_state(&doc).unwrap(),

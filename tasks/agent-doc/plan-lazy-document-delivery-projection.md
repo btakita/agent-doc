@@ -4,7 +4,7 @@ Status: implemented and verified
 
 ## Incident
 
-After a compact write had been accepted and ACKed, a later JetBrains local
+After a compact write had converged in the editor projection, a later JetBrains local
 delta reported an obsolete baseline. The relay quarantined that delta correctly,
 but then requested an authoritative full state from the editor. JetBrains
 answered by re-registering from its stale buffer. Repeated bootstrap/replay
@@ -18,6 +18,13 @@ mismatched component: opened 'status' but closed 'backlog'
 The tmux pane projection was not the writer. It converged, then its route command
 waited behind the delivery-recovery barrier and parsed the corrupted canonical
 document.
+
+A later Haiven cycle proved a separate legacy route: the foreground writer
+inserted its retained Target into the durable event ledger without publishing
+that fact into the live controller graph. The editor projection already matched
+the Target, but the transition remained at `write_applied` because no Computed
+could observe the retained input. This was projection skew, not an outstanding
+editor acknowledgement.
 
 ## Architecture contract
 
@@ -78,6 +85,11 @@ per-document delivery/settlement ComputedMap
 
 The graph is lazy and keyed by document hash. A transport call may wake or
 observe it, but no transport callback is allowed to decide authority.
+
+All automatic retained-write, authority, queue, compact, watch, and provenance
+facts enter through the controller's typed state-event ingress. Runtime
+consumers read the live per-document projection; cold ledger replay is reserved
+for actorless/bootstrap operation. There is no automatic durable-only fallback.
 
 JetBrains, VS Code, and Zed implement the same boundary: registration consumes
 the controller bootstrap, controller revisions flow downstream, and only

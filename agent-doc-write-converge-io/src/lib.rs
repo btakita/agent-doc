@@ -85,12 +85,10 @@ const VISIBLE_WRITE_RECEIPT_TIMEOUT_MS: u64 = 6_000;
 const VISIBLE_WRITE_RECEIPT_POLL_MS: u64 = 25;
 /// `#lazily-hot-path` W1 — longest single park on the controller's receipt push.
 ///
-/// The receipt normally lands through the controller, which pushes it the instant it
-/// folds; this bound exists only so a receipt written straight to the durable ledger
-/// by `record_visible_write_commit_candidate_direct` (the controller-unreachable
-/// fallback, which the controller's in-memory projection never observes) is still
-/// picked up promptly by the authoritative re-read. Ten poll intervals: an order of
-/// magnitude fewer round trips than the old spin, with the same fallback visibility.
+/// The receipt lands through the controller, which pushes it the instant it
+/// folds. The bounded chunk still protects against a dropped notification or a
+/// controller transport interruption; the authoritative predicate is re-read
+/// between chunks.
 const VISIBLE_WRITE_RECEIPT_AWAIT_CHUNK_MS: u64 = VISIBLE_WRITE_RECEIPT_POLL_MS * 10;
 
 /// Shared closeout budget for an editor's lazily-backed visible-write receipt.
@@ -1732,11 +1730,8 @@ pub fn poll_visible_write_content_lazily_event(
         // wedges.
         //
         // The await is chunked rather than consuming the whole remaining deadline.
-        // The controller can only push a receipt its own in-memory projection saw, and
-        // `record_visible_write_commit_candidate_direct` writes the durable ledger
-        // without going through it. Chunking keeps that fallback observable on a
-        // bounded cadence while still collapsing the common case from one round trip
-        // per poll interval to one that returns the instant the fact lands.
+        // Chunking bounds recovery from a dropped notification while the common case
+        // still returns the instant the controller-owned projection folds the fact.
         let await_window = remaining.min(std::time::Duration::from_millis(
             VISIBLE_WRITE_RECEIPT_AWAIT_CHUNK_MS,
         ));
@@ -4726,8 +4721,11 @@ mod tests {
             ),
         ] {
             let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
-            agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event)
-                .unwrap();
+            agent_doc_controller_io::project_controller::append_state_event_for_test(
+                dir.path(),
+                &event,
+            )
+            .unwrap();
         }
 
         let observed = visible_write_content_from_lazily_event(&file, patch_id)
@@ -4801,7 +4799,7 @@ mod tests {
                 },
             ),
         ] {
-            agent_doc_controller_io::project_controller::append_state_event(
+            agent_doc_controller_io::project_controller::append_state_event_for_test(
                 dir.path(),
                 &agent_doc_state_backbone::StateEvent::new(event_id, fact),
             )

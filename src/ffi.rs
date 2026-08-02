@@ -1044,7 +1044,7 @@ fn append_editor_state_event_from_ffi(
 ) -> anyhow::Result<bool> {
     #[cfg(not(test))]
     {
-        agent_doc_controller_io::project_controller::append_editor_state_event_existing(
+        agent_doc_controller_io::project_controller::publish_editor_state_event_existing(
             project_root,
             file,
             event,
@@ -1053,7 +1053,10 @@ fn append_editor_state_event_from_ffi(
     #[cfg(test)]
     {
         let _ = file;
-        agent_doc_controller_io::project_controller::append_state_event(project_root, event)
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
+            project_root,
+            event,
+        )
     }
 }
 

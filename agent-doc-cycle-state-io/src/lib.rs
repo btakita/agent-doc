@@ -728,7 +728,12 @@ pub fn load_recent_captured_response_checkpoints(
     Ok(checkpoints)
 }
 
-fn load_document_projection(
+/// Load the authoritative per-document projection.
+///
+/// A live controller serves its in-memory reactive projection. Cold durable
+/// replay is reserved for actorless/bootstrap use when no controller is
+/// reachable.
+pub fn load_document_projection(
     file: &Path,
 ) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());

@@ -1299,9 +1299,7 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
             actor.submit(
                 agent_doc_document_realtime::session_ops::SessionOpKind::FileWatch,
                 move |_ctx| -> anyhow::Result<()> {
-                    agent_doc_controller_io::project_controller::append_state_event(
-                        &base_dir, &event,
-                    )?;
+                    publish_reactive_state_event(&base_dir, &event)?;
                     Ok(())
                 },
             )??;
@@ -1424,6 +1422,22 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
         self.actor_contexts.remove(path);
         Ok(())
     }
+}
+
+#[cfg(not(test))]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> anyhow::Result<bool> {
+    agent_doc_controller_io::project_controller::publish_state_event(project_root, event)
+}
+
+#[cfg(test)]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> anyhow::Result<bool> {
+    agent_doc_controller_io::project_controller::append_state_event_for_test(project_root, event)
 }
 
 /// Structural node operations for `agent-doc exchange` (Phase 4 of the

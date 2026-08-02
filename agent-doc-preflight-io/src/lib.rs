@@ -2192,8 +2192,7 @@ fn record_selected_queue_head_state(
             hosting_epoch: None,
         },
     );
-    let inserted =
-        agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)?;
+    let inserted = publish_reactive_state_event(&project_root, &event)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -2242,10 +2241,7 @@ fn record_deferred_queue_head_state(
             hosting_epoch: None,
         },
     );
-    let selected_inserted = agent_doc_controller_io::project_controller::append_state_event(
-        &project_root,
-        &selected_event,
-    )?;
+    let selected_inserted = publish_reactive_state_event(&project_root, &selected_event)?;
     let reason_hash = agent_doc_hash::content_hash(reason);
     let deferred_event = agent_doc_state_backbone::StateEvent::new(
         format!("queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"),
@@ -2256,10 +2252,7 @@ fn record_deferred_queue_head_state(
             hosting_epoch: None,
         },
     );
-    let deferred_inserted = agent_doc_controller_io::project_controller::append_state_event(
-        &project_root,
-        &deferred_event,
-    )?;
+    let deferred_inserted = publish_reactive_state_event(&project_root, &deferred_event)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -2328,8 +2321,7 @@ fn record_queue_worklist_state(
             hosting_epoch: None,
         },
     );
-    let inserted =
-        agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)?;
+    let inserted = publish_reactive_state_event(&project_root, &event)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -2343,6 +2335,22 @@ fn record_queue_worklist_state(
         ),
     );
     Ok(())
+}
+
+#[cfg(not(test))]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    agent_doc_controller_io::project_controller::publish_state_event(project_root, event)
+}
+
+#[cfg(test)]
+fn publish_reactive_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    agent_doc_controller_io::project_controller::append_state_event_for_test(project_root, event)
 }
 
 /// Fold a CP-proven editor-buffer queue deletion into the preflight queue source.
@@ -6811,7 +6819,7 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
             dir.path(),
             &late_selection,
         )

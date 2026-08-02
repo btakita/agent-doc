@@ -132,13 +132,54 @@ Tracked markdown is now clean of both classes in every family repo. Remaining hi
 **Part 3 — split out as `#lzzigfailedcommand`, with the diagnosis it was missing.** The `failed command:` line `zig build test` prints while exiting 0 is not a link defect and was not cheap. It is now its own item, at the top of the queue, carrying what the investigation proved: bisect pins it to exactly one artifact (`run_reactive_graph_conformance_tests`) — removing that step takes the count 1 → 0, removing any other leaves it at 1. The binary itself is healthy: standalone it exits 0 with `All 98 tests passed` and writes **zero** bytes to stdout, so it cannot be corrupting the `--listen=-` protocol channel, and the runner still books its own step as `run test 98 pass`. Ruled out: the empty `src/main.zig` test artifact, stderr volume from per-fixture progress prints, concurrency (`-j1` reproduces), and the `has_side_effects` path (bare `zig build test` with no manifest reproduces). What is left is how the Zig build runner reads that binary's termination — so the next step instruments the runner, not the binary.
 
 I split rather than gated because the two link classes are genuinely finished and the third is a different investigation with a different surface. Leaving it under one id would have meant re-gating the same item every time the link half came up green.
+
+### Re: do [#lzzigfailedcommand] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzzigfailedcommand]
+
+
+Fixed and pushed. The cause was upstream in Zig's build runner, and the item's own "RULED OUT: stderr volume" line was a false negative — that turned out to be the whole answer, just tested incompletely.
+
+**Two upstream facts combine.** Neither alone does it:
+
+1. `build_runner.zig` enters its error printer under the comment *"No matter the result, we want to display error/warning messages"*, guarded only by `result_stderr.len > 0` and the error bundles — **never by step status**. A step that *succeeded* but captured stderr goes through the error printer.
+2. `Step.Run` populates `result_failed_command` for **every** run, up front, as a record in case that step later fails. The error printer prints it unconditionally.
+
+So the reactive-graph conformance artifact — the only test step writing routine progress to stderr — reached the error printer *on success*, with the command string already sitting there. That also explains every earlier observation without contradiction: the bisect to that one artifact was right, and the binary really is healthy, exits 0, and writes zero bytes to stdout, so it never touched the `--listen=-` channel. Nothing was ever failing.
+
+**Why the earlier stderr test came back negative.** Suppressing the per-fixture progress lines left `DIVERGENCE`, the `SKIP` lines, and the summary line still writing. `result_stderr` stayed non-empty, so the branch still fired. I re-ran it as all-or-nothing — every `std.debug.print` in that one file stubbed out — and the line vanished, which pinned it exactly.
+
+**The fix, and the line it draws.** Routine output now goes through a `note` helper, silent unless `LAZILY_CONFORMANCE_VERBOSE` is set: per-fixture counts, ledgered skips, ledgered divergences, the summary. Findings keep `std.debug.print` and are still always paired with a returned error. The invariant that buys is the useful part: **captured stderr is non-empty exactly when the step genuinely fails**, so `failed command:` now means what it says instead of being unconditional noise.
+
+One thing I did not trade away: divergence records now carry their `got X, want Y` detail alongside the ledger id, so an **undocumented** divergence still prints the full comparison on the failure path even though the routine line is gated. Silencing the routine line without that would have made a real finding harder to read — a worse outcome than the noise.
+
+I deliberately left one print loud: the `SKIP ... clone lazily-spec as a sibling` line when the corpus is missing. That is a degraded state that should be visible, and per `#lzvacuousrun` a silent skip is the anti-pattern worth more than a clean log.
+
+**Verification.**
+
+| Check | Result |
+|---|---|
+| `zig build test` | exit 0, **11 bytes** of output, zero `failed command` lines |
+| `make check` | green |
+| Mutation, ledger renamed | exit **1**, prints `undocumented divergence … — got 2, want 1`, and `failed command:` where it is now correct |
+| `LAZILY_CONFORMANCE_VERBOSE=1` | restores all 67 progress/skip/divergence lines |
+| Pinned toolchains | 0.15.2, 0.16.0, master — all green, all clean |
+| Coverage guards | still 114/138 fixtures opened, 86/86 scenarios replayed |
+
+That last row was the risk worth checking rather than assuming: silencing a conformance runner's output is exactly how you'd accidentally convert a real run into a vacuous one. The manifest recorder works off runtime file opens, not prints, so the magnitudes are unchanged — the guards would have caught it if not.
+
+Pushed as `e6c85dc`; superproject pointer `8216c9c`. CI run `30736131754` was still **queued** at write time, so the evidence above is local.
+
+**Not done, and not mine to do:** preflight flagged the installed `agent-doc` as missing `55dd1851d fix: make retained boundary cleanup idempotent`. I did not `make install` — `src/agent-doc` has extensive uncommitted WIP from the concurrent pane that owns `agent-doc-bugs2.md`, including a version bump across every crate, so building here would install their in-progress code rather than that one committed fix. That belongs to the agent-doc session.
 <!-- agent:boundary:ebcdbd84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzzigfailedcommand]
+- ~~do [#lzzigfailedcommand]~~
 - ~~do [#lzkeynullstrict]~~
 - ~~📌 do [#lzreadmelinkrot]~~
 - 📌 do [#lzvacuousrun]
@@ -159,7 +200,6 @@ I split rather than gated because the two link classes are genuinely finished an
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzzigfailedcommand] [recommended] lazily-zig prints a bare `failed command: ./.zig-cache/o/<hash>/test ... --listen=-` line during `zig build test` while the build exits 0 and reports `Build Summary: 24/24 steps succeeded; 916/916 tests passed`. A green gate that prints a failure line trains a reader to skim past the next line that is real. Split out of #lzreadmelinkrot, whose two README link defects are fixed; this third part is carried forward with the diagnosis it did not have. PROVEN by bisect: removing `run_test.dependOn(&run_reactive_graph_conformance_tests.step)` from build.zig takes the count from 1 to 0, and removing any other test step leaves it at 1, so the source is that one artifact. Also proven: the binary is healthy — run standalone it exits 0 with `All 98 tests passed`, writes ZERO bytes to stdout so it cannot be corrupting the --listen protocol channel, and the build runner still records its own step as `run test 98 pass (98 total)`. RULED OUT: the empty test artifact over src/main.zig (which has no test block — removing it drops steps 24 to 22 and leaves the line), and stderr volume from the per-fixture progress prints (suppressing them leaves the line). Reproduces under -j1, so not a concurrency artifact, and under a bare `zig build test` with no LAZILY_CONFORMANCE_MANIFEST set, so not the has_side_effects path. Remaining suspects: something in how the runner reads that binary's termination under --listen=-. Next step is to instrument the Zig build runner rather than the binary.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

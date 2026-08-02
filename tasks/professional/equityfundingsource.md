@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -38,10 +38,36 @@ complete
 Compacted content:
 - Archived 15 response topic(s): cycle check; denied applications showing in Available Deals; lender annual Requirements; 12 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): Production logs; Production logs follow-up; Fixing the product...
+
+### Re: #efs-prod-deploy-20d7a416 — production is on the schedule-capture build — opus-5
+
+> **Queue prompt:**
+>
+> do [#efs-prod-deploy-20d7a416]
+
+Production is live on `20d7a416`: version `4e040d1b-df18-4083-b144-a8449f2a1e74`, deployed 2026-08-01T04:16:42Z, active at 100%. `EFS_ENVIRONMENT="production"`, both `equityfundingsource.com` and `www.` return 200. Repo was in sync with origin/main (0 ahead / 0 behind).
+
+Pre-deploy per `runbooks/deployment.md`: `make check` green (2282 pass, 0 fail, build + worker build clean); **no migrations pending on production D1** before or after, so this was code-only; Time Travel bookmark recorded (`000005f9-0000000e-000050ba-…`). Rollback target if you need it: `3b7d6d2d-bdf8-4847-8ba1-a45ab111a5e6` (2026-07-30T18:19Z).
+
+**On what the build-identity evidence does and does not prove.** Content-hashed assets on production match my clean local build exactly — `index.browser-7YCODNTY.js`, `index.server-45257KN3_YJAK3EWU.css`. But this change is server-side, so matching asset hashes only show the build came from this tree; the deployment timestamp and version ID are what establish the *server* bundle is new. I tried to byte-compare the deployed worker script against local `dist/worker/index.js` and could not: `.env` stores `passage:` references rather than literal credentials, so a raw Cloudflare API fetch does not authenticate. The wrappers resolve those at run time, and I am not resolving secrets by hand on a livestreamed session.
+
+**The scheduled path is verified running clean on the new build.** The 04:15Z sync tick fired 90 seconds *before* the deploy, so I waited for the next one:
+
+```
+tmo_sync_last_started_at    2026-08-01T04:45:48Z
+tmo_sync_last_completed_at  2026-08-01T04:45:50Z
+tmo_sync_cursor_ts          2026-08-01T04:45:48Z
+```
+
+The cursor advancing is the signal that matters, not the two-second runtime. A `partial` batch leaves the cursor stuck — that was the whole shape of `#tmo-sync-cron-failures`, where four consecutive runs re-swept the same 28 loans because the cursor never moved. It moved. No error recorded.
+
+**The change itself is still inert on production, and will be until ~17:00Z today.** The backup interval is 24 hours and the last run was `2026-07-31T17:00:53Z` — cut on the old build, so `schedule_rows=0` like every production artifact before it. The next daily job is the first that can carry schedules. I can force it early by setting `tmo_backup_interval_hours` to 0 and restoring it after a tick, but that is a production settings write you did not ask for, so I left it. Filed as `#tmo-prod-schedule-artifact-confirm` instead, with the check spelled out — that is what unblocks `#tmo-clone-apply`, which needs a schedule-bearing source.
+
+Both environments now run the same build: staging `410b3c74` (2026-07-30T23:18Z), production `4e040d1b`.
 <!-- agent:boundary:3972fcb2 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - do [#tmo-prod-schedule-artifact-confirm]
 - do [#efs-dev-vars-secret-history]
 <!-- /agent:queue -->

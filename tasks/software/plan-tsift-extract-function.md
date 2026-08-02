@@ -130,7 +130,17 @@ emitted code that parsed:
 - `base = base * 2` recorded its write at the target's own offset, so the
   right-hand read looked like a read of an already-assigned local.
 
-Two refusals were added beyond the list above: hoisting out of a method or an
-expression-position function (a `def` beside a method *is* another method, and
-the bare call does not resolve to it), and — for GDScript — more than one
-returned name, since it has no destructuring call site.
+Two refusals were added beyond the list above: an enclosing function that sits
+in an *expression* rather than a statement (an arrow function, a class
+expression — there is no statement slot beside it), and, for GDScript, more
+than one returned name, since it has no destructuring call site.
+
+`#extractfrommethod` (tsift `d98c2df`) then turned the method case from a
+refusal into the answer to a different question — not "can this be extracted"
+but "where does the new function go so the bare call still resolves". Python
+climbs past the class to module scope with `self` threaded through the
+signature first; JS/TS land beside the class declaration and refuse a range
+that names `this`; GDScript deliberately stays inside the class, because its
+methods call each other bare. The climb stops at the first non-class statement
+position, which keeps a nested function's extraction inside its enclosing
+function and its closure intact.

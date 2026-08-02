@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: f24bab55-5bc5-4ad8-af25-9ac03a96471f
+resume: f624f9a9-cec4-4668-a14a-60fc02aa0162
 agent: claude
 claude_model: opus
 agent_doc_format: template

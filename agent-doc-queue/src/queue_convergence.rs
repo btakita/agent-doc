@@ -324,11 +324,13 @@ mod tests {
             text: "do [#done]".to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         });
         let prompt = document_queue::QueueEntry::Prompt(document_queue::QueuePrompt {
             text: "do [#live]".to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         });
 
         assert!(queue_entries_are_drained_residue(&[

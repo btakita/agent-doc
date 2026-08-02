@@ -3,7 +3,7 @@
 //! Pure functions for parsing and mutating the `agent:queue` component body.
 //!
 //! Hybrid syntax:
-//! - `- text` → single-line prompt
+//! - `- text` / `1. text` → single-line prompt
 //! - `~~~prompt` / `---` → multi-line prompt fence
 //! - `--- start [at <datetime>]` / `~~~start` → start fence (activation signal)
 //! - `--- stop` / `~~~stop` → stop fence (breakpoint)
@@ -71,6 +71,12 @@ pub struct QueuePrompt {
     /// round-trips both more tempting and more damaging, so indentation is data,
     /// never something render re-derives.
     pub indent: usize,
+    /// Exact Markdown list marker captured from the operator-authored line.
+    ///
+    /// `None` is the ordinary `-` bullet. Ordered markers retain their source
+    /// spelling (`1.`, `2.`, ...) so parse/render remains byte-preserving while
+    /// nested ordered siblings can compile to dependency edges (`#f1s3`).
+    pub ordered_marker: Option<String>,
 }
 
 impl QueuePrompt {
@@ -80,12 +86,18 @@ impl QueuePrompt {
             text: text.into(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         }
     }
 
     /// `true` when this prompt is nested under a parent item.
     pub fn is_nested(&self) -> bool {
         self.indent > 0
+    }
+
+    /// `true` when this item came from an ordered Markdown list marker.
+    pub fn is_ordered(&self) -> bool {
+        self.ordered_marker.is_some()
     }
 }
 
@@ -206,6 +218,28 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
         .collect())
 }
 
+/// Parse one Markdown queue-list item while retaining its source shape.
+///
+/// Ordered Markdown permits any positive decimal marker (`1.`, `2.`, ...).
+/// The operator-facing recommendation remains repeated `1.` markers because
+/// insertions do not renumber siblings, but accepting and retaining every
+/// decimal spelling keeps existing documents byte-preserving.
+fn split_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    let dedented = &line[indent..];
+    if let Some(rest) = dedented.strip_prefix("- ") {
+        return Some((indent, None, rest));
+    }
+
+    let marker_end = dedented.find(". ")?;
+    let digits = &dedented[..marker_end];
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let rest = &dedented[marker_end + 2..];
+    Some((indent, Some(dedented[..=marker_end].to_string()), rest))
+}
+
 /// Parse a queue body into entries paired with their byte range within `body`.
 ///
 /// Each range spans the entry's full source extent — including fence open/close
@@ -255,6 +289,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     text: trimmed.to_string(),
                     multiline: false,
                     indent: 0,
+                    ordered_marker: None,
                 }),
                 span(start_i, start_i + 1),
             ));
@@ -262,29 +297,28 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
             continue;
         }
 
-        // A queue item is `- <text>`. Tolerate a single stray leading backtick
+        // A queue item is `- <text>` or `<digits>. <text>`. Tolerate a single
+        // stray leading backtick
         // (`` `- text ``, a common mistype where the operator's code-span tick
         // landed before the bullet) by normalizing it to `- text`, so the item
         // parses — and re-renders — as a real prompt instead of being silently
         // preserved as inert `Freeform` and skipped (#queue-line-leading-backtick-drop).
         let item_line = match line.strip_prefix('`') {
-            Some(rest) if rest.starts_with("- ") => rest,
+            Some(rest) if split_list_item(rest).is_some() => rest,
             _ => line,
         };
-        // `#queuenest` / `#f1s3`: accept an INDENTED `- <text>` as a nested item
-        // and retain its indentation. Before this, `strip_prefix("- ")` required
-        // column 0, so every child line fell through to `Freeform` — preserved
-        // verbatim but invisible to strike/consume/sync. Indentation is captured
-        // as data so `render` reproduces the operator's shape byte for byte
-        // rather than re-deriving it (#queueatcreate).
-        let indent = item_line.len() - item_line.trim_start_matches(' ').len();
-        let dedented = &item_line[indent..];
-        if let Some(rest) = dedented.strip_prefix("- ") {
+        // `#queuenest` / `#f1s3`: accept indented unordered and ordered list
+        // items, retaining both indentation and the exact source marker.
+        // Before this, `1. <text>` fell through to inert `Freeform`. Capturing
+        // the marker as data lets `render` preserve every operator-authored byte
+        // while the ordered-list projection derives `after=` edges.
+        if let Some((indent, ordered_marker, rest)) = split_list_item(item_line) {
             let entry = if let Some(completed) = parse_completed_inline(rest) {
                 QueueEntry::Completed(QueuePrompt {
                     text: completed.to_string(),
                     multiline: false,
                     indent,
+                    ordered_marker,
                 })
             } else if is_reference_directive(rest) {
                 // Optional-`do` grammar (Stage 1): a `re [#id]` / `re #id` line
@@ -296,6 +330,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     text: rest.to_string(),
                     multiline: false,
                     indent,
+                    ordered_marker,
                 })
             };
             entries.push((entry, span(start_i, start_i + 1)));
@@ -355,6 +390,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                         text,
                         multiline: true,
                         indent: 0,
+                        ordered_marker: None,
                     };
                     let entry = if completed {
                         QueueEntry::Completed(prompt)
@@ -386,6 +422,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                             text,
                             multiline: true,
                             indent: 0,
+                            ordered_marker: None,
                         }),
                         span(start_i, close_idx + 1),
                     ));
@@ -416,6 +453,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                         text,
                         multiline: true,
                         indent: 0,
+                        ordered_marker: None,
                     }),
                     span(start_i, close_idx + 1),
                 ));
@@ -462,12 +500,14 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     // marking unrun work complete. Rendering the bullet keeps one
                     // segmentation truth. `parse_spans` still accepts the legacy
                     // bare form, so existing documents round-trip and self-heal.
-                    // `#queuenest`: replay the captured indentation so a nested
-                    // item round-trips byte-identically (#queueatcreate).
+                    // `#queuenest` / `#f1s3`: replay the captured indentation and
+                    // exact list marker so nested list syntax round-trips
+                    // byte-identically (#queueatcreate).
                     for _ in 0..p.indent {
                         out.push(' ');
                     }
-                    out.push_str("- ");
+                    out.push_str(p.ordered_marker.as_deref().unwrap_or("-"));
+                    out.push(' ');
                     out.push_str(&p.text);
                     out.push('\n');
                 }
@@ -488,7 +528,8 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     for _ in 0..p.indent {
                         out.push(' ');
                     }
-                    out.push_str("- ~~");
+                    out.push_str(p.ordered_marker.as_deref().unwrap_or("-"));
+                    out.push_str(" ~~");
                     out.push_str(&p.text);
                     out.push_str("~~\n");
                 }
@@ -657,6 +698,7 @@ fn do_prompt_entry(id: &str) -> QueueEntry {
         text: format!("do [#{id}]"),
         multiline: false,
         indent: 0,
+        ordered_marker: None,
     })
 }
 
@@ -1202,6 +1244,12 @@ pub fn sort_prompts_by_priority_with_operator_authored(
     backlog_sourced: &std::collections::HashSet<String>,
     operator_authored: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
+    // Nested/ordered lists are an operator-authored tree, not interchangeable
+    // flat prompt slots. Their ordered edges are enforced by the shared DAG
+    // projection; never flatten the visible grouping to restate that order.
+    if has_nested_or_ordered_list(entries) {
+        return None;
+    }
     let positions: Vec<usize> = entries
         .iter()
         .enumerate()
@@ -1313,6 +1361,9 @@ pub fn sort_prompts_by_dag_with_operator_authored(
     backlog_sourced: &std::collections::HashSet<String>,
     operator_authored: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
+    if has_nested_or_ordered_list(entries) {
+        return None;
+    }
     let positions: Vec<usize> = entries
         .iter()
         .enumerate()
@@ -1806,6 +1857,155 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
     false
 }
 
+/// Compile nested ordered-list sibling groups into `after=` dependency edges.
+///
+/// List shape is ingress sugar, not a second scheduling authority: callers
+/// merge this projection with explicit tracked-work `after=` metadata and all
+/// downstream scheduling/drainability continues to consume one dependency map.
+///
+/// Group labels are never executable and need no ids. When an ordered sibling
+/// is itself a group, every entry leaf in the following sibling subtree depends
+/// on every terminal leaf in the preceding subtree. Unordered work *inside* a
+/// group remains unordered; only the boundary between ordered sibling subtrees
+/// gains edges.
+pub fn ordered_list_after_deps(
+    entries: &[QueueEntry],
+) -> std::collections::HashMap<String, Vec<String>> {
+    #[derive(Default)]
+    struct Node {
+        entry_idx: Option<usize>,
+        children: Vec<usize>,
+    }
+
+    #[derive(Default)]
+    struct Frontier {
+        entries: Vec<String>,
+        terminals: Vec<String>,
+    }
+
+    fn push_unique(items: &mut Vec<String>, value: String) {
+        if !items.contains(&value) {
+            items.push(value);
+        }
+    }
+
+    fn visit(
+        node_idx: usize,
+        nodes: &[Node],
+        entries: &[QueueEntry],
+        deps: &mut std::collections::HashMap<String, Vec<String>>,
+    ) -> Frontier {
+        let children = &nodes[node_idx].children;
+        if children.is_empty() {
+            let Some(entry_idx) = nodes[node_idx].entry_idx else {
+                return Frontier::default();
+            };
+            let Some(id) = entry_do_id(&entries[entry_idx]) else {
+                return Frontier::default();
+            };
+            return Frontier {
+                entries: vec![id.clone()],
+                terminals: vec![id],
+            };
+        }
+
+        let ordered_siblings = node_idx != 0
+            && children.len() > 1
+            && children.iter().all(|&child_idx| {
+                nodes[child_idx]
+                    .entry_idx
+                    .and_then(|entry_idx| match &entries[entry_idx] {
+                        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+                            Some(prompt.is_ordered())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            });
+
+        let mut frontiers = Vec::with_capacity(children.len());
+        for &child_idx in children {
+            frontiers.push(visit(child_idx, nodes, entries, deps));
+        }
+
+        if ordered_siblings {
+            let mut combined = Frontier::default();
+            let mut previous_terminals: Vec<String> = Vec::new();
+            for frontier in frontiers
+                .into_iter()
+                .filter(|frontier| !frontier.entries.is_empty())
+            {
+                if combined.entries.is_empty() {
+                    combined.entries = frontier.entries.clone();
+                } else {
+                    for entry in &frontier.entries {
+                        let entry_deps = deps.entry(entry.clone()).or_default();
+                        for terminal in &previous_terminals {
+                            if terminal != entry && !entry_deps.contains(terminal) {
+                                entry_deps.push(terminal.clone());
+                            }
+                        }
+                    }
+                }
+                previous_terminals = frontier.terminals.clone();
+                combined.terminals = frontier.terminals;
+            }
+            return combined;
+        }
+
+        let mut combined = Frontier::default();
+        for frontier in frontiers {
+            for entry in frontier.entries {
+                push_unique(&mut combined.entries, entry);
+            }
+            for terminal in frontier.terminals {
+                push_unique(&mut combined.terminals, terminal);
+            }
+        }
+        combined
+    }
+
+    // Virtual root at index 0. The root is deliberately never ordered: the
+    // documented queue shape is a top-level unordered list whose children may
+    // contain ordered groups.
+    let mut nodes = vec![Node::default()];
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    for (entry_idx, entry) in entries.iter().enumerate() {
+        let Some(indent) = entry_indent(entry) else {
+            continue;
+        };
+        while stack
+            .last()
+            .is_some_and(|(open_indent, _)| *open_indent >= indent)
+        {
+            stack.pop();
+        }
+        let parent_idx = stack.last().map(|(_, node_idx)| *node_idx).unwrap_or(0);
+        let node_idx = nodes.len();
+        nodes.push(Node {
+            entry_idx: Some(entry_idx),
+            children: Vec::new(),
+        });
+        nodes[parent_idx].children.push(node_idx);
+        stack.push((indent, node_idx));
+    }
+
+    let mut deps = std::collections::HashMap::new();
+    visit(0, &nodes, entries, &mut deps);
+    deps
+}
+
+/// Structured list shape is operator-authored grouping and must not be flattened
+/// by the legacy prompt-slot priority sort.
+pub fn has_nested_or_ordered_list(entries: &[QueueEntry]) -> bool {
+    entries.iter().any(|entry| match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+            prompt.is_nested() || prompt.is_ordered()
+        }
+        _ => false,
+    })
+}
+
 /// Indentation of an item-shaped entry, or `None` for entries that carry no list
 /// depth (fences, presets, dispatch, freeform).
 fn entry_indent(entry: &QueueEntry) -> Option<usize> {
@@ -2014,6 +2214,7 @@ pub fn dedup_pin_variant_do_heads(entries: &[QueueEntry]) -> Option<Vec<QueueEnt
                     text: text.clone(),
                     multiline: false,
                     indent: 0,
+                    ordered_marker: None,
                 })
             }
             _ => entry.clone(),
@@ -2602,6 +2803,7 @@ pub fn converge_queue_via_lifecycle(
                     text: text.clone(),
                     multiline: false,
                     indent: 0,
+                    ordered_marker: None,
                 }));
             }
             _ => converged.push(entry.clone()),
@@ -3591,6 +3793,7 @@ mod tests {
             text: "do [#x]".to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         })];
         let rendered = render(&entries);
         assert_eq!(rendered, "- ~~do [#x]~~\n");
@@ -4097,6 +4300,7 @@ mod tests {
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             })
         );
         assert_eq!(
@@ -4105,6 +4309,7 @@ mod tests {
                 text: "do #fix2".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             })
         );
         assert_eq!(
@@ -4113,6 +4318,7 @@ mod tests {
                 text: "run tests".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             })
         );
     }
@@ -4128,6 +4334,7 @@ mod tests {
                 text: "Review the changes in src/.\nCheck for edge cases.".to_string(),
                 multiline: true,
                 indent: 0,
+                ordered_marker: None,
             })
         );
     }
@@ -4143,6 +4350,7 @@ mod tests {
                 text: "Review the changes.\nThen run cargo test.".to_string(),
                 multiline: true,
                 indent: 0,
+                ordered_marker: None,
             })
         );
     }
@@ -4172,6 +4380,7 @@ mod tests {
                 text: "There is significant blocking with the sync pipeline.".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             })
         );
         assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.text == "run tests"));
@@ -4477,6 +4686,7 @@ mod tests {
             text: "do #fix1".to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         })];
         assert_eq!(render(&entries), "- do #fix1\n");
     }
@@ -4487,6 +4697,7 @@ mod tests {
             text: "Review changes.\nRun tests.".to_string(),
             multiline: true,
             indent: 0,
+            ordered_marker: None,
         })];
         assert_eq!(render(&entries), "---\nReview changes.\nRun tests.\n---\n");
     }
@@ -4516,12 +4727,14 @@ mod tests {
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
             QueueEntry::StopFence,
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix2".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
         ];
         assert_eq!(render(&entries), "- do #fix1\n--- stop\n- do #fix2\n");
@@ -4535,11 +4748,13 @@ mod tests {
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix2".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
         ];
         let result = mark_first_prompt_completed(&entries);
@@ -4555,11 +4770,13 @@ mod tests {
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix2".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
         ];
         let result = mark_first_prompt_completed(&entries);
@@ -4587,12 +4804,14 @@ mod tests {
                 text: "task1".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
             QueueEntry::StopFence,
             QueueEntry::Prompt(QueuePrompt {
                 text: "task2".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
         ];
         let p = prompts(&entries);
@@ -4609,6 +4828,7 @@ mod tests {
                 text: "task1".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
         ];
         assert_eq!(first_prompt(&entries).unwrap().text, "task1");
@@ -4628,11 +4848,13 @@ mod tests {
                 text: "task1".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
             QueueEntry::Prompt(QueuePrompt {
                 text: "task2".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }),
         ];
         let result = remove_first_prompt(&entries);
@@ -4652,6 +4874,7 @@ mod tests {
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             })
         );
     }
@@ -4670,6 +4893,7 @@ mod tests {
             text: text.to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         })
     }
 
@@ -5325,6 +5549,70 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ordered_nested_list_parses_and_round_trips_exact_markers() {
+        let body = "- epic\n  01. do [#a]\n  2. do [#b]\n";
+        let entries = parse(body).unwrap();
+        let markers: Vec<Option<&str>> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt) => Some(prompt.ordered_marker.as_deref()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(markers, vec![None, Some("01."), Some("2.")]);
+        assert_eq!(render(&entries), body);
+    }
+
+    #[test]
+    fn ordered_leaf_siblings_compile_after_edges() {
+        let entries = parse("- epic\n  1. do [#a]\n  2. do [#b]\n").unwrap();
+        let deps = ordered_list_after_deps(&entries);
+
+        assert!(!deps.contains_key("a"));
+        assert_eq!(deps.get("b"), Some(&ids(&["a"])));
+    }
+
+    #[test]
+    fn ordered_group_subtrees_bridge_leaf_frontiers_without_group_ids() {
+        let entries = parse(
+            "- epic\n\
+             \x20 1. [#group-a] group a\n\
+             \x20   - do [#a1]\n\
+             \x20   - do [#a2]\n\
+             \x20 2. [#group-b] group b\n\
+             \x20   - do [#b1]\n\
+             \x20   - do [#b2]\n",
+        )
+        .unwrap();
+        let deps = ordered_list_after_deps(&entries);
+
+        assert_eq!(deps.get("b1"), Some(&ids(&["a1", "a2"])));
+        assert_eq!(deps.get("b2"), Some(&ids(&["a1", "a2"])));
+        assert!(!deps.contains_key("group-a"));
+        assert!(!deps.contains_key("group-b"));
+        assert!(
+            deps.values()
+                .flatten()
+                .all(|id| id != "group-a" && id != "group-b"),
+            "group labels must never become executable dependency identities"
+        );
+    }
+
+    #[test]
+    fn reordering_ordered_list_rederives_edges() {
+        let original =
+            ordered_list_after_deps(&parse("- epic\n  1. do [#a]\n  2. do [#b]\n").unwrap());
+        let reordered =
+            ordered_list_after_deps(&parse("- epic\n  1. do [#b]\n  2. do [#a]\n").unwrap());
+
+        assert_eq!(original.get("b"), Some(&ids(&["a"])));
+        assert!(!original.contains_key("a"));
+        assert_eq!(reordered.get("a"), Some(&ids(&["b"])));
+        assert!(!reordered.contains_key("b"));
+    }
+
     /// Leaf-only execution: a parent is the group label and never yields a
     /// runnable head; its children do.
     #[test]
@@ -5390,6 +5678,7 @@ mod tests {
             text: text.to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         })
     }
     fn c(text: &str) -> QueueEntry {
@@ -5397,6 +5686,7 @@ mod tests {
             text: text.to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         })
     }
 
@@ -5687,11 +5977,13 @@ mod tests {
                         text: ":round_pushpin: switch actor\nroute error body".into(),
                         multiline: true,
                         indent: 0,
+                        ordered_marker: None,
                     }),
                     QueueEntry::Prompt(QueuePrompt {
                         text: ":round_pushpin: switch actor\nroute error body".into(),
                         multiline: true,
                         indent: 0,
+                        ordered_marker: None,
                     }),
                 ],
                 vec![],

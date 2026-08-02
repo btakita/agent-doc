@@ -8811,6 +8811,7 @@ fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_p
             text: text.to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         })
     }
     fn multi(text: &str) -> QueueEntry {
@@ -8818,6 +8819,7 @@ fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_p
             text: text.to_string(),
             multiline: true,
             indent: 0,
+            ordered_marker: None,
         })
     }
 

@@ -123,6 +123,7 @@ impl PreparedFreeTextAdmission {
                                 text: command,
                                 multiline: false,
                                 indent: 0,
+                                ordered_marker: None,
                             },
                         ),
                     );
@@ -526,6 +527,7 @@ mod tests {
                 text: "❯ Implement checkout setup".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             },
         )];
 
@@ -568,6 +570,7 @@ mod tests {
                 text: command,
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             },
         )];
 
@@ -578,6 +581,7 @@ mod tests {
                 text: "/goal Implement [#abc123] and [#def456]".to_string(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             },
         )];
         assert!(goal_command_already_queued(&bracketed, &ids));

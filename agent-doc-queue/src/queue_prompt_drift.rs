@@ -207,6 +207,7 @@ pub fn merge_visible_queue_additions_into_content_ours(
                 text: text.clone(),
                 multiline: false,
                 indent: 0,
+                ordered_marker: None,
             }));
             *content_ours_counts.entry(text).or_insert(0) += 1;
         }

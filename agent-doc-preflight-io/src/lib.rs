@@ -3556,7 +3556,8 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                             agent_doc_queue::document_queue::QueuePrompt {
                                 text: cleaned,
                                 multiline: p.multiline,
-                                indent: 0,
+                                indent: p.indent,
+                                ordered_marker: p.ordered_marker.clone(),
                             },
                         )
                     }
@@ -3693,7 +3694,8 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                                     agent_doc_queue::document_queue::QueueEntry::Completed(agent_doc_queue::document_queue::QueuePrompt {
                                         text: annotated,
                                         multiline: p.multiline,
-                                        indent: 0,
+                                        indent: p.indent,
+                                        ordered_marker: p.ordered_marker.clone(),
                                     })
                                 }
                                 None => entry.clone(),

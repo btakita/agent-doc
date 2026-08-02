@@ -334,10 +334,12 @@ pub fn collect_backlog_priority_ranks(
     rank
 }
 
-/// Build an id->`after=#id` dependency map from active tracked-work items.
+/// Build the canonical id->`after=#id` dependency projection.
 ///
-/// First-seen deps win on duplicate ids across components; items with no
-/// dependency tokens are omitted.
+/// Explicit tracked-work metadata is collected first. Nested ordered-list
+/// syntax in `agent:queue` is then compiled into the same map, so every
+/// scheduler and drainability gate consumes one source of dependency truth
+/// (`#f1s3`). Duplicate edges are collapsed.
 pub fn collect_after_deps(
     components: &[element::Component],
     content: &str,
@@ -351,6 +353,20 @@ pub fn collect_after_deps(
         for (id, d) in backlog::active_item_after_deps(body) {
             if !d.is_empty() {
                 deps.entry(id).or_insert(d);
+            }
+        }
+    }
+    for comp in components.iter().filter(|comp| comp.name == "queue") {
+        let body = &content[comp.open_end..comp.close_start];
+        let Ok(entries) = document_queue::parse(body) else {
+            continue;
+        };
+        for (id, ordered_deps) in document_queue::ordered_list_after_deps(&entries) {
+            let slot = deps.entry(id).or_default();
+            for dep in ordered_deps {
+                if !slot.contains(&dep) {
+                    slot.push(dep);
+                }
             }
         }
     }
@@ -561,6 +577,7 @@ mod tests {
             text: text.to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         })
     }
 
@@ -917,6 +934,28 @@ mod tests {
         assert_eq!(deps.get("a"), Some(&vec!["root".to_string()]));
         assert_eq!(deps.get("c"), Some(&vec!["a".to_string()]));
         assert!(!deps.contains_key("b"));
+    }
+
+    #[test]
+    fn collect_after_deps_merges_ordered_list_sugar_with_explicit_metadata() {
+        let content = concat!(
+            "<!-- agent:queue go -->\n",
+            "- epic\n",
+            "  1. do [#a]\n",
+            "  2. do [#b]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#a] first\n",
+            "- [ ] [#b] after=#root second\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let deps = collect_after_deps(&components, content);
+
+        assert_eq!(
+            deps.get("b"),
+            Some(&vec!["root".to_string(), "a".to_string()])
+        );
     }
 
     /// `#queueatcreate`: enqueueing must not rewrite operator-authored lines.

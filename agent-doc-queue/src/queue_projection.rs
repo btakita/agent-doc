@@ -260,6 +260,7 @@ mod tests {
             text: text.to_string(),
             multiline: false,
             indent: 0,
+            ordered_marker: None,
         })
     }
 

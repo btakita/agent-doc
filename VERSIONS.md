@@ -4,6 +4,19 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.114
+
+_JetBrains plugin 0.2.335; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Ordered nested queue lists compile to enforceable leaf dependencies.** Exact
+  numeric list markers and indentation now round-trip byte-for-byte. Ordered
+  sibling subtrees derive canonical `after=` edges between their leaf
+  frontiers, merge with explicit dependency metadata, and re-derive when the
+  operator reorders the list; group labels remain id-free and non-executable.
+  Runtime selection, drainability, and deferred-head accounting now all use the
+  same leaf-only projection, so a group label cannot masquerade as runnable work
+  or allow a later ordered leaf to bypass a deferred prerequisite.
+
 ## 0.35.113
 
 _JetBrains plugin 0.2.335; VS Code extension 0.2.64; Zed extension 0.1.0._

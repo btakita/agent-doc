@@ -374,12 +374,9 @@ pub fn deferred_head_count(content: &str) -> usize {
         return 0;
     };
     let deferred_ids = deferred_backlog_ids(content);
-    entries
-        .iter()
-        .filter_map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => extract_head_id(&prompt.text),
-            _ => None,
-        })
+    document_queue::prompts(&entries)
+        .into_iter()
+        .filter_map(|prompt| extract_head_id(&prompt.text))
         .filter(|id| deferred_ids.contains(&id.to_ascii_lowercase()))
         .count()
 }
@@ -426,19 +423,17 @@ pub fn drainable_head_count(content: &str) -> usize {
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids(content);
     let after_deps = after_deps_from_content(content);
-    activation
-        .entries_after
-        .iter()
-        .filter(|entry| match entry {
-            QueueEntry::Prompt(prompt) => head_is_drainable(
+    document_queue::prompts(&activation.entries_after)
+        .into_iter()
+        .filter(|prompt| {
+            head_is_drainable(
                 &prompt.text,
                 open_backlog.as_ref(),
                 &deferred_ids,
                 &after_deps,
                 queue_facts.preset_supplies_directive,
                 DrainScope::InSessionLoop,
-            ),
-            _ => false,
+            )
         })
         .count()
 }
@@ -558,23 +553,18 @@ fn first_drainable_head<'a>(
     preset_supplies_directive: bool,
     scope: DrainScope,
 ) -> Option<&'a QueuePrompt> {
-    entries_after.iter().find_map(|entry| match entry {
-        QueueEntry::Prompt(prompt) => {
-            if head_is_drainable(
+    document_queue::prompts(entries_after)
+        .into_iter()
+        .find(|prompt| {
+            head_is_drainable(
                 &prompt.text,
                 open_backlog_ids,
                 deferred_ids,
                 after_deps,
                 preset_supplies_directive,
                 scope,
-            ) {
-                Some(prompt)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    })
+            )
+        })
 }
 
 fn head_is_drainable(
@@ -1417,6 +1407,47 @@ mod tests {
             drainable_head_count(&done),
             1,
             "a met prerequisite must unblock the dependent"
+        );
+    }
+
+    #[test]
+    fn ordered_list_sugar_blocks_later_leaf_while_prior_leaf_is_deferred() {
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- epic\n",
+            "  1. do [#pre]\n",
+            "  2. do [#dep]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#pre] [operator-verify] prerequisite a human must clear\n",
+            "- [ ] [#dep] dependent work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        assert_eq!(
+            after_deps_from_content(content).get("dep"),
+            Some(&vec!["pre".to_string()]),
+            "the runtime projection must include the compiled ordered-list edge"
+        );
+        assert!(
+            deferred_backlog_ids(content).contains("pre"),
+            "operator-verify prerequisite must remain deferred"
+        );
+        assert_eq!(
+            drainable_head_count(content),
+            0,
+            "ordered-list dependency sugar must block later leaves at runtime"
+        );
+
+        let done = content.replace(
+            "- [ ] [#pre] [operator-verify] prerequisite a human must clear\n",
+            "",
+        );
+        assert_eq!(
+            drainable_head_count(&done),
+            1,
+            "completing the preceding leaf must unblock the next ordered leaf"
         );
     }
 

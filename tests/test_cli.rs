@@ -1955,6 +1955,15 @@ fn test_backlog_reopen_help_exposes_explicit_queue_reactivation() {
 }
 
 #[test]
+fn test_respond_help_routes_backlog_only_to_write_commit() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["respond", "--help"]);
+    cmd.assert().success().stdout(predicate::str::contains(
+        "use `agent-doc write --commit` instead",
+    ));
+}
+
+#[test]
 fn test_admin_recycle_help_accepts_document_or_project_target() {
     let mut cmd = agent_doc_cmd();
     cmd.args(["admin", "recycle", "--help"]);

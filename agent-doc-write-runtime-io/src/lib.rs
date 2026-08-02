@@ -1638,7 +1638,9 @@ fn run_command_inner(
         anyhow::bail!("--backlog-only cannot be combined with --template, --stream, or --ipc");
     }
     if options.pending_only && commit_mode == CommitMode::Required {
-        anyhow::bail!("finalize does not support --backlog-only");
+        anyhow::bail!(
+            "`respond`/`finalize` requires an assistant response and does not support --backlog-only; use `agent-doc write --commit <FILE> --backlog-only ...` for a tracked-work-only commit"
+        );
     }
     if !options.pending_add_to.len().is_multiple_of(2) {
         anyhow::bail!("--backlog-add-to expects repeated FILE TEXT pairs");

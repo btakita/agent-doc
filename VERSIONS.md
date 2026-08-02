@@ -22,7 +22,9 @@ _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
   archived item as open backlog work, and optionally reactivates exactly one
   live queue directive. The archive, document, and queue projection share one
   tracked-work transaction, so a reopened id is not immediately reaped again
-  by stale completion evidence.
+  by stale completion evidence. Shared closeout help now also states that
+  tracked-work-only commits use `write --commit`; strict `respond`/`finalize`
+  requires an assistant response body.
 - **Exact visible delivery targets acknowledge without waiting on a stale local
   replica.** The editor adapters now distinguish an unrelated divergent buffer
   from a buffer whose hash exactly proves the controller generation. In the

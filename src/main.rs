@@ -1917,7 +1917,9 @@ struct WriteArgs {
     #[arg(long = "allow-replace-pending", hide = true)]
     allow_replace_pending: bool,
     /// Only mutate tracked-work components — skip stdin reading and exchange synthesis.
-    /// Requires at least one backlog/icebox/review mutation flag; incompatible with --template/--stream/--ipc.
+    /// Requires at least one backlog/icebox/review mutation flag; incompatible with
+    /// --template/--stream/--ipc. Unavailable on `respond`/`finalize`, whose strict
+    /// contract requires an assistant response; use `agent-doc write --commit` instead.
     #[arg(long = "backlog-only", alias = "pending-only")]
     pending_only: bool,
     /// Replace the status component content (repeatable for multi-line).

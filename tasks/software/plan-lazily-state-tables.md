@@ -1,9 +1,10 @@
 # Plan: Typed state tables as Lazily Computeds
 
-**Status:** Proposed
+**Status:** Phases 1-2 landed in `lazily-rs`; Phase 3 (Agent Doc migration) open
 **Created:** 2026-08-01
 **Session:** `tasks/software/lazily.md`
 **Related:** `tasks/software/plan-lazily-state-machine-mirroring.md`
+**Implementation:** `lazily-rs/src/state_table.rs`, `lazily-rs/tests/state_table_pilot.rs`
 
 ## Problem
 
@@ -29,9 +30,12 @@ Computed<InputState> ── transition table ──> Computed<Decision>
 
 This complements the existing `StateMachine` roadmap. `StateMachine` owns an accepted sequence of state changes; a state table derives a decision from the current product of observed facts. Either can be implemented using the other internally, but their public semantics should remain distinct.
 
-## Proposed Rust surface
+## Rust surface (as landed)
 
-Start in `lazily-rs`, without a procedural macro:
+In `lazily-rs`, without a procedural macro. The proposal's
+`input: impl Signal<T::Input>` does not survive contact with the Cell kernel —
+`Signal` is retired, and the eager/lazy axis belongs to `Computed::eager`, not
+to the table's signature:
 
 ```rust
 pub trait StateTable {
@@ -41,11 +45,12 @@ pub trait StateTable {
     fn decide(input: &Self::Input) -> Self::Decision;
 }
 
-pub fn state_table<T>(
-    input: impl Signal<T::Input>,
-) -> Computed<T::Decision>
-where
-    T: StateTable;
+pub fn state_table<T: StateTable>(ctx: &Context, input: Computed<T::Input>) -> Computed<T::Decision>;
+pub fn projected_state_table<T: StateTable, F>(ctx: &Context, project: F) -> Computed<T::Decision>;
+
+// The row set, and the assertions over it.
+pub trait FiniteState: Sized { fn all() -> Vec<Self>; }
+pub fn table_coverage<T: StateTable>() -> TableCoverage<T::Input, T::Decision>;
 ```
 
 Use Rust enums for closed alternatives. Rust's `union` is an unsafe overlapping-memory representation, not the equivalent of Python's `A | B` sum type and not suitable for typing label strings. If external strings are required, parse them once into an enum at the boundary and reject unknown labels there.
@@ -83,17 +88,41 @@ The input type should group projection, delivery, generation, terminal-cycle, an
 
 ## Phases
 
-### Phase 1 — inventory and semantics
+### Phase 1 — inventory and semantics — DONE
 
-- Inventory three candidate consumers in `lazily-rs` and Agent Doc.
-- Classify each as state ownership (`StateMachine`) or state derivation (`StateTable`).
-- Write the pilot product-state enum and exhaustive table before changing runtime behavior.
+Four consumers inventoried and classified:
 
-### Phase 2 — minimal `lazily-rs` helper
+| Consumer | Classification | Note |
+|---|---|---|
+| `agent_doc_state_backbone::retained_write::settlement_verdict` | derivation — `StateTable` | Already a total pure function over `Source`s feeding a `Computed<SettlementVerdict>`. Missing both halves of the contract: its input is three `Option`s of hash-bearing structs, so it has no row set; and presence carried by `Option` makes impossible combinations (no retained intent + a divergent visible projection) constructible, ruled out only by the function body. **The pilot.** |
+| `coordination::LeaderCell::role` | derivation — `StateTable` | `holder(now)` classified into three rows (none / is-me / is-other). The unbounded peer id is already classified at the boundary; this is the shape, at its smallest. |
+| `service::HealthCore::health` | derivation — `StateTable` *after* a projection | Folds a variable-arity probe map, so it has no finite product as written. It becomes one over `(any_critical_down, any_down)` — 4 rows, one of which (`critical down` + `nothing down`) is unconstructible. |
+| `resilience::CircuitBreakerCore` (`BreakerState`) | ownership — `StateMachine` | Holds Closed/Open/HalfOpen and folds outcomes into it. Not a table. |
 
-- Implement the trait/helper using existing `Computed` primitives.
-- Add no runtime, background task, persistence, macro, or dynamic string registry.
-- Verify distinct-until-changed behavior and dependency invalidation.
+`membership::MembershipCore` (`PeerState`) classifies the same way as the
+breaker, for the same reason.
+
+The pilot product-state enum and its exhaustive table are written in
+`lazily-rs/tests/state_table_pilot.rs`, ahead of any Agent Doc runtime change.
+
+### Phase 2 — minimal `lazily-rs` helper — DONE
+
+`lazily-rs/src/state_table.rs`: the `StateTable` trait, `state_table` /
+`projected_state_table` (plus `thread_safe_*` counterparts), `FiniteState` with
+tuple/`Option`/`bool` impls and the declarative `finite_state!` macro, and
+`table_coverage` returning a `TableCoverage` row set.
+
+No runtime, background task, persistence, proc-macro, or dynamic string
+registry. `projected_state_table` builds **two** guarded cells rather than one —
+that is the load-bearing part: payload churn that leaves the product state
+unchanged stops at the projection and never reaches `decide`. Mutation-checked
+by collapsing them into one cell (the coverage test reddens 7 vs 1) and by
+dropping the decision cell's `PartialEq` guard (the effect sink reddens with a
+duplicate `Wait`).
+
+Every coverage assertion fails on an empty row set rather than sweeping nothing
+(`assert_at_least`, `#lzvacuousrun`), and `assert_at_least(0)` is rejected
+outright — a floor that cannot fail is not a floor.
 
 ### Phase 3 — pilot migration
 
@@ -123,8 +152,9 @@ The input type should group projection, delivery, generation, terminal-cycle, an
 
 ## Completion criteria
 
-- The pilot table is exhaustive and every row has a test.
-- `make check` passes in `lazily-rs` and the pilot consumer.
-- Arrival-order, restart, and effect-frontier tests pass.
-- The public API documents the distinction between state machine, state table, projection, transition, target, and retained transition.
-- Cross-language parity is based on semantic capability, including Zed projection parity, rather than identical implementation shape.
+- [x] The pilot table is exhaustive and every row has a test — 11 constructible rows of a naive 32, all six decisions reached, `assert_decisions_exactly`.
+- [x] Arrival-order, restart, and effect-frontier tests pass.
+- [x] The public API documents the distinction between state machine and state table (`src/state_table.rs` module docs); the pilot names projection, visible classification, frontier, and retained transition.
+- [x] `make check` passes in `lazily-rs`.
+- [ ] `make check` passes in the pilot consumer — pending Phase 3.
+- [ ] Cross-language parity is based on semantic capability, including Zed projection parity, rather than identical implementation shape — pending Phase 4.

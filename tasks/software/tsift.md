@@ -64,15 +64,38 @@ Two refusals beyond the plan's list: hoisting out of a method or an expression-p
 **Live proof**, since the fixtures had already proven willing to be wrong: extracted Python and JavaScript both still compute `36` for `outer(3, 4)`, and the extracted TypeScript passes `tsc --noEmit --strict` while the pre-fix shape fails it with two `TS2304`s.
 
 Next in the queue is `#deciderustspells` — phase 3, still a decision rather than an implementation. Two follow-ups queued behind it: hoisting past a class so extraction works inside methods, and the `break`/`continue` over-refusal when the loop is entirely inside the range.
+
+### Re: do [#extractfrommethod] — opus-5
+
+> **Queue prompt:**
+>
+> do [#extractfrommethod]
+
+
+Done, tsift `d98c2df`. `make check` green, previous cycle's CI (`30733679220`) came back green, this one (`30734881556`) still running at close.
+
+The refusal was covering for the wrong question. Not "can this be extracted" but **"where does the new function go so the bare call still resolves"** — and that has three different answers, each forced by how the language resolves a bare call:
+
+- **Python** climbs past the class to module scope. `self` is an ordinary name, so it threads through the derived signature like any other parameter. I put it first rather than letting it sort alphabetically: a correct `def scaled(base, self)` reads as a mistake, and a tool that looks wrong gets distrusted.
+- **JS / TS** land beside the class declaration. A range naming `this` or `super` refuses instead — unlike `self` it is not a name a signature can carry, and a plain function's `this` is not the method's. Threading it would need a body rewrite the derivation does not do.
+- **GDScript** deliberately does not climb. Its methods call each other bare, so a sibling `func` in the same class is what keeps the call working; climbing out would break it rather than fix it. This is the one place where the previously-refused shape was already correct.
+
+The climb stops at the first **non-class** statement position, which is what keeps a nested function's extraction inside its enclosing function — a nested `def` closes over the outer function's locals, and hoisting past it would strand them. Climbing past a *class* body costs nothing, because a method could not read a class-body name unqualified to begin with. An arrow function, a function expression, and a class expression still refuse: there is no statement slot beside them.
+
+One thing that only showed up once the insertion point could move: collisions have to be checked against the block the new function actually lands in, not just module scope. A GDScript sibling-method conflict is invisible to a file-root scan, since it never enumerates a class's members.
+
+**Live proof**, since the emitter has twice now agreed with itself and disagreed with the language: `panel.outer(4)` still returns `12` in Python after extracting through `self.scale`, `outer(4)` still returns `8` in JavaScript, the GDScript sibling `func` lands inside the class at the right tab depth, and a `this`-bearing range refuses by name through the CLI rather than emitting a function with a different receiver. I also mutation-checked the new assertions — disabling the climb and disabling the `self`-first ordering each redden the test.
+
+Next head is `#extractloopbreak`.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#extractfrommethod]
+- ~~do [#extractfrommethod]~~
 - do [#extractloopbreak]
-- do [#deciderustspells]
+- do [#deciderustspells]: Please describe the decision. Could we implement the prerequisites for phase 1 derivation directly by adding T, &T, and &mut T support in tsift?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -82,7 +105,6 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#deciderustspells] Decide how Rust spells extract_function before writing any Rust code: a caller-supplied signature, or a closure that infers. Rust cannot use the phase 1 derivation directly because choosing T, &T, or &mut T needs types tsift does not have, and guessing emits code that parses and does not build. A closure is correct without types but changes borrow behaviour and cannot be pub; a caller-supplied signature is honest but moves the hard part to the caller. Write the rationale, then implement. Plan: tasks/software/plan-tsift-extract-function.md
-- [ ] 🚧 [#extractfrommethod] Make extract_function usable inside methods instead of refusing them: hoist the new function past the enclosing class rather than beside the method, so a Python extraction lands at module scope with `self` threaded through as an ordinary parameter, and a JS extraction lands beside the class declaration. The current EnclosingFunctionNotHoistable refusal is correct but costs the most common real extraction site. Plan: tasks/software/plan-tsift-extract-function.md
 - [ ] [#extractloopbreak] Narrow the control-flow escape refusal: break and continue only escape when their loop is outside the selected range. A range containing a whole for or while loop refuses today even though hoisting it is safe, which is the most common false refusal in the phase 1 list. return and yield stay unconditional. Plan: tasks/software/plan-tsift-extract-function.md
 - [/] [#8wqk] Register crates.io GitHub Trusted Publishing for every post-baseline tsift workspace crate through the operator browser/passkey flow, then verify a tag release publishes without the local token
 <!-- /agent:backlog -->

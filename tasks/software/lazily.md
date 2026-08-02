@@ -207,15 +207,53 @@ Error: 0xcbf29ce484222325 ... 0xFFFFFFFFFFFFFFFF ...
 Mutation-checked twice. Doubling the boundary reddens. Dropping the platform check for a magnitude-only guard reddens the **VM-lossless** test — which is the design claim stated as a failing test rather than as prose.
 
 What I have not proven is the web behaviour itself. I am not going to claim it: the assertions are written, they run on a JS target, and they were removed only because nothing can build them yet. They belong in `#lzdartwebcompile` alongside the literal fixes.
-<!-- agent:boundary:a7471b03 -->
+
+### Re: #lzdartwebcompile — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzdartwebcompile]
+
+
+Done, pushed. lazily-dart `5011c2a`, superproject `32d6881`. `make check` green, 649 tests (was 634); CI queued.
+
+**The item's framing was right and its scope was one file short.** Eight literals in the IPC surface, three more in `rateshape.dart`'s SplitMix64 — so it was not only the wire that could not build for the web, it was `package:lazily/lazily.dart` entirely. Both are fixed; the sentinel in `align` became a nullable, which is what "no candidate yet" always meant and has no width.
+
+**Then the gate found a live defect, which changes what this item was.** `#lzdartintwidth` was correct-by-construction hardening — nothing could reach a JS runtime, so nothing could round. But it fixed the msgpack *decoder* and left the *encoder* on `ByteData.setUint64`, which dart2js leaves unimplemented for **every** 8-byte write:
+
+```
+Unsupported operation: Uint64 accessor not supported by dart2js.
+    at _Packer._prefixed$3 ... at _Packer.pack$1
+```
+
+That refuses `2^32..2^53` — values a browser represents perfectly well. A web peer could decode a wide frame and then throw producing its own reply. `setInt64` had the same hole. This was reachable the moment anything compiled, and no VM test could see it. The first run of the new gate was the reproduction.
+
+**The design question the item asked me to settle: web IS a supported target for the wire**, with one rule on both codecs — *refuse, never round*. That forced two API changes rather than a quiet approximation:
+
+| API | Native | JavaScript target |
+|---|---|---|
+| wire integers | full u64, lossless | `FormatException` above 2^53−1 |
+| `contentHash` → `int` | unchanged | `UnsupportedError` — the digest is a different identity once rounded |
+| `contentHashHex` → `String` | same value | same value |
+| arena checksum | **53-bit fold** (was 63) | same value |
+
+`BlockKey.content` now takes the hex, not a packed `int` — breaking, zero callers outside `blockKey()`. The arena fold narrowed because a checksum that means one thing the VM can hold and a browser cannot is a checksum with two definitions; it is Dart-internal and self-consistent-only, and no fixture pins it.
+
+**On not repeating last cycle's problem.** All 64-bit arithmetic is now one file, `lib/src/u64.dart` — 32-bit halves, 16-bit-limb products, carries via `~/` and `%` so no intermediate reaches 2^53. I kept one multiply rather than a fast VM path beside a portable one, because two implementations of one hash is a drift surface where only one side is ever reachable by a test.
+
+The VM's native 64-bit operators are an **independent oracle** for that file, which is worth more than golden numbers: `test/u64_test.dart` asserts the portable spelling *agrees with the arithmetic it replaced* over a corpus hitting every carry boundary — add, multiply, xor, shift at all 64 widths, and the byte-level equivalence with `setUint64`/`setInt64` including the signed branch no conforming frame can reach. The `Lcg` sequence is unchanged from before the rewrite, and now identical on both targets. Seven mutations checked; each reddens — dropped carry, prime off by one, sign lost in the half split, fold widened, halves swapped in the packer, refusal removed, shift off by one.
+
+`tool/ipc_browser_check.dart` reports `OK — 8/8` and fails if the registered count changes without the floor moving, because an entry point whose only evidence is exit 0 says the same thing whether it asserted eight properties or none. Wired into `check` and CI; `ci-reach` confirms it (9 reached, 0 excused).
+
+What I have not proven is a real browser — this runs under Node on a dart2js build, which is the same code path and not the same host.
+<!-- agent:boundary:0ebd3a72 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzdartintwidth]~~
+- ~~do [#lzdartwebcompile]~~
 - do [#lzspecdecoderbound]
-- ~~do [#lzjsintwidth]~~
 - do [#lzkeynullstrict]
 - 📌 do [#lzreadmelinkrot]
 - 📌 do [#lzvacuousrun]
@@ -236,7 +274,6 @@ What I have not proven is the web behaviour itself. I am not going to claim it: 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdartwebcompile] lazily-dart's IPC surface does not compile to JavaScript at all, which is why the web half of #lzdartintwidth could not be proven end to end. Measured with dart compile js against a file whose only import is package:lazily/ipc.dart: the compile fails on 64-bit integer literals that dart2js rejects outright - 0x7FFFFFFFFFFFFFFF in lib/src/stable_id.dart around line 242, plus 0xcbf29ce484222325 (an FNV-1a offset basis) and two 0xFFFFFFFFFFFFFFFF masks elsewhere in the reachable set. This is worth knowing for two reasons. First, it means the silent-rounding scenario #lzdartintwidth guards against cannot actually occur today, so that guard is correct-by-construction rather than fixing a live corruption - the framing in this backlog previously overstated it. Second, the binding advertises a browser story it cannot currently deliver for IPC: tool/stdlib_browser_check.dart exists and passes, but it imports only package:lazily/stdlib.dart, so the browser gate covers the stdlib surface and nothing of the wire. Work: replace the offending literals with BigInt or split-word arithmetic (the FNV constants and masks are the substantive ones; the 0x7FFFFFFFFFFFFFFF sentinel is a trivial swap for a nullable or for maxExactInt), then add tool/ipc_browser_check.dart alongside the stdlib one and wire it into make check so the wire surface has the same browser gate. Once that compiles, port the #lzdartintwidth assertions to it - they are written to run on a JS target and were removed only because nothing could build them. Decide explicitly whether IPC on web is a supported target or not; either answer is fine, but the guard, the browser check and the README should agree on it.
 - [ ] [#lzspecdecoderbound] protocol.md states the 2 to the 53 bound as a PRODUCER obligation and says nothing about what a decoder does when it receives a violation. Section NodeId / PeerId reads: JavaScript/TypeScript peers must keep values at or below Number.MAX_SAFE_INTEGER. That settles what a producer may emit and leaves the receiving half undefined, which is exactly where bindings have diverged in practice - lazily-js refuses such a frame in both codecs, lazily-dart accepts it and is lossless on the VM and lossy on web, and I did not check the remaining seven. Silent rounding is the worst of the available behaviours because a corrupted id decodes cleanly and is undetectable downstream, so the spec should say so rather than leave each binding to decide. Work: add a decoder clause - a decoder that cannot represent a received value MUST reject the frame rather than round it - audit all nine decoders against it, and add a conformance fixture carrying an id above 2 to the 53 with the expected outcome so the rule is replayed rather than asserted in prose. Note while doing this that the phrase JavaScript/TypeScript peers does not obviously cover Dart or Kotlin compiled to JavaScript, and the wording should name the constraint (a runtime whose integers are doubles) instead of the source language.
 - [ ] [#lzkeynullstrict] The shared json decode path rejects an explicit key of null on NodeSnapshot, but a conforming peer may legally send one. Surfaced by the lazily-zig agent while mutation-checking #lzmsgpackseven, and it is not zig-only because it lives in the value-tree decode both codecs now share. protocol.md says a self-describing codec OMITS an absent optional NodeKey, and every binding's encoder does. It does not say a decoder may refuse the null form: a serde-based peer that simply did not apply skip_serializing_if emits key null, and rmp_serde's own decoder accepts it and reads it as absent. lazily-zig's NodeSnapshot.fromJson errors instead, which makes it stricter than the reference implementation on a frame the reference implementation produces. Note the asymmetry that makes this easy to get wrong: CrdtOp.key is ALWAYS written as null when unset and every decoder must read that back as absent, so the null form is already required reading one field over. Work: settle whether omit-when-absent is an encoder rule only, say so explicitly in protocol.md, then audit all nine decoders for NodeSnapshot and DeltaOp NodeAdd and make them accept both the omitted and the null form while continuing to emit only the omitted one. Add a fixture scenario carrying the null form so the leniency is replayed rather than asserted in prose.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md

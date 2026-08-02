@@ -159,6 +159,14 @@ in an *expression* rather than a statement (an arrow function, a class
 expression — there is no statement slot beside it), and, for GDScript, more
 than one returned name, since it has no destructuring call site.
 
+`#extractstalerange` added the one refusal that is a property of the *batch*
+rather than of the range. Intents apply in order against one shared buffer, and
+every named intent re-resolves itself against it; a line number cannot, so a
+range-selected intent whose file an earlier intent already edits is addressing
+lines that have moved. It refuses at plan time by name, and the refusal blocks
+the whole batch so the earlier intent does not land either. Scoped to the file,
+not to the kind — an inserted import shifts lines exactly as an extraction does.
+
 `#extractfrommethod` (tsift `d98c2df`) then turned the method case from a
 refusal into the answer to a different question — not "can this be extracted"
 but "where does the new function go so the bare call still resolves". Python

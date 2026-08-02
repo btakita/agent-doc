@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: a3a22fb5-698e-455d-9e58-aea3af22dc22
+resume: f625127b-9ab3-4df1-8106-bcec988ac45c
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -108,14 +108,60 @@ I mutation-checked all three arms — restoring the old unconditional refusal, d
 One thing the tests made concrete that is worth noting for the next reader: extract only the loop and leave `total = 0` behind, and `total` becomes both a parameter *and* a return — the accumulator gets passed in and handed back. That is correct, and it is also a signal the range was drawn one line too high. Widening it to include the initialization gives the signature you actually wanted.
 
 Next head is `#deciderustspells`, which you have annotated with a question about implementing `T` / `&T` / `&mut T` support directly. I'll take that up as the decision's framing rather than answering around it.
+
+### Re: do [#deciderustspells] — opus-5
+
+> **Queue prompt:** do [#deciderustspells]: Please describe the decision. Could we implement the prerequisites for phase 1 derivation directly by adding T, &T, and &mut T support in tsift?
+
+Decided, implemented, and shipped: tsift `ec381ab`. `make check` green; the three earlier CI runs all came back green.
+
+**Direct answer to your question: partly — and the part that's reachable turns out not to be the part that was blocking.**
+
+"Adding `T`, `&T`, `&mut T` support" is really two questions that separate cleanly, and they have different answers:
+
+**The ownership qualifier is reachable.** Whether a name should be `T`, `&T`, or `&mut T` is use analysis, not type analysis — does the range mutate it, is it read after the range. We already compute both to derive parameters and returns. There's even a clean syntactic shortcut in Rust: a non-`mut` local *cannot* be mutated, so `&T` is provably safe for it without knowing anything about its type.
+
+**The type itself is not reachable.** To write `a: Foo<Bar>` you need the type of `a`, and Rust locals are idiomatically unannotated — `let mut total = 0;` is the norm, not `let mut total: u32 = 0;`. Getting a type from that needs name resolution, trait resolution, method return types, and generic instantiation. That is rustc's type checker, not something tsift can grow: the only realistic source is rust-analyzer, which would turn a self-contained AST tool into one that needs the project to build, for the sake of one intent in one language.
+
+**And then the qualifier turns out not to help anyway**, which is the finding I didn't expect going in. A `&T` or `&mut T` parameter requires rewriting every use of the name in the extracted body into a dereference — `acc += 1` has to become `*acc += 1`. Rust auto-derefs for method calls and field access, but not for arithmetic or plain value use. That's a body rewrite, and this intent's whole contract is that it *doesn't* rewrite bodies; it moves them and derives a signature around them. So even with perfect ownership analysis, by-reference parameters need machinery that doesn't exist and that the derivation is deliberately built without.
+
+**So the decision is: Rust extracts by value, copying the types it can already see.** Same rule as TypeScript — copy the annotation from the `fn` parameter or `let` that binds the name, refuse where there is none. Then:
+
+- A name that would be moved in while the caller still reads it **refuses** (`MovedNameUsedAfterRange`).
+- A name the range both reads and reassigns is **threaded** — moved in and handed back as part of the return. That covers the accumulator shape with no borrow at all, which is most of what you actually want to extract.
+- The signature says `mut` on a parameter the range assigns; the return type is spelled from the returned names' own annotations.
+
+Three more refusals, Rust-specific because the constructs are: `?` and `.await` leave the enclosing function through a channel the derived signature doesn't declare, and a block's **trailing expression** *is* the function's return value — hoisting it would hand that value to the new function and leave the caller returning nothing. `self` refuses too: unlike Python's, it isn't a name a signature can carry.
+
+**Why not the two options the plan originally offered:**
+
+- A **closure** needs no types at all, and that is exactly what's wrong with it. It cannot be `pub`, cannot move to another module, cannot be documented or tested on its own, and changes borrow behaviour through what it captures. Worse, it would *succeed* precisely where the free function honestly declines — the wrong direction for an intent whose refusal list is the feature. Extracting a function is usually a step toward moving it somewhere; a closure is a dead end for that.
+- A **caller-supplied signature** is honest, but it gives up the one property that makes this intent worth having: that the signature and the call site come from one analysis and cannot disagree. tsift would be splicing a signature it did not derive against a call site it did.
+
+**Live proof.** Both emitted shapes compile with zero warnings and return the same value as before extraction:
+
+```rust
+// declaration inside the range — the call site declares what it receives
+let total = accumulate(limit, rows);
+fn accumulate(limit: u32, rows: &[u32]) -> u32 { let mut total: u32 = 0; ... total }
+
+// declaration outside — the accumulator is threaded through
+total = fold_rows(limit, rows, total);
+fn fold_rows(limit: u32, rows: &[u32], mut total: u32) -> u32 { ... total }
+```
+
+The unannotated-local, moved-name, and `?` refusals each fire by name through the CLI.
+
+One thing to watch that the live run surfaced: `extract_function` is the only line-addressed intent, so two of them against the same file in one batch is unsafe — the second's line numbers are measured against bytes the first already moved. It fails closed today, but with a confusing message rather than a stale-range one. Queued as `#extractstalerange`.
+
+That drains the queue. The plan's three phases have all landed: Python, GDScript, JavaScript, JSX, TypeScript, TSX, and Rust — one analysis, seven vocabularies and emitters.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#extractloopbreak]~~
-- ~~do [#deciderustspells]: Please describe the decision. Could we implement the prerequisites for phase 1 derivation directly by adding T, &T, and &mut T support in tsift?~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#extractstalerange]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -124,7 +170,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#deciderustspells] Decide how Rust spells extract_function before writing any Rust code: a caller-supplied signature, or a closure that infers. Rust cannot use the phase 1 derivation directly because choosing T, &T, or &mut T needs types tsift does not have, and guessing emits code that parses and does not build. A closure is correct without types but changes borrow behaviour and cannot be pub; a caller-supplied signature is honest but moves the hard part to the caller. Write the rationale, then implement. Plan: tasks/software/plan-tsift-extract-function.md
+- [ ] [#extractstalerange] Fail closed with a stale-range message when one edit-intents batch carries two extract_function intents against the same file: the second's start_line/end_line are measured against bytes the first already moved, so the batch currently refuses with whatever refusal the shifted lines happen to trigger. Detect the same-file range-selected pair at plan time and name the real cause. Plan: tasks/software/plan-tsift-extract-function.md
 - [/] [#8wqk] Register crates.io GitHub Trusted Publishing for every post-baseline tsift workspace crate through the operator browser/passkey flow, then verify a tag release publishes without the local token
 <!-- /agent:backlog -->
 

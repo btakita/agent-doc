@@ -347,14 +347,50 @@ That is the hazard arriving on schedule, which is an argument for `id` rather th
 **Verification:** `make check` green in all ten repos (lazily-spec, rs, py, js, go, kt, dart, zig, cpp, cs) plus lazily-react. Two of the reds were formatting-only (`clang-format`, `dart format`) and are fixed. Committed and pushed to every repo; superproject gitlinks bumped for the nine that moved. CI is queued or in progress on all of them, so this closeout rests on local evidence.
 
 Session note: the exchange is at 286 lines / 8 response sections, but the queue is active, so I kept draining rather than stopping to compact.
+
+### Re: do [#lzscenariobodyskip] — opus-5
+
+**Ported to all four remaining bindings — lazily-go, lazily-dart, lazily-zig, lazily-cpp — each mutation-proven in both directions.** All ten repos green and pushed.
+
+The contract is the one lazily-py established: book on the first read of the scenario's **payload**, stay silent on its **label**. No two of these languages could use the same seam:
+
+| binding | seam | sites |
+| --- | --- | --- |
+| lazily-go | three shapes, one per decode style already in use: `scenarioView` (map runners, `Map()` books), `typedScenarioView` (strict whole-fixture structs, `Value()` books), `rawScenarioView` (`Decode()` books) | 19 |
+| lazily-dart | `MapMixin` gets the js Proxy contract with **zero call-site churn** — the yielded scenario books on the first payload-key read and stays silent for the nine `scenarioLabelKeys` | 1 |
+| lazily-zig | `next()` hands back a `Scenario` handle instead of the value; `replay()` is the only way to reach the payload, so forgetting to book stops being expressible | 12 |
+| lazily-cpp | `lazily_test::ScenarioView` owns the payload; `id()`/`peek()` silent, `replay()` books | 15 |
+
+**Zig and cpp were subtler than the plan expected.** Neither booked at the yield — both already had an explicit `replaying()` / `record_scenario_at` call at the *top of the loop body*, which is one step better and still blind to the case the rung exists for: the call runs, then the body does nothing. Making the payload reachable **only** through the booking accessor is what closes it.
+
+**Mutation proof, both halves, per binding** — same probe each time, a no-op loop body:
+
+| binding | fixture | old booking + no-op | new booking + no-op |
+| --- | --- | --- | --- |
+| lazily-go | `collections/semtree_incremental.json` | `make check` **GREEN** | **RED** — "was OPENED but never REPLAYED" x3 |
+| lazily-dart | `familysync/materialize_on_ingest.json` | **GREEN** | **RED** — "was NOT replayed" x3 |
+| lazily-zig | `familysync/materialize_on_ingest.json` | **GREEN** | **RED** — "was NEVER REPLAYED" x3 |
+| lazily-cpp | `crdt-tree/algebra.json` | **GREEN** | **RED** — "was never replayed" x3 |
+
+The green column is the point: three scenarios booked in each binding having run nothing at all.
+
+**Two real fail-opens surfaced and are fixed:**
+
+- lazily-go `reencodedNodeFields` switched on `scenario["codec"]` with no `default`, so a fixture naming an unimplemented codec left `generic` nil and the runner carried on.
+- lazily-cpp's merge-policy chain ended in `else { assert(policy == "Max"); ... }` — **NDEBUG compiles that assert out**, so a release build replayed Max for *any* unknown policy and reported green.
+
+**Incidental:** six inline Go scenario structs became named types. Two of them (`crdtTreeScenarioT`, `outboxStoreScenarioT`) were byte-identical anonymous copies carried in two places, where a field added to one silently stopped being decoded at the other.
+
+**What I did not finish.** The item's second clause — "give every scenario dispatch chain a fail-closed else" — is a separate sweep across six bindings, and I fixed only the two fail-opens I hit while porting. Dart's `switch` chains, zig's `else => unreachable`, and kt's `when` blocks are unaudited. Filed at the top of the backlog with the specific sites, not gated: nothing blocks it.
+
+Verification: `make check` green in lazily-go, lazily-dart, lazily-zig, lazily-cpp (and unchanged in the other six); committed and pushed to each, superproject gitlinks bumped. CI is queued or in progress.
 <!-- agent:boundary:ebcdbd84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzscenariobodyskip]
-- ~~do [#recommendedconformanceco]~~
+-t 🚧 do [#lzscenariobodyskip]
 - 📌 do [#lzassertionblockschema]
 - 📌 do [#lzdependencyavailability]
 - 📌 do [#lzcpptranscribedrunners]
@@ -370,10 +406,10 @@ Session note: the exchange is at 286 lines / 8 response sections, but the queue 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#failcloseddispatch] Fail-closed dispatch chains across the conformance runners (#lzscenariobodyskip part 2). Every scenario dispatch chain must error on an unmatched shape instead of falling through — an unmatched arm still BOOKS the scenario, because the payload was handed over before the dispatch, so the ledger cannot see it: the scenario WAS replayed, just as something the fixture never named. js, cs and rs already have theirs, and two concrete fail-opens are now fixed (lazily-go reencodedNodeFields switched on scenario codec with no default, leaving generic nil; lazily-cpp merge-policy chain ended in assert(policy == "Max"), which NDEBUG compiles out so a release build replayed Max for ANY unknown policy). REMAINING: audit the rest of go, py, kt, dart, zig, cpp — dart has switch chains in test/command_conformance_test.dart and test/collections_extra_conformance_test.dart, zig has "else => unreachable" at src/lazily/signaling_conformance.zig:349, and kt when-blocks were not audited. Mutation-check each by feeding a discriminator value no arm names.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.
-- [ ] 🚧 [#lzscenariobodyskip] The scenario ledger booked a scenario at the point the iteration helper YIELDED it, which cannot distinguish a body that ran from one that skipped past. lazily-py has the reference fix: book on first read of the scenario PAYLOAD (steps, ops, frames, expect) and stay silent for label keys (id, name, description), which also stops a by-name lookup from booking every scenario it scans past. PORTED AND MUTATION-PROVEN in lazily-js, lazily-rs, lazily-cs and lazily-kt (each: pre-change ledger reported OK over a skipped body, post-change reddens). REMAINING: lazily-go, lazily-cpp, lazily-zig, lazily-dart. Each needs its own seam because none has a map or JsonElement interception point: go decodes scenarios into TYPED STRUCTS, so either the fixture struct holds a json.RawMessage slice and sc.Decode becomes the booking payload read, or booking moves from before t.Run to inside the subtest body (weaker - blind to a fall-through within the body). cpp, zig and dart still to be surveyed. Also still open across all bindings: give every scenario dispatch chain a fail-closed else so an unmatched shape errors instead of passing (js, cs and rs already have theirs). Mutation-check with a no-op body, not just a skipped iteration.
 - [ ] [#lzassertionblockschema] [recommended] Extend lazily-spec's existing JSON Schema coverage from the wire field to the ASSERTION blocks. Raised by the operator as a question about whether Protobufs would help the key-validation work; the schema instinct is right but protobuf is the wrong instrument here, because codegen replaces the observable dynamic key access every tracker depends on with compiled struct fields, which is exactly the blind spot lazily-go found in #lzconsumednotasserted, and proto3 tolerates unknown fields by design so it would not even give rung 2. The instrument already exists: 14 schemas under lazily-spec schemas, using additionalProperties and required, with tests test_schema_conformance.py carrying both-directions stale-form rejection tests after a real slot_id and base64 drift incident. Two gaps. First, those schemas validate the wire field, while every defect found in #lzassertunknownkeys and #lzconsumednotasserted lived in expect, expected and assertions, which are entirely unschema'd. Second, roughly 13 of 31 fixture areas have a schema at all - collections, ingress, materialization, reactive-graph and temporal have none. Schema the assertion blocks and #lzwqfixtureconfig closes structurally, since visibility_timeout and max_deliveries stop being hardcoded out of band in nine runners.
 - [ ] [#lzfixturediscrim] A fixture can be opened, have every key consumed, have every key asserted - and still be unfalsifiable, because its data cannot distinguish the claim it makes. Found in lazily-cs while closing #lzconsumednotasserted: reversing SignalingRoom's roster sort still PASSED, because the canonical anti_spoof_session.json transcript never produces a roster with more than one entry, so no ordering is observable and every emitted frame stays byte-identical. This is the fourth rung - fixture-opened, key-consumed, key-asserted, claim-discriminating - and no runner-side guard can reach it, because it is a property of the corpus data rather than of runner code. Only a mutation against the LIBRARY exposes it. Audit lazily-spec claim by claim: for each assertion key, mutate the behaviour it names and confirm at least one canonical fixture reddens; where none does, either strengthen the fixture data or record the claim as untested with a reason. lazily-cs worked its instance around locally by driving a three-peer room plus a vacuity guard that fails if the roster drops below two, but the corpus fix belongs upstream in lazily-spec so all nine bindings inherit it.
 - [ ] [#lzrung2gaps] Conformance runners still outside the unconsumed-key guard entirely, all surfaced while closing #lzconsumednotasserted. lazily-cpp: nine fixture-replaying runners (command, distributed, lossless_tree, receipts, seqcrdt, statechart, stdlib, topic, reactive_graph) carry hand-rolled unknown-key guards instead of the shared AssertionKeys tracker, so they get neither rung 2 nor rung 3, and test_command_conformance.cpp has no unknown-key guard over its expect block at all. lazily-cs: StateChartConformanceTests has no FixtureAssertions tracker because its steps mix op inputs with assertions. Same class in lazily-kt, where bringing MaterializationConformanceTest under the tracker exposed two keys no runner had ever read - default_mode, and observe in deferral_not_deallocation.json. Convert each to the shared tracker so both rungs apply, and mutation-check every conversion rather than trusting the green that follows it.

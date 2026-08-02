@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 80d6474f-4308-4934-92b7-b1bf78c9ab6a
+resume: a6cd2cc7-b311-4090-b7de-fdbeb6a17520
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -64,19 +64,50 @@ The cursor advancing is the signal that matters, not the two-second runtime. A `
 **The change itself is still inert on production, and will be until ~17:00Z today.** The backup interval is 24 hours and the last run was `2026-07-31T17:00:53Z` — cut on the old build, so `schedule_rows=0` like every production artifact before it. The next daily job is the first that can carry schedules. I can force it early by setting `tmo_backup_interval_hours` to 0 and restoring it after a tick, but that is a production settings write you did not ask for, so I left it. Filed as `#tmo-prod-schedule-artifact-confirm` instead, with the check spelled out — that is what unblocks `#tmo-clone-apply`, which needs a schedule-bearing source.
 
 Both environments now run the same build: staging `410b3c74` (2026-07-30T23:18Z), production `4e040d1b`.
+
+### Re: #efs-dev-vars-secret-history — the per-environment files are clean; the tracked example was not — opus-5
+
+> **Queue prompt:**
+>
+> do [#efs-dev-vars-secret-history]
+
+**The thing you asked about is clean.** `.dev.vars.production` and `.dev.vars.staging` were never committed. Three independent checks agree:
+
+- `git log --all --diff-filter=A -- '.dev.vars*'` returns exactly one path ever added: `.dev.vars.example`, at `c9aa3b92` (2026-04-23).
+- `git rev-list --objects --all | grep dev.vars` — across every ref including remotes and the three stashes — yields that same single path and nothing else.
+- Content identity: `git hash-object` on the current `.dev.vars`, `.dev.vars.production`, and `.dev.vars.staging` produces three hashes that `git cat-file -e` cannot find. Those bytes are not in the object database at all, not even as dangling blobs from an amended commit.
+
+So no rotation is required on that account, and there is nothing to purge. `.gitignore` now carries both `.dev.vars` and `.dev.vars.*` (EFS `292b52d6`), and all three files are confirmed `!!` ignored.
+
+**The audit found a different exposure, in the file that is supposed to be committed.** `.dev.vars.example` has carried a real 44-character base64url `AUTH_SECRET` and a 27-character `ADMIN_GLOBAL_PASSWORD` since the first commit, unchanged across all nine revisions that touched it. Neither is a placeholder. I compared values without printing them:
+
+- The example's `ADMIN_GLOBAL_PASSWORD` is **byte-identical** to the one local `.dev.vars` uses.
+- The example's `AUTH_SECRET` matches none of the three — `.dev.vars` (64), `.dev.vars.production` (55), `.dev.vars.staging` (52) all differ.
+
+Blast radius is narrower than it first reads. The repo is private, both deployed environments use different values, Cloudflare Worker secrets are write-only so the example was never a deploy source, and the only reference to it anywhere in the tree is a line in `docs/deploy.md` — `bin/cf-secrets-dev-vars.ts` syncs secret *names* into `.dev.vars` and explicitly cannot pull values. It is a committed local-dev admin password in a private repo, not a live production credential. But nothing in the repo stopped the next real value from being pasted straight back into that file.
+
+**Fixed and pushed** (EFS `3a2bfe30`): both values replaced with obvious placeholders, plus `tests/dev-vars-example-no-secrets.test.ts`, which fails when any secret-shaped key in the example holds a ≥16-char non-placeholder value, and when `.gitignore` loses the `.dev.vars.*` rule. I mutation-checked both assertions rather than trusting a green run — restoring the pre-fix example turns the first red, deleting the `.dev.vars.*` line turns the second red, and each returns to green on restore. Full suite: 2285 pass, 0 fail (2282 before, +3).
+
+**Sibling audit — one real hit.** EFS is the only repo in `src/` that uses `.dev.vars` at all, so the specific `.gitignore` gap did not propagate. Scanning every sibling's *tracked* env files for long opaque values under secret-shaped keys turned up `censible-core`, which commits real env files rather than samples: `apps/finegar-etl/.env` holds a FactSet FTP login and a 39-char password, and `.env.sample` holds a 26-char `SESSION_KEY`. Also private, also apparently dormant. Filed as `#censible-env-committed-creds` to handle from a censible-core session rather than reaching across from here. Everything else tracks placeholders only.
+
+Two follow-ups queued: `#efs-dev-vars-local-rotate` for the local-dev password that is still recoverable from EFS history, and the censible item above.
+
+Unrelated, for whoever owns it: preflight reports the installed `agent-doc` binary is missing commit `55dd1851d`. I did not run `make install` in `src/agent-doc` — pane `%72` is holding that repo.
 <!-- agent:boundary:3972fcb2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#tmo-prod-schedule-artifact-confirm]
-- do [#efs-dev-vars-secret-history]
+- do [#efs-dev-vars-local-rotate]
+- do [#censible-env-committed-creds]
+- ⏭️ do [#tmo-prod-schedule-artifact-confirm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#efs-dev-vars-local-rotate] Rotate the local-dev ADMIN_GLOBAL_PASSWORD in src/equityfundingsource-dev/.dev.vars. Its value is byte-identical to the one that sat in the tracked .dev.vars.example from 2026-04-23 through 3a2bfe30, so it is in git history for anyone with repo access even though the working copy is now a placeholder. Production and staging values differ and are unaffected. Pick a new value, write it into .dev.vars only, and decide whether the history is worth purging - the repo is private and the value is local-dev-only, so a filter-repo rewrite plus force-push across every clone is probably not worth it. AUTH_SECRET does not need this: the committed example value never matched .dev.vars, .dev.vars.production, or .dev.vars.staging.
+- [ ] [#censible-env-committed-creds] Sibling-repo fallout from the same gap: censible-core commits real env files, not just samples. apps/finegar-etl/.env carries FACTSET_FTP_LOGIN plus a 39-char FACTSET_FTP_PASSWORD, and .env.sample carries a 26-char SESSION_KEY. Repo is private (btakita/censible-core) and the project looks dormant, so the first question is whether the FactSet FTP account still exists. If it does, rotate with FactSet and drop the credential out of the tracked file; if it does not, replace both with placeholders so the pattern does not get copied forward. Do this from a censible-core session, not from EFS. Checked and clean: every other sibling tracks only .env.sample / .env.example with placeholder values; presence SERVICE_API_JWT_TOKEN is a 16-char dev placeholder.
 - [ ] [#tmo-prod-schedule-artifact-confirm] Confirm the first schedule-bearing PRODUCTION TMO backup artifact. Production went live on 20d7a416 at 2026-08-01T04:16Z, but tmo_backup_interval_hours is 24 and the last run was 2026-07-31T17:00:53Z on the old build, so the next daily job around 2026-08-01T17:00Z is the first artifact that can carry payment schedules. Check: read tmo_backup_last_key and tmo_backup_last_status from production platform_settings, confirm the key advanced to a 2026-08-01 object and status is complete, then pull that object from R2 bucket equityfundingsource-tmo-cache-production and count schedule rows - expect roughly 12 of 31 loans to carry one, versus 0 on every prior artifact. Sandbox already measured 34 rows over 26 loans. Unblocks #tmo-clone-apply, which needs a schedule-bearing clone source. Do not read the artifact contents into the transcript - it holds production PII; count and discard.
-- [ ] [#efs-dev-vars-secret-history] Confirm .dev.vars.production / .dev.vars.staging were never committed, and rotate if they were. Both hold cleartext AUTH_SECRET and ADMIN_GLOBAL_PASSWORD; .gitignore covered '.dev.vars' but NOT the per-environment variants, so they sat untracked-but-committable until EFS 292b52d6 added '.dev.vars.*'. Run: git -C src/equityfundingsource-dev log --all --diff-filter=A -- '.dev.vars*'. If any commit ever added one, rotate AUTH_SECRET (wrangler secret put AUTH_SECRET, both envs) and ADMIN_GLOBAL_PASSWORD, and purge from history. Audit the same gap in sibling repos that copied this .gitignore.
 <!-- /agent:backlog -->
 
 ## Review

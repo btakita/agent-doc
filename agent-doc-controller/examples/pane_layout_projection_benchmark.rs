@@ -17,7 +17,7 @@ fn main() {
             assert!(!black_box(&mut state).schedule(black_box(first_generation + offset)));
         }
         assert_eq!(
-            black_box(state.pending_generation()),
+            black_box(state.pending_revision()),
             first_generation + WRITES_PER_BATCH - 1
         );
     }

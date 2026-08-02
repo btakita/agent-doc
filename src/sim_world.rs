@@ -56,7 +56,7 @@ mod pane_layout_projection_model {
         world.step(Action::Finish(41));
 
         assert!(world.worker.is_active());
-        assert_eq!(world.worker.pending_generation(), 42);
+        assert_eq!(world.worker.pending_revision(), 42);
         assert_eq!(
             world.starts, 1,
             "new state coalesces into the active worker"
@@ -74,7 +74,7 @@ mod pane_layout_projection_model {
         world.step(Action::Publish(52));
 
         assert!(world.worker.is_active());
-        assert_eq!(world.worker.pending_generation(), 52);
+        assert_eq!(world.worker.pending_revision(), 52);
         assert_eq!(world.starts, 2);
     }
 }

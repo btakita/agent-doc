@@ -360,6 +360,7 @@ pub(crate) struct PaneLayoutDesired {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PaneLayoutObservation {
     pub generation: u64,
+    pub actor_bindings: Vec<ControllerTmuxActorBinding>,
     pub report: ControllerTmuxLayoutSyncStateReport,
 }
 
@@ -385,6 +386,7 @@ impl From<&ControllerTmuxLayoutSyncInvocation> for PaneLayoutStructure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PaneLayoutStructuralReceipt {
     structure: PaneLayoutStructure,
+    actor_bindings: Vec<ControllerTmuxActorBinding>,
     pub report: Option<ControllerTmuxLayoutSyncStateReport>,
     pub file_panes: Vec<(String, String)>,
 }
@@ -401,6 +403,7 @@ pub(crate) enum PaneLayoutEffectPhase {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PaneLayoutEffectReceipt {
     pub generation: u64,
+    pub actor_bindings: Vec<ControllerTmuxActorBinding>,
     pub attempt: u64,
     pub phase: PaneLayoutEffectPhase,
     pub reason: String,
@@ -416,6 +419,7 @@ impl Default for PaneLayoutEffectReceipt {
     fn default() -> Self {
         Self {
             generation: 0,
+            actor_bindings: Vec::new(),
             attempt: 0,
             phase: PaneLayoutEffectPhase::Idle,
             reason: "idle".to_string(),
@@ -479,23 +483,29 @@ pub struct ControllerPaneLayoutStateProjection {
 
 fn derive_pane_layout_projection(
     desired: Option<PaneLayoutDesired>,
+    actor_bindings: Vec<ControllerTmuxActorBinding>,
     observed: Option<PaneLayoutObservation>,
     receipt: PaneLayoutEffectReceipt,
 ) -> PaneLayoutProjection {
     let Some(desired) = desired else {
         return PaneLayoutProjection::Absent;
     };
+    let receipt_is_current =
+        receipt.generation == desired.generation && receipt.actor_bindings == actor_bindings;
+    let observation_is_current = observed.as_ref().is_some_and(|observed| {
+        observed.generation == desired.generation && observed.actor_bindings == actor_bindings
+    });
     let focus_converged = desired.invocation.focus.is_none()
-        || (receipt.generation == desired.generation
-            && (!receipt.focus_required || receipt.focus_applied));
+        || (receipt_is_current && (!receipt.focus_required || receipt.focus_applied));
     if focus_converged
-        && observed.as_ref().is_some_and(|observed| {
-            observed.generation == desired.generation && observed.report.synced
-        })
+        && observation_is_current
+        && observed
+            .as_ref()
+            .is_some_and(|observed| observed.report.synced)
     {
         return PaneLayoutProjection::Converged(desired);
     }
-    if receipt.generation == desired.generation {
+    if receipt_is_current {
         match receipt.phase {
             PaneLayoutEffectPhase::InFlight => {
                 return PaneLayoutProjection::Applying(desired);
@@ -729,15 +739,19 @@ impl ControllerPaneLayoutGraph {
         let structural_receipt = ctx.source(None);
         let applicable_receipt = ctx.computed(move |ctx| {
             let desired = ctx.get(&desired)?;
+            let actor_bindings = ctx.get(&actor_bindings);
             let receipt = ctx.get(&receipt);
-            (receipt.generation == desired.generation).then_some(receipt)
+            (receipt.generation == desired.generation && receipt.actor_bindings == actor_bindings)
+                .then_some(receipt)
         });
         let desired_for_projection = desired;
+        let actor_bindings_for_projection = actor_bindings;
         let observed_for_projection = observed;
         let receipt_for_projection = receipt;
         let projection = ctx.computed(move |ctx| {
             derive_pane_layout_projection(
                 ctx.get(&desired_for_projection),
+                ctx.get(&actor_bindings_for_projection),
                 ctx.get(&observed_for_projection),
                 ctx.get(&receipt_for_projection),
             )
@@ -843,6 +857,7 @@ impl ControllerPaneLayoutGraph {
 
     fn state_projection(&self) -> Option<ControllerPaneLayoutStateProjection> {
         let desired = self.desired()?;
+        let actor_bindings = self.actor_bindings();
         let phase = match self.projection() {
             PaneLayoutProjection::Absent => return None,
             PaneLayoutProjection::NeedsEffect(_) => ControllerPaneLayoutPhase::NeedsEffect,
@@ -853,10 +868,15 @@ impl ControllerPaneLayoutGraph {
         let observation = self
             .ctx
             .get(&self.observed)
-            .filter(|observation| observation.generation == desired.generation)
+            .filter(|observation| {
+                observation.generation == desired.generation
+                    && observation.actor_bindings == actor_bindings
+            })
             .map(|observation| observation.report);
         let receipt = self.ctx.get(&self.receipt);
-        let (attempt, reason_detail) = if receipt.generation == desired.generation {
+        let (attempt, reason_detail) = if receipt.generation == desired.generation
+            && receipt.actor_bindings == actor_bindings
+        {
             (receipt.attempt, Some(receipt.reason))
         } else {
             (0, None)
@@ -908,10 +928,12 @@ impl ControllerPaneLayoutGraph {
     }
 
     fn record_observation(&self, observation: PaneLayoutObservation) {
+        let actor_bindings = self.actor_bindings();
         if !observation.report.synced
             && self
                 .desired()
                 .is_some_and(|desired| desired.generation == observation.generation)
+            && observation.actor_bindings == actor_bindings
         {
             self.ctx.set(&self.structural_receipt, None);
         }
@@ -936,9 +958,11 @@ impl ControllerPaneLayoutGraph {
     fn reusable_structural_receipt(
         &self,
         desired: &PaneLayoutDesired,
+        actor_bindings: &[ControllerTmuxActorBinding],
     ) -> Option<PaneLayoutStructuralReceipt> {
         self.ctx.get(&self.structural_receipt).filter(|receipt| {
             receipt.structure == PaneLayoutStructure::from(&desired.invocation)
+                && receipt.actor_bindings.as_slice() == actor_bindings
                 && !receipt.file_panes.is_empty()
         })
     }
@@ -946,6 +970,7 @@ impl ControllerPaneLayoutGraph {
     fn record_structural_assignment(
         &self,
         desired: &PaneLayoutDesired,
+        actor_bindings: Vec<ControllerTmuxActorBinding>,
         report: Option<ControllerTmuxLayoutSyncStateReport>,
         file_panes: Vec<(String, String)>,
     ) {
@@ -956,6 +981,7 @@ impl ControllerPaneLayoutGraph {
             &self.structural_receipt,
             Some(PaneLayoutStructuralReceipt {
                 structure: PaneLayoutStructure::from(&desired.invocation),
+                actor_bindings,
                 report: report.filter(|report| report.synced),
                 file_panes,
             }),
@@ -4206,18 +4232,25 @@ impl ControllerRuntime {
     fn reusable_pane_layout_structure(
         &self,
         desired: &PaneLayoutDesired,
+        actor_bindings: &[ControllerTmuxActorBinding],
     ) -> Option<PaneLayoutStructuralReceipt> {
-        self.pane_layout_graph.reusable_structural_receipt(desired)
+        self.pane_layout_graph
+            .reusable_structural_receipt(desired, actor_bindings)
     }
 
     fn record_pane_layout_structural_assignment(
         &self,
         desired: &PaneLayoutDesired,
+        actor_bindings: Vec<ControllerTmuxActorBinding>,
         report: Option<ControllerTmuxLayoutSyncStateReport>,
         file_panes: Vec<(String, String)>,
     ) {
-        self.pane_layout_graph
-            .record_structural_assignment(desired, report, file_panes);
+        self.pane_layout_graph.record_structural_assignment(
+            desired,
+            actor_bindings,
+            report,
+            file_panes,
+        );
     }
 
     fn pane_layout_actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
@@ -6980,13 +7013,25 @@ mod tests {
     #[test]
     fn pane_layout_projection_is_derived_from_desired_observed_and_effect_state() {
         let desired = pane_layout_desired_for_test(7);
+        let actor_bindings = vec![ControllerTmuxActorBinding {
+            document_path: "tasks/one.md".to_string(),
+            session_id: "session-one".to_string(),
+            pane_id: "%1".to_string(),
+            generation: 3,
+        }];
         assert_eq!(
-            derive_pane_layout_projection(None, None, PaneLayoutEffectReceipt::default()),
+            derive_pane_layout_projection(
+                None,
+                actor_bindings.clone(),
+                None,
+                PaneLayoutEffectReceipt::default(),
+            ),
             PaneLayoutProjection::Absent
         );
         assert_eq!(
             derive_pane_layout_projection(
                 Some(desired.clone()),
+                actor_bindings.clone(),
                 None,
                 PaneLayoutEffectReceipt::default(),
             ),
@@ -6995,9 +7040,11 @@ mod tests {
         assert_eq!(
             derive_pane_layout_projection(
                 Some(desired.clone()),
+                actor_bindings.clone(),
                 None,
                 PaneLayoutEffectReceipt {
                     generation: 7,
+                    actor_bindings: actor_bindings.clone(),
                     attempt: 1,
                     phase: PaneLayoutEffectPhase::InFlight,
                     reason: "applying".to_string(),
@@ -7011,6 +7058,7 @@ mod tests {
 
         let mismatched = PaneLayoutObservation {
             generation: 7,
+            actor_bindings: actor_bindings.clone(),
             report: ControllerTmuxLayoutSyncStateReport {
                 synced: false,
                 reason: "pane_order_mismatch".to_string(),
@@ -7026,9 +7074,11 @@ mod tests {
         assert_eq!(
             derive_pane_layout_projection(
                 Some(desired.clone()),
-                Some(mismatched),
+                actor_bindings.clone(),
+                Some(mismatched.clone()),
                 PaneLayoutEffectReceipt {
                     generation: 7,
+                    actor_bindings: actor_bindings.clone(),
                     attempt: 1,
                     phase: PaneLayoutEffectPhase::RetryPending,
                     reason: "retry_scheduled".to_string(),
@@ -7039,9 +7089,33 @@ mod tests {
             ),
             PaneLayoutProjection::RetryPending(desired.clone())
         );
+        let changed_actor_bindings = vec![ControllerTmuxActorBinding {
+            generation: 4,
+            ..actor_bindings[0].clone()
+        }];
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                changed_actor_bindings,
+                Some(mismatched),
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    actor_bindings: actor_bindings.clone(),
+                    attempt: 1,
+                    phase: PaneLayoutEffectPhase::RetryPending,
+                    reason: "retry_scheduled".to_string(),
+                    file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: false,
+                },
+            ),
+            PaneLayoutProjection::NeedsEffect(desired.clone()),
+            "a changed actor-binding projection must reactivate the exact layout effect without a timer",
+        );
 
         let converged = PaneLayoutObservation {
             generation: 7,
+            actor_bindings: actor_bindings.clone(),
             report: ControllerTmuxLayoutSyncStateReport {
                 synced: true,
                 reason: "synced".to_string(),
@@ -7057,9 +7131,11 @@ mod tests {
         assert_eq!(
             derive_pane_layout_projection(
                 Some(desired.clone()),
+                actor_bindings.clone(),
                 Some(converged.clone()),
                 PaneLayoutEffectReceipt {
                     generation: 7,
+                    actor_bindings: actor_bindings.clone(),
                     attempt: 1,
                     phase: PaneLayoutEffectPhase::RetryPending,
                     reason: "focus_pane_not_found".to_string(),
@@ -7074,9 +7150,11 @@ mod tests {
         assert_eq!(
             derive_pane_layout_projection(
                 Some(desired.clone()),
+                actor_bindings.clone(),
                 Some(converged),
                 PaneLayoutEffectReceipt {
                     generation: 7,
+                    actor_bindings,
                     attempt: 2,
                     phase: PaneLayoutEffectPhase::Converged,
                     reason: "observed_layout_and_focus_convergence".to_string(),
@@ -7152,20 +7230,43 @@ mod tests {
             window_name: Some("agent-doc".to_string()),
             focus: first.invocation.focus.clone(),
         };
-        graph.record_structural_assignment(&first, Some(report.clone()), assignment.clone());
+        graph.record_structural_assignment(
+            &first,
+            graph.actor_bindings(),
+            Some(report.clone()),
+            assignment.clone(),
+        );
 
         let mut focus_only = first.invocation.clone();
         focus_only.focus = Some("tasks/one.md".to_string());
         let second = graph.set_desired(focus_only, Some(82));
-        let reusable = graph.reusable_structural_receipt(&second).unwrap();
+        let reusable = graph
+            .reusable_structural_receipt(&second, &graph.actor_bindings())
+            .unwrap();
 
         assert_eq!(reusable.file_panes, assignment);
         assert_eq!(reusable.report, Some(report));
+        let changed_actor_bindings = vec![ControllerTmuxActorBinding {
+            document_path: "tasks/one.md".to_string(),
+            session_id: "session-one".to_string(),
+            pane_id: "%9".to_string(),
+            generation: 9,
+        }];
+        assert!(
+            graph
+                .reusable_structural_receipt(&second, &changed_actor_bindings)
+                .is_none(),
+            "a structural assignment cannot be reused after its actor-binding projection changes",
+        );
 
         let mut structural_change = second.invocation.clone();
         structural_change.columns.reverse();
         let third = graph.set_desired(structural_change, Some(83));
-        assert!(graph.reusable_structural_receipt(&third).is_none());
+        assert!(
+            graph
+                .reusable_structural_receipt(&third, &graph.actor_bindings())
+                .is_none()
+        );
     }
 
     #[test]
@@ -7181,6 +7282,7 @@ mod tests {
         let first_assignment = vec![("tasks/primary.md".to_string(), "%1".to_string())];
         graph.record_receipt(PaneLayoutEffectReceipt {
             generation: first.generation,
+            actor_bindings: graph.actor_bindings(),
             attempt: 1,
             phase: PaneLayoutEffectPhase::Converged,
             reason: "observed_convergence".to_string(),
@@ -7195,6 +7297,7 @@ mod tests {
         let second = graph.set_desired(second_invocation, Some(82));
         graph.record_receipt(PaneLayoutEffectReceipt {
             generation: first.generation,
+            actor_bindings: graph.actor_bindings(),
             attempt: 2,
             phase: PaneLayoutEffectPhase::Converged,
             reason: "late_prior_generation".to_string(),

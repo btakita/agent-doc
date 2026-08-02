@@ -62,13 +62,12 @@ const CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX: Duration = Duration::from_secs(30);
 const CONTROLLER_CLOSEOUT_COORDINATION_TIMEOUT: Duration = Duration::from_secs(15);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
-const PANE_LAYOUT_OBSERVATION_INTERVAL: Duration = Duration::from_secs(1);
-const PANE_LAYOUT_RETRY_MIN: Duration = Duration::from_millis(250);
-const PANE_LAYOUT_RETRY_MAX: Duration = Duration::from_secs(5);
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 const PANE_LAYOUT_COMMAND_AWAIT: Duration = Duration::from_secs(30);
 const ASYNC_EDITOR_COMMAND_MIN_AWAIT_MS: u64 = 1;
 const STATE_PLANE_SUBSCRIBE_MAX: Duration = Duration::from_secs(120);
+const PANE_LAYOUT_DESIRED_PROJECTION_RETRY_MIN: Duration = Duration::from_millis(250);
+const PANE_LAYOUT_DESIRED_PROJECTION_RETRY_MAX: Duration = Duration::from_secs(5);
 const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
 const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
 const DOCUMENT_TURN_AUTHORITY_TYPE_TAG: &str = "agent-doc.document-turn-authority.v1";
@@ -9872,7 +9871,6 @@ pub(crate) fn serve_with_options(
     // budget-exhausted supervisor is reported once, not every tick.
     let supervisor_watchdog_interval = supervisor_watchdog_interval();
     let mut supervisor_watchdog_last_run: Option<Instant> = None;
-    let mut pane_layout_observation_last_run: Option<Instant> = None;
     let mut supervisor_watchdog_halt_notified: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     while !should_stop.load(Ordering::SeqCst) {
@@ -10014,21 +10012,6 @@ pub(crate) fn serve_with_options(
                     // `#orphandrain`: sweep the documents the supervisor watchdog
                     // cannot help — those with no supervisor to revive.
                     controller_orphan_drain_tick(&runtime);
-                }
-                let pane_layout_observation_now = Instant::now();
-                let pane_layout_observation_due = pane_layout_observation_last_run
-                    .map(|last| {
-                        pane_layout_observation_now.duration_since(last)
-                            >= PANE_LAYOUT_OBSERVATION_INTERVAL
-                    })
-                    .unwrap_or(true);
-                if pane_layout_observation_due {
-                    pane_layout_observation_last_run = Some(pane_layout_observation_now);
-                    // Observation is the only timer-driven step. It publishes a
-                    // tmux fact into the Lazily graph; the graph's Computed
-                    // delta and retained Effect decide whether reconciliation
-                    // is needed.
-                    observe_pane_layout_projection(&runtime);
                 }
                 std::thread::sleep(CONNECT_POLL);
             }
@@ -17100,7 +17083,7 @@ fn pane_layout_desired_projection_worker(
                         ),
                     );
                 }
-                let retry_delay = pane_layout_retry_delay(attempt);
+                let retry_delay = pane_layout_desired_projection_retry_delay(attempt);
                 let mut projection = state.lock();
                 if projection
                     .pending_frame
@@ -17123,6 +17106,13 @@ fn pane_layout_desired_projection_worker(
     }
 }
 
+fn pane_layout_desired_projection_retry_delay(attempt: u64) -> Duration {
+    let shift = attempt.saturating_sub(1).min(4) as u32;
+    PANE_LAYOUT_DESIRED_PROJECTION_RETRY_MIN
+        .saturating_mul(1_u32 << shift)
+        .min(PANE_LAYOUT_DESIRED_PROJECTION_RETRY_MAX)
+}
+
 pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRuntime>) {
     runtime.install_state_plane_sink(
         PANE_LAYOUT_DESIRED_STATE_CHANNEL,
@@ -17139,26 +17129,25 @@ pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRunti
 struct ControllerPaneLayoutProjectionSink {
     runtime: std::sync::Weak<ControllerRuntime>,
     state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
-    wake: Arc<Condvar>,
+    next_work_revision: AtomicU64,
 }
 
 impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
-    fn reconcile(&self, desired: PaneLayoutDesired) {
+    fn reconcile(&self, _desired: PaneLayoutDesired) {
+        let work_revision = self.next_work_revision.fetch_add(1, Ordering::SeqCst);
         let should_spawn = {
             let mut state = self.state.lock();
-            state.schedule(desired.generation)
+            state.schedule(work_revision)
         };
-        self.wake.notify_one();
         if !should_spawn {
             return;
         }
         let runtime = self.runtime.clone();
         let state = Arc::clone(&self.state);
-        let wake = Arc::clone(&self.wake);
         let spawn = std::thread::Builder::new()
             .name("agent-doc-pane-layout-effect".to_string())
             .spawn(move || {
-                pane_layout_effect_worker(runtime, state, wake);
+                pane_layout_effect_worker(runtime, state);
             });
         if let Err(error) = spawn {
             self.state.lock().deactivate();
@@ -17176,7 +17165,7 @@ pub(super) fn install_pane_layout_projection_sink(runtime: &Arc<ControllerRuntim
             state: Arc::new(Mutex::new(
                 agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
             )),
-            wake: Arc::new(Condvar::new()),
+            next_work_revision: AtomicU64::new(1),
         }));
 }
 
@@ -17188,13 +17177,6 @@ fn pane_layout_state_invocation(
         window: desired.invocation.window.clone(),
         focus: desired.invocation.focus.clone(),
     }
-}
-
-fn pane_layout_retry_delay(attempt: u64) -> Duration {
-    let shift = attempt.saturating_sub(1).min(5) as u32;
-    PANE_LAYOUT_RETRY_MIN
-        .saturating_mul(1_u32 << shift)
-        .min(PANE_LAYOUT_RETRY_MAX)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17274,11 +17256,11 @@ fn apply_pane_layout_focus_effect(
 fn pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
     state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
-    wake: Arc<Condvar>,
 ) {
     let mut attempt = 0_u64;
     let mut active_generation = 0_u64;
     loop {
+        let work_revision = state.lock().pending_revision();
         let Some(runtime) = runtime.upgrade() else {
             state.lock().deactivate();
             return;
@@ -17297,13 +17279,18 @@ fn pane_layout_effect_worker(
                 if converged.generation == desired.generation
         );
         if already_converged {
-            if pane_layout_effect_worker_retire_if_current(&runtime, &state, desired.generation) {
+            if pane_layout_effect_worker_retire_if_current(
+                &runtime,
+                &state,
+                work_revision,
+                desired.generation,
+            ) {
                 return;
             }
             attempt = 0;
             continue;
         }
-        if state.lock().is_superseded(desired.generation) {
+        if state.lock().is_superseded(work_revision) {
             attempt = 0;
             continue;
         }
@@ -17317,8 +17304,9 @@ fn pane_layout_effect_worker(
                 return;
             }
         };
+        let actor_bindings = runtime.pane_layout_actor_bindings();
         let mut guarded_invocation = desired.invocation.clone();
-        guarded_invocation.actor_bindings = runtime.pane_layout_actor_bindings();
+        guarded_invocation.actor_bindings = actor_bindings.clone();
         let focus_suppressed = suppress_inactive_automatic_layout_focus(
             &mut guarded_invocation,
             desktop_editor_focus_state(),
@@ -17333,13 +17321,14 @@ fn pane_layout_effect_worker(
             );
         }
         let projected_focus = guarded_invocation.focus.clone();
-        let reusable_structure = runtime.reusable_pane_layout_structure(&desired);
+        let reusable_structure = runtime.reusable_pane_layout_structure(&desired, &actor_bindings);
         let reusable_file_panes = reusable_structure
             .as_ref()
             .map(|receipt| receipt.file_panes.clone())
             .unwrap_or_default();
         runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
             generation: desired.generation,
+            actor_bindings: actor_bindings.clone(),
             attempt,
             phase: PaneLayoutEffectPhase::InFlight,
             reason: if reusable_structure.is_some() {
@@ -17357,7 +17346,7 @@ fn pane_layout_effect_worker(
             let tmux = tmux_router::Tmux::default_server();
             let focus_receipt = apply_pane_layout_focus_effect(
                 &state,
-                desired.generation,
+                work_revision,
                 projected_focus.as_deref(),
                 focus_suppressed,
                 &reusable.file_panes,
@@ -17384,10 +17373,12 @@ fn pane_layout_effect_worker(
                 let logged_panes = report.panes.clone();
                 runtime.record_pane_layout_observation(PaneLayoutObservation {
                     generation: desired.generation,
+                    actor_bindings: actor_bindings.clone(),
                     report,
                 });
                 runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
                     generation: desired.generation,
+                    actor_bindings: actor_bindings.clone(),
                     attempt,
                     phase: PaneLayoutEffectPhase::Converged,
                     reason: format!("reused_structural_layout; {focus_reason}"),
@@ -17408,8 +17399,12 @@ fn pane_layout_effect_worker(
                         logged_panes,
                     ),
                 );
-                if pane_layout_effect_worker_retire_if_current(&runtime, &state, desired.generation)
-                {
+                if pane_layout_effect_worker_retire_if_current(
+                    &runtime,
+                    &state,
+                    work_revision,
+                    desired.generation,
+                ) {
                     return;
                 }
                 attempt = 0;
@@ -17417,7 +17412,7 @@ fn pane_layout_effect_worker(
             }
         }
 
-        if state.lock().is_superseded(desired.generation) {
+        if state.lock().is_superseded(work_revision) {
             agent_doc_ops_log_io::log_op(
                 &bootstrap.project_root,
                 &format!(
@@ -17439,11 +17434,12 @@ fn pane_layout_effect_worker(
         if effect_result.is_ok() {
             runtime.record_pane_layout_structural_assignment(
                 &desired,
+                actor_bindings.clone(),
                 None,
                 effect_file_panes.clone(),
             );
         }
-        if state.lock().is_superseded(desired.generation) {
+        if state.lock().is_superseded(work_revision) {
             agent_doc_ops_log_io::log_op(
                 &bootstrap.project_root,
                 &format!(
@@ -17458,7 +17454,7 @@ fn pane_layout_effect_worker(
             let tmux = tmux_router::Tmux::default_server();
             apply_pane_layout_focus_effect(
                 &state,
-                desired.generation,
+                work_revision,
                 projected_focus.as_deref(),
                 focus_suppressed,
                 &effect_file_panes,
@@ -17528,16 +17524,19 @@ fn pane_layout_effect_worker(
         if report.synced {
             runtime.record_pane_layout_structural_assignment(
                 &desired,
+                actor_bindings.clone(),
                 Some(report.clone()),
                 effect_file_panes.clone(),
             );
         }
         runtime.record_pane_layout_observation(PaneLayoutObservation {
             generation: desired.generation,
+            actor_bindings: actor_bindings.clone(),
             report,
         });
         runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
             generation: desired.generation,
+            actor_bindings,
             attempt,
             phase: if synced {
                 PaneLayoutEffectPhase::Converged
@@ -17569,73 +17568,40 @@ fn pane_layout_effect_worker(
                 logged_panes,
             ),
         );
-        if synced {
-            if pane_layout_effect_worker_retire_if_current(&runtime, &state, desired.generation) {
-                return;
-            }
-            attempt = 0;
-            continue;
+        if pane_layout_effect_worker_retire_if_current(
+            &runtime,
+            &state,
+            work_revision,
+            desired.generation,
+        ) {
+            return;
         }
-        drop(runtime);
-        let retry_delay = pane_layout_retry_delay(attempt);
-        let mut worker = state.lock();
-        if worker.is_superseded(desired.generation) {
-            attempt = 0;
-            continue;
-        }
-        wake.wait_for(&mut worker, retry_delay);
-        if worker.is_superseded(desired.generation) {
-            attempt = 0;
-        }
+        attempt = 0;
     }
 }
 
 fn pane_layout_effect_worker_retire_if_current(
     runtime: &ControllerRuntime,
     state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
+    completed_work_revision: u64,
     completed_generation: u64,
 ) -> bool {
     let desired_is_current = runtime
         .pane_layout_desired()
         .is_some_and(|desired| desired.generation == completed_generation);
-    let projection_is_converged = matches!(
+    let projection_is_terminal_for_current_inputs = matches!(
         runtime.pane_layout_projection(),
         PaneLayoutProjection::Converged(ref converged)
             if converged.generation == completed_generation
+    ) || matches!(
+        runtime.pane_layout_projection(),
+        PaneLayoutProjection::RetryPending(ref pending)
+            if pending.generation == completed_generation
     );
-    if !desired_is_current || !projection_is_converged {
+    if !desired_is_current || !projection_is_terminal_for_current_inputs {
         return false;
     }
-    state.lock().retire_if_current(completed_generation)
-}
-
-fn observe_pane_layout_projection(runtime: &Arc<ControllerRuntime>) {
-    let Some(desired) = runtime.pane_layout_desired() else {
-        return;
-    };
-    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
-        return;
-    };
-    match tmux_layout_sync_state_for_invocation(
-        &bootstrap,
-        runtime,
-        &pane_layout_state_invocation(&desired),
-    ) {
-        Ok(report) => {
-            runtime.record_pane_layout_observation(PaneLayoutObservation {
-                generation: desired.generation,
-                report,
-            });
-            publish_pane_layout_status(runtime);
-        }
-        Err(error) => agent_doc_ops_log_io::log_op(
-            &bootstrap.project_root,
-            &format!(
-                "pane_layout_observation_deferred generation={} error={error:#}",
-                desired.generation,
-            ),
-        ),
-    }
+    state.lock().retire_if_current(completed_work_revision)
 }
 
 pub(crate) fn handle_tmux_focus_state(

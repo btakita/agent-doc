@@ -8,6 +8,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 _JetBrains plugin 0.2.334; VS Code extension 0.2.64; Zed extension 0.1.0._
 
+- **Automatic tmux pane synchronization no longer stalls controller IPC on a
+  periodic probe.** The one-second synchronous tmux observation was removed
+  from the Project Controller accept loop, and the tmux effect no longer sleeps
+  and retries the same failed inputs. Observations, structural assignments, and
+  effect receipts are keyed to the exact desired-generation plus actor-binding
+  projection; `retry_pending` parks until either input changes, at which point
+  the retained Lazily effect reactivates. The shared controller path gives
+  JetBrains, VS Code, and Zed the same behavior.
 - **Retained delivery now has one exhaustive typed state table and one Effect
 boundary.** Durable Base → Target facts, current delivery, live membership,
 convergence, and controller generation reduce to a single

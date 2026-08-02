@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 17b41e7b-2df9-42ec-8a28-879b1f729d43
+resume: c72ba128-2d9b-4ee6-92f6-bac197e10c7e
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -119,15 +119,15 @@ Also closed out here: the `#zigthirdindexed` response from the previous cycle wa
 stuck at `write_applied` with no terminal commit. The body and the queue strike were
 already on disk; a bare `write --commit` retired the retained intent and `preflight`
 persisted the reap. That landed as `1a678b2ec`. Its CI run `30719216281` is green.
-<!-- agent:boundary:c50adc2b -->
+<!-- agent:boundary:671891be -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#zigthirdindexed]~~
-- 🚧 do [#wsdq]
-- do [#jzs7]
+- ~~do [#wsdq]~~
+- 🚧 do [#jzs7]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -136,13 +136,13 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#wsdq] release + publish + install
-- [ ] [#jzs7] Plan and implement extract method refactoring
+- [ ] 🚧 [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#wsdq] release + publish + install
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

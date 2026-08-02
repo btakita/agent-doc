@@ -74,7 +74,7 @@ One piece of housekeeping I left alone: preflight has been warning `legacy_gated
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

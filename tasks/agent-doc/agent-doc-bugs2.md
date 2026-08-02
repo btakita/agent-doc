@@ -89,13 +89,41 @@ Design decisions:
 - **Codify these cases as reactive state, but from source facts rather than one boolean per bug.** Sources are CRDT nodes/origin/generation/component identity, prompt→response association, editor-visible delivery receipt, actor/maintenance facts, and command admission. Computed values are the unresolved steering observable set, closeout readiness, projection convergence, pane layout intent, and recycle eligibility; Effects perform persistence, delivery, tmux reconciliation, and successor promotion.
 
 Release proof: agent-doc `0.35.113` / JetBrains plugin `0.2.335`; commit `563eb992f`; tag `v0.35.113`; complete `make check` passed (`.tsift/artifacts/tart-46c1e80355.test.log`); `make install-full` succeeded; the audited `manylinux_2_17` wheel and source distribution are published on PyPI. The new GitHub CI and cross-platform Release workflows are running; the immediately preceding `0.35.112` workflows completed successfully.
+
+### Re: `#f1s3` — ordered nested queue grouping
+
+> **Queue prompt:**
+>
+> do [#f1s3]
+
+
+Implemented and released in agent-doc `0.35.114` (`d94a05726`).
+
+The semantics are now explicit:
+
+- Group labels are structural only: they are never executable and require no ids.
+- Indented unordered children remain mutually unordered.
+- Ordered sibling subtrees compile at ingress into canonical `after=` edges between leaf frontiers: every entry leaf of the next subtree depends on every terminal leaf of the preceding subtree.
+- Explicit `after=` metadata and derived ordered-list edges share one dependency projection and are deduplicated. Reordering the numbered siblings re-derives the edges from the new operator-authored order.
+- Parent priority does not implicitly propagate. Priority remains leaf metadata, and maintenance preserves structured list shape instead of flattening it.
+
+The parser preserves indentation and the exact numeric marker (`01.`, `2.`, and so on) byte-for-byte. Strike/annotation reconstruction now preserves both fields. Runtime continuation selection, drainability counts, and deferred-head accounting all use the same leaf-only projection, fixing the contributing Phase 1 bug where a group label could be counted or selected as runnable work.
+
+Regression coverage includes exact marker round trips, ordered leaf edges, group-to-group leaf-frontier bridging without group ids, operator reorder re-derivation, explicit/derived edge merging, and the runtime case where a deferred prerequisite blocks the next ordered leaf. `cargo check --workspace --all-targets` and the full local `make check` pass.
+
+Installed `0.35.114` with the full dev-harness/plugin install and successfully recycled the active controller mid-turn without forcing or interrupting the harness child. Main and tag `v0.35.114` are pushed, and the Python package publish succeeded. I inspected CI once: documentation jobs were green and CI/Release were in progress; per your instruction I did not wait or poll.
 <!-- agent:boundary:124f8e72 -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~In haiven-dev.md, I moved [#rotatethreeexposed] from the backlog into the icebox. But agent-doc reversed my change.~~
-- ~~do [#connectedadmitpreflight]~~
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~do [#f1s3]~~
+- do [#steeringobservableset]
+- do [#promptselect]
+- do [#realtimesalient]
+- do [#multilineheadbullet]
+- do [#compacttombgc]
+- do [#reactive-closeout-install-verify]
 <!-- /agent:queue -->
 
 ## Notes
@@ -106,7 +134,6 @@ Release proof: agent-doc `0.35.113` / JetBrains plugin `0.2.335`; commit `563eb9
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#f1s3] #queuenest phase 2 — `ol` -> `after=` compilation, per tasks/agent-doc/plan-queue-nested-list-grouping.md. PHASE 1 SHIPPED in b67dd3582 (indent-aware parse retaining depth, leaf-only execution so group parents are never runnable heads, byte-preserving render round-trip). REMAINING: parse `1.` ordered-list markers (today they fall through to Freeform), and compile a nested ol to `after=` edges at ingress next to #queueingressorder, keeping `after=` the single source of truth so reordering an ol re-derives edges. BLOCKED ON A DESIGN ANSWER the plan itself records as open: do groups need ids (`[#epic]`) for `after=` to reference a whole group? Compiling an ordered GROUP to edges needs to know whether a group is addressable. Second open question (does `priority=` on a parent apply to all its leaves?) affects the sort, not the compilation, and can be settled later.
 - [ ] [#steeringobservableset] #agent-doc-bug Phase 6 durable graph adoption: back RealtimeSteeringSet with a lazily reactive OBSERVABLE SET (not a drain-one-head QueueCell) keyed on the body-aware identity (Phase 3.1), reconciled on the reliable-sync plane; session-check reads set-emptiness (all directives settled) instead of re-diffing HEAD↔buffer. Plan: src/agent-doc/tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md (Phase 6). [recommended]
 - [ ] [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
 - [ ] [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.

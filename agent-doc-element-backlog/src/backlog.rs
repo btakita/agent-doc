@@ -1088,6 +1088,18 @@ pub fn find_tracked_work_component_in_content(
         .with_context(|| format!("document has no {} component", list.label()))
 }
 
+/// Resolve the canonical completed-work archive component.
+///
+/// Component-name compatibility belongs to the pure tracked-work model; I/O
+/// adapters should not independently classify current and legacy done names.
+pub fn find_done_archive_component_in_content(content: &str) -> Result<element::Component> {
+    let components = element::parse(content).context("failed to parse components")?;
+    components
+        .into_iter()
+        .find(|component| element::is_backlog_done_component(&component.name))
+        .context("document has no agent:done component")
+}
+
 /// Build the active document identity registry for tracked-work lookup.
 ///
 /// Each normalized `#id` maps to the active sources that define it: frontmatter

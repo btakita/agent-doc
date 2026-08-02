@@ -2287,8 +2287,8 @@ enum Commands {
     /// Sync tmux panes to a 2D columnar layout matching the editor
     Sync {
         /// Columns of comma-separated file paths (left-to-right). Repeat for each column.
-        /// When omitted, sync falls back to the layout recorded in project `state.db`
-        /// for the current sync scope.
+        /// At least one explicit column is required: a bare CLI cannot observe
+        /// the current editor projection safely.
         #[arg(long = "col")]
         columns: Vec<String>,
         /// Only operate on panes within this tmux window (e.g. @1)
@@ -3557,6 +3557,14 @@ enum PendingAction {
         /// Hash id (without the `#` prefix)
         id: String,
     },
+    /// Move an item from agent:done back to open tracked work
+    Reopen {
+        /// Hash id (without the `#` prefix)
+        id: String,
+        /// Also reactivate a live `do [#id]` queue directive
+        #[arg(long)]
+        queue: bool,
+    },
     /// Rewrite an item's text, preserving its hash id
     Edit {
         /// Hash id (without the `#` prefix)
@@ -4354,6 +4362,10 @@ fn try_main() -> anyhow::Result<()> {
             no_autostart,
             exact_visible,
         } => {
+            anyhow::ensure!(
+                !columns.is_empty(),
+                "sync requires at least one explicit --col; use the editor Sync Tmux Layout or Resync / Fix Sessions action to publish its exact visible projection"
+            );
             if rename && let Some(ref f) = focus {
                 agent_doc_sync_io::sync::write_rename_debounce(f);
             }
@@ -5755,6 +5767,9 @@ fn try_main() -> anyhow::Result<()> {
                         PendingAction::Done { id } => {
                             agent_doc_element_backlog_io::backlog_cmd::done(&file, &id)
                         }
+                        PendingAction::Reopen { id, queue } => {
+                            agent_doc_element_backlog_io::backlog_cmd::reopen(&file, &id, queue)
+                        }
                         PendingAction::Edit { id, text } => {
                             agent_doc_element_backlog_io::backlog_cmd::edit(&file, &id, &text)
                         }
@@ -5822,6 +5837,11 @@ fn try_main() -> anyhow::Result<()> {
                         }
                         PendingAction::Done { id } => {
                             agent_doc_element_backlog_io::backlog_cmd::done(&file, &id)
+                        }
+                        PendingAction::Reopen { id, queue } => {
+                            agent_doc_element_backlog_io::backlog_cmd::icebox_reopen(
+                                &file, &id, queue,
+                            )
                         }
                         PendingAction::Edit { id, text } => {
                             agent_doc_element_backlog_io::backlog_cmd::icebox_edit(

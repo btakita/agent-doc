@@ -38,6 +38,31 @@ class SyncLayoutActionTest {
     }
 
     @Test
+    fun `resync publishes a distinct reactive generation kind`() {
+        assertEquals(
+            "resync",
+            SyncLayoutAction.syncCallerKind(
+                noAutostart = true,
+                requestedCallerKind = "resync",
+            ),
+        )
+        assertEquals(
+            "automatic",
+            SyncLayoutAction.syncCallerKind(
+                noAutostart = true,
+                requestedCallerKind = null,
+            ),
+        )
+        assertEquals(
+            "manual",
+            SyncLayoutAction.syncCallerKind(
+                noAutostart = false,
+                requestedCallerKind = null,
+            ),
+        )
+    }
+
+    @Test
     fun `sync failure message surfaces controller diagnostic`() {
         assertEquals(
             "Sync failed: pane creation failed in tmux session agent-doc",

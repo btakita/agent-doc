@@ -94,6 +94,100 @@ pub fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<S
     Ok(ids)
 }
 
+/// Remove every archived entry whose own leading id matches `id` and recover
+/// the newest matching item as an open tracked-work item.
+///
+/// Archive entries have the binary-owned shape
+/// `- YYYY-MM-DD [#id] text`; indented continuation lines belong to that entry.
+/// Prose citations and ids in continuations are not identities. Removing all
+/// same-id archive entries prevents a later done-archive scan from immediately
+/// classifying the explicitly reopened item as completed again.
+pub fn take_done_archive_item(
+    archive: &str,
+    id: &str,
+) -> Result<(String, agent_doc_element_backlog::backlog::PendingItem)> {
+    let id = agent_doc_element_backlog::backlog::normalize_pending_id(id);
+    anyhow::ensure!(!id.is_empty(), "reopened done id must not be empty");
+
+    #[derive(Debug)]
+    struct Entry {
+        start: usize,
+        first_line_end: usize,
+        end: usize,
+        id: String,
+        text: String,
+    }
+
+    fn entry_header(line: &str) -> Option<(String, String)> {
+        if !(line.starts_with("- ") || line.starts_with("* ")) {
+            return None;
+        }
+        let marker = line.find("[#")?;
+        let after = &line[marker + 2..];
+        let close = after.find(']')?;
+        let id = &after[..close];
+        if !agent_doc_element_backlog::backlog::is_valid_pending_id(id) {
+            return None;
+        }
+        Some((
+            id.to_ascii_lowercase(),
+            after[close + 1..].trim().to_string(),
+        ))
+    }
+
+    let mut headers = Vec::new();
+    let mut offset = 0usize;
+    for raw in archive.split_inclusive('\n') {
+        let without_newline = raw.strip_suffix('\n').unwrap_or(raw);
+        let line = without_newline
+            .strip_suffix('\r')
+            .unwrap_or(without_newline);
+        if let Some((entry_id, text)) = entry_header(line) {
+            headers.push((offset, offset + raw.len(), entry_id, text));
+        }
+        offset += raw.len();
+    }
+
+    let entries = headers
+        .iter()
+        .enumerate()
+        .map(|(index, (start, first_line_end, entry_id, text))| Entry {
+            start: *start,
+            first_line_end: *first_line_end,
+            end: headers
+                .get(index + 1)
+                .map(|(next_start, ..)| *next_start)
+                .unwrap_or(archive.len()),
+            id: entry_id.clone(),
+            text: text.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let mut reopened = None;
+    let mut rewritten = String::with_capacity(archive.len());
+    let mut cursor = 0usize;
+    for entry in entries {
+        if entry.id != id {
+            continue;
+        }
+        rewritten.push_str(&archive[cursor..entry.start]);
+        cursor = entry.end;
+        reopened = Some(agent_doc_element_backlog::backlog::PendingItem {
+            marker: agent_doc_element_backlog::backlog::PendingListMarker::Bullet,
+            id: entry.id,
+            state: agent_doc_element_backlog::backlog::PendingState::Open,
+            gate_type: None,
+            in_progress: false,
+            text: entry.text,
+            continuation: archive[entry.first_line_end..entry.end].to_string(),
+        });
+    }
+    rewritten.push_str(&archive[cursor..]);
+
+    let item = reopened.with_context(|| format!("id not found in done archive: {id}"))?;
+    Ok((rewritten, item))
+}
+
 /// Resolve the binary-owned external done archive configured by the document.
 ///
 /// Commit closeout uses this typed path to keep the session document and the
@@ -111,7 +205,7 @@ pub fn configured_external_done_archive(file: &Path, content: &str) -> Result<Op
     resolve_done_archive_target(file, &archive_path).map(Some)
 }
 
-fn resolve_done_archive_target(file: &Path, archive_path: &str) -> Result<PathBuf> {
+pub(crate) fn resolve_done_archive_target(file: &Path, archive_path: &str) -> Result<PathBuf> {
     if archive_path.trim().is_empty() {
         bail!("agent:done archive= must not be empty");
     }
@@ -246,6 +340,28 @@ mod tests {
             .get("archive")
             .expect("archive attribute")
             .clone()
+    }
+
+    #[test]
+    fn take_done_archive_item_removes_all_same_id_entries_and_preserves_continuation() {
+        let archive = concat!(
+            "# Agent Doc Completed Work\n\n",
+            "- 2026-07-01 [#keep] keep this\n",
+            "- 2026-07-02 [#reopen] original text\n",
+            "  proof line\n",
+            "- 2026-07-03 [#reopen] corrected text\n",
+            "  latest proof\n",
+        );
+        let (rewritten, item) = take_done_archive_item(archive, "#REOPEN").unwrap();
+        assert!(rewritten.contains("[#keep] keep this"));
+        assert!(!rewritten.contains("[#reopen]"));
+        assert_eq!(item.id, "reopen");
+        assert_eq!(item.text, "corrected text");
+        assert_eq!(item.continuation, "  latest proof\n");
+        assert_eq!(
+            item.state,
+            agent_doc_element_backlog::backlog::PendingState::Open
+        );
     }
 
     /// The end-to-end regression.

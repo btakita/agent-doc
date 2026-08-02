@@ -2,8 +2,8 @@
 //!
 //! ## Spec
 //! - `prune()`: quietly removes dead/duplicate registry entries by delegating to
-//!   `tmux_router::prune()`, then returns active panes from stash windows, purges
-//!   idle stash windows, and clears orphaned stash panes. Called automatically
+//!   `tmux_router::prune()`, purges idle stash windows, and clears orphaned stash
+//!   panes. Called automatically
 //!   before route, sync, and claim operations. Returns the count of entries removed.
 //! - `run(fix, target_file)`: verbose counterpart to `prune()` for the `agent-doc resync`
 //!   and `agent-doc fix` CLI subcommands. Prints which entries were removed, which
@@ -22,11 +22,11 @@
 //!   `WrongProcess` → deregister only (foreign process is not killed); target-scoped
 //!   `NoLiveOwner` → refresh the recovered registry binding, otherwise deregister only
 //!   (pane left intact for route/later manual recovery);
-//!   `InStash` → promote live owner panes back into `agent-doc` and refresh
-//!   registry runtime metadata; deregister only unproven stashed panes;
+//!   `InStash` → preserve live owner panes in their reactive parking location;
+//!   deregister only unproven stashed panes;
 //!   `WrongWindow` → stash the outlier pane so the next route consolidates it.
-//! - Stash management: `return_stashed_panes` moves registered active panes back to
-//!   their original window (or first non-stash window of the frontmatter session);
+//! - Stash management: visible pane placement belongs to the retained controller
+//!   layout projection. Resync never bulk-promotes registered stash panes;
 //!   `purge_stash_windows` kills entire stash windows where all panes are idle
 //!   shells and the window is older than 30 seconds; `purge_unregistered_stash_panes`
 //!   kills individual unregistered idle shell panes in stash windows. Unregistered
@@ -73,8 +73,9 @@
 //!   `WrongSession` issue → entry removed from registry, pane kill attempted.
 //! - `fix_wrong_process_deregisters_without_kill`: `WrongProcess` issue →
 //!   registry entry removed, foreign process pane untouched.
-//! - `fix_in_stash_promotes_live_owner`: `InStash` issue with live owner proof →
-//!   pane promoted back into `agent-doc`, registry entry retained and refreshed.
+//! - `fix_in_stash_preserves_live_owner`: `InStash` issue with live owner proof →
+//!   pane remains parked, registry entry retained, and the reactive layout plane
+//!   decides whether it belongs in the visible projection.
 //! - `stash_window_purged_when_all_idle`: stash window with only idle shell panes
 //!   older than 30 s → `purge_stash_windows` kills the window.
 //! - `stash_window_spared_when_agent_active`: stash window containing a `claude`
@@ -458,16 +459,9 @@ fn pane_hosts_live_supervisor_session(
     })
 }
 
-/// Return active (non-idle) panes from stash windows back to their original sessions.
-///
-/// For each registered pane sitting in a stash window:
-/// 1. Skip idle shells (zsh/bash/sh/fish) — those are handled by purge functions.
-/// 2. Look up the pane's registry entry to find the original window.
-/// 3. If the original window is alive, move the pane back via `join-pane`.
-/// 4. Otherwise, if the tmux session exists, move to the session's first window.
-/// 5. Log each action to stderr.
-///
-/// After returning panes, any stash window that becomes empty is auto-cleaned by tmux.
+/// Stash cleanup primitives. Visible placement is deliberately excluded from
+/// resync: the retained controller layout projection is the sole authority that
+/// may promote a registered pane into the editor-visible `agent-doc` window.
 mod stash;
 pub(crate) use stash::*;
 
@@ -840,25 +834,6 @@ fn refresh_target_no_live_owner_registry_entry(
     true
 }
 
-fn refresh_registry_runtime_for_pane(
-    tmux: &Tmux,
-    registry: &mut tmux_router::Registry,
-    key: &str,
-    pane: &str,
-) -> bool {
-    let Some(entry) = registry.get_mut(key) else {
-        return false;
-    };
-    entry.pane = pane.to_string();
-    if let Some(pid) = agent_doc_tmux_io::pane_pid(tmux, pane) {
-        entry.pid = pid;
-    }
-    if let Some(window) = agent_doc_tmux_io::target_window_id(tmux, pane) {
-        entry.window = window;
-    }
-    true
-}
-
 fn apply_fixes_with_base(
     tmux: &Tmux,
     issues: &[Issue],
@@ -1098,34 +1073,16 @@ fn apply_fixes_to_registry(
                         )
                     }) || registered_pane_still_owns_file(tmux, key, file, pane);
                 if proves_live_owner {
-                    match crate::sync::promote_pane_to_agent_doc_window(tmux, pane) {
-                        Ok(true) => {
-                            refresh_registry_runtime_for_pane(tmux, registry, key, pane);
-                            eprintln!(
-                                "  promoted live owner pane {} for {} from stash into agent-doc",
-                                pane, file
-                            );
-                            eprintln!("  fixed: {}", issue);
-                            fixed += 1;
-                        }
-                        Ok(false) => {
-                            eprintln!(
-                                "  preserving live owner pane {} for {} in stash; promotion was not possible",
-                                pane, file
-                            );
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "  preserving live owner pane {} for {} in stash; promotion failed: {}",
-                                pane, file, e
-                            );
-                        }
-                    }
+                    eprintln!(
+                        "  preserving live owner pane {} for {} in reactive stash parking; the pane-layout projection owns visibility",
+                        pane, file
+                    );
                     continue;
                 }
 
                 // Deregister only when the stashed pane no longer proves
-                // ownership; live bound sessions must be promoted or preserved.
+                // ownership; live bound sessions remain parked until the
+                // controller's exact-visible projection requests them.
                 eprintln!(
                     "  [resync] pane {} for {} is in stash window, deregistering",
                     pane, key
@@ -1367,9 +1324,9 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
     }
 
     if fix {
-        // Return active panes from stash back to their original sessions,
-        // then clean up idle/orphaned stash panes.
-        return_stashed_panes(&tmux);
+        // Clean up idle/orphaned panes without changing the visible layout.
+        // The editor/controller reactive plane is the only authority allowed
+        // to promote registered stash panes into `agent-doc`.
         purge_stash_windows(&tmux);
         purge_unregistered_stash_panes(&tmux);
         purge_unregistered_dead_non_stash_panes(&tmux);

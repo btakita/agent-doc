@@ -233,6 +233,16 @@ focus <FILE>` selects the resolved pane when it is already visible, but skips
 - In scoped mode, it must limit repair to the target document and fail closed if ownership is still ambiguous.
 - `--fix` may deregister wrong-process panes, move wrong-window panes into stash, and either kill or relocate wrong-session panes, but only when no stronger live-owner proof keeps the current pane authoritative.
 - Stash cleanup must preserve recoverable agent panes that still prove ownership of a registered document or still host a live supervisor socket.
+- Resync repairs registry/liveness state; it does not infer editor visibility from
+  the registry and must never bulk-promote registered stash panes. A live
+  `InStash` owner remains reactively parked until the retained pane-layout
+  projection requests that document.
+- The editor **Resync / Fix Sessions** action is one operator command with two
+  ordered boundaries: registry cleanup completes first, then the editor
+  publishes its current exact-visible columns with `caller_kind=resync`.
+  That distinct retained generation is the sole visible-layout writer.
+  Repeating resync with two editor panes must preserve exactly two visible tmux
+  panes; unrelated registered documents remain in stash.
 
 ## fix
 
@@ -246,6 +256,11 @@ focus <FILE>` selects the resolved pane when it is already visible, but skips
 `agent-doc sync [--col <FILES>,...] [--window W] [--focus FILE] [--no-autostart] [--exact-visible]`
 
 - Declaratively mirrors editor layout into tmux columns.
+- Standalone CLI sync requires at least one explicit `--col`. It must fail
+  closed when columns are omitted instead of replaying a scope-local
+  `state.db` row that may describe a different nested project or older editor
+  projection. Editor actions capture and publish their complete current
+  projection through the controller.
 - Files with session ids are managed even when their current registry entry was pruned; `claim` is the only command that creates a new session id.
 - Sync must synthesize a per-run tmux-router registry from each visible file's own nearest `.agent-doc` root instead of forcing all files through the caller's current root.
 - When `.agent-doc/state.db` has a live authoritative actor row for a visible

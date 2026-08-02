@@ -6,6 +6,8 @@
 //!   (supports canonical `id=<custom> ` syntax and compatibility `[#custom] ` input
 //!   to preserve a custom id)
 //! - `agent-doc backlog <FILE> remove <target>` — remove by content match
+//! - `agent-doc backlog <FILE> reopen <id>` — move an archived item back to open
+//!   tracked work, optionally reactivating its queue directive
 //! - `agent-doc backlog <FILE> prune` — remove completed items
 //! - `agent-doc backlog <FILE> list` — print backlog items
 //! - `agent-doc icebox <FILE> ...` uses the same granular tracked-work
@@ -654,6 +656,91 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
+}
+
+fn reopen_in_list(
+    file: &Path,
+    id: &str,
+    list: backlog::TrackedWorkList,
+    enqueue: bool,
+) -> Result<()> {
+    let full_content = read_command_document(file, "backlog_reopen")?;
+    let id = backlog::normalize_pending_id(id);
+    anyhow::ensure!(!id.is_empty(), "reopened backlog id must not be empty");
+    anyhow::ensure!(
+        backlog::find_open_tracked_work_component_in_content(&full_content, &id).is_err(),
+        "cannot reopen #{}: an open tracked-work item already uses that id",
+        id
+    );
+
+    let archive = backlog::find_done_archive_component_in_content(&full_content)?;
+    let mut target = full_content.clone();
+
+    let item = if let Some(archive_path) = archive.attrs.get("archive") {
+        let archive_file = crate::done_archive::resolve_done_archive_target(file, archive_path)?;
+        let archive_content = match deferred_raw_content(&archive_file) {
+            Some(content) => content,
+            None => std::fs::read_to_string(&archive_file).with_context(|| {
+                format!("failed to read done archive {}", archive_file.display())
+            })?,
+        };
+        let (rewritten, item) = crate::done_archive::take_done_archive_item(&archive_content, &id)?;
+        anyhow::ensure!(
+            stage_raw_write(&archive_file, rewritten),
+            "backlog reopen lost its external archive transaction"
+        );
+        item
+    } else {
+        let (rewritten, item) =
+            crate::done_archive::take_done_archive_item(archive.content(&full_content), &id)?;
+        target = archive.replace_content(&full_content, &rewritten);
+        item
+    };
+
+    let target_component = backlog::find_tracked_work_component_in_content(&target, list)?;
+    let target_body = target_component.content(&target);
+    let inserted = backlog::op_insert_item_first(target_body, item);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &inserted,
+        &agent_doc_hash::document_id_for_path(file),
+    );
+    target = target_component.replace_content(&target, &canonical);
+
+    if enqueue {
+        target = agent_doc_queue::backlog_sync::reopen_actionable_id_in_content(&target, &id)?
+            .unwrap_or(target);
+    }
+
+    persist_pending_write(file, &full_content, &target)?;
+    eprintln!(
+        "[pending] reopened #{} into {}{}",
+        id,
+        list.label(),
+        if enqueue {
+            " and reactivated its queue directive"
+        } else {
+            ""
+        }
+    );
+    Ok(())
+}
+
+/// Move a completed/archive item back to the open backlog.
+pub fn reopen(file: &Path, id: &str, enqueue: bool) -> Result<()> {
+    with_pending_write_transaction(file, || {
+        reopen_in_list(file, id, backlog::TrackedWorkList::Backlog, enqueue)
+    })
+}
+
+/// Move a completed/archive item back to the open icebox.
+pub fn icebox_reopen(file: &Path, id: &str, enqueue: bool) -> Result<()> {
+    anyhow::ensure!(
+        !enqueue,
+        "icebox reopen cannot enqueue parked work; reopen it into backlog instead"
+    );
+    with_pending_write_transaction(file, || {
+        reopen_in_list(file, id, backlog::TrackedWorkList::Icebox, false)
+    })
 }
 
 /// Complete and reap tracked-work ids through one authoritative document target.
@@ -1719,6 +1806,84 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&archive).unwrap(),
             "- 2026-07-16 [#done1] Already reaped\n"
+        );
+    }
+
+    #[test]
+    fn reopen_moves_inline_done_item_to_backlog_and_reactivates_queue() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- ~~do [#deadscratchclean]~~\n",
+            "- do [#keep1]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:pending priority queue -->\n",
+            "- [ ] [#keep1] Keep backlog item\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:done -->\n",
+            "- 2026-07-16 [#deadscratchclean] Clean dead scratch files\n",
+            "  preserve proof detail\n",
+            "<!-- /agent:done -->\n",
+        );
+        let (_tmp, doc) = setup_test_dir();
+        fs::write(&doc, content).unwrap();
+
+        force_pending(|| reopen(&doc, "#deadscratchclean", true));
+
+        let reopened = fs::read_to_string(&doc).unwrap();
+        assert!(
+            reopened.contains(
+                "<!-- agent:pending priority queue -->\n- [ ] [#deadscratchclean] Clean dead scratch files\n  preserve proof detail\n"
+            ),
+            "{reopened}"
+        );
+        assert!(
+            reopened.contains("<!-- agent:queue priority go -->\n- do [#deadscratchclean]\n"),
+            "{reopened}"
+        );
+        assert!(!reopened.contains("~~do [#deadscratchclean]~~"));
+        let done_body = reopened
+            .split("<!-- agent:done -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("<!-- /agent:done -->").next())
+            .unwrap();
+        assert!(!done_body.contains("[#deadscratchclean]"), "{reopened}");
+    }
+
+    #[test]
+    fn reopen_external_done_item_publishes_archive_and_document_together() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("test.md");
+        let archive = tmp.path().join("completed.done.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:done archive=completed.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        fs::write(
+            &archive,
+            concat!(
+                "# Agent Doc Completed Work\n\n",
+                "- 2026-07-16 [#deadscratchclean] Clean dead scratch files\n",
+            ),
+        )
+        .unwrap();
+
+        force_pending(|| reopen(&doc, "deadscratchclean", false));
+
+        let reopened = fs::read_to_string(&doc).unwrap();
+        assert!(
+            reopened.contains("- [ ] [#deadscratchclean] Clean dead scratch files"),
+            "{reopened}"
+        );
+        assert!(
+            !fs::read_to_string(&archive)
+                .unwrap()
+                .contains("[#deadscratchclean]")
         );
     }
 

@@ -6,12 +6,8 @@ use agent_doc_session_registry_io::registration as sessions;
 #[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
 
-pub(crate) fn return_stashed_panes(tmux: &Tmux) {
-    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
-    return_stashed_panes_with_registry(tmux, &registry);
-}
-
 /// Testable inner function that accepts a registry parameter.
+#[cfg(test)]
 pub(crate) fn return_stashed_panes_with_registry(tmux: &Tmux, registry: &tmux_router::Registry) {
     // Build a map from pane_id → (key, entry) for quick lookup
     let pane_to_entry: std::collections::HashMap<&str, (&str, &tmux_router::RegistryEntry)> =
@@ -660,6 +656,7 @@ pub(crate) fn find_return_target_bulk(
 /// 1. The entry's original window (if alive and not a stash window)
 /// 2. The first non-stash window in the tmux session from frontmatter
 /// 3. The first non-stash window in any session with a matching name
+#[cfg(test)]
 pub(crate) fn find_return_target(
     tmux: &Tmux,
     entry: &tmux_router::RegistryEntry,
@@ -700,6 +697,7 @@ pub(crate) fn find_return_target(
 }
 
 /// Find the first pane in the first non-stash window of a tmux session.
+#[cfg(test)]
 pub(crate) fn first_non_stash_pane(tmux: &Tmux, session_name: &str) -> Option<String> {
     let output = agent_doc_tmux_io::list_windows(
         tmux,

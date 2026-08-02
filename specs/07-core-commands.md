@@ -253,7 +253,13 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 `agent-doc backlog <FILE> <ACTION>`
 
 - Canonical surface for tracked work. `agent-doc pending` remains a deprecated alias only.
-- Supports add/edit/done/reorder/prune/list/gate operations against the canonical `agent:backlog` component.
+- Supports add/edit/done/reopen/reorder/prune/list/gate operations against the canonical `agent:backlog` component.
+- `backlog <FILE> reopen <ID>` is the explicit inverse of reap: it removes all
+  same-id entries from canonical inline or external `agent:done`, restores the
+  newest entry as an open item with the same id/text/continuation, and publishes
+  the archive plus session document in one tracked-work transaction.
+  `--queue` also removes a same-id struck directive and prepends one live
+  `do [#ID]` directive without rewriting unrelated queue bytes.
 - Non-item separator lines and headings inside backlog/icebox must be preserved during mutation.
 - Flush-left parent items are the tracked units; indented nested lists travel with the parent during edit/reorder/reap/transfer.
 

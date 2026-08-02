@@ -173,6 +173,13 @@ On every preflight run:
   tracked work, creates `agent:done` when needed, and appends each removed item
   there or to its explicit `archive=...done.md` target instead of silently
   deleting it.
+- The standalone `agent-doc backlog <file> reopen <id> [--queue]` command is
+  the only supported completed-history reversal. It atomically removes every
+  same-id entry from inline or external `agent:done`, restores the newest
+  archived text and continuation to open backlog state under the original id,
+  and, with `--queue`, replaces any same-id struck queue history with exactly
+  one live directive. Ordinary backlog add/sync remains monotonic and must not
+  resurrect an archived id implicitly.
 - Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in live tracked work before commit. Do not silently treat the stale rewrite as generic local drift.
 - Same-cycle completion invariant: when preflight/repair reap a user-authored `[x]` tracked item directly from the document, that id counts as intentionally resolved for the current cycle's history-replay guards even if no explicit `--done <id>` flag was recorded. Do not restore the older `[ ]` or `[/]` history entry just because the completion came from a manual document edit.
 - External archive invariant: preflight and session-check must treat IDs found

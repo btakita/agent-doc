@@ -8,6 +8,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
 
+- **Resync no longer multiplies editor panes from the session registry.**
+  Registry repair preserves proven live owners in stash and never bulk-promotes
+  every registered actor. JetBrains publishes the current exact-visible editor
+  layout as one distinct reactive `resync` generation after cleanup, so
+  repeated repair preserves pane cardinality. Bare `agent-doc sync` now fails
+  closed without an explicit `--col` instead of replaying a possibly cross-root
+  stale layout row. The deterministic SimWorld harness covers the reported
+  two-to-five pane oscillation.
+- **Completed tracked work can be explicitly reopened without hand-editing
+  binary-owned archives.** `agent-doc backlog <FILE> reopen <ID> [--queue]`
+  removes the id from inline or external `agent:done`, restores the newest
+  archived item as open backlog work, and optionally reactivates exactly one
+  live queue directive. The archive, document, and queue projection share one
+  tracked-work transaction, so a reopened id is not immediately reaped again
+  by stale completion evidence.
 - **Exact visible delivery targets acknowledge without waiting on a stale local
   replica.** The editor adapters now distinguish an unrelated divergent buffer
   from a buffer whose hash exactly proves the controller generation. In the

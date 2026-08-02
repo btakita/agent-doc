@@ -63,6 +63,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - A `sync` projection is the product of columns and focused document. The controller first reconciles the passive layout, then applies the requested pane through a generation-fenced effect. Matching columns alone cannot retire the projection; the effect receipt must also prove focus when it was requested. A newer surface generation cancels stale focus before it reaches tmux.
 - If a Project Controller-backed manual `Sync Tmux Layout` terminal outcome later reports that the current layout was preserved because a visible protected pane could not detach yet, the command projection/log must retain the protected pane id, open-cycle phase, and document path so the user can tell which pane is delaying sync. Current controller builds should attach/focus the requested document around the protected pane instead of emitting that deferred-sync marker.
 - Automatic layout sync completes at desired-state publication rather than waiting for that exact plane version to become observed. The controller owns a single latest-wins worker, interrupts obsolete retry waits when a newer generation arrives, and never reports a superseded automatic version as a user-visible failure. Manual sync keeps its terminal receipt boundary.
+- **Resync / Fix Sessions** first runs registry/liveness cleanup, which must not
+  promote registered stash panes. On successful cleanup the same operator
+  action captures the current editor columns on the EDT and publishes one
+  exact-visible desired state with `caller_kind=resync` and
+  `no_autostart=true`. The distinct caller kind forces a new retained
+  reconciliation generation even when the documents match the last automatic
+  surface. Repeated resyncs preserve editor pane cardinality; they never derive
+  visible panes by enumerating the session registry.
 - Manual `Sync Tmux Layout` submits `agent-doc.sync_tmux_layout.v1` to the Project Controller command plane
   with `no_autostart=false` and waits for the terminal command receipt. The controller runs the full sync
   path and repairs window order before reconciliation: `0:agent-doc`, `1:stash`, then adjacent

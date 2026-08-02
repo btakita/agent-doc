@@ -276,6 +276,13 @@ class SyncLayoutAction : AnAction() {
         internal fun deferredSyncRetryDelayMs(attempt: Int): Long? =
             if (attempt < SYNC_DEFERRED_MAX_RETRIES) SYNC_DEFERRED_RETRY_MS else null
 
+        internal fun syncCallerKind(
+            noAutostart: Boolean,
+            requestedCallerKind: String?,
+        ): String = requestedCallerKind
+            ?.takeIf { it.isNotBlank() }
+            ?: if (noAutostart) "automatic" else "manual"
+
         /**
          * Syncs tmux layout to match the IDE editor split. Can be called from
          * any action (e.g. ClaimAction calls this after claiming).
@@ -285,10 +292,11 @@ class SyncLayoutAction : AnAction() {
             project: com.intellij.openapi.project.Project,
             notify: Boolean = true,
             noAutostart: Boolean = false,
+            callerKind: String? = null,
         ) {
             if (!SwingUtilities.isEventDispatchThread()) {
                 ApplicationManager.getApplication().invokeLater {
-                    syncLayout(project, notify, noAutostart)
+                    syncLayout(project, notify, noAutostart, callerKind)
                 }
                 return
             }
@@ -334,7 +342,7 @@ class SyncLayoutAction : AnAction() {
                         focus = focusedFile,
                         noAutostart = noAutostart,
                         exactVisible = true,
-                        callerKind = if (noAutostart) "automatic" else "manual",
+                        callerKind = syncCallerKind(noAutostart, callerKind),
                     )
                     if (receipt.exitCode != 0) {
                         LOG.warn("[sync] Project Controller async submit failed projectRoot=$projectRoot focus=$focusedFile columns=$columns output=${receipt.output}")

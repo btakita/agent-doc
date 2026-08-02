@@ -1935,6 +1935,26 @@ fn test_cli_help() {
 }
 
 #[test]
+fn test_sync_without_explicit_columns_fails_closed() {
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("sync");
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "sync requires at least one explicit --col",
+    ));
+}
+
+#[test]
+fn test_backlog_reopen_help_exposes_explicit_queue_reactivation() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["backlog", "reopen", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("<FILE>"))
+        .stdout(predicate::str::contains("<ID>"))
+        .stdout(predicate::str::contains("--queue"));
+}
+
+#[test]
 fn test_admin_recycle_help_accepts_document_or_project_target() {
     let mut cmd = agent_doc_cmd();
     cmd.args(["admin", "recycle", "--help"]);
@@ -21753,6 +21773,7 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_reap_policy() {
     for required in [
         "pub enum TrackedWorkList",
         "pub fn find_tracked_work_component_in_content",
+        "pub fn find_done_archive_component_in_content",
         "pub fn find_open_tracked_work_component_in_content",
         "pub fn open_tracked_work_component_name_in_content",
         "pub fn content_has_resolved_tracked_work_id",

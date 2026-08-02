@@ -564,6 +564,69 @@ pub fn enqueue_actionable_ids_in_content(
     Ok(Some(queue_comp.replace_content(content, &new_body)))
 }
 
+/// Re-activate one explicitly reopened tracked-work id in the queue.
+///
+/// This is intentionally narrower than ordinary backlog mirroring. A struck
+/// queue entry is completion evidence and normal sync must not regress it, but
+/// an explicit `backlog reopen --queue` is a new operator intent. Remove only
+/// completed entries whose sole tracked-work identity is `id`, preserve every
+/// unrelated source byte, and prepend one live canonical directive unless an
+/// already-live entry references the id.
+pub fn reopen_actionable_id_in_content(content: &str, id: &str) -> anyhow::Result<Option<String>> {
+    let id = id.trim().trim_start_matches('#').to_ascii_lowercase();
+    anyhow::ensure!(!id.is_empty(), "reopened queue id must not be empty");
+
+    let components = element::parse(content)?;
+    let queue_comp = components
+        .iter()
+        .find(|component| component.name == "queue")
+        .ok_or_else(|| anyhow::anyhow!("document has no agent:queue component"))?;
+    let body = &content[queue_comp.open_end..queue_comp.close_start];
+    let spans = document_queue::parse_spans(body)?;
+    let mut live_present = false;
+    let mut completed_ranges = Vec::new();
+
+    for (entry, range) in spans {
+        let references = document_queue::queue_entry_reference_ids(&entry);
+        if !references.iter().any(|candidate| candidate == &id) {
+            continue;
+        }
+        match entry {
+            QueueEntry::Prompt(_) => live_present = true,
+            QueueEntry::Completed(_) => {
+                anyhow::ensure!(
+                    references.len() == 1,
+                    "cannot reopen #{} from a completed queue head shared with other ids",
+                    id
+                );
+                completed_ranges.push(range);
+            }
+            _ => {}
+        }
+    }
+
+    if live_present && completed_ranges.is_empty() {
+        return Ok(None);
+    }
+
+    let mut preserved = String::with_capacity(body.len());
+    let mut cursor = 0usize;
+    for range in &completed_ranges {
+        preserved.push_str(&body[cursor..range.start]);
+        cursor = range.end;
+    }
+    preserved.push_str(&body[cursor..]);
+
+    let new_body = if live_present {
+        preserved
+    } else if preserved.trim().is_empty() {
+        format!("- do [#{id}]\n")
+    } else {
+        format!("- do [#{id}]\n{preserved}")
+    };
+    Ok(Some(queue_comp.replace_content(content, &new_body)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -579,6 +642,38 @@ mod tests {
             indent: 0,
             ordered_marker: None,
         })
+    }
+
+    #[test]
+    fn explicit_reopen_reactivates_struck_id_without_touching_other_queue_bytes() {
+        let content = concat!(
+            "<!-- agent:queue priority go -->\n",
+            "- ~~do [#reopen]~~\n",
+            "- /goal preserve this exact line\n",
+            "- do [#other]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let reopened = reopen_actionable_id_in_content(content, "reopen")
+            .unwrap()
+            .expect("struck id should be reactivated");
+        assert!(reopened.contains("- do [#reopen]\n"));
+        assert!(!reopened.contains("~~do [#reopen]~~"));
+        assert!(reopened.contains("- /goal preserve this exact line\n"));
+        assert!(reopened.contains("- do [#other]\n"));
+    }
+
+    #[test]
+    fn explicit_reopen_is_idempotent_when_live_id_is_already_queued() {
+        let content = concat!(
+            "<!-- agent:queue go -->\n",
+            "- do [#reopen]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            reopen_actionable_id_in_content(content, "#REOPEN")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

@@ -22,6 +22,7 @@ agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.118" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.118" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.118" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.118" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.118" }
 anyhow = "1"
 
 [dev-dependencies]

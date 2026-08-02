@@ -315,6 +315,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Remove item from the backlog component",
     ));
     cmds.push(cmd(
+        "/agent-doc backlog reopen",
+        "<FILE> <ID> [--queue]",
+        "Move completed work back to the backlog and optionally reactivate its queue directive",
+    ));
+    cmds.push(cmd(
         "/agent-doc backlog prune",
         "<FILE>",
         "Remove completed items from the backlog",

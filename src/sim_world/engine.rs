@@ -473,6 +473,14 @@ impl SimWorld {
             SimCommand::SyncRerequestVisibleEditorPassive => {
                 self.apply_sync_rerequest_visible_editor(SyncMode::SafePassive);
             }
+            SimCommand::SyncReactiveResyncGeneration => {
+                let outcome = self.sync.apply_requested_projection(
+                    &["agent-doc-bugs2", "haiven-dev"],
+                    "haiven-dev",
+                    SyncMode::SafePassive,
+                );
+                self.record_sync_outcome(outcome);
+            }
             SimCommand::SyncFocusStashedMoveBeforeSelect => {
                 self.sync = SyncProjection::stashed_focus_case();
                 self.sync.focus_doc_move_before_select("requested");

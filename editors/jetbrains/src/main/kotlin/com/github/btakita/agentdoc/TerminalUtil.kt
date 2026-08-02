@@ -1052,7 +1052,12 @@ object TerminalUtil {
      * and surfaces the result as an Event-Log notification. No cleanup logic lives
      * in the plugin — the CLI owns it; this only reports the outcome.
      */
-    internal fun runProjectCleanupCommand(project: Project, label: String, args: List<String>) {
+    internal fun runProjectCleanupCommand(
+        project: Project,
+        label: String,
+        args: List<String>,
+        afterSuccess: (() -> Unit)? = null,
+    ) {
         val projectRoot = cleanupProjectRoot(project)
         val agentDoc = resolveAgentDoc(projectRoot)
         showHint(project, "$label: running agent-doc ${args.joinToString(" ")}…")
@@ -1065,6 +1070,7 @@ object TerminalUtil {
                     val reason = if (result.timedOut) "timed out" else "failed (exit ${result.exitCode})"
                     notifyError(project, "$label $reason:\n${result.output}")
                 } else {
+                    afterSuccess?.invoke()
                     notifyInfo(project, "$label complete.\n${result.output.ifBlank { "No changes." }}")
                 }
             } catch (e: Exception) {
@@ -1074,7 +1080,22 @@ object TerminalUtil {
     }
 
     fun resyncFixSessions(project: Project) =
-        runProjectCleanupCommand(project, "Resync / Fix Sessions", listOf("resync", "--fix"))
+        runProjectCleanupCommand(
+            project,
+            "Resync / Fix Sessions",
+            listOf("resync", "--fix"),
+            afterSuccess = {
+                // Registry repair is deliberately non-layout-mutating. Publish
+                // one exact-visible repair generation so the retained controller
+                // projection—not registry enumeration—owns pane cardinality.
+                SyncLayoutAction.syncLayout(
+                    project,
+                    notify = false,
+                    noAutostart = true,
+                    callerKind = "resync",
+                )
+            },
+        )
 
     fun gcStaleSessions(project: Project) =
         runProjectCleanupCommand(project, "GC Stale Sessions", listOf("gc"))

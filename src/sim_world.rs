@@ -4038,6 +4038,10 @@ enum SimCommand {
     SyncVisibleFocusPreserve,
     SyncRerequestVisibleEditorManual,
     SyncRerequestVisibleEditorPassive,
+    /// `#resyncreactivecardinality`: registry repair has completed without
+    /// moving panes. Re-publish the editor's exact two-document projection as
+    /// one reactive resync generation. Driven only by the targeted regression.
+    SyncReactiveResyncGeneration,
     SyncFocusStashedMoveBeforeSelect,
     /// A passive editor reconciliation observes both a stale pane in the stash
     /// and an inactive document pane beside the operator. The attached client
@@ -4381,6 +4385,20 @@ impl SyncProjection {
             protected_open_cycle: BTreeSet::new(),
             stashed: BTreeSet::new(),
             active: Some("editor".to_string()),
+        }
+    }
+
+    fn reactive_resync_case() -> Self {
+        Self {
+            visible: vec!["agent-doc-bugs2".to_string(), "haiven-dev".to_string()],
+            protected_open_cycle: BTreeSet::new(),
+            stashed: BTreeSet::from([
+                "lazily".to_string(),
+                "tsift".to_string(),
+                "equity".to_string(),
+                "haiven-models".to_string(),
+            ]),
+            active: Some("haiven-dev".to_string()),
         }
     }
 
@@ -10130,6 +10148,38 @@ fn sync_sim_tmuxbudget_seed_3005_rejects_duplicate_editor_pane_for_rerequested_d
         "safe-passive sync must share the same single-editor-pane decision"
     );
     world.assert_structural_invariants().unwrap();
+}
+
+#[test]
+fn sync_sim_repeated_resync_preserves_exact_editor_cardinality_and_stash_parking() {
+    // Regression for the Haiven 2 → 5 → 3 pane oscillation. Registry repair
+    // preserves live registered actors in stash; one reactive exact-visible
+    // generation owns the visible projection. Repeating the same operator
+    // resync must therefore remain idempotent at exactly two visible panes.
+    let mut world = SimWorld::new(3_008);
+    world.sync = SyncProjection::reactive_resync_case();
+    let expected_visible = world.sync.visible.clone();
+    let expected_stashed = world.sync.stashed.clone();
+
+    for _ in 0..4 {
+        world
+            .apply(SimCommand::SyncReactiveResyncGeneration)
+            .unwrap();
+        assert_eq!(
+            world.sync.visible, expected_visible,
+            "resync must not promote unrelated registered stash panes"
+        );
+        assert_eq!(
+            world.sync.stashed, expected_stashed,
+            "resync must preserve reactive parking for non-visible documents"
+        );
+        assert_eq!(
+            world.sync.visible.len(),
+            2,
+            "two editor panes must produce exactly two tmux panes"
+        );
+        world.assert_structural_invariants().unwrap();
+    }
 }
 
 #[test]

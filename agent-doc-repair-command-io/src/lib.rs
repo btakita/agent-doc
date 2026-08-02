@@ -84,6 +84,12 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
 /// Return the stable operation key only when the durable cycle contains a
 /// non-empty captured response that is eligible for binary-owned closeout.
 pub fn captured_finalize_resume_key(file: &Path) -> Result<Option<CapturedFinalizeResumeKey>> {
+    if let Some(capture) =
+        agent_doc_cycle_state_io::load_projected_retained_captured_response(file)?
+        && let Some(key) = captured_finalize_resume_key_from_capture(&capture)
+    {
+        return Ok(Some(key));
+    }
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(None);
     };
@@ -104,17 +110,20 @@ pub fn captured_finalize_resume_key(file: &Path) -> Result<Option<CapturedFinali
     else {
         return Ok(None);
     };
-    if capture.cycle_id != state.cycle_id
-        || capture.response_sha256 != response_sha256
-        || capture.response_body.trim().is_empty()
-    {
+    if capture.cycle_id != state.cycle_id || capture.response_sha256 != response_sha256 {
         return Ok(None);
     }
-    Ok(Some(CapturedFinalizeResumeKey {
-        cycle_id: state.cycle_id,
-        capture_id: capture_id.to_string(),
-        response_sha256: response_sha256.to_string(),
-    }))
+    Ok(captured_finalize_resume_key_from_capture(&capture))
+}
+
+fn captured_finalize_resume_key_from_capture(
+    capture: &agent_doc_cycle_state_io::ProjectedCapturedResponse,
+) -> Option<CapturedFinalizeResumeKey> {
+    (!capture.response_body.trim().is_empty()).then(|| CapturedFinalizeResumeKey {
+        cycle_id: capture.cycle_id.clone(),
+        capture_id: capture.capture_id.clone(),
+        response_sha256: capture.response_sha256.clone(),
+    })
 }
 
 /// Resume one exact captured finalize operation through the existing strict
@@ -178,12 +187,22 @@ fn resume_captured_finalize_intent(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,
 ) -> Result<RepairOutcome> {
-    let capture =
-        agent_doc_cycle_state_io::load_projected_captured_response(file, &expected.capture_id)?
-            .filter(|capture| {
-                capture.cycle_id == expected.cycle_id
-                    && capture.response_sha256 == expected.response_sha256
-            });
+    let retained = agent_doc_cycle_state_io::load_projected_retained_captured_response(file)?
+        .filter(|capture| {
+            capture.cycle_id == expected.cycle_id
+                && capture.capture_id == expected.capture_id
+                && capture.response_sha256 == expected.response_sha256
+        });
+    let capture = match retained {
+        Some(capture) => Some(capture),
+        None => {
+            agent_doc_cycle_state_io::load_projected_captured_response(file, &expected.capture_id)?
+                .filter(|capture| {
+                    capture.cycle_id == expected.cycle_id
+                        && capture.response_sha256 == expected.response_sha256
+                })
+        }
+    };
     if let Some(capture) = capture
         && let Some(plan_json) = capture.mutation_plan_json.as_deref()
     {
@@ -308,5 +327,29 @@ mod captured_finalize_resume_tests {
             ),
             CapturedFinalizeResumeOutcome::NeedsOperator { .. }
         ));
+    }
+
+    #[test]
+    fn retained_capture_produces_a_resume_key_without_current_cycle_state() {
+        let capture = agent_doc_cycle_state_io::ProjectedCapturedResponse {
+            cycle_id: "retained-cycle".to_string(),
+            capture_id: "retained-capture".to_string(),
+            response_sha256: "retained-response-sha".to_string(),
+            response_body: "response body".to_string(),
+            intent_body: None,
+            mutation_plan_json: None,
+            file_hash: None,
+            snapshot_hash: None,
+            baseline_content: None,
+        };
+
+        assert_eq!(
+            captured_finalize_resume_key_from_capture(&capture),
+            Some(CapturedFinalizeResumeKey {
+                cycle_id: "retained-cycle".to_string(),
+                capture_id: "retained-capture".to_string(),
+                response_sha256: "retained-response-sha".to_string(),
+            }),
+        );
     }
 }

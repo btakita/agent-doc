@@ -815,6 +815,9 @@ and one controller `Effect` publishes it to the shared supervisor state plane.
 The effect revalidates the pinned transition continuation, builds the
 supervisor wake from that continuation rather than the current closeout cycle,
 and advances its published frontier only after publication succeeds.
+The supervisor subscriber derives both its keyed single-flight identity and
+replay body from the same pending-transition continuation; a later closeout
+cycle cannot make the received wake appear operationless.
 Repeated observations and multiple supervisors are deduplicated by the exact
 controller-generation/delivery-version action identity. Ordinary divergent
 writes and malformed projections derive no action.

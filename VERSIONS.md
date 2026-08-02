@@ -24,6 +24,9 @@ events gain the continuation during projection replay; no sidecar migration or
 new acknowledgement request is required. The final effect fence and
 supervisor-wake payload use that same pinned continuation, and the one-shot
 published frontier advances only after the wake is successfully published.
+Cold or recycled supervisors also derive the resumed operation key and exact
+replay body from the pending transition continuation; current-cycle capture is
+only a legacy fallback when no pinned continuation exists.
 - **Retained transitions now flow back into attached editors as guarded
 reactive projections.** The controller derives a transition only when the
   current visible projection still byte-matches its recorded base, then a

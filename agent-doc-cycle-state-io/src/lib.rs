@@ -503,6 +503,22 @@ pub struct ProjectedCapturedResponse {
     pub baseline_content: Option<String>,
 }
 
+impl From<agent_doc_state_backbone::CapturedResponseProjection> for ProjectedCapturedResponse {
+    fn from(capture: agent_doc_state_backbone::CapturedResponseProjection) -> Self {
+        Self {
+            cycle_id: capture.cycle_id,
+            capture_id: capture.capture_id,
+            response_sha256: capture.response_sha256,
+            response_body: capture.response_body,
+            intent_body: capture.intent_body,
+            mutation_plan_json: capture.mutation_plan_json,
+            file_hash: capture.file_hash,
+            snapshot_hash: capture.snapshot_hash,
+            baseline_content: capture.baseline_content,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectedResponseDraft {
     pub cycle_id: String,
@@ -579,19 +595,9 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
                 .map(|checkpoint| checkpoint.checkpoint_sequence),
             capture_id: projection.capture_id,
             response_sha256: projection.response_sha256,
-            captured_response: projection.captured_response.map(|capture| {
-                ProjectedCapturedResponse {
-                    cycle_id: capture.cycle_id,
-                    capture_id: capture.capture_id,
-                    response_sha256: capture.response_sha256,
-                    response_body: capture.response_body,
-                    intent_body: capture.intent_body,
-                    mutation_plan_json: capture.mutation_plan_json,
-                    file_hash: capture.file_hash,
-                    snapshot_hash: capture.snapshot_hash,
-                    baseline_content: capture.baseline_content,
-                }
-            }),
+            captured_response: projection
+                .captured_response
+                .map(ProjectedCapturedResponse::from),
             captured_response_retired_reason: projection.captured_response_retired_reason,
             response_draft: projection
                 .response_draft
@@ -644,6 +650,18 @@ pub fn load_projected_captured_response(
     Ok(load_closeout_projection(file)?
         .and_then(|projection| projection.captured_response)
         .filter(|capture| capture.capture_id == capture_id))
+}
+
+/// Load the response continuation pinned to the active retained Base → Target
+/// transition. This identity survives later closeout-cycle recycling and is
+/// therefore authoritative for reactive retained-finalize resumption.
+pub fn load_projected_retained_captured_response(
+    file: &Path,
+) -> Result<Option<ProjectedCapturedResponse>> {
+    Ok(load_document_projection(file)?
+        .and_then(|document| document.document.pending_write)
+        .and_then(|intent| intent.continuation)
+        .map(ProjectedCapturedResponse::from))
 }
 
 pub fn load_projected_response_draft(

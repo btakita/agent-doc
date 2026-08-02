@@ -44,6 +44,15 @@ REACTIVE_HARNESS_TERMS = (
     "Imperative commands live inside an `Effect` whenever",
 )
 INSTALL_HARNESS_MARKER = "skill install --all"
+MUTATION_CAPTURE_RUNTIME = Path(
+    "agent-doc-write-runtime-io/src/run_entry.rs"
+)
+MUTATION_CAPTURE_CALL = (
+    "capture_closeout_mutation_plan_before_authority_resolution(file, &response, &flags)?;"
+)
+AUTHORITY_RESOLUTION_CALL = (
+    "let current_content = resolve_document_content_for_write_mode("
+)
 
 
 class HarnessError(RuntimeError):
@@ -243,6 +252,19 @@ def verify_dev_harness_contract(root: Path) -> list[str]:
             "Makefile install and install-full must project current harness "
             f"artifacts with `{INSTALL_HARNESS_MARKER}`"
         ]
+    runtime_path = root / MUTATION_CAPTURE_RUNTIME
+    try:
+        runtime_text = runtime_path.read_text()
+    except OSError as exc:
+        return [f"cannot read closeout runtime harness {runtime_path}: {exc}"]
+    run_stream = runtime_text.find("pub(crate) fn run_stream(")
+    capture = runtime_text.find(MUTATION_CAPTURE_CALL, run_stream)
+    authority = runtime_text.find(AUTHORITY_RESOLUTION_CALL, run_stream)
+    if run_stream < 0 or capture < 0 or authority < 0 or capture > authority:
+        return [
+            "run_stream must durably capture the closeout mutation plan before "
+            "its first editor-authority resolution (#bugbacklogdropped)"
+        ]
     return []
 
 
@@ -327,6 +349,7 @@ def release_version(root: Path, version: str) -> tuple[int, int]:
 def write_fixture(root: Path) -> None:
     (root / "agent-doc-part").mkdir(parents=True)
     (root / ".claude/skills/agent-doc").mkdir(parents=True)
+    (root / MUTATION_CAPTURE_RUNTIME.parent).mkdir(parents=True)
     (root / "Cargo.toml").write_text(
         """[workspace]
 members = ["agent-doc-part"]
@@ -371,6 +394,13 @@ version = "1.2.3"
 
 install-full:
 \tagent-doc skill install --all
+"""
+    )
+    (root / MUTATION_CAPTURE_RUNTIME).write_text(
+        """pub(crate) fn run_stream() {
+    capture_closeout_mutation_plan_before_authority_resolution(file, &response, &flags)?;
+    let current_content = resolve_document_content_for_write_mode(
+}
 """
     )
     (root / "Cargo.lock").write_text(
@@ -427,6 +457,24 @@ def self_test() -> None:
         else:
             raise HarnessError("fixture install harness drift was not detected")
         makefile.write_text(install_contract)
+        runtime = root / MUTATION_CAPTURE_RUNTIME
+        runtime_contract = runtime.read_text()
+        runtime.write_text(
+            runtime_contract.replace(
+                MUTATION_CAPTURE_CALL,
+                "capture_closeout_mutation_plan_after_authority_resolution();",
+            )
+        )
+        try:
+            verify_release_version(root)
+        except HarnessError as exc:
+            if "#bugbacklogdropped" not in str(exc):
+                raise HarnessError(
+                    "fixture closeout drift did not identify the mutation-capture boundary"
+                ) from exc
+        else:
+            raise HarnessError("fixture closeout mutation-capture drift was not detected")
+        runtime.write_text(runtime_contract)
         skill = root / ".claude/skills/agent-doc/SKILL.md"
         skill.write_text(skill.read_text().replace("2.4.6", "1.2.3"))
         try:

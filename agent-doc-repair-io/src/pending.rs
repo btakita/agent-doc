@@ -24,6 +24,22 @@ pub fn save_pending(file: &Path, response: &str) -> Result<()> {
     save_pending_after_capture(file, response, &capture)
 }
 
+pub fn save_pending_with_plan(
+    file: &Path,
+    response: &str,
+    mutation_plan_json: Option<&str>,
+) -> Result<()> {
+    let canonical_response =
+        agent_doc_template_io::canonicalize_response_for_capture(file, response)?;
+    let capture = agent_doc_capture_io::capture_response_with_intent_and_plan(
+        file,
+        &canonical_response,
+        response,
+        mutation_plan_json,
+    )?;
+    save_pending_after_capture(file, response, &capture)
+}
+
 pub fn save_pending_with_current_content(
     file: &Path,
     response: &str,

@@ -250,13 +250,23 @@ pub fn capture_response_with_intent(
     response: &str,
     intent_body: &str,
 ) -> Result<CaptureRecord> {
+    capture_response_with_intent_and_plan(file, response, intent_body, None)
+}
+
+pub fn capture_response_with_intent_and_plan(
+    file: &Path,
+    response: &str,
+    intent_body: &str,
+    mutation_plan_json: Option<&str>,
+) -> Result<CaptureRecord> {
     let file_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for response capture", file.display()))?;
-    capture_response_with_current_content_and_intent(
+    capture_response_with_current_content_and_intent_and_plan(
         file,
         response,
         &file_content,
         Some(intent_body),
+        mutation_plan_json,
     )
 }
 

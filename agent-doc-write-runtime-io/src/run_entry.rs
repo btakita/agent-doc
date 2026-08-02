@@ -1034,6 +1034,9 @@ pub(crate) fn run_stream(
         }
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
+    sanitize_template_patchback_response(&mut response)?;
+
+    capture_closeout_mutation_plan_before_authority_resolution(file, &response, &flags)?;
 
     let current_content = resolve_document_content_for_write_mode(
         file,
@@ -1055,7 +1058,6 @@ pub(crate) fn run_stream(
             .ok()
             .flatten();
     }
-    sanitize_template_patchback_response(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
@@ -1860,6 +1862,40 @@ pub(crate) fn run_stream(
     Ok(())
 }
 
+/// Capture the semantic mutation envelope before the first live-authority read.
+///
+/// Resolving an editor-owned document can stop at the pre-write delivery barrier.
+/// The response body is still recoverable from the capture ledger, so its
+/// backlog/status mutation plan must already be attached to the same capture or
+/// binary-owned recovery could later commit only the response.
+fn capture_closeout_mutation_plan_before_authority_resolution(
+    file: &Path,
+    response: &str,
+    flags: &WriteFlags,
+) -> Result<()> {
+    if !flags.has_pending_mutation {
+        return Ok(());
+    }
+    let mutation_plan_json = flags.mutation_plan_json.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "closeout for {} has tracked-work mutations but no durable mutation plan",
+            file.display()
+        )
+    })?;
+    agent_doc_repair_io::pending::save_pending_with_plan(file, response, Some(mutation_plan_json))?;
+    agent_doc_cycle_state_io::mark_pending_mutations(file)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "closeout_mutation_plan_captured_before_authority_resolution file={} response_hash={} plan_hash={} recovery=replay_same_closeout_envelope",
+            file.display(),
+            agent_doc_hash::content_hash(response),
+            agent_doc_hash::content_hash(mutation_plan_json),
+        ),
+    );
+    Ok(())
+}
+
 /// Explicit editor mode: deliver through the registered Lazily replica.
 /// Fails closed when no PID-scoped endpoint accepts the retained intent.
 pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
@@ -2598,6 +2634,85 @@ mod tests {
         // or a real error would silently apply mutations it never earned.
         let hard = anyhow::anyhow!("finalize: refusing to mutate a non-git document");
         assert!(!error_requests_retry_without_disk(&hard));
+    }
+
+    /// `#bugbacklogdropped`: an already-retained editor target can block the
+    /// first authority read. The mutation plan must be durable before that read
+    /// so capture recovery cannot replay only the response body.
+    #[test]
+    fn tracked_work_mutation_plan_is_captured_before_authority_resolution() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("pre-barrier-plan.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: pre-barrier-plan\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### User Prompt\n\n",
+            "Capture the whole closeout.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#existing] Existing item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        fs::write(&doc, baseline).unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: Capture the whole closeout — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let plan = agent_doc_write_command_io::CapturedCloseoutMutationPlan {
+            is_template: true,
+            is_stream: true,
+            pending_add: vec!["[#new] New retained work".to_string()],
+            pending_edit: vec!["existing=Edited retained work".to_string()],
+            ..Default::default()
+        };
+        let plan_json = serde_json::to_string(&plan).unwrap();
+        let flags = WriteFlags {
+            allow_replace_pending: false,
+            has_pending_add: true,
+            has_pending_done: false,
+            has_pending_mutation: true,
+            pending_done_ids: Vec::new(),
+            queue_completion_ids: Vec::new(),
+            pending_kept_open_ids: Vec::new(),
+            strict_closeout: true,
+            force_disk: false,
+            no_pending_capture: false,
+            mutation_plan_json: Some(plan_json.clone()),
+            empty_response_recovery: None,
+            rerun_command_base: None,
+        };
+
+        capture_closeout_mutation_plan_before_authority_resolution(&doc, response, &flags).unwrap();
+
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("eager capture should create a durable cycle projection");
+        let capture_id = state
+            .capture_id
+            .as_deref()
+            .expect("eager capture should identify its response");
+        let capture = agent_doc_cycle_state_io::load_projected_captured_response(&doc, capture_id)
+            .unwrap()
+            .expect("eager capture should retain the response and mutation plan");
+        assert_eq!(
+            capture.mutation_plan_json.as_deref(),
+            Some(plan_json.as_str())
+        );
+        let recovered: agent_doc_write_command_io::CapturedCloseoutMutationPlan =
+            serde_json::from_str(capture.mutation_plan_json.as_deref().unwrap()).unwrap();
+        assert_eq!(recovered.pending_add, plan.pending_add);
+        assert_eq!(recovered.pending_edit, plan.pending_edit);
+        assert!(
+            state.had_pending_mutations,
+            "recovery must fail closed until the retained mutation envelope lands"
+        );
     }
 
     #[test]

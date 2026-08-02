@@ -26,6 +26,13 @@ _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
   receipt. Successive queue or response edits are serialized and coalesced;
   mismatched canonical state remains fail-closed instead of losing the edit or
   adopting the whole buffer.
+- **Retained response recovery keeps the complete closeout mutation envelope.**
+  A streamed closeout now captures its typed backlog/status plan before its
+  first editor-authority read, so an older pending editor delivery cannot stop
+  the command between response capture and mutation-plan capture. Binary-owned
+  replay applies the same `--backlog-add`/`--backlog-edit` intent or fails
+  closed; it can no longer commit only the recovered response. The Rust and
+  development harnesses enforce this ordering.
 
 ## 0.35.117
 

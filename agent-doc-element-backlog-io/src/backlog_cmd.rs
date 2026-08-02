@@ -12,9 +12,9 @@
 //!   operations against the `agent:icebox` component.
 
 use anyhow::{Context, Result};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::done_archive::{archive_pending_done, external_done_archive_ids};
 use agent_doc_element::element;
@@ -28,6 +28,29 @@ use agent_doc_element_review::{
 
 thread_local! {
     static FORCE_DISK_PENDING_WRITE: Cell<bool> = const { Cell::new(false) };
+    static PENDING_WRITE_TRANSACTION: RefCell<Option<PendingWriteTransaction>> =
+        const { RefCell::new(None) };
+}
+
+#[derive(Debug)]
+struct DeferredPendingWrite {
+    file: PathBuf,
+    initial: String,
+    target: String,
+    force_disk: bool,
+}
+
+#[derive(Debug)]
+struct DeferredRawWrite {
+    file: PathBuf,
+    target: String,
+}
+
+#[derive(Debug)]
+struct PendingWriteTransaction {
+    primary_file: PathBuf,
+    documents: Vec<DeferredPendingWrite>,
+    raw_writes: Vec<DeferredRawWrite>,
 }
 
 pub fn with_force_disk_pending_writes<T>(
@@ -46,8 +69,112 @@ pub fn with_force_disk_pending_writes<T>(
     })
 }
 
-fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()> {
-    let force_disk = FORCE_DISK_PENDING_WRITE.with(Cell::get);
+fn transaction_path(file: &Path) -> PathBuf {
+    if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(file))
+            .unwrap_or_else(|_| file.to_path_buf())
+    }
+}
+
+fn transaction_document_content(file: &Path) -> Option<String> {
+    let file = transaction_path(file);
+    PENDING_WRITE_TRANSACTION.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|transaction| {
+                transaction
+                    .documents
+                    .iter()
+                    .find(|document| document.file == file)
+            })
+            .map(|document| document.target.clone())
+    })
+}
+
+fn register_transaction_document(file: &Path, content: &str) {
+    let file = transaction_path(file);
+    PENDING_WRITE_TRANSACTION.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(transaction) = slot.as_mut() else {
+            return;
+        };
+        if transaction
+            .documents
+            .iter()
+            .any(|document| document.file == file)
+        {
+            return;
+        }
+        transaction.documents.push(DeferredPendingWrite {
+            file,
+            initial: content.to_string(),
+            target: content.to_string(),
+            force_disk: false,
+        });
+    });
+}
+
+fn stage_transaction_pending_write(
+    file: &Path,
+    current: &str,
+    target: &str,
+    force_disk: bool,
+) -> Result<bool> {
+    let file = transaction_path(file);
+    PENDING_WRITE_TRANSACTION.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(transaction) = slot.as_mut() else {
+            return Ok(false);
+        };
+        let document = if let Some(document) = transaction
+            .documents
+            .iter_mut()
+            .find(|document| document.file == file)
+        {
+            document
+        } else {
+            transaction.documents.push(DeferredPendingWrite {
+                file: file.clone(),
+                initial: current.to_string(),
+                target: current.to_string(),
+                force_disk,
+            });
+            transaction
+                .documents
+                .last_mut()
+                .expect("deferred pending write was just inserted")
+        };
+        if document.target != current {
+            if document.target == document.initial {
+                // A first mutation may materialize its missing component in
+                // memory before calling the shared persistence boundary (for
+                // example `review_add`). Adopt that preparatory shape while
+                // preserving the original bytes as the final publish/CAS
+                // baseline. Once any mutation is staged, every later command
+                // must consume the exact virtual target.
+                document.target = current.to_string();
+            } else {
+                anyhow::bail!(
+                    "tracked-work transaction lost its document cursor for {}",
+                    file.display()
+                );
+            }
+        }
+        document.target = target.to_string();
+        document.force_disk |= force_disk;
+        Ok(true)
+    })
+}
+
+fn persist_pending_write_now(
+    file: &Path,
+    current: &str,
+    target: &str,
+    force_disk: bool,
+) -> Result<()> {
     if force_disk {
         std::fs::write(file, target)
             .with_context(|| format!("pending_write: failed to write {}", file.display()))?;
@@ -65,6 +192,119 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
     }
 
     crate::converge_or_disk_write(file, current, target, "pending_write")
+}
+
+fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()> {
+    let force_disk = FORCE_DISK_PENDING_WRITE.with(Cell::get);
+    if stage_transaction_pending_write(file, current, target, force_disk)? {
+        return Ok(());
+    }
+    persist_pending_write_now(file, current, target, force_disk)
+}
+
+/// Plan every tracked-work command in `f` against virtual document contents and
+/// publish the resulting targets only after the entire mutation envelope
+/// validates. Same-document closeout flags therefore produce one tracked-work
+/// write, and a later semantic error cannot strand earlier adds or moves.
+pub fn with_pending_write_transaction<T>(
+    primary_file: &Path,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let primary_file = transaction_path(primary_file);
+    PENDING_WRITE_TRANSACTION.with(|slot| {
+        if slot.borrow().is_some() {
+            anyhow::bail!("nested tracked-work transactions are not supported");
+        }
+        *slot.borrow_mut() = Some(PendingWriteTransaction {
+            primary_file,
+            documents: Vec::new(),
+            raw_writes: Vec::new(),
+        });
+        Ok(())
+    })?;
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    let transaction = PENDING_WRITE_TRANSACTION.with(|slot| {
+        slot.borrow_mut()
+            .take()
+            .expect("tracked-work transaction disappeared")
+    });
+    let value = match result {
+        Ok(Ok(value)) => value,
+        Ok(Err(err)) => return Err(err),
+        Err(payload) => std::panic::resume_unwind(payload),
+    };
+
+    for raw_write in transaction.raw_writes {
+        if let Some(parent) = raw_write.file.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create deferred archive directory {}",
+                    parent.display()
+                )
+            })?;
+        }
+        agent_doc_fs::write_atomic(&raw_write.file, raw_write.target.as_bytes()).with_context(
+            || {
+                format!(
+                    "failed to publish deferred archive {}",
+                    raw_write.file.display()
+                )
+            },
+        )?;
+    }
+
+    let mut documents = transaction.documents;
+    documents.sort_by_key(|document| document.file == transaction.primary_file);
+    for document in documents {
+        if document.initial == document.target {
+            continue;
+        }
+        persist_pending_write_now(
+            &document.file,
+            &document.initial,
+            &document.target,
+            document.force_disk,
+        )?;
+    }
+    Ok(value)
+}
+
+pub(crate) fn deferred_raw_content(file: &Path) -> Option<String> {
+    let file = transaction_path(file);
+    PENDING_WRITE_TRANSACTION.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|transaction| {
+                transaction
+                    .raw_writes
+                    .iter()
+                    .find(|write| write.file == file)
+            })
+            .map(|write| write.target.clone())
+    })
+}
+
+pub(crate) fn stage_raw_write(file: &Path, target: String) -> bool {
+    let file = transaction_path(file);
+    PENDING_WRITE_TRANSACTION.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(transaction) = slot.as_mut() else {
+            return false;
+        };
+        if let Some(write) = transaction
+            .raw_writes
+            .iter_mut()
+            .find(|write| write.file == file)
+        {
+            write.target = target;
+        } else {
+            transaction
+                .raw_writes
+                .push(DeferredRawWrite { file, target });
+        }
+        true
+    })
 }
 
 /// Apply a caller-supplied pure document rewrite through the tracked-work write
@@ -99,14 +339,19 @@ pub fn apply_document_rewrite(
 }
 
 fn read_command_document(file: &Path, source: &str) -> Result<String> {
+    if let Some(content) = transaction_document_content(file) {
+        return Ok(content);
+    }
     let force_disk = FORCE_DISK_PENDING_WRITE.with(Cell::get);
-    if force_disk {
+    let content = if force_disk {
         crate::force_disk_document_content(file, source)
             .with_context(|| format!("{source}: failed to read disk document"))
     } else {
         crate::current_document_content(file, source)
             .with_context(|| format!("{source}: failed to resolve current document"))
-    }
+    }?;
+    register_transaction_document(file, &content);
+    Ok(content)
 }
 
 fn find_tracked_list_component(
@@ -1396,6 +1641,46 @@ mod tests {
         assert!(
             content.contains("<!-- agent:done -->") && content.contains("[#close1]"),
             "{content}"
+        );
+    }
+
+    #[test]
+    fn tracked_work_transaction_rolls_back_external_done_archive_with_primary_document() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("test.md");
+        let archive = tmp.path().join("completed.done.md");
+        let initial_doc = "---\nagent_doc_session: test\n---\n\n\
+<!-- agent:pending -->\n\
+- [ ] [#close1] Close the loop\n\
+<!-- /agent:pending -->\n\n\
+<!-- agent:done archive=\"completed.done.md\" -->\n\
+<!-- /agent:done -->\n";
+        let initial_archive = "# Agent Doc Completed Work\n\n";
+        fs::write(&doc, initial_doc).unwrap();
+        fs::write(&archive, initial_archive).unwrap();
+
+        let error = with_test_effects(|| {
+            with_pending_write_transaction(&doc, || -> Result<()> {
+                done_and_reap_many(&doc, &["close1".to_string()])?;
+                anyhow::bail!("reject a later tracked-work mutation");
+            })
+        })
+        .unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("reject a later tracked-work mutation"),
+            "{error:#}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            initial_doc,
+            "the primary document must not expose the earlier resolve"
+        );
+        assert_eq!(
+            fs::read_to_string(&archive).unwrap(),
+            initial_archive,
+            "the external archive must publish in the same successful envelope"
         );
     }
 

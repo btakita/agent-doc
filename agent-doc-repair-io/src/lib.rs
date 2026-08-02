@@ -697,6 +697,19 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         if response_prefix_repaired_doc != doc_content {
             return Ok(RepairOutcome::TemplateNormalized);
         }
+        // Inline boundary fragmentation is a structural transport artifact, and
+        // its repair explicitly carries the complete prompt forward.  Run this
+        // narrow repair before the broad live-steering guard: an explicit prompt
+        // inside the fragmented projection is evidence to preserve, not a reason
+        // to leave the projection wedged.
+        let inline_boundary_repaired_doc = repair_inline_boundary_fragmentation_if_needed(
+            effects.repair_io_effects,
+            file,
+            &doc_content,
+        )?;
+        if inline_boundary_repaired_doc != doc_content {
+            return Ok(RepairOutcome::TemplateNormalized);
+        }
         let has_live_prompt =
             agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?.is_present();
         if !has_live_prompt {
@@ -1653,6 +1666,59 @@ pub fn repair_duplicate_exchange_scaffold_if_needed(
         file.display()
     );
     Ok(repaired)
+}
+
+fn repair_inline_boundary_fragmentation_if_needed(
+    effects: &impl RepairTemplateWriteEffects,
+    file: &Path,
+    doc_content: &str,
+) -> Result<String> {
+    let Some(repaired) = repair_inline_boundary_fragmentation(doc_content)? else {
+        return Ok(doc_content.to_string());
+    };
+
+    let save_repaired_snapshot = match agent_doc_snapshot_io::load_document_baseline(file)? {
+        Some(snapshot_content) => {
+            !agent_doc_turn::closeout_recovery::repair_leaves_unanswered_prompt_diff(
+                &snapshot_content,
+                &repaired,
+                None,
+            )
+        }
+        None => true,
+    };
+    let settled = effects.atomic_write_if_current(
+        file,
+        &repaired,
+        doc_content,
+        "repair_inline_boundary_fragmentation",
+    )?;
+    anyhow::ensure!(
+        settled == repaired,
+        "[repair] inline boundary fragmentation repair for {} returned a non-exact authority cut",
+        file.display(),
+    );
+    if save_repaired_snapshot {
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &settled,
+            agent_doc_ops_log_io::log_op,
+        )?;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "repair_inline_boundary_fragmentation file={} prior_hash={} repaired_hash={}",
+            file.display(),
+            agent_doc_hash::content_hash(doc_content),
+            agent_doc_hash::content_hash(&settled),
+        ),
+    );
+    eprintln!(
+        "[repair] restored a fragmented prompt/response boundary in {}",
+        file.display()
+    );
+    Ok(settled)
 }
 
 fn repair_structural_projection_if_needed(

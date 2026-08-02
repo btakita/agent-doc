@@ -762,11 +762,82 @@ pub fn prompt_change_is_answered_by_later_response(
                     return true;
                 }
             }
-            PromptBearingChangeKind::ContentEdit => {}
+            // A response heading can acknowledge only the prompt run that
+            // directly precedes it.  Scanning across substantive edits lets
+            // unrelated assistant prose bridge an unanswered operator prompt
+            // to a later response cell.
+            PromptBearingChangeKind::ContentEdit => return false,
         }
     }
 
     false
+}
+
+fn prompt_change_run_is_already_answered(changes: &[PromptBearingChange], idx: usize) -> bool {
+    if changes
+        .get(idx)
+        .is_none_or(|change| change.kind != PromptBearingChangeKind::PromptTarget)
+    {
+        return false;
+    }
+    let preview = changes[idx]
+        .text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(changes[idx].text.as_str())
+        .trim();
+    // Explicit steering (`❯`, `do #…`, slash commands, questions, and the
+    // other fresh-prompt forms) is acknowledged only by a structurally
+    // associated response cell. The unmarked plain-prose compatibility
+    // heuristic is reserved for soft prompts; otherwise later maintenance
+    // prose can impersonate an answer.
+    if line_looks_like_fresh_prompt_after_response(preview) {
+        return false;
+    }
+
+    let mut run = String::new();
+    for change in changes.iter().skip(idx) {
+        match change.kind {
+            PromptBearingChangeKind::PromptTarget | PromptBearingChangeKind::ContentEdit => {
+                if !run.is_empty() {
+                    run.push('\n');
+                }
+                run.push_str(&change.text);
+            }
+            PromptBearingChangeKind::RecoveryArtifact
+            | PromptBearingChangeKind::BoundaryArtifact => break,
+        }
+    }
+    prompt_change_is_already_answered(&run)
+}
+
+fn prompt_target_is_marker_only_normalization(diff_text: &str, change_text: &str) -> bool {
+    let Some(added_prompt) = change_text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .filter(|line| line.starts_with('❯'))
+    else {
+        return false;
+    };
+    let target = added_prompt.trim_start_matches('❯').trim();
+    if target.is_empty() {
+        return false;
+    }
+
+    let mut saw_removed_equivalent = false;
+    let mut saw_added_equivalent = false;
+    for line in diff_text.lines() {
+        if let Some(removed) = line.strip_prefix('-').filter(|_| !line.starts_with("---")) {
+            saw_removed_equivalent |= removed.trim().trim_start_matches('❯').trim() == target;
+        }
+        if let Some(added) = line.strip_prefix('+').filter(|_| !line.starts_with("+++")) {
+            let added = added.trim();
+            saw_added_equivalent |=
+                added.starts_with('❯') && added.trim_start_matches('❯').trim() == target;
+        }
+    }
+    saw_removed_equivalent && saw_added_equivalent
 }
 
 pub fn strip_queue_components_for_unstarted_prompt_guard(body: &str) -> String {
@@ -797,9 +868,6 @@ pub fn prompt_target_is_immediately_before_existing_response(
         .lines()
         .find(|line| !line.trim().is_empty())
         .map(|line| line.trim().to_string());
-    let answered_prompt_marker = target_line
-        .as_deref()
-        .is_some_and(|line| line.starts_with('❯'));
     let target = target_line
         .as_deref()
         .map(|line| line.trim_start_matches('❯').trim().to_string());
@@ -835,9 +903,9 @@ pub fn prompt_target_is_immediately_before_existing_response(
             if is_exchange_response_heading(trimmed) {
                 return true;
             }
-            if answered_prompt_marker {
-                continue;
-            }
+            // Only an adjacent response cell can acknowledge this exact
+            // prompt block.  In particular, do not scan across another
+            // prompt or assistant prose to find an unrelated later heading.
             return false;
         }
     }
@@ -859,14 +927,18 @@ pub fn first_unstarted_prompt_bearing_change_from_diff(
 /// is not a FIFO queue drained one head at a time — the operator can add several
 /// prompts while a turn is active, and all of them must reach the agent at once so
 /// it can address them together and find patterns across them
-/// (`#realtime-steering-aggregate`, plan Phase 6). The answered-prompt suppression
-/// (`skip_answered_response_run`, immediately-before-existing-response) is identical
-/// to the single-change path so the two never disagree on what counts as unstarted.
+/// (`#realtime-steering-aggregate`, plan Phase 6). This selector retains raw
+/// encounter order so an unrelated later response cannot hide intervening
+/// operator steering (`#prompt-response-adjacency`).
 pub fn all_unstarted_prompt_bearing_changes_from_diff(
     diff_text: &str,
     current_doc: &str,
 ) -> Vec<PromptBearingChange> {
-    let changes = classify_prompt_bearing_changes(diff_text);
+    // Keep the unsuppressed encounter order here.  The public classifier
+    // intentionally removes answered response runs for broad consumers, but
+    // that erases the intervening content this safety-critical selector needs
+    // to distinguish an adjacent response from an unrelated later one.
+    let changes = classify_prompt_bearing_changes_raw(diff_text);
     let mut unstarted = Vec::new();
     let mut skip_answered_response_run = false;
     for (idx, change) in changes.iter().enumerate() {
@@ -887,8 +959,8 @@ pub fn all_unstarted_prompt_bearing_changes_from_diff(
                         continue;
                     }
                 }
-                if prompt_change_is_already_answered(&change.text)
-                    || prompt_change_is_answered_by_later_response(&changes, idx)
+                if prompt_target_is_marker_only_normalization(diff_text, &change.text)
+                    || prompt_change_run_is_already_answered(&changes, idx)
                     || prompt_target_is_immediately_before_existing_response(
                         current_doc,
                         &change.text,
@@ -4123,7 +4195,47 @@ Done.\n\
 
         assert!(
             change.is_none(),
-            "answered prompt immediately before an existing response should not stay actionable"
+            "the only newly added prompt is immediately before an existing response"
+        );
+    }
+
+    #[test]
+    fn unstarted_prompt_does_not_cross_assistant_content_to_later_response() {
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: Tauri vs Flutter vs Slint — gpt-5 (HEAD)\n\n",
+            "The desktop comparison follows.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: Tauri vs Flutter vs Slint — gpt-5 (HEAD)\n\n",
+            "The desktop comparison follows.\n\n",
+            "❯ Can the rust FPE engine be directly embedded in the backend?\n\n",
+            "| Option | Result |\n",
+            "| --- | --- |\n",
+            "| Tauri | Preferred |\n\n",
+            "### Re: status — gpt-5 (HEAD)\n\n",
+            "The repository is clean.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = unified_diff_from_contents(snapshot, current).expect("diff");
+        assert!(
+            !prompt_change_is_already_answered(concat!(
+                "❯ Can the rust FPE engine be directly embedded in the backend?\n",
+                "| Option | Result |\n",
+                "| --- | --- |\n",
+                "| Tauri | Preferred |\n",
+            )),
+            "a table continuing the current assistant response is not an acknowledgement"
+        );
+        let changes = all_unstarted_prompt_bearing_changes_from_diff(&diff, current);
+
+        assert!(
+            changes.iter().any(|change| change
+                .text
+                .contains("Can the rust FPE engine be directly embedded in the backend?")),
+            "substantive assistant content must not bridge an unanswered prompt to a later response"
         );
     }
 
@@ -4170,6 +4282,45 @@ Done.\n\
         assert_eq!(
             changes[0].text,
             "Updated local references for the renamed `ClaudeScore/buildparty-investor-demo` repo: `.gitmodules` now points at the new SSH URL, and the checked-out submodule's `origin` remote has been synced to match."
+        );
+    }
+
+    #[test]
+    fn explicit_prompt_does_not_treat_later_maintenance_prose_as_plain_answer() {
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: completed work — gpt-5\n",
+            "Implemented.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#scopeid] completed item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: completed work — gpt-5\n",
+            "Implemented.\n",
+            "do #statusws. spec-test-build-install-commit-push\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "- 2026-08-02 [#scopeid] completed item\n",
+            "<!-- /agent:done -->\n",
+        );
+        let diff = unified_diff_from_contents(snapshot, current).expect("diff");
+
+        let changes = all_unstarted_prompt_bearing_changes_from_diff(&diff, current);
+
+        assert!(
+            changes
+                .iter()
+                .any(|change| change.text.contains("do #statusws")),
+            "binary-owned backlog reaping must not impersonate an answer to explicit steering"
         );
     }
 

@@ -175,15 +175,19 @@ fn append_external_done_archive(
     today: &str,
     removed: &[agent_doc_element_backlog::backlog::PendingItem],
 ) -> Result<()> {
-    let mut existing = match std::fs::read_to_string(target) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            "# Agent Doc Completed Work\n\n".to_string()
-        }
-        Err(err) => {
-            return Err(err)
-                .with_context(|| format!("failed to read done archive {}", target.display()));
-        }
+    let deferred = crate::backlog_cmd::deferred_raw_content(target);
+    let mut existing = match deferred {
+        Some(content) => content,
+        None => match std::fs::read_to_string(target) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                "# Agent Doc Completed Work\n\n".to_string()
+            }
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to read done archive {}", target.display()));
+            }
+        },
     };
     let mut changed = false;
     if !existing.is_empty() && !existing.ends_with('\n') {
@@ -204,6 +208,9 @@ fn append_external_done_archive(
         changed = true;
     }
     if changed || !target.exists() {
+        if crate::backlog_cmd::stage_raw_write(target, existing.clone()) {
+            return Ok(());
+        }
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
                 format!(

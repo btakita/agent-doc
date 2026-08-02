@@ -2195,7 +2195,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     ) {
         val canonical = forwarder.replicaText() ?: return
         shadows[filePath] = canonical
-        if (editorText == null || editorText == canonical) return
+        if (editorText == null) return
+        if (editorText == canonical) {
+            // Registration proves which canonical generation the replacement
+            // replica opened, but not what the IDE buffer currently displays.
+            // Publish the exact post-swap view so the controller can discharge
+            // this generation's delivery receipt.
+            if (!forwarder.projectVisibleState(canonical)) {
+                requestRemoteDrain(filePath, "registration-visible-projection-retry")
+            }
+            return
+        }
         retainedCanonicalProjectionPaths.add(filePath)
         log.info(
             "[crdt-replica] projecting controller bootstrap into ${File(filePath).name}; " +

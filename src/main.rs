@@ -538,6 +538,29 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         }
     }
 
+    fn resolve_cross_root_document_pane(
+        &self,
+        project_root: &Path,
+        file: &Path,
+    ) -> anyhow::Result<
+        Option<agent_doc_controller_io::project_controller::ControllerTmuxActorBinding>,
+    > {
+        Ok(
+            agent_doc_controller_io::project_controller::authoritative_actor_binding(
+                project_root,
+                file,
+            )?
+            .map(|record| {
+                agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                    document_path: record.document_id,
+                    session_id: record.session_id,
+                    pane_id: record.pane_id,
+                    generation: record.generation,
+                }
+            }),
+        )
+    }
+
     fn ensure_cross_root_document_pane(
         &self,
         project_root: &Path,
@@ -3102,9 +3125,8 @@ enum AdminAction {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Recycle running controllers onto the freshly-installed binary at their next
-    /// idle boundary (no dispatch in flight). Run after `cargo install` so a
-    /// long-running controller stops serving the prior binary (`#ctlrecycle`).
+    /// Recycle running controllers through a two-phase handoff. Active harness
+    /// children and accepted controller RPCs are preserved.
     Recycle {
         /// Optional document path or project root to recycle (defaults to the nearest project from CWD)
         #[arg(value_name = "FILE_OR_PROJECT_ROOT")]
@@ -3115,11 +3137,9 @@ enum AdminAction {
         /// Recycle the controller in every project root with a running controller
         #[arg(long)]
         all_projects: bool,
-        /// Force the recycle to take effect promptly: override the cycle-open /
-        /// in-flight-dispatch deferral (may interrupt an in-flight turn — that is
-        /// the point of `--force`), and, when no live controller answers, escalate
-        /// to a kill+cold-start (`session restart-supervisor`) instead of a no-op.
-        /// Composes with `--all-projects`.
+        /// Skip the controller recycle debounce. When no live controller answers,
+        /// also allow the supervisor fallback to interrupt a busy pane. Normal
+        /// controller recycling never interrupts the active harness child.
         #[arg(long)]
         force: bool,
         /// Emit JSON instead of a human-readable report
@@ -5329,9 +5349,9 @@ fn try_main() -> anyhow::Result<()> {
                             );
                         } else {
                             let boundary = if force {
-                                "now (forced, overriding the in-flight-dispatch deferral)"
+                                "through an immediate two-phase handoff (debounce skipped)"
                             } else {
-                                "at next idle boundary"
+                                "through a two-phase handoff"
                             };
                             println!(
                                 "[admin] recycle (all projects{}): {recycled} controller(s) marked to recycle {boundary}, {skipped} skipped; {supervisors_marked} route-owned supervisor(s) scheduled to recycle at next idle boundary, {supervisors_skipped} skipped",
@@ -5381,9 +5401,9 @@ fn try_main() -> anyhow::Result<()> {
                             );
                         } else if recycled {
                             let boundary = if force {
-                                "now (forced, overriding the in-flight-dispatch deferral)"
+                                "through an immediate two-phase handoff (debounce skipped)"
                             } else {
-                                "at next idle boundary"
+                                "through a two-phase handoff"
                             };
                             println!(
                                 "[admin] recycle{}: controller for {} marked to recycle {boundary}",

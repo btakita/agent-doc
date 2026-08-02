@@ -4,6 +4,102 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.112
+
+_JetBrains plugin 0.2.335; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Mid-turn controller recycle now uses successor-before-retire promotion.**
+  The predecessor launches one replacement on a private socket, waits for its
+  durable liveness fold, promotes that socket atomically, redirects new RPCs,
+  and retires only after its already-accepted RPCs drain. Continuous IDE or
+  supervisor traffic no longer starves recycle, and an open harness dispatch
+  remains owned by its unchanged route supervisor and child.
+- **Controller startup is serviceable before retained editor notifications.**
+  The durable reliable-sync fold remains synchronous, while potentially slow
+  dead-editor and replica-rebuild IPC effects run after listener readiness.
+  Concurrent launchers fail closed when an existing socket is still hydrating
+  instead of unlinking it and publishing duplicate listeners.
+- **Empty controller roots are rejected before launch-claim namespacing.**
+Invalid callers can no longer hold the shared SHA-256-empty launch endpoint
+or spend the install retry budget on an unsatisfiable `current_dir`.
+- **Automatic mixed-root tmux layout sync is pane-authority-only and fast.**
+Exact-visible editor snapshots preserve cross-root columns, honor an explicit
+validated `agent-doc` window, and resolve an existing nested-root pane from
+that root's controller actor projection before any editor-content read. A
+temporary content-authority outage can no longer drop the right-side pane or
+stall the parent sync; no-autostart still forbids foreign pane creation.
+- **Published pane-layout projections are successful command admissions.**
+The command-plane terminal now distinguishes applying the desired projection
+from observing the later tmux effect: `projection_published` returns an applied
+command receipt while the embedded layout payload keeps `applied: false` until
+the reactive effect converges. Automatic editor sync no longer reports a false
+rejection after the controller has already accepted and enacted the request.
+- **Automatic structural sync cannot converge from a stale pane assignment.**
+An automatic `Sync` intent is already the sparse edge for a first editor
+observation, changed columns, or controller-observed drift, so every such
+generation now crosses the tmux effect boundary. Cached structural receipts
+remain available for manual focus-only generations, while editor focus changes
+continue to use their separate pane-selection effect.
+- **Supervisor hot-reexec no longer impersonates a session restart.** A
+replacement image detects a surviving inherited harness child before start
+admission, validates the existing controller document/session/pane binding, and
+retains its actor generation and runtime state while refreshing only the
+supervisor transport lease. It emits no `session_start`, start hook, or ownership
+transition; binding drift fails closed before any replacement generation is
+published.
+- **Mid-response operator prompts can no longer be acknowledged by an unrelated
+later response heading.** Unstarted-prompt selection now retains unsuppressed
+diff encounter order and requires an adjacent response association. Substantive
+assistant prose or another prompt keeps the operator request actionable, while
+marker-only `❯` normalization and proven contiguous plain-answer runs remain
+non-actionable historical state. Explicit steering cannot be answered by later
+binary-owned backlog/done maintenance, and preflight's post-repair drift gate
+preserves the same fresh-prompt exemption as its entry gate. The narrow
+inline-boundary-fragmentation repair now runs before the broad live-steering
+guard because it proves the complete prompt survives; an actionable prompt no
+longer leaves that structural transport artifact wedged.
+- **Relative session paths no longer collapse the controller project root to an
+empty path.** The shared project-root walker anchors relative documents to the
+process working directory before walking `.agent-doc` ancestors, so supervisor
+idle-watch projections reach the existing controller instead of asking launch
+admission to claim `PathBuf("")`. Empty-root rejection remains the fail-closed
+backstop. Tmux pane-CWD lookup still preserves a nonexistent reported path as
+stale fallback evidence rather than anchoring it to the caller's repo.
+
+## 0.35.111
+
+_JetBrains plugin 0.2.335; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Installed controller generations can promote mid-turn without interrupting
+  the harness child.** The controller recycle gate now waits only for a stable
+  handoff and a between-RPC cut; durable dispatches no longer pin stale
+  controller code for the full Claude/Codex/OpenCode turn. Dispatch, CRDT, and
+  closeout state rehydrate from SQLite, while the route-owned supervisor keeps
+  ownership of the live child and remains turn-boundary gated. `--force` skips
+  the controller debounce rather than weakening the active-RPC gate.
+
+## 0.35.110
+
+_JetBrains plugin 0.2.335; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Mixed closeout mutations now publish as one semantic tracked-work
+  transaction.** Review removals/resolutions and backlog ungates are evaluated
+  before dependent additions/edits against a virtual document, then the
+  primary session document and any external done archive publish only after
+  every mutation validates. A duplicate or otherwise invalid late mutation
+  rolls back the complete tracked-work projection instead of leaving a partial
+  closeout, and MCP tool errors retain the full causal error chain.
+- **Replica replacement now discharges its exact visible-state receipt.**
+  Generation registration still proves the controller canonical bootstrap,
+  while JetBrains separately projects the post-swap buffer when it exactly
+  equals that canonical text and retries a failed projection through the
+  retained remote-drain path.
+- **Durable convergence no longer clears the only resumable closeout state
+  before editor delivery.** The Lazily settlement Effect remains subscribed
+  while a known live editor owes an exact projection receipt. Receipt
+  convergence then emits the durable settlement/wake edge, allowing captured
+  closeouts to finish without weakening the strict delivery commit barrier.
+
 ## 0.35.109
 
 _JetBrains plugin 0.2.334; VS Code extension 0.2.64; Zed extension 0.1.0._

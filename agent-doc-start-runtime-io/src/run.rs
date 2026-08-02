@@ -1,7 +1,9 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_start_io::{log_event, prepare_start_runtime, start_console_status};
+use agent_doc_start_io::{
+    log_event, prepare_start_runtime, prepare_start_runtime_reentry, start_console_status,
+};
 use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
     lifecycle::{BootResumeAction, boot_resume_action},
@@ -490,6 +492,13 @@ pub fn run_with_reap_policy_and_resume(
     route_owned_reap_policy: RouteOwnedReapPolicy,
     resume: Option<agent_doc_harness::ResumeRequest>,
 ) -> Result<()> {
+    // A live child handed across `execve` means this invocation replaces only
+    // the supervisor transport. Detect it before start admission so that
+    // admission cannot publish a false session start or advance actor generation.
+    let mut pending_adopt = ReexecState::from_env();
+    let preserved_child_survived = pending_adopt
+        .as_ref()
+        .is_some_and(|state| state.child_survived());
     let agent_doc_start_io::StartRuntime {
         session_id,
         fm,
@@ -503,7 +512,11 @@ pub fn run_with_reap_policy_and_resume(
         supervisor_instance_id,
         actor_record,
         post_start_document_model_ensure,
-    } = prepare_start_runtime(file, force, route_owned)?;
+    } = if preserved_child_survived {
+        prepare_start_runtime_reentry(file, force, route_owned)?
+    } else {
+        prepare_start_runtime(file, force, route_owned)?
+    };
     let _stderr_redirect = stderr_redirect;
 
     // `#resumeclaim` / `#resumestale`: resolve what this launch will actually
@@ -588,11 +601,7 @@ pub fn run_with_reap_policy_and_resume(
     // Consume hot-reexec handoff facts before resolving the child environment.
     // These supervisor-only transport values must never reach the harness child or
     // perturb the exact capability-proof contract.
-    let mut pending_adopt = ReexecState::from_env();
     let preserved_proof_contract = std::env::var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV).ok();
-    let preserved_child_survived = pending_adopt
-        .as_ref()
-        .is_some_and(|state| state.child_survived());
     if pending_adopt.is_some() {
         unsafe {
             std::env::remove_var(REEXEC_CHILD_PID_ENV);
@@ -710,7 +719,7 @@ pub fn run_with_reap_policy_and_resume(
         launch_binary_identity,
         &harness.binary,
         Some(actor_runtime),
-        Some(agent_doc_controller::actor::ActorState::Starting),
+        Some(actor_record.state),
         Some(pane_id.clone()),
     ));
     let mut capability_proof_thread = configure_managed_capability_proof_for_spec(
@@ -744,14 +753,15 @@ pub fn run_with_reap_policy_and_resume(
             generation: actor_record.generation,
             supervisor_pid: std::process::id(),
             supervisor_socket,
-            runtime_state: agent_doc_controller::actor::ActorState::Starting
-                .as_str()
-                .to_string(),
+            runtime_state: actor_record.state.as_str().to_string(),
         },
     )?;
     log_event(
         &mut session_log,
-        "controller_supervisor_registered state=starting",
+        &format!(
+            "controller_supervisor_registered state={}",
+            actor_record.state.as_str()
+        ),
     );
     if post_start_document_model_ensure {
         log_event(

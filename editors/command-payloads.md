@@ -43,6 +43,14 @@ target path is the lazily command envelope.
 | Session status/clear/restart/doctor | `session_command` | `agent-doc.session_command.v1` | editor-spawned CLI |
 | CRDT replica register/update/pull/projection | `crdt_replica` | `agent-doc.crdt_replica.v1` | controller `crdt_replica` custom envelope |
 
+For `sync_tmux_layout`, a terminal command receipt of `applied` acknowledges
+that the controller durably accepted the desired pane-layout projection. The
+embedded `ControllerTmuxLayoutSyncReceipt.applied` field separately reports
+whether the downstream tmux effect was already observed. Consequently,
+`reason: "projection_published"` is a successful command terminal with
+`applied: false` in the embedded effect receipt; retry/failure reasons remain
+rejected terminals.
+
 ## Payload schemas
 
 All payloads are JSON objects. Absent optional fields default as noted.

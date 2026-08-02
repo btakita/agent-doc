@@ -15,8 +15,24 @@ pub fn recycle_debounce_decision(
     }
 }
 
-pub fn force_overrides_in_flight_gate(recycle_forced: bool, handoff_stable: bool) -> bool {
-    recycle_forced && handoff_stable
+/// A project-controller image may begin a two-phase recycle while RPCs and a
+/// durable harness dispatch remain open.
+///
+/// The harness child is owned by the route-owned supervisor, not by the project
+/// controller. Dispatch/cycle state is durable in `state.db`, so treating the
+/// whole harness turn as controller activity only keeps stale controller code
+/// alive and delays retained-write recovery. The only launch exclusion is a
+/// non-stable handoff. Promotion redirects new RPCs to the replacement, and the
+/// predecessor exits only after its already-accepted RPCs drain.
+pub fn controller_recycle_safe_to_handoff(handoff_stable: bool) -> bool {
+    handoff_stable
+}
+
+/// Explicit force and protocol-skew recovery skip the normal recycle debounce.
+/// Neither case may interrupt an RPC; promotion and predecessor drain own that
+/// proof.
+pub fn controller_recycle_is_urgent(recycle_forced: bool, protocol_skew_urgent: bool) -> bool {
+    recycle_forced || protocol_skew_urgent
 }
 
 /// `#recycleidleonly`: a ROUTINE stale-binary recycle must wait for a real turn
@@ -94,10 +110,18 @@ mod tests {
     }
 
     #[test]
-    fn force_overrides_in_flight_gate_only_when_forced_and_stable() {
-        assert!(force_overrides_in_flight_gate(true, true));
-        assert!(!force_overrides_in_flight_gate(false, true));
-        assert!(!force_overrides_in_flight_gate(true, false));
-        assert!(!force_overrides_in_flight_gate(false, false));
+    fn controller_recycle_is_safe_midturn_only_between_rpcs_and_outside_handoff() {
+        // Active RPCs drain on the predecessor after promotion. A durable harness
+        // dispatch may likewise remain open: it is supervisor-owned and survives.
+        assert!(controller_recycle_safe_to_handoff(true));
+        assert!(!controller_recycle_safe_to_handoff(false));
+    }
+
+    #[test]
+    fn forced_or_protocol_skew_recycle_skips_the_debounce() {
+        assert!(controller_recycle_is_urgent(true, false));
+        assert!(controller_recycle_is_urgent(false, true));
+        assert!(controller_recycle_is_urgent(true, true));
+        assert!(!controller_recycle_is_urgent(false, false));
     }
 }

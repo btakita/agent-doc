@@ -3836,6 +3836,7 @@ pub(crate) fn reap_stale_duplicate_controllers(
     }
 }
 
+#[cfg(feature = "test-support")]
 pub(crate) fn shutdown_stale_controller(project_root: &Path) {
     let _ = request_with_reason(project_root, "shutdown", "stale_controller_replacement");
     let start = Instant::now();
@@ -5338,7 +5339,10 @@ pub fn visible_write_materialized_carry_forward_for_file(
 }
 
 /// `#ctlrecycle` R2 — ask the active controller for `project_root` to recycle at its
-/// next idle boundary (`agent-doc admin recycle`). Returns `Ok(true)` when a
+/// through a two-phase handoff (`agent-doc admin recycle`). Durable harness turns
+/// and accepted RPCs may remain active: the child is supervisor-owned, controller
+/// state is persisted, and the predecessor drains accepted clients after socket
+/// promotion. Returns `Ok(true)` when a
 /// controller was reached, `Ok(false)` when none is running (nothing to recycle).
 /// Never launches a controller — connect-only, so it is a no-op on a clean project.
 pub fn recycle_controller(project_root: &Path) -> Result<bool> {
@@ -5346,9 +5350,10 @@ pub fn recycle_controller(project_root: &Path) -> Result<bool> {
 }
 
 /// `#recycleforce` — `recycle_controller` with an explicit operator force flag.
-/// When `force` is true, the controller-side handler recycles at the next serve-loop
-/// tick WITHOUT waiting on the in-flight-dispatch idle gate (`agent-doc admin recycle
-/// --force`). `force == false` is byte-for-byte the prior defer-at-idle behavior.
+/// When `force` is true, the controller-side handler skips the normal debounce.
+/// Both modes preserve the active harness child and accepted RPCs. In the
+/// no-controller fallback, `force` may still authorize interrupting a busy
+/// supervisor pane.
 pub fn recycle_controller_force(project_root: &Path, force: bool) -> Result<bool> {
     let checkpoint =
         checkpoint_route_owned_documents_for_project(project_root, "controller_recycle_request")?;
@@ -8248,6 +8253,17 @@ fn empty_controller_request(command: &str) -> ControllerRequest {
     }
 }
 
+/// Whether the command plane has successfully applied the layout command.
+///
+/// `ControllerTmuxLayoutSyncReceipt::applied` describes the downstream tmux
+/// effect, not admission of the desired projection. Automatic/no-autostart
+/// callers intentionally return as soon as that projection is durable, so
+/// `projection_published` is a successful command-plane terminal even though
+/// the pane effect is still reactive.
+fn tmux_layout_command_applied(receipt: &ControllerTmuxLayoutSyncReceipt) -> bool {
+    receipt.applied || receipt.reason == "projection_published"
+}
+
 fn dispatch_command_submit_payload(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -8305,7 +8321,7 @@ fn dispatch_command_submit_payload(
                 Ok(receipt) => {
                     let output =
                         serde_json::to_string(&receipt).unwrap_or_else(|_| receipt.reason.clone());
-                    if receipt.applied {
+                    if tmux_layout_command_applied(&receipt) {
                         CommandSubmitDispatchResult::applied(output, &receipt).unwrap_or_else(
                             |err| {
                                 CommandSubmitDispatchResult::rejected(
@@ -8874,14 +8890,12 @@ pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutRepo
 /// either side in `Preparing`. The success path calls [`HandoffDropGuard::complete`]
 /// after the socket rename + reap so a promoted, now-authoritative controller is
 /// never shut down.
-#[cfg(test)]
 pub(crate) struct HandoffDropGuard<'a> {
     project_root: &'a Path,
     temp_sock: &'a Path,
     completed: bool,
 }
 
-#[cfg(test)]
 impl<'a> HandoffDropGuard<'a> {
     pub(crate) fn new(project_root: &'a Path, temp_sock: &'a Path) -> Self {
         Self {
@@ -8896,7 +8910,6 @@ impl<'a> HandoffDropGuard<'a> {
     }
 }
 
-#[cfg(test)]
 impl Drop for HandoffDropGuard<'_> {
     fn drop(&mut self) {
         if self.completed {
@@ -8922,16 +8935,32 @@ impl Drop for HandoffDropGuard<'_> {
     }
 }
 
-#[cfg(test)]
-#[allow(dead_code)]
 pub(crate) fn handoff_stale_controller(
     project_root: &Path,
     launch_mode: LaunchMode,
     old_status: ControllerStatus,
 ) -> Result<interprocess::local_socket::Stream> {
+    handoff_controller_generation(
+        project_root,
+        launch_mode,
+        old_status.pid,
+        old_status.controller_generation.unwrap_or(1),
+    )
+}
+
+/// Promote a replacement controller before retiring the current generation.
+///
+/// Keeping the generation inputs separate from `ControllerStatus` lets the
+/// serving controller initiate its own handoff from its in-memory bootstrap;
+/// asking its single public socket for `status` from the serve loop would
+/// deadlock the very listener that must answer the request.
+fn handoff_controller_generation(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+    old_pid: Option<u32>,
+    old_generation: u64,
+) -> Result<interprocess::local_socket::Stream> {
     let public_sock = socket_path(project_root);
-    let old_pid = old_status.pid;
-    let old_generation = old_status.controller_generation.unwrap_or(1);
     let new_generation = old_generation.saturating_add(1).max(1);
     let temp_sock = project_root.join(".agent-doc").join(format!(
         "controller-handoff-{}-{}.sock",
@@ -9174,60 +9203,72 @@ fn connect_or_launch_with_claim_wait(
         }
     }
     if connect(project_root).is_ok() {
-        if let Ok(old_status) = status(project_root)
-            && old_status.active
-        {
-            let current_binary = current_binary_identity().ok();
-            if active_controller_status_is_adoptable(&old_status, current_binary.as_ref()) {
-                reap_stale_duplicate_controllers(
-                    project_root,
-                    old_status.pid,
-                    old_status.controller_generation.unwrap_or(1),
-                );
-                return connect(project_root);
-            }
-            if old_status
-                .handoff_state
-                .unwrap_or(ControllerHandoffState::Stable)
-                == ControllerHandoffState::Stable
-            {
-                log_stable_stale_controller_restart(project_root, &old_status);
-            } else {
-                abort_non_stable_active_controller_for_recovery(
-                    project_root,
-                    &old_status,
-                    "fallback",
-                );
-                if let Ok(recovered_status) = status(project_root) {
-                    if active_controller_status_is_adoptable(
-                        &recovered_status,
-                        current_binary.as_ref(),
-                    ) {
-                        reap_stale_duplicate_controllers(
-                            project_root,
-                            recovered_status.pid,
-                            recovered_status.controller_generation.unwrap_or(1),
-                        );
-                        return connect(project_root);
-                    }
-                    if recovered_status
-                        .handoff_state
-                        .unwrap_or(ControllerHandoffState::Stable)
-                        == ControllerHandoffState::Stable
-                    {
-                        log_stable_stale_controller_restart(project_root, &recovered_status);
-                    } else {
-                        anyhow::bail!(
-                            "project controller is active but not authoritative (handoff_state={:?}); retry after handoff recovery",
-                            old_status
-                                .handoff_state
-                                .unwrap_or(ControllerHandoffState::Preparing)
-                        );
+        match status(project_root) {
+            Ok(old_status) if old_status.active => {
+                let current_binary = current_binary_identity().ok();
+                if active_controller_status_is_adoptable(&old_status, current_binary.as_ref()) {
+                    reap_stale_duplicate_controllers(
+                        project_root,
+                        old_status.pid,
+                        old_status.controller_generation.unwrap_or(1),
+                    );
+                    return connect(project_root);
+                }
+                if old_status
+                    .handoff_state
+                    .unwrap_or(ControllerHandoffState::Stable)
+                    == ControllerHandoffState::Stable
+                {
+                    log_stable_stale_controller_restart(project_root, &old_status);
+                    return handoff_stale_controller(project_root, launch_mode, old_status);
+                } else {
+                    abort_non_stable_active_controller_for_recovery(
+                        project_root,
+                        &old_status,
+                        "fallback",
+                    );
+                    if let Ok(recovered_status) = status(project_root) {
+                        if active_controller_status_is_adoptable(
+                            &recovered_status,
+                            current_binary.as_ref(),
+                        ) {
+                            reap_stale_duplicate_controllers(
+                                project_root,
+                                recovered_status.pid,
+                                recovered_status.controller_generation.unwrap_or(1),
+                            );
+                            return connect(project_root);
+                        }
+                        if recovered_status
+                            .handoff_state
+                            .unwrap_or(ControllerHandoffState::Stable)
+                            == ControllerHandoffState::Stable
+                        {
+                            log_stable_stale_controller_restart(project_root, &recovered_status);
+                            return handoff_stale_controller(
+                                project_root,
+                                launch_mode,
+                                recovered_status,
+                            );
+                        } else {
+                            anyhow::bail!(
+                                "project controller is active but not authoritative (handoff_state={:?}); retry after handoff recovery",
+                                old_status
+                                    .handoff_state
+                                    .unwrap_or(ControllerHandoffState::Preparing)
+                            );
+                        }
                     }
                 }
             }
+            // A socket that accepts connections but has not answered `status`
+            // is commonly a replacement still hydrating durable state. Never
+            // unlink its public endpoint and cold-launch a peer: that creates
+            // multiple listeners with the same pathname and lets every route
+            // supervisor repeat the race. Wait for the published controller;
+            // on timeout, fail closed and let the caller retry.
+            _ => return wait_for_controller_after_launch(project_root),
         }
-        shutdown_stale_controller(project_root);
     }
 
     launch_detached(project_root, launch_mode)?;
@@ -9527,12 +9568,10 @@ fn inherited_fd_close_limit() -> i32 {
     }
 }
 
-#[cfg(test)]
-#[allow(dead_code)]
 pub(crate) fn wait_for_controller(
     project_root: &Path,
 ) -> Result<interprocess::local_socket::Stream> {
-    wait_for_controller_path(&socket_path(project_root))
+    wait_for_controller_path_with_timeout(&socket_path(project_root), CONNECT_WAIT)
 }
 
 pub(crate) fn wait_for_controller_after_launch(
@@ -9865,6 +9904,8 @@ pub(crate) fn serve_with_options(
     let controller_launched_at = Instant::now();
     let recycle_grace = recycle_idle_grace();
     let mut recycle_stale_since: Option<Instant> = None;
+    let recycle_handoff_in_flight = Arc::new(AtomicBool::new(false));
+    let recycle_handoff_promoted = Arc::new(AtomicBool::new(false));
     // #supresilience Part B — autonomous route-owned supervisor watchdog. Runs on
     // the controller's idle serve tick, throttled to `SUPERVISOR_WATCHDOG_INTERVAL`.
     // `watchdog_halt_notified` dedups the operator halt diagnostic per document so a
@@ -9955,14 +9996,15 @@ pub(crate) fn serve_with_options(
                     should_stop.store(true, Ordering::SeqCst);
                     break;
                 }
-                // R1/R2 (#ctlrecycle): recycle onto a freshly-installed binary (R1) or
-                // on an operator `recycle` request (R2) once no dispatch is in flight,
-                // debounced so a brief lull between queue items never triggers it. The
-                // idle DB probe only runs when a recycle is actually wanted (rare), so
-                // the common hot path stays an atomic load plus one binary `stat`.
-                let wants_recycle_and_idle = controller_wants_recycle(&runtime)
-                    && active_clients.load(Ordering::SeqCst) == 0
-                    && controller_recycle_idle(&runtime);
+                // R1/R2 (#ctlrecycle): hand off onto a freshly-installed binary (R1)
+                // or on an operator `recycle` request (R2). The replacement binds a
+                // private socket and hydrates before promotion, so an active RPC is
+                // not a launch gate: promotion redirects new clients, then the old
+                // controller drains already-accepted clients before retiring. A
+                // durable harness dispatch may remain open because its child belongs
+                // to the route-owned supervisor.
+                let wants_recycle_at_safe_tick =
+                    controller_wants_recycle(&runtime) && controller_recycle_ready(&runtime);
                 // An IPC build mismatch on the ACK-recovery path proves
                 // that this binary cannot reach the editor that owns the
                 // delivery frontier. Once every request and durable
@@ -9970,19 +10012,27 @@ pub(crate) fn serve_with_options(
                 // only lets the polling client reacquire the controller and
                 // starve its upgrade. Urgent recycle skips that debounce,
                 // but never the idle gates above.
-                let urgent_recycle = wants_recycle_and_idle && runtime.recycle_urgent();
+                let urgent_recycle = wants_recycle_at_safe_tick
+                    && agent_doc_controller::recycle::controller_recycle_is_urgent(
+                        runtime.recycle_forced(),
+                        runtime.recycle_urgent(),
+                    );
                 let (do_recycle, next_since) = if urgent_recycle {
                     (true, None)
                 } else {
                     agent_doc_controller::recycle::recycle_debounce_decision(
-                        wants_recycle_and_idle,
+                        wants_recycle_at_safe_tick,
                         recycle_stale_since,
                         Instant::now(),
                         recycle_grace,
                     )
                 };
                 recycle_stale_since = next_since;
-                if do_recycle {
+                if do_recycle
+                    && recycle_handoff_in_flight
+                        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                {
                     let reason = if runtime.recycle_forced() {
                         "operator_force_request"
                     } else if runtime.recycle_urgent() {
@@ -9993,8 +10043,60 @@ pub(crate) fn serve_with_options(
                         "stale_binary"
                     };
                     controller_self_recycle(&runtime, reason);
-                    should_stop.store(true, Ordering::SeqCst);
-                    break;
+                    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
+                        recycle_handoff_in_flight.store(false, Ordering::SeqCst);
+                        std::thread::sleep(CONNECT_POLL);
+                        continue;
+                    };
+                    let handoff_root = bootstrap.project_root.clone();
+                    let old_pid = Some(bootstrap.pid);
+                    let old_generation = bootstrap.controller_generation;
+                    let handoff_in_flight = Arc::clone(&recycle_handoff_in_flight);
+                    let handoff_promoted = Arc::clone(&recycle_handoff_promoted);
+                    let stop_after_handoff = Arc::clone(&should_stop);
+                    let draining_clients = Arc::clone(&active_clients);
+                    std::thread::spawn(move || {
+                        let result = (|| -> Result<()> {
+                            // Serialize self-initiated handoff with every client
+                            // launch/handoff for this project root. The old
+                            // controller keeps serving while the replacement
+                            // hydrates and is promoted.
+                            let _claim =
+                                LaunchClaim::acquire_blocking(&handoff_root, LAUNCH_CLAIM_WAIT)?;
+                            let stream = handoff_controller_generation(
+                                &handoff_root,
+                                launch_mode,
+                                old_pid,
+                                old_generation,
+                            )?;
+                            drop(stream);
+                            Ok(())
+                        })();
+                        match result {
+                            Ok(()) => {
+                                // The public pathname now belongs to the
+                                // replacement. No new client can reach this
+                                // predecessor; let every already-accepted RPC
+                                // drain before retiring it.
+                                handoff_promoted.store(true, Ordering::SeqCst);
+                                while draining_clients.load(Ordering::SeqCst) > 0 {
+                                    std::thread::sleep(CONNECT_POLL);
+                                }
+                                stop_after_handoff.store(true, Ordering::SeqCst);
+                            }
+                            Err(err) => {
+                                handoff_in_flight.store(false, Ordering::SeqCst);
+                                agent_doc_ops_log_io::log_op(
+                                    &handoff_root,
+                                    &format!(
+                                        "controller_self_handoff_failed generation={} error={}",
+                                        old_generation,
+                                        format!("{err:#}").replace('\n', " | "),
+                                    ),
+                                );
+                            }
+                        }
+                    });
                 }
                 // #supresilience Part B — periodic dead-supervisor watchdog. Skipped
                 // on a recycling iteration above (the controller is going away, so a
@@ -10018,7 +10120,9 @@ pub(crate) fn serve_with_options(
             Err(err) => return Err(err).context("failed to accept project controller client"),
         }
     }
-    let _ = std::fs::remove_file(&sock);
+    if !recycle_handoff_promoted.load(Ordering::SeqCst) {
+        let _ = std::fs::remove_file(&sock);
+    }
     Ok(())
 }
 
@@ -10944,32 +11048,22 @@ fn controller_binary_is_stale(runtime: &ControllerRuntime) -> bool {
     }
 }
 
-/// `#ctlrecycle` R1 — is the controller safe to recycle right now? Only when it is
-/// `Stable` (not mid-handoff) AND no dispatch is in flight for ANY document, so a
-/// recycle never interrupts an in-flight turn. Fail-closed on the idle proof: a
-/// bootstrap-lock or DB error reads as "not idle" so we never recycle on uncertainty.
-pub(crate) fn controller_recycle_idle(runtime: &ControllerRuntime) -> bool {
+/// `#ctlrecycle` R1 — is the controller safe to begin a two-phase handoff?
+/// Only a `Stable` controller may launch a replacement.
+///
+/// A durable in-flight harness dispatch is deliberately NOT a gate: the harness
+/// child belongs to the route-owned supervisor and all controller recovery state
+/// lives in SQLite. Active RPCs are also not a launch gate: after promotion they
+/// drain on the unreachable predecessor before that process retires. This lets
+/// installs promote closeout/CRDT fixes mid-turn without interrupting the agent,
+/// its pane, or an already-accepted request.
+pub(crate) fn controller_recycle_ready(runtime: &ControllerRuntime) -> bool {
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
         return false;
     };
-    if bootstrap.handoff_state != ControllerHandoffState::Stable {
-        return false;
-    }
-    // `#recycleforce`: a forced recycle (`agent-doc admin recycle --force`) is an
-    // explicit operator override of the in-flight-dispatch deferral. Skip the
-    // open-dispatch idle probe so the recycle takes effect at the next serve-loop
-    // tick even mid-turn. We still require `Stable` above so a forced recycle never
-    // lands mid-handoff (which would strand the replacement controller).
-    if agent_doc_controller::recycle::force_overrides_in_flight_gate(
-        runtime.recycle_forced(),
+    agent_doc_controller::recycle::controller_recycle_safe_to_handoff(
         bootstrap.handoff_state == ControllerHandoffState::Stable,
-    ) {
-        return true;
-    }
-    let Ok(conn) = open_state_db(&bootstrap.project_root) else {
-        return false;
-    };
-    !state_store::has_any_open_in_flight_dispatch(&conn).unwrap_or(true)
+    )
 }
 
 /// `#ctlrecycle` R1/R2 — record the recycle and let the serve loop exit so the next
@@ -11295,10 +11389,11 @@ pub(crate) fn handle_request_locked(
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "recycle" => {
-            // R2 (#ctlrecycle): mark this controller to recycle at the next idle
-            // boundary. Unlike `shutdown`, it does NOT stop immediately — the
-            // serve-loop idle poll honors it only once no dispatch is in flight, so
-            // an explicit recycle never interrupts an in-flight turn.
+            // R2 (#ctlrecycle): mark this controller for a two-phase handoff.
+            // Promotion redirects new clients; the predecessor drains accepted
+            // clients. A durable harness dispatch may remain open because the
+            // supervisor owns the child and the replacement controller
+            // rehydrates from SQLite.
             runtime.request_recycle();
             agent_doc_ops_log_io::log_op(
                 &bootstrap_snapshot.project_root,
@@ -11312,11 +11407,9 @@ pub(crate) fn handle_request_locked(
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "recycle_force" => {
-            // `#recycleforce`: mark this controller to recycle promptly, overriding
-            // the in-flight-dispatch idle gate. Still acts at the serve-loop tick
-            // (never mid-RPC), but `controller_recycle_idle` returns true while
-            // forced, so the recycle is NOT deferred behind an open dispatch — an
-            // explicit operator override that MAY interrupt an in-flight turn.
+            // `#recycleforce`: mark this controller to recycle promptly. It skips
+            // the normal debounce but still uses two-phase promotion and
+            // predecessor drain. The active harness child is never interrupted.
             runtime.request_recycle_force();
             agent_doc_ops_log_io::log_op(
                 &bootstrap_snapshot.project_root,
@@ -12243,18 +12336,26 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
             .collect::<Vec<_>>()
     };
     restored_reliable_sync_projects().lock().insert(project_key);
-    // A process can die while the controller is down, so its exit watcher never
-    // gets a chance to publish Alive(false). Reconcile those durable Open facts
-    // once at hydration and record the death through the same durable LWW path
-    // as a live exit event. This prevents a dead IDE pid from retaining editor
-    // authority forever after controller/IDE restart.
-    for pid in dead_open_pids {
-        record_reliable_sync_editor_exit(project_root, pid);
-    }
-    request_editor_replica_rebuild_after_restart(project_root);
-    // Arm the Tier 2 reactive path from boot as well, so later registrations are
-    // covered without another explicit call site.
-    publish_editor_replica_rebuild_targets(project_root);
+    // The durable fold above is the readiness boundary. Recovery effects below
+    // can contact every retained editor route, and one stale IPC endpoint may
+    // consume a timeout. Running them before the accept loop made a newly-bound
+    // socket look alive while its backlog was never serviced; concurrent route
+    // supervisors then cold-launched duplicate controllers. Project these
+    // effects asynchronously so `status`/handoff RPCs are immediately
+    // serviceable while the already-hydrated liveness plane drives recovery.
+    let recovery_root = project_root.to_path_buf();
+    std::thread::spawn(move || {
+        // A process can die while the controller is down, so its exit watcher
+        // never gets a chance to publish Alive(false). Record those deaths
+        // through the same durable LWW path as a live exit event.
+        for pid in dead_open_pids {
+            record_reliable_sync_editor_exit(&recovery_root, pid);
+        }
+        request_editor_replica_rebuild_after_restart(&recovery_root);
+        // Arm the Tier 2 reactive path from boot as well, so later
+        // registrations are covered without another explicit call site.
+        publish_editor_replica_rebuild_targets(&recovery_root);
+    });
     Ok(())
 }
 
@@ -17321,7 +17422,10 @@ fn pane_layout_effect_worker(
             );
         }
         let projected_focus = guarded_invocation.focus.clone();
-        let reusable_structure = runtime.reusable_pane_layout_structure(&desired, &actor_bindings);
+        let reusable_structure =
+            pane_layout_invocation_allows_structural_reuse(&desired.invocation)
+                .then(|| runtime.reusable_pane_layout_structure(&desired, &actor_bindings))
+                .flatten();
         let reusable_file_panes = reusable_structure
             .as_ref()
             .map(|receipt| receipt.file_panes.clone())
@@ -18418,6 +18522,17 @@ fn pane_layout_invocation_awaits_projection(
     invocation.caller_kind != "automatic" && !invocation.no_autostart
 }
 
+/// Automatic surface `Sync` intents are already the sparse structural edge:
+/// first observation, changed columns, or controller-observed drift. They must
+/// cross the tmux effect boundary instead of trusting a structural assignment
+/// cached before this editor generation. Pure focus changes have their own
+/// `SurfaceIntent::Focus` path and do not need this cache.
+fn pane_layout_invocation_allows_structural_reuse(
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+) -> bool {
+    invocation.caller_kind != "automatic"
+}
+
 #[cfg(test)]
 mod pane_layout_projection_dispatch_tests {
     use super::*;
@@ -18445,6 +18560,16 @@ mod pane_layout_projection_dispatch_tests {
         )));
         assert!(pane_layout_invocation_awaits_projection(&invocation(
             "manual", false,
+        )));
+    }
+
+    #[test]
+    fn automatic_structural_edges_do_not_reuse_a_prior_editor_generation() {
+        assert!(!pane_layout_invocation_allows_structural_reuse(
+            &invocation("automatic", true)
+        ));
+        assert!(pane_layout_invocation_allows_structural_reuse(&invocation(
+            "manual", false
         )));
     }
 
@@ -20742,6 +20867,38 @@ mod tests {
     }
 
     #[test]
+    fn published_tmux_layout_projection_is_a_successful_command_terminal() {
+        let receipt = |applied, reason: &str| ControllerTmuxLayoutSyncReceipt {
+            applied,
+            reason: reason.to_string(),
+            columns: vec!["tasks/one.md".to_string()],
+            window: Some("agent-doc".to_string()),
+            focus: Some("tasks/one.md".to_string()),
+            no_autostart: true,
+            exact_visible: true,
+            routes_created_panes: false,
+            file_panes: Vec::new(),
+        };
+
+        assert!(tmux_layout_command_applied(&receipt(
+            false,
+            "projection_published"
+        )));
+        assert!(tmux_layout_command_applied(&receipt(
+            true,
+            "observed_convergence"
+        )));
+        assert!(!tmux_layout_command_applied(&receipt(
+            false,
+            "projection_retry_pending"
+        )));
+        assert!(!tmux_layout_command_applied(&receipt(
+            false,
+            "superseded_by_newer_layout_state"
+        )));
+    }
+
+    #[test]
     fn command_submit_selected_text_uses_the_plain_editor_route() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -22812,25 +22969,20 @@ mod tests {
         ));
     }
     #[test]
-    fn force_overrides_in_flight_gate_only_when_forced_and_stable() {
-        use agent_doc_controller::recycle::force_overrides_in_flight_gate;
+    fn controller_recycle_midturn_requires_only_a_stable_handoff_cut() {
+        use agent_doc_controller::recycle::controller_recycle_safe_to_handoff;
 
-        // `#recycleforce`: the force bypass of the in-flight-dispatch idle gate fires
-        // only when the operator asked for force AND the controller is `Stable`.
-        assert!(force_overrides_in_flight_gate(true, true));
-        // Not forced → never bypass (default defer-at-idle behavior unchanged).
-        assert!(!force_overrides_in_flight_gate(false, true));
-        // Forced but mid-handoff (not Stable) → do NOT bypass; a forced recycle must
-        // not strand a half-promoted replacement controller.
-        assert!(!force_overrides_in_flight_gate(true, false));
-        assert!(!force_overrides_in_flight_gate(false, false));
+        // Active RPCs drain on the predecessor after socket promotion. An open
+        // durable harness dispatch is likewise irrelevant to controller replacement.
+        assert!(controller_recycle_safe_to_handoff(true));
+        assert!(!controller_recycle_safe_to_handoff(false));
     }
 
     #[test]
     fn recycle_force_rpc_sets_forced_flag_while_plain_recycle_does_not() {
         // `#recycleforce`: the `recycle_force` RPC sets BOTH the want-recycle and the
-        // forced flags; the plain `recycle` RPC sets only want-recycle (so its idle
-        // gate is preserved).
+        // forced flags; the plain `recycle` RPC sets only want-recycle (so its
+        // debounce is preserved).
         let dir = tempfile::TempDir::new().unwrap();
         let bootstrap = test_bootstrap(&dir);
         let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
@@ -26275,6 +26427,24 @@ mod tests {
             "restored liveness immediately projects missing-replica targets; the controller \
              listener must already be ready so the returning editor projection becomes a \
              retained-delivery Source edge"
+        );
+
+        let restore = &source[source
+            .find("fn restore_reliable_sync_liveness(")
+            .expect("reliable-sync restoration")..];
+        let durable_fold = restore
+            .find("restored_reliable_sync_projects().lock().insert(project_key)")
+            .expect("durable liveness fold readiness boundary");
+        let async_effects = restore
+            .find("std::thread::spawn(move ||")
+            .expect("post-hydration recovery effect thread");
+        let editor_signal = restore
+            .find("request_editor_replica_rebuild_after_restart(&recovery_root)")
+            .expect("editor replica recovery effect");
+        assert!(
+            durable_fold < async_effects && async_effects < editor_signal,
+            "startup must hydrate liveness synchronously, then move potentially blocking editor \
+             IPC effects off the controller accept path"
         );
     }
 

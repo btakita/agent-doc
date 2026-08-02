@@ -46,6 +46,7 @@ from the session-actor contract rather than from the old phased rollout notes.
 - While the actor is live, its exact harness-session binding is controller-owned lifecycle state before, during, and after an in-place supervisor replacement. For Codex, the prompt-hook ledger supplies the exact thread-id source edge; child termination observes that edge once and launches `codex resume <thread-id>`, without polling. Frontmatter `agent_doc_session`/`resume` fields are document projections and durable cold-recovery seeds, not authority to replace or erase a proven live binding, and a bare `start --resume` must prefer the controller binding when that projection lags or is absent.
 - A non-forced `restart-supervisor` accepted by a live supervisor is an owned drain-to-boundary handoff. A controller-side proof timeout is observation only: it must not escalate to killing the supervisor or harness child. If the supervisor is already dead but the document's harness is still alive in its pane, continue-mode preserves that child and fails closed; only explicit fresh-mode may quit it.
 - Install/recycle is an ordered document handoff, not a kill-and-relaunch broadcast. The executable path is replaced by same-directory atomic rename so controller and supervisor exec calls always see a complete old or new binary. Background auto-install waits for a clean committed source tree, disables the nested `lib-install` recycle broadcast, marks every route-owned supervisor first, then marks controllers, exactly once. A supervisor with a live child adopts the existing PTY across `execve`; a supervisor without a live child starts one fresh document-bound replacement and auto-triggers its own file.
+- Supervisor-owned document paths may be relative to the supervisor CWD, but every controller request resolves them through an absolute, non-empty project root. The shared project-root walker anchors relative paths before testing `.agent-doc` ancestors; controller launch admission rejects an empty root as a fail-closed backstop. A nonexistent tmux-reported pane CWD is stale evidence and remains on the caller's explicit fallback path instead of being anchored into the supervisor process's unrelated root.
 - Route-owned lifecycle is explicit at creation. Editor-origin Run Agent Doc and selected-document layout provisioning use `keep-alive`, so an idle prompt after commit or install remains the selected document's interactive owner. Controller/watchdog recovery uses `auto` and may reap a proven idle one-shot generation. Focus reconciliation must never recreate a keep-alive pane merely because a stale actor projection temporarily made it unfocusable.
 - Not a replacement for `ipc_socket.rs` — that socket handles write-path IPC between the binary and editor plugins. Supervisor IPC is a different socket, scoped to claude lifecycle control.
 
@@ -187,11 +188,17 @@ a closed actor record is replaceable through the stale-authority path.
 ### Actor lifecycle reporting
 
 - Startup calls the project controller before the child launches:
-  `start_session` records the actor generation in `starting`, and
-  `register_supervisor` records the supervisor pid/socket lease.
+`start_session` records the actor generation in `starting`, and
+`register_supervisor` records the supervisor pid/socket lease.
+- Supervisor hot-reexec with a surviving inherited child is not startup. The
+replacement must detect that handoff before start admission, require the
+authoritative document/session/pane binding to match and remain non-closed,
+retain its generation and runtime state, and refresh only the supervisor
+pid/socket lease. It must not emit `session_start`, fire session-start hooks, or
+publish an ownership transition. A missing or mismatched binding fails closed.
 - Prompt observation reports `ready` with reason `prompt_ready`. This happens on
-  the first prompt for a child and after later `busy` dispatches return to an
-  idle prompt.
+the first prompt for a child and after later `busy` dispatches return to an
+idle prompt.
 - Supervisor-owned dispatch paths report `busy` before injection, using
   `ipc_inject` for routed IPC and `auto_trigger_inject` for restart-triggered
   reopen commands.
@@ -561,25 +568,25 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   session-check, and queue continuation detection observe the projection through
   controller RPC instead of a `.agent-doc/recycle-yield` marker. It still respects
   `turn_boundary` — a fresh-binary flush never drops a live turn.
-- `#recycleforce` operator override: `agent-doc admin recycle --force` is a real
-  flag (no `-- ` separator needed) and composes with `--all-projects` and the
-  single-project form. `--force` overrides the controller-side in-flight-dispatch
-  deferral: the `recycle_force` RPC sets a `recycle_forced` flag so
-  `controller_recycle_idle` returns true without the open-dispatch idle probe
-  (pure decision `force_overrides_in_flight_gate`, which still requires the
-  controller to be `Stable` so a forced recycle never strands a half-promoted
-  handoff replacement). The recycle still fires at the next serve-loop tick, never
-  mid-RPC, but it MAY interrupt an in-flight turn — that is the point of `--force`.
+- `#midturn-controller-recycle` / `#recycleforce`: a project controller may
+  start a private replacement even while durable harness dispatches or
+  controller RPCs remain open. Socket promotion redirects new RPCs, then the
+  unreachable predecessor drains already-accepted RPCs before retiring. The
+  route-owned supervisor owns the harness child and pane, while
+  dispatch/cycle/CRDT recovery state is durable in SQLite; therefore the
+  controller replacement does not interrupt the turn. A non-stable handoff is
+  the strict launch gate. `agent-doc admin recycle --force` is a real flag (no
+  `-- ` separator needed), composes with `--all-projects`, and skips only the
+  normal controller debounce.
   When NO live controller answers the single-project form and a document path was
   supplied (`agent-doc admin recycle <FILE> --force`), the no-op "nothing to
   recycle" message is replaced by an escalation to the kill+cold-start path
   (`session restart-supervisor`, which carries the same self-ancestor guard as
   `admin kill-supervisor`, so a forced escalation never tears down the caller's own
-  ancestor supervisor). The escalation gate is the pure
-  `recycle_force_should_escalate_dead_supervisor` decision (requires force, a no-op
-  recycle, and a non-directory document target). Without `--force`, behavior is
-  byte-for-byte the prior defer-at-idle-boundary recycle. `--json` adds a
-  `forced: bool` field (and `escalated_cold_start: bool` on the single-project arm).
+  ancestor supervisor). In that no-controller fallback only, `--force` also
+  permits interrupting a busy pane. Without `--force`, the supervisor fallback
+  keeps its busy-pane guard. `--json` adds a `forced: bool` field (and
+  `escalated_cold_start: bool` on the single-project arm).
 - On `Dispatch` it injects a harness-specific trigger through the same
   `auto_trigger_inject_command` path (capability-proof gated, actor marked
   `busy` before bytes). Claude/OpenCode receive the normal harness trigger

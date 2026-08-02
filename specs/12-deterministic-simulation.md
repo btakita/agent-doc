@@ -144,6 +144,9 @@ Closeout invariants currently exercised by the simulator:
 - A captured response cannot commit until its tracked-work mutation envelope is
   also captured; retained-delivery recovery preserves and applies both exactly
   once.
+- A mixed tracked-work envelope either publishes every semantically valid
+  backlog/review/done projection or none of them; a late invalid addition cannot
+  leave earlier resolves, ungates, or an external done archive partially written.
 - A malformed agent target is rejected before delivery and cannot corrupt the
   canonical document, while later valid retained transitions continue to make
   monotonic progress.

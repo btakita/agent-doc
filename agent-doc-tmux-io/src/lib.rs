@@ -591,6 +591,12 @@ pub fn project_root_for_pane_current_path(output: &str) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(current_path);
+    // A missing pane CWD is stale tmux evidence. Preserve the observed path for
+    // the caller's fallback policy instead of anchoring a relative miss to this
+    // process's unrelated project root.
+    if !path.exists() {
+        return Some(path);
+    }
     agent_doc_fs::find_project_root(&path).or(Some(path))
 }
 

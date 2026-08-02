@@ -1189,6 +1189,111 @@ fn write_review_add_and_edit_mutate_review_component() {
     assert!(review.contains("- [/] [#rvw1] review text updated"));
 }
 
+/// `#closeouttrackedtxn`: one finalize/write envelope may close some review
+/// gates, move another review item to icebox, reactivate and edit a third item,
+/// and add fresh backlog work. Review exits must release their ids before adds,
+/// while ungating must precede backlog edits.
+#[test]
+fn write_mixed_review_closeout_mutations_land_as_one_valid_envelope() {
+    let (_tmp, doc) = setup_doc("");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:pending -->\n",
+        "<!-- /agent:pending -->\n\n\
+         <!-- agent:review -->\n\
+         - [/] [#resolved] completed review work\n\
+         - [/] [#parked] review work to park\n\
+         - [/] [#reactivated] review work to reactivate\n\
+         <!-- /agent:review -->\n\n\
+         <!-- agent:icebox -->\n\
+         <!-- /agent:icebox -->\n\n\
+         <!-- agent:done -->\n\
+         <!-- /agent:done -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--review-resolve",
+            "resolved",
+            "--review-remove",
+            "parked",
+            "--icebox-add",
+            "id=parked parked after review",
+            "--pending-ungate",
+            "reactivated",
+            "--pending-edit",
+            "reactivated=reactivated and narrowed",
+            "--pending-add",
+            "id=fresh newly captured follow-up",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let backlog = component_body(&content, "pending");
+    let review = component_body(&content, "review");
+    let icebox = component_body(&content, "icebox");
+    let done = component_body(&content, "done");
+    assert!(backlog.contains("- [ ] [#fresh] newly captured follow-up"));
+    assert!(backlog.contains("- [ ] [#reactivated] reactivated and narrowed"));
+    assert!(!review.contains("[#resolved]"));
+    assert!(!review.contains("[#parked]"));
+    assert!(!review.contains("[#reactivated]"));
+    assert!(icebox.contains("- [ ] [#parked] parked after review"));
+    assert!(done.contains("[#resolved] completed review work"));
+}
+
+/// A semantic failure late in a mixed tracked-work envelope must not publish an
+/// earlier successful add. This is the partial-closeout shape that stranded a
+/// response and one backlog item while every following review transition was
+/// silently absent.
+#[test]
+fn write_mixed_review_closeout_error_rolls_back_all_tracked_work() {
+    let (_tmp, doc) = setup_doc("");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:pending -->\n",
+        "<!-- /agent:pending -->\n\n\
+         <!-- agent:review -->\n\
+         - [/] [#parked] review work still owns this id\n\
+         <!-- /agent:review -->\n\n\
+         <!-- agent:icebox -->\n\
+         <!-- /agent:icebox -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+
+    let assert_result = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-add",
+            "id=fresh must roll back",
+            "--icebox-add",
+            "id=parked duplicate id must fail",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(stderr.contains("parked"), "stderr: {stderr}");
+    assert!(
+        stderr.to_ascii_lowercase().contains("already"),
+        "stderr must retain the concrete duplicate-id cause: {stderr}"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !component_body(&content, "pending").contains("[#fresh]"),
+        "an earlier tracked-work add must not survive a later flag failure:\n{content}"
+    );
+    assert!(component_body(&content, "review").contains("[#parked]"));
+    assert!(!component_body(&content, "icebox").contains("[#parked]"));
+}
+
 #[test]
 fn write_review_add_dedupes_symptom_key_into_existing_review_item() {
     let key = "[symptom-key invariant=component_drift document=doc-abc component=exchange content_hash=sha256:cafebabe]";

@@ -18422,6 +18422,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && !start_io_source.contains(
                 "agent_doc_document_realtime_io::atomic_write_through_authority(file, &merged)"
             )
+            && start_io_source.contains("pub fn prepare_start_runtime_reentry(")
+            && orchestration_start_run.contains(
+                "prepare_start_runtime_reentry(file, force, route_owned)?"
+            )
             && orchestration_start_run.contains("prepare_start_runtime(file, force, route_owned)?"),
         "agent-doc-start-io should own start admission/session-owner IO while start/run.rs calls it directly"
     );

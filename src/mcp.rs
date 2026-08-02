@@ -446,8 +446,12 @@ fn handle_tools_call(params: Option<&Value>) -> std::result::Result<Value, McpPr
 
     Ok(match result {
         Ok(result) => result,
-        Err(err) => tool_error_result(err.to_string()),
+        Err(err) => tool_error_result(format_tool_error(&err)),
     })
+}
+
+fn format_tool_error(error: &anyhow::Error) -> String {
+    format!("{error:#}")
 }
 
 fn tool_read(args: &Map<String, Value>) -> Result<Value> {
@@ -1339,5 +1343,14 @@ mod tests {
                 .unwrap()
                 .contains("failed to read")
         );
+    }
+
+    #[test]
+    fn tool_errors_preserve_the_complete_anyhow_chain() {
+        let error = anyhow::anyhow!("duplicate tracked-work id")
+            .context("failed to apply tracked-work mutations");
+        let message = format_tool_error(&error);
+        assert!(message.contains("failed to apply tracked-work mutations"));
+        assert!(message.contains("duplicate tracked-work id"));
     }
 }

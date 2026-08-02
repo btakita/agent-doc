@@ -2984,7 +2984,7 @@ Body\n\
         }
     }
     #[test]
-    fn session_check_ignores_answered_prompt_marker_before_existing_response() {
+    fn session_check_does_not_cross_another_prompt_to_find_existing_response() {
         let current = concat!(
             "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -2999,10 +2999,18 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         assert!(
-            agent_doc_diff::prompt_target_is_immediately_before_existing_response(
+            !agent_doc_diff::prompt_target_is_immediately_before_existing_response(
                 current,
                 "❯ JB `/clear` on this document error:"
-            )
+            ),
+            "a later prompt must not bridge the target to an unrelated response"
+        );
+        assert!(
+            agent_doc_diff::prompt_target_is_immediately_before_existing_response(
+                current,
+                "❯ This prompt was duplicated."
+            ),
+            "the prompt immediately adjacent to the response remains answered"
         );
     }
     #[test]

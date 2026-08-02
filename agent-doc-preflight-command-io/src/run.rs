@@ -365,7 +365,13 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // Step 0d: Fail closed on out-of-band closeout drift before transcript
     // repair can normalize a dirty response body into prompt-looking lines.
     // Open cycles still go through repair first so interrupted write/commit
-    // boundaries can recover normally.
+    // boundaries can recover normally. A proven route/queue snapshot commit
+    // boundary is safe recovery and must run before the fresh-prompt exemption;
+    // the live prompt belongs to the next cycle, while the queued dispatch
+    // snapshot belongs to the prior boundary.
+    if !options.probe {
+        agent_doc_preflight_runtime_io::recover_route_queue_snapshot_commit_boundary(file, &rc)?;
+    }
     let open_cycle = closeout_cycle_is_open(file)?;
     if !options.probe
         && !open_cycle
@@ -500,8 +506,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // Step 1b2: Fail closed on out-of-band closeout drift before this preflight
     // mutates backlog state or runs the generic commit path. Otherwise a
     // snapshot/file pair that already contains a visible response could be
-    // normalized into a misleading `no_changes` result.
-    if !options.probe {
+    // normalized into a misleading `no_changes` result. Preserve the same
+    // fresh-prompt exemption as step 0d: repair may have reaped completed
+    // backlog state into the snapshot while leaving the operator's live prompt
+    // only in the visible document. That binary-owned maintenance is committed
+    // with the response cycle; it is not orphaned response drift.
+    if !options.probe
+        && agent_doc_session_check_io::detect_unstarted_prompt_bearing_diff(file)?.is_none()
+    {
         agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
             file,
             &rc,

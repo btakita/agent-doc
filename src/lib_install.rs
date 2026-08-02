@@ -291,12 +291,11 @@ pub(crate) fn run_paths(
     // the JetBrains plugin hot-reloads this cdylib by mtime, but already-running
     // agent-doc controllers/supervisors keep serving the PRIOR binary until they
     // recycle. Instead of only printing the recycle hint, automatically mark every
-    // running controller and route-owned supervisor to recycle at its next idle
-    // boundary so the new build goes live everywhere, not just in the editor cdylib.
-    // The controller recycle path is idle-gated
-    // (`recycle_controllers_all_projects` sends a `recycle` RPC that fires only at a
-    // turn/inter-queue-item boundary, never mid-turn), so triggering it from
-    // `lib-install` is safe. Opt out with a falsey AGENT_DOC_RECYCLE_ON_INSTALL.
+    // running controller and route-owned supervisor to recycle safely so the new
+    // build goes live everywhere, not just in the editor cdylib. Controllers use
+    // private-socket hydration, atomic promotion, and predecessor RPC drain;
+    // supervisors remain turn-boundary gated. Opt out with a falsey
+    // AGENT_DOC_RECYCLE_ON_INSTALL.
     auto_recycle_after_install();
 
     // Proactively send the shared `reload_library` intent to editor adapters that
@@ -408,10 +407,12 @@ fn recycle_on_install_enabled() -> bool {
 }
 
 /// Mark every running controller and route-owned supervisor to recycle onto the
-/// freshly-installed binary at its next idle boundary. Best-effort: a recycle
-/// failure must never fail the install, so errors are logged (never swallowed
-/// silently) and the print-only hint is surfaced as a fallback. When opted out,
-/// only the hint is printed.
+/// freshly-installed binary. Controllers promote a private replacement mid-turn
+/// and drain accepted RPCs on the predecessor; supervisors retain the live child
+/// until a true turn boundary.
+/// Best-effort: a recycle failure must never fail the install, so errors are
+/// logged (never swallowed silently) and the print-only hint is surfaced as a
+/// fallback. When opted out, only the hint is printed.
 fn auto_recycle_after_install() {
     if !recycle_on_install_enabled() {
         eprintln!(

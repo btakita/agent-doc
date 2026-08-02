@@ -9,9 +9,20 @@ const RECOVERY_DIR: &str = ".agent-doc/recovery";
 const STARTING_DIR: &str = ".agent-doc/starting";
 
 /// Walk up the directory tree from `path` to find the directory containing
-/// `.agent-doc` (the project root). Returns `None` if no such ancestor exists.
+/// `.agent-doc` (the project root). Relative inputs are first anchored to the
+/// process working directory so the returned root is never an empty relative
+/// path. Returns `None` if no such ancestor exists.
 pub fn find_project_root(path: &Path) -> Option<PathBuf> {
-    let mut current = if path.is_file() { path.parent()? } else { path };
+    let anchored = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut current = if anchored.is_file() {
+        anchored.parent()?
+    } else {
+        anchored.as_path()
+    };
     loop {
         if current.join(".agent-doc").is_dir() {
             return Some(current.to_path_buf());
@@ -466,7 +477,7 @@ fn project_roots_for(path: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        document_state_hash, document_state_hash_from_str, inode_of_path,
+        document_state_hash, document_state_hash_from_str, find_project_root, inode_of_path,
         preserve_dropped_operator_buffer, quarantine_corrupt_file, read_optional,
         read_valid_or_quarantine, referenced_markdown_path, referenced_markdown_path_checked,
         rewrite_start_path, running_exe_inode_for_pid, same_document_path, snapshot_path_for,
@@ -669,6 +680,26 @@ mod tests {
                 .join("snapshots")
                 .join(format!("{hash}.md"))
         );
+    }
+
+    #[test]
+    fn project_root_from_relative_file_is_absolute_and_non_empty() {
+        let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let tmp = tempfile::Builder::new()
+            .prefix("agent-doc-fs-relative-root")
+            .tempdir_in(&cwd)
+            .unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("nested").join("session.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# session\n").unwrap();
+        let relative_doc = doc.strip_prefix(&cwd).unwrap();
+
+        let root = find_project_root(relative_doc).unwrap();
+
+        assert!(root.is_absolute(), "root should be absolute: {root:?}");
+        assert!(!root.as_os_str().is_empty());
+        assert_eq!(root, tmp.path().canonicalize().unwrap());
     }
 
     #[test]

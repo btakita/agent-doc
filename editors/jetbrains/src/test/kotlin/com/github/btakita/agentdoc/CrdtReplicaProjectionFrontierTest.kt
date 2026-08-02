@@ -77,6 +77,20 @@ class CrdtReplicaProjectionFrontierTest {
         assertFalse(
             registrationBody.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
+        val retainedRegistrationBody = manager
+            .substringAfter("private fun retainCanonicalProjectionAfterRegistration(")
+            .substringBefore("private fun refreshReplicaAfterTransportLoss(")
+        assertTrue(
+            "an exact registered buffer must publish the visible-state receipt",
+            retainedRegistrationBody.contains("if (editorText == canonical)") &&
+                retainedRegistrationBody.contains("forwarder.projectVisibleState(canonical)"),
+        )
+        assertTrue(
+            "a failed registration receipt must remain retryable",
+            retainedRegistrationBody.contains(
+                "requestRemoteDrain(filePath, \"registration-visible-projection-retry\")",
+            ),
+        )
     }
 
     /**

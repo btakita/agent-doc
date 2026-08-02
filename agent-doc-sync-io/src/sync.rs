@@ -2013,7 +2013,11 @@ fn document_belongs_to_sync_root(file: &Path, sync_project_root: &Path) -> bool 
 fn sanitize_cross_root_layout(
     saved_layout: Vec<String>,
     sync_project_root: &Path,
+    preserve_cross_root: bool,
 ) -> (Vec<String>, Vec<String>) {
+    if preserve_cross_root {
+        return (saved_layout, Vec::new());
+    }
     let mut dropped: Vec<String> = Vec::new();
     let sanitized = saved_layout
         .into_iter()
@@ -2186,30 +2190,27 @@ fn run_with_options_internal_at_root(
             }
         };
 
-    // Cross-root guard (`#sync-cross-root-autostart`): remembered layout state can
-    // accumulate documents that live under a nested/submodule project root with
-    // its own `.agent-doc/` (e.g. `src/sample-app/tasks/...`). Restoring or
-    // auto-starting them from this root provisions a mis-rooted pane that dies on
-    // start. Sanitize the remembered layout at load so the cross-root document is
-    // neither restored into a column nor re-persisted; this self-heals memory that
-    // was polluted before the guard existed.
+    // Cross-root guard (`#sync-cross-root-autostart`): generic remembered layout
+    // must not cause a parent controller to provision a nested-root document.
+    // Exact-visible editor snapshots are different: they are an authoritative
+    // workspace layout observation and run with no autostart. Preserve those
+    // columns so the pane-layout effect can join the nested controller's already
+    // owned actor binding without corrupting mixed-root layout memory.
     let sync_project_root = canonical_sync_project_root(project_root);
-    let saved_layout = {
-        let (sanitized, dropped) = sanitize_cross_root_layout(saved_layout, &sync_project_root);
-        for path in &dropped {
-            eprintln!(
-                "[sync] dropping cross-root document from remembered layout: {} (sync root {})",
-                path,
-                sync_project_root.display()
-            );
-            sync_log(&format!(
-                "cross_root_layout_dropped file={} sync_root={}",
-                path,
-                sync_project_root.display()
-            ));
-        }
-        sanitized
-    };
+    let (saved_layout, dropped) =
+        sanitize_cross_root_layout(saved_layout, &sync_project_root, exact_visible_projection);
+    for path in &dropped {
+        eprintln!(
+            "[sync] dropping cross-root document from remembered layout: {} (sync root {})",
+            path,
+            sync_project_root.display()
+        );
+        sync_log(&format!(
+            "cross_root_layout_dropped file={} sync_root={}",
+            path,
+            sync_project_root.display()
+        ));
+    }
 
     let input_cols = effective_sync_columns(col_args, &saved_layout, &layout_state_root)?;
     let column_memory = agent_doc_tmux::apply_column_memory(
@@ -2311,7 +2312,20 @@ fn run_with_options_internal_at_root(
     };
     let explicit_window_is_agent_doc =
         window.is_some_and(|target| target_is_agent_doc_window(tmux, target));
-    if let Some(ref session_name) = target_session {
+    if let Some(target) = window
+        && !explicit_window_is_agent_doc
+    {
+        let refusal = format!(
+            "[sync] explicit window {} is not an agent-doc window; preserving layout instead of reconciling onto the wrong tmux window",
+            target
+        );
+        eprintln!("{}", refusal);
+        sync_log(&refusal);
+        return Ok(());
+    }
+    if window.is_none()
+        && let Some(ref session_name) = target_session
+    {
         if let Some(resolved_window_id) =
             resolve_agent_doc_window_id(tmux, session_name, "agent-doc")
             && effective_window.as_deref() != Some(resolved_window_id.as_str())
@@ -2330,17 +2344,6 @@ fn run_with_options_internal_at_root(
             );
             eprintln!("{}", warning);
             sync_log(&warning);
-            if let Some(target) = window
-                && !explicit_window_is_agent_doc
-            {
-                let refusal = format!(
-                    "[sync] explicit window {} is not an agent-doc window; preserving layout instead of reconciling onto the wrong tmux window",
-                    target
-                );
-                eprintln!("{}", refusal);
-                sync_log(&refusal);
-                return Ok(());
-            }
         }
     }
     let window = effective_window.as_deref();
@@ -2693,6 +2696,72 @@ fn run_with_options_internal_at_root(
             }
 
             let is_cross_root = !document_belongs_to_sync_root(file_path, &sync_project_root);
+            if skip_autostart_diagnostics && is_cross_root {
+                // A mixed-root exact-visible layout is a pane-only projection.
+                // Ask the owning controller for its existing actor binding before
+                // touching editor content. This observation never focuses,
+                // resumes, provisions, or copies the foreign actor into the
+                // parent registry.
+                let owner_root = agent_doc_project_root_io::project_root_containing(file_path);
+                let observed = match owner_root {
+                    Some(owner_root) => crate::runtime_effects()?
+                        .resolve_cross_root_document_pane(&owner_root, file_path),
+                    None => Ok(None),
+                };
+                match observed {
+                    Ok(Some(binding)) if tmux.pane_alive(&binding.pane_id) => {
+                        sync_log(&format!(
+                            "safe_passive_cross_root_actor_projection_reused file={} pane={} generation={}",
+                            file_path.display(),
+                            binding.pane_id,
+                            binding.generation,
+                        ));
+                        safe_passive_managed_files
+                            .borrow_mut()
+                            .insert(file_path.to_path_buf());
+                        safe_passive_resolved_files
+                            .borrow_mut()
+                            .insert(file_path.to_path_buf());
+                        session_files
+                            .borrow_mut()
+                            .push((binding.session_id.clone(), file_path.to_path_buf()));
+                        pre_resolved_panes.insert(file_path.to_path_buf(), binding.pane_id.clone());
+                        reserve_sync_pane(&claimed_sync_panes, &binding.pane_id, file_path);
+                        sa += seg_mark.elapsed();
+                        continue;
+                    }
+                    Ok(Some(binding)) => {
+                        sync_log(&format!(
+                            "safe_passive_cross_root_actor_projection_dead file={} pane={} generation={}",
+                            file_path.display(),
+                            binding.pane_id,
+                            binding.generation,
+                        ));
+                    }
+                    Ok(None) => {
+                        sync_log(&format!(
+                            "safe_passive_cross_root_actor_projection_missing file={}",
+                            file_path.display(),
+                        ));
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[sync] warning: owning-controller actor projection unavailable for {}: {}",
+                            file_path.display(),
+                            error,
+                        );
+                        sync_log(&format!(
+                            "safe_passive_cross_root_actor_projection_failed file={} error={}",
+                            file_path.display(),
+                            error,
+                        ));
+                    }
+                }
+                blocked_unresolved_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
+                continue;
+            }
             let content = match crate::runtime_effects().and_then(|effects| {
                 effects.resolve_current_document(file_path, "sync_ownership_authority")
             }) {
@@ -5488,7 +5557,7 @@ mod tests {
             same_root_doc.to_string_lossy().to_string(),
             cross_root_doc.to_string_lossy().to_string(),
         ];
-        let (sanitized, dropped) = sanitize_cross_root_layout(saved_layout, &sync_root);
+        let (sanitized, dropped) = sanitize_cross_root_layout(saved_layout, &sync_root, false);
         assert_eq!(dropped.len(), 1, "exactly the submodule doc is dropped");
         assert!(dropped[0].contains("sample-app"));
         // Same-root column preserved; cross-root column blanked to hold its slot.
@@ -5497,6 +5566,125 @@ mod tests {
         assert_eq!(
             sanitized[1], "",
             "cross-root column becomes an empty placeholder"
+        );
+    }
+
+    #[test]
+    fn exact_visible_layout_memory_preserves_cross_root_columns() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(root.join("src/haiven-dev/.agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("src/haiven-dev/tasks")).unwrap();
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = root.join("src/haiven-dev/tasks/haiven-dev.md");
+        std::fs::write(&root_doc, "---\n---\n").unwrap();
+        std::fs::write(&child_doc, "---\n---\n").unwrap();
+
+        let saved_layout = vec![
+            root_doc.to_string_lossy().to_string(),
+            child_doc.to_string_lossy().to_string(),
+        ];
+        let (preserved, dropped) = sanitize_cross_root_layout(saved_layout.clone(), &root, true);
+
+        assert_eq!(preserved, saved_layout);
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn exact_visible_cross_root_actor_binding_routes_without_content_authority() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let child_root = root.join("src/haiven-dev");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(child_root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(child_root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = child_root.join("tasks/haiven-dev.md");
+        std::fs::write(
+            &root_doc,
+            "---\nagent_doc_session: root-session\n---\n\n# Root\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\n---\n\n# Child\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-cross-root-pane-only");
+        let decoy_pane = iso.new_session("test", &root).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let decoy_window = iso.pane_window(&decoy_pane).unwrap();
+        let root_pane = iso.new_window("test", &root).unwrap();
+        let root_window = iso.pane_window(&root_pane).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &root_window, "agent-doc"])
+            .unwrap();
+        let child_pane = iso.new_window("test", &child_root).unwrap();
+        let child_window = iso.pane_window(&child_pane).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &child_window, "stash"])
+            .unwrap();
+
+        sessions::register_full_with_cwd_in(
+            &child_root,
+            "child-session",
+            &child_pane,
+            &child_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &child_pane).unwrap(),
+            &child_window,
+            &child_root.to_string_lossy(),
+        )
+        .unwrap();
+
+        // Reproduce temporary editor-content authority loss. The owning
+        // controller/registry observation remains sufficient for pane layout.
+        std::fs::remove_file(&child_doc).unwrap();
+        std::fs::create_dir(&child_doc).unwrap();
+        let root_binding =
+            agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                document_path: root_doc.to_string_lossy().to_string(),
+                session_id: "root-session".to_string(),
+                pane_id: root_pane.clone(),
+                generation: 7,
+            };
+        let columns = vec![
+            root_doc.to_string_lossy().to_string(),
+            child_doc.to_string_lossy().to_string(),
+        ];
+        let _cwd = ScopedCurrentDir::set(&root);
+
+        run_with_options_internal_at_root(
+            &root,
+            &columns,
+            Some(&root_window),
+            Some(root_doc.to_string_lossy().as_ref()),
+            AutoStartMode::SafePassive,
+            true,
+            false,
+            &[root_binding],
+            &iso,
+        )
+        .unwrap();
+
+        assert_eq!(
+            iso.list_panes_ordered(&root_window).unwrap(),
+            vec![root_pane, child_pane],
+            "the existing nested-root pane should move from stash into the explicit agent-doc window"
+        );
+        assert_eq!(
+            iso.list_panes_ordered(&decoy_window).unwrap(),
+            vec![decoy_pane],
+            "a different same-named window must not replace the explicit target"
         );
     }
 

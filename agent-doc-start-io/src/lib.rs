@@ -45,6 +45,42 @@ pub struct StartRuntime {
     pub post_start_document_model_ensure: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartRuntimeAdmission {
+    NewSession,
+    SupervisorReexecPreservingChild,
+}
+
+impl StartRuntimeAdmission {
+    fn preserves_session_lifecycle(self) -> bool {
+        matches!(self, Self::SupervisorReexecPreservingChild)
+    }
+}
+
+fn validate_supervisor_reentry_actor(
+    canonical: &Path,
+    session_id: &str,
+    pane_id: &str,
+    record: agent_doc_controller::actor::ActorRecord,
+) -> Result<agent_doc_controller::actor::ActorRecord> {
+    if record.session_id != session_id
+        || record.pane_id != pane_id
+        || record.state == agent_doc_controller::actor::ActorState::Closed
+    {
+        anyhow::bail!(
+            "cannot reenter supervisor for {}: inherited session={} pane={}, authoritative session={} pane={} generation={} state={}",
+            canonical.display(),
+            session_id,
+            pane_id,
+            record.session_id,
+            record.pane_id,
+            record.generation,
+            record.state.as_str()
+        );
+    }
+    Ok(record)
+}
+
 #[derive(Debug)]
 struct SessionIdentityRekey {
     previous_session_id: String,
@@ -417,6 +453,39 @@ fn resolve_start_admission_document(file: &Path) -> Result<StartAdmissionDocumen
 }
 
 pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Result<StartRuntime> {
+    prepare_start_runtime_with_admission(
+        file,
+        force,
+        route_owned,
+        StartRuntimeAdmission::NewSession,
+    )
+}
+
+/// Prepare a replacement supervisor that will adopt a child preserved across
+/// `execve`.
+///
+/// This is a transport reentry, not a new session lifecycle. The existing
+/// controller actor must still own the same document/session/pane, and its
+/// generation and runtime state are retained.
+pub fn prepare_start_runtime_reentry(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+) -> Result<StartRuntime> {
+    prepare_start_runtime_with_admission(
+        file,
+        force,
+        route_owned,
+        StartRuntimeAdmission::SupervisorReexecPreservingChild,
+    )
+}
+
+fn prepare_start_runtime_with_admission(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    admission: StartRuntimeAdmission,
+) -> Result<StartRuntime> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -522,7 +591,9 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
         );
     }
 
-    close_stale_start_actors(&project_root, &mut session_log, route_owned);
+    if !admission.preserves_session_lifecycle() {
+        close_stale_start_actors(&project_root, &mut session_log, route_owned);
+    }
 
     let harness = agent_doc_harness::HarnessConfig::from_context(&fm, &global_config);
     let stderr_redirect = {
@@ -632,72 +703,112 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
         rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &expected_session);
     }
 
-    let supervisor_instance_id = uuid::Uuid::new_v4().to_string();
     let prior_entry = agent_doc_session_registry_io::lookup_entry(&session_id)?;
     let pane_window = agent_doc_tmux_io::target_window_id(&tmux, &pane_id).unwrap_or_default();
+    let supervisor_instance_id = if admission.preserves_session_lifecycle() {
+        prior_entry
+            .as_ref()
+            .map(|entry| entry.supervisor_instance_id.trim())
+            .filter(|instance_id| !instance_id.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    } else {
+        uuid::Uuid::new_v4().to_string()
+    };
 
-    let start_generation = {
-        let generations = agent_doc_session_actor_io::next_generation(&canonical, &session_id)
-            .unwrap_or(agent_doc_supervisor::OwnershipGeneration {
-                prior_generation: 0,
-                new_generation: 1,
-            });
+    let actor_record = if admission.preserves_session_lifecycle() {
+        agent_doc_controller_io::project_controller::ensure_controller_running(
+            &project_root,
+            LaunchMode::Lazy,
+        )?;
+        let record = agent_doc_controller_io::project_controller::authoritative_actor_binding(
+            &project_root,
+            &canonical,
+        )?
+        .with_context(|| {
+            format!(
+                "cannot reenter supervisor for {} without an authoritative actor binding",
+                canonical.display()
+            )
+        })?;
+        let record = validate_supervisor_reentry_actor(&canonical, &session_id, &pane_id, record)?;
         log_event(
             &mut session_log,
-            &agent_doc_supervisor::format_transition_event(
-                agent_doc_supervisor::OwnershipTransitionEvent {
-                    caller: "start",
-                    reason: "session_start",
-                    prior_generation: generations.prior_generation,
-                    new_generation: generations.new_generation,
-                    old_pane: prior_entry.as_ref().map(|entry| entry.pane.as_str()),
-                    new_pane: &pane_id,
-                    old_window: prior_entry.as_ref().and_then(|entry| {
-                        (!entry.window.is_empty()).then_some(entry.window.as_str())
-                    }),
-                    new_window: Some(pane_window.as_str()),
-                },
+            &format!(
+                "supervisor_reexec_session_reentry file={} pane={} session={} generation={} state={} lifecycle=preserved",
+                file.display(),
+                pane_id,
+                session_id_short(&session_id),
+                record.generation,
+                record.state.as_str()
             ),
         );
-        generations.new_generation
+        record
+    } else {
+        let start_generation = {
+            let generations = agent_doc_session_actor_io::next_generation(&canonical, &session_id)
+                .unwrap_or(agent_doc_supervisor::OwnershipGeneration {
+                    prior_generation: 0,
+                    new_generation: 1,
+                });
+            log_event(
+                &mut session_log,
+                &agent_doc_supervisor::format_transition_event(
+                    agent_doc_supervisor::OwnershipTransitionEvent {
+                        caller: "start",
+                        reason: "session_start",
+                        prior_generation: generations.prior_generation,
+                        new_generation: generations.new_generation,
+                        old_pane: prior_entry.as_ref().map(|entry| entry.pane.as_str()),
+                        new_pane: &pane_id,
+                        old_window: prior_entry.as_ref().and_then(|entry| {
+                            (!entry.window.is_empty()).then_some(entry.window.as_str())
+                        }),
+                        new_window: Some(pane_window.as_str()),
+                    },
+                ),
+            );
+            generations.new_generation
+        };
+        log_event(
+            &mut session_log,
+            &format!(
+                "session_start file={} pane={} session={} generation={}",
+                file.display(),
+                pane_id,
+                session_id_short(&session_id),
+                start_generation
+            ),
+        );
+        let record = start_controller_session(StartControllerSessionInput {
+            file,
+            canonical: &canonical,
+            project_root: &project_root,
+            session_id: &session_id,
+            pane_id: &pane_id,
+            pane_window: &pane_window,
+            start_generation,
+            session_log: &mut session_log,
+        })?;
+        log_event(
+            &mut session_log,
+            &format!(
+                "controller_session_start generation={} state={}",
+                record.generation,
+                record.state.as_str()
+            ),
+        );
+        start_console_status(
+            &mut session_log,
+            route_owned,
+            format!(
+                "Registered session {} -> pane {}",
+                session_id_short(&session_id),
+                pane_id
+            ),
+        );
+        record
     };
-    log_event(
-        &mut session_log,
-        &format!(
-            "session_start file={} pane={} session={} generation={}",
-            file.display(),
-            pane_id,
-            session_id_short(&session_id),
-            start_generation
-        ),
-    );
-    let actor_record = start_controller_session(StartControllerSessionInput {
-        file,
-        canonical: &canonical,
-        project_root: &project_root,
-        session_id: &session_id,
-        pane_id: &pane_id,
-        pane_window: &pane_window,
-        start_generation,
-        session_log: &mut session_log,
-    })?;
-    log_event(
-        &mut session_log,
-        &format!(
-            "controller_session_start generation={} state={}",
-            actor_record.generation,
-            actor_record.state.as_str()
-        ),
-    );
-    start_console_status(
-        &mut session_log,
-        route_owned,
-        format!(
-            "Registered session {} -> pane {}",
-            session_id_short(&session_id),
-            pane_id
-        ),
-    );
     publish_start_supervisor_registry(StartSupervisorRegistryPublication {
         file,
         canonical: &canonical,
@@ -710,7 +821,9 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
         route_owned,
     });
 
-    fire_session_start_hooks(file, &session_id, &fm, &global_config, &harness);
+    if !admission.preserves_session_lifecycle() {
+        fire_session_start_hooks(file, &session_id, &fm, &global_config, &harness);
+    }
 
     agent_doc_ops_log_io::log_op(
         file,
@@ -1392,6 +1505,89 @@ mod tests {
             StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable
         );
         assert!(document.authority.needs_post_start_document_model_ensure());
+    }
+
+    fn reentry_actor(
+        session_id: &str,
+        pane_id: &str,
+        generation: u64,
+        state: agent_doc_controller::actor::ActorState,
+    ) -> agent_doc_controller::actor::ActorRecord {
+        agent_doc_controller::actor::ActorRecord {
+            document_id: "/tmp/reentry.md".to_string(),
+            session_id: session_id.to_string(),
+            generation,
+            pane_id: pane_id.to_string(),
+            window_id: "@7".to_string(),
+            harness: "claude".to_string(),
+            state,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "supervisor".to_string(),
+                reason: "turn_started".to_string(),
+                timestamp: 1,
+                prior_generation: generation,
+                new_generation: generation,
+            },
+        }
+    }
+
+    #[test]
+    fn surviving_child_reentry_preserves_actor_generation_and_state() {
+        let record = reentry_actor(
+            "session-a",
+            "%26",
+            532,
+            agent_doc_controller::actor::ActorState::Busy,
+        );
+
+        let retained = validate_supervisor_reentry_actor(
+            Path::new("/tmp/reentry.md"),
+            "session-a",
+            "%26",
+            record.clone(),
+        )
+        .unwrap();
+
+        assert_eq!(retained, record);
+        assert_eq!(retained.generation, 532);
+        assert_eq!(
+            retained.state,
+            agent_doc_controller::actor::ActorState::Busy
+        );
+    }
+
+    #[test]
+    fn surviving_child_reentry_rejects_binding_drift_without_replacement() {
+        for record in [
+            reentry_actor(
+                "session-other",
+                "%26",
+                532,
+                agent_doc_controller::actor::ActorState::Busy,
+            ),
+            reentry_actor(
+                "session-a",
+                "%27",
+                532,
+                agent_doc_controller::actor::ActorState::Busy,
+            ),
+            reentry_actor(
+                "session-a",
+                "%26",
+                532,
+                agent_doc_controller::actor::ActorState::Closed,
+            ),
+        ] {
+            assert!(
+                validate_supervisor_reentry_actor(
+                    Path::new("/tmp/reentry.md"),
+                    "session-a",
+                    "%26",
+                    record,
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]

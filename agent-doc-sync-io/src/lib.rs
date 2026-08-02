@@ -300,6 +300,19 @@ pub trait SyncRuntimeEffects: Send + Sync + 'static {
 
     fn session_check_inspect(&self, file: &Path) -> Result<SyncSessionCheckStatus>;
 
+    /// Read the controller-owned actor projection for a document in another
+    /// project root without focusing, resuming, or provisioning its pane.
+    ///
+    /// Exact-visible editor sync uses this observation to route an already
+    /// owned pane even when document-content authority is temporarily
+    /// unavailable. The foreign binding remains ephemeral input to the parent
+    /// layout effect and must not be copied into its durable registry.
+    fn resolve_cross_root_document_pane(
+        &self,
+        project_root: &Path,
+        file: &Path,
+    ) -> Result<Option<agent_doc_controller_io::project_controller::ControllerTmuxActorBinding>>;
+
     /// Ask the controller that owns `project_root` to ensure `file` has an actor
     /// pane, returning the controller-proven pane binding. This is an effect:
     /// callers must not copy the foreign binding into their durable registry.
@@ -567,6 +580,24 @@ impl SyncRuntimeEffects for TestSyncRuntimeEffects {
             ));
         }
         Ok(SyncSessionCheckStatus::Ok("clean".to_string()))
+    }
+
+    fn resolve_cross_root_document_pane(
+        &self,
+        project_root: &Path,
+        file: &Path,
+    ) -> Result<Option<agent_doc_controller_io::project_controller::ControllerTmuxActorBinding>>
+    {
+        Ok(
+            agent_doc_session_registry_io::lookup_file_entry_in(project_root, file)?.map(|entry| {
+                agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                    document_path: file.display().to_string(),
+                    session_id: entry.session_id,
+                    pane_id: entry.pane,
+                    generation: 0,
+                }
+            }),
+        )
     }
 
     fn ensure_cross_root_document_pane(

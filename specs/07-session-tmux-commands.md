@@ -34,6 +34,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - If unresolved prompt-bearing drift exists and the pane is busy, route may attempt one scoped `agent-doc fix <FILE>` pass and then one bounded fresh-restart recovery, but it must still fail closed if no clean dispatch path emerges.
 - For live same-document panes with no new prompt-bearing drift, route may focus the pane and return success without sending a duplicate reopen.
 - Fresh auto-starts and live reroutes both require a real per-document cycle acknowledgment after dispatch; accepted input alone is not sufficient.
+- Automatic editor-layout `Sync` generations are structural edges and must cross the tmux effect boundary even when the desired columns match a retained structural receipt. A first observation or controller-observed drift cannot be declared converged from an older pane assignment; focus-only changes use their separate effect.
 - Route auto-start may not create a duplicate hidden fallback pane just because split/join heuristics failed. A shared `agent-doc` window may supply a split-only cross-project anchor when every visible pane proves process-tree ownership of a different agent-doc document; this does not rebind or inject into the anchor. If any visible pane has unknown ownership, one appears to own the requested document without authoritative registration, or `split-window` fails beside the chosen anchor, route must fail closed with tmux cleanup commands instead of creating and stashing a second pane.
 - Before route or sync auto-start allocates a pane, it must resolve the live same-document owner independently of the registry row. A proven live owner wins over a missing, dead, or stale registry pane and is reused; startup must not allocate a launcher that can discover and refuse the existing owner only after the duplicate pane exists. This shared rule applies to JetBrains, Zed, VS Code, and CLI-triggered routing.
 - Once route has created a fresh pane for a document, that pane stays authoritative for the reroute. A concurrent geometry-only registry rebind must not hand dispatch back to an older same-session pane and make the fresh pane disposable.
@@ -280,6 +281,14 @@ tmux-router registry metadata only as a projection of that binding.
   directly (that runs the harness as a blocking restart-loop child unsuitable
   for a plugin thread).
 - If an editor supplies `--window W`, `W` must already be an `agent-doc` window for the target tmux session. When the named session has no visible `agent-doc` window, normal sync must fail closed and preserve layout instead of reconciling remembered docs onto an arbitrary non-`agent-doc` window.
+- A validated explicit `--window W` is the layout target; sync must not replace
+  it by re-resolving the session's named window or report that the named
+  window is absent. Exact-visible editor layouts may span project roots. For
+  each nested-root document, the parent layout effect must consume the owning
+  controller's existing live actor binding before document-content
+  resolution, move that pane into `W`, and keep the binding ephemeral. Missing
+  foreign bindings fail closed: no parent-root registry write, content
+  mutation, resume, or pane creation is allowed under `--no-autostart`.
 - Post-sync registry updates must fail closed if tmux-router reports a
   geometry-only pane assignment that disagrees with a still-live authoritative
   actor pane for that document.

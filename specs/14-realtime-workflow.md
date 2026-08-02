@@ -44,6 +44,34 @@ provide a bounded agent-response candidate, but the hot path must still merge
 that candidate into the latest source-of-truth document. A snapshot must never
 be load-bearing for deciding what operator-visible state should survive.
 
+## Prompt-to-response acknowledgement
+
+`agent-doc-diff` owns the policy that associates an operator prompt with an
+answering response cell (`#prompt-response-adjacency`). Its sources are the
+admitted baseline, the ordered unsuppressed diff changes, and the current
+operator-visible Exchange projection. The computed result is the aggregate of
+still-unanswered prompt changes consumed by realtime steering, admission, and
+session-check. Those consumers must not reconstruct acknowledgement from a
+filtered change list.
+
+| Transition | Computed acknowledgement |
+| --- | --- |
+| Exact prompt block followed immediately by a response heading | answered |
+| Prompt followed by substantive prose or another prompt, then a later response heading | unresolved |
+| Plain prompt-and-answer prose in one contiguous added run | answered when the existing plain-response classifier proves it |
+| Explicit prompt followed by binary-owned backlog/done maintenance | unresolved; component maintenance cannot answer steering |
+| Existing prompt gains only the canonical `❯` marker | metadata normalization; no new prompt |
+| No associated response | unresolved |
+
+The selector fails open: ambiguity keeps the operator prompt actionable. This
+can repeat a prompt, but it cannot silently omit operator work. No plugin
+receipt, controller generation, or later response heading may substitute for
+this document-structure association. Prompt presence also does not suppress a
+structural repair whose pure transformation proves that it carries the complete
+prompt into the repaired projection. Such narrow repairs run before the broad
+live-steering guard and publish through the same authority-fenced write; general
+template normalization stays behind the guard.
+
 ## Source Of Truth
 
 When a live editor owner owns the document, the CRDT relay/editor buffer is the
@@ -778,6 +806,16 @@ balanced component markers, and at most one live exchange boundary marker.
   and controller generation. One optional-effect projection covers activation
   observation, guarded target application, and closeout resume; waiting and
   conflict states project no Effect.
+- Replica registration and its generation prove the canonical bootstrap opened
+  by the replica, not the text currently visible in an attached editor buffer.
+  When the post-registration buffer exactly equals that canonical text, the
+  editor publishes the existing visible-state projection receipt for the new
+  replica; a failed projection remains on the remote-drain retry path.
+- Authority and disk equality do not settle a retained write while a known live
+  editor still owes that receipt. The settlement Effect remains subscribed to
+  the delivery projection, preserves the pending continuation, and emits the
+  durable converged/wake edge only after delivery converges. Detached or
+  unobserved delivery retains the ordinary authority-plus-disk settlement path.
 - A replacement controller observes the already-retained registered editor/CRDT
   projection as the `AwaitingDelivery` transition's activation Effect. The
   controller listener is bound before restored liveness publishes

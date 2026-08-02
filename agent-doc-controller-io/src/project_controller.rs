@@ -67,8 +67,6 @@ const CONNECT_WAIT: Duration = Duration::from_secs(3);
 const LAUNCH_CONNECT_WAIT: Duration = Duration::from_secs(45);
 #[cfg(any(test, feature = "test-support"))]
 const LAUNCH_CONNECT_WAIT: Duration = Duration::from_millis(500);
-#[cfg(test)]
-#[allow(dead_code)]
 const HANDOFF_CONNECT_WAIT: Duration = Duration::from_secs(30);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
 /// How long a contended launch waits for the current bootstrap claimant to
@@ -1714,20 +1712,19 @@ pub(crate) struct ControllerRuntime {
     /// one fact producer publishes once and all waiters react.
     state_projection_waiters: Condvar,
     /// `#ctlrecycle` R2 — set true by the `recycle` RPC (`agent-doc admin recycle`).
-    /// The serve-loop idle poll honors it the same way it honors binary staleness:
-    /// once no dispatch is in flight (debounced), the controller self-terminates and
-    /// the next `connect_or_launch` relaunches the fresh binary.
+    /// The serve-loop honors it by starting a two-phase handoff (debounced).
+    /// Durable harness dispatches may remain open because their child is
+    /// supervisor-owned; accepted RPCs drain on the predecessor after promotion.
     recycle_requested: AtomicBool,
     /// A rolling-upgrade incompatibility observed by a read-only recovery RPC.
     /// Unlike the normal five-second recycle debounce, this may recycle at the
-    /// first exact idle cut. It still never stops while a client or durable
-    /// dispatch is active.
+    /// first stable handoff opportunity. It still never drops an accepted client.
     recycle_urgent: AtomicBool,
     /// `#recycleforce` — set true by the `recycle_force` RPC (`agent-doc admin
     /// recycle --force`). An explicit operator override: the serve-loop idle poll
-    /// recycles WITHOUT waiting on the in-flight-dispatch idle gate, so a forced
-    /// recycle takes effect at the next tick even mid-turn. Implies
-    /// `recycle_requested`.
+    /// skips the normal debounce, so a forced recycle starts the next stable
+    /// handoff even mid-turn. It never interrupts the supervisor-owned harness
+    /// child or an accepted RPC. Implies `recycle_requested`.
     recycle_forced: AtomicBool,
     /// `#stategraphjoin` / `#retainedsettlereactive` — one reactive graph per
     /// open document.
@@ -3461,6 +3458,7 @@ impl ControllerDocumentGraphs {
         let key = document_hash.to_string();
         let verdict_map = self.verdict.clone();
         let settle_generation = self.settle_generation.clone();
+        let retained_delivery = self.retained_delivery.clone();
         let sink = self.settle_sink.clone();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
@@ -3483,6 +3481,22 @@ impl ControllerDocumentGraphs {
             else {
                 return;
             };
+            // Authority + disk convergence proves the retained target is
+            // durable, but an attached editor may still owe an exact visible
+            // projection receipt. Keep the pending intent alive until that
+            // receipt arrives so its delivery edge can produce the closeout
+            // wake rather than clearing the only resumable state too early.
+            let delivery_pending = retained_delivery
+                .contains_key(ctx, &effect_key)
+                .then(|| retained_delivery.observe(ctx, &effect_key))
+                .flatten()
+                .flatten()
+                .is_some_and(|delivery| {
+                    delivery.live_editors > 0 && !delivery.delivery_converged
+                });
+            if delivery_pending {
+                return;
+            }
             let Some(sink) = sink.get() else {
                 // No sink bound (test runtime): say so rather than silently
                 // dropping a settlement.
@@ -4091,7 +4105,7 @@ impl ControllerRuntime {
         Ok(runtime)
     }
 
-    /// `#ctlrecycle` R2 — mark this controller to recycle at the next idle boundary.
+    /// `#ctlrecycle` R2 — mark this controller for a two-phase handoff.
     fn request_recycle(&self) {
         self.recycle_requested.store(true, Ordering::SeqCst);
     }
@@ -4104,8 +4118,8 @@ impl ControllerRuntime {
         self.recycle_requested.load(Ordering::SeqCst)
     }
 
-    /// `#recycleforce` — mark this controller to recycle promptly, overriding the
-    /// in-flight-dispatch idle gate (`agent-doc admin recycle --force`). Also sets
+    /// `#recycleforce` — mark this controller to hand off without the normal
+    /// debounce (`agent-doc admin recycle --force`). Also sets
     /// `recycle_requested` so the existing want-recycle predicate fires.
     fn request_recycle_force(&self) {
         self.recycle_forced.store(true, Ordering::SeqCst);
@@ -5239,6 +5253,12 @@ impl LaunchClaim {
     }
 
     fn acquire_inner(project_root: &Path, timeout: Option<Duration>) -> Result<Self> {
+        if project_root.as_os_str().is_empty() || !project_root.is_dir() {
+            anyhow::bail!(
+                "cannot acquire controller launch claim: project root {:?} is empty or not a directory (#ctrlrespawnenoent2)",
+                project_root,
+            );
+        }
         let canonical_root = project_root
             .canonicalize()
             .unwrap_or_else(|_| project_root.to_path_buf());
@@ -8081,6 +8101,26 @@ mod tests {
         assert!(second.is_err());
         drop(first);
         assert!(LaunchClaim::acquire(dir.path()).is_ok());
+    }
+    #[test]
+    fn launch_claim_rejects_empty_or_missing_project_roots_before_namespacing() {
+        let empty = LaunchClaim::acquire(Path::new(""))
+            .err()
+            .expect("empty root must be rejected");
+        assert!(
+            empty.to_string().contains("empty or not a directory"),
+            "{empty:#}"
+        );
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let missing = dir.path().join("missing");
+        let missing = LaunchClaim::acquire(&missing)
+            .err()
+            .expect("missing root must be rejected");
+        assert!(
+            missing.to_string().contains("empty or not a directory"),
+            "{missing:#}"
+        );
     }
     #[test]
     fn blocking_launch_claim_waits_for_holder_then_acquires() {
@@ -12212,6 +12252,72 @@ agent:queue\n\
                     if intent_id == "intent-1"
             )),
             "the clear must be durable, not just an in-memory projection edit"
+        );
+    }
+
+    #[test]
+    fn satisfied_intent_waits_for_the_attached_editor_delivery_receipt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        defer_document_write(&runtime, dir.path(), &document_hash, "intent-1", "target");
+        runtime.document_retained_write_observe_delivery(
+            &document_hash,
+            Some(RetainedDeliveryObservation {
+                file: file.clone(),
+                content: Arc::from("content-for-target"),
+                content_hash: "target".to_string(),
+                live_editors: 1,
+                delivery_converged: false,
+                delivery_version: 1,
+            }),
+        );
+
+        runtime.document_retained_write_verdict(
+            &document_hash,
+            &file,
+            Some(observation("target")),
+            Some(observation("target")),
+        );
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("intent-1"),
+            "durable convergence must not clear the resume state before the live editor receipt",
+        );
+        let ledger = load_state_event_ledger(dir.path()).unwrap();
+        assert!(
+            !ledger.events().iter().any(|event| matches!(
+                &event.fact,
+                agent_doc_state_backbone::StateFact::DocumentWriteConverged { intent_id, .. }
+                    if intent_id == "intent-1"
+            )),
+            "the converged event is also the closeout wake, so it must wait for delivery",
+        );
+
+        runtime.document_retained_write_observe_delivery(
+            &document_hash,
+            Some(RetainedDeliveryObservation {
+                file,
+                content: Arc::from("content-for-target"),
+                content_hash: "target".to_string(),
+                live_editors: 1,
+                delivery_converged: true,
+                delivery_version: 2,
+            }),
+        );
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash),
+            None,
+            "the subscribed settlement effect must resume when delivery converges",
+        );
+        let ledger = load_state_event_ledger(dir.path()).unwrap();
+        assert!(
+            ledger.events().iter().any(|event| matches!(
+                &event.fact,
+                agent_doc_state_backbone::StateFact::DocumentWriteConverged { intent_id, .. }
+                    if intent_id == "intent-1"
+            )),
+            "delivery convergence must durably settle and wake the captured closeout",
         );
     }
 

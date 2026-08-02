@@ -47,9 +47,9 @@ tables suggest:
 2. GDScript, JavaScript, TypeScript-without-annotations — same derivation, and
    TS gets `: unknown` nowhere; if a parameter's type cannot be spelled the
    intent refuses rather than annotating badly.
-3. Rust — either behind an explicit caller-supplied signature, or as a closure
-   (`let extracted = |a, b| { ... };`), which infers. Deferred deliberately;
-   see "What phase 3 has to answer" below.
+3. Rust — deferred deliberately, and answered in phase 3 by neither of the two
+   options this line originally listed: it copies the annotation that already
+   exists and refuses where there is none, extracting by value only.
 
 ## Phases
 
@@ -78,14 +78,33 @@ emitter for the `def`/`function`/`func` spelling and the indentation or brace
 block. Registration is a table entry plus a conformance fixture row, the same
 shape phase 3 of the rename plan settled on.
 
-### Phase 3 — `#jzs7extract3` — Rust, and what it has to answer
+### Phase 3 — `#jzs7extract3` — Rust: answered, then implemented
 
-Not "implement Rust". First answer: does the caller supply the signature, or do
-we emit a closure? A closure is correct without types but changes borrow
-behaviour and cannot be `pub`. A caller-supplied signature is honest but moves
-the hard part to the caller. Pick one with a written rationale before writing
-code, because this is the decision that determines whether the intent is useful
-or merely available.
+The question was: caller-supplied signature, or a closure? **Neither.** The
+answer is a third option the framing had folded into the first — copy the
+annotation that already exists, and refuse where there is none.
+
+The ownership qualifier and the type turned out to be separable questions with
+different answers. The qualifier is derivable from the use analysis the intent
+already does. The type is not, and nothing short of a type checker gets it:
+`let` bindings are idiomatically unannotated, and inferring one needs name
+resolution, trait resolution, and method return types. tsift has no type
+information of any kind.
+
+The qualifier does not rescue the rest either. A `&T` or `&mut T` parameter
+requires rewriting each use of the name in the body into a dereference —
+`acc += 1` becoming `*acc += 1` — and rewriting bodies is what this intent does
+not do. So **Rust extracts by value**, refuses a name that would be moved in
+while the caller still reads it, and *threads* a name the range both reads and
+reassigns: moved in and handed back as part of the return, which covers the
+accumulator shape with no borrow at all.
+
+Why not a closure: it cannot be `pub`, cannot move to another module, cannot be
+documented or tested on its own, changes borrow behaviour through what it
+captures, and would succeed exactly where the free function honestly declines.
+Why not a caller-supplied signature: it gives up the one property that makes
+this intent worth having — that the signature and the call site come from one
+analysis and cannot disagree.
 
 ## Refusals — the list is the feature
 
@@ -115,11 +134,13 @@ above rather than left to "not found in `F`".
 
 ## Status
 
-Phase 1 landed in `#jzs7`. Phase 2 landed in `#registerextractfunction`
+All three phases have landed. Phase 1 in `#jzs7`. Phase 2 landed in `#registerextractfunction`
 (tsift `e272087`): Python, GDScript, JavaScript, JSX, TypeScript, and TSX share
 one analysis, with the node-kind vocabulary and the emitter as `Dialect` data
-rather than inlined Python kinds. Phase 3 is `#deciderustspells` — still a
-decision, not an implementation.
+rather than inlined Python kinds. Phase 3 landed in `#deciderustspells`
+(tsift `ec381ab`): Rust joins them by value, copying the types it can already
+see. Registered languages are now Python, GDScript, JavaScript, JSX,
+TypeScript, TSX, and Rust — one analysis, seven vocabularies and emitters.
 
 Three things the generalization turned up that phase 1 had wrong, each of which
 emitted code that parsed:

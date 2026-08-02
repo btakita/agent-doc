@@ -210,13 +210,36 @@ Done across eight bindings, all pushed, CI green on every one. The item's diagno
 **Not done:** cpp needed no change — it was already immune via `MIN_FIXTURES`/`MIN_SCENARIOS`, confirming the item. js's `check-assertion-keys.mjs` still has no positive floor over its key population, and cs still lacks rs's manifest-self-guard; both are adjacent rungs rather than this defect, so I left them and am filing them rather than silently widening the diff.
 
 Superproject pointer `ba3039aff`.
+
+### Re: do [#recommendedlazilyscripts] — opus-5
+
+> **Queue prompt:**
+>
+> do [#recommendedlazilyscripts]
+
+
+Both halves closed, plus a third instance of the same gap found while proving the second.
+
+**1. lazily-js `check-assertion-keys.mjs` — positive-evidence floor.** The `#lzvacuousrun` sweep gave this script the missing-corpus CI split but not a magnitude assertion, so a manifest that was present and non-empty but *short* — recorder detached partway, a test file no longer collected, `TRACKED` no longer matching the corpus block names — walked a small-but-nonzero key population and still printed OK. Added the same two-part floor `MIN_FIXTURES` and `MIN_SCENARIOS` carry one and two rungs up: zero tracked keys is its own finding (with a distinct message, because "the recorder saw nothing" is not "the suite asserted too little"), and asserted keys must reach `MIN_ASSERTED_KEYS`. 520, calibrated below the observed 547/575 across 128 key-bearing fixtures — the same margin the sibling floors use.
+
+Mutation-checked in both directions: `MIN_ASSERTED_KEYS=600` over the real manifest fails on the floor, and an R-only manifest with no fixture manifest and an emptied `DECLARED_UNCONSUMED` fails on the zero check. The pre-change script printed `assertion-key consumption OK: 0/0 ...` and exited 0 for that same input, which is the false green the item named.
+
+**2. lazily-cs — manifest self-guard.** lazily-rs resolves every recorded manifest id against the corpus root; lazily-cs never did, so a manifest of invented paths passed unexamined. Added, and it fails in the shape that actually happens here: several test hosts append at process exit, so a truncated or interleaved write leaves ids nobody can resolve — the count inflates *and* a fixture the suite stopped opening hides behind them. Scenario records ride in the same file behind a TAB (`SpecCorpus.RecordScenario`), so the loop skips those; the python leg already checks them against the fixture's own ids.
+
+**3. Found while proving 2 — lazily-js had the same gap.** Its `check-conformance-coverage.sh` also computed coverage from the manifest without resolving a single recorded id. Same fix, same mutation proof. Its scenario ledger already self-checked; only the fixture-manifest half was missing.
+
+All three mutation-checked by appending one non-existent fixture path (or forcing the floor) and confirming red, then confirming green on the real evidence.
+
+**Verification.** `make check` green in both repos — lazily-js `547/575` keys with `floor 520`, `135/138` fixtures, `118/118` scenarios; lazily-cs `138/138` fixtures, `125/125` scenarios. Pushed as `34b9caa` + `9c56344` (lazily-js) and `b2e43b4` (lazily-cs); both CI runs are in progress on those SHAs, not yet concluded.
+
+Two notes, neither blocking: preflight reports 1 legacy gated item still living in `agent:backlog` (`agent-doc migrate` moves it into `agent:review`), and a stale `agent-doc` install warning from another session's in-flight source edits — I did not rebuild over it.
 <!-- agent:boundary:ebcdbd84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#recommendedlazilyscripts]
+- ~~do [#recommendedlazilyscripts]~~
 - 📌 do [#lzscenariobodyskip]
 - 📌 do [#lzspecscenarioids]
 - 📌 do [#lzassertionblockschema]
@@ -234,7 +257,6 @@ Superproject pointer `ba3039aff`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#recommendedlazilyscripts] [recommended] lazily-js scripts/check-assertion-keys.mjs has no positive-evidence floor over its key population. The #lzvacuousrun sweep gave it the missing-corpus CI split (it had the same SKIP+exit 0 hole as the other two scripts) but not a magnitude assertion, so it can still print OK over a small-but-nonzero key set. Same rung as the coverage and scenario guards, one script over. Separately: lazily-cs lacks the manifest-self-guard that lazily-rs has (every recorded manifest id must resolve to a file in the corpus), so a manifest of invented paths is not caught there; that is an evidence-channel gap rather than a vacuity one.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

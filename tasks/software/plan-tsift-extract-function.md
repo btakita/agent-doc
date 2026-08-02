@@ -112,5 +112,25 @@ above rather than left to "not found in `F`".
 
 ## Status
 
-Phase 1 in progress in `#jzs7`. Phases 2 and 3 are queued as their own backlog
-IDs so a partial landing is visible as a partial landing.
+Phase 1 landed in `#jzs7`. Phase 2 landed in `#registerextractfunction`
+(tsift `e272087`): Python, GDScript, JavaScript, JSX, TypeScript, and TSX share
+one analysis, with the node-kind vocabulary and the emitter as `Dialect` data
+rather than inlined Python kinds. Phase 3 is `#deciderustspells` — still a
+decision, not an implementation.
+
+Three things the generalization turned up that phase 1 had wrong, each of which
+emitted code that parsed:
+
+- A bare assignment does not declare outside Python, so a range that only
+  *assigns* a name declared behind it left the new function writing a name that
+  was not in scope. The new function now opens with those declarations, and
+  refuses when the name is not a local of the enclosing function at all.
+- `obj.attr = 1` counted the receiver as a binding, so it stopped being a
+  parameter.
+- `base = base * 2` recorded its write at the target's own offset, so the
+  right-hand read looked like a read of an already-assigned local.
+
+Two refusals were added beyond the list above: hoisting out of a method or an
+expression-position function (a `def` beside a method *is* another method, and
+the bare call does not resolve to it), and — for GDScript — more than one
+returned name, since it has no destructuring call site.

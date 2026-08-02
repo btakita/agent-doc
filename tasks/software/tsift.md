@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: c72ba128-2d9b-4ee6-92f6-bac197e10c7e
+resume: 005a26d8-0d7b-4527-a8c7-22e18cbb5b70
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -39,7 +39,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 
 Compacted content:
 - Archived 1 response topic(s): do [#finishsymbolkind]
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): do [#tsrenameast1]; do [#tsrenameast2]; do [#tsrenameast3] / d...
+- Prior summary/context: **[**prior compacted content: Archived 5 response topic(s): do [#tsrenameast1]; do [#tsrenameast2]; do [#tsrenameast3] / d...
 
 ### Re: do [#zigthirdindexed] — opus-5
 
@@ -119,7 +119,17 @@ Also closed out here: the `#zigthirdindexed` response from the previous cycle wa
 stuck at `write_applied` with no terminal commit. The body and the queue strike were
 already on disk; a bare `write --commit` retired the retained intent and `preflight`
 persisted the reap. That landed as `1a678b2ec`. Its CI run `30719216281` is green.
-<!-- agent:boundary:671891be -->
+
+### Re: 0.1.79 released, published, and installed — gpt-5
+
+`#wsdq` is complete. The held release bump was reapplied only after the graph-backed cross-file receiver work landed in `be1dbf4`, so 0.1.79 contains both the Zig/Kotlin receiver evidence and the release projection. The release commit is `f960a89`, `v0.1.79` is pushed, and the installed binary reports `tsift 0.1.79`.
+
+Verification is green: local `make check` completed with an explicit exit 0; main CI run 30728685320 passed both `clippy + test` and live Convex graph acceptance; Release run 30728688279 attempt 2 passed all platform builds, the GitHub release, OpenCode npm publication, and the crates.io publication job.
+
+The first Release attempt exposed separate per-crate crates.io OIDC configuration drift at `tsift-astgrep`. That was not a code or package failure. I completed the authorized 0.1.79 workspace publication in dependency order with the local publish-scoped credential, then reran the failed job; its idempotent version-exists projection skipped every published crate and closed green. I filed the durable OIDC parity work as an operator-gated follow-up because the repository runbook requires per-crate crates.io browser/passkey registration; a publish receipt must not be misrepresented as a trusted-publisher configuration receipt.
+
+The Agent Doc retained-closeout/session-identity work is installed and pushed (`a568674f0`), its isolated CI fixture correction is pushed (`797fd6a88`), all 8,495 local tests passed, and CI run 30728947238 is green. This response is closing through the binary-owned reactive finalize projection—no direct document edit, retained sidecar, manual `write --commit`, or editor ACK command. `#jzs7` remains the next active queue item and is not being claimed complete here.
+<!-- agent:boundary:5d1c16fb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -136,13 +146,13 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#8wqk] Register crates.io GitHub Trusted Publishing for every post-baseline tsift workspace crate through the operator browser/passkey flow, then verify a tag release publishes without the local token
 - [ ] 🚧 [#jzs7] Plan and implement extract method refactoring
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#wsdq] release + publish + install
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

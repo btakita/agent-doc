@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -115,7 +115,7 @@ Next head is `#deciderustspells`, which you have annotated with a question about
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#extractloopbreak]~~
-- do [#deciderustspells]: Please describe the decision. Could we implement the prerequisites for phase 1 derivation directly by adding T, &T, and &mut T support in tsift?
+- ~~do [#deciderustspells]: Please describe the decision. Could we implement the prerequisites for phase 1 derivation directly by adding T, &T, and &mut T support in tsift?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -124,7 +124,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#deciderustspells] Decide how Rust spells extract_function before writing any Rust code: a caller-supplied signature, or a closure that infers. Rust cannot use the phase 1 derivation directly because choosing T, &T, or &mut T needs types tsift does not have, and guessing emits code that parses and does not build. A closure is correct without types but changes borrow behaviour and cannot be pub; a caller-supplied signature is honest but moves the hard part to the caller. Write the rationale, then implement. Plan: tasks/software/plan-tsift-extract-function.md
+- [ ] 🚧 [#deciderustspells] Decide how Rust spells extract_function before writing any Rust code: a caller-supplied signature, or a closure that infers. Rust cannot use the phase 1 derivation directly because choosing T, &T, or &mut T needs types tsift does not have, and guessing emits code that parses and does not build. A closure is correct without types but changes borrow behaviour and cannot be pub; a caller-supplied signature is honest but moves the hard part to the caller. Write the rationale, then implement. Plan: tasks/software/plan-tsift-extract-function.md
 - [/] [#8wqk] Register crates.io GitHub Trusted Publishing for every post-baseline tsift workspace crate through the operator browser/passkey flow, then verify a tag release publishes without the local token
 <!-- /agent:backlog -->
 

@@ -35,68 +35,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260801-182827.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260802-054447.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Response
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): Are these issues in tsift.md now fixed?
-The compacted exchange was not committed. #spec-test-build-install-commit-push
-
-### Re: Response
-
-Implemented, installed, committed, pushed, and CI-verified.
-
-The periodic pane-sync latency was coming from the Project Controller accept loop: once per second it synchronously ran a tmux layout observation on the same thread that accepts editor/document IPC. When a pane was missing, the tmux probe/retry sequence could occupy that thread for tens of seconds, making unrelated controller calls look wedged.
-
-The pane-layout path is now edge-driven:
-
-- Removed the one-second tmux observer from the controller accept loop.
-- Removed timer/backoff retries from the tmux layout effect worker. A failed exact-input attempt now derives stable `retry_pending`, records its observation/effect receipt, and retires the worker.
-- Made the exact input key `desired layout generation + actor-binding projection`. A desired-layout or actor-authority change invalidates the old observation/receipt and reactively re-enters `NeedsEffect`; retrying unchanged inputs is impossible.
-- Keyed structural file-to-pane assignments to the same actor-binding snapshot. A mid-effect actor move cannot relabel stale pane geometry as reusable.
-- Fenced focus/select-pane consequences by a monotonic input revision rather than assuming the desired generation alone names every dependency change.
-- Kept durable state-plane ingestion recovery separate: its bounded retry covers controller handoff/durable desired-state publication, not tmux observation and not the IPC accept loop.
-- Documented the shared controller behavior as JetBrains, VS Code, and Zed parity. Arbitrary out-of-band tmux drift is not polled; the next editor desired-state or actor-binding event is the reactive wake edge.
-
-This preserves the requested architecture: no editor ACK request, no CRDT sidecar authority, no forced disk write, no periodic tmux polling, and no imperative same-input retry loop.
-
-The earlier retained-closeout and queue-order work is also landed in `97442c82c` (`fix: reactively complete retained closeouts`): exact retained transitions settle/resume from the Lazily projection and equal-priority backlog additions retain insertion order in the queue. The pane-latency follow-up is `cb2a5e589` (`fix: make tmux pane sync reactive`). Both source commits are pushed; the superproject gitlink is pushed at `db44e15bd`.
-
-Verification and installation:
-
-- Focused pane-layout projection, structural-reuse, focus-fencing, and latest-input worker tests passed.
-- Final `make check` passed locally, including simulations/model checks.
-- `make install` installed `agent-doc 0.35.109` atomically, preserved live process inodes, queued 10 route-owned supervisors and 2 controllers for idle-boundary recycle, and delivered the native reload to an available live editor endpoint without forcing unavailable endpoints.
-- GitHub CI run 30732386174 is green: both `make check` and `make tmux-ci` passed. The preceding retained-closeout CI run 30731513721 is also green.
-
-No IDEA restart is required for this controller-side change. The installer recopied the unchanged JetBrains 0.2.334 package and prints its generic restart notice, but the pane-sync implementation lives in the installed controller/native path; active old controller/supervisor inodes adopt it at their already-queued idle boundary.
-
-The requested Lazily state-table follow-up already landed concurrently, so I preserved it instead of creating a duplicate: `tasks/software/plan-lazily-state-tables.md` (commit `91bc0d19c`) and open `lazily.md` backlog item `#lazilystatetable`. The plan explicitly models state tables as pure Computeds over typed product states, keeps effects outside the table, rejects request/ACK gates and sidecars, and includes Zed projection parity.
-Fix haiven-dev.md issue: `The --done reap landed and the capture is durable; the cycle is deferred at write_applied pending CRDT convergence — the binary explicitly says not to re-send or force it, so I've observed once and stopped.`
-
-### Re: haiven-dev retained closeout and editor route — gpt-5
-
-Fixed and installed. The two haiven symptoms had one root cause: commit-time boundary cleanup called the no-ID template helpers, so every retry minted a different `agent:boundary` ID. A retained Base → Target transition could converge, enter `commit_document`, and immediately replace its own Target with a new post-commit reposition projection. The async `editor_route` did start, but it remained inside `route_dispatch_drain_closeout` until its 125-second terminal-projection timeout.
-
-The cleanup is now a fixed-point projection:
-
-- Snapshot normalization reads the current exchange boundary ID and passes it to `reposition_boundary_to_end_clean_with_id`.
-- Working/editor normalization reuses the committed snapshot ID through `reposition_boundary_to_end_preserve_head_with_id`.
-- Re-observing an already-normalized snapshot or working projection produces the same value, so it does not publish a replacement Target or restart editor delivery.
-- No sidecar, imperative editor request/ACK gate, retry timer, or forced disk path was introduced.
-
-The realtime workflow spec now requires commit-time normalization to preserve the retained transition's boundary identity and be idempotent. Focused unit tests cover the snapshot fixed point and working-projection identity; the older commit integration tests now assert stable identity plus correct marker position instead of treating a freshly randomized ID as proof of cleanup.
-
-Verification and live recovery:
-
-- Focused `agent-doc-git-io` and `agent-doc-commit-io` tests passed.
-- Full `make check` passed locally.
-- `make install` atomically installed `agent-doc 0.35.109` plus the matching native library and queued the controller fleet for safe adoption.
-- The haiven controller and route-owned supervisor were recycled in continue mode onto the installed inode; no IDEA restart was required.
-- The original retained haiven cycle then completed without resubmission: `commit_success` completed in about one second, a terminal closeout proof was recorded, and haiven committed cleanly as `ec1d0e0`.
-- Source commit `55dd1851d` (`fix: make retained boundary cleanup idempotent`) is pushed to `agent-doc/main`; the superproject gitlink is committed at `7bfb786c6`. CI run `30734112979` was still in progress with no failed step at the requested one-time check.
-
-The stale `cmd-a1a1b94a-0661-4998-805a-729519f8ce72` timeout is historical; its accepted projection belonged to the replaced controller. The underlying route path is now unblocked by the terminal retained closeout, so it should not be resubmitted as recovery.
+- Archived 2 response topic(s): Response; haiven-dev retained closeout and editor route
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): Response
 <!-- agent:boundary:124f8e72 -->
 <!-- /agent:exchange -->
 ## Queue

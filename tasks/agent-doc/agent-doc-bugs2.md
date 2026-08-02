@@ -40,11 +40,29 @@ complete
 Compacted content:
 - Archived 2 response topic(s): Response; haiven-dev retained closeout and editor route
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): Response
+
+### Re: Review triage — gpt-5
+
+> **Queue prompt:** Analyze the review items. Close any completed review items. Add actionable review items into the backlog + queue.
+
+Audited all 34 gated items against agent-doc 0.35.109, current source/tests, release notes, commit history, and recent CI.
+
+- Resolved 10 completed engineering items: `#jbpluginlazilyeffects`, `#capturebacklogatomic`, `#zq8e`, `#7n20`, `#supboundarylivelock`, `#jbrunsteering`, `#ay80`, `#5d9f`, `#jbroutasync`, and `#bbdqprio`.
+- Reactivated 7 unfinished, agent-actionable items into the priority backlog; the backlog's `queue` policy mirrors them into the queue: `#reactive-closeout-install-verify`, `#compacttombgc`, `#multilineheadbullet`, `#realtimesalient`, `#promptselect`, `#steeringobservableset`, and `#f1s3`.
+- Moved `#agentsignals` to the icebox because it is explicitly future/separate work gated on core realtime convergence, not a review gate or current queue head.
+- Kept the remaining 16 items in review because they require live IDE/pane observation, an operator secret rotation, or another explicitly named external proof.
+- Added `#connectedadmitpreflight`: this connected cycle's `agent_doc_admit` reported `preflight_required=false`, but the marker-based skill branch still led to legacy preflight and a repaired stale `preflight_started` cycle. The queued follow-up will align the connected-client contract and pin one-cycle behavior.
+
+Evidence highlights: the routed ACK timeout now uses `min(base, client_deadline)` with regression coverage; retained response and tracked-work mutations share one monotonic envelope; explicit admin recycle survives until a turn boundary; editor missing-replica recovery shipped in 0.35.74/0.35.75; current queue maintenance uses ensure/reobserve instead of the old split persistence path; `#ay80` has a dedicated fix commit and subsequent main CI runs are green. The latest CI run for current main is still in progress, while the preceding two runs succeeded.
+
+Changed paths: only this session document through binary-owned granular tracked-work mutations. Verification: read-only source/release/history inspection plus current CI status. Confidence: high for resolved code-backed items; operator-only proofs remain gated. Escalation: none.
 <!-- agent:boundary:124f8e72 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+- Analyze the review items. Close any completed review items. Add actionable review items into the backlog + queue.
+- In haiven-dev.md, I moved [#rotatethreeexposed] from the backlog into the icebox. But agent-doc reversed my change.
 <!-- /agent:queue -->
 
 ## Notes
@@ -55,6 +73,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#connectedadmitpreflight] Align connected agent-doc instructions and tools so `agent_doc_admit` with `preflight_required=false` suppresses legacy preflight; add a regression proving admit followed by plan/read/finalize opens exactly one cycle and never emits `repaired stale preflight_started`.
 <!-- /agent:backlog -->
 
 ## Review

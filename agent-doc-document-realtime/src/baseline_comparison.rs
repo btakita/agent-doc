@@ -6,6 +6,10 @@
 //! policy. A baseline is not a competing document source; it is an immutable
 //! turn/checkpoint fact used to reason about what changed in the current model.
 
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RealtimeSteering {
     None,
@@ -54,6 +58,34 @@ impl RealtimeSteering {
             | Self::PromptReduced { verbatim, .. } => Some(verbatim),
         }
     }
+
+    pub fn turn_state(&self) -> agent_doc_turn::cp_projection::TurnSteeringState {
+        use agent_doc_turn::cp_projection::TurnSteeringState;
+        match self {
+            Self::None => TurnSteeringState::None,
+            Self::PromptTarget { .. } => TurnSteeringState::PromptTarget,
+            Self::ContentEdit { .. } => TurnSteeringState::ContentEdit,
+            Self::PromptDeleted { .. } => TurnSteeringState::PromptDeleted,
+            Self::PromptReduced { .. } => TurnSteeringState::PromptReduced,
+        }
+    }
+
+    /// Stable semantic identity for one observable steering element.
+    ///
+    /// The complete normalized body participates in the hash, not only its
+    /// first-line preview. This keeps distinct multi-line directives separate
+    /// while deduplicating the same CRDT-visible directive across reconnects.
+    pub fn identity(&self) -> Option<String> {
+        let label = self.label()?;
+        let verbatim = self.verbatim()?.replace("\r\n", "\n");
+        let body = verbatim.trim();
+        let digest = Sha256::digest(format!("{label}\0{body}").as_bytes());
+        let mut identity = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            write!(&mut identity, "{byte:02x}").expect("writing to String cannot fail");
+        }
+        Some(identity)
+    }
 }
 
 /// All realtime operator steering directives added since the baseline, in document
@@ -73,9 +105,48 @@ pub struct RealtimeSteeringSet {
 
 impl RealtimeSteeringSet {
     pub fn new(directives: Vec<RealtimeSteering>) -> Self {
-        Self {
-            directives: directives.into_iter().filter(|d| d.is_present()).collect(),
+        let mut identities = BTreeSet::new();
+        let directives = directives
+            .into_iter()
+            .filter(|directive| {
+                directive
+                    .identity()
+                    .is_some_and(|identity| identities.insert(identity))
+            })
+            .collect();
+        Self { directives }
+    }
+
+    /// Rehydrate the durable identity-keyed controller projection. During a
+    /// rolling upgrade an aggregate-only payload is represented as one legacy
+    /// directive so it remains visible, but only `elements` are set evidence.
+    pub fn from_turn_projection(
+        projection: &agent_doc_turn::cp_projection::TurnSteeringProjection,
+    ) -> Self {
+        let mut elements = projection.elements.values().collect::<Vec<_>>();
+        elements.sort_by_key(|element| element.ordinal);
+        if !elements.is_empty() {
+            return Self::new(
+                elements
+                    .into_iter()
+                    .map(|element| {
+                        steering_from_turn_fields(
+                            element.state,
+                            element.preview.clone(),
+                            element.verbatim.clone(),
+                        )
+                    })
+                    .collect(),
+            );
         }
+        if !projection.is_present() {
+            return Self::default();
+        }
+        Self::new(vec![steering_from_turn_fields(
+            projection.state,
+            projection.preview.clone(),
+            projection.verbatim.clone().unwrap_or_default(),
+        )])
     }
 
     pub fn is_present(&self) -> bool {
@@ -139,23 +210,55 @@ impl RealtimeSteeringSet {
     /// The primary directive supplies the compact state/preview while `count`
     /// and `verbatim` retain the complete aggregate for every consumer.
     pub fn turn_projection(&self) -> agent_doc_turn::cp_projection::TurnSteeringProjection {
-        use agent_doc_turn::cp_projection::{TurnSteeringProjection, TurnSteeringState};
+        use agent_doc_turn::cp_projection::{
+            TurnSteeringElementProjection, TurnSteeringProjection, TurnSteeringState,
+        };
 
         let primary = self.primary();
         let preview = primary.preview().map(str::to_string);
-        let state = match primary {
-            RealtimeSteering::None => return TurnSteeringProjection::none(),
-            RealtimeSteering::PromptTarget { .. } => TurnSteeringState::PromptTarget,
-            RealtimeSteering::ContentEdit { .. } => TurnSteeringState::ContentEdit,
-            RealtimeSteering::PromptDeleted { .. } => TurnSteeringState::PromptDeleted,
-            RealtimeSteering::PromptReduced { .. } => TurnSteeringState::PromptReduced,
-        };
-        TurnSteeringProjection::observed_aggregate(
+        let state = primary.turn_state();
+        if matches!(state, TurnSteeringState::None) {
+            return TurnSteeringProjection::none();
+        }
+        let elements = self
+            .directives
+            .iter()
+            .enumerate()
+            .filter_map(|(ordinal, directive)| {
+                Some((
+                    directive.identity()?,
+                    TurnSteeringElementProjection {
+                        state: directive.turn_state(),
+                        ordinal,
+                        preview: directive.preview().map(str::to_string),
+                        verbatim: directive.verbatim()?.to_string(),
+                    },
+                ))
+            })
+            .collect::<BTreeMap<_, _>>();
+        TurnSteeringProjection::observed_identity_set(
             state,
-            self.len(),
             preview,
             self.verbatim_aggregate(),
+            elements,
         )
+    }
+}
+
+fn steering_from_turn_fields(
+    state: agent_doc_turn::cp_projection::TurnSteeringState,
+    preview: Option<String>,
+    verbatim: String,
+) -> RealtimeSteering {
+    use agent_doc_turn::cp_projection::TurnSteeringState;
+    let preview =
+        preview.unwrap_or_else(|| verbatim.lines().next().unwrap_or_default().to_string());
+    match state {
+        TurnSteeringState::None => RealtimeSteering::None,
+        TurnSteeringState::PromptTarget => RealtimeSteering::PromptTarget { preview, verbatim },
+        TurnSteeringState::ContentEdit => RealtimeSteering::ContentEdit { preview, verbatim },
+        TurnSteeringState::PromptDeleted => RealtimeSteering::PromptDeleted { preview, verbatim },
+        TurnSteeringState::PromptReduced => RealtimeSteering::PromptReduced { preview, verbatim },
     }
 }
 
@@ -572,11 +675,38 @@ mod tests {
 
         let projection = set.turn_projection();
         assert_eq!(projection.count, 2);
+        assert_eq!(projection.elements.len(), 2);
         assert_eq!(
             projection.preview.as_deref(),
             Some("❯ First steering directive")
         );
         assert_eq!(projection.verbatim.as_deref(), Some(aggregate.as_str()));
+    }
+
+    #[test]
+    fn realtime_steering_identity_set_deduplicates_and_retracts_by_body() {
+        let first = RealtimeSteering::PromptTarget {
+            preview: "first".into(),
+            verbatim: "first\nbody".into(),
+        };
+        let second = RealtimeSteering::PromptTarget {
+            preview: "second".into(),
+            verbatim: "second\nbody".into(),
+        };
+        let duplicate_first = first.clone();
+        let first_id = first.identity().unwrap();
+        let second_id = second.identity().unwrap();
+
+        let both = RealtimeSteeringSet::new(vec![first, second.clone(), duplicate_first])
+            .turn_projection();
+        assert_eq!(both.elements.len(), 2);
+        assert!(both.elements.contains_key(&first_id));
+        assert!(both.elements.contains_key(&second_id));
+
+        let after_retraction = RealtimeSteeringSet::new(vec![second]).turn_projection();
+        assert_eq!(after_retraction.elements.len(), 1);
+        assert!(!after_retraction.elements.contains_key(&first_id));
+        assert!(after_retraction.elements.contains_key(&second_id));
     }
 
     #[test]

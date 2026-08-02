@@ -13257,14 +13257,21 @@ fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
         );
     }
     for required in [
+        "agent_doc_cycle_state_io::load_document_projection",
+        "projected_open_turn_steering_set",
+        "RealtimeSteeringSet::from_turn_projection",
         "agent_doc_document_realtime::baseline_comparison::BaselineComparison::new",
-        ".realtime_steering()",
+        ".realtime_steering_all()",
     ] {
         assert!(
             prompt_bearing_io.contains(required),
-            "session-check prompt-bearing IO should delegate to realtime baseline comparison: {required}"
+            "session-check prompt-bearing IO should consume the controller observable set and delegate only the actorless fallback to realtime baseline comparison: {required}"
         );
     }
+    assert!(
+        !prompt_bearing_io.contains(".realtime_steering()"),
+        "session-check must not independently recompute a second single-steering projection"
+    );
 }
 
 #[test]

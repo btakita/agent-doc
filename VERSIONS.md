@@ -4,6 +4,24 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.115
+
+_JetBrains plugin 0.2.336; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Response-aware prefix repair no longer corrupts assistant answers.**
+  Markdown blockquotes inside `### Re:` response bodies stay quoted response
+  context even when their text appears in the prompt-normalization target set.
+  Rust and JetBrains regression harnesses cover the reported `(HEAD)` response
+  shape and prevent later answer prose from acquiring `❯`.
+- **Realtime steering is a durable identity-keyed observable set.** Each
+  directive is keyed by its kind and complete normalized body, deduplicates
+  across reconnects, and retracts independently while retaining document order
+  and the compatibility aggregate. Both mutation and visible-projection CRDT
+  edges refresh the controller set; VS Code preserves it, and session-check
+  trusts its authoritative open-turn emptiness only when the controller-stamped
+  canonical content hash matches the CRDT content being checked. Missing or
+  stale receipts safely retain the baseline-comparison fallback.
+
 ## 0.35.114
 
 _JetBrains plugin 0.2.335; VS Code extension 0.2.64; Zed extension 0.1.0._

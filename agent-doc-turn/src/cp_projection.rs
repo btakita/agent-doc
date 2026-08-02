@@ -21,6 +21,7 @@
 
 use crate::CyclePhase;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Coarse turn state the plugin renders and reasons about. Collapses the finer
 /// [`CyclePhase`] persistence phases into the three the editor actually needs.
@@ -67,10 +68,30 @@ fn turn_steering_state_is_none(state: &TurnSteeringState) -> bool {
     matches!(state, TurnSteeringState::None)
 }
 
+/// One identity-keyed operator steering element.
+///
+/// `ordinal` preserves document order independently of the map's stable key
+/// order. The key is derived from the directive kind and complete body by the
+/// realtime comparison owner, so concurrent directives can be deduplicated and
+/// retracted independently without collapsing back to one aggregate string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnSteeringElementProjection {
+    pub state: TurnSteeringState,
+    pub ordinal: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    pub verbatim: String,
+}
+
 /// Realtime steering that changed the session document relative to the active
 /// turn baseline while the Project Controller turn is still in flight.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TurnSteeringProjection {
+    /// Controller-stamped receipt for the canonical CRDT content generation
+    /// from which this set was derived. An empty set is authoritative only
+    /// when this hash matches the content currently being checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_content_hash: Option<String>,
     #[serde(default, skip_serializing_if = "turn_steering_state_is_none")]
     pub state: TurnSteeringState,
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -79,6 +100,11 @@ pub struct TurnSteeringProjection {
     pub preview: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verbatim: Option<String>,
+    /// Durable observable-set projection keyed by stable, body-aware element
+    /// identity. Empty on legacy payloads, which remain readable through the
+    /// aggregate fields above.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub elements: BTreeMap<String, TurnSteeringElementProjection>,
 }
 
 const fn is_zero(value: &usize) -> bool {
@@ -88,19 +114,23 @@ const fn is_zero(value: &usize) -> bool {
 impl TurnSteeringProjection {
     pub const fn none() -> Self {
         Self {
+            observed_content_hash: None,
             state: TurnSteeringState::None,
             count: 0,
             preview: None,
             verbatim: None,
+            elements: BTreeMap::new(),
         }
     }
 
     pub fn observed(state: TurnSteeringState, preview: Option<String>) -> Self {
         Self {
+            observed_content_hash: None,
             state,
             count: 1,
             preview,
             verbatim: None,
+            elements: BTreeMap::new(),
         }
     }
 
@@ -114,20 +144,56 @@ impl TurnSteeringProjection {
             return Self::none();
         }
         Self {
+            observed_content_hash: None,
             state,
             count,
             preview,
             verbatim,
+            elements: BTreeMap::new(),
+        }
+    }
+
+    pub fn observed_identity_set(
+        state: TurnSteeringState,
+        preview: Option<String>,
+        verbatim: Option<String>,
+        elements: BTreeMap<String, TurnSteeringElementProjection>,
+    ) -> Self {
+        if elements.is_empty() || matches!(state, TurnSteeringState::None) {
+            return Self::none();
+        }
+        Self {
+            observed_content_hash: None,
+            state,
+            count: elements.len(),
+            preview,
+            verbatim,
+            elements,
         }
     }
 
     pub fn is_present(&self) -> bool {
-        !matches!(self.state, TurnSteeringState::None)
+        !self.elements.is_empty() || !matches!(self.state, TurnSteeringState::None)
+    }
+
+    pub fn with_observed_content_hash(mut self, content_hash: impl Into<String>) -> Self {
+        self.observed_content_hash = Some(content_hash.into());
+        self
+    }
+
+    pub fn has_observation_receipt(&self) -> bool {
+        self.observed_content_hash.is_some()
+    }
+
+    /// The identity-keyed set is the current contract. Aggregate-only payloads
+    /// deserialize for rolling upgrades but are not mistaken for set evidence.
+    pub fn identity_set_is_empty(&self) -> bool {
+        self.elements.is_empty()
     }
 }
 
 fn turn_steering_projection_is_none(steering: &TurnSteeringProjection) -> bool {
-    !steering.is_present()
+    !steering.is_present() && !steering.has_observation_receipt()
 }
 
 /// The plugin-facing projection of the authoritative turn phase.
@@ -296,5 +362,71 @@ mod tests {
         assert!(json.contains("removed prompt"));
         let back: TurnProjection = serde_json::from_str(&json).unwrap();
         assert_eq!(proj, back);
+    }
+
+    #[test]
+    fn steering_identity_set_round_trips_and_keeps_independent_elements() {
+        let elements = BTreeMap::from([
+            (
+                "prompt-a".to_string(),
+                TurnSteeringElementProjection {
+                    state: TurnSteeringState::PromptTarget,
+                    ordinal: 0,
+                    preview: Some("first".into()),
+                    verbatim: "first body".into(),
+                },
+            ),
+            (
+                "prompt-b".to_string(),
+                TurnSteeringElementProjection {
+                    state: TurnSteeringState::ContentEdit,
+                    ordinal: 1,
+                    preview: Some("second".into()),
+                    verbatim: "second body".into(),
+                },
+            ),
+        ]);
+        let steering = TurnSteeringProjection::observed_identity_set(
+            TurnSteeringState::PromptTarget,
+            Some("first".into()),
+            Some("first body\n\nsecond body".into()),
+            elements,
+        );
+
+        assert_eq!(steering.count, 2);
+        assert!(!steering.identity_set_is_empty());
+        let json = serde_json::to_string(&steering).unwrap();
+        let back: TurnSteeringProjection = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, steering);
+        assert!(back.elements.contains_key("prompt-a"));
+        assert!(back.elements.contains_key("prompt-b"));
+    }
+
+    #[test]
+    fn legacy_aggregate_projection_remains_readable_without_set_evidence() {
+        let projection: TurnSteeringProjection = serde_json::from_str(
+            r#"{"state":"prompt_target","count":2,"preview":"first","verbatim":"both"}"#,
+        )
+        .unwrap();
+
+        assert!(projection.is_present());
+        assert!(projection.identity_set_is_empty());
+        assert!(!projection.has_observation_receipt());
+    }
+
+    #[test]
+    fn observed_empty_set_round_trips_with_controller_receipt() {
+        let steering =
+            TurnSteeringProjection::none().with_observed_content_hash("canonical-content-hash");
+        let projection = TurnProjection::from_phase(CyclePhase::PreflightStarted)
+            .with_realtime_steering(steering.clone());
+
+        assert!(!steering.is_present());
+        assert!(steering.identity_set_is_empty());
+        assert!(steering.has_observation_receipt());
+        let json = serde_json::to_string(&projection).unwrap();
+        assert!(json.contains("canonical-content-hash"));
+        let back: TurnProjection = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.realtime_steering, steering);
     }
 }

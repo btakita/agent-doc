@@ -596,10 +596,22 @@ CP is authoritative for every transition (`transition_authority`).
 flight. The CP computes this from the current realtime document model compared
 with the immutable turn baseline: prompt-target additions, document edits,
 prompt deletion, and prompt reduction are projected as named steering states
-with a short preview. These states do not make disk authoritative and they do not
-turn the baseline into a document source; they are operator steering signals that
-the editor must surface on the active turn banner/status label so a deleted or
-changed prompt is visible before the old response is persisted blindly.
+with a short preview. The durable projection includes an `elements` observable
+set keyed by SHA-256 identity over each directive kind and complete normalized
+body; its ordinal retains document order. Replica update and visible projection
+edges both refresh this set, so reconnects deduplicate stable directives and
+one directive can be retracted without removing its concurrent siblings.
+Each observation also carries the controller-stamped canonical CRDT content
+hash. Session-check consumes the controller set directly for an open turn,
+including authoritative emptiness, only when that receipt matches the canonical
+content currently being checked. A missing or stale receipt falls back to
+baseline comparison; it must never turn an unobserved default-empty projection
+into evidence. This generation receipt is the acknowledgement boundary, so the
+plugin does not need a second bespoke steering acknowledgement.
+These states do not make disk authoritative and they do not turn the baseline
+into a document source; they are operator steering signals that the editor must
+surface on the active turn banner/status label so a deleted or changed prompt is
+visible before the old response is persisted blindly.
 
 ### Editor Parity Requirement
 

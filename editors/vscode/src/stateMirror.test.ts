@@ -185,10 +185,25 @@ describe('GraphView fold + AgentDocProjection (#lzsync 3B clean split)', () => {
                 payload: {
                     phase: 'preflight_started',
                     realtime_steering: {
+                        observed_content_hash: 'current-hash',
                         state: 'prompt_target',
                         count: 2,
                         preview: 'First edit',
                         verbatim: 'First edit\n\nSecond edit',
+                        elements: {
+                            first: {
+                                state: 'prompt_target',
+                                ordinal: 0,
+                                preview: 'First edit',
+                                verbatim: 'First edit',
+                            },
+                            second: {
+                                state: 'prompt_target',
+                                ordinal: 1,
+                                preview: 'Second edit',
+                                verbatim: 'Second edit',
+                            },
+                        },
                     },
                 },
             },
@@ -198,10 +213,25 @@ describe('GraphView fold + AgentDocProjection (#lzsync 3B clean split)', () => {
             turn_in_flight: true,
             transition_authority: 'project_controller',
             realtime_steering: {
+                observed_content_hash: 'current-hash',
                 state: 'prompt_target',
                 count: 2,
                 preview: 'First edit',
                 verbatim: 'First edit\n\nSecond edit',
+                elements: {
+                    first: {
+                        state: 'prompt_target',
+                        ordinal: 0,
+                        preview: 'First edit',
+                        verbatim: 'First edit',
+                    },
+                    second: {
+                        state: 'prompt_target',
+                        ordinal: 1,
+                        preview: 'Second edit',
+                        verbatim: 'Second edit',
+                    },
+                },
             },
         });
 
@@ -217,6 +247,31 @@ describe('GraphView fold + AgentDocProjection (#lzsync 3B clean split)', () => {
             state: 'idle',
             turn_in_flight: false,
             transition_authority: 'project_controller',
+        });
+    });
+
+    it('preserves a controller-confirmed empty steering set receipt', () => {
+        const view = new GraphView();
+        applyIpcMessageToView(view, snapshotMsg(1, [
+            {
+                node: CLOSEOUT,
+                typeTag: AgentDocNodeType.CLOSEOUT_CYCLE,
+                payload: {
+                    phase: 'preflight_started',
+                    realtime_steering: {
+                        observed_content_hash: 'current-hash',
+                    },
+                },
+            },
+        ]));
+
+        assert.deepStrictEqual(agentDocTurnProjectionFromView(view), {
+            state: 'awaiting_response',
+            turn_in_flight: true,
+            transition_authority: 'project_controller',
+            realtime_steering: {
+                observed_content_hash: 'current-hash',
+            },
         });
     });
 });

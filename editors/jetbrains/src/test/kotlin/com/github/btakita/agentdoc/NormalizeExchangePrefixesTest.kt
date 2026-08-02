@@ -658,8 +658,8 @@ New user prompt.
     @Test
     fun `does not treat prefixed markdown response labels as fresh prompts`() {
         val doc = """
-<!-- agent:exchange patch=append -->
-### Re: previous — gpt-5
+            <!-- agent:exchange patch=append -->
+            ### Re: previous — gpt-5
 
 Implemented.
 
@@ -685,5 +685,33 @@ do #next. spec-test-build-install-commit-push
         assertTrue(result.contains("❯ **Commit / push:**\n- `abc1234` pushed."))
         assertFalse(result.contains("❯ - `abc1234` pushed."))
         assertTrue(result.contains("❯ do #next. spec-test-build-install-commit-push\n"))
+    }
+
+    @Test
+    fun `does not reclassify quoted response targets as prompts`() {
+        val doc = """
+            <!-- agent:exchange patch=append -->
+            ### Re: Response (HEAD)
+
+            > Please install the model.
+
+            Installed the model in the backend.
+
+            > Can the rust FPE engine be directly embedded in the backend?
+
+            Yes. The Go backend can call the embedded Rust library.
+            The separate ONNX path remains optional.
+            <!-- agent:boundary:c1b2f576:haiven-dev -->
+            <!-- /agent:exchange -->
+        """.trimIndent()
+        val targets = listOf(
+            "> Please install the model.",
+            "Installed the model in the backend.",
+            "> Can the rust FPE engine be directly embedded in the backend?",
+            "Yes. The Go backend can call the embedded Rust library.",
+            "The separate ONNX path remains optional.",
+        )
+
+        assertEquals(doc, normalizeExchangePrefixesUtil(doc, targets))
     }
 }

@@ -7403,7 +7403,7 @@ fn handle_crdt_replica_rpc(
             }
         }
     }
-    if method == ControllerCrdtReplicaMethod::Update
+    if replica_method_changes_realtime_steering_set(method)
         && let Some(runtime) = runtime
         && let Err(error) = observe_realtime_steering_after_replica_update(
             bootstrap,
@@ -7447,6 +7447,13 @@ fn replica_method_changes_delivery_frontier(method: ControllerCrdtReplicaMethod)
             | ControllerCrdtReplicaMethod::Update
             | ControllerCrdtReplicaMethod::Projection
             | ControllerCrdtReplicaMethod::Pull
+    )
+}
+
+fn replica_method_changes_realtime_steering_set(method: ControllerCrdtReplicaMethod) -> bool {
+    matches!(
+        method,
+        ControllerCrdtReplicaMethod::Update | ControllerCrdtReplicaMethod::Projection
     )
 }
 
@@ -7593,7 +7600,8 @@ fn realtime_steering_event_for_text(
         baseline, current,
     )
     .realtime_steering_all()
-    .turn_projection();
+    .turn_projection()
+    .with_observed_content_hash(content_hash.clone());
     agent_doc_state_backbone::StateEvent::new(
         format!("realtime-steering:{document_hash}:{cycle_id}:{content_hash}"),
         agent_doc_state_backbone::StateFact::RealtimeSteeringObserved {
@@ -20710,11 +20718,46 @@ mod tests {
         };
         assert_eq!(cycle_id, "cycle");
         assert_eq!(steering.count, 2);
+        assert_eq!(steering.elements.len(), 2);
+        assert_eq!(
+            steering.observed_content_hash.as_deref(),
+            Some(content_hash.as_str())
+        );
+        assert!(
+            steering
+                .elements
+                .values()
+                .any(|element| element.verbatim.contains("First live edit"))
+        );
+        assert!(
+            steering
+                .elements
+                .values()
+                .any(|element| element.verbatim.contains("Second live edit"))
+        );
         assert!(steering.verbatim.as_deref().is_some_and(
             |body| body.contains("First live edit") && body.contains("Second live edit")
         ));
         assert_eq!(content_hash, &agent_doc_hash::content_hash(&current));
         assert!(event.event_id.ends_with(content_hash));
+    }
+
+    #[test]
+    fn realtime_steering_observes_mutation_and_visible_projection_edges() {
+        assert!(replica_method_changes_realtime_steering_set(
+            ControllerCrdtReplicaMethod::Update
+        ));
+        assert!(replica_method_changes_realtime_steering_set(
+            ControllerCrdtReplicaMethod::Projection
+        ));
+        for method in [
+            ControllerCrdtReplicaMethod::Register,
+            ControllerCrdtReplicaMethod::Deregister,
+            ControllerCrdtReplicaMethod::Pull,
+            ControllerCrdtReplicaMethod::Awareness,
+        ] {
+            assert!(!replica_method_changes_realtime_steering_set(method));
+        }
     }
 
     #[test]

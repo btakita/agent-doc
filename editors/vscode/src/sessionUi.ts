@@ -52,11 +52,18 @@ export interface TurnProjection {
     state: 'idle' | 'awaiting_response' | 'persisting';
     turn_in_flight: boolean;
     transition_authority: string;
-    realtime_steering?: {
-        state?: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
+realtime_steering?: {
+observed_content_hash?: string;
+state?: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
         count?: number;
         preview?: string;
         verbatim?: string;
+        elements?: Record<string, {
+            state: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
+            ordinal: number;
+            preview?: string;
+            verbatim: string;
+        }>;
     };
 }
 

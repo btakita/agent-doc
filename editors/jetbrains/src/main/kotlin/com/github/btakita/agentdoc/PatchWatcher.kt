@@ -2602,10 +2602,38 @@ private fun isExchangeResponseHeadingForPrefixRepair(trimmed: String): Boolean =
 
 private fun startsPromptRunAfterResponseForPrefixRepair(trimmed: String, isTarget: Boolean): Boolean {
     val alreadyPrefixed = trimmed.startsWith("❯ ")
+    if (!alreadyPrefixed && !isTarget) return false
     val unprefixed = if (alreadyPrefixed) trimmed.removePrefix("❯ ").trimStart() else trimmed
     if (lineLooksLikePlainResponseAfterPromptForPrefixRepair(unprefixed)) return false
-    return lineLooksLikeFreshPromptAfterResponseForPrefixRepair(unprefixed) ||
-        ((alreadyPrefixed || isTarget) && !lineLooksLikePlainResponseAfterPromptForPrefixRepair(unprefixed))
+    // Mirror the Rust classifier: a blockquote inside an assistant response is
+    // quoted context, not a fresh prompt transition. Otherwise `> Please ...`
+    // exits response mode and every subsequent normalization target is
+    // corrupted into a `❯` prompt.
+    if (unprefixed.startsWith(">")) return false
+    if (alreadyPrefixed && !Regex("""^❯\s+([-*+]|\d+[.)])\s+""").containsMatchIn(trimmed)) {
+        return true
+    }
+    val lower = unprefixed.lowercase()
+    return lower.startsWith("please ") ||
+        lower.contains(" please ") ||
+        lower.startsWith("can you ") ||
+        lower.startsWith("could you ") ||
+        lower.startsWith("would you ") ||
+        lower.startsWith("need you to ") ||
+        lower == "go" ||
+        lower == "continue" ||
+        lower.startsWith("/") ||
+        lower.startsWith("do #") ||
+        lower.startsWith("do [#") ||
+        lower.startsWith("fix #") ||
+        lower.startsWith("run ") ||
+        lower.startsWith("rerun ") ||
+        lower.startsWith("build ") ||
+        lower.startsWith("test ") ||
+        lower.startsWith("commit ") ||
+        lower.startsWith("push ") ||
+        lower.startsWith("verify ") ||
+        lower.startsWith("investigate ")
 }
 
 private fun lineLooksLikeFreshPromptAfterResponseForPrefixRepair(trimmed: String): Boolean {

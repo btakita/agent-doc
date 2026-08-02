@@ -2859,6 +2859,37 @@ do #spfxnorm. spec-test-build-install-commit-push
     }
 
     #[test]
+    fn normalize_exchange_prefixes_never_reclassifies_quoted_response_targets_as_prompts() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: Response (HEAD)
+
+> Please install the model.
+
+Installed the model in the backend.
+
+> Can the rust FPE engine be directly embedded in the backend?
+
+Yes. The Go backend can call the embedded Rust library.
+The separate ONNX path remains optional.
+<!-- agent:boundary:c1b2f576:haiven-dev -->
+<!-- /agent:exchange -->
+";
+        let targets = vec![
+            "> Please install the model.".to_string(),
+            "Installed the model in the backend.".to_string(),
+            "> Can the rust FPE engine be directly embedded in the backend?".to_string(),
+            "Yes. The Go backend can call the embedded Rust library.".to_string(),
+            "The separate ONNX path remains optional.".to_string(),
+        ];
+
+        let repaired = normalize_exchange_prefixes_for_targets(working, &targets);
+
+        assert_eq!(repaired, working);
+        assert!(!repaired.contains("\n❯ "));
+    }
+
+    #[test]
     fn normalization_prefix_observation_counts_counts_exchange_targets() {
         let content = "\
 <!-- agent:exchange -->

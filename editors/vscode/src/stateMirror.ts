@@ -46,11 +46,18 @@ export interface AgentDocTurnProjection {
     state: 'idle' | 'awaiting_response' | 'persisting';
     turn_in_flight: boolean;
     transition_authority: 'project_controller';
-    realtime_steering?: {
-        state: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
+realtime_steering?: {
+observed_content_hash?: string;
+state?: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
         count?: number;
         preview?: string;
         verbatim?: string;
+        elements?: Record<string, {
+            state: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
+            ordinal: number;
+            preview?: string;
+            verbatim: string;
+        }>;
     };
 }
 
@@ -100,16 +107,31 @@ function realtimeSteeringField(
 ): AgentDocTurnProjection['realtime_steering'] | undefined {
     const value = obj?.realtime_steering;
     if (!value || typeof value !== 'object') return undefined;
-    const steering = value as Record<string, unknown>;
-    const state = stringField(steering, 'state');
-    if (!['prompt_target', 'content_edit', 'prompt_deleted', 'prompt_reduced'].includes(state ?? '')) {
-        return undefined;
-    }
-    return {
-        state: state as NonNullable<AgentDocTurnProjection['realtime_steering']>['state'],
-        count: typeof steering.count === 'number' ? steering.count : undefined,
-        preview: stringField(steering, 'preview'),
-        verbatim: stringField(steering, 'verbatim'),
+const steering = value as Record<string, unknown>;
+const state = stringField(steering, 'state');
+const observedContentHash = stringField(steering, 'observed_content_hash');
+if (
+!observedContentHash
+&& !['prompt_target', 'content_edit', 'prompt_deleted', 'prompt_reduced'].includes(state ?? '')
+) {
+return undefined;
+}
+    const elements = steering.elements;
+return {
+...(state ? {
+state: state as NonNullable<AgentDocTurnProjection['realtime_steering']>['state'],
+} : {}),
+...(observedContentHash ? { observed_content_hash: observedContentHash } : {}),
+...(typeof steering.count === 'number' ? { count: steering.count } : {}),
+...(stringField(steering, 'preview') ? { preview: stringField(steering, 'preview') } : {}),
+...(stringField(steering, 'verbatim') ? { verbatim: stringField(steering, 'verbatim') } : {}),
+        ...(elements && typeof elements === 'object' && !Array.isArray(elements)
+            ? {
+                elements: elements as NonNullable<
+                    NonNullable<AgentDocTurnProjection['realtime_steering']>['elements']
+                >,
+            }
+            : {}),
     };
 }
 

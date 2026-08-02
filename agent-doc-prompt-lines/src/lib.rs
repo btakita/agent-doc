@@ -142,6 +142,13 @@ pub fn line_looks_like_targeted_prompt_prefix_repair_start(trimmed: &str, is_tar
     if unprefixed.is_empty() || line_looks_like_plain_response_after_prompt(unprefixed) {
         return false;
     }
+    // A blockquote inside an assistant response is quoted context, even when
+    // its text also appears in the normalization target set. Treating
+    // `> Please ...` as a fresh prompt exits response mode and lets every
+    // following answer line acquire a `❯` prefix.
+    if unprefixed.starts_with('>') {
+        return false;
+    }
 
     if (trimmed.starts_with('❯') && !line_looks_like_markdown_list_item(trimmed))
         || line_looks_like_soft_prompt_request(unprefixed)

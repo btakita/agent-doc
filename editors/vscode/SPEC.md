@@ -44,9 +44,13 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 - VS Code CRDT replica IPC must use `.agent-doc/controller.sock` with the controller `crdt_replica` envelope. It must not connect to `.agent-doc/supervisor/*.sock`.
 - VS Code drains named-document CRDT deliveries from targeted `EditorIntent` events and the Lazily-backed controller subscription. It must not watch a filesystem event directory or use a fixed interval remote-update pull loop.
 - VS Code reads turn-state refreshes from the Project Controller `state_subscribe` Lazily projection and mirrors the returned snapshot/delta locally. It does not read filesystem state for ordinary turn-state UI. If the Project Controller request fails, the status bar shows `agent-doc: Project Controller disconnected`; there is no compatibility fallback. Native-library reload arrives as the targeted `reload_library` editor intent. Turn-state refreshes are coalesced and use a minimum refresh interval; active-editor changes may force one immediate Project Controller refresh.
-- The mirrored closeout payload's Rust-owned `realtime_steering` aggregate drives
-  the active-turn status label/count and hover text; TypeScript must not derive
-  steering from the visible buffer or disk.
+- The mirrored closeout payload's Rust-owned `realtime_steering` aggregate and
+  body-identity-keyed `elements` set drive the active-turn status label/count,
+  hover text, and durable directive membership. Its
+  `observed_content_hash` is the controller's canonical CRDT generation
+  receipt; a receipt-only empty set renders no steering label. TypeScript
+  preserves that projection and must not derive steering from the visible
+  buffer or disk.
 - VS Code activation must not run automatic `agent-doc resync`, `resync --fix`, or a reconnect-reread scan over open buffers. Session repair/audit remains an explicit `Resync / Fix Sessions` operator action only.
 - Prompt steering is Project Controller-owned. VS Code must not treat stale supervisor freshness as an editor-IPC apply/receipt/repair veto; supervisor recycle is only an explicit session action.
 

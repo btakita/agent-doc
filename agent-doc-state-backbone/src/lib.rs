@@ -1974,12 +1974,17 @@ impl DocumentStateProjection {
                 }
             }
             StateFact::RealtimeSteeringObserved {
-                cycle_id, steering, ..
+                cycle_id,
+                steering,
+                content_hash,
+                ..
             } => {
                 if self.closeout.cycle_id.as_deref() == Some(cycle_id)
                     && self.closeout.phase.is_some_and(CyclePhase::is_open)
                 {
-                    self.closeout.realtime_steering = steering.clone();
+                    self.closeout.realtime_steering = steering
+                        .clone()
+                        .with_observed_content_hash(content_hash.clone());
                 }
             }
             StateFact::ResponseCaptured {
@@ -3738,7 +3743,7 @@ impl QueueHeadProjection {
 }
 
 fn turn_steering_projection_is_none(steering: &TurnSteeringProjection) -> bool {
-    !steering.is_present()
+    !steering.is_present() && !steering.has_observation_receipt()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -6188,7 +6193,9 @@ mod tests {
 
     #[test]
     fn realtime_steering_is_scoped_to_the_open_closeout_cycle() {
-        use agent_doc_turn::cp_projection::{TurnSteeringProjection, TurnSteeringState};
+        use agent_doc_turn::cp_projection::{
+            TurnSteeringElementProjection, TurnSteeringProjection, TurnSteeringState,
+        };
 
         let mut projection = DocumentStateProjection::new("doc-steering");
         projection.apply(&StateFact::PreflightStarted {
@@ -6197,21 +6204,93 @@ mod tests {
             session_id: None,
             tracked_work_maintenance_required: None,
         });
+        let elements = BTreeMap::from([
+            (
+                "first-id".into(),
+                TurnSteeringElementProjection {
+                    state: TurnSteeringState::PromptTarget,
+                    ordinal: 0,
+                    preview: Some("first prompt".into()),
+                    verbatim: "first prompt".into(),
+                },
+            ),
+            (
+                "second-id".into(),
+                TurnSteeringElementProjection {
+                    state: TurnSteeringState::PromptTarget,
+                    ordinal: 1,
+                    preview: Some("second prompt".into()),
+                    verbatim: "second prompt".into(),
+                },
+            ),
+        ]);
         projection.apply(&StateFact::RealtimeSteeringObserved {
             document_hash: "doc-steering".into(),
             cycle_id: "cycle-1".into(),
-            steering: TurnSteeringProjection::observed_aggregate(
+            steering: TurnSteeringProjection::observed_identity_set(
                 TurnSteeringState::PromptTarget,
-                2,
                 Some("first prompt".into()),
                 Some("both prompts verbatim".into()),
+                elements,
             ),
             content_hash: "hash-1".into(),
         });
         assert_eq!(projection.closeout.realtime_steering.count, 2);
+        assert_eq!(projection.closeout.realtime_steering.elements.len(), 2);
+        assert_eq!(
+            projection
+                .closeout
+                .realtime_steering
+                .observed_content_hash
+                .as_deref(),
+            Some("hash-1")
+        );
         assert_eq!(
             projection.closeout.realtime_steering.verbatim.as_deref(),
             Some("both prompts verbatim")
+        );
+
+        projection.apply(&StateFact::RealtimeSteeringObserved {
+            document_hash: "doc-steering".into(),
+            cycle_id: "cycle-1".into(),
+            steering: TurnSteeringProjection::observed_identity_set(
+                TurnSteeringState::PromptTarget,
+                Some("second prompt".into()),
+                Some("second prompt".into()),
+                BTreeMap::from([(
+                    "second-id".into(),
+                    TurnSteeringElementProjection {
+                        state: TurnSteeringState::PromptTarget,
+                        ordinal: 0,
+                        preview: Some("second prompt".into()),
+                        verbatim: "second prompt".into(),
+                    },
+                )]),
+            ),
+            content_hash: "hash-2".into(),
+        });
+        assert_eq!(projection.closeout.realtime_steering.elements.len(), 1);
+        assert_eq!(
+            projection
+                .closeout
+                .realtime_steering
+                .observed_content_hash
+                .as_deref(),
+            Some("hash-2")
+        );
+        assert!(
+            !projection
+                .closeout
+                .realtime_steering
+                .elements
+                .contains_key("first-id")
+        );
+        assert!(
+            projection
+                .closeout
+                .realtime_steering
+                .elements
+                .contains_key("second-id")
         );
 
         projection.apply(&StateFact::CommitObserved {

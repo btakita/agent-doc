@@ -85,8 +85,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 
 - The active-turn banner is derived from the Project Controller
   `state_subscribe` closeout payload, including `realtime_steering` kind/count
-  and the full aggregate as hover text. It must not re-read disk or derive
-  steering in Kotlin.
+  and the full aggregate as hover text. The identity-keyed `elements` object is
+  preserved verbatim from the Rust projection. Its `observed_content_hash` is
+  the controller's canonical CRDT generation receipt; a receipt-only empty set
+  renders no steering label. Kotlin must not re-read disk or derive steering.
+- Exchange prompt-prefix normalization must remain response-aware. A Markdown
+  blockquote under `### Re:` is quoted response context even when its complete
+  text is present in the normalization target set; it cannot transition the
+  parser into prompt mode or cause later response prose to acquire `❯`.
 - `Run Agent Doc` saves only the active markdown document and immediately dispatches a Project Controller `editor_route` request carrying dispatch-only, plain-trigger routing with a 15-second ready wait. The editor path does not block on the typing debounce and does not save unrelated open documents; the active document save is the editor-owned flush boundary before the controller route request runs. Even after `Clear Session Context`, this action still sends the plain `agent-doc <FILE>` reopen into the live session instead of restarting Codex.
 - Editor selection never forks `Run Agent Doc` onto another transport. Selected-text invocations and saved-document diff steering use the exact same Project Controller request as an unselected click and submit the same bare `agent-doc <FILE>` trigger; Rust route policy decides whether that starts, replaces, or steers the live turn. Kotlin must not send `selected_text` / `steering_id`, await a turn-steering acknowledgement, or derive actor-state admission independently.
 - Every `Run Agent Doc` click writes a durable attempt ledger entry for click receipt, active document save, `editor_route` request construction/start, retry/dedupe, and terminal route outcome. The ledger may persist diagnostic route shape and route output summaries, but it must not persist raw document prompt text; prompt/trigger proof is represented by byte counts and hashes in binary/controller diagnostics.

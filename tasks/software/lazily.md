@@ -64,13 +64,15 @@ The Kotlin one is the most interesting: it is the *same* hole cpp had before `#l
 Root-level fixtures (`arena_blob.json`, `snapshot_*`, `delta_*`) **cannot be cited at all**: they have no area, and the two area-scoped guards exclude them from their audit entirely, so the rule cannot answer honestly for them. That leaves "Shared-memory blob path" and the Snapshot/Delta half of the IPC-wire row still unbacked. I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Filed, together with a smaller one: Dart's `crdt_sync_frames.json` entry carries no reason of its own — it inherited the comment above it — in a ledger that requires one per entry.
 
 Last cycle's lazily-cpp CI is green (`30720210025`). Exchange is large (queue active, so noting rather than compacting).
-<!-- agent:boundary:6857eeac -->
+<!-- agent:boundary:37f28c8c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#coveragejsonscores]~~
+- 🚧 do [#lazilystatetable]
+- do [#reliablesyncrow]
+- do [#rootlevelconformance]
 - 📌 do [#lzcppmsgpackwire]
 - 📌 do [#lzmsgpackseven]
 - 📌 do [#lzreadmelinkrot]
@@ -92,7 +94,7 @@ Last cycle's lazily-cpp CI is green (`30720210025`). Exchange is large (queue ac
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
+- [ ] 🚧 [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.
 - [ ] [#lzcppmsgpackwire] lazily-cpp ships a MessagePack codec that is NOT protocol.md's msgpack, which is worse than not having one because the file made it read as implemented and coverage.json would have shown a check. The spec frame is externally tagged, Snapshot mapping to its body, over named-field maps whose keys match the json schema; include/lazily/codec.hpp writes an INTERNALLY tagged envelope with type and value keys, gives NodeState and IpcValue integer kind discriminators instead of the Payload and Inline external tags, and also ships a positional array form protocol.md excludes outright. A peer that negotiated msgpack with lazily-cpp would not decode its frames. Two honest exits: align codec.hpp to the spec frame and replay codec/frame_roundtrip_msgpack.json, or keep it as a private codec, rename it so nothing implies the msgpack token, and drop msgpack from anything cpp advertises. coverage.json marks it partial until then. Depends on #lzcppjsoncodec only for the fixture-reading seam, not for the wire itself.

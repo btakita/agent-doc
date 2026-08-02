@@ -1,8 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
-    CrdtReplicaForwarder,
-    CrdtReplicaManager,
+  CrdtReplicaForwarder,
+  CrdtReplicaManager,
+  coalescedReplicaTextChange,
+  localReplicaBaselineDecision,
     parsePullResponse,
     parseRegisterResponse,
     matchingRemoteTargetGeneration,
@@ -70,15 +72,20 @@ class FakeTransport implements ReplicaTransport {
     registerCount = 0;
     pullCount = 0;
     unavailablePulls = 0;
-    projectionFailures = 0;
+  projectionFailures = 0;
+  registerFailures = 0;
 
     async register(
         _filePath: string,
         _identity: string,
         _stateVector?: Uint8Array | null,
-    ): Promise<{ clientId: number; bootstrap?: Uint8Array | null }> {
-        this.registerCount += 1;
-        return { clientId: 41 + this.registerCount, bootstrap: Buffer.from([9]) };
+  ): Promise<{ clientId: number; bootstrap?: Uint8Array | null }> {
+    this.registerCount += 1;
+    if (this.registerFailures > 0) {
+      this.registerFailures -= 1;
+      throw new Error('register unavailable');
+    }
+    return { clientId: 41 + this.registerCount, bootstrap: Buffer.from([9]) };
     }
 
     async broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void> {
@@ -109,9 +116,13 @@ class FakeTransport implements ReplicaTransport {
         if (this.projectionFailures > 0) {
             this.projectionFailures -= 1;
             return false;
-        }
-        this.projected.push({ contentHash, diskPersisted });
-        this.pending = [];
+    }
+    this.projected.push({ contentHash, diskPersisted });
+    this.pending = this.pending.filter(
+      (update) =>
+        update.expectedContentHash != null
+        && update.expectedContentHash !== contentHash,
+    );
         return true;
     }
 
@@ -184,7 +195,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.strictEqual(shouldApplyRemoteUpdate(self, 42), false);
     });
 
-    it('converts VS Code UTF-16 ranges to CRDT codepoint units', () => {
+  it('converts VS Code UTF-16 ranges to CRDT codepoint units', () => {
         assert.deepStrictEqual(utf16RangeToCodePoints('a😀b', 1, 2), {
             offset: 1,
             deleteLen: 1,
@@ -193,7 +204,21 @@ it('applies peer remote updates but suppresses self echoes', () => {
             offset: 4,
             deleteLen: 0,
         });
+  });
+
+  it('types the stale local baseline as a canonical rebootstrap transition', () => {
+    assert.strictEqual(localReplicaBaselineDecision('base', 'base'), 'forward-local');
+    assert.strictEqual(
+      localReplicaBaselineDecision('stale', 'base'),
+      'rebootstrap-canonical-then-forward',
+    );
+    assert.deepStrictEqual(coalescedReplicaTextChange('a😀b', 'aZb'), {
+      offset: 1,
+      deleteLen: 1,
+      insert: 'Z',
+      resultingText: 'aZb',
     });
+  });
 
     it('forwards a local editor delta through the registered replica', async () => {
         const node = new FakeNode('a😀b');
@@ -224,9 +249,9 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.deepStrictEqual(Array.from(transport.broadcasts[0].update), [1, 2, 3]);
     });
 
-    it('retains an unsaved queue edit without whole-editor adoption when the native baseline is stale', async () => {
-        const staleNode = new FakeNode('base');
-        const replacementNode = new FakeNode('base\n- queue item');
+  it('rebases an unsaved queue edit onto exact controller canonical without whole-editor adoption', async () => {
+    const staleNode = new FakeNode('base');
+    const replacementNode = new FakeNode('base');
         const nodes = [staleNode, replacementNode];
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
@@ -246,28 +271,36 @@ it('applies peer remote updates but suppresses self echoes', () => {
         staleNode.remoteText = 'stale native text';
         staleNode.applyUpdate(42, Buffer.from([7]));
         editorText = 'base\n- queue item';
-        await manager.handleLocalChangeDelta(filePath, [
-            { rangeOffset: 4, rangeLength: 0, text: '\n- queue item' },
-        ]);
+    await manager.handleLocalChangeDelta(filePath, [
+      { rangeOffset: 4, rangeLength: 0, text: '\n- queue item' },
+    ]);
 
-        assert.deepStrictEqual(staleNode.locals, []);
-        assert.strictEqual(transport.registerCount, 1);
-        assert.strictEqual(editorText.match(/- queue item/g)?.length, 1);
-        manager.dispose();
-    });
+    assert.deepStrictEqual(staleNode.locals, []);
+    assert.deepStrictEqual(replacementNode.locals, [
+      { clientId: 43, offset: 4, deleteLen: 0, insert: '\n- queue item' },
+    ]);
+    assert.strictEqual(transport.registerCount, 2);
+    assert.strictEqual(transport.deregistered.length, 1);
+    assert.strictEqual(transport.projected.length, 1);
+    assert.strictEqual(editorText.match(/- queue item/g)?.length, 1);
+    manager.dispose();
+  });
 
-    it('retains successive queue edits while a stale native baseline awaits canonical projection', async () => {
+  it('retains successive queue edits while a stale native baseline awaits canonical projection', async () => {
         const firstEdit = 'base\n- queue item';
         const latestEdit = `${firstEdit}\n- later item`;
-        const staleNode = new FakeNode('base');
-        const transport = new FakeTransport();
+    const staleNode = new FakeNode('base');
+    const failedReplacementNode = new FakeNode('base');
+    const replacementNode = new FakeNode('base');
+    const nodes = [staleNode, failedReplacementNode, replacementNode];
+    const transport = new FakeTransport();
         const filePath = '/work/plan.md';
         let editorText = 'base';
         const manager = new CrdtReplicaManager({
             projectRoot: '/work',
             identity: 'vscode-test',
             transport,
-            nodeFactory: () => staleNode,
+      nodeFactory: () => nodes.shift()!,
             listDocuments: () => [],
             currentText: () => editorText,
             applyText: async () => true,
@@ -275,9 +308,10 @@ it('applies peer remote updates but suppresses self echoes', () => {
 
         manager.seedDocument(filePath, editorText);
         assert.strictEqual(await manager.attachDocument(filePath), true);
-        staleNode.remoteText = 'stale native text';
-        staleNode.applyUpdate(42, Buffer.from([7]));
-        editorText = firstEdit;
+    staleNode.remoteText = 'stale native text';
+    staleNode.applyUpdate(42, Buffer.from([7]));
+    transport.registerFailures = 1;
+    editorText = firstEdit;
         await manager.handleLocalChangeDelta(filePath, [
             { rangeOffset: 4, rangeLength: 0, text: '\n- queue item' },
         ]);
@@ -286,8 +320,16 @@ it('applies peer remote updates but suppresses self echoes', () => {
             { rangeOffset: firstEdit.length, rangeLength: 0, text: '\n- later item' },
         ]);
 
-        assert.strictEqual(transport.registerCount, 1);
-        assert.strictEqual(editorText.match(/- queue item/g)?.length, 1);
+    assert.strictEqual(transport.registerCount, 3);
+    assert.deepStrictEqual(replacementNode.locals, [
+      {
+        clientId: 44,
+        offset: 4,
+        deleteLen: 0,
+        insert: '\n- queue item\n- later item',
+      },
+    ]);
+    assert.strictEqual(editorText.match(/- queue item/g)?.length, 1);
         assert.strictEqual(editorText.match(/- later item/g)?.length, 1);
         manager.dispose();
     });
@@ -422,6 +464,88 @@ it('applies peer remote updates but suppresses self echoes', () => {
         manager.dispose();
     });
 
+    it('rebootstraps a stale replica before acknowledging an exact visible target', async () => {
+        const stale = new FakeNode('base');
+        const replacement = new FakeNode('remote text');
+        const nodes = [stale, replacement];
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        let editorText = 'base';
+        transport.pending = [{
+            patchId: 'crdt:1:42:21',
+            origin: 1,
+            target: 42,
+            generation: 21,
+            expectedContentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+            update: Buffer.from([21]),
+        }];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => nodes.shift() ?? new FakeNode('remote text'),
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async () => {
+                assert.fail('the exact visible target must not be written into the editor again');
+            },
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        editorText = 'remote text';
+        await manager.drainRemoteUpdates();
+
+        assert.strictEqual(transport.registerCount, 2);
+        assert.strictEqual(stale.updates.length, 0);
+        assert.strictEqual(stale.closed.length, 1);
+        assert.strictEqual(transport.projected.length, 1);
+        assert.strictEqual(transport.pending.length, 0);
+        manager.dispose();
+    });
+
+    it('rejects visible-target acknowledgement when the editor races canonical rebootstrap', async () => {
+        const stale = new FakeNode('base');
+        const replacement = new FakeNode('remote text');
+        const nodes = [stale, replacement];
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        let editorText = 'base';
+        const register = transport.register.bind(transport);
+        transport.register = async (...args) => {
+            const ack = await register(...args);
+            if (transport.registerCount === 2) editorText = 'operator edit';
+            return ack;
+        };
+        transport.pending = [{
+            patchId: 'crdt:1:42:22',
+            origin: 1,
+            target: 42,
+            generation: 22,
+            expectedContentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+            update: Buffer.from([22]),
+        }];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => nodes.shift() ?? new FakeNode('remote text'),
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async () => false,
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        editorText = 'remote text';
+        await manager.drainRemoteUpdates();
+
+        assert.strictEqual(transport.registerCount, 2);
+        assert.strictEqual(stale.closed.length, 0);
+        assert.strictEqual(replacement.closed.length, 1);
+        assert.strictEqual(transport.projected.length, 0);
+        assert.strictEqual(transport.pending.length, 1);
+        manager.dispose();
+    });
+
     it('rejects malformed canonical without adopting the editor baseline', async () => {
         const first = new FakeNode('base');
         first.remoteText = 'INVALID_CANONICAL';
@@ -523,6 +647,14 @@ it('applies peer remote updates but suppresses self echoes', () => {
         assert.strictEqual(
             replicaBaselineDecision('exact', false, false, true, true, true, false),
             'project-remote-target',
+        );
+        assert.strictEqual(
+            replicaBaselineDecision('exact', true, false, false, true, false, false),
+            'rebootstrap-visible-remote-target',
+        );
+        assert.strictEqual(
+            replicaBaselineDecision('exact', true, false, false, true, false, true),
+            'retry-fail-closed',
         );
         assert.strictEqual(
             replicaBaselineDecision('exact', false, false, true, false, false, false),
@@ -775,10 +907,16 @@ it('applies peer remote updates but suppresses self echoes', () => {
         await manager.drainRemoteUpdates();
 
         assert.deepStrictEqual(applied, ['remote text']);
-        assert.deepStrictEqual(transport.projected, [{
-            contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
-            diskPersisted: false,
-        }]);
+        assert.deepStrictEqual(transport.projected, [
+            {
+                contentHash: 'ee7973f451eafb37642e8f6e3d8cfd2d806783c48748eebb66c46f781169815a',
+                diskPersisted: false,
+            },
+            {
+                contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+                diskPersisted: false,
+            },
+        ]);
     });
 
 it('force-refresh never republishes an unproven full editor snapshot', async () => {

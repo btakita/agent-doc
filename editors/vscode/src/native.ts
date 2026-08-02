@@ -218,7 +218,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
-export const EDITOR_PLUGIN_VERSION = '0.2.64';
+export const EDITOR_PLUGIN_VERSION = '0.2.65';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 // #ctrlkillreregister Tier 3: this extension calls agent_doc_peer_replicas_missing

@@ -232,6 +232,7 @@ internal enum class ReplicaBaselineDecision {
     ApplyRemote,
     ApplyRemoteRepair,
     ProjectRemoteTarget,
+    RebootstrapVisibleRemoteTarget,
     ReplayRemoteTarget,
     RealignShadow,
     RetryFailClosed,
@@ -267,6 +268,8 @@ internal fun replicaBaselineDecisionUtil(
         ReplicaBaselineDecision.RetryFailClosed
     editorMatchesRemoteTarget && replicaMatchesEditor ->
         ReplicaBaselineDecision.ProjectRemoteTarget
+    editorMatchesRemoteTarget ->
+        ReplicaBaselineDecision.RebootstrapVisibleRemoteTarget
     canonicalProjectionRetained && replicaMatchesRemoteTarget ->
         ReplicaBaselineDecision.ReplayRemoteTarget
     canonicalProjectionRetained && replicaMatchesExpected ->
@@ -286,6 +289,21 @@ internal fun replicaBaselineDecisionUtil(
 
 internal fun shouldForwardLocalDeltaUtil(replicaText: String?, shadowText: String): Boolean =
     replicaText == shadowText
+
+internal enum class LocalReplicaBaselineDecision {
+    ForwardLocal,
+    RebootstrapCanonicalThenForward,
+}
+
+internal fun localReplicaBaselineDecisionUtil(
+    replicaText: String?,
+    capturedBaseText: String,
+): LocalReplicaBaselineDecision =
+    if (shouldForwardLocalDeltaUtil(replicaText, capturedBaseText)) {
+        LocalReplicaBaselineDecision.ForwardLocal
+    } else {
+        LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward
+    }
 
 internal data class CoalescedLocalEdit(
     val offsetCodePoints: Int,
@@ -970,32 +988,52 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return true
         }
         val edit = coalescedLocalEditUtil(beforeText, editorText) ?: return true
-        shadows[filePath] = editorText
         val forwarder = forwarderFor(filePath, beforeText)
-        if (forwarder != null) {
-            val replicaText = forwarder.replicaText()
-            if (shouldForwardLocalDeltaUtil(replicaText, beforeText)) {
-                forwarder.forwardLocalDelta(
-                    offset = edit.offsetCodePoints,
-                    deleteLen = edit.deleteCodePoints,
-                    insert = edit.insert,
-                    resultingText = edit.resultingText,
-                )
-            } else {
-                // The controller canonical revision is the whole-document
-                // authority. A stale native replica may not publish its editor
-                // buffer as a replacement baseline: retain the canonical
-                // projection and let the normal remote-delivery effect repair
-                // this consumer.
+        if (forwarder == null) {
+            shadows[filePath] = beforeText
+            return false
+        }
+        val replicaText = forwarder.replicaText()
+        val forwarded =
+            when (localReplicaBaselineDecisionUtil(replicaText, beforeText)) {
+                LocalReplicaBaselineDecision.ForwardLocal -> {
+                    forwarder.forwardLocalDelta(
+                        offset = edit.offsetCodePoints,
+                        deleteLen = edit.deleteCodePoints,
+                        insert = edit.insert,
+                        resultingText = edit.resultingText,
+                    )
+                    forwarder.replicaText() == editorText
+                }
+                LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward ->
+                    rebootstrapCanonicalAndForwardCapturedLocalEdit(
+                        filePath = filePath,
+                        capturedBaseText = beforeText,
+                        visibleEditorText = editorText,
+                        staleForwarder = forwarder,
+                        edit = edit,
+                    )
+            }
+        if (!forwarded) {
+            // Retain the exact captured base. Advancing the shadow before the
+            // delta reaches a canonical replica loses the only safe rebase
+            // proof and turns the next retry into whole-editor adoption.
+            shadows[filePath] = beforeText
+            if (replicaText != beforeText) {
                 retainedCanonicalProjectionPaths.add(filePath)
                 log.warn(
                     "[crdt-replica] local delta found a stale native baseline for ${File(filePath).name}; " +
                         "shadow_hash=${contentHash(beforeText)} " +
                         "replica_hash=${replicaText?.let(::contentHash) ?: "missing"} " +
-                        "recovery=lazy-controller-canonical-projection",
+                        "recovery=canonical-rebootstrap-captured-local-delta",
                 )
-                requestRemoteDrain(filePath, "stale-local-baseline")
             }
+            requestRemoteDrain(filePath, "captured-local-delta-retry")
+            return false
+        }
+        shadows[filePath] = editorText
+        if (!forwarders[filePath]!!.projectVisibleState(editorText)) {
+            requestRemoteDrain(filePath, "local-visible-projection-retry")
         }
         logSlow(
             "forward-local-delta",
@@ -1007,6 +1045,40 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "insert_chars=${edit.insert.length}",
         )
         return true
+    }
+
+    private fun rebootstrapCanonicalAndForwardCapturedLocalEdit(
+        filePath: String,
+        capturedBaseText: String,
+        visibleEditorText: String,
+        staleForwarder: CrdtReplicaForwarder,
+        edit: CoalescedLocalEdit,
+    ): Boolean {
+        if (forwarders[filePath] !== staleForwarder) return false
+        val replacement =
+            forwarderFor(
+                filePath = filePath,
+                bypassRegisterBackoff = true,
+                replaceCached = true,
+                expectedEditorTextAtSwap = visibleEditorText,
+                allowPendingLocalAtSwap = true,
+                bootstrapFromControllerCanonical = true,
+                expectedCanonicalTextAtSwap = capturedBaseText,
+            )
+        if (replacement == null || replacement === staleForwarder) return false
+        if (
+            editorBufferText(filePath) != visibleEditorText ||
+            replacement.replicaText() != capturedBaseText
+        ) {
+            return false
+        }
+        replacement.forwardLocalDelta(
+            offset = edit.offsetCodePoints,
+            deleteLen = edit.deleteCodePoints,
+            insert = edit.insert,
+            resultingText = edit.resultingText,
+        )
+        return replacement.replicaText() == visibleEditorText
     }
 
     fun requestRemoteDrain(filePath: String? = null, reason: String = "event") {
@@ -1948,6 +2020,46 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return false
         }
         if (
+            decision == ReplicaBaselineDecision.RebootstrapVisibleRemoteTarget &&
+            editorRemoteGeneration != null
+        ) {
+            val replacement = forwarderFor(
+                filePath = filePath,
+                initialEditorText = editorText,
+                bypassRegisterBackoff = true,
+                replaceCached = true,
+                expectedEditorTextAtSwap = editorText,
+                bootstrapFromControllerCanonical = true,
+            )
+            if (replacement == null || replacement === forwarder) {
+                requestRemoteDrain(filePath, "visible-target-canonical-rebootstrap-retry")
+                return false
+            }
+            val replacementText = replacement.replicaText()
+            if (replacementText != editorText) {
+                retainedCanonicalProjectionPaths.add(filePath)
+                log.info(
+                    "[crdt-replica] visible remote target advanced during canonical rebootstrap for $filePath: " +
+                        "editor_hash=$editorHash replacement_hash=${replacementText?.let(::contentHash) ?: "missing"} " +
+                        "generation=$editorRemoteGeneration",
+                )
+                requestRemoteDrain(filePath, "visible-target-canonical-advanced")
+                return false
+            }
+            shadows[filePath] = editorText
+            if (!replacement.projectVisibleState(editorText)) {
+                retainedCanonicalProjectionPaths.add(filePath)
+                requestRemoteDrain(filePath, "visible-target-projection-retry")
+                return false
+            }
+            retainedCanonicalProjectionPaths.remove(filePath)
+            log.info(
+                "[crdt-replica] acknowledged an exact visible remote target after canonical replica rebootstrap for $filePath: " +
+                    "editor_hash=$editorHash generation=$editorRemoteGeneration",
+            )
+            return false
+        }
+        if (
             decision == ReplicaBaselineDecision.ReplayRemoteTarget &&
             replicaText != null &&
             replicaRemoteGeneration != null
@@ -2087,6 +2199,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         replaceCached: Boolean = bypassRegisterBackoff,
         expectedEditorTextAtSwap: String? = null,
         allowPendingLocalAtSwap: Boolean = false,
+        bootstrapFromControllerCanonical: Boolean = false,
+        expectedCanonicalTextAtSwap: String? = null,
     ): CrdtReplicaForwarder? {
         val cached = forwarders[filePath]
         if (bypassRegisterBackoff) {
@@ -2106,7 +2220,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             baseIdentity
         }
         val retainedResumeState =
-            cached?.captureResumeState() ?: nativeReloadResumeStates[filePath]
+            if (bootstrapFromControllerCanonical) {
+                null
+            } else {
+                cached?.captureResumeState() ?: nativeReloadResumeStates[filePath]
+            }
         val forwarder = CrdtReplicaForwarder(
             filePath = filePath,
             identity = identity,
@@ -2122,6 +2240,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
             return null
         }
+        if (
+            expectedCanonicalTextAtSwap != null &&
+            forwarder.replicaText() != expectedCanonicalTextAtSwap
+        ) {
+            // The captured operator delta is only meaningful relative to its
+            // exact base. Keep the cached endpoint and retry; never derive a
+            // replacement edit from a different controller generation.
+            forwarder.deregister()
+            return null
+        }
         clearRegisterFailure(filePath)
         if (forwarder.canonicalProjectionRetained) {
             // Controller state survives an IDEA/plugin restart; this local set
@@ -2133,7 +2261,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "${File(filePath).name}; canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
             )
         }
-        if (retainedResumeState != null) {
+        if (bootstrapFromControllerCanonical) {
+            nativeReloadResumeStates.remove(filePath)
+        } else if (retainedResumeState != null) {
             nativeReloadResumeStates.remove(filePath, retainedResumeState)
         }
         if (

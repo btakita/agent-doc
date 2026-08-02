@@ -26,9 +26,9 @@ pub const CONTRACT_MARKER: &str = "[agent-doc] cycle contract (preflight already
 /// so the agent receives the contract *with* the prompt instead of having to
 /// remember to shell back for it.
 ///
-/// Fails open in every branch. A hook that breaks a turn is worse than a hook
-/// that does nothing, and the agent still has `agent-doc preflight` as the
-/// explicit path.
+/// The hook process remains best-effort so ordinary non-agent-doc prompts are
+/// never blocked. The agent-doc skill fails closed when this hook does not emit
+/// a contract; the model never recreates admission by invoking preflight.
 pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
     use std::io::Read;
     let mut payload = String::new();

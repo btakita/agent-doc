@@ -413,6 +413,54 @@ class CrdtReplicaProjectionFrontierTest {
     }
 
     @Test
+    fun `exact visible target reboots a stale replica from controller canonical before ack`() {
+        assertEquals(
+            ReplicaBaselineDecision.RebootstrapVisibleRemoteTarget,
+            replicaBaselineDecisionUtil(
+                editorState = TemplateStructureProjectionState.Exact,
+                editorMatchesExpected = true,
+                replicaMatchesExpected = false,
+                replicaMatchesEditor = false,
+                editorMatchesRemoteTarget = true,
+                replicaMatchesRemoteTarget = false,
+                recoveryInFlight = false,
+                canonicalProjectionRetained = true,
+            ),
+        )
+        assertEquals(
+            ReplicaBaselineDecision.RetryFailClosed,
+            replicaBaselineDecisionUtil(
+                editorState = TemplateStructureProjectionState.Exact,
+                editorMatchesExpected = true,
+                replicaMatchesExpected = false,
+                replicaMatchesEditor = false,
+                editorMatchesRemoteTarget = true,
+                replicaMatchesRemoteTarget = false,
+                recoveryInFlight = true,
+                canonicalProjectionRetained = true,
+            ),
+        )
+
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val manager = Files.readString(managerPath)
+        val rebootstrapEffect = manager
+            .substringAfter("decision == ReplicaBaselineDecision.RebootstrapVisibleRemoteTarget")
+            .substringBefore("decision == ReplicaBaselineDecision.ReplayRemoteTarget")
+        assertTrue(rebootstrapEffect.contains("expectedEditorTextAtSwap = editorText"))
+        assertTrue(rebootstrapEffect.contains("bootstrapFromControllerCanonical = true"))
+        assertTrue(rebootstrapEffect.indexOf("replacement.replicaText()") <
+            rebootstrapEffect.indexOf("replacement.projectVisibleState(editorText)"))
+        val registration = manager
+            .substringAfter("private fun forwarderFor(")
+            .substringBefore("private fun retainCanonicalProjectionAfterRegistration(")
+        assertTrue(registration.contains("if (bootstrapFromControllerCanonical)"))
+        assertTrue(registration.contains("null"))
+    }
+
+    @Test
     fun `invalid editor requires an exact baseline`() {
         assertEquals(
             ReplicaBaselineDecision.ApplyRemoteRepair,
@@ -445,6 +493,35 @@ class CrdtReplicaProjectionFrontierTest {
         assertTrue(shouldForwardLocalDeltaUtil("before", "before"))
         assertFalse(shouldForwardLocalDeltaUtil("stale", "before"))
         assertFalse(shouldForwardLocalDeltaUtil(null, "before"))
+        assertEquals(
+            LocalReplicaBaselineDecision.ForwardLocal,
+            localReplicaBaselineDecisionUtil("before", "before"),
+        )
+        assertEquals(
+            LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward,
+            localReplicaBaselineDecisionUtil("stale", "before"),
+        )
+
+        val managerPath =
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                Paths.get(
+                    "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt",
+                ),
+            ).first { Files.exists(it) }
+        val manager = Files.readString(managerPath)
+        val localEffect =
+            manager
+                .substringAfter("private fun forwardLocalDeltaFromShadow(")
+                .substringBefore("fun requestRemoteDrain(")
+        assertTrue(localEffect.contains("expectedCanonicalTextAtSwap = capturedBaseText"))
+        assertTrue(localEffect.contains("expectedEditorTextAtSwap = visibleEditorText"))
+        assertTrue(localEffect.contains("bootstrapFromControllerCanonical = true"))
+        assertTrue(localEffect.contains("shadows[filePath] = beforeText"))
+        assertTrue(
+            localEffect.indexOf("replacement.replicaText() != capturedBaseText") <
+                localEffect.indexOf("replacement.forwardLocalDelta("),
+        )
     }
 
     private fun update(generation: Long, expectedHash: String) = ReplicaRemoteUpdate(

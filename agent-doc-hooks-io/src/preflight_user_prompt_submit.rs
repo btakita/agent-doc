@@ -15,12 +15,12 @@
 //! arrives, so the binary can run its own pipeline and hand the agent the
 //! contract with the prompt — no round trip, and no way to skip it.
 //!
-//! # Fails open, always
+//! # Best-effort hook, fail-closed workflow
 //!
-//! A hook that breaks a turn is worse than a hook that does nothing. Every
-//! unrecognized shape, missing file, and internal error returns quietly and lets
-//! the prompt through unchanged. The only thing this hook can do is *add*
-//! context.
+//! Every unrecognized non-agent-doc shape returns quietly so ordinary prompts
+//! remain unaffected. The agent-doc workflow itself requires the emitted
+//! contract and fails closed when it is absent; the model never recreates
+//! admission by invoking or polling preflight.
 //!
 //! This module is the **decision** only. The effect — actually running preflight
 //! — lives in the binary crate, because `agent-doc-commit-io` already depends on

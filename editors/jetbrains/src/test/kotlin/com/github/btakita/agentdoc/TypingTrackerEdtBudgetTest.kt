@@ -273,9 +273,10 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("fun requestRemoteDrain")
 
         assertTrue(
-            "a stale native baseline must retain the controller projection and wake its pull",
+            "a stale native baseline must retain the captured delta and rebootstrap its exact controller base",
             forwardBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
-                forwardBody.contains("requestRemoteDrain(filePath, \"stale-local-baseline\")"),
+                forwardBody.contains("expectedCanonicalTextAtSwap = capturedBaseText") &&
+                forwardBody.contains("requestRemoteDrain(filePath, \"captured-local-delta-retry\")"),
         )
         assertFalse(
             "stale-baseline recovery must never adopt a whole editor buffer into canonical authority",
@@ -493,13 +494,14 @@ class TypingTrackerEdtBudgetTest {
         val localDeltaBody = source.substringAfter("private fun forwardLocalDeltaFromShadow(")
             .substringBefore("fun requestRemoteDrain(")
         assertTrue(
-            "a stale local baseline must retain and lazily pull the controller canonical projection",
+            "a stale local baseline must retain its typed delta and rebootstrap from exact controller canonical",
             localDeltaBody.contains("tryReadDocumentText(document)") &&
                 localDeltaBody.contains("coalescedLocalEditUtil(beforeText, editorText)") &&
-                localDeltaBody.contains("shouldForwardLocalDeltaUtil(replicaText, beforeText)") &&
+                localDeltaBody.contains("localReplicaBaselineDecisionUtil(replicaText, beforeText)") &&
                 localDeltaBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
-                localDeltaBody.contains("requestRemoteDrain(filePath, \"stale-local-baseline\")") &&
-                localDeltaBody.contains("recovery=lazy-controller-canonical-projection"),
+                localDeltaBody.contains("expectedCanonicalTextAtSwap = capturedBaseText") &&
+                localDeltaBody.contains("requestRemoteDrain(filePath, \"captured-local-delta-retry\")") &&
+                localDeltaBody.contains("recovery=canonical-rebootstrap-captured-local-delta"),
         )
         assertFalse(
             "a stale local baseline must never schedule whole-editor adoption",

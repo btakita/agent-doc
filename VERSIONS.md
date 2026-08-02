@@ -4,6 +4,29 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.118
+
+_JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **Exact visible delivery targets acknowledge without waiting on a stale local
+  replica.** The editor adapters now distinguish an unrelated divergent buffer
+  from a buffer whose hash exactly proves the controller generation. In the
+  latter state they atomically rebuild the native replica from controller
+  canonical state, reject raced operator edits, and only then publish the
+  visible receipt. Controller socket receipt alone remains insufficient.
+- **Preflight admission no longer falls back to model-owned polling.** Claude
+  skill installation now projects the binary `UserPromptSubmit` admission hook,
+  the workflow fails closed when its cycle contract is absent, and both local
+  install targets refresh all harness artifacts. The development harness checks
+  that install contract.
+- **Operator edits made while a response is converging keep their exact CRDT
+  base.** JetBrains and VS Code now retain a typed canonical-base/visible-result
+  cut, rebuild a stale native replica only when controller canonical still
+  equals that base, and then publish the minimal local delta plus visible
+  receipt. Successive queue or response edits are serialized and coalesced;
+  mismatched canonical state remains fail-closed instead of losing the edit or
+  adopting the whole buffer.
+
 ## 0.35.117
 
 _JetBrains plugin 0.2.337; VS Code extension 0.2.64; Zed extension 0.1.0._

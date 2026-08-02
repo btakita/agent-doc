@@ -962,6 +962,9 @@ fn install_okf_all(root: Option<&Path>) -> Result<()> {
 }
 
 fn install_env_artifacts(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<()> {
+    if matches!(env, agent_kit::detect::Environment::ClaudeCode) {
+        install_claude_hook_artifacts(root)?;
+    }
     if matches!(env, agent_kit::detect::Environment::Codex) {
         install_codex_hook_artifacts(root)?;
     }
@@ -976,6 +979,14 @@ fn install_env_artifacts_all(root: Option<&Path>) -> Result<()> {
         install_env_artifacts(env, root)?;
     }
     Ok(())
+}
+
+fn install_claude_hook_artifacts(root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let claude_dir = base.join(".claude");
+    std::fs::create_dir_all(&claude_dir)?;
+    merge_claude_turn_status_hooks(&claude_dir.join("settings.json"))
 }
 
 fn install_codex_hook_artifacts(root: Option<&Path>) -> Result<()> {
@@ -2262,6 +2273,39 @@ mod tests {
             "Codex workflow should be installed as a skill, not .codex/AGENTS.md"
         );
         assert!(!dir.path().join(".codex/AGENTS.md").exists());
+    }
+
+    #[test]
+    fn install_for_claude_writes_binary_admission_hook_and_preserves_existing_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &settings_path,
+            r#"{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"custom-hook"}]}]}}"#,
+        )
+        .unwrap();
+
+        super::install_env_artifacts(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        super::install_env_artifacts(Environment::ClaudeCode, Some(dir.path())).unwrap();
+
+        let settings: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(settings_path).unwrap()).unwrap();
+        let commands: Vec<_> = settings["hooks"]["UserPromptSubmit"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|entry| entry["hooks"].as_array().cloned().unwrap_or_default())
+            .filter_map(|hook| hook["command"].as_str().map(String::from))
+            .collect();
+        assert!(commands.contains(&"custom-hook".to_string()));
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.as_str() == PREFLIGHT_USER_PROMPT_COMMAND)
+                .count(),
+            1,
+        );
     }
 
     #[test]

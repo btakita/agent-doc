@@ -26,7 +26,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 
 ## Post-Preflight Planning
 
-- **`#preflightinbinary`:** the Claude `UserPromptSubmit` hook (`agent-doc hook preflight-user-prompt-submit`, installed into `.claude/settings.json`) runs preflight in-process when the `agent-doc <FILE>` trigger arrives and prints the contract behind the `[agent-doc] cycle contract ...` marker. With the marker present the agent must NOT run `agent-doc preflight` — the round trip is what the hook removes. Harnesses without the hook (Codex `hooks.json`, OpenCode) still run it explicitly. A second preflight inside an open turn is safe either way: the binary reuses the open cycle instead of minting a second id (`reusable_by_reentrant_preflight`).
+- **`#preflightinbinary`:** the Claude `UserPromptSubmit` hook (`agent-doc hook preflight-user-prompt-submit`, installed into `.claude/settings.json`) runs preflight in-process when the `agent-doc <FILE>` trigger arrives and prints the contract behind the `[agent-doc] cycle contract ...` marker. The model must never run or poll `agent-doc preflight`; a missing marker is a fail-closed harness-admission defect. Connected Codex uses `agent_doc_admit`; other harness adapters must likewise obtain one binary-owned admission contract before the model turn.
 - After preflight — hook-run or explicit — the next dispatch step should consume a binary-owned planning record rather than improvise from raw prose alone.
 - Run `agent-doc plan <FILE>` and execute the cycle from its `prompt_targets`, `repo_actions`, `required_commands`, `pending_mutations`, `handoff`, and `blockers`.
 - If the plan says `handoff=orchestrate`, run the emitted `agent-doc orchestrate ...` command before attempting a manual response.

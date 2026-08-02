@@ -179,6 +179,7 @@ timings:
 install:
 	$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
+	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --all
 	@$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --lib
 	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" agent-doc lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
 	@$(MAKE) install-editor-plugins
@@ -198,6 +199,7 @@ install:
 install-full:
 	cargo build --release --bin agent-doc
 	@target/release/agent-doc binary-install --source target/release/agent-doc
+	@target/release/agent-doc skill install --all
 	@cargo build --release --lib
 	@agent-doc lib-install
 	@$(MAKE) install-editor-plugins

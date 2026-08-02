@@ -157,6 +157,7 @@ export type ReplicaBaselineDecision =
     | 'apply-remote'
     | 'apply-remote-repair'
     | 'project-remote-target'
+    | 'rebootstrap-visible-remote-target'
     | 'replay-remote-target'
     | 'realign-shadow'
     | 'retry-fail-closed';
@@ -182,9 +183,10 @@ export function replicaBaselineDecision(
     recoveryInFlight: boolean,
 ): ReplicaBaselineDecision {
     if (recoveryInFlight) return 'retry-fail-closed';
-    if (editorState === 'exact' && editorMatchesRemoteTarget && replicaMatchesEditor) {
+    if (editorMatchesRemoteTarget && replicaMatchesEditor) {
         return 'project-remote-target';
     }
+    if (editorMatchesRemoteTarget) return 'rebootstrap-visible-remote-target';
     if (editorMatchesExpected && replicaMatchesRemoteTarget) return 'replay-remote-target';
     if (editorState !== 'exact' && editorMatchesExpected) return 'apply-remote-repair';
     if (editorState !== 'exact') return 'retry-fail-closed';
@@ -195,6 +197,83 @@ export function replicaBaselineDecision(
 
 export function shouldForwardLocalDelta(replicaText: string | null, shadowText: string): boolean {
     return replicaText === shadowText;
+}
+
+export type LocalReplicaBaselineDecision =
+    | 'forward-local'
+    | 'rebootstrap-canonical-then-forward';
+
+export function localReplicaBaselineDecision(
+    replicaText: string | null,
+    capturedBaseText: string,
+): LocalReplicaBaselineDecision {
+    return shouldForwardLocalDelta(replicaText, capturedBaseText)
+        ? 'forward-local'
+        : 'rebootstrap-canonical-then-forward';
+}
+
+export interface CoalescedReplicaTextChange {
+    offset: number;
+    deleteLen: number;
+    insert: string;
+    resultingText: string;
+}
+
+export function coalescedReplicaTextChange(
+    before: string,
+    after: string,
+): CoalescedReplicaTextChange | null {
+    if (before === after) return null;
+    const commonLimit = Math.min(before.length, after.length);
+    let prefix = 0;
+    while (prefix < commonLimit && before[prefix] === after[prefix]) prefix += 1;
+    if (
+        prefix > 0
+        && prefix < before.length
+        && prefix < after.length
+        && /[\uD800-\uDBFF]/.test(before[prefix - 1])
+        && /[\uDC00-\uDFFF]/.test(before[prefix])
+    ) {
+        prefix -= 1;
+    }
+
+    let suffix = 0;
+    while (
+        suffix < before.length - prefix
+        && suffix < after.length - prefix
+        && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+    ) {
+        suffix += 1;
+    }
+    let beforeEnd = before.length - suffix;
+    let afterEnd = after.length - suffix;
+    if (
+        suffix > 0
+        && (
+            (
+                beforeEnd > prefix
+                && beforeEnd < before.length
+                && /[\uD800-\uDBFF]/.test(before[beforeEnd - 1])
+                && /[\uDC00-\uDFFF]/.test(before[beforeEnd])
+            )
+            || (
+                afterEnd > prefix
+                && afterEnd < after.length
+                && /[\uD800-\uDBFF]/.test(after[afterEnd - 1])
+                && /[\uDC00-\uDFFF]/.test(after[afterEnd])
+            )
+        )
+    ) {
+        suffix -= 1;
+        beforeEnd = before.length - suffix;
+        afterEnd = after.length - suffix;
+    }
+    return {
+        offset: Array.from(before.slice(0, prefix)).length,
+        deleteLen: Array.from(before.slice(prefix, beforeEnd)).length,
+        insert: after.slice(prefix, afterEnd),
+        resultingText: after,
+    };
 }
 
 export function utf16RangeToCodePoints(
@@ -615,6 +694,13 @@ export class CrdtReplicaManager {
     private readonly replicaRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private readonly replicaRetryFailureCounts = new Map<string, number>();
     private readonly pendingLocalEdits = new Map<string, number>();
+    private readonly pendingLocalRebases = new Map<string, {
+        capturedBaseText: string;
+        visibleEditorText: string;
+    }>();
+    private readonly localRebaseRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private readonly localRebaseRetryFailureCounts = new Map<string, number>();
+    private readonly localChangeLanes = new Map<string, Promise<void>>();
     private readonly nonOperatorProjectionEpochs = new Map<string, number>();
     private readonly drainRequestedPaths = new Set<string>();
     private drainAllRequested = false;
@@ -659,6 +745,11 @@ export class CrdtReplicaManager {
         for (const timer of this.replicaRetryTimers.values()) clearTimeout(timer);
         this.replicaRetryTimers.clear();
         this.replicaRetryFailureCounts.clear();
+        for (const timer of this.localRebaseRetryTimers.values()) clearTimeout(timer);
+        this.localRebaseRetryTimers.clear();
+        this.localRebaseRetryFailureCounts.clear();
+        this.pendingLocalRebases.clear();
+        this.localChangeLanes.clear();
         this.applyingRemote.clear();
         for (const forwarder of this.forwarders.values()) {
             void forwarder.deregister();
@@ -760,6 +851,8 @@ export class CrdtReplicaManager {
         this.shadows.delete(filePath);
         this.attaching.delete(filePath);
         this.clearReplicaRetryBackoff(filePath);
+        this.clearLocalRebaseRetry(filePath);
+        this.pendingLocalRebases.delete(filePath);
         const forwarder = this.forwarders.get(filePath);
         this.forwarders.delete(filePath);
         await forwarder?.deregister();
@@ -799,6 +892,26 @@ export class CrdtReplicaManager {
         changes: readonly ReplicaTextChange[],
         admission?: ReplicaLocalChangeAdmission,
     ): Promise<void> {
+        return this.enqueueLocalChange(filePath, () =>
+            this.handleLocalChangeDeltaNow(filePath, changes, admission));
+    }
+
+    private enqueueLocalChange(filePath: string, task: () => Promise<void>): Promise<void> {
+        const previous = this.localChangeLanes.get(filePath) ?? Promise.resolve();
+        const current = previous.catch(() => undefined).then(task);
+        this.localChangeLanes.set(filePath, current);
+        return current.finally(() => {
+            if (this.localChangeLanes.get(filePath) === current) {
+                this.localChangeLanes.delete(filePath);
+            }
+        });
+    }
+
+    private async handleLocalChangeDeltaNow(
+        filePath: string,
+        changes: readonly ReplicaTextChange[],
+        admission?: ReplicaLocalChangeAdmission,
+    ): Promise<void> {
         const admitted = admission ?? this.captureLocalChange(filePath, true);
         const finish = () => {
             if (admitted.pendingReserved) this.clearLocalPending(filePath);
@@ -826,30 +939,202 @@ export class CrdtReplicaManager {
             return;
         }
         this.shadows.set(filePath, newText);
-        const { offset, deleteLen } = utf16RangeToCodePoints(
-            oldText,
-            change.rangeOffset,
-            change.rangeLength,
-        );
+        const capturedBaseText =
+            this.pendingLocalRebases.get(filePath)?.capturedBaseText ?? oldText;
+        const edit = coalescedReplicaTextChange(capturedBaseText, newText);
+        if (edit == null) {
+            this.pendingLocalRebases.delete(filePath);
+            this.clearLocalRebaseRetry(filePath);
+            finish();
+            return;
+        }
+        this.pendingLocalRebases.set(filePath, {
+            capturedBaseText,
+            visibleEditorText: newText,
+        });
+        let forwarded = false;
         try {
             const forwarder = await this.forwarderFor(filePath);
             if (forwarder) {
                 const replicaText = forwarder.replicaText();
-                if (shouldForwardLocalDelta(replicaText, oldText)) {
-                    await forwarder.forwardLocalDelta(offset, deleteLen, change.text);
+                const activeForwarder =
+                    localReplicaBaselineDecision(replicaText, capturedBaseText) === 'forward-local'
+                        ? await this.forwardCapturedLocalEdit(
+                            filePath,
+                            capturedBaseText,
+                            newText,
+                            edit,
+                            forwarder,
+                        )
+                        : await this.rebootstrapCanonicalAndForwardCapturedLocalEdit(
+                            filePath,
+                            capturedBaseText,
+                            newText,
+                            edit,
+                            forwarder,
+                        );
+                forwarded = activeForwarder != null;
+                if (activeForwarder) {
+                    this.pendingLocalRebases.delete(filePath);
+                    this.clearLocalRebaseRetry(filePath);
+                    this.shadows.set(filePath, newText);
+                    if (!(await activeForwarder.projectVisibleState(newText))) {
+                        this.scheduleReplicaRetry(filePath, 'local-visible-projection-retry');
+                    }
                 } else {
-                this.logger.warn(
-                    `[crdt-replica] local delta found a stale native baseline for ${filePath}; ` +
-                    `shadow_hash=${sha256(oldText)} ` +
-                    `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)} ` +
-                    'recovery=lazy-controller-canonical-projection',
-                );
-                this.scheduleReplicaRetry(filePath, 'local-delta-lazy-canonical-projection');
+                    this.logger.warn(
+                        `[crdt-replica] retained a captured local delta while its canonical base is unavailable for ${filePath}; ` +
+                        `base_hash=${sha256(capturedBaseText)} visible_hash=${sha256(newText)} ` +
+                        `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)} ` +
+                        'recovery=canonical-rebootstrap-captured-local-delta',
+                    );
                 }
             }
         } finally {
+            if (!forwarded) {
+                const latestVisibleText = this.currentEditorText(filePath) ?? newText;
+                this.shadows.set(filePath, latestVisibleText);
+                this.pendingLocalRebases.set(filePath, {
+                    capturedBaseText,
+                    visibleEditorText: latestVisibleText,
+                });
+                this.scheduleLocalRebaseRetry(filePath, 'captured-local-delta');
+            }
             finish();
         }
+    }
+
+    private async forwardCapturedLocalEdit(
+        filePath: string,
+        capturedBaseText: string,
+        visibleEditorText: string,
+        edit: CoalescedReplicaTextChange,
+        forwarder: CrdtReplicaForwarder,
+    ): Promise<CrdtReplicaForwarder | null> {
+        if (
+            this.forwarders.get(filePath) !== forwarder
+            || forwarder.replicaText() !== capturedBaseText
+        ) {
+            return null;
+        }
+        await forwarder.forwardLocalDelta(edit.offset, edit.deleteLen, edit.insert);
+        return forwarder.replicaText() === visibleEditorText ? forwarder : null;
+    }
+
+    private async rebootstrapCanonicalAndForwardCapturedLocalEdit(
+        filePath: string,
+        capturedBaseText: string,
+        visibleEditorText: string,
+        edit: CoalescedReplicaTextChange,
+        staleForwarder: CrdtReplicaForwarder,
+    ): Promise<CrdtReplicaForwarder | null> {
+        if (this.forwarders.get(filePath) !== staleForwarder) return null;
+        const identity = `${this.options.identity}:${filePath}:refresh-${++this.refreshConnectionEpoch}`;
+        const replacement = new CrdtReplicaForwarder(
+            filePath,
+            identity,
+            this.nodeFactory(),
+            this.transport,
+        );
+        try {
+            if (!(await replacement.register())) return null;
+        } catch (error: any) {
+            this.logger.debug(
+                `[crdt-replica] captured local delta rebootstrap skipped for ${filePath}: ${error?.message ?? error}`,
+            );
+            return null;
+        }
+        if (
+            this.forwarders.get(filePath) !== staleForwarder
+            || this.currentEditorText(filePath) !== visibleEditorText
+            || replacement.replicaText() !== capturedBaseText
+        ) {
+            await replacement.deregister();
+            return null;
+        }
+        this.forwarders.set(filePath, replacement);
+        await staleForwarder.deregister();
+        await replacement.forwardLocalDelta(edit.offset, edit.deleteLen, edit.insert);
+        return replacement.replicaText() === visibleEditorText ? replacement : null;
+    }
+
+    private scheduleLocalRebaseRetry(filePath: string, reason: string): void {
+        if (this.localRebaseRetryTimers.has(filePath) || this.disposed) return;
+        const failures = (this.localRebaseRetryFailureCounts.get(filePath) ?? 0) + 1;
+        this.localRebaseRetryFailureCounts.set(filePath, failures);
+        const delayMs = Math.min(250 * (2 ** Math.min(failures - 1, 12)), 30_000);
+        this.logger.debug(
+            `[crdt-replica] captured local delta retry scheduled for ${filePath}; ` +
+            `reason=${reason} delay_ms=${delayMs} failures=${failures}`,
+        );
+        const timer = setTimeout(() => {
+            this.localRebaseRetryTimers.delete(filePath);
+            if (!this.disposed) {
+                void this.enqueueLocalChange(filePath, () => this.retryPendingLocalRebase(filePath));
+            }
+        }, delayMs);
+        timer.unref?.();
+        this.localRebaseRetryTimers.set(filePath, timer);
+    }
+
+    private clearLocalRebaseRetry(filePath: string): void {
+        this.localRebaseRetryFailureCounts.delete(filePath);
+        const timer = this.localRebaseRetryTimers.get(filePath);
+        if (timer) clearTimeout(timer);
+        this.localRebaseRetryTimers.delete(filePath);
+    }
+
+    private async retryPendingLocalRebase(filePath: string): Promise<void> {
+        const pending = this.pendingLocalRebases.get(filePath);
+        if (!pending) return;
+        const visibleEditorText = this.currentEditorText(filePath);
+        if (visibleEditorText == null) {
+            this.scheduleLocalRebaseRetry(filePath, 'editor-unavailable');
+            return;
+        }
+        const edit = coalescedReplicaTextChange(pending.capturedBaseText, visibleEditorText);
+        if (edit == null) {
+            this.pendingLocalRebases.delete(filePath);
+            this.clearLocalRebaseRetry(filePath);
+            this.requestRemoteDrain(filePath);
+            return;
+        }
+        const forwarder = await this.forwarderFor(filePath);
+        if (!forwarder) {
+            this.scheduleLocalRebaseRetry(filePath, 'replica-unavailable');
+            return;
+        }
+        const activeForwarder =
+            localReplicaBaselineDecision(forwarder.replicaText(), pending.capturedBaseText) === 'forward-local'
+                ? await this.forwardCapturedLocalEdit(
+                    filePath,
+                    pending.capturedBaseText,
+                    visibleEditorText,
+                    edit,
+                    forwarder,
+                )
+                : await this.rebootstrapCanonicalAndForwardCapturedLocalEdit(
+                    filePath,
+                    pending.capturedBaseText,
+                    visibleEditorText,
+                    edit,
+                    forwarder,
+                );
+        if (!activeForwarder || this.currentEditorText(filePath) !== visibleEditorText) {
+            this.pendingLocalRebases.set(filePath, {
+                capturedBaseText: pending.capturedBaseText,
+                visibleEditorText: this.currentEditorText(filePath) ?? visibleEditorText,
+            });
+            this.scheduleLocalRebaseRetry(filePath, 'canonical-base-not-ready');
+            return;
+        }
+        this.shadows.set(filePath, visibleEditorText);
+        this.pendingLocalRebases.delete(filePath);
+        this.clearLocalRebaseRetry(filePath);
+        if (!(await activeForwarder.projectVisibleState(visibleEditorText))) {
+            this.scheduleReplicaRetry(filePath, 'local-visible-projection-retry');
+        }
+        this.requestRemoteDrain(filePath);
     }
 
     /**
@@ -1197,6 +1482,15 @@ export class CrdtReplicaManager {
             );
             return false;
         }
+        if (decision === 'rebootstrap-visible-remote-target' && editorRemoteGeneration != null) {
+            await this.rebootstrapVisibleRemoteTarget(
+                filePath,
+                editorText,
+                forwarder,
+                editorRemoteGeneration,
+            );
+            return false;
+        }
         if (
             decision === 'replay-remote-target'
             && replicaText != null
@@ -1269,6 +1563,56 @@ export class CrdtReplicaManager {
         return this.options.currentText(filePath);
     }
 
+    private async rebootstrapVisibleRemoteTarget(
+        filePath: string,
+        editorText: string,
+        staleForwarder: CrdtReplicaForwarder,
+        generation: number,
+    ): Promise<void> {
+        if (this.forwarders.get(filePath) !== staleForwarder || this.hasPendingLocal(filePath)) {
+            this.requestRemoteDrain(filePath);
+            return;
+        }
+        const identity = `${this.options.identity}:${filePath}:refresh-${++this.refreshConnectionEpoch}`;
+        const replacement = new CrdtReplicaForwarder(
+            filePath,
+            identity,
+            this.nodeFactory(),
+            this.transport,
+        );
+        if (!(await replacement.register())) {
+            this.scheduleReplicaRetry(filePath, 'visible-target-canonical-rebootstrap-retry');
+            return;
+        }
+        if (
+            this.currentEditorText(filePath) !== editorText
+            || this.hasPendingLocal(filePath)
+            || this.forwarders.get(filePath) !== staleForwarder
+        ) {
+            await replacement.deregister();
+            this.scheduleReplicaRetry(filePath, 'visible-target-canonical-rebootstrap-raced');
+            return;
+        }
+        const replacementText = replacement.replicaText();
+        if (replacementText !== editorText) {
+            await replacement.deregister();
+            this.scheduleReplicaRetry(filePath, 'visible-target-canonical-advanced');
+            return;
+        }
+        this.forwarders.set(filePath, replacement);
+        await staleForwarder.deregister();
+        this.shadows.set(filePath, editorText);
+        if (!(await replacement.projectVisibleState(editorText))) {
+            this.scheduleReplicaRetry(filePath, 'visible-target-projection-retry');
+            return;
+        }
+        this.options.observeProjection?.(filePath);
+        this.logger.debug(
+            `[crdt-replica] acknowledged an exact visible remote target after canonical replica rebootstrap for ${filePath}: `
+            + `editor_hash=${sha256(editorText)} generation=${generation}`,
+        );
+    }
+
     private async forwarderFor(filePath: string): Promise<CrdtReplicaForwarder | null> {
         const existing = this.forwarders.get(filePath);
         if (existing) return existing;
@@ -1312,6 +1656,7 @@ export class CrdtReplicaManager {
     }
 
     private hasPendingLocal(filePath: string): boolean {
-        return (this.pendingLocalEdits.get(filePath) ?? 0) > 0;
+        return (this.pendingLocalEdits.get(filePath) ?? 0) > 0
+            || this.pendingLocalRebases.has(filePath);
     }
 }

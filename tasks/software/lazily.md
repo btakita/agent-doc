@@ -216,11 +216,7 @@ Superproject pointer `ba3039aff`.
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#recommendedlazilyscripts]
-- ~~do [#lzzigfailedcommand]~~
-- ~~do [#lzkeynullstrict]~~
-- ~~📌 do [#lzreadmelinkrot]~~
-- ~~📌 do [#lzvacuousrun]~~
+- 🚧 do [#recommendedlazilyscripts]
 - 📌 do [#lzscenariobodyskip]
 - 📌 do [#lzspecscenarioids]
 - 📌 do [#lzassertionblockschema]
@@ -238,7 +234,7 @@ Superproject pointer `ba3039aff`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedlazilyscripts] [recommended] lazily-js scripts/check-assertion-keys.mjs has no positive-evidence floor over its key population. The #lzvacuousrun sweep gave it the missing-corpus CI split (it had the same SKIP+exit 0 hole as the other two scripts) but not a magnitude assertion, so it can still print OK over a small-but-nonzero key set. Same rung as the coverage and scenario guards, one script over. Separately: lazily-cs lacks the manifest-self-guard that lazily-rs has (every recorded manifest id must resolve to a file in the corpus), so a manifest of invented paths is not caught there; that is an evidence-channel gap rather than a vacuity one.
+- [ ] 🚧 [#recommendedlazilyscripts] [recommended] lazily-js scripts/check-assertion-keys.mjs has no positive-evidence floor over its key population. The #lzvacuousrun sweep gave it the missing-corpus CI split (it had the same SKIP+exit 0 hole as the other two scripts) but not a magnitude assertion, so it can still print OK over a small-but-nonzero key set. Same rung as the coverage and scenario guards, one script over. Separately: lazily-cs lacks the manifest-self-guard that lazily-rs has (every recorded manifest id must resolve to a file in the corpus), so a manifest of invented paths is not caught there; that is an evidence-channel gap rather than a vacuity one.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -61,7 +61,7 @@ Changed paths: only this session document through binary-owned granular tracked-
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- Analyze the review items. Close any completed review items. Add actionable review items into the backlog + queue.
+- ~~Analyze the review items. Close any completed review items. Add actionable review items into the backlog + queue.~~ — auto-struck: answered this cycle (#ftstrike)
 - In haiven-dev.md, I moved [#rotatethreeexposed] from the backlog into the icebox. But agent-doc reversed my change.
 <!-- /agent:queue -->
 

@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -155,13 +155,40 @@ The unannotated-local, moved-name, and `?` refusals each fire by name through th
 One thing to watch that the live run surfaced: `extract_function` is the only line-addressed intent, so two of them against the same file in one batch is unsafe — the second's line numbers are measured against bytes the first already moved. It fails closed today, but with a confusing message rather than a stale-range one. Queued as `#extractstalerange`.
 
 That drains the queue. The plan's three phases have all landed: Python, GDScript, JavaScript, JSX, TypeScript, TSX, and Rust — one analysis, seven vocabularies and emitters.
+
+### Re: do [#extractstalerange] — opus-5
+
+> **Queue prompt:**
+>
+> do [#extractstalerange]
+
+
+Done, tsift `7ee90f0`. `make check` green (452 in the CLI suite), previous CI run came back green, this one (`30756553093`) still pending at close. Installed locally.
+
+`extract_function` is the only intent addressed by line number, and that turns out to be a property of the **batch**, not just of the intent. A batch applies its intents in order against one shared buffer. Every named intent re-resolves itself against that buffer as it goes — a symbol is still findable after the bytes around it move. A range cannot: a line number carries no evidence of what it meant.
+
+**The refusal is at plan time and it blocks the whole batch.** The later intent becomes a `conflict` naming the earlier intent's handle, and since the apply path already bails on any non-planned draft, nothing lands. Refusing only the later one would still have rewritten the file and left you re-measuring against a file nobody told you had changed.
+
+**Live, with the pre-fix behaviour spelled out**, because "it fails closed today, just confusingly" turned out to be only half true:
+
+- Two extractions against one Python file: the first applied, the second refused with *"the range contains `return`"* — a property of the shifted range, not the reason it shifted, and the file was already half-rewritten.
+- Widen the same file by two statements and the second extraction **succeeds**. I asked to extract `total = acc * 3` / `doubled = total + total`; what got hoisted was `tripled` / `quad`, two statements further down. It parses, `ruff` formats it, and it runs. That is the case worth the guard — a confusing refusal is a nuisance, a silently wrong extraction is the failure this intent's whole refusal list exists to prevent.
+
+After: both batches refuse by name with the file untouched.
+
+**Scoped to the file, not to the kind.** The invariant is that an earlier intent moved these bytes, not that it was also an extraction — an `insert_import` shifts every line below it exactly as an extraction does, and that batch refuses the same way. This is stricter than the bytes strictly require (a rename changes no line numbers), and deliberately so: a stale range does not reliably fail, so under-refusing is again the expensive direction. Two extractions against two *different* files still both apply.
+
+One thing the message had to give up: plan messages are truncated to the 160-byte response budget, and the first draft lost its actionable half. The fix now comes before the diagnosis — *"give this intent its own batch and re-read its line numbers"* first, the colliding handle after — so truncation eats the part you can recover from the plan record anyway.
+
+Mutation-checked all three arms: removing the guard reddens both refusal tests, counting only range-selected intents as writers reddens the `insert_import` test, and dropping the per-file scoping reddens the separate-files test.
+
+That drains the queue.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#extractstalerange]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -170,7 +197,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#extractstalerange] Fail closed with a stale-range message when one edit-intents batch carries two extract_function intents against the same file: the second's start_line/end_line are measured against bytes the first already moved, so the batch currently refuses with whatever refusal the shifted lines happen to trigger. Detect the same-file range-selected pair at plan time and name the real cause. Plan: tasks/software/plan-tsift-extract-function.md
 - [/] [#8wqk] Register crates.io GitHub Trusted Publishing for every post-baseline tsift workspace crate through the operator browser/passkey flow, then verify a tag release publishes without the local token
 <!-- /agent:backlog -->
 

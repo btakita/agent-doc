@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 019fbbad-6fae-74e3-b833-5b840865c8ec
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -35,31 +35,44 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260801-044700.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260801-182827.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Are these issues in tsift.md now fixed?
-- Prior summary/context: prior compacted content: Archived 13 response topic(s): completed queue items and closeout churn; JetBrains native su...
-tmux pane auto-sync is laggy or possibly wedged. #spec-test-build-install-commit-push: `mismatched component: opened 'status' but closed 'backlog'`
+- Archived 1 response topic(s): Response
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): Are these issues in tsift.md now fixed?
+The compacted exchange was not committed. #spec-test-build-install-commit-push
 
 ### Re: Response
 
-Implemented and pushed the tmux/editor convergence fix as `ce4f580ed` (`fix: retain canonical editor projections reactively`).
+Implemented, installed, committed, pushed, and CI-verified.
 
-The root cause was stale whole-buffer promotion, not tmux layout itself: tmux converged, then the old editor-delivery recovery barrier requested a full state; a stale editor buffer could be re-registered and merged into controller canonical text, deleting queue additions and producing `mismatched component: opened 'status' but closed 'backlog'`.
+The periodic pane-sync latency was coming from the Project Controller accept loop: once per second it synchronously ran a tmux layout observation on the same thread that accepts editor/document IPC. When a pane was missing, the tmux probe/retry sequence could occupy that thread for tens of seconds, making unrelated controller calls look wedged.
 
-The controller is now the sole whole-document authority. It retains one process-scoped, Lazily keyed canonical projection independently of disposable relay membership. Editors consume controller bootstrap/revisions and may only send later user-attributable incremental deltas upstream. Stale deltas remain quarantined and trigger canonical reprojection; they cannot replace canonical text.
+The pane-layout path is now edge-driven:
 
-Removed the active CRDT recovery sidecar path, `request_full_state`, ACK replay/force-refresh recovery, editor text/full-state adoption, the foreground 8-second recovery barrier, repair force-disk fallback, and post-commit fallback IPC. Unsettled work returns a typed retained/pending projection instead of writing a secondary snapshot or forcing disk. JetBrains, VS Code, and Zed follow the same authority boundary; Zed full-sync `didChange` is reduced to a causal delta.
+- Removed the one-second tmux observer from the controller accept loop.
+- Removed timer/backoff retries from the tmux layout effect worker. A failed exact-input attempt now derives stable `retry_pending`, records its observation/effect receipt, and retires the worker.
+- Made the exact input key `desired layout generation + actor-binding projection`. A desired-layout or actor-authority change invalidates the old observation/receipt and reactively re-enters `NeedsEffect`; retrying unchanged inputs is impossible.
+- Keyed structural file-to-pane assignments to the same actor-binding snapshot. A mid-effect actor move cannot relabel stale pane geometry as reusable.
+- Fenced focus/select-pane consequences by a monotonic input revision rather than assuming the desired generation alone names every dependency change.
+- Kept durable state-plane ingestion recovery separate: its bounded retry covers controller handoff/durable desired-state publication, not tmux observation and not the IPC accept loop.
+- Documented the shared controller behavior as JetBrains, VS Code, and Zed parity. Arbitrary out-of-band tmux drift is not polled; the next editor desired-state or actor-binding event is the reactive wake edge.
 
-An exact projection ACK release means the controller sends a canonical revision plus content hash; after the editor applies it, the editor reports the hash of what is actually displayed. Only an exact hash match clears that editor's `canonical_projection_required` fence and releases the retained closeout. A mismatch keeps the fence and canonical projection retained. This is a content-qualified delivery receipt, not permission for the editor to upload or replace the document.
+This preserves the requested architecture: no editor ACK request, no CRDT sidecar authority, no forced disk write, no periodic tmux polling, and no imperative same-input retry loop.
 
-A legacy projection means a CRDT recovery row/whole-document projection persisted by an older version, potentially surviving process or controller recycling. Those rows remain decodable only for rolling compatibility; current runtime authority neither hydrates from nor checkpoints them.
+The earlier retained-closeout and queue-order work is also landed in `97442c82c` (`fix: reactively complete retained closeouts`): exact retained transitions settle/resume from the Lazily projection and equal-priority backlog additions retain insertion order in the queue. The pane-latency follow-up is `cb2a5e589` (`fix: make tmux pane sync reactive`). Both source commits are pushed; the superproject gitlink is pushed at `db44e15bd`.
 
-Also removed the pointless `let left = left` Clippy artifact.
+Verification and installation:
 
-Verification: exact staged `make check` passed (8,476 tests plus release/formal/TLA targets; artifact `tart-19446638c1`), JetBrains `./gradlew test buildPlugin` passed all 413 tests, and installation from the exact commit succeeded. The CLI/shared library and JetBrains package `0.2.332` were installed; 2/3 editor endpoints hot-reloaded and one running IDE requires restart. GitHub CI run `30691805683` is queued for `ce4f580ed`; the prior CI baseline is green.
-<!-- agent:boundary:68dc82db -->
+- Focused pane-layout projection, structural-reuse, focus-fencing, and latest-input worker tests passed.
+- Final `make check` passed locally, including simulations/model checks.
+- `make install` installed `agent-doc 0.35.109` atomically, preserved live process inodes, queued 10 route-owned supervisors and 2 controllers for idle-boundary recycle, and delivered the native reload to an available live editor endpoint without forcing unavailable endpoints.
+- GitHub CI run 30732386174 is green: both `make check` and `make tmux-ci` passed. The preceding retained-closeout CI run 30731513721 is also green.
+
+No IDEA restart is required for this controller-side change. The installer recopied the unchanged JetBrains 0.2.334 package and prints its generic restart notice, but the pane-sync implementation lives in the installed controller/native path; active old controller/supervisor inodes adopt it at their already-queued idle boundary.
+
+The requested Lazily state-table follow-up already landed concurrently, so I preserved it instead of creating a duplicate: `tasks/software/plan-lazily-state-tables.md` (commit `91bc0d19c`) and open `lazily.md` backlog item `#lazilystatetable`. The plan explicitly models state tables as pure Computeds over typed product states, keeps effects outside the table, rejects request/ACK gates and sidecars, and includes Zed projection parity.
+<!-- agent:boundary:124f8e72 -->
 <!-- /agent:exchange -->
 ## Queue
 

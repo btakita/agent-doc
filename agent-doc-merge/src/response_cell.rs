@@ -8,7 +8,7 @@
 use agent_doc_element::element;
 use agent_doc_markdown_ast::exchange_tree::{
     ExchangeNode, ExchangeNodeKind, ResponseTurnCellPolicy, parse_exchange_nodes,
-    render_exchange_nodes,
+    remove_all_salient_responses, render_exchange_nodes,
 };
 use std::collections::HashSet;
 
@@ -74,13 +74,26 @@ pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCe
     let (nodes, rendered) = parse_response_cell(response)?;
     let response_policy = ResponseTurnCellPolicy::from_response_nodes(&nodes);
     let cell_id = response_policy.cell_id().to_string();
-    let node_ids = response_policy.node_ids();
     let components = element::parse(doc)?;
     let exchange = components
         .iter()
         .find(|component| component.name == "exchange")
         .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
     let current = exchange.content(doc);
+    let current_without_salient = remove_all_salient_responses(current);
+    let cleaned_doc = if current_without_salient == current {
+        doc.to_string()
+    } else {
+        exchange.replace_content(doc, &current_without_salient)
+    };
+    let cleaned_components = element::parse(&cleaned_doc)?;
+    let cleaned_exchange = cleaned_components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
+    let current = cleaned_exchange.content(&cleaned_doc);
+    let removed_salient = cleaned_doc != doc;
+    let node_ids = response_policy.node_ids();
 
     let current_node_ids = parse_exchange_nodes(current)
         .iter()
@@ -93,9 +106,9 @@ pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCe
             .any(|window| window == node_ids)
     {
         return Ok(ResponseCellAddOutcome {
-            content: doc.to_string(),
+            content: cleaned_doc,
             cell_id,
-            applied: false,
+            applied: removed_salient,
         });
     }
 
@@ -116,9 +129,9 @@ pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCe
     let pending = &nodes[already..];
     if pending.is_empty() {
         return Ok(ResponseCellAddOutcome {
-            content: doc.to_string(),
+            content: cleaned_doc,
             cell_id,
-            applied: false,
+            applied: removed_salient,
         });
     }
     let rendered = if already == 0 {
@@ -134,7 +147,7 @@ pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCe
     next.push_str(&rendered);
 
     Ok(ResponseCellAddOutcome {
-        content: exchange.replace_content(doc, &next),
+        content: cleaned_exchange.replace_content(&cleaned_doc, &next),
         cell_id,
         applied: true,
     })
@@ -515,6 +528,30 @@ mod tests {
         let finalized = add_response_cell(&checkpointed.content, full).unwrap();
         assert!(!finalized.applied);
         assert_eq!(finalized.content, checkpointed.content);
+    }
+
+    #[test]
+    fn finalize_replaces_salient_node_and_replay_cleans_stale_salient() {
+        let live =
+            crate::salient_response::upsert_salient_response_node(DOC, "cycle-1", "Diagnosis.")
+                .unwrap();
+        let response = "### Re: operator prompt — gpt-5\n\nFinal answer.";
+        let finalized = add_response_cell(&live.content, response).unwrap();
+        assert!(finalized.applied);
+        assert!(!finalized.content.contains("agent:salient-response"));
+        assert!(!finalized.content.contains("Diagnosis."));
+        assert_eq!(finalized.content.matches("Final answer.").count(), 1);
+
+        let stale = crate::salient_response::upsert_salient_response_node(
+            &finalized.content,
+            "cycle-1",
+            "Stale replay.",
+        )
+        .unwrap();
+        let replay = add_response_cell(&stale.content, response).unwrap();
+        assert!(replay.applied, "stale progress cleanup is a real mutation");
+        assert!(!replay.content.contains("agent:salient-response"));
+        assert_eq!(replay.content.matches("Final answer.").count(), 1);
     }
 
     /// The prefix match is anchored at the tail, so an older unrelated turn that

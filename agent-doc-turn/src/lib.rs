@@ -25,6 +25,7 @@ pub mod owner_pane_recursion;
 pub mod repair;
 pub mod response_replay;
 pub mod response_text;
+pub mod salient_response;
 pub mod turn_scope;
 pub mod turn_status;
 pub mod wait_machine;

@@ -95,6 +95,24 @@ class EditorTabSyncListener : FileEditorManagerListener {
         }
     }
 
+    /**
+     * `selectionChanged` may be delivered before IDEA updates `selectedFiles` and
+     * the split-window model. Keep the selected-document fact authoritative and
+     * re-read the editor projection on a bounded number of later EDT turns. This is
+     * event settling, not a timer/retry ladder: every pass yields the EDT, the
+     * generation guard cancels stale work, and exhaustion retains the observation
+     * for the next real layout/focus event.
+     */
+    internal object SelectionProjectionSettling {
+        const val MAX_REPROJECTION_PASSES = 3
+
+        fun shouldReproject(
+            authority: ObservationAuthority,
+            remainingPasses: Int,
+        ): Boolean =
+            authority == ObservationAuthority.DocumentSelection && remainingPasses > 0
+    }
+
     /** One column of the reported split layout. Wire shape of Rust `SurfaceColumn`. */
     internal data class SurfaceColumnPayload(val files: List<String>)
 
@@ -251,6 +269,16 @@ class EditorTabSyncListener : FileEditorManagerListener {
     }
 
     private fun projectLatestSurfaceOnEditorThread(requestedGeneration: Long) {
+        projectLatestSurfaceOnEditorThread(
+            requestedGeneration,
+            SelectionProjectionSettling.MAX_REPROJECTION_PASSES,
+        )
+    }
+
+    private fun projectLatestSurfaceOnEditorThread(
+        requestedGeneration: Long,
+        remainingSelectionPasses: Int,
+    ) {
         ApplicationManager.getApplication().invokeLater {
             try {
                 if (generation.get() != requestedGeneration) {
@@ -265,11 +293,26 @@ class EditorTabSyncListener : FileEditorManagerListener {
                         forceReconcile = observation.forceReconcile,
                     )
                         ?: run {
-                            // The selection event can precede IDEA's visible-editor
-                            // projection. Retain the selected-document Source and
-                            // wait for the next real selection/layout/focus event;
-                            // a timer retry would repeatedly block the EDT.
-                            log("observe: retained until editor-surface dependency changes")
+                            // The selection event can precede IDEA's visible-editor projection.
+                            // Re-read on a bounded later EDT turn so a single tab switch is a
+                            // complete reactive edge even when IDEA emits no follow-up event.
+                            if (
+                                SelectionProjectionSettling.shouldReproject(
+                                    authority = observation.authority,
+                                    remainingPasses = remainingSelectionPasses,
+                                )
+                            ) {
+                                log(
+                                    "observe: editor projection settling; remaining=" +
+                                        "$remainingSelectionPasses",
+                                )
+                                projectLatestSurfaceOnEditorThread(
+                                    requestedGeneration,
+                                    remainingSelectionPasses - 1,
+                                )
+                            } else {
+                                log("observe: retained until editor-surface dependency changes")
+                            }
                             return@invokeLater
                         }
                 surfaceDeliveryExecutor.execute {

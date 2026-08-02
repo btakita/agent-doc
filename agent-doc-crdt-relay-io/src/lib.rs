@@ -73,6 +73,7 @@ use lazily::{DurableOutbox, ThreadSafeContext, ThreadSafeSourceMap};
 pub enum CrdtReplicaEventReason {
     Fanout,
     ResponseCellAdd,
+    SalientResponseUpsert,
     CpWrite,
     Rebootstrap,
     CanonicalProjection,
@@ -108,6 +109,7 @@ impl CrdtReplicaEventReason {
         match self {
             Self::Fanout => "fanout",
             Self::ResponseCellAdd => "response_cell_add",
+            Self::SalientResponseUpsert => "salient_response_upsert",
             Self::CpWrite => "cp_write",
             Self::Rebootstrap => "rebootstrap",
             Self::CanonicalProjection => "canonical_projection",
@@ -2228,6 +2230,104 @@ pub fn add_response_cell_for_file(
         file,
         &format!(
             "crdt_response_cell_add file={} source={} cell_id={} applied={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
+            file.display(),
+            source,
+            result.cell_id,
+            result.applied,
+            result.content_hash,
+            result.update_bytes,
+            result.targets,
+            result.live_editors,
+            result.delivery_converged,
+        ),
+    );
+    Ok(Some(result))
+}
+
+fn apply_salient_response_on_hub(
+    hub: &mut RelayHub,
+    file: &Path,
+    authority: CrdtAuthority,
+    cycle_id: &str,
+    body: &str,
+) -> Result<ResponseCellRelayWrite> {
+    let ready = hub.commit_barrier_under_authority(authority)?;
+    if !ready {
+        anyhow::bail!(
+            "salient response upsert refused for {}: editor_sync_pending",
+            file.display()
+        );
+    }
+    let canonical = hub.canonical_text();
+    let outcome = agent_doc_merge::salient_response::upsert_salient_response_node(
+        &canonical, cycle_id, body,
+    )?;
+    let (update_bytes, targets) = if outcome.applied {
+        let packet = hub.apply_canonical_replace(&canonical, &outcome.content)?;
+        (packet.update.len(), packet.targets.len())
+    } else {
+        (0, 0)
+    };
+    Ok(ResponseCellRelayWrite {
+        applied: outcome.applied,
+        cell_id: outcome.cell_id,
+        content_hash: agent_doc_hash::content_hash(&outcome.content),
+        content: outcome.content,
+        update_bytes,
+        targets,
+        live_editors: hub.live_count(),
+        delivery_converged: hub.delivery_converged(),
+    })
+}
+
+/// Append or replace the one non-final salient response node for an open cycle.
+/// The semantic operation is evaluated against the controller canonical under
+/// the same inbound barrier as final response-cell insertion.
+pub fn upsert_salient_response_for_file(
+    file: &Path,
+    cycle_id: &str,
+    body: &str,
+    source: &str,
+) -> Result<Option<ResponseCellRelayWrite>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let Some(result) = with_existing_hub(file, |hub| {
+        apply_salient_response_on_hub(hub, file, authority, cycle_id, body)
+    })?
+    else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_salient_response_upsert_deferred file={} source={} reason=missing_live_canonical_model recovery=wait_for_editor_replica",
+                file.display(),
+                source,
+            ),
+        );
+        return Ok(None);
+    };
+    let result = result?;
+    if result.targets > 0
+        && result.update_bytes > 0
+        && let Err(err) = signal_crdt_replica_event(
+            file,
+            CrdtReplicaEventReason::SalientResponseUpsert,
+            result.targets,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_event_signal_failed file={} reason=salient_response_upsert error={err}",
+                file.display()
+            ),
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_salient_response_upsert file={} source={} cell_id={} applied={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
             file.display(),
             source,
             result.cell_id,

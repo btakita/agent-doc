@@ -4,6 +4,24 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.117
+
+_JetBrains plugin 0.2.337; VS Code extension 0.2.64; Zed extension 0.1.0._
+
+- **Standalone salient conclusions can become document-visible before
+  closeout.** `agent-doc salient-checkpoint` validates a complete Markdown
+  body, upserts one explicitly non-final cycle-scoped exchange node through the
+  controller/CRDT authority, and never acts as queue-answer evidence. Final
+  response application deterministically removes that node, including on
+  replay.
+- **JetBrains tab selection settles its own layout projection.** When IDEA emits
+  `selectionChanged` before `selectedFiles` and the split-window model expose
+  the new tab, the plugin retains the selected-document fact and re-reads the
+  projection on bounded later EDT turns. A single cross-root tab switch now
+  publishes the current editor surface without requiring manual **Sync Tmux
+  Layout**. The JetBrains regression suite is part of `make check` through the
+  agent-doc development harness.
+
 ## 0.35.116
 
 _JetBrains plugin 0.2.336; VS Code extension 0.2.64; Zed extension 0.1.0._

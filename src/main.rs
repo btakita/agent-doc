@@ -2399,6 +2399,11 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Replace the active cycle's operator-visible, non-final salient response
+    SalientCheckpoint {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Persist the complete response and resolve the cycle to a committed state
     #[command(name = "respond", visible_alias = "finalize")]
     Finalize {
@@ -4488,6 +4493,13 @@ fn try_main() -> anyhow::Result<()> {
                 .read_to_string(&mut response)
                 .context("failed to read response checkpoint from stdin")?;
             agent_doc_write_runtime_io::checkpoint_response(&file, &response)
+        }
+        Commands::SalientCheckpoint { file } => {
+            let mut response = String::new();
+            std::io::stdin()
+                .read_to_string(&mut response)
+                .context("failed to read salient response from stdin")?;
+            agent_doc_write_runtime_io::checkpoint_salient_response(&file, &response)
         }
         Commands::Write { args, commit } => {
             let lint_override = match args.lint.as_deref() {

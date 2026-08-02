@@ -28,6 +28,10 @@ pub enum ExchangeNodeKind {
     /// A user prompt turn — a caret `❯ …` line or free user text before the first
     /// response. Never merged into a neighboring response.
     Prompt,
+    /// Operator-visible, non-final assistant progress for one open cycle.
+    /// The enclosing protocol comments make this node replaceable without
+    /// allowing its body to prove that a prompt was answered.
+    Salient { cycle_id: String },
     /// An agent response turn — a `### Re: …` heading plus its following content.
     /// `key` is the normalized heading identity (leading `### `, a surrounding
     /// `~~…~~` strike wrapper, and a trailing ` (HEAD)` annotation stripped) used
@@ -81,6 +85,7 @@ impl ExchangeNode {
                     .join("\n");
                 format!("p:{}", short_content_hash(body.trim()))
             }
+            ExchangeNodeKind::Salient { cycle_id } => format!("s:{cycle_id}"),
         }
     }
 }
@@ -93,6 +98,26 @@ fn is_h3_heading(trimmed: &str) -> bool {
 /// A caret prompt line (`❯ …`) — the canonical operator prompt marker.
 fn is_caret_prompt(trimmed: &str) -> bool {
     trimmed.starts_with('❯')
+}
+
+const SALIENT_OPEN_PREFIX: &str = "<!-- agent:salient-response cycle=\"";
+const SALIENT_OPEN_SUFFIX: &str = "\" -->";
+const SALIENT_CLOSE: &str = "<!-- /agent:salient-response -->";
+const SALIENT_HEADING: &str = "#### Live response (not final)";
+
+fn salient_cycle_id_from_open_marker(trimmed: &str) -> Option<String> {
+    let cycle_id = trimmed
+        .strip_prefix(SALIENT_OPEN_PREFIX)?
+        .strip_suffix(SALIENT_OPEN_SUFFIX)?;
+    (!cycle_id.is_empty()
+        && cycle_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "-_.:".contains(character)))
+    .then(|| cycle_id.to_string())
+}
+
+fn is_salient_close_marker(trimmed: &str) -> bool {
+    trimmed == SALIENT_CLOSE
 }
 
 /// Normalize a `### ` heading line into a stable turn-identity key: strip the
@@ -275,10 +300,44 @@ fn split_keep_newlines(s: &str) -> Vec<String> {
 pub fn parse_exchange_nodes(inner: &str) -> Vec<ExchangeNode> {
     let mut nodes: Vec<ExchangeNode> = Vec::new();
     let mut current: Option<ExchangeNode> = None;
+    let mut salient_closed = false;
 
     for line in split_keep_newlines(inner) {
         let trimmed = line.trim_end_matches(['\n', '\r']).trim();
-        if is_h3_heading(trimmed) {
+        if matches!(
+            current.as_ref().map(|node| &node.kind),
+            Some(ExchangeNodeKind::Salient { .. })
+        ) {
+            if !salient_closed {
+                salient_closed = is_salient_close_marker(trimmed);
+                current
+                    .as_mut()
+                    .expect("salient node exists")
+                    .lines
+                    .push(line);
+                continue;
+            }
+            if trimmed.is_empty() {
+                current
+                    .as_mut()
+                    .expect("salient node exists")
+                    .lines
+                    .push(line);
+                continue;
+            }
+            nodes.push(current.take().expect("salient node exists"));
+            salient_closed = false;
+        }
+
+        if let Some(cycle_id) = salient_cycle_id_from_open_marker(trimmed) {
+            if let Some(n) = current.take() {
+                nodes.push(n);
+            }
+            current = Some(ExchangeNode {
+                kind: ExchangeNodeKind::Salient { cycle_id },
+                lines: vec![line],
+            });
+        } else if is_h3_heading(trimmed) {
             if let Some(n) = current.take() {
                 nodes.push(n);
             }
@@ -355,6 +414,9 @@ pub fn list_exchange_nodes(inner: &str) -> Vec<ExchangeNodeSummary> {
                         .unwrap_or("")
                         .to_string(),
                 ),
+                ExchangeNodeKind::Salient { cycle_id } => {
+                    ("salient", format!("live response for {cycle_id}"))
+                }
             };
             ExchangeNodeSummary {
                 node_id: n.node_id(),
@@ -428,6 +490,64 @@ pub fn add_prompt(inner: &str, text: &str) -> String {
         format!("❯ {t}\n")
     };
     append_turn(inner, &turn)
+}
+
+/// Render one complete, cycle-keyed non-final response node.
+pub fn render_salient_response(cycle_id: &str, body: &str) -> String {
+    format!(
+        "{SALIENT_OPEN_PREFIX}{cycle_id}{SALIENT_OPEN_SUFFIX}\n\
+{SALIENT_HEADING}\n\n{}\n\
+{SALIENT_CLOSE}\n",
+        body.trim_matches(['\n', '\r'])
+    )
+}
+
+/// Append or replace the one salient response node owned by `cycle_id`.
+pub fn upsert_salient_response(inner: &str, cycle_id: &str, body: &str) -> String {
+    let rendered = render_salient_response(cycle_id, body);
+    let replacement = parse_exchange_nodes(&rendered)
+        .into_iter()
+        .next()
+        .expect("rendered salient response is one node");
+    let mut nodes = parse_exchange_nodes(inner);
+    if let Some(index) = nodes.iter().position(|node| {
+        matches!(
+            &node.kind,
+            ExchangeNodeKind::Salient {
+                cycle_id: existing
+            } if existing == cycle_id
+        )
+    }) {
+        if nodes[index].render().trim_end() == replacement.render().trim_end() {
+            return inner.to_string();
+        }
+        nodes[index] = replacement;
+        return render_exchange_nodes(&nodes);
+    }
+    append_turn(inner, &rendered)
+}
+
+/// Remove every non-final response node. Final response insertion uses this
+/// unconditionally so replay also cleans a stale progress projection.
+pub fn remove_all_salient_responses(inner: &str) -> String {
+    render_exchange_nodes(
+        &parse_exchange_nodes(inner)
+            .into_iter()
+            .filter(|node| !matches!(node.kind, ExchangeNodeKind::Salient { .. }))
+            .collect::<Vec<_>>(),
+    )
+}
+
+pub fn salient_response_materialized(inner: &str, cycle_id: &str, body: &str) -> bool {
+    let expected = render_salient_response(cycle_id, body);
+    parse_exchange_nodes(inner).into_iter().any(|node| {
+        matches!(
+            &node.kind,
+            ExchangeNodeKind::Salient {
+                cycle_id: existing
+            } if existing == cycle_id
+        ) && node.render().trim_end() == expected.trim_end()
+    })
 }
 
 /// Move `node_id` to immediately before (`before = true`) or after the node
@@ -545,6 +665,44 @@ mod tests {
     fn empty_exchange_yields_no_nodes() {
         assert!(parse_exchange_nodes("").is_empty());
         assert_eq!(render_exchange_nodes(&[]), "");
+    }
+
+    #[test]
+    fn salient_block_is_one_non_prompt_non_response_node() {
+        let block = render_salient_response(
+            "cycle-7",
+            "Confirmed diagnosis.\n\n### Heading inside progress\n\n❯ example",
+        );
+        let nodes = parse_exchange_nodes(&block);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(
+            nodes[0].kind,
+            ExchangeNodeKind::Salient {
+                cycle_id: "cycle-7".to_string()
+            }
+        );
+        assert_eq!(nodes[0].node_id(), "s:cycle-7");
+        assert_eq!(render_exchange_nodes(&nodes), block);
+    }
+
+    #[test]
+    fn salient_upsert_replaces_by_cycle_and_final_cleanup_removes_it() {
+        let initial = "❯ Investigate.\n";
+        let first = upsert_salient_response(initial, "cycle-7", "First finding.");
+        let replay = upsert_salient_response(&first, "cycle-7", "First finding.");
+        assert_eq!(replay, first);
+
+        let second = upsert_salient_response(&first, "cycle-7", "Confirmed finding.");
+        assert!(!second.contains("First finding."));
+        assert!(salient_response_materialized(
+            &second,
+            "cycle-7",
+            "Confirmed finding."
+        ));
+        assert_eq!(
+            remove_all_salient_responses(&second).trim_end(),
+            initial.trim_end()
+        );
     }
 
     // --- Phase 4 structural operations ---

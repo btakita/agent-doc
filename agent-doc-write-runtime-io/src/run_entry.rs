@@ -283,6 +283,76 @@ pub fn checkpoint_response(file: &Path, response: &str) -> Result<()> {
     Ok(())
 }
 
+/// Publish one structurally complete, explicitly salient non-final result into
+/// the live exchange. Repeated calls replace the node owned by the active cycle;
+/// finalize removes it as part of final response-cell insertion.
+pub fn checkpoint_salient_response(file: &Path, response: &str) -> Result<()> {
+    let body = match agent_doc_turn::salient_response::decide_salient_checkpoint(response) {
+        agent_doc_turn::salient_response::SalientCheckpointDecision::Apply { body } => body,
+        agent_doc_turn::salient_response::SalientCheckpointDecision::Reject(rejection) => {
+            anyhow::bail!(rejection.message())
+        }
+    };
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        .ok_or_else(|| anyhow::anyhow!("salient response requires an active preflight cycle"))?;
+    anyhow::ensure!(
+        state.is_open(),
+        "salient response requires an open cycle; current phase is {:?}",
+        state.phase,
+    );
+
+    let response_sha256 = agent_doc_hash::content_hash(&body);
+    let operation_id = format!("salient-response:{}:{response_sha256}", state.cycle_id);
+    let Some(write) =
+        agent_doc_controller_io::project_controller::salient_response_via_controller_model_for_doc(
+            file,
+            &state.cycle_id,
+            &operation_id,
+            &response_sha256,
+            &body,
+            "salient_response_checkpoint",
+        )?
+    else {
+        anyhow::bail!(
+            "salient response requires the live controller/Lazily document model; use console commentary for a headless document"
+        );
+    };
+
+    let materialized = materialize_response_cell_projection(file, &write.content)?;
+    anyhow::ensure!(
+        agent_doc_merge::salient_response::salient_response_materialized(
+            &materialized,
+            &state.cycle_id,
+            &body,
+        )?,
+        "salient response was not present after acknowledged materialization for {}",
+        file.display(),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "salient_response_checkpoint_materialized file={} cycle_id={} operation_id={} cell_id={} applied={} response_sha256={} content_hash={}",
+            file.display(),
+            state.cycle_id,
+            operation_id,
+            write.cell_id,
+            write.applied,
+            response_sha256,
+            agent_doc_hash::content_hash(&materialized),
+        ),
+    );
+    eprintln!(
+        "[write] salient response {} ({})",
+        write.cell_id,
+        if write.applied {
+            "advanced"
+        } else {
+            "unchanged"
+        },
+    );
+    Ok(())
+}
+
 fn try_add_response_cell_via_realtime_backbone(
     file: &Path,
     patches: &[template::PatchBlock],

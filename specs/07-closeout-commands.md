@@ -11,6 +11,11 @@ uncommitted response tail, preserves every operator prompt, and materializes the
 acknowledged projection. It does not mark the response `write_applied`, consume
 queue heads, apply backlog/done mutations, update the baseline, or commit.
 
+`salient-checkpoint <FILE>` reads one complete, standalone conclusion from stdin
+and upserts a cycle-scoped `Live response (not final)` exchange node. The node is
+controller/CRDT materialized, never proves that queue work was answered, never
+commits, and is removed by final response application, including replay cleanup.
+
 `respond` is the primary spelling for the binary-owned seal transition;
 `finalize` remains a compatibility alias. The seal
 captures the complete cumulative response, records the durable response-cell

@@ -111,6 +111,29 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `stale selected-files projection is reread on later EDT turns`() {
+        assertTrue(
+            EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(
+                authority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
+                remainingPasses = 1,
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(
+                authority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
+                remainingPasses = 0,
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(
+                authority = EditorTabSyncListener.ObservationAuthority.Layout,
+                remainingPasses =
+                    EditorTabSyncListener.SelectionProjectionSettling.MAX_REPROJECTION_PASSES,
+            ),
+        )
+    }
+
+    @Test
     fun `selected editor file is used when no selection event file is supplied`() {
         val activeFile =
             EditorTabSyncListener.SurfaceReport.resolveActiveFilePath(
@@ -362,8 +385,10 @@ class EditorTabSyncListenerTest {
         assertTrue(layoutChange.contains("latestSurfaceObservation.get()"))
         assertTrue(layoutChange.contains("it.preferredFile != null"))
         assertFalse(layoutChange.contains("delayMs"))
-        assertTrue(report.contains("ApplicationManager.getApplication().invokeLater"))
-        assertTrue(report.contains("compareAndSet(observation, null)"))
+assertTrue(report.contains("ApplicationManager.getApplication().invokeLater"))
+assertTrue(report.contains("SelectionProjectionSettling.shouldReproject"))
+assertTrue(report.contains("remainingSelectionPasses - 1"))
+assertTrue(report.contains("compareAndSet(observation, null)"))
         assertFalse(report.contains("requestObservation("))
         assertFalse(report.contains("invokeAndWait"))
         assertFalse(report.contains("schedule("))

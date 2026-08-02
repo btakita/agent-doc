@@ -6104,6 +6104,8 @@ struct ControllerResponseCellAddPayload {
     committed_content: Option<String>,
     #[serde(default)]
     checkpoint_only: bool,
+    #[serde(default)]
+    salient_only: bool,
     source: Option<String>,
 }
 
@@ -6125,6 +6127,7 @@ pub fn add_response_cell_via_controller_model_for_doc(
         response_sha256,
         response,
         committed_content,
+        false,
         false,
         source,
     )
@@ -6150,6 +6153,29 @@ pub fn checkpoint_response_cell_via_controller_model_for_doc(
         response,
         committed_content,
         true,
+        false,
+        source,
+    )
+}
+
+/// Append or replace the cycle-keyed, non-final salient response node.
+pub fn salient_response_via_controller_model_for_doc(
+    doc: &Path,
+    cycle_id: &str,
+    operation_id: &str,
+    response_sha256: &str,
+    response: &str,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>> {
+    response_cell_via_controller_model_for_doc(
+        doc,
+        cycle_id,
+        operation_id,
+        response_sha256,
+        response,
+        None,
+        true,
+        true,
         source,
     )
 }
@@ -6163,6 +6189,7 @@ fn response_cell_via_controller_model_for_doc(
     response: &str,
     committed_content: Option<&str>,
     checkpoint_only: bool,
+    salient_only: bool,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
@@ -6181,6 +6208,7 @@ fn response_cell_via_controller_model_for_doc(
         response: response.to_string(),
         committed_content: committed_content.map(str::to_string),
         checkpoint_only,
+        salient_only,
         source: Some(source.to_string()),
     };
     let result: ControllerResponseCellAddResult = request_controller(
@@ -7221,14 +7249,38 @@ fn handle_response_cell_add_rpc(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("controller_response_cell_add");
-    let write = agent_doc_crdt_relay_io::add_response_cell_for_file(
-        &canonical,
-        payload.committed_content.as_deref(),
-        &payload.response,
-        source,
-    )?;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ResponseCellMutationKind {
+        Final,
+        CompleteCheckpoint,
+        SalientCheckpoint,
+    }
+    let kind = match (payload.checkpoint_only, payload.salient_only) {
+        (false, false) => ResponseCellMutationKind::Final,
+        (true, false) => ResponseCellMutationKind::CompleteCheckpoint,
+        (true, true) => ResponseCellMutationKind::SalientCheckpoint,
+        (false, true) => anyhow::bail!("salient response mutation must also be checkpoint-only"),
+    };
+    let write = match kind {
+        ResponseCellMutationKind::Final | ResponseCellMutationKind::CompleteCheckpoint => {
+            agent_doc_crdt_relay_io::add_response_cell_for_file(
+                &canonical,
+                payload.committed_content.as_deref(),
+                &payload.response,
+                source,
+            )?
+        }
+        ResponseCellMutationKind::SalientCheckpoint => {
+            agent_doc_crdt_relay_io::upsert_salient_response_for_file(
+                &canonical,
+                &payload.cycle_id,
+                &payload.response,
+                source,
+            )?
+        }
+    };
     if let Some(write) = &write
-        && !payload.checkpoint_only
+        && kind == ResponseCellMutationKind::Final
     {
         agent_doc_cycle_state_io::append_response_cell_added(
             &canonical,

@@ -78,10 +78,15 @@ model identity. Never use the harness label (`codex`, `claude`) as the suffix, a
 never omit it.
 
 **Response checkpoints and sealing:** stream incomplete progress only to the
-harness console. After each complete `### Re:` section (balanced fences and
-component markers), the harness may persist the cumulative response with
-`agent-doc response-checkpoint <FILE>`. The binary replaces the uncommitted
-response tail in Lazily; it does not consume queue/backlog work or commit.
+harness console. A standalone conclusion that remains useful before closeout may
+be written with `agent-doc salient-checkpoint <FILE>`. The binary structurally
+validates the complete Markdown body and upserts one cycle-scoped
+`Live response (not final)` node. It is not answer evidence and does not consume
+queue/backlog work or commit. After each complete `### Re:` section (balanced
+fences and component markers), the harness may persist the cumulative response
+with `agent-doc response-checkpoint <FILE>`. The binary replaces the
+uncommitted response tail in Lazily; it does not consume queue/backlog work or
+commit. A final response removes any live-response node for the cycle.
 Turn-end `agent-doc respond` asks the binary to resolve those closeout mutations
 and commit exactly once (`finalize` remains an alias). See
 [streaming-checkpoints.md](streaming-checkpoints.md).

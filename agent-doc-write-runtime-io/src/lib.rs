@@ -681,6 +681,10 @@ pub fn checkpoint_response(file: &Path, response: &str) -> Result<()> {
     run_entry::checkpoint_response(file, response)
 }
 
+pub fn checkpoint_salient_response(file: &Path, response: &str) -> Result<()> {
+    run_entry::checkpoint_salient_response(file, response)
+}
+
 pub fn run_command_with_empty_response_recovery(
     options: CommandOptions,
     commit_mode: CommitMode,

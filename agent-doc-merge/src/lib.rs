@@ -17,6 +17,7 @@ pub mod exchange_seqcrdt;
 pub mod frontmatter_crdt;
 pub mod queue_seqcrdt;
 pub mod response_cell;
+pub mod salient_response;
 
 pub use document_cell::{
     CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,

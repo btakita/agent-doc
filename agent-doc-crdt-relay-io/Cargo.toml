@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-crdt-relay-io"
-version = "0.35.116"
+version = "0.35.117"
 edition = "2024"
 description = "CRDT relay host IO boundary for agent-doc"
 license = "MIT"
@@ -12,20 +12,20 @@ name = "agent_doc_crdt_relay_io"
 doctest = false
 
 [dependencies]
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.116" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.116" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.116" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.116" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.116" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.116" }
-agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.116" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.116" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.116" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.116" }
-agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.116" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.116" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.116" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.116" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.117" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.117" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.117" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.117" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.117" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.117" }
+agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.117" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.117" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.117" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.117" }
+agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.117" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.117" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.117" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.117" }
 anyhow = "1"
 lazily = { version = "0.53.0", features = ["ipc", "durable-sqlite"] }
 # `#relaylockpoison`: the relay registries use parking_lot, not std::sync::Mutex.

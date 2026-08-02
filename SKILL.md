@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.116"
+agent-doc-version: "0.35.117"
 ---
 
 # agent-doc
@@ -80,6 +80,7 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 ### 1. Respond
 
 - Address the user's changes naturally in the console; that response is the document response.
+- Keep routine progress in the console; persist a standalone pre-closeout conclusion with `agent-doc salient-checkpoint <FILE>` (non-final, no queue-answer/commit authority, removed by final response). See the streaming runbook.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; answer or group each unresolved prompt in that tail and each unresolved `prompt_target`; treat `content_edit` items as user corrections.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay in plan/backlog capture mode. Otherwise complete the requested repo work before persistence or stop on a blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone. When draining a free-text queue head (no `#id`), quote it as a `> **Queue prompt:**` blockquote so `#ftstrike` can strike it (see [runbooks/respond.md](runbooks/respond.md), `#qdeferstrike`).
 

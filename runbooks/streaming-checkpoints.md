@@ -8,7 +8,12 @@ semantically complete response checkpoints before the turn is sealed.
 
 - Send concise progress through the harness console/commentary channel.
 - Incomplete token prefixes may be retained as crash-recovery evidence, but they
-  are never a live-buffer sidecar and never become document authority.
+are never a live-buffer sidecar and never become document authority.
+- When a standalone conclusion is valuable before closeout, send its complete
+  Markdown body to `agent-doc salient-checkpoint <FILE>`. The binary rejects
+  empty bodies, protocol markers, and unbalanced fences, then upserts one
+  cycle-scoped `Live response (not final)` node through controller/CRDT
+  authority.
 - At a semantic breakpoint, pipe the cumulative complete response through
   `agent-doc response-checkpoint <FILE>`. Pass the response **cumulatively** —
   every section so far, not just the new one. The binary appends only the
@@ -43,6 +48,10 @@ bottleneck — a very large response, or a document under concurrent editing whe
 `compare_and_swap_raced` shows up in `ops.log`. Confirm with the
 `closeout_latency` phase breakdown before adopting it as a habit; do not assume
 the convergence window is the expensive part, because usually it is not.
+
+Salient checkpoints are deliberately sparse: routine status stays console-only.
+They never count as answer evidence, and the final response removes the
+cycle-scoped salient node even when final closeout is replayed.
 
 ## Final write
 

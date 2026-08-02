@@ -109,6 +109,7 @@ version-sync:
 
 dev-harness-test:
 	@python3 scripts/agent-doc-dev self-test
+	@cd editors/jetbrains && ./gradlew --no-daemon --console=plain -q test
 
 # Bump JB plugin patch version and build both zips
 bump-plugin:

@@ -8,6 +8,13 @@ a live-buffer sidecar. A newer checkpoint supersedes only response nodes absent
 from the committed exchange anchor; operator prompt nodes and unsaved queue
 deletions remain authoritative.
 
+Standalone conclusions may cross the write boundary earlier as a distinct
+cycle-scoped salient-response node. The agent declares salience; the binary only
+validates structural completeness and upserts through controller/CRDT
+authority. The node is explicitly non-final, has no queue/progress answer
+authority, and is deterministically replaced or removed by later salient/final
+mutations.
+
 The explicit close of the last editor replica first publishes the exact final
 buffer cut, then releases the replica. If no replica remains, the binary projects
 that retained cut to disk; zero-member delivery alone is never visible-write

@@ -948,14 +948,13 @@ fn record_lazily_visible_write_receipt(
     source: &str,
 ) -> anyhow::Result<()> {
     mark_embedded_editor_host();
-    let proof =
-        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_project_file(
-            project_root,
-            file,
-            patch_id_str,
-            content_str,
-            source,
-        )?;
+    let proof = record_visible_write_commit_candidate_from_ffi(
+        project_root,
+        file,
+        patch_id_str,
+        content_str,
+        source,
+    )?;
     eprintln!(
         "[ffi] lazily visible-write receipt recorded: patch_id {} model_revision={} candidate_hash={} source={}",
         &patch_id_str[..patch_id_str.len().min(8)],
@@ -964,6 +963,35 @@ fn record_lazily_visible_write_receipt(
         source
     );
     Ok(())
+}
+
+fn record_visible_write_commit_candidate_from_ffi(
+    project_root: &Path,
+    file: &Path,
+    patch_id: &str,
+    candidate_content: &str,
+    source: &str,
+) -> anyhow::Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+    #[cfg(not(test))]
+    {
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_project_file(
+            project_root,
+            file,
+            patch_id,
+            candidate_content,
+            source,
+        )
+    }
+    #[cfg(test)]
+    {
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_test(
+            project_root,
+            file,
+            patch_id,
+            candidate_content,
+            source,
+        )
+    }
 }
 
 fn record_editor_patch_receipt(

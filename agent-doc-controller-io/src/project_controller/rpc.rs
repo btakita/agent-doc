@@ -4949,6 +4949,47 @@ pub fn record_visible_write_commit_candidate_for_project_file(
     })
 }
 
+/// Direct typed-event projection for isolated editor-FFI fixtures.
+///
+/// Runtime callers must use [`record_visible_write_commit_candidate_for_project_file`]
+/// so publication is serialized through the live controller.
+#[doc(hidden)]
+pub fn record_visible_write_commit_candidate_for_test(
+    project_root: &Path,
+    file: &Path,
+    patch_id: &str,
+    candidate_content: &str,
+    source: &str,
+) -> Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let commit_candidate_hash = visible_write_commit_candidate_hash(candidate_content);
+    let payload = VisibleWriteCommitCandidatePayload {
+        patch_id: patch_id.to_string(),
+        model_revision: next_visible_write_model_revision(project_root, &canonical),
+        editor_visible_hash: commit_candidate_hash.clone(),
+        commit_candidate_hash,
+        commit_candidate_content: candidate_content.to_string(),
+        source: source.to_string(),
+    };
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let (generation_event, applied_event, proof_event) =
+        visible_write_commit_candidate_events(&document_hash, &payload);
+    for event in [generation_event, applied_event, proof_event] {
+        super::append_state_event(project_root, &event)?;
+    }
+    visible_write_commit_candidate_for_patch_from_projection(
+        &load_state_backbone_projection(project_root)?,
+        &canonical,
+        patch_id,
+    )
+    .with_context(|| {
+        format!(
+            "test visible-write receipt did not fold for {} patch_id={patch_id}",
+            canonical.display()
+        )
+    })
+}
+
 pub fn visible_write_commit_candidate_applied_for_file(
     file: &Path,
     commit_candidate_hash: &str,

@@ -90,18 +90,49 @@ The last two round-trip cleanly and pass every value assertion. They are the one
 
 I also mutation-checked the ledger flip itself: re-adding `codec/frame_roundtrip_msgpack.json` to cpp's `KNOWN_UNCOVERED` reddens `check-coverage-claims.mjs` against the ✅ I just set. The mark is backed by cpp's own ledger, not by the annotation.
 
-**Two things I changed beyond the item, and why.** `interop_peer`'s `normalize_msgpack` routed through the private codec while advertising the token, so it now routes through the spec wire and its self-check asserts the bytes are externally tagged; the old private-codec normalization survives under an honest name. And `json` moved out of that handshake's `carve_outs` into `codecs` — `json_codec.hpp` landed in `#lzcppjsoncodec` and replays the canonical corpus, so the carve-out had been false since then. Both are the same defect class as the item, in the same file.
+**Two things I changed beyond the item, and why.** `interop_peer`'s `normalize_msgpack` routed through the private codec while advertising the token, so it now routes through the spec wire and its self-check asserts the bytes are externally tagged; the old 4private-codec normalization survives under an honest name. And `json` moved out of that handshake's `carve_outs` into `codecs` — `json_codec.hpp` landed in `#lzcppjsoncodec` and replays the canonical corpus, so the carve-out had been false since then. Both are the same defect class as the item, in the same file.
 
 **What I found and did not fix.** `CapabilityHandshake.codec` is a bare `std::string` compared for equality, and nothing in lazily-cpp maps that token to an encoder — lazily-rs has `Codec::encode`/`Codec::decode`, cpp has three unrelated free functions where the one named plain `encode` is the private framing. The wire is correct now; nothing yet *binds* a negotiated token to it, so the identical trap is still reachable one layer up. That is an API addition rather than a wire fix, so it is filed as `#lzcppcodecdispatch` at the top of the backlog rather than folded in here.
 
 `coverage.json` row 37 now carries the distinction in its own text instead of a `~` legend no column uses, so the next binding to ship a private MessagePack codec reads why that does not earn the mark. Seven bindings still carve out `msgpack` — that is `#lzmsgpackseven`, next in the queue.
-<!-- agent:boundary:d572664f -->
+
+### Re: do [#lzcppcodecdispatch] — the negotiated token now picks the encoder — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcppcodecdispatch]
+
+
+Done, pushed. lazily-cpp `fef0ed2`, superproject `c2302ef`. `make check` green (53/53, interop self-check OK, 115 fixtures across 21 areas); CI queued (`30730012680`). Last cycle's `#lzcppmsgpackwire` CI came back green (`30727880531`).
+
+**Fixing the wire without fixing the selection would have left the defect alive.** `#lzcppmsgpackwire` made the msgpack bytes correct; nothing *chose* them. `CapabilityHandshake.codec` was a `std::string` compared for equality, and the three encoders were unrelated free functions where the one named plain `encode` is the private framing. A caller that had just negotiated `msgpack` and reached for the shortest name still emitted the wrong wire.
+
+`Codec` is now a closed enum over the tokens this binding speaks, and `codec_dispatch.hpp` turns the negotiated token into the encoder — `codec_encode`/`codec_decode` on the enum, `negotiated_encode`/`negotiated_decode` on the session, so a boundary that ran a handshake never re-decides what it already agreed on.
+
+**Two absences are the design.** `postcard` is not in the enum: protocol.md defines it, a peer may legitimately offer it, and lazily-cpp does not implement it — so `codec_from_token("postcard")` returns nullopt and the handshake fails rather than resolving to a default. The private framing is absent for the opposite reason: it is not a codec token at all, and the whole point is that it stays unreachable from a negotiated one. `codec.hpp` keeps its real job (same-binding serialization, chiefly the durable outbox) and is simply never what a handshake selects.
+
+Frames are `std::vector<uint8_t>` for every codec. `json` is text on the wire, but giving one codec a different return type would put the branch back at the call site, which is the thing being removed.
+
+**Mutation-checked in both directions**, because "the encoder is right" and "the decoder refuses a foreign frame" fail independently — a dispatch that encoded correctly but decoded the private form would still let a peer push bytes nothing agreed on:
+
+| Mutation | Caught by |
+|---|---|
+| msgpack arm points at the private encoder | the spec-wire assertion (`msgpack_to_json` on the frame) |
+| encoder left correct, decoder falls back to the private framing on error | `test_private_framing_is_unreachable_from_a_negotiated_token` |
+| `hello` advertises `postcard` | the interop self-check's exact-list guard |
+
+That last one is new and worth naming: `interop_peer`'s advertised `codecs` list is a string literal, so it can drift from the enum silently — the same shape of defect as advertising a codec whose bytes are wrong, which is how this whole thread started. The self-check now pins the exact list and requires every token in it to resolve to something dispatchable.
+
+`check_compatible` also names both sides on a codec mismatch now instead of returning a bare "codec mismatch", which an enum makes free.
+
+Next in the queue is `#lzmsgpackseven` — the seven bindings that still carve out `msgpack` in their `KNOWN_UNCOVERED`.
+<!-- agent:boundary:9422cde1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzcppcodecdispatch]
+- ~~do [#lzcppcodecdispatch]~~
 - 📌 do [#lzmsgpackseven]
 - 📌 do [#lzreadmelinkrot]
 - 📌 do [#lzvacuousrun]
@@ -122,7 +153,6 @@ I also mutation-checked the ledger flip itself: re-adding `codec/frame_roundtrip
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzcppcodecdispatch] lazily-cpp negotiates a codec token and then has no library-supported way to USE it. CapabilityHandshake.codec is a bare std::string compared for equality in check_compatible, and nothing maps that token to an encoder. lazily-rs has Codec::encode / Codec::decode dispatching json, msgpack and postcard (src/ipc.rs around line 1548). cpp instead has three unrelated free functions - encode/decode (the PRIVATE internally-tagged framing), encode_json/decode_json, encode_msgpack/decode_msgpack - and the one named plain encode is the private framing, so a caller that negotiated msgpack and reached for the obvious name silently emits the wrong wire. That is the exact trap #lzcppmsgpackwire just closed, still open one layer up: the wire is right now, but nothing binds the negotiated token to it. Work: add a Codec enum over the three tokens with codec_encode/codec_decode dispatch, have CapabilityHandshake carry that enum rather than a free string, and test both directions - a handshake that negotiated msgpack round-trips through the externally tagged frame, and the private framing is unreachable from any negotiated token. Mutation-check by pointing the msgpack arm at the private encoder and confirming the test reddens.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

@@ -1,5 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 019fc8aa-4c13-7823-9dba-c24de607d84f
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -39,12 +40,29 @@ complete
 Compacted content:
 - Archived 15 response topic(s): #realtimesalient; tmux auto-sync latency; haiven Compact Exchange commit; 12 more
 - Prior summary/context: prior compacted content: Archived 8 response topic(s): Review triage; Closeout convergence, live-session recovery, an...
+
+### Re: #pcc2 and the haiven-dev closeout wedge — gpt-5.6
+
+> **Queue prompt:**
+>
+> do [#pcc2]
+
+
+Completed `#pcc2`: agent-doc now projects deterministic whole-document, per-component, unscoped-text, and component-order hashes. Existing byte-equality gates are unchanged; authority/disk failures now report the exact divergent component set. The projection is pure and reusable by the later ownership-scoped phases.
+
+The live haiven-dev report is a real retained-closeout wedge, not a lost response. Cycle `cycle-1785775474032` remains at `response_captured`; the editor replica is current and delivery-converged, but realtime steering made the capture baseline stale and the safe `reset --from-current --preserve-session` recovery is itself waiting for editor-authority/disk convergence. I did not recapture the response or use force-disk. The behavioral unblock remains covered by the already-next `#pcc3`; phase 2 intentionally makes this divergence observable without weakening authority.
+
+Changed paths: `agent-doc-document/src/authority_hashes.rs`, its module export, authority/disk diagnostics in document-realtime/session-check/reset.
+
+Verification: focused affected-crate suite passed 499 tests; full `make check` passed all 8,575 tests plus formal models; private-name denylist found no new matches; latest pre-push CI was green and the new push CI is in progress.
+
+Commits: agent-doc `403fb0263` (feature) and `e37326a14` (requested formatting cleanup), pushed to `origin/main`; parent gitlink commit `317163c1b`. Confidence: high for the diagnostic-only phase. Escalation: none; haiven’s retained capture remains fail-closed pending convergence rather than risking operator text.
 <!-- agent:boundary:f621055c:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#pcc2]
+- ~~do [#pcc2]~~
 - do [#pcc3]
 - do [#pcc4]
 - do [#panelayoutrace]
@@ -75,7 +93,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#pcc2] #agent-doc-feature Per-component convergence phase 2: per-component authority hashes. Extend the authority/disk comparison from one document hash to a hash per component, keeping the whole-document hash as a derived value so existing diagnostics keep working. No behavior change: the point is to be able to SAY which components diverge before anything acts on it. Depends on #pcc1. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#pcc3] #agent-doc-feature Per-component convergence phase 3: scope the convergence gate to owned components. Change decide_read_only_terminal_projection and the session-check divergence INTERRUPT to require equality only on components the turn wrote, so a divergence confined to an unowned component is non-blocking. This is the phase that makes the queue drain during live editing AND the phase that can destroy an operator buffer if the ownership set is computed too broadly, so it ships behind a default-off config flag. REQUIRED BEFORE IT SHIPS: a SimWorld test where the agent writes exchange while a simulated operator edits queue every tick, asserting every keystroke SURVIVES; an over-claim test forcing queue into the owned set and proving that survival test can go RED; and a replay of the three real 2026-08-03 documents (lazily.md, haiven-dev.md, agent-doc-bugs2.md) at their state_events hashes asserting none reaches a permanent INTERRUPT. Depends on #pcc2. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#pcc4] #agent-doc-feature Per-component convergence phase 4: per-component commit. Commit only the owned components, rebasing onto whatever the operator has since written elsewhere in the document, instead of writing the whole file. Non-goal to preserve: the agent still never component-merges a disk candidate under a live editor - per-component scope narrows WHAT must converge, it does not grant new authority to overwrite. Depends on #pcc3. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#panelayoutrace] #agent-doc-bug Pane-layout/dispatch race leaves an unmanaged pane in the agent-doc tmux window, and layout convergence has no concept of physical pane order. Plan: tasks/agent-doc/plan-pane-layout-dispatch-race.md. OPERATOR REPRO (2026-08-03): Run Agent Doc on lazily.md, then navigate the editor to agent-doc-bugs2.md WHILE that dispatch is still occurring; the yellow tmux bar offering to run lazily.md appears and lazily.md's pane stays in the window. Confirmed at 07:02:00Z - phase=retry_pending observation=pane_count_mismatch, expected=[bugs2, haiven-dev] (2, editor-visible) vs actual=[bugs2, lazily, haiven-dev] (3), panes=[%72,%77,%95]. Dispatch routes/creates a pane for its target while the editor-surface observation recomputes columns from what is visible NOW, so navigating away mid-dispatch excludes the document dispatch is still setting up and its pane becomes an extra the layout cannot model. TWO defects, do not conflate: (A) pane_count_mismatch retries forever because it will not close a pane hosting an active agent and the column set has no slot for it - it needs a terminal named outcome; (B) convergence compares expected/actual as ordered DOCUMENT lists and never checks that the hosting panes are in corresponding left-to-right order, so at 06:31:30Z it reported converged/synced with panes=[%77,%95] while %77 was at x=181 and %95 at x=121 (physically reversed) and %72 at x=0 was unmodelled - focus then picks column 0 faithfully and lands on the rightmost pane, which is the wrong-pane-focus symptom. DO NOT fix B by indexing focus into the physical pane list: in this state that selects %72, injecting into a different document's agent, which is worse. Both recorded projections can be replayed as fixtures without a live IDE

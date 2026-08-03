@@ -38,12 +38,30 @@ complete
 Compacted content:
 - Archived 3 response topic(s): #efs-prod-deploy-20d7a416; #efs-dev-vars-secret-history; do [#efs-dev-vars-local-rotate]
 - Prior summary/context: prior compacted content: Archived 15 response topic(s): cycle check; denied applications showing in Available Deals; ...
+
+### Re: do [#recommendedprunestale] — opus-5
+
+The check found unique work, so this could not be a plain delete. `worktree-playful-strolling-wilkinson` held one commit that never landed — 8c6434ec, "search-first existing-lender picker; TMO id at lender creation" — and `git cherry main` confirmed the patch was not in `main` under any hash. I ported it, verified it, then pruned.
+
+**Why a straight cherry-pick would have been wrong.** The branch's backend half called `user__set_lender_account_`, which no longer exists: `#lender-account-retire` dropped `users.lender_account` in migration `0140_lender_account_to_vesting.sql` because a TMO account belongs to a **vesting**, not to the lender row. So the UI half was still novel, the backend half was written against a data model that has since been replaced.
+
+**What landed** — EFS `main` `cde6a247`, pushed to `origin`:
+
+- `lib/ui--browser--efs/portal/admin/deal_detail.tsx` — `ExistingLenderCombobox` replaces the full-list `<select>` in the Add Interested Lender modal. Search by name or email, Enter picks the top match, Escape closes, selected state collapses to a chip with a "Change" button. The create-new fields move under a "Not found — add a new lender" heading and gain a TMO lender account input plus the `TmoLosPortalLink`. Filtering is extracted as exported `lender_search_matches_` so it is testable.
+- `app/equityfundingsource/lib/admin/investor_management/index.ts` — `admin_deals_by_id_interests_POST_` accepts `lender_account`, and for a lender EFS just created attaches it via `lender_vesting_attach_account_` (idempotent, never overwrites) instead of the retired user-row setter. An existing lender still posts its id alone; its vestings stay managed from the interest card.
+- `tests/dial-lender-search.test.ts` — 9 tests. The source-contract guards read the **whole function body** rather than a fixed byte window, so a later comment cannot slide the guarded call out of the slice. One guard asserts `user__set_lender_account_` is absent, so the retired path cannot ride back in with this port.
+
+Mutation-checked: deleting the `lender_vesting_attach_account_` block turns the suite red (2 fail), restoring it turns it green. `make check` is `2294 pass / 0 fail`, up from 2285 — typecheck and worker build included.
+
+**The prune itself:** `git worktree remove` on `.claude/worktrees/playful-strolling-wilkinson`, local branch deleted, `origin` branch deleted. `git worktree list` now shows only `main`, `.claude/worktrees/` is empty. The stale tracked `.dev.vars.example` carrying the pre-`3a2bfe30` `ADMIN_GLOBAL_PASSWORD` went with it — dead since `#efs-dev-vars-local-rotate`, so cleanup, not exposure.
+
+Not deployed. EFS has no CI workflow, so a live deploy is the remaining gate for this change; queued as a backlog item rather than pushed to production unasked.
 <!-- agent:boundary:3972fcb2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#recommendedprunestale]
-- ~~do [#efs-dev-vars-local-rotate]~~
+- do [#recommendeddeploybrowser]
+- ~~do [#recommendedprunestale]~~
 - do [#censible-env-committed-creds]
 - do [#tmo-prod-schedule-artifact-confirm]
 <!-- /agent:queue -->
@@ -51,7 +69,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedprunestale] [recommended] Prune stale EFS worktree branch `worktree-playful-strolling-wilkinson` (local worktree at src/equityfundingsource-dev/.claude/worktrees/ + pushed origin branch, pinned at 8c6434ec 2026-07-10, ~3 weeks behind main). Its tracked .dev.vars.example still carries the pre-3a2bfe30 ADMIN_GLOBAL_PASSWORD — now dead since #efs-dev-vars-local-rotate, so this is cleanup, not exposure. Check whether the branch holds unique work before `git worktree remove` + `git push origin --delete`.
+- [ ] [#recommendeddeploybrowser] [recommended] Deploy + browser-verify #dial-lender-search in the EFS admin portal: Add Interested Lender modal search-combobox (name/email, Enter picks top match) and the TMO lender account field attaching a first vesting via lender_vesting_attach_account_. Landed on EFS main cde6a247; EFS has no CI workflow so live deploy + admin-portal check is the remaining gate.
 - [ ] [#censible-env-committed-creds] Sibling-repo fallout from the same gap: censible-core commits real env files, not just samples. apps/finegar-etl/.env carries FACTSET_FTP_LOGIN plus a 39-char FACTSET_FTP_PASSWORD, and .env.sample carries a 26-char SESSION_KEY. Repo is private (btakita/censible-core) and the project looks dormant, so the first question is whether the FactSet FTP account still exists. If it does, rotate with FactSet and drop the credential out of the tracked file; if it does not, replace both with placeholders so the pattern does not get copied forward. Do this from a censible-core session, not from EFS. Checked and clean: every other sibling tracks only .env.sample / .env.example with placeholder values; presence SERVICE_API_JWT_TOKEN is a 16-char dev placeholder.
 - [ ] [#tmo-prod-schedule-artifact-confirm] Confirm the first schedule-bearing PRODUCTION TMO backup artifact. Production went live on 20d7a416 at 2026-08-01T04:16Z, but tmo_backup_interval_hours is 24 and the last run was 2026-07-31T17:00:53Z on the old build, so the next daily job around 2026-08-01T17:00Z is the first artifact that can carry payment schedules. Check: read tmo_backup_last_key and tmo_backup_last_status from production platform_settings, confirm the key advanced to a 2026-08-01 object and status is complete, then pull that object from R2 bucket equityfundingsource-tmo-cache-production and count schedule rows - expect roughly 12 of 31 loans to carry one, versus 0 on every prior artifact. Sandbox already measured 34 rows over 26 loans. Unblocks #tmo-clone-apply, which needs a schedule-bearing clone source. Do not read the artifact contents into the transcript - it holds production PII; count and discard.
 <!-- /agent:backlog -->

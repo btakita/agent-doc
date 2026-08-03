@@ -861,7 +861,10 @@ impl HarnessConfig {
             return false;
         };
         let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(&line);
-        self.matches_prompt(stripped.trim())
+        let stripped = stripped.trim();
+        self.matches_prompt(stripped)
+            || (self.binary == "codex"
+                && codex_prompt_candidate_is_dim_placeholder(output, stripped))
     }
 
     /// Same logic as [`is_bottom_idle_chrome`] but without the `has_busy_cue()`
@@ -3611,6 +3614,10 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 21% used
 gpt-5.6-sol xhigh · ~/work/btakita/agent-loop · Context 0% used
 ";
         assert_eq!(h.protected_prompt_input_reason(output), None);
+        assert!(
+            h.output_prompt_visible(output),
+            "the current-child PTY keeps SGR-2, so an unlisted dim Codex suggestion must prove the fresh composer is ready"
+        );
         assert!(!h.is_dispatch_ready_prompt_line("› Summarize recent commits"));
     }
 

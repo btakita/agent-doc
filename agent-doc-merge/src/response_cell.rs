@@ -38,6 +38,17 @@ fn parse_response_cell(response: &str) -> anyhow::Result<(Vec<ExchangeNode>, Str
     Ok((nodes, rendered))
 }
 
+/// Whether `response` is eligible for the atomic response-cell path.
+///
+/// Template closeout accepts legacy response heading depths such as `## Re:`,
+/// while the response-cell AST intentionally accepts only canonical `###`
+/// response nodes. Callers use this predicate before choosing the cell path so
+/// a valid legacy patchback falls through to compatibility normalization instead
+/// of turning the controller's parse rejection into a retained-closeout loop.
+pub fn is_assistant_only_response_cell(response: &str) -> bool {
+    parse_response_cell(response).is_ok()
+}
+
 /// `#crdtcaschkpt` — how many leading nodes of `incoming` are already the
 /// trailing run of `current`.
 ///
@@ -839,5 +850,16 @@ mod tests {
         let response = "### Re: topic — gpt-5\n\nDone.\n\n❯ operator prompt";
         let err = add_response_cell(DOC, response).unwrap_err();
         assert!(err.to_string().contains("only assistant response nodes"));
+        assert!(!is_assistant_only_response_cell(response));
+    }
+
+    #[test]
+    fn legacy_heading_depth_is_not_an_atomic_response_cell() {
+        assert!(!is_assistant_only_response_cell(
+            "## Re: legacy topic — gpt-5\n\nDone."
+        ));
+        assert!(is_assistant_only_response_cell(
+            "### Re: canonical topic — gpt-5\n\nDone."
+        ));
     }
 }

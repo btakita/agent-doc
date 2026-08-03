@@ -976,7 +976,7 @@ fn verify_auto_trigger_submitted(
     let tmux = tmux_router::Tmux::default_server();
     let mut already_resubmitted = false;
     loop {
-        let capture = agent_doc_tmux_io::capture_pane(&tmux, pane_id).ok();
+        let capture = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, pane_id).ok();
         let cursor_y = agent_doc_tmux_io::pane_cursor_y(&tmux, pane_id);
         let facts = agent_doc_supervisor::auto_trigger::AutoTriggerSubmitFacts {
             pane_captured: capture.is_some(),
@@ -3243,6 +3243,23 @@ mod tests {
         assert_eq!(
             auto_trigger_no_prompt_action(&mut monitor, start + AUTO_TRIGGER_TIMEOUT),
             AutoTriggerNoPromptAction::FailClosed
+        );
+    }
+    #[test]
+    fn auto_trigger_submit_verification_preserves_dim_placeholder_evidence() {
+        let source = include_str!("lib.rs");
+        let verification = source
+            .split_once("fn verify_auto_trigger_submitted(")
+            .and_then(|(_, tail)| tail.split_once("\nfn spawn_auto_trigger_thread("))
+            .map(|(body, _)| body)
+            .expect("auto-trigger verification function must remain discoverable");
+        assert!(
+            verification.contains("capture_pane_with_ansi"),
+            "post-submit verification must preserve SGR-2 so a fresh Codex autosuggest is recognized as an empty composer"
+        );
+        assert!(
+            !verification.contains("agent_doc_tmux_io::capture_pane(&tmux"),
+            "plain capture strips the only evidence that an unlisted Codex suggestion is not operator input"
         );
     }
     #[test]

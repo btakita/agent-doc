@@ -79,6 +79,14 @@ prompt into the repaired projection. Such narrow repairs run before the broad
 live-steering guard and publish through the same authority-fenced write; general
 template normalization stays behind the guard.
 
+The atomic CRDT response-cell path is narrower than template compatibility.
+Before selecting it, the write runtime must prove that the complete exchange
+patch parses as canonical assistant-only response nodes. A legacy response
+heading depth such as `## Re:` or any embedded operator prompt is ineligible and
+must fall through to compatibility patchback without sending a controller
+`response_cell_add` request. A parser rejection at that boundary must not turn a
+durable `response_captured` closeout into an identical automatic retry loop.
+
 ## Source Of Truth
 
 When a live editor owner owns the document, the CRDT relay/editor buffer is the

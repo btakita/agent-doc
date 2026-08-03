@@ -36,6 +36,14 @@ entering `WaitingInput` or `Closed`. Route-level clear tracking
 (`codex_hook::record_external_prompt_for_file`) is harness-agnostic so that
 managed and dispatch-only routes can restart fresh after a tracked `/clear`
 for both Codex and OpenCode.
+- If that tracked-clear fresh restart is rejected specifically because a
+  retained closeout cycle is open, route may request a forced controller-owned
+  replacement only after direct pane evidence proves the owner dispatch-ready
+  and durable cycle state proves `ResponseCaptured` or `WriteApplied`.
+  Replacement is not successful until the authoritative actor publishes a
+  generation newer than the controller receipt. A busy pane, another cycle
+  phase, an unrelated rejection, or an unavailable supervisor fails closed
+  without suggesting that another pane invoke `agent-doc start`.
 - A supervisor binary hot-reexec that adopts the same surviving harness child is
 a transport replacement, not a child restart or session start. Before
 registering its replacement lease it must validate the existing
@@ -45,6 +53,10 @@ without allocating a replacement generation.
 - Same-generation lifecycle updates such as prompt readiness, dispatch-busy,
 waiting-for-input, blocked, and closed must preserve the authoritative
 generation while still updating `state` and `last_transition`.
+- Live-pane readiness and auto-trigger verification must preserve ANSI through
+  classification. Codex SGR-2 composer suggestions are dynamic idle placeholders
+  even when their text is absent from the static phrase list; the same plain
+  undecorated line remains protected drafted input.
 - Legacy logs without explicit generation markers may infer historical
   generations from repeated `session_start` events for diagnostics, but new
   writes must emit explicit generation metadata.

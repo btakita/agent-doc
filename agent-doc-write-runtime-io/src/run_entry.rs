@@ -159,7 +159,8 @@ fn response_cell_from_patchback(
     }
     let response = patches[0].content.trim_matches(['\n', '\r']);
     (!response.is_empty()
-        && agent_doc_template::response_materialization::response_text_has_heading(response))
+        && agent_doc_template::response_materialization::response_text_has_heading(response)
+        && agent_doc_merge::response_cell::is_assistant_only_response_cell(response))
     .then(|| response.to_string())
 }
 
@@ -2759,6 +2760,20 @@ mod tests {
         assert!(
             response_cell_from_patchback(std::slice::from_ref(&legacy_headingless), "").is_none(),
             "legacy headingless patchbacks must use the semantic component patch path instead of an invalid response cell",
+        );
+        let legacy_heading_depth =
+            template::PatchBlock::new("exchange", "\n## Re: retained — gpt-5\n\nRecovered.\n");
+        assert!(
+            response_cell_from_patchback(std::slice::from_ref(&legacy_heading_depth), "").is_none(),
+            "legacy response heading depths must use compatibility patchback instead of repeatedly failing the canonical response-cell parser",
+        );
+        let embedded_prompt = template::PatchBlock::new(
+            "exchange",
+            "\n### Re: retained — gpt-5\n\nRecovered.\n\n❯ next operator prompt\n",
+        );
+        assert!(
+            response_cell_from_patchback(std::slice::from_ref(&embedded_prompt), "").is_none(),
+            "a mixed response/prompt patch must not be selected as an assistant-only response cell",
         );
     }
 

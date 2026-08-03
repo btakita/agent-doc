@@ -161,7 +161,7 @@ where
 {
     let pane = state.owned_pane_id()?;
     let tmux = tmux_router::Tmux::default_server();
-    let content = agent_doc_tmux_io::capture_pane(&tmux, &pane).ok()?;
+    let content = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &pane).ok()?;
     Some(supervisor_detection::pane_dispatch_ready_at_cursor(
         &content,
         harness,
@@ -208,7 +208,7 @@ where
 {
     let pane_id = state.owned_pane_id()?;
     let tmux = tmux_router::Tmux::default_server();
-    let content = agent_doc_tmux_io::capture_pane(&tmux, &pane_id).ok()?;
+    let content = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &pane_id).ok()?;
     let cursor_y = agent_doc_tmux_io::pane_cursor_y(&tmux, &pane_id);
     let payload_already_pending = dispatch_payload_pending_in_current_input(
         &content,
@@ -276,5 +276,27 @@ where
 {
     let pane = state.owned_pane_id()?;
     let tmux = tmux_router::Tmux::default_server();
-    agent_doc_tmux_io::capture_pane(&tmux, &pane).ok()
+    agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &pane).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn dim_sensitive_live_pane_probes_preserve_ansi() {
+        let source = include_str!("detection.rs")
+            .split_once("\n#[cfg(test)]")
+            .map(|(production, _)| production)
+            .expect("tests must remain behind cfg(test)");
+        assert!(
+            !source.contains("agent_doc_tmux_io::capture_pane(&tmux"),
+            "supervisor live-pane readiness must not strip the SGR-2 evidence that distinguishes a Codex autosuggest placeholder from operator input"
+        );
+        assert_eq!(
+            source
+                .matches("agent_doc_tmux_io::capture_pane_with_ansi(&tmux")
+                .count(),
+            3,
+            "every supervisor live-pane observation must use the ANSI-preserving capture"
+        );
+    }
 }

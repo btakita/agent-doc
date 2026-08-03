@@ -18,7 +18,34 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   SimWorld coverage types into `queue` on every tick during an `exchange`
   closeout and asserts every keystroke survives; a paired ownership-overclaim
   mutation demonstrates that the survival oracle goes red when `queue` is
-  incorrectly claimed.
+incorrectly claimed.
+- **Retained closeout replay no longer wedges when a valid legacy response
+  heading reaches the atomic response-cell fast path
+  (`#responsecelllegacyfallback`).** Strict template compatibility accepts
+  headings such as `## Re:`, while the realtime response-cell AST deliberately
+  accepts canonical `###` response nodes only. The fast-path selector now proves
+  that the entire patch parses as assistant-only response cells before asking
+  the controller to add it. Legacy heading depths and mixed response/prompt
+  patches fall through to the established compatibility patchback path instead
+  of making every `response_captured` recovery retry fail with `response cell
+  may contain only assistant response nodes`.
+- **Tracked `/clear` recovery can replace an idle owner when an open retained
+  closeout rejects the in-place fresh restart
+  (`#trackedclearretainedreplacement`).** Route now distinguishes an accepted
+  supervisor restart, a typed supervisor rejection, and an unavailable
+  supervisor. It may escalate an open-cycle rejection to a forced controller
+  replacement only when the pane is independently dispatch-ready and the durable
+  phase is `ResponseCaptured` or `WriteApplied`; every other shape fails closed.
+  Route then requires the authoritative actor to publish a newer generation
+  before it attempts prompt dispatch, eliminating the former impossible advice
+  to run `agent-doc start` manually from an already-owned pane.
+- **Fresh Codex auto-trigger recognizes dynamic dim composer suggestions
+  (`#codexdimautotrigger`).** Supervisor readiness, live payload observation,
+  pane-content inspection, and post-submit verification now preserve ANSI so
+  SGR-2 remains available to the harness classifier. An unlisted dim suggestion
+  such as `Summarize recent commits` is idle placeholder chrome, while the same
+  undecorated text remains drafted operator input. This closes the restart shape
+  where the fresh child was ready but auto-trigger timed out as `no_prompt`.
 - **The editor's "Restart Agent" action reached the controller and was rejected
   outright (`#agentrestartwire`).** `session_actor_cmd::restart_agent` encodes
   the operator's harness-replacement intent as `agent:<mode>` so it stays

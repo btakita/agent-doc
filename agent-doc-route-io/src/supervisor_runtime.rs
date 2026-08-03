@@ -4,6 +4,13 @@ use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_supervisor::route_runtime::{RouteActorState, SupervisorHealth, SupervisorRuntime};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SupervisorRestartRequestOutcome {
+    Accepted,
+    Rejected(String),
+    Unavailable(String),
+}
+
 fn supervisor_runtime_from_state_data(data: &serde_json::Value) -> SupervisorRuntime {
     let running = data
         .get("running")
@@ -86,23 +93,48 @@ pub fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealt
     query_supervisor_runtime(file, session_id).health
 }
 
-pub fn restart_via_supervisor_with_mode(file: &Path, session_id: &str, mode: &str) -> bool {
+pub fn request_restart_via_supervisor_with_mode(
+    file: &Path,
+    session_id: &str,
+    mode: &str,
+) -> SupervisorRestartRequestOutcome {
     let canonical = match file.canonicalize() {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(err) => {
+            return SupervisorRestartRequestOutcome::Unavailable(format!(
+                "canonicalize {}: {err}",
+                file.display()
+            ));
+        }
     };
     let project_root = match agent_doc_project_root_io::project_root_containing(&canonical) {
         Some(r) => r,
-        None => return false,
+        None => {
+            return SupervisorRestartRequestOutcome::Unavailable(format!(
+                "no project root contains {}",
+                canonical.display()
+            ));
+        }
     };
     let sock = agent_doc_supervisor_io::ipc::socket_path(&project_root, session_id);
     let method = IpcMethod::Restart {
         mode: mode.to_string(),
     };
     match agent_doc_supervisor_io::ipc::send_command(&sock, &method) {
-        Ok(resp) => resp.ok,
-        Err(_) => false,
+        Ok(resp) if resp.ok => SupervisorRestartRequestOutcome::Accepted,
+        Ok(resp) => SupervisorRestartRequestOutcome::Rejected(
+            resp.error
+                .unwrap_or_else(|| "supervisor rejected restart without a reason".to_string()),
+        ),
+        Err(err) => SupervisorRestartRequestOutcome::Unavailable(format!("{err:#}")),
     }
+}
+
+pub fn restart_via_supervisor_with_mode(file: &Path, session_id: &str, mode: &str) -> bool {
+    matches!(
+        request_restart_via_supervisor_with_mode(file, session_id, mode),
+        SupervisorRestartRequestOutcome::Accepted
+    )
 }
 
 pub fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {

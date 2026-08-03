@@ -1,4 +1,4 @@
-//! Routed cycle-start acknowledgment I/O.
+//! Reactive routed-admission projection I/O.
 
 use anyhow::Result;
 use std::path::Path;
@@ -11,58 +11,39 @@ use crate::restart_handoff::wait_for_busy_restart_handoff;
 use crate::startup_ready::{AgentReadyWaitOutcome, wait_for_agent_ready_outcome};
 use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
-    MissingCycleAckFacts, RoutedCycleAckFacts, RoutedDispatchStartProof,
-    fresh_route_start_ack_timeout, routed_cycle_ack_timeout_with_client_deadline,
-    should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
+    MissingAdmissionProjectionFacts, RoutedAdmissionFacts, RoutedDispatchStartProof,
+    fresh_route_admission_timeout, routed_admission_timeout_with_client_deadline,
+    should_optimistically_accept_missing_admission_projection,
+    should_require_routed_admission_projection,
 };
 use agent_doc_harness::HarnessConfig;
-use agent_doc_turn::cycle_ack::{
-    CycleAckState, PromptBearingRouteContext, cycle_state_advances_start_ack,
-};
 use agent_doc_turn::op_log::OpsLogEvent;
+use agent_doc_turn::prompt_bearing_route::PromptBearingRouteContext;
 use tmux_router::Tmux;
 
 #[derive(Debug, Clone, Copy)]
-pub struct RouteCycleAckEffects {
+pub struct RouteAdmissionEffects {
     pub route_dispatch_effects: RouteDispatchEffects,
     pub emit_startup_miss_diagnostic: fn(&Tmux, &str, &Path, &str),
     pub emit_busy_route_diagnostic: fn(&Tmux, &str, &Path, &HarnessConfig),
 }
 
-pub fn wait_for_start_ack(
+pub fn wait_for_start_projection(
     file: &Path,
     baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     timeout: Duration,
-) -> Option<agent_doc_cycle_state_io::CycleState> {
-    let start = std::time::Instant::now();
-    let poll = Duration::from_millis(200);
-
-    while start.elapsed() < timeout {
-        if let Ok(Some(state)) = agent_doc_cycle_state_io::load_with_closeout_projection(file)
-            && cycle_state_advances_start_ack(
-                CycleAckState {
-                    cycle_id: &state.cycle_id,
-                    phase: state.phase,
-                    updated_at: state.updated_at,
-                    last_event: &state.last_event,
-                },
-                baseline.map(|state| CycleAckState {
-                    cycle_id: &state.cycle_id,
-                    phase: state.phase,
-                    updated_at: state.updated_at,
-                    last_event: &state.last_event,
-                }),
-            )
-        {
-            return Some(state);
-        }
-        std::thread::sleep(poll);
-    }
-    None
+) -> Option<agent_doc_state_backbone::TurnAdmissionProjection> {
+    agent_doc_controller_io::project_controller::await_turn_admission_projection_for_file(
+        file,
+        baseline.map(|state| state.cycle_id.as_str()),
+        timeout,
+    )
+    .ok()
+    .flatten()
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn retry_routed_cycle_ack_after_fresh_restart(
+pub fn retry_routed_admission_after_fresh_restart(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
@@ -71,10 +52,10 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
     harness: &HarnessConfig,
     baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     marker: &str,
-    ack_timeout: Duration,
-    effects: RouteCycleAckEffects,
+    admission_timeout: Duration,
+    effects: RouteAdmissionEffects,
 ) -> Result<Option<String>> {
-    if !fresh_cycle_ack_restart_supported(&harness.binary) {
+    if !fresh_admission_restart_supported(&harness.binary) {
         return Ok(None);
     }
     if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
@@ -84,12 +65,12 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "route_cycle_start_retry_after_fresh_restart file={} pane={} harness={} marker={} timeout_secs={}",
+            "route_admission_retry_after_fresh_restart file={} pane={} harness={} marker={} timeout_secs={}",
             file.display(),
             pane,
             harness.binary,
             marker,
-            ack_timeout.as_secs()
+            admission_timeout.as_secs()
         ),
     );
     eprintln!(
@@ -105,7 +86,7 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
     let ready = wait_for_agent_ready_outcome(
         tmux,
         &dispatch_pane,
-        fresh_route_start_ack_timeout(cfg!(test)),
+        fresh_route_admission_timeout(cfg!(test)),
         harness,
     );
     if !ready.is_ready() {
@@ -124,10 +105,12 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
             ),
         );
         (effects.emit_busy_route_diagnostic)(tmux, &dispatch_pane, file, harness);
-        if should_optimistically_accept_missing_cycle_ack(MissingCycleAckFacts {
-            harness_binary: &harness.binary,
-            live_child_for_file: true,
-        }) {
+        if should_optimistically_accept_missing_admission_projection(
+            MissingAdmissionProjectionFacts {
+                harness_binary: &harness.binary,
+                live_child_for_file: true,
+            },
+        ) {
             let baseline_id = baseline.map(|b| b.cycle_id.as_str());
             let miss = agent_doc_supervisor_io::startup_miss::record_startup_miss(
                 file,
@@ -146,7 +129,7 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
                     dispatch_pane,
                     harness.binary,
                     marker,
-                    fresh_route_start_ack_timeout(cfg!(test)).as_secs(),
+                    fresh_route_admission_timeout(cfg!(test)).as_secs(),
                     miss_ts
                 ),
             );
@@ -154,7 +137,7 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
                 "[route] fresh-restart retry for {} never restored a dispatch-ready prompt in pane {} after {}s, but the earlier reopen was already accepted — keeping the reroute optimistic",
                 file.display(),
                 dispatch_pane,
-                fresh_route_start_ack_timeout(cfg!(test)).as_secs()
+                fresh_route_admission_timeout(cfg!(test)).as_secs()
             );
             return Ok(Some(dispatch_pane));
         }
@@ -173,7 +156,7 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
                 file.display(),
                 pane,
                 dispatch_pane,
-                fresh_route_start_ack_timeout(cfg!(test)).as_secs()
+                fresh_route_admission_timeout(cfg!(test)).as_secs()
             ),
             AgentReadyWaitOutcome::Ready => unreachable!("checked above"),
         };
@@ -203,29 +186,31 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
         }
     };
 
-    match wait_for_start_ack(file, baseline, ack_timeout) {
+    match wait_for_start_projection(file, baseline, admission_timeout) {
         Some(state) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_cycle_start_acknowledged_after_fresh_restart file={} pane={} harness={} cycle={} phase={} marker={} timeout_secs={}",
+                    "route_admission_projected_after_fresh_restart file={} pane={} harness={} cycle={} phase={} marker={} timeout_secs={}",
                     file.display(),
                     dispatch_pane,
                     harness.binary,
                     state.cycle_id,
                     state.phase.as_str(),
                     marker,
-                    ack_timeout.as_secs()
+                    admission_timeout.as_secs()
                 ),
             );
             let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
             Ok(Some(dispatch_pane))
         }
         None => {
-            if should_optimistically_accept_missing_cycle_ack(MissingCycleAckFacts {
-                harness_binary: &harness.binary,
-                live_child_for_file: true,
-            }) {
+            if should_optimistically_accept_missing_admission_projection(
+                MissingAdmissionProjectionFacts {
+                    harness_binary: &harness.binary,
+                    live_child_for_file: true,
+                },
+            ) {
                 let baseline_id = baseline.map(|b| b.cycle_id.as_str());
                 let miss = agent_doc_supervisor_io::startup_miss::record_startup_miss(
                     file,
@@ -244,7 +229,7 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
                         "fresh-restart retry trigger {} but no document cycle started for pending {} after {}s (startup-miss {})",
                         dispatch_start.dispatch_stage_label(),
                         marker,
-                        ack_timeout.as_secs(),
+                        admission_timeout.as_secs(),
                         miss_ts
                     ),
                 );
@@ -257,15 +242,15 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
                         dispatch_pane,
                         harness.binary,
                         marker,
-                        ack_timeout.as_secs(),
+                        admission_timeout.as_secs(),
                         miss_ts
                     ),
                 );
                 eprintln!(
-                    "[route] fresh-restart reroute for {} never produced a new cycle ack for pending {} after {}s, but pane {} accepted the reopen — keeping the reroute optimistic",
+                    "[route] fresh-restart reroute for {} never projected prompt admission for pending {} after {}s, but pane {} accepted the reopen — keeping the reroute optimistic",
                     file.display(),
                     marker,
-                    ack_timeout.as_secs(),
+                    admission_timeout.as_secs(),
                     dispatch_pane
                 );
                 return Ok(Some(dispatch_pane));
@@ -275,7 +260,7 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
     }
 }
 
-fn fresh_cycle_ack_restart_supported(harness_binary: &str) -> bool {
+fn fresh_admission_restart_supported(harness_binary: &str) -> bool {
     matches!(harness_binary, "claude" | "codex")
 }
 
@@ -316,7 +301,7 @@ fn prompt_bearing_route_context_from_steering(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn require_routed_cycle_ack(
+pub fn require_routed_admission_projection(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
@@ -331,9 +316,9 @@ pub fn require_routed_cycle_ack(
     // (`submit.deadline_ms`), when it supplied one. Waiting past it cannot
     // produce a useful outcome.
     client_deadline: Option<std::time::Duration>,
-    effects: RouteCycleAckEffects,
+    effects: RouteAdmissionEffects,
 ) -> Result<Option<String>> {
-    if !should_require_routed_cycle_ack(RoutedCycleAckFacts {
+    if !should_require_routed_admission_projection(RoutedAdmissionFacts {
         baseline_cycle_open: baseline.is_some_and(|state| state.is_open()),
         prompt_bearing_marker_present: prompt_bearing_marker.is_some(),
     }) {
@@ -341,43 +326,43 @@ pub fn require_routed_cycle_ack(
     }
 
     let marker = prompt_bearing_marker.expect("marker checked above");
-    let ack_timeout = routed_cycle_ack_timeout_with_client_deadline(
+    let admission_timeout = routed_admission_timeout_with_client_deadline(
         live_child_for_file,
         cfg!(test),
         client_deadline,
     );
     if live_child_for_file {
         eprintln!(
-            "[route] live agent-doc child active in pane {} for {} — waiting up to {}s for a new cycle ack for pending {}",
+            "[route] live agent-doc child active in pane {} for {} — waiting up to {}s for the admission projection for pending {}",
             pane,
             file.display(),
-            ack_timeout.as_secs(),
+            admission_timeout.as_secs(),
             marker
         );
     }
-    let ack_start = Instant::now();
-    match wait_for_start_ack(file, baseline, ack_timeout) {
+    let projection_wait_started = Instant::now();
+    match wait_for_start_projection(file, baseline, admission_timeout) {
         Some(state) => {
             log_route_latency(
                 file,
-                "cycle_start_ack",
-                ack_start.elapsed(),
-                ack_timeout,
+                "admission_projection",
+                projection_wait_started.elapsed(),
+                admission_timeout,
                 pane,
                 harness,
-                "acknowledged",
+                "projected",
             );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_cycle_start_acknowledged file={} pane={} harness={} cycle={} phase={} marker={} timeout_secs={}",
+                    "route_admission_projected file={} pane={} harness={} cycle={} phase={} marker={} timeout_secs={}",
                     file.display(),
                     pane,
                     harness.binary,
                     state.cycle_id,
                     state.phase.as_str(),
                     marker,
-                    ack_timeout.as_secs()
+                    admission_timeout.as_secs()
                 ),
             );
             let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
@@ -386,20 +371,21 @@ pub fn require_routed_cycle_ack(
         None => {
             log_route_latency(
                 file,
-                "cycle_start_ack",
-                ack_start.elapsed(),
-                ack_timeout,
+                "admission_projection",
+                projection_wait_started.elapsed(),
+                admission_timeout,
                 pane,
                 harness,
                 "missing",
             );
-            let optimistic_allowed =
-                should_optimistically_accept_missing_cycle_ack(MissingCycleAckFacts {
+            let optimistic_allowed = should_optimistically_accept_missing_admission_projection(
+                MissingAdmissionProjectionFacts {
                     harness_binary: &harness.binary,
                     live_child_for_file,
-                });
+                },
+            );
             if live_child_for_file
-                && let Some(dispatch_pane) = retry_routed_cycle_ack_after_fresh_restart(
+                && let Some(dispatch_pane) = retry_routed_admission_after_fresh_restart(
                     tmux,
                     file,
                     pane,
@@ -408,7 +394,7 @@ pub fn require_routed_cycle_ack(
                     harness,
                     baseline,
                     marker,
-                    ack_timeout,
+                    admission_timeout,
                     effects,
                 )?
             {
@@ -423,7 +409,7 @@ pub fn require_routed_cycle_ack(
                     pane,
                     harness.binary,
                     marker,
-                    ack_timeout.as_secs()
+                    admission_timeout.as_secs()
                 ),
             );
             let baseline_id = baseline.map(|b| b.cycle_id.as_str());
@@ -445,7 +431,7 @@ pub fn require_routed_cycle_ack(
                     "routed trigger {} but no document cycle started for pending {} after {}s (startup-miss {})",
                     dispatch_stage,
                     marker,
-                    ack_timeout.as_secs(),
+                    admission_timeout.as_secs(),
                     miss_ts
                 ),
             );
@@ -459,16 +445,16 @@ pub fn require_routed_cycle_ack(
                         pane,
                         harness.binary,
                         marker,
-                        ack_timeout.as_secs(),
+                        admission_timeout.as_secs(),
                         miss_ts
                     ),
                 );
                 eprintln!(
-                    "[route] routed {} trigger for {} never produced a new cycle ack for pending {} after {}s, but the correct pane accepted the reopen — keeping the reroute optimistic",
+                    "[route] routed {} trigger for {} never projected prompt admission for pending {} after {}s, but the correct pane accepted the reopen — keeping the reroute optimistic",
                     harness.binary,
                     file.display(),
                     marker,
-                    ack_timeout.as_secs()
+                    admission_timeout.as_secs()
                 );
                 return Ok(Some(pane.to_string()));
             }
@@ -479,7 +465,7 @@ pub fn require_routed_cycle_ack(
                 dispatch_stage,
                 pane,
                 marker,
-                ack_timeout.as_secs(),
+                admission_timeout.as_secs(),
                 miss_ts
             );
         }
@@ -489,13 +475,13 @@ pub fn require_routed_cycle_ack(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_controller::dispatch::routed_cycle_ack_timeout;
+    use agent_doc_controller::dispatch::routed_admission_timeout;
 
     #[test]
     fn stale_hook_snapshot_recovery_restarts_supported_harnesses() {
-        assert!(fresh_cycle_ack_restart_supported("claude"));
-        assert!(fresh_cycle_ack_restart_supported("codex"));
-        assert!(!fresh_cycle_ack_restart_supported("opencode"));
+        assert!(fresh_admission_restart_supported("claude"));
+        assert!(fresh_admission_restart_supported("codex"));
+        assert!(!fresh_admission_restart_supported("opencode"));
     }
 
     struct TestPipelineFrontmatterEffects;
@@ -531,169 +517,13 @@ mod tests {
         TestPipelineFrontmatterEffects;
 
     #[test]
-    fn wait_for_start_ack_detects_new_preflight_cycle() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("route-live-child-skip.md");
-        std::fs::write(&doc, "# Session\n").unwrap();
-
-        let doc_for_thread = doc.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
-            agent_doc_cycle_state_io::start_preflight(&doc_for_thread, None, Some("# Session\n"))
-                .unwrap();
-        });
-
-        let ack = wait_for_start_ack(&doc, None, Duration::from_secs(1));
-        assert!(
-            ack.is_some(),
-            "fresh start should acknowledge a new preflight cycle"
-        );
-        assert_eq!(
-            ack.unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
-        );
-    }
-
-    #[test]
-    fn wait_for_start_ack_uses_terminal_projection() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("route-stale-open-projection.md");
-        let content = "# Session\n";
-        std::fs::write(&doc, content).unwrap();
-
-        let baseline =
-            agent_doc_cycle_state_io::start_preflight(&doc, None, Some(content)).unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "commit_success",
-            Some(content),
-            Some(content),
-        )
-        .unwrap();
-        assert_eq!(
-            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::Committed
-        );
-
-        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(250))
-            .expect("projected terminal phase should advance the open route-start baseline");
-        assert_eq!(ack.cycle_id, baseline.cycle_id);
-        assert_eq!(ack.phase, agent_doc_turn::CyclePhase::Committed);
-    }
-
-    #[test]
-    fn wait_for_start_ack_detects_new_committed_cycle_after_prior_commit() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("route-live-pane-busy.md");
-        std::fs::write(&doc, "# Session\n").unwrap();
-
-        agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "commit_success",
-            Some("# Session\n"),
-            Some("# Session\n"),
-        )
-        .unwrap();
-        let baseline = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-
-        // Write the fresh cycle (distinct cycle_id from the prior committed
-        // baseline) all the way to `Committed` *before* the wait, then assert the
-        // wait observes the terminal committed state. Doing this synchronously is
-        // deterministic: the earlier spawn-thread + `sleep` variant was flaky under
-        // CI load because `wait_for_start_ack` returns on the *first* advancing
-        // cycle change, and a 200ms poll could land between the new cycle's
-        // `start_preflight` and `mark_committed` — legitimately returning the
-        // intermediate `PreflightStarted` (a new cycle_id already advances the ack)
-        // and failing `phase == Committed`. The "change arrives during the wait"
-        // path is covered by `wait_for_start_ack_detects_new_preflight_cycle`.
-        agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "commit_success",
-            Some("# Session\n"),
-            Some("# Session\n"),
-        )
-        .unwrap();
-
-        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_secs(1))
-            .expect("new committed cycle should count as startup acknowledgment");
-        assert_ne!(ack.cycle_id, baseline.cycle_id);
-        assert_eq!(ack.phase, agent_doc_turn::CyclePhase::Committed);
-    }
-    #[test]
-    fn wait_for_start_ack_times_out_without_cycle_change() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("route-live-same-cycle.md");
-        std::fs::write(&doc, "# Session\n").unwrap();
-
-        agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "commit_success",
-            Some("# Session\n"),
-            Some("# Session\n"),
-        )
-        .unwrap();
-        let baseline = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-
-        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(250));
-        assert!(
-            ack.is_none(),
-            "unchanged cycle state must not count as a fresh-start ack"
-        );
-    }
-    #[test]
-    fn wait_for_start_ack_ignores_same_committed_cycle_mutation() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("route-live-ack-ok.md");
-        std::fs::write(&doc, "# Session\n").unwrap();
-
-        agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "commit_success",
-            Some("# Session\n"),
-            Some("# Session\n"),
-        )
-        .unwrap();
-        let baseline = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-
-        let doc_for_thread = doc.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
-            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-                &TEST_PIPELINE_FRONTMATTER_EFFECTS,
-                &doc_for_thread,
-                "commit_already_current",
-                Some("# Session\n"),
-                Some("# Session\n"),
-            )
-            .unwrap();
-        });
-
-        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(350));
-        assert!(
-            ack.is_none(),
-            "same committed cycle mutations must not count as a new routed-start ack"
-        );
-    }
-    #[test]
-    fn routed_cycle_ack_only_required_for_prompt_bearing_drift_on_closed_cycle() {
-        assert!(!should_require_routed_cycle_ack(RoutedCycleAckFacts {
-            baseline_cycle_open: false,
-            prompt_bearing_marker_present: false,
-        }));
+    fn routed_admission_only_required_for_prompt_bearing_drift_on_closed_cycle() {
+        assert!(!should_require_routed_admission_projection(
+            RoutedAdmissionFacts {
+                baseline_cycle_open: false,
+                prompt_bearing_marker_present: false,
+            }
+        ));
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -701,10 +531,12 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
         let open_state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert!(!should_require_routed_cycle_ack(RoutedCycleAckFacts {
-            baseline_cycle_open: open_state.is_open(),
-            prompt_bearing_marker_present: true,
-        }));
+        assert!(!should_require_routed_admission_projection(
+            RoutedAdmissionFacts {
+                baseline_cycle_open: open_state.is_open(),
+                prompt_bearing_marker_present: true,
+            }
+        ));
 
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
@@ -715,26 +547,28 @@ mod tests {
         )
         .unwrap();
         let committed_state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert!(should_require_routed_cycle_ack(RoutedCycleAckFacts {
-            baseline_cycle_open: committed_state.is_open(),
-            prompt_bearing_marker_present: true,
-        }));
+        assert!(should_require_routed_admission_projection(
+            RoutedAdmissionFacts {
+                baseline_cycle_open: committed_state.is_open(),
+                prompt_bearing_marker_present: true,
+            }
+        ));
     }
     #[test]
-    fn routed_cycle_ack_timeout_extends_for_live_children() {
+    fn routed_admission_timeout_extends_for_live_children() {
         assert_eq!(
-            routed_cycle_ack_timeout(false, cfg!(test)),
+            routed_admission_timeout(false, cfg!(test)),
             Duration::from_secs(1)
         );
         assert_eq!(
-            routed_cycle_ack_timeout(true, cfg!(test)),
+            routed_admission_timeout(true, cfg!(test)),
             Duration::from_secs(2)
         );
     }
     #[test]
-    fn fresh_route_start_ack_timeout_allows_restart_slack() {
+    fn fresh_route_admission_timeout_allows_restart_slack() {
         assert_eq!(
-            fresh_route_start_ack_timeout(cfg!(test)),
+            fresh_route_admission_timeout(cfg!(test)),
             Duration::from_secs(2)
         );
     }
@@ -760,7 +594,7 @@ Body\n\
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
             ctx.is_none(),
-            "frontmatter-only drift must not force routed cycle acknowledgment"
+            "frontmatter-only drift must not force routed admission"
         );
     }
     #[test]
@@ -800,7 +634,7 @@ Body\n\
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
             ctx.is_none(),
-            "answered prompt after a stale boundary must not force routed cycle acknowledgment"
+            "answered prompt after a stale boundary must not force routed admission"
         );
     }
     #[test]
@@ -841,7 +675,7 @@ Body\n\
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
             ctx.is_none(),
-            "raw assistant completion prose after a stale-boundary prompt must not force routed cycle acknowledgment"
+            "raw assistant completion prose after a stale-boundary prompt must not force routed admission"
         );
     }
     #[test]
@@ -878,7 +712,7 @@ Body\n\
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()
-            .expect("plain exchange-tail prompt should force routed ack gating");
+            .expect("plain exchange-tail prompt should require a routed admission projection");
         assert_eq!(
             ctx.marker,
             "prompt_target: When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"

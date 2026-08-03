@@ -1385,8 +1385,8 @@ pub fn decide_fresh_dispatch_target_after_ready_wait(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FreshStartAckOutcome {
-    CycleAcknowledged,
+pub enum FreshStartAdmissionOutcome {
+    AdmissionProjected,
     IdleNoOpKeep,
     /// (#jbtsiftnosub2) A no-cycle fresh start whose pane is back at a
     /// dispatch-ready prompt **but still shows the injected trigger sitting
@@ -1400,19 +1400,19 @@ pub enum FreshStartAckOutcome {
     GenuineMissReap,
 }
 
-pub const fn fresh_start_ack_outcome(
-    cycle_acknowledged: bool,
+pub const fn fresh_start_admission_outcome(
+    admission_projected: bool,
     pane_dispatch_ready: bool,
     trigger_pending_in_composer: bool,
-) -> FreshStartAckOutcome {
-    if cycle_acknowledged {
-        FreshStartAckOutcome::CycleAcknowledged
+) -> FreshStartAdmissionOutcome {
+    if admission_projected {
+        FreshStartAdmissionOutcome::AdmissionProjected
     } else if pane_dispatch_ready && trigger_pending_in_composer {
-        FreshStartAckOutcome::StrandedTriggerResubmit
+        FreshStartAdmissionOutcome::StrandedTriggerResubmit
     } else if pane_dispatch_ready {
-        FreshStartAckOutcome::IdleNoOpKeep
+        FreshStartAdmissionOutcome::IdleNoOpKeep
     } else {
-        FreshStartAckOutcome::GenuineMissReap
+        FreshStartAdmissionOutcome::GenuineMissReap
     }
 }
 
@@ -1423,8 +1423,9 @@ pub const fn fresh_start_ack_outcome(
 /// `_with_ansi` variant). ALL whitespace is stripped from both sides before the
 /// substring test so a trigger wrapped across terminal columns — tmux splits a
 /// long token onto the next line with a newline and no space — still matches.
-/// On a genuinely-submitted turn the harness clears the composer and a document
-/// cycle is acknowledged (so this branch is never reached); on a brand-new fresh
+/// On a genuinely-submitted turn the harness clears the composer and the
+/// controller projects a document cycle (so this branch is never reached); on a
+/// brand-new fresh
 /// pane the only way the trigger literal can appear is the just-injected,
 /// not-yet-submitted draft, so a whitespace-insensitive match cannot false-fire.
 ///
@@ -1448,22 +1449,24 @@ fn strip_all_whitespace(text: &str) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RoutedCycleAckFacts {
+pub struct RoutedAdmissionFacts {
     pub baseline_cycle_open: bool,
     pub prompt_bearing_marker_present: bool,
 }
 
-pub fn should_require_routed_cycle_ack(facts: RoutedCycleAckFacts) -> bool {
+pub fn should_require_routed_admission_projection(facts: RoutedAdmissionFacts) -> bool {
     facts.prompt_bearing_marker_present && !facts.baseline_cycle_open
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MissingCycleAckFacts<'a> {
+pub struct MissingAdmissionProjectionFacts<'a> {
     pub harness_binary: &'a str,
     pub live_child_for_file: bool,
 }
 
-pub fn should_optimistically_accept_missing_cycle_ack(facts: MissingCycleAckFacts<'_>) -> bool {
+pub fn should_optimistically_accept_missing_admission_projection(
+    facts: MissingAdmissionProjectionFacts<'_>,
+) -> bool {
     facts.harness_binary == "codex" && facts.live_child_for_file
 }
 
@@ -2141,7 +2144,7 @@ pub fn dispatch_start_early_resubmit_probe_timeout(test_mode: bool) -> Duration 
     }
 }
 
-pub fn fresh_route_start_ack_timeout(test_mode: bool) -> Duration {
+pub fn fresh_route_admission_timeout(test_mode: bool) -> Duration {
     if test_mode {
         Duration::from_secs(2)
     } else {
@@ -2149,30 +2152,31 @@ pub fn fresh_route_start_ack_timeout(test_mode: bool) -> Duration {
     }
 }
 
-/// The ack wait, capped at the client's own deadline (`#jbroutasync`).
+/// The admission-projection wait, capped at the client's own deadline
+/// (`#jbroutasync`).
 ///
 /// `submit.deadline_ms` was written (`rpc.rs`, `command_plane.rs`) but never
 /// read by dispatch. With a live child the controller waited 30s while the
 /// JetBrains client gave up at `waitForReadySeconds * 1000` (observed
 /// `timeout_ms=15000`), so the operator saw a timeout while the route was still
-/// running — and the controller kept waiting for an ack nobody was listening
-/// for. Waiting past the client's deadline cannot produce a useful outcome, so
-/// take the smaller of the two.
+/// running — and the controller kept waiting for a projection nobody was
+/// listening for. Waiting past the client's deadline cannot produce a useful
+/// outcome, so take the smaller of the two.
 ///
 /// A deadline of `None` (no client deadline supplied) keeps the base timeout.
-pub fn routed_cycle_ack_timeout_with_client_deadline(
+pub fn routed_admission_timeout_with_client_deadline(
     live_child_for_file: bool,
     test_mode: bool,
     client_deadline: Option<Duration>,
 ) -> Duration {
-    let base = routed_cycle_ack_timeout(live_child_for_file, test_mode);
+    let base = routed_admission_timeout(live_child_for_file, test_mode);
     match client_deadline {
         Some(deadline) => base.min(deadline),
         None => base,
     }
 }
 
-pub fn routed_cycle_ack_timeout(live_child_for_file: bool, test_mode: bool) -> Duration {
+pub fn routed_admission_timeout(live_child_for_file: bool, test_mode: bool) -> Duration {
     if test_mode {
         if live_child_for_file {
             Duration::from_secs(2)
@@ -2395,8 +2399,8 @@ impl RoutedDispatchStartProof {
 
     /// Whether the harness proved that the routed trigger left the composer and
     /// began a turn. A slow model may not open its document cycle within the
-    /// fresh-start ACK window, but this proof means the session is live and must
-    /// not be reaped or marked as a startup miss.
+    /// fresh-start admission window, but this proof means the session is live
+    /// and must not be reaped or marked as a startup miss.
     pub const fn confirms_dispatch_start(self) -> bool {
         matches!(
             self,
@@ -2999,10 +3003,10 @@ mod tests {
     /// `#jbroutasync`: the controller must not outwait the client that asked.
     /// Observed live — the JetBrains client gave up at 15s while the controller
     /// waited to 30s, so the operator saw a timeout while the route was still
-    /// running and the controller waited for an ack nobody would read.
+    /// running and the controller waited for a projection nobody would read.
     #[test]
-    fn routed_cycle_ack_wait_is_capped_at_the_client_deadline() {
-        let base = routed_cycle_ack_timeout(true, false);
+    fn routed_cycle_projection_wait_is_capped_at_the_client_deadline() {
+        let base = routed_admission_timeout(true, false);
         assert_eq!(
             base,
             Duration::from_secs(30),
@@ -3011,7 +3015,7 @@ mod tests {
 
         // The live regression: client deadline shorter than the base.
         assert_eq!(
-            routed_cycle_ack_timeout_with_client_deadline(
+            routed_admission_timeout_with_client_deadline(
                 true,
                 false,
                 Some(Duration::from_secs(15))
@@ -3022,7 +3026,7 @@ mod tests {
 
         // A longer client deadline must not extend the controller's own bound.
         assert_eq!(
-            routed_cycle_ack_timeout_with_client_deadline(
+            routed_admission_timeout_with_client_deadline(
                 true,
                 false,
                 Some(Duration::from_secs(120))
@@ -3033,12 +3037,12 @@ mod tests {
 
         // No deadline supplied keeps existing behavior exactly.
         assert_eq!(
-            routed_cycle_ack_timeout_with_client_deadline(true, false, None),
+            routed_admission_timeout_with_client_deadline(true, false, None),
             base
         );
         assert_eq!(
-            routed_cycle_ack_timeout_with_client_deadline(false, false, None),
-            routed_cycle_ack_timeout(false, false)
+            routed_admission_timeout_with_client_deadline(false, false, None),
+            routed_admission_timeout(false, false)
         );
     }
 
@@ -4074,43 +4078,44 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
-    fn fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss() {
+    fn fresh_start_admission_outcome_keeps_idle_no_op_and_reaps_genuine_miss() {
         assert_eq!(
-            fresh_start_ack_outcome(true, false, false),
-            FreshStartAckOutcome::CycleAcknowledged,
-            "a document cycle ack is a normal fresh start regardless of pane prompt state"
+            fresh_start_admission_outcome(true, false, false),
+            FreshStartAdmissionOutcome::AdmissionProjected,
+            "a projected document cycle is a normal fresh start regardless of pane prompt state"
         );
         assert_eq!(
-            fresh_start_ack_outcome(false, true, false),
-            FreshStartAckOutcome::IdleNoOpKeep,
+            fresh_start_admission_outcome(false, true, false),
+            FreshStartAdmissionOutcome::IdleNoOpKeep,
             "a no-cycle fresh start that returns to dispatch-ready with an empty composer is a legitimate idle no-op"
         );
         assert_eq!(
-            fresh_start_ack_outcome(false, false, false),
-            FreshStartAckOutcome::GenuineMissReap,
+            fresh_start_admission_outcome(false, false, false),
+            FreshStartAdmissionOutcome::GenuineMissReap,
             "a no-cycle fresh start without dispatch-ready proof is a genuine startup miss"
         );
     }
 
     #[test]
-    fn fresh_start_ack_outcome_resubmits_stranded_unsubmitted_trigger() {
+    fn fresh_start_admission_outcome_resubmits_stranded_unsubmitted_trigger() {
         // (#jbtsiftnosub2) The JB-created-fresh-pane drift: pane is back at a
         // dispatch-ready prompt but the injected trigger is still sitting
         // unsubmitted in the composer. This must NOT be kept as an idle no-op.
         assert_eq!(
-            fresh_start_ack_outcome(false, true, true),
-            FreshStartAckOutcome::StrandedTriggerResubmit,
+            fresh_start_admission_outcome(false, true, true),
+            FreshStartAdmissionOutcome::StrandedTriggerResubmit,
             "a dispatch-ready pane still showing the unsubmitted trigger is a stranded prompt, not a no-op"
         );
-        // A cycle ack always wins even if the trigger echo lingers in scrollback.
+        // A projected cycle always wins even if the trigger echo lingers in
+        // scrollback.
         assert_eq!(
-            fresh_start_ack_outcome(true, true, true),
-            FreshStartAckOutcome::CycleAcknowledged,
+            fresh_start_admission_outcome(true, true, true),
+            FreshStartAdmissionOutcome::AdmissionProjected,
         );
         // No dispatch-ready prompt is still a genuine miss regardless of composer state.
         assert_eq!(
-            fresh_start_ack_outcome(false, false, true),
-            FreshStartAckOutcome::GenuineMissReap,
+            fresh_start_admission_outcome(false, false, true),
+            FreshStartAdmissionOutcome::GenuineMissReap,
         );
     }
 
@@ -4149,37 +4154,43 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
-    fn routed_cycle_ack_required_only_for_prompt_bearing_closed_baselines() {
-        assert!(!should_require_routed_cycle_ack(RoutedCycleAckFacts {
-            baseline_cycle_open: false,
-            prompt_bearing_marker_present: false,
-        }));
-        assert!(!should_require_routed_cycle_ack(RoutedCycleAckFacts {
-            baseline_cycle_open: true,
-            prompt_bearing_marker_present: true,
-        }));
-        assert!(should_require_routed_cycle_ack(RoutedCycleAckFacts {
-            baseline_cycle_open: false,
-            prompt_bearing_marker_present: true,
-        }));
+    fn routed_cycle_projection_required_only_for_prompt_bearing_closed_baselines() {
+        assert!(!should_require_routed_admission_projection(
+            RoutedAdmissionFacts {
+                baseline_cycle_open: false,
+                prompt_bearing_marker_present: false,
+            }
+        ));
+        assert!(!should_require_routed_admission_projection(
+            RoutedAdmissionFacts {
+                baseline_cycle_open: true,
+                prompt_bearing_marker_present: true,
+            }
+        ));
+        assert!(should_require_routed_admission_projection(
+            RoutedAdmissionFacts {
+                baseline_cycle_open: false,
+                prompt_bearing_marker_present: true,
+            }
+        ));
     }
 
     #[test]
-    fn missing_cycle_ack_optimism_is_codex_live_child_only() {
-        assert!(should_optimistically_accept_missing_cycle_ack(
-            MissingCycleAckFacts {
+    fn missing_cycle_projection_optimism_is_codex_live_child_only() {
+        assert!(should_optimistically_accept_missing_admission_projection(
+            MissingAdmissionProjectionFacts {
                 harness_binary: "codex",
                 live_child_for_file: true,
             }
         ));
-        assert!(!should_optimistically_accept_missing_cycle_ack(
-            MissingCycleAckFacts {
+        assert!(!should_optimistically_accept_missing_admission_projection(
+            MissingAdmissionProjectionFacts {
                 harness_binary: "codex",
                 live_child_for_file: false,
             }
         ));
-        assert!(!should_optimistically_accept_missing_cycle_ack(
-            MissingCycleAckFacts {
+        assert!(!should_optimistically_accept_missing_admission_projection(
+            MissingAdmissionProjectionFacts {
                 harness_binary: "opencode",
                 live_child_for_file: true,
             }
@@ -5326,22 +5337,22 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     #[test]
     fn route_ack_timeouts_extend_for_startup_and_live_children() {
-        assert_eq!(fresh_route_start_ack_timeout(true), Duration::from_secs(2));
+        assert_eq!(fresh_route_admission_timeout(true), Duration::from_secs(2));
         assert_eq!(
-            fresh_route_start_ack_timeout(false),
+            fresh_route_admission_timeout(false),
             Duration::from_secs(30)
         );
         assert_eq!(
-            routed_cycle_ack_timeout(false, true),
+            routed_admission_timeout(false, true),
             Duration::from_secs(1)
         );
-        assert_eq!(routed_cycle_ack_timeout(true, true), Duration::from_secs(2));
+        assert_eq!(routed_admission_timeout(true, true), Duration::from_secs(2));
         assert_eq!(
-            routed_cycle_ack_timeout(false, false),
+            routed_admission_timeout(false, false),
             Duration::from_secs(15)
         );
         assert_eq!(
-            routed_cycle_ack_timeout(true, false),
+            routed_admission_timeout(true, false),
             Duration::from_secs(30)
         );
     }

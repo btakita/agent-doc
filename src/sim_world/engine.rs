@@ -1957,7 +1957,7 @@ impl SimWorld {
         active_component: Option<&str>,
     ) -> agent_doc_merge::document_cell_merge::DocumentCellMerge {
         use agent_doc_merge::document_cell_merge::{
-            AckReason, ActiveNodes, OutcomeKind, document_cell_merge_scoped,
+            ActiveNodes, MergeConflictReason, OutcomeKind, document_cell_merge_scoped,
         };
         let active = match active_component {
             Some(name) => ActiveNodes::new().active_component(name),
@@ -1976,10 +1976,10 @@ impl SimWorld {
             .iter()
             .any(|o| o.kind == OutcomeKind::DeletionKept);
         let delete_ack = sm
-            .requires_ack
+            .conflict_advisories
             .iter()
-            .any(|a| a.reason == AckReason::OperatorDeletedAgentEditedNode);
-        let only_disjoint = sm.requires_ack.is_empty()
+            .any(|a| a.reason == MergeConflictReason::OperatorDeletedAgentEditedNode);
+        let only_disjoint = sm.conflict_advisories.is_empty()
             && !has_operator_won
             && !has_delete_kept
             && sm.outcomes.iter().any(|o| {
@@ -2006,7 +2006,7 @@ impl SimWorld {
         // ack ONLY because the node was inside the active area. The identical
         // conflict with no active area (or a different active component)
         // auto-resolves operator-wins with no ack.
-        if has_operator_won && active_component.is_some() && !sm.requires_ack.is_empty() {
+        if has_operator_won && active_component.is_some() && !sm.conflict_advisories.is_empty() {
             self.coverage.document_cell_merge_scope_gated_acks += 1;
         }
         sm

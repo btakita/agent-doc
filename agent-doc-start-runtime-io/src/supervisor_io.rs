@@ -59,33 +59,6 @@ impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorS
     fn clear_prompt_dispatch_on_failure(&self, key: &str) {
         self.clear_prompt_dispatch_projection_on_failure(key);
     }
-
-    fn begin_turn_steering(
-        &self,
-        steering_id: &str,
-        _bytes: &str,
-    ) -> agent_doc_supervisor_io::ipc::PromptDispatchAdmission {
-        const TURN_STEERING_ADMISSION_CAPACITY: usize = 256;
-        let mut admissions = self.turn_steering_admissions.lock();
-        if admissions.iter().any(|current| current == steering_id) {
-            return agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Duplicate {
-                key: steering_id.to_string(),
-            };
-        }
-        if admissions.len() >= TURN_STEERING_ADMISSION_CAPACITY {
-            admissions.pop_front();
-        }
-        admissions.push_back(steering_id.to_string());
-        agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Accepted {
-            key: steering_id.to_string(),
-        }
-    }
-
-    fn clear_turn_steering_on_failure(&self, steering_id: &str) {
-        self.turn_steering_admissions
-            .lock()
-            .retain(|current| current != steering_id);
-    }
 }
 
 impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorShared {
@@ -420,105 +393,6 @@ mod tests {
             written.lock().as_slice(),
             b"agent-doc tasks/software/tsift.md\ragent-doc tasks/software/tsift.md\r"
         );
-    }
-
-    #[test]
-    fn live_turn_steering_socket_delivers_exact_selection_once_and_keeps_turn_busy() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("steering.md");
-        std::fs::write(
-            &doc,
-            "---\nagent_doc_session: steering-session\n---\n\n# Steering\n",
-        )
-        .unwrap();
-        let runtime = SessionActorRuntime {
-            project_root: dir.path().to_path_buf(),
-            file: doc,
-            session_id: "steering-session".to_string(),
-            pane_id: "%31".to_string(),
-            generation: 12,
-        };
-        let shared = Arc::new(SupervisorShared::with_actor_runtime(
-            "test",
-            "steering-instance".to_string(),
-            None,
-            "codex",
-            Some(runtime),
-            Some(agent_doc_controller::actor::ActorState::Busy),
-            None,
-        ));
-        let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
-            RecordingWriter(written.clone()),
-        )))));
-        let handler_state = shared.clone();
-        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
-            dir.path(),
-            "steering-session",
-            move |method| {
-                agent_doc_supervisor_io::ipc::handle_supervisor_ipc(method, handler_state.as_ref())
-            },
-        )
-        .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        let socket = agent_doc_supervisor_io::ipc::socket_path(dir.path(), "steering-session");
-        let selection = "Keep this line\n  and these spaces  ";
-        let method = IpcMethod::Steer {
-            steering_id: "selection-1".to_string(),
-            bytes: selection.to_string(),
-        };
-
-        let first = agent_doc_supervisor_io::ipc::send_command(&socket, &method).unwrap();
-        let retry = agent_doc_supervisor_io::ipc::send_command(&socket, &method).unwrap();
-
-        assert!(first.ok, "{first:?}");
-        assert_eq!(first.data.as_ref().unwrap()["kind"], "turn_steering_ack");
-        assert_eq!(first.data.as_ref().unwrap()["outcome"], "delivered");
-        assert_eq!(first.data.as_ref().unwrap()["n"], selection.len());
-        assert!(retry.ok, "{retry:?}");
-        assert_eq!(retry.data.as_ref().unwrap()["outcome"], "duplicate");
-        assert_eq!(retry.data.as_ref().unwrap()["n"], 0);
-        assert_eq!(
-            written.lock().as_slice(),
-            agent_doc_supervisor::input::normalize_supervisor_inject_bytes(selection)
-        );
-        assert_eq!(
-            *shared.actor_state.lock(),
-            Some(agent_doc_controller::actor::ActorState::Busy),
-            "steering must not finish or restart the active turn"
-        );
-        ipc.stop();
-    }
-
-    #[test]
-    fn turn_steering_rejects_when_no_active_turn_exists() {
-        let shared = Arc::new(SupervisorShared::new(
-            "test",
-            "idle-steering-instance".to_string(),
-        ));
-        let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
-            RecordingWriter(written.clone()),
-        )))));
-
-        let response = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
-            IpcMethod::Steer {
-                steering_id: "idle-selection".to_string(),
-                bytes: "must not become a new trigger".to_string(),
-            },
-            shared.as_ref(),
-        );
-
-        assert!(!response.ok);
-        assert!(
-            response
-                .error
-                .as_deref()
-                .unwrap_or_default()
-                .contains("active busy turn")
-        );
-        assert!(written.lock().is_empty());
     }
 
     #[test]

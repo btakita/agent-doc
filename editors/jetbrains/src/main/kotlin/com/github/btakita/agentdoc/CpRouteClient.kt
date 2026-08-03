@@ -15,6 +15,8 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 internal fun jsonBooleanFieldOrNull(
     value: JsonObject,
@@ -50,14 +52,6 @@ internal fun controllerFailureMessageUtil(root: JsonObject): String? =
 internal data class CpEditorRouteResult(
     val exitCode: Int,
     val output: String,
-    val steering: CpTurnSteeringAck? = null,
-)
-
-internal data class CpTurnSteeringAck(
-    val kind: String,
-    val steeringId: String,
-    val outcome: String,
-    val acceptedBytes: Int,
 )
 
 internal data class CpTmuxLayoutSyncState(
@@ -107,6 +101,10 @@ internal data class CpDocumentPathTransitionReceipt(
     val attempt: Long,
     val error: String? = null,
 )
+
+internal fun interface CpTurnAuthoritySubscription : AutoCloseable {
+    override fun close()
+}
 
 internal enum class MissingFocusPanePolicy(val token: String) {
     ObserveOnly("observe_only"),
@@ -244,41 +242,139 @@ internal object CpRouteClient {
     }
 
     /**
-     * Read the controller's current in-memory turn projection for one document.
+     * Retain one controller-owned reactive turn projection for a document.
      *
-     * The returned shape matches [TurnStateBridge.presentationFromDocumentAuthority] so the UI
-     * keeps one fail-closed rendering path without entering the native library or opening SQLite.
+     * The controller pushes typed projection frames. Reconnection follows only
+     * socket lifecycle edges; this path never polls or acknowledges turn state.
      */
-    fun documentTurnAuthority(
+    fun subscribeDocumentTurnAuthority(
         projectRoot: String,
         filePath: String,
-    ): String {
+        onAuthority: (String) -> Unit,
+    ): CpTurnAuthoritySubscription {
         val socket = cpcSocket(projectRoot)
-        return try {
-            val turn = sendRequestDataToSocket(socket, documentTurnProjectionRequest(filePath))
-            JsonObject().also {
-                it.addProperty("document", filePath)
-                it.addProperty("readiness", "ready")
-                it.add("turn", turn)
-            }.toString()
-        } catch (e: Exception) {
-            JsonObject().also {
-                it.addProperty("document", filePath)
-                it.addProperty("readiness", "unavailable")
-                it.addProperty(
-                    "error",
-                    "document_turn_projection unavailable via ${socket.path}: ${e.message}",
-                )
-            }.toString()
+        val closed = AtomicBoolean(false)
+        val activeChannel = AtomicReference<SocketChannel?>()
+        val thread =
+            Thread({
+                var controllerGeneration: Long? = null
+                var planeVersion = 0L
+                var reconnectDelayMs = TURN_AUTHORITY_RECONNECT_MIN_MS
+                while (!closed.get()) {
+                    try {
+                        SocketChannel.open(UnixDomainSocketAddress.of(socket.toPath())).use { channel ->
+                            activeChannel.set(channel)
+                            val request =
+                                documentTurnAuthorityStreamRequest(
+                                    filePath,
+                                    controllerGeneration,
+                                    planeVersion,
+                                )
+                            val writer = Channels.newWriter(channel, Charsets.UTF_8)
+                            writer.write(request.toString())
+                            writer.write("\n")
+                            writer.flush()
+                            val reader = Channels.newReader(channel, Charsets.UTF_8).buffered()
+                            reconnectDelayMs = TURN_AUTHORITY_RECONNECT_MIN_MS
+                            while (!closed.get()) {
+                                val line = reader.readLine() ?: break
+                                val root = JsonParser.parseString(line).asJsonObject
+                                controllerFailureMessageUtil(root)?.let { error ->
+                                    throw IllegalStateException(error)
+                                }
+                                val frame =
+                                    root.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
+                                        ?: throw IllegalStateException(
+                                            "Project Controller stream frame missing data",
+                                        )
+                                controllerGeneration =
+                                    jsonLongFieldOrNull(frame, "controller_generation")
+                                        ?: controllerGeneration
+                                planeVersion =
+                                    jsonLongFieldOrNull(frame, "plane_version") ?: planeVersion
+                                val projection =
+                                    frame.get("projection")
+                                        ?.takeIf { it.isJsonObject }
+                                        ?.asJsonObject
+                                        ?: continue
+                                onAuthority(
+                                    JsonObject().also {
+                                        it.addProperty("document", filePath)
+                                        it.addProperty("readiness", "ready")
+                                        it.add("turn", projection)
+                                    }.toString(),
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (!closed.get()) {
+                            onAuthority(
+                                JsonObject().also {
+                                    it.addProperty("document", filePath)
+                                    it.addProperty("readiness", "unavailable")
+                                    it.addProperty(
+                                        "error",
+                                        "document-turn authority stream unavailable via " +
+                                            "${socket.path}: ${e.message}",
+                                    )
+                                }.toString(),
+                            )
+                        }
+                    } finally {
+                        activeChannel.set(null)
+                    }
+                    if (closed.get()) break
+                    try {
+                        Thread.sleep(reconnectDelayMs)
+                    } catch (_: InterruptedException) {
+                        if (closed.get()) break
+                    }
+                    reconnectDelayMs =
+                        (reconnectDelayMs * 2).coerceAtMost(TURN_AUTHORITY_RECONNECT_MAX_MS)
+                }
+            }, "agent-doc-turn-authority-stream").apply {
+                isDaemon = true
+                start()
+            }
+        return CpTurnAuthoritySubscription {
+            closed.set(true)
+            try {
+                activeChannel.getAndSet(null)?.close()
+            } catch (_: Exception) {
+                // Stream close is best-effort during editor disposal.
+            }
+            thread.interrupt()
         }
     }
 
-    internal fun documentTurnProjectionRequest(filePath: String): JsonObject =
-        JsonObject().also {
-            it.addProperty("command", "document_turn_projection")
+    internal fun documentTurnAuthorityStreamRequest(
+        filePath: String,
+        afterControllerGeneration: Long?,
+        afterVersion: Long,
+    ): JsonObject {
+        val subscription =
+            JsonObject().also {
+                it.addProperty(
+                    "channel",
+                    "agent-doc/document-turn-authority/v1/" +
+                        StateProjectionBridge.documentHash(filePath),
+                )
+                afterControllerGeneration?.let {
+                    subscriptionGeneration -> it.addProperty(
+                        "after_controller_generation",
+                        subscriptionGeneration,
+                    )
+                }
+                it.addProperty("after_version", afterVersion)
+                it.addProperty("timeout_ms", TURN_AUTHORITY_STREAM_TIMEOUT_MS)
+            }
+        return JsonObject().also {
+            it.addProperty("command", "document_turn_authority_stream")
             it.addProperty("file", filePath)
             it.addProperty("caller", EditorIdentity.id)
+            it.addProperty("diagnostic_payload", subscription.toString())
         }
+    }
 
     internal fun editorSurfaceObserveRequest(
         surfaceJson: String,
@@ -339,8 +435,6 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
-        selectedText: String? = null,
-        steeringId: String? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         if (commandPlaneEnabled()) {
@@ -354,8 +448,6 @@ internal object CpRouteClient {
             routeKey = routeKey,
                 commandId = commandId,
                 controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
-                selectedText = selectedText,
-                steeringId = steeringId,
             )
         return try {
             val accepted = sendAcceptedCommandSubmitToSocket(
@@ -390,8 +482,6 @@ internal object CpRouteClient {
             waitForReadySeconds = waitForReadySeconds,
             attemptId = attemptId,
             routeKey = routeKey,
-            selectedText = selectedText,
-            steeringId = steeringId,
         )
         return try {
             sendToSocket(socket, request)
@@ -574,8 +664,6 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
-        selectedText: String? = null,
-        steeringId: String? = null,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("source", "jetbrains_plugin")
@@ -588,8 +676,6 @@ internal object CpRouteClient {
         })
         attemptId?.let { payload.addProperty("attempt_id", it) }
         routeKey?.let { payload.addProperty("route_key", it) }
-        selectedText?.let { payload.addProperty("selected_text", it) }
-        steeringId?.let { payload.addProperty("steering_id", it) }
         return payload
     }
 
@@ -600,8 +686,6 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
-        selectedText: String? = null,
-        steeringId: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -609,8 +693,6 @@ internal object CpRouteClient {
             waitForReadySeconds,
             attemptId,
             routeKey,
-            selectedText,
-            steeringId,
         )
         val request = JsonObject()
         request.addProperty("command", EditorCommandName.EditorRoute.token)
@@ -638,11 +720,9 @@ internal object CpRouteClient {
         layoutArgs: List<String>,
         waitForReadySeconds: Long,
         attemptId: String?,
-    routeKey: String?,
+        routeKey: String?,
         commandId: String,
         controllerCommand: String = "editor_command_submit",
-        selectedText: String? = null,
-        steeringId: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -650,8 +730,6 @@ internal object CpRouteClient {
             waitForReadySeconds,
             attemptId,
             routeKey,
-            selectedText,
-            steeringId,
         )
         return commandSubmitRequest(
             filePath = filePath,
@@ -661,7 +739,7 @@ internal object CpRouteClient {
             // Retries of one click share an attempt id; a later intentional click
             // gets a new id. Durable controller receipts still coalesce attempts
             // while the prior document turn is in flight.
-            idempotencyKey = steeringId ?: attemptId ?: routeKey ?: relativePath,
+            idempotencyKey = attemptId ?: routeKey ?: relativePath,
             commandId = commandId,
         deadlineMs = waitForReadySeconds * 1000,
         supersede = false,
@@ -899,11 +977,7 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
                 },
             )
         }
-        return CpEditorRouteResult(
-            0,
-            output,
-            steering = parseTurnSteeringAck(data.getAsJsonObject("payload")),
-        )
+        return CpEditorRouteResult(0, output)
     }
 
     internal fun resolveCommandSubmitAcceptedData(
@@ -954,12 +1028,15 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
     /// nothing".
     ///
     /// It must stay comfortably ABOVE the longest legitimate server-side wait,
-    /// which is `routed_cycle_ack_timeout` at 30s with a live child. Setting it
+    /// which is the 30s reactive turn-admission projection await. Setting it
     /// near the client's 15s deadline hint would abort routes that are still
     /// running correctly — the exact failure recorded in #jbroutasync.
 private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
 private const val COMMAND_COMPLETION_GRACE_MS = 5_000L
 private const val MIN_COMMAND_AWAIT_TIMEOUT_MS = 1L
+private const val TURN_AUTHORITY_STREAM_TIMEOUT_MS = 120_000L
+private const val TURN_AUTHORITY_RECONNECT_MIN_MS = 250L
+private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
 
     private val socketWatchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }
@@ -1023,17 +1100,6 @@ private const val MIN_COMMAND_AWAIT_TIMEOUT_MS = 1L
         return CpEditorRouteResult(
             exitCode = data.get("exit_code")?.asInt ?: 1,
             output = data.get("output")?.asString ?: "",
-            steering = parseTurnSteeringAck(data),
-        )
-    }
-
-    private fun parseTurnSteeringAck(routeResult: JsonObject?): CpTurnSteeringAck? {
-        val steering = routeResult?.getAsJsonObject("steering") ?: return null
-        return CpTurnSteeringAck(
-            kind = steering.get("kind")?.asString ?: return null,
-            steeringId = steering.get("steering_id")?.asString ?: return null,
-            outcome = steering.get("outcome")?.asString ?: return null,
-            acceptedBytes = steering.get("accepted_bytes")?.asInt ?: return null,
         )
     }
 

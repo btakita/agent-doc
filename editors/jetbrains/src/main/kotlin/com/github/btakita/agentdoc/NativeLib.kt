@@ -614,17 +614,6 @@ interface AgentDocLib : Library {
     fun agent_doc_deferred_write_reconnect_propagated(filePath: String, editorContent: String): Int
 
     /**
-     * Read the Project Controller→plugin turn-state projection JSON for a document path:
-     * `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"project_controller","realtime_steering":{...}}`.
-     * The plugin observes this to render turn-in-flight UI and to decide whether a forwarded
-     * operator prompt starts a fresh turn or would collide with an in-flight response (the
-     * double-append guard). Defaults to the idle projection when no cycle is open.
-     * Shared-Foundation parity with the VS Code frontend (`specs/14-realtime-workflow.md` § Editor
-     * Parity Requirement). Caller must free the returned pointer with [agent_doc_free_string].
-     */
-    fun agent_doc_turn_projection(filePath: String): Pointer?
-
-    /**
      * Borrowed static capability token for lossless-tree CRDT frame exchange. Do not free the
      * returned pointer.
      */

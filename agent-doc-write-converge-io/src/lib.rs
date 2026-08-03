@@ -1129,14 +1129,14 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     {
         let merged_doc = sm.merged_doc.clone();
         let outcome_count = sm.outcomes.len();
-        let ack_count = sm.requires_ack.len();
+        let conflict_count = sm.conflict_advisories.len();
         let merged_response_present = !response_headings.is_empty()
             && response_converged_in_visible_target(base, &queue_reconciled_ours, &merged_doc);
         let visible_repair_required = !visible_write_response_present;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "live_prompt_drift_semantic_merged file={} source={} patch_id={} base_len={} base_hash={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={} merged_len={} merged_hash={} outcomes={} acks={} visible_write_response_present={} merged_response_present={} visible_repair_required={} reason=node_keyed_semantic_merge",
+                "live_prompt_drift_semantic_merged file={} source={} patch_id={} base_len={} base_hash={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={} merged_len={} merged_hash={} outcomes={} conflicts={} visible_write_response_present={} merged_response_present={} visible_repair_required={} reason=node_keyed_semantic_merge",
                 file.display(),
                 source,
                 patch_id.unwrap_or("-"),
@@ -1149,34 +1149,42 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 merged_doc.len(),
                 agent_doc_hash::content_hash(&merged_doc),
                 outcome_count,
-                ack_count,
+                conflict_count,
                 visible_write_response_present,
                 merged_response_present,
                 visible_repair_required,
             ),
         );
-        if ack_count > 0 {
+        if conflict_count > 0 {
             let reasons: Vec<String> = sm
-                .requires_ack
+                .conflict_advisories
                 .iter()
-                .map(|ack| format!("{}:{}:{}", ack.component, ack.id, ack.reason.token()))
+                .map(|advisory| {
+                    format!(
+                        "{}:{}:{}",
+                        advisory.component,
+                        advisory.id,
+                        advisory.reason.token()
+                    )
+                })
                 .collect();
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_cell_merge_ack_pending file={} source={} patch_id={} ack_count={} reasons={}",
+                    "document_cell_merge_conflict_projected file={} source={} patch_id={} conflict_count={} reasons={}",
                     file.display(),
                     source,
                     patch_id.unwrap_or("-"),
-                    ack_count,
+                    conflict_count,
                     reasons.join(","),
                 ),
             );
-            if let Err(e) =
-                agent_doc_cycle_state_io::record_semantic_merge_acks(file, &sm.requires_ack)
-            {
+            if let Err(e) = agent_doc_cycle_state_io::record_semantic_merge_conflict_advisories(
+                file,
+                &sm.conflict_advisories,
+            ) {
                 eprintln!(
-                    "[write] warning: failed to record document_cell_merge acks for carry-forward: {e}"
+                    "[write] warning: failed to project document_cell_merge conflict advisory: {e}"
                 );
             }
         }

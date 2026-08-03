@@ -291,4 +291,23 @@ describe('buildTurnStatePresentation (Project Controller turn-state coordination
         assert.strictEqual(presentation.tooltip, 'first removal\n\nsecond removal');
         assert.strictEqual(presentation.guardPromptForwarding, true);
     });
+
+    it('projects merge conflicts without requesting another turn', () => {
+        const projection: TurnProjection = {
+            state: 'idle',
+            turn_in_flight: false,
+            transition_authority: 'project_controller',
+            semantic_merge_conflicts: [{
+                component: 'exchange',
+                id: 'node-1',
+                reason: 'same_node_operator_override',
+                detail: 'operator value won',
+            }],
+        };
+
+        const presentation = buildTurnStatePresentation(projection);
+        assert.strictEqual(presentation.label, 'agent-doc: ⚠ merge conflict');
+        assert.strictEqual(presentation.tooltip, 'exchange:node-1 — operator value won');
+        assert.strictEqual(presentation.guardPromptForwarding, false);
+    });
 });

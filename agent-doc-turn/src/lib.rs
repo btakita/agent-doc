@@ -13,7 +13,6 @@ pub mod closeout_signal;
 pub mod codex_stop_continuation;
 pub mod coined_ids;
 pub mod cp_projection;
-pub mod cycle_ack;
 pub mod cycle_policy;
 pub mod document_drift;
 pub mod drain_stall;
@@ -22,6 +21,7 @@ pub mod heuristics;
 pub mod no_change;
 pub mod op_log;
 pub mod owner_pane_recursion;
+pub mod prompt_bearing_route;
 pub mod repair;
 pub mod response_replay;
 pub mod response_text;
@@ -143,7 +143,7 @@ pub enum CycleBookkeepingEvent {
     IpcSnapshotAdoptionBlocked,
     DroppedExchangePrompts,
     DroppedQueuePrompts,
-    DocumentCellMergeAcks,
+    DocumentCellMergeConflicts,
 }
 
 pub struct CyclePhaseMachine {

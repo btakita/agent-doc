@@ -44,7 +44,7 @@ class CpSocketDeadlineTest {
 
     /**
      * The ceiling is a hang guard, not a latency control. It must stay above the
-     * longest legitimate server-side wait — `routed_cycle_ack_timeout` is 30s
+     * longest legitimate server-side wait — reactive turn admission is 30s
      * with a live child — or it would abort routes that are still running
      * correctly, which is the failure recorded in #jbroutasync.
      */
@@ -57,7 +57,7 @@ class CpSocketDeadlineTest {
             .substringBefore("\n")
         val millis = declaration.replace("_", "").replace("L", "").trim().toLong()
         assertTrue(
-            "must exceed the 30s live-child routed_cycle_ack_timeout, got ${millis}ms",
+            "must exceed the 30s turn-admission projection await, got ${millis}ms",
             millis > 30_000,
         )
     }

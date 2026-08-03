@@ -30,6 +30,30 @@ class TurnStateBridgeTest {
     }
 
     @Test
+    fun `presentation projects merge conflict without requesting another turn`() {
+        val presentation =
+            TurnStateBridge.presentation(
+                """
+                    {
+                      "state":"idle",
+                      "turn_in_flight":false,
+                      "transition_authority":"project_controller",
+                      "semantic_merge_conflicts":[{
+                        "component":"exchange",
+                        "id":"node-1",
+                        "reason":"same_node_operator_override",
+                        "detail":"operator value won"
+                      }]
+                    }
+                """.trimIndent(),
+            )
+
+        assertEquals("agent-doc: ⚠ merge conflict", presentation.label)
+        assertEquals("exchange:node-1 — operator value won", presentation.tooltip)
+        assertFalse(presentation.guardPromptForwarding)
+    }
+
+    @Test
     fun `route failure presentation explains start-session pane crash`() {
         val presentation = TurnStateBridge.routeFailurePresentation(
             """

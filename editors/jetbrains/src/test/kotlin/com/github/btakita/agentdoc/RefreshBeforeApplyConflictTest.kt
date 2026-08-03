@@ -385,24 +385,17 @@ class RefreshBeforeApplyConflictTest {
             turnRefresher.contains("SLOW_BACKOFF"),
         )
         assertTrue(
-            "banner refresher must cap each event-drain slice",
-            turnRefresher.contains("TURN_STATE_MAX_PATHS_PER_DRAIN"),
-        )
-        assertTrue(
-            "banner refresher must yield between backlog slices",
-            turnRefresher.contains("TURN_STATE_DRAIN_YIELD_MS"),
-        )
-        assertTrue(
-            "banner refresher must read the controller-owned in-memory projection",
-            turnRefresher.contains("CpRouteClient.documentTurnAuthority"),
+            "banner refresher must retain the controller-owned reactive projection",
+            turnRefresher.contains("CpRouteClient.subscribeDocumentTurnAuthority"),
         )
         assertFalse(
             "banner refresher must not enter the reloadable native library",
             turnRefresher.contains("NativeAdminControls.documentAuthority"),
         )
-        assertTrue(
-            "banner refresher must retain a bounded cache-observation cadence",
-            turnRefresher.contains("TURN_STATE_CACHE_OBSERVE_INTERVAL_MS"),
+        assertFalse(
+            "banner refresher must not poll the controller turn projection",
+            turnRefresher.contains("TURN_STATE_CACHE_OBSERVE_INTERVAL_MS") ||
+                turnRefresher.contains("documentTurnAuthority("),
         )
         assertFalse(
             "turn projection must not make imperative Project Controller subscriptions",

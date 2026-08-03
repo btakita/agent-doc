@@ -82,33 +82,20 @@ pub struct BacklogTargetRequirement {
     pub baseline_item_ids: Vec<String>,
 }
 
-/// `#semmerge-ack-turn` (document_cell_merge Phase 4): a node-keyed acknowledgement
-/// that a node-disjoint semantic merge could NOT apply the agent's change
-/// verbatim — the operator deleted an agent-edited node, overrode the same node,
-/// or revived an agent-deleted node, and the operator value won in `merged_doc`.
-/// The agent's content is never silently discarded: the next cycle surfaces these
-/// so the agent emits an exchange turn acknowledging the non-applied change.
+/// Node-keyed reactive advisory projected when semantic merge cannot apply the
+/// agent's change verbatim and the concurrent operator value wins.
 ///
-/// `reason` is the stable [`agent_doc_merge::document_cell_merge::AckReason`]
-/// token (see [`AckReason::token`](agent_doc_merge::document_cell_merge::AckReason::token)).
-/// `recorded_cycle_id` is the cycle whose convergence recorded the ack (forensic
-/// info). `surfaced` drives the one-cycle lifecycle: [`start_preflight_with_task`]
-/// carries forward only un-surfaced acks and marks them surfaced, so each ack
-/// reaches the agent exactly once and drops the cycle after. The flag is used
-/// instead of comparing cycle ids because `cycle_id` is millisecond-derived and
-/// two cycles can collide within the same millisecond.
+/// The advisory belongs to the cycle that observed the conflict. It is state
+/// for diagnostics and editor presentation, never a request for a future turn
+/// and never carried into the next preflight.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PendingSemanticMergeAck {
+pub struct SemanticMergeConflictAdvisory {
     pub component: String,
     pub id: String,
     pub reason: String,
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recorded_cycle_id: Option<String>,
-    /// True once this ack has been carried into a cycle for the agent to surface.
-    /// Set by [`start_preflight_with_task`] when it carries the ack forward.
-    #[serde(default)]
-    pub surfaced: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -260,13 +247,13 @@ pub struct CycleState {
     /// for a committed response, binary consume, or explicit deferral proof.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_free_text_queue_heads: Vec<String>,
-    /// `#semmerge-ack-turn` (document_cell_merge Phase 4): node-keyed acks carried into
-    /// the NEXT cycle's response. Recorded at convergence time
-    /// ([`record_semantic_merge_acks`]) and carried forward exactly one cycle by
-    /// [`start_preflight_with_task`], which preflight surfaces as
-    /// `document_cell_merge_acks` so the agent emits an acknowledgement exchange turn.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_semantic_merge_acks: Vec<PendingSemanticMergeAck>,
+    /// Reactive semantic-merge conflicts observed during this cycle.
+    #[serde(
+        default,
+        alias = "pending_semantic_merge_acks",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub semantic_merge_conflict_advisories: Vec<SemanticMergeConflictAdvisory>,
     /// `#closeoutstall`: typed operator-gated closeout state. A response may be
     /// safely captured and queued for editor IPC while the live editor has not
     /// proven application. This keeps the cycle open and gives session-check,
@@ -300,7 +287,7 @@ pub struct AdmitOutput {
     pub file_hash: Option<String>,
 }
 
-/// `#suprecyclespin` — seconds an open cycle may sit untouched (no IPC ack
+/// `#suprecyclespin` — seconds an open cycle may sit untouched (no IPC advisory
 /// connection in flight) at a harness turn boundary before the supervisor
 /// recycle/restart defer path force-closes it as abandoned. Bounded so a
 /// crashed/superseded older turn cannot wedge the recycle in `DeferCycleOpen`
@@ -337,7 +324,7 @@ impl CycleState {
     }
 
     /// `#suprecyclespin` — whether this open cycle has stalled past
-    /// `deadline_secs`: still open, no IPC ack connection in flight, and untouched
+    /// `deadline_secs`: still open, no IPC advisory connection in flight, and untouched
     /// (`now_secs - updated_at > deadline_secs`). A stalled open cycle is an
     /// abandoned older turn that a newer committed cycle has superseded; the
     /// supervisor recycle-defer path force-closes such a cycle (`mark_abandoned`)
@@ -455,7 +442,8 @@ pub fn reconstruct_cycle_state(
 
     if projection.matches_cycle(&state.cycle_id) {
         apply_closeout_projection_to_cycle_state(&mut state, &projection);
-        state.pending_semantic_merge_acks = projection.pending_semantic_merge_acks.clone();
+        state.semantic_merge_conflict_advisories =
+            projection.semantic_merge_conflict_advisories.clone();
     }
     Ok(Some(state))
 }
@@ -478,7 +466,7 @@ pub struct ProjectedCloseoutState {
     pub session_check_passed: bool,
     pub tracked_work_maintenance_required: Option<bool>,
     pub abandoned_reason: Option<String>,
-    pub pending_semantic_merge_acks: Vec<PendingSemanticMergeAck>,
+    pub semantic_merge_conflict_advisories: Vec<SemanticMergeConflictAdvisory>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -622,16 +610,15 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
             session_check_passed: projection.session_check_passed,
             tracked_work_maintenance_required: projection.tracked_work_maintenance_required,
             abandoned_reason: projection.abandoned_reason,
-            pending_semantic_merge_acks: projection
-                .pending_semantic_merge_acks
+            semantic_merge_conflict_advisories: projection
+                .semantic_merge_conflict_advisories
                 .into_iter()
-                .map(|ack| PendingSemanticMergeAck {
-                    component: ack.component,
-                    id: ack.id,
-                    reason: ack.reason,
-                    detail: ack.detail,
-                    recorded_cycle_id: ack.recorded_cycle_id,
-                    surfaced: ack.surfaced,
+                .map(|advisory| SemanticMergeConflictAdvisory {
+                    component: advisory.component,
+                    id: advisory.id,
+                    reason: advisory.reason,
+                    detail: advisory.detail,
+                    recorded_cycle_id: advisory.recorded_cycle_id,
                 })
                 .collect(),
         }
@@ -1046,75 +1033,6 @@ fn closeout_recovery_evidence_key(evidence: &CloseoutRecoveryEvidenceInput<'_>) 
     Ok(agent_doc_hash::content_hash(&payload))
 }
 
-pub fn load_pending_semantic_merge_acks(file: &Path) -> Result<Vec<PendingSemanticMergeAck>> {
-    Ok(load_semantic_merge_ack_queue_source(file)?
-        .map(|source| source.pending_semantic_merge_acks())
-        .unwrap_or_default())
-}
-
-fn document_cell_merge_acks_to_carry(file: &Path) -> Result<Vec<PendingSemanticMergeAck>> {
-    Ok(load_semantic_merge_ack_queue_source(file)?
-        .map(|source| source.document_cell_merge_acks_to_carry())
-        .unwrap_or_default())
-}
-
-enum DocumentCellMergeAckQueueSource {
-    Projection(Box<ProjectedCloseoutState>),
-    Cycle(Box<CycleState>),
-}
-
-impl DocumentCellMergeAckQueueSource {
-    fn pending_semantic_merge_acks(&self) -> Vec<PendingSemanticMergeAck> {
-        self.document_cell_merge_ack_queue().to_vec()
-    }
-
-    fn document_cell_merge_acks_to_carry(&self) -> Vec<PendingSemanticMergeAck> {
-        carry_forward_unsurfaced_semantic_merge_acks(self.document_cell_merge_ack_queue())
-    }
-
-    fn document_cell_merge_ack_queue(&self) -> &[PendingSemanticMergeAck] {
-        match self {
-            Self::Projection(projection) => &projection.pending_semantic_merge_acks,
-            Self::Cycle(state) => &state.pending_semantic_merge_acks,
-        }
-    }
-}
-
-fn load_semantic_merge_ack_queue_source(
-    file: &Path,
-) -> Result<Option<DocumentCellMergeAckQueueSource>> {
-    let raw = load(file)?;
-    let Some(projection) = load_closeout_projection(file)? else {
-        return Ok(raw.map(|state| DocumentCellMergeAckQueueSource::Cycle(Box::new(state))));
-    };
-    if !projection.pending_semantic_merge_acks.is_empty() {
-        return Ok(Some(DocumentCellMergeAckQueueSource::Projection(Box::new(
-            projection,
-        ))));
-    }
-    if let Some(raw) = raw
-        && projection.matches_cycle(&raw.cycle_id)
-    {
-        return Ok(Some(DocumentCellMergeAckQueueSource::Cycle(Box::new(raw))));
-    }
-    Ok(Some(DocumentCellMergeAckQueueSource::Projection(Box::new(
-        projection,
-    ))))
-}
-
-fn carry_forward_unsurfaced_semantic_merge_acks(
-    acks: &[PendingSemanticMergeAck],
-) -> Vec<PendingSemanticMergeAck> {
-    acks.iter()
-        .filter(|ack| !ack.surfaced)
-        .cloned()
-        .map(|mut ack| {
-            ack.surfaced = true;
-            ack
-        })
-        .collect()
-}
-
 pub fn admit_with_current_resolver<R, S, L>(
     file: &Path,
     mut resolve_current: R,
@@ -1187,13 +1105,6 @@ pub fn start_preflight_with_task(
 ) -> Result<CycleState> {
     let now = now_secs();
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    // `#semmerge-ack-turn` (Phase 4): carry forward acks recorded by the prior
-    // cycle's convergence so this cycle's response can acknowledge the non-applied
-    // agent change. Carry only un-surfaced acks and mark them surfaced here — an
-    // ack the prior cycle itself carried IN was already surfaced there, so it
-    // drops. Driven by the `surfaced` flag rather than a cycle-id comparison
-    // because `cycle_id` is millisecond-derived and can collide across cycles.
-    let carried_semantic_merge_acks = document_cell_merge_acks_to_carry(file).unwrap_or_default();
     // `#queueskip`: carry forward the skipped-head accumulator so a head marked
     // skippable in a prior cycle stays skipped until it is consumed or removed
     // (preflight recomputes/clears it each cycle). Without this the flag would
@@ -1268,17 +1179,15 @@ pub fn start_preflight_with_task(
         active_free_text_queue_heads: file_content
             .map(agent_doc_queue::queue_heads::active_free_text_queue_heads)
             .unwrap_or_default(),
-        pending_semantic_merge_acks: carried_semantic_merge_acks,
+        semantic_merge_conflict_advisories: reentrant
+            .as_ref()
+            .map(|open| open.semantic_merge_conflict_advisories.clone())
+            .unwrap_or_default(),
         blocked_closeout: None,
         skipped_queue_head_ids: carried_skipped_queue_head_ids,
     };
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::PreflightStarted)?;
-    append_semantic_merge_ack_carried_forward_events(
-        file,
-        &state.cycle_id,
-        &state.pending_semantic_merge_acks,
-    )?;
     append_phase_event_to_session_log(file, &state, file_content);
     Ok(state)
 }
@@ -2071,30 +1980,28 @@ pub fn record_dropped_queue_prompts(file: &Path, prompts: &[String]) -> Result<O
     Ok(Some(state))
 }
 
-/// `#semmerge-ack-turn` (document_cell_merge Phase 4): record node-keyed acks emitted
-/// by the convergence semantic merge so the NEXT cycle can acknowledge the
-/// non-applied agent change in an exchange turn. Tags each ack with the current
-/// cycle id ([`start_preflight_with_task`] carries it forward exactly one cycle).
-/// Appends only previously-unseen `(component, id, reason)` triples.
-pub fn record_semantic_merge_acks(
+/// Project node-keyed semantic-merge conflicts into the current cycle.
+///
+/// These are reactive diagnostics, not future-turn requests. A new preflight
+/// clears them with the rest of the prior cycle projection.
+pub fn record_semantic_merge_conflict_advisories(
     file: &Path,
-    acks: &[agent_doc_merge::document_cell_merge::AckRequest],
+    advisories: &[agent_doc_merge::document_cell_merge::MergeConflictAdvisory],
 ) -> Result<Option<CycleState>> {
     let Some(mut state) = load_with_closeout_projection(file)? else {
         if let Some(projection) = load_closeout_projection(file)?
             && let Some(cycle_id) = projection.cycle_id.as_deref()
         {
-            for ack in acks {
-                append_semantic_merge_ack_recorded_event(
+            for advisory in advisories {
+                append_semantic_merge_conflict_advisory_recorded_event(
                     file,
                     cycle_id,
-                    &PendingSemanticMergeAck {
-                        component: ack.component.clone(),
-                        id: ack.id.clone(),
-                        reason: ack.reason.token().to_string(),
-                        detail: ack.detail.clone(),
+                    &SemanticMergeConflictAdvisory {
+                        component: advisory.component.clone(),
+                        id: advisory.id.clone(),
+                        reason: advisory.reason.token().to_string(),
+                        detail: advisory.detail.clone(),
                         recorded_cycle_id: Some(cycle_id.to_string()),
-                        surfaced: false,
                     },
                 )?;
             }
@@ -2103,23 +2010,32 @@ pub fn record_semantic_merge_acks(
     };
     let cycle_id = state.cycle_id.clone();
     let mut changed = false;
-    for ack in acks {
-        let reason = ack.reason.token().to_string();
-        let pending_ack = PendingSemanticMergeAck {
-            component: ack.component.clone(),
-            id: ack.id.clone(),
+    for advisory in advisories {
+        let reason = advisory.reason.token().to_string();
+        let projected_advisory = SemanticMergeConflictAdvisory {
+            component: advisory.component.clone(),
+            id: advisory.id.clone(),
             reason: reason.clone(),
-            detail: ack.detail.clone(),
+            detail: advisory.detail.clone(),
             recorded_cycle_id: Some(cycle_id.clone()),
-            surfaced: false,
         };
-        append_semantic_merge_ack_recorded_event(file, &cycle_id, &pending_ack)?;
-        if !state.pending_semantic_merge_acks.iter().any(|existing| {
-            existing.component == ack.component
-                && existing.id == ack.id
-                && existing.reason == reason
-        }) {
-            state.pending_semantic_merge_acks.push(pending_ack);
+        append_semantic_merge_conflict_advisory_recorded_event(
+            file,
+            &cycle_id,
+            &projected_advisory,
+        )?;
+        if !state
+            .semantic_merge_conflict_advisories
+            .iter()
+            .any(|existing| {
+                existing.component == advisory.component
+                    && existing.id == advisory.id
+                    && existing.reason == reason
+            })
+        {
+            state
+                .semantic_merge_conflict_advisories
+                .push(projected_advisory);
             changed = true;
         }
     }
@@ -3005,62 +2921,30 @@ fn submit_closeout_advance_via_socket(
     Ok(true)
 }
 
-fn append_semantic_merge_ack_recorded_event(
+fn append_semantic_merge_conflict_advisory_recorded_event(
     file: &Path,
     cycle_id: &str,
-    ack: &PendingSemanticMergeAck,
+    advisory: &SemanticMergeConflictAdvisory,
 ) -> Result<bool> {
     let Some(document_hash) = cycle_document_hash(file)? else {
         return Ok(false);
     };
     let event_id = format!(
-        "semantic-merge-ack-recorded:{document_hash}:{cycle_id}:{}:{}:{}",
-        ack.component, ack.id, ack.reason
+        "semantic-merge-conflict-observed:{document_hash}:{cycle_id}:{}:{}:{}",
+        advisory.component, advisory.id, advisory.reason
     );
     append_state_fact(
         file,
         event_id,
-        agent_doc_state_backbone::StateFact::DocumentCellMergeAckRecorded {
+        agent_doc_state_backbone::StateFact::DocumentCellMergeConflictObserved {
             document_hash,
             cycle_id: cycle_id.to_string(),
-            component: ack.component.clone(),
-            id: ack.id.clone(),
-            reason: ack.reason.clone(),
-            detail: ack.detail.clone(),
+            component: advisory.component.clone(),
+            id: advisory.id.clone(),
+            reason: advisory.reason.clone(),
+            detail: advisory.detail.clone(),
         },
     )
-}
-
-fn append_semantic_merge_ack_carried_forward_events(
-    file: &Path,
-    target_cycle_id: &str,
-    acks: &[PendingSemanticMergeAck],
-) -> Result<()> {
-    let Some(document_hash) = cycle_document_hash(file)? else {
-        return Ok(());
-    };
-    for ack in acks {
-        let source_cycle_id = ack.recorded_cycle_id.clone();
-        let source = source_cycle_id.as_deref().unwrap_or("unknown");
-        let event_id = format!(
-            "semantic-merge-ack-carried:{document_hash}:{target_cycle_id}:{source}:{}:{}:{}",
-            ack.component, ack.id, ack.reason
-        );
-        append_state_fact(
-            file,
-            event_id,
-            agent_doc_state_backbone::StateFact::DocumentCellMergeAckCarriedForward {
-                document_hash: document_hash.clone(),
-                source_cycle_id,
-                target_cycle_id: target_cycle_id.to_string(),
-                component: ack.component.clone(),
-                id: ack.id.clone(),
-                reason: ack.reason.clone(),
-                detail: ack.detail.clone(),
-            },
-        )?;
-    }
-    Ok(())
 }
 
 /// Resolve the ledger key for `file`, or `None` when the document has no
@@ -3182,7 +3066,7 @@ fn synthetic_state_with_id(
         dropped_queue_prompts: Vec::new(),
         active_queue_heads: Vec::new(),
         active_free_text_queue_heads: Vec::new(),
-        pending_semantic_merge_acks: Vec::new(),
+        semantic_merge_conflict_advisories: Vec::new(),
         blocked_closeout: None,
         skipped_queue_head_ids: Vec::new(),
     }
@@ -3238,7 +3122,7 @@ mod tests {
         state.updated_at = 1_000 + deadline + 1;
         assert!(!state.open_stalled(0, 1_000 + deadline + 5, deadline));
         assert!(!state.stalled_before_response_capture_cycle(0, 1_000 + deadline + 5, deadline));
-        // IPC ack connection in flight → finalize is live, never force-closed even
+        // IPC advisory connection in flight → finalize is live, never force-closed even
         // if the cycle has been open a long time.
         state.updated_at = 1_000;
         assert!(!state.open_stalled(1, 1_000 + deadline + 100, deadline));
@@ -3370,12 +3254,12 @@ mod tests {
         );
     }
 
-    fn ack(
+    fn advisory(
         component: &str,
         id: &str,
-        reason: agent_doc_merge::document_cell_merge::AckReason,
-    ) -> agent_doc_merge::document_cell_merge::AckRequest {
-        agent_doc_merge::document_cell_merge::AckRequest {
+        reason: agent_doc_merge::document_cell_merge::MergeConflictReason,
+    ) -> agent_doc_merge::document_cell_merge::MergeConflictAdvisory {
+        agent_doc_merge::document_cell_merge::MergeConflictAdvisory {
             component: component.to_string(),
             id: id.to_string(),
             reason,
@@ -3384,28 +3268,36 @@ mod tests {
     }
 
     #[test]
-    fn record_semantic_merge_acks_tags_current_cycle_and_dedupes() {
-        use agent_doc_merge::document_cell_merge::AckReason;
+    fn record_semantic_merge_conflict_advisories_tags_current_cycle_and_dedupes() {
+        use agent_doc_merge::document_cell_merge::MergeConflictReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
         let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
 
-        record_semantic_merge_acks(
+        record_semantic_merge_conflict_advisories(
             &doc,
-            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
+            &[advisory(
+                "exchange",
+                "a",
+                MergeConflictReason::SameNodeOperatorOverride,
+            )],
         )
         .unwrap();
         // Re-recording the same (component, id, reason) is a no-op.
-        record_semantic_merge_acks(
+        record_semantic_merge_conflict_advisories(
             &doc,
-            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
+            &[advisory(
+                "exchange",
+                "a",
+                MergeConflictReason::SameNodeOperatorOverride,
+            )],
         )
         .unwrap();
 
         let state = load(&doc).unwrap().unwrap();
-        assert_eq!(state.pending_semantic_merge_acks.len(), 1);
-        let recorded = &state.pending_semantic_merge_acks[0];
+        assert_eq!(state.semantic_merge_conflict_advisories.len(), 1);
+        let recorded = &state.semantic_merge_conflict_advisories[0];
         assert_eq!(recorded.component, "exchange");
         assert_eq!(recorded.id, "a");
         assert_eq!(recorded.reason, "same_node_operator_override");
@@ -3413,15 +3305,11 @@ mod tests {
             recorded.recorded_cycle_id.as_deref(),
             Some(started.cycle_id.as_str())
         );
-        assert!(
-            !recorded.surfaced,
-            "freshly recorded ack is not yet surfaced"
-        );
     }
 
     #[test]
     fn a_reentrant_preflight_keeps_the_turn_identity_and_refreshes_the_contract() {
-        use agent_doc_merge::document_cell_merge::AckReason;
+        use agent_doc_merge::document_cell_merge::MergeConflictReason;
         // #preflightinbinary: with preflight running in the binary on the
         // trigger prompt, a second preflight can reach the same turn (an agent
         // or a hookless harness also runs one). It used to mint
@@ -3434,9 +3322,13 @@ mod tests {
         fs::write(&doc, "body").unwrap();
 
         let first = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        record_semantic_merge_acks(
+        record_semantic_merge_conflict_advisories(
             &doc,
-            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
+            &[advisory(
+                "exchange",
+                "a",
+                MergeConflictReason::SameNodeOperatorOverride,
+            )],
         )
         .unwrap();
 
@@ -3448,7 +3340,7 @@ mod tests {
         );
         assert_eq!(reentrant.started_at, first.started_at);
         assert_eq!(
-            reentrant.pending_semantic_merge_acks.len(),
+            reentrant.semantic_merge_conflict_advisories.len(),
             1,
             "the refreshed contract must carry facts recorded since the turn opened"
         );
@@ -3473,108 +3365,31 @@ mod tests {
     }
 
     #[test]
-    fn document_cell_merge_acks_survive_in_ledger() {
-        use agent_doc_merge::document_cell_merge::AckReason;
+    fn semantic_merge_conflict_advisories_are_cycle_local_reactive_state() {
+        use agent_doc_merge::document_cell_merge::MergeConflictReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
 
         start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        record_semantic_merge_acks(
+        record_semantic_merge_conflict_advisories(
             &doc,
-            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
-        )
-        .unwrap();
-        assert!(load(&doc).unwrap().is_some());
-
-        let pending = load_pending_semantic_merge_acks(&doc).unwrap();
-        assert_eq!(pending.len(), 1);
-        assert!(!pending[0].surfaced);
-
-        let cycle2 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        assert_eq!(cycle2.pending_semantic_merge_acks.len(), 1);
-        assert!(cycle2.pending_semantic_merge_acks[0].surfaced);
-
-        let surfaced = load_pending_semantic_merge_acks(&doc).unwrap();
-        assert_eq!(surfaced.len(), 1);
-        assert!(surfaced[0].surfaced);
-
-        let cycle3 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        assert!(cycle3.pending_semantic_merge_acks.is_empty());
-    }
-
-    #[test]
-    fn start_preflight_carries_prior_cycle_acks_forward_exactly_once() {
-        use agent_doc_merge::document_cell_merge::AckReason;
-        let dir = setup_project();
-        let doc = dir.path().join("doc.md");
-        fs::write(&doc, "body").unwrap();
-
-        // Cycle 1: converge records an ack.
-        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        record_semantic_merge_acks(
-            &doc,
-            &[ack(
+            &[advisory(
                 "exchange",
                 "a",
-                AckReason::OperatorDeletedAgentEditedNode,
+                MergeConflictReason::SameNodeOperatorOverride,
             )],
         )
         .unwrap();
+        let current = load(&doc).unwrap().unwrap();
+        assert_eq!(current.semantic_merge_conflict_advisories.len(), 1);
 
-        // Cycle 2: start_preflight must carry the ack forward so it is surfaced.
-        let cycle2 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        assert_eq!(
-            cycle2.pending_semantic_merge_acks.len(),
-            1,
-            "ack carried into the immediately-following cycle"
-        );
+        mark_committed(&doc, "commit_success", Some("snap"), Some("body")).unwrap();
+        let next = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         assert!(
-            cycle2.pending_semantic_merge_acks[0].surfaced,
-            "carried ack is marked surfaced"
+            next.semantic_merge_conflict_advisories.is_empty(),
+            "a conflict observation must not become a future-turn courtesy request"
         );
-
-        // Cycle 3: the ack was already surfaced in cycle 2, so it must drop.
-        let cycle3 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        assert!(
-            cycle3.pending_semantic_merge_acks.is_empty(),
-            "ack surfaced once then dropped: {:?}",
-            cycle3.pending_semantic_merge_acks
-        );
-    }
-
-    #[test]
-    fn document_cell_merge_ack_recorded_after_carry_chains_to_next_cycle() {
-        use agent_doc_merge::document_cell_merge::AckReason;
-        let dir = setup_project();
-        let doc = dir.path().join("doc.md");
-        fs::write(&doc, "body").unwrap();
-
-        // Cycle 1 records ack A.
-        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        record_semantic_merge_acks(
-            &doc,
-            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
-        )
-        .unwrap();
-
-        // Cycle 2 surfaces A (carried) AND its own convergence records ack B.
-        let cycle2 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        assert_eq!(cycle2.pending_semantic_merge_acks.len(), 1);
-        record_semantic_merge_acks(
-            &doc,
-            &[ack(
-                "exchange",
-                "b",
-                AckReason::OperatorRevivedAgentDeletedNode,
-            )],
-        )
-        .unwrap();
-
-        // Cycle 3 surfaces only B (A was surfaced in cycle 2 and dropped).
-        let cycle3 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        assert_eq!(cycle3.pending_semantic_merge_acks.len(), 1);
-        assert_eq!(cycle3.pending_semantic_merge_acks[0].id, "b");
     }
 
     #[test]

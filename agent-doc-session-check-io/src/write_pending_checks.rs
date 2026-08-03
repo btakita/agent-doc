@@ -1364,13 +1364,13 @@ mod precommit_pending_capture_tests {
         let doc = setup_precommit(
             tmp.path(),
             "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
-            "### Re: #agent-doc-bug — opus-4-6\n\nPlanned agent-doc backlog items:\n- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Routed-cycle ack follow-up\n",
+            "### Re: #agent-doc-bug — opus-4-6\n\nPlanned agent-doc backlog items:\n- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Turn admission projection follow-up\n",
             false,
         );
         let target = tmp.path().join("bugs.md");
         write_backlog_doc(
             &target,
-            "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Routed-cycle ack follow-up\n- [ ] [#old1] Existing item\n",
+            "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Turn admission projection follow-up\n- [ ] [#old1] Existing item\n",
         );
         let requirement = agent_doc_cycle_state_io::BacklogTargetRequirement {
             path: std::fs::canonicalize(&target)

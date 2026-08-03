@@ -54,6 +54,10 @@ const CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX: Duration = Duration::from_secs(
 /// closeout publishes a terminal fact. This ceiling bounds the exceptional
 /// crashed-owner path before recovery retries its liveness-aware claim.
 const CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX: Duration = Duration::from_secs(30);
+/// Ceiling for one routed-admission projection subscription. Route's caller
+/// deadline may shorten this, but admission itself is a controller projection
+/// transition rather than a cycle-sidecar polling loop.
+const CONTROLLER_TURN_ADMISSION_AWAIT_MAX: Duration = Duration::from_secs(30);
 /// A closeout-owner CAS writes one durable state fact. Under brief SQLite or
 /// controller pressure that fact can land just after the generic 5s deadline;
 /// timing out then is especially harmful because the caller never constructs
@@ -655,10 +659,10 @@ impl DocumentTurnAuthorityReconnectGuard {
         self.advanced_on_connection = false;
     }
 
-    fn observe(&mut self, subscription: &ControllerStatePlaneSubscription) -> bool {
+    fn observe(&mut self, frame: &DocumentTurnAuthorityStreamFrame) -> bool {
         let next = ControllerStatePlaneCursor {
-            controller_generation: subscription.controller_generation,
-            plane_version: subscription.latest_version,
+            controller_generation: frame.controller_generation,
+            plane_version: frame.plane_version,
         };
         let advanced = match self.cursor {
             None => true,
@@ -686,6 +690,19 @@ impl DocumentTurnAuthorityReconnectGuard {
             self.consecutive_stalled_disconnects.saturating_add(1);
         self.consecutive_stalled_disconnects <= 1
     }
+}
+
+/// Editor-facing wire projection for the retained document-turn stream.
+///
+/// State-plane snapshots remain the controller's internal transport. Editors
+/// consume this typed projection directly so they never need to reconstruct a
+/// Lazily envelope or issue a turn-state request/ack pair.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentTurnAuthorityStreamFrame {
+    pub controller_generation: u64,
+    pub plane_version: u64,
+    pub timed_out: bool,
+    pub projection: Option<agent_doc_turn::cp_projection::TurnProjection>,
 }
 
 fn document_turn_authority_stream_request(
@@ -791,24 +808,10 @@ pub async fn observe_document_turn_authority_stream(
                     }
                 }
             }
-            let subscription: ControllerStatePlaneSubscription =
+            let frame: DocumentTurnAuthorityStreamFrame =
                 decode_controller_response(&authority_root, &request, response.trim())?;
-            if reconnect.observe(&subscription)
-                && let Some(projection) = subscription
-                    .frames
-                    .last()
-                    .map(|frame| {
-                        let message: lazily::IpcMessage = serde_json::from_str(&frame.message_json)
-                            .context("decode document-turn authority state-plane message")?;
-                        let payload = state_plane_snapshot_payload(
-                            &message,
-                            &channel,
-                            DOCUMENT_TURN_AUTHORITY_TYPE_TAG,
-                        )?;
-                        serde_json::from_slice(&payload)
-                            .context("decode document-turn authority projection")
-                    })
-                    .transpose()?
+            if reconnect.observe(&frame)
+                && let Some(projection) = frame.projection
             {
                 observe(projection);
             }
@@ -4436,6 +4439,84 @@ pub fn await_closeout_cycle_progress_for_file(
     )
 }
 
+/// Await the reactive document-cycle projection created by a routed prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+enum TurnAdmissionProjectionOperation {
+    Current,
+    Await {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        baseline_cycle_id: Option<String>,
+        wait_ms: u64,
+    },
+}
+
+pub fn await_turn_admission_projection_for_file(
+    file: &Path,
+    baseline_cycle_id: Option<&str>,
+    wait: Duration,
+) -> Result<Option<agent_doc_state_backbone::TurnAdmissionProjection>> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let wait = wait.min(CONTROLLER_TURN_ADMISSION_AWAIT_MAX);
+    let operation = TurnAdmissionProjectionOperation::Await {
+        baseline_cycle_id: baseline_cycle_id.map(str::to_string),
+        wait_ms: u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
+    };
+    let request = ControllerRequest {
+        command: "turn_admission_projection".to_string(),
+        file: Some(canonical),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("route".to_string()),
+        reason: Some("prompt_admission".to_string()),
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(&operation)?),
+    };
+    request_existing_controller_with_timeout(
+        &project_root,
+        request,
+        wait.saturating_add(CONTROLLER_RPC_TIMEOUT),
+    )
+}
+
+/// Read the current turn-admission cursor before publishing a turn effect.
+///
+/// This is a one-shot effect fence, not a completion acknowledgement. All
+/// post-submit progress is observed by [`await_turn_admission_projection_for_file`]
+/// from the controller's reactive projection.
+pub fn current_turn_admission_projection_for_file(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::TurnAdmissionProjection>> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let request = ControllerRequest {
+        command: "turn_admission_projection".to_string(),
+        file: Some(canonical),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("turn_submitter".to_string()),
+        reason: Some("effect_fence".to_string()),
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(
+            &TurnAdmissionProjectionOperation::Current,
+        )?),
+    };
+    request_existing_controller_with_timeout(&project_root, request, CONTROLLER_RPC_TIMEOUT)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct QueueContextClearPayload {
     command: String,
@@ -7123,18 +7204,12 @@ struct ControllerEditorRoutePayload {
     route_key: Option<String>,
     #[serde(default)]
     source: Option<String>,
-    #[serde(default)]
-    selected_text: Option<String>,
-    #[serde(default)]
-    steering_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct ControllerEditorRouteResult {
     exit_code: i32,
     output: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    steering: Option<ControllerTurnSteeringReceipt>,
 }
 
 fn handle_crdt_current_text_rpc(
@@ -7684,19 +7759,6 @@ fn handle_editor_route_rpc(
         .filter(|value| !value.is_empty())
         .unwrap_or("jetbrains_plugin");
 
-    if payload.selected_text.is_some() || payload.steering_id.is_some() {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "controller_editor_route_legacy_steering_normalized file={} source={} steering_id={} selected_bytes={} outcome=plain_trigger",
-                canonical.display(),
-                source,
-                payload.steering_id.as_deref().unwrap_or("none"),
-                payload.selected_text.as_deref().map(str::len).unwrap_or(0),
-            ),
-        );
-    }
-
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -7740,7 +7802,6 @@ fn handle_editor_route_rpc(
     Ok(ControllerEditorRouteResult {
         exit_code: result.exit_code,
         output: result.output,
-        steering: None,
     })
 }
 
@@ -11559,6 +11620,9 @@ pub(crate) fn handle_request_locked(
         "closeout_cycle_progress_await" => controller_envelope(
             handle_closeout_cycle_progress_await(runtime.as_ref(), request),
         ),
+        "turn_admission_projection" => {
+            controller_envelope(handle_turn_admission_projection(runtime.as_ref(), request))
+        }
         "command_plane_submit" => {
             // #af88 B enforcement: a command-plane submit persists facts (the
             // durable sink), so refuse it when the caller proves this controller
@@ -11772,11 +11836,6 @@ pub(crate) fn handle_request_locked(
         "document_path_transition_observe" => controller_envelope(
             handle_document_path_transition_observe(&bootstrap_snapshot, runtime.as_ref(), request),
         ),
-        "document_turn_projection" => controller_envelope(handle_document_turn_projection(
-            &bootstrap_snapshot,
-            runtime.as_ref(),
-            request,
-        )),
         "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
         "state_plane_publish" => {
             controller_envelope(handle_state_plane_publish(runtime.as_ref(), request))
@@ -11971,7 +12030,8 @@ fn serve_document_turn_authority_stream(
         );
         after_controller_generation = Some(subscription.controller_generation);
         after_version = subscription.latest_version;
-        let mut response = controller_envelope(Ok(subscription))?;
+        let frame = document_turn_authority_stream_frame(&subscription)?;
+        let mut response = controller_envelope(Ok(frame))?;
         response.push('\n');
         if let Err(error) = writer.write_all(response.as_bytes()) {
             if matches!(
@@ -11990,6 +12050,31 @@ fn serve_document_turn_authority_stream(
             .context("flush document-authority stream frame")?;
     }
     Ok(())
+}
+
+fn document_turn_authority_stream_frame(
+    subscription: &ControllerStatePlaneSubscription,
+) -> Result<DocumentTurnAuthorityStreamFrame> {
+    let projection = subscription
+        .frames
+        .last()
+        .map(|frame| {
+            let message: lazily::IpcMessage = serde_json::from_str(&frame.message_json)
+                .context("decode document-turn authority state-plane message")?;
+            let payload = state_plane_snapshot_payload(
+                &message,
+                &subscription.channel,
+                DOCUMENT_TURN_AUTHORITY_TYPE_TAG,
+            )?;
+            serde_json::from_slice(&payload).context("decode document-turn authority projection")
+        })
+        .transpose()?;
+    Ok(DocumentTurnAuthorityStreamFrame {
+        controller_generation: subscription.controller_generation,
+        plane_version: subscription.latest_version,
+        timed_out: subscription.timed_out,
+        projection,
+    })
 }
 
 fn stale_mutating_client_binary(client_version: Option<&str>) -> Option<&str> {
@@ -13623,6 +13708,34 @@ pub(crate) fn handle_closeout_cycle_progress_await(
         .unwrap_or(CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX)
         .min(CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX);
     Ok(runtime.wait_for_closeout_cycle_progress(&document_hash, cycle_id, wait))
+}
+
+pub(crate) fn handle_turn_admission_projection(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<Option<agent_doc_state_backbone::TurnAdmissionProjection>> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let operation: TurnAdmissionProjectionOperation =
+        serde_json::from_str(&payload_json).context("parse turn admission projection operation")?;
+    match operation {
+        TurnAdmissionProjectionOperation::Current => Ok(runtime
+            .document_state_projection(&document_hash)?
+            .and_then(|document| document.turn_admission_after(None))),
+        TurnAdmissionProjectionOperation::Await {
+            baseline_cycle_id,
+            wait_ms,
+        } => {
+            let wait = Duration::from_millis(wait_ms).min(CONTROLLER_TURN_ADMISSION_AWAIT_MAX);
+            Ok(runtime.wait_for_turn_admission_projection(
+                &document_hash,
+                baseline_cycle_id.as_deref(),
+                wait,
+            ))
+        }
+    }
 }
 
 pub(crate) fn handle_closeout_owner_claim(
@@ -16698,20 +16811,6 @@ fn handle_document_path_transition_observe(
         ),
     );
     Ok(receipt)
-}
-
-fn handle_document_turn_projection(
-    bootstrap: &ControllerBootstrap,
-    runtime: &ControllerRuntime,
-    request: ControllerRequest,
-) -> Result<agent_doc_turn::cp_projection::TurnProjection> {
-    let file = request_file(&request)?;
-    let document_hash = agent_doc_hash::document_id_for_path(&file);
-    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
-        &bootstrap.project_root,
-        &file.to_string_lossy(),
-    );
-    Ok(runtime.document_turn_authority_projection(&document_hash, &document_id))
 }
 
 pub fn editor_surface_projection_channel(client_id: &str) -> String {
@@ -20487,16 +20586,15 @@ mod tests {
         );
     }
 
-    fn document_turn_authority_subscription(
+    fn document_turn_authority_frame(
         controller_generation: u64,
-        latest_version: u64,
-    ) -> ControllerStatePlaneSubscription {
-        ControllerStatePlaneSubscription {
-            channel: "agent-doc/document-turn-authority/test".to_string(),
+        plane_version: u64,
+    ) -> DocumentTurnAuthorityStreamFrame {
+        DocumentTurnAuthorityStreamFrame {
             controller_generation,
-            latest_version,
+            plane_version,
             timed_out: false,
-            frames: Vec::new(),
+            projection: None,
         }
     }
 
@@ -20520,18 +20618,42 @@ mod tests {
     }
 
     #[test]
+    fn turn_admission_projection_operations_share_one_typed_command() {
+        let current = serde_json::to_value(TurnAdmissionProjectionOperation::Current).unwrap();
+        assert_eq!(current, serde_json::json!({"operation": "current"}));
+
+        let awaiting = TurnAdmissionProjectionOperation::Await {
+            baseline_cycle_id: Some("cycle-41".to_string()),
+            wait_ms: 30_000,
+        };
+        let json = serde_json::to_value(&awaiting).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "operation": "await",
+                "baseline_cycle_id": "cycle-41",
+                "wait_ms": 30_000
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<TurnAdmissionProjectionOperation>(json).unwrap(),
+            awaiting
+        );
+    }
+
+    #[test]
     fn repeated_disconnect_without_authority_progress_stops_reconnect_churn() {
         let mut reconnect = DocumentTurnAuthorityReconnectGuard::default();
         reconnect.begin_connection();
-        assert!(reconnect.observe(&document_turn_authority_subscription(7, 41)));
+        assert!(reconnect.observe(&document_turn_authority_frame(7, 41)));
         assert!(reconnect.should_reconnect_after_disconnect());
 
         reconnect.begin_connection();
-        assert!(!reconnect.observe(&document_turn_authority_subscription(7, 41)));
+        assert!(!reconnect.observe(&document_turn_authority_frame(7, 41)));
         assert!(reconnect.should_reconnect_after_disconnect());
 
         reconnect.begin_connection();
-        assert!(!reconnect.observe(&document_turn_authority_subscription(7, 41)));
+        assert!(!reconnect.observe(&document_turn_authority_frame(7, 41)));
         assert!(
             !reconnect.should_reconnect_after_disconnect(),
             "an unchanged dependency cursor must become unavailable, not a CPU-bound retry loop"
@@ -20542,11 +20664,11 @@ mod tests {
     fn controller_generation_change_reactivates_document_authority_subscription() {
         let mut reconnect = DocumentTurnAuthorityReconnectGuard::default();
         reconnect.begin_connection();
-        assert!(reconnect.observe(&document_turn_authority_subscription(7, 41)));
+        assert!(reconnect.observe(&document_turn_authority_frame(7, 41)));
         assert!(reconnect.should_reconnect_after_disconnect());
 
         reconnect.begin_connection();
-        assert!(reconnect.observe(&document_turn_authority_subscription(8, 1)));
+        assert!(reconnect.observe(&document_turn_authority_frame(8, 1)));
         assert_eq!(
             reconnect.cursor,
             Some(ControllerStatePlaneCursor {
@@ -21069,43 +21191,6 @@ mod tests {
             false,
             "superseded_by_newer_layout_state"
         )));
-    }
-
-    #[test]
-    fn command_submit_selected_text_uses_the_plain_editor_route() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let file = dir.path().join("plan.md");
-        std::fs::write(&file, "# Plan\n").unwrap();
-        let bootstrap = test_bootstrap(&dir);
-        let runtime = test_controller_runtime(&bootstrap);
-        let selected = "Preserve this\n  exact selection  ";
-        let request = command_submit_request_for_test(
-            Some(file),
-            "editor_route",
-            "agent-doc.editor_route.v1",
-            serde_json::json!({
-                "relative_path": "plan.md",
-                "dispatch_only": true,
-                "plain_trigger": true,
-                "layout_args": [],
-                "selected_text": selected,
-                "steering_id": "steer-exact-1",
-            }),
-            "cmd-steer",
-        );
-
-        let response =
-            handle_editor_command_submit_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
-        assert_eq!(response["exit_code"], 0);
-        assert!(
-            response["payload"]["output"]
-                .as_str()
-                .unwrap()
-                .contains("test editor route accepted")
-        );
-        assert!(response["payload"]["steering"].is_null());
-        assert_eq!(response["projection"]["commands"][0]["status"], "applied");
     }
 
     #[test]
@@ -22905,6 +22990,67 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(5),
             "projection release must wake the waiter, not its deadline ({elapsed:?})"
+        );
+    }
+
+    #[test]
+    fn turn_admission_await_wakes_on_reactive_projection_change() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+
+        runtime
+            .apply_state_event(&agent_doc_state_backbone::StateEvent::new(
+                "preflight-old",
+                agent_doc_state_backbone::StateFact::PreflightStarted {
+                    document_hash: document_hash.clone(),
+                    cycle_id: "cycle-old".into(),
+                    session_id: None,
+                    tracked_work_maintenance_required: None,
+                },
+            ))
+            .unwrap();
+
+        let publisher = Arc::clone(&runtime);
+        let published_hash = document_hash.clone();
+        let publisher = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            publisher
+                .apply_state_event(&agent_doc_state_backbone::StateEvent::new(
+                    "preflight-new",
+                    agent_doc_state_backbone::StateFact::PreflightStarted {
+                        document_hash: published_hash,
+                        cycle_id: "cycle-new".into(),
+                        session_id: None,
+                        tracked_work_maintenance_required: None,
+                    },
+                ))
+                .unwrap();
+        });
+
+        let started = Instant::now();
+        let admission = runtime
+            .wait_for_turn_admission_projection(
+                &document_hash,
+                Some("cycle-old"),
+                Duration::from_secs(30),
+            )
+            .expect("new preflight projection should admit the routed prompt");
+        let elapsed = started.elapsed();
+        publisher.join().unwrap();
+
+        assert_eq!(admission.cycle_id, "cycle-new");
+        assert_eq!(
+            admission.phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "projection notification must wake the waiter, not its deadline ({elapsed:?})"
         );
     }
 

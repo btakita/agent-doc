@@ -206,7 +206,8 @@ pub fn run_with_tmux_with_options(
             // Clean up panes created during the failed route attempt, but fail
             // closed for the current session owner: if a newly-created pane is
             // still the registered live pane for this document, preserve it so
-            // a missed start-ack cannot crash the user's active tmux pane.
+            // a missing admission projection cannot crash the user's active
+            // tmux pane.
             cleanup_failed_route_panes(tmux, file, &session_id, &created_panes);
             Err(e)
         }

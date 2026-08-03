@@ -74,6 +74,7 @@ const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
 const EDITOR_SURFACE_CLIENT_ID = `vscode-pid:${process.pid}`;
 const EDITOR_SURFACE_CLIENT_GENERATION = monotonicMillis();
 const EDITOR_SURFACE_OBSERVE_TIMEOUT_MS = 40_000;
+const EDITOR_SURFACE_FORGET_TIMEOUT_MS = 2_000;
 const LAZILY_CURRENT_OBSERVATION_DELAY_MS = 75;
 
 function monotonicMillis(): number {
@@ -409,140 +410,161 @@ function showError(message: string): void {
     vscode.window.showErrorMessage(`Agent Doc: ${message}`);
 }
 
-// Controller-owned turn-state coordination. The status view samples a pure
-// in-memory projection over the existing controller socket; neither the
-// reloadable native library nor SQLite participates in this editor hot path.
+// Controller-owned turn-state coordination. The status view subscribes once to
+// a retained reactive projection; neither the reloadable native library,
+// SQLite, nor a turn-state request/ack loop participates in this editor path.
 const turnStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
-const TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS = 250;
-const TURN_STATUS_PROJECTION_TIMEOUT_MS = 2_000;
-const TURN_STATUS_AUTHORITY_SETTLE_MS = 75;
-let turnStatusWatcherRoot: string | undefined;
-let turnStatusRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-let turnStatusLastRefreshMs = 0;
-let turnAuthorityRequestController: AbortController | undefined;
+const TURN_AUTHORITY_STREAM_TIMEOUT_MS = 120_000;
+const TURN_AUTHORITY_RECONNECT_MIN_MS = 250;
+const TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000;
+let turnStatusWatcherKey: string | undefined;
 let turnAuthorityCache: {
     key: string;
     readiness: 'pending' | 'ready' | 'unavailable';
     projection?: import('./sessionUi.js').TurnProjection;
     error?: string;
-    observedAt: number;
+} | undefined;
+let turnAuthorityStream: {
+    key: string;
+    projectRoot: string;
+    filePath: string;
+    socket?: net.Socket;
+    buffer: string;
+    disposed: boolean;
+    reconnectTimer?: ReturnType<typeof setTimeout>;
+    reconnectDelayMs: number;
+    controllerGeneration?: number;
+    planeVersion: number;
 } | undefined;
 
-function activeAgentDocProjectRoot(): string | undefined {
+function activeAgentDocTurnTarget(): { projectRoot: string; filePath: string } | undefined {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !editor.document.fileName.endsWith('.md')) return undefined;
     const workspaceRoot = getWorkspaceRoot(editor.document.uri);
     if (!workspaceRoot) return undefined;
-    return resolveProject(workspaceRoot, editor.document.uri.fsPath).cwd;
+    return {
+        projectRoot: resolveProject(workspaceRoot, editor.document.uri.fsPath).cwd,
+        filePath: editor.document.fileName,
+    };
 }
 
 function disposeTurnStatusWatcher(): void {
-    turnStatusWatcherRoot = undefined;
-    if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
-    turnStatusRefreshTimer = undefined;
-    turnAuthorityRequestController?.abort();
-    turnAuthorityRequestController = undefined;
+    turnStatusWatcherKey = undefined;
+    if (turnAuthorityStream) {
+        turnAuthorityStream.disposed = true;
+        if (turnAuthorityStream.reconnectTimer) {
+            clearTimeout(turnAuthorityStream.reconnectTimer);
+        }
+        turnAuthorityStream.socket?.destroy();
+    }
+    turnAuthorityStream = undefined;
     turnAuthorityCache = undefined;
 }
 
 function configureTurnStatusWatcher(): void {
-    const root = activeAgentDocProjectRoot();
-    if (root === turnStatusWatcherRoot) return;
+    const target = activeAgentDocTurnTarget();
+    const key = target ? `${target.projectRoot}\0${target.filePath}` : undefined;
+    if (key === turnStatusWatcherKey) return;
     disposeTurnStatusWatcher();
-    if (!root) return;
-    turnStatusWatcherRoot = root;
-}
-
-function turnStatusRefreshDelayMs(): number {
-    const now = Date.now();
-    const minIntervalUntil = turnStatusLastRefreshMs + TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS;
-    return Math.max(0, minIntervalUntil - now);
-}
-
-function scheduleTurnStatusCacheObservation(delayMs: number): void {
-    if (turnStatusRefreshTimer) return;
-    turnStatusRefreshTimer = setTimeout(() => {
-        turnStatusRefreshTimer = undefined;
-        refreshTurnStatusNow('native-authority');
-    }, delayMs);
-}
-
-function refreshTurnStatus(reason = 'event', force = false): void {
-    if (force) {
-        if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
-        turnStatusRefreshTimer = undefined;
-        refreshTurnStatusNow(reason);
-        return;
-    }
-    if (turnStatusRefreshTimer) return;
-    const delayMs = turnStatusRefreshDelayMs();
-    turnStatusRefreshTimer = setTimeout(() => {
-        turnStatusRefreshTimer = undefined;
-        refreshTurnStatusNow(reason);
-    }, delayMs);
-}
-
-function currentControllerTurnAuthority(
-    projectRoot: string,
-    filePath: string,
-): {
-    readiness: 'pending' | 'ready' | 'unavailable';
-    projection?: import('./sessionUi.js').TurnProjection;
-    error?: string;
-} {
-    const key = `${projectRoot}\0${filePath}`;
-    if (turnAuthorityCache?.key !== key) {
-        turnAuthorityRequestController?.abort();
-        turnAuthorityRequestController = undefined;
-        turnAuthorityCache = {
-            key,
-            readiness: 'pending',
-            observedAt: 0,
-        };
-    }
-    const cache = turnAuthorityCache;
-    if (
-        !turnAuthorityRequestController
-        && Date.now() - cache.observedAt >= TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS
-    ) {
-        const controller = new AbortController();
-        turnAuthorityRequestController = controller;
-        void requestProjectController(
-            projectRoot,
-            {
-                command: 'document_turn_projection',
-                file: filePath,
-                caller: EDITOR_ID,
-            },
-            controller.signal,
-            TURN_STATUS_PROJECTION_TIMEOUT_MS,
-        ).then((projection: import('./sessionUi.js').TurnProjection) => {
-            if (turnAuthorityCache?.key !== key || controller.signal.aborted) return;
-            turnAuthorityCache = {
-                key,
-                readiness: 'ready',
-                projection,
-                observedAt: Date.now(),
-            };
-        }).catch((error: unknown) => {
-            if (turnAuthorityCache?.key !== key || controller.signal.aborted) return;
-            turnAuthorityCache = {
-                key,
-                readiness: 'unavailable',
-                error: String(error),
-                observedAt: Date.now(),
-            };
-        }).finally(() => {
-            if (turnAuthorityRequestController !== controller) return;
-            turnAuthorityRequestController = undefined;
-            refreshTurnStatus('controller-authority', true);
-        });
-    }
-    return {
-        readiness: cache.readiness,
-        projection: cache.projection,
-        error: cache.error,
+    if (!target || !key) return;
+    turnStatusWatcherKey = key;
+    turnAuthorityCache = { key, readiness: 'pending' };
+    turnAuthorityStream = {
+        key,
+        projectRoot: target.projectRoot,
+        filePath: target.filePath,
+        buffer: '',
+        disposed: false,
+        reconnectDelayMs: TURN_AUTHORITY_RECONNECT_MIN_MS,
+        planeVersion: 0,
     };
+    connectTurnAuthorityStream(turnAuthorityStream);
+}
+
+function connectTurnAuthorityStream(stream: NonNullable<typeof turnAuthorityStream>): void {
+    if (stream.disposed || turnAuthorityStream !== stream) return;
+    const socket = net.createConnection(controllerSocketPath(stream.projectRoot));
+    stream.socket = socket;
+    stream.buffer = '';
+    socket.setEncoding('utf8');
+    socket.on('connect', () => {
+        stream.reconnectDelayMs = TURN_AUTHORITY_RECONNECT_MIN_MS;
+        socket.write(`${JSON.stringify({
+            command: 'document_turn_authority_stream',
+            file: stream.filePath,
+            caller: EDITOR_ID,
+            diagnostic_payload: JSON.stringify({
+                channel: `agent-doc/document-turn-authority/v1/${native.documentHash(stream.filePath)}`,
+                after_controller_generation: stream.controllerGeneration,
+                after_version: stream.planeVersion,
+                timeout_ms: TURN_AUTHORITY_STREAM_TIMEOUT_MS,
+            }),
+        })}\n`);
+    });
+    socket.on('data', (chunk: string) => {
+        stream.buffer += chunk;
+        for (;;) {
+            const newline = stream.buffer.indexOf('\n');
+            if (newline < 0) break;
+            const line = stream.buffer.slice(0, newline).trim();
+            stream.buffer = stream.buffer.slice(newline + 1);
+            if (!line) continue;
+            try {
+                const envelope = JSON.parse(line);
+                if (envelope?.ok !== true) {
+                    throw new Error(envelope?.error || 'document-turn authority stream failed');
+                }
+                const frame = envelope.data as {
+                    controller_generation: number;
+                    plane_version: number;
+                    timed_out: boolean;
+                    projection?: import('./sessionUi.js').TurnProjection | null;
+                };
+                stream.controllerGeneration = frame.controller_generation;
+                stream.planeVersion = frame.plane_version;
+                if (!frame.projection) continue;
+                turnAuthorityCache = {
+                    key: stream.key,
+                    readiness: 'ready',
+                    projection: frame.projection,
+                };
+                refreshTurnStatusNow('controller-authority-stream');
+            } catch (error: unknown) {
+                markTurnAuthorityUnavailable(stream, String(error));
+                socket.destroy();
+                return;
+            }
+        }
+    });
+    socket.on('error', (error) => {
+        markTurnAuthorityUnavailable(stream, String(error));
+    });
+    socket.on('close', () => {
+        if (stream.disposed || turnAuthorityStream !== stream) return;
+        markTurnAuthorityUnavailable(stream, 'Project Controller authority stream disconnected');
+        const delay = stream.reconnectDelayMs;
+        stream.reconnectDelayMs = Math.min(
+            stream.reconnectDelayMs * 2,
+            TURN_AUTHORITY_RECONNECT_MAX_MS,
+        );
+        stream.reconnectTimer = setTimeout(() => {
+            stream.reconnectTimer = undefined;
+            connectTurnAuthorityStream(stream);
+        }, delay);
+    });
+}
+
+function markTurnAuthorityUnavailable(
+    stream: NonNullable<typeof turnAuthorityStream>,
+    error: string,
+): void {
+    if (stream.disposed || turnAuthorityStream !== stream) return;
+    turnAuthorityCache = {
+        key: stream.key,
+        readiness: 'unavailable',
+        error,
+    };
+    refreshTurnStatusNow('controller-authority-disconnected');
 }
 
 function refreshTurnStatusNow(reason: string): void {
@@ -552,21 +574,20 @@ function refreshTurnStatusNow(reason: string): void {
         turnStatusBarItem.hide();
         return;
     }
-    const workspaceRoot = getWorkspaceRoot(editor.document.uri);
-    const projectRoot = workspaceRoot
-        ? resolveProject(workspaceRoot, editor.document.uri.fsPath).cwd
-        : undefined;
-    turnStatusLastRefreshMs = Date.now();
-    if (!projectRoot) {
+    const target = activeAgentDocTurnTarget();
+    if (!target) {
         turnStatusBarItem.text = 'agent-doc: Project Controller disconnected';
         turnStatusBarItem.tooltip = 'Agent Doc Project Controller is not connected for this document.';
         turnStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
         turnStatusBarItem.show();
         return;
     }
-    const authority = currentControllerTurnAuthority(projectRoot, editor.document.fileName);
+    const key = `${target.projectRoot}\0${target.filePath}`;
+    const authority = turnAuthorityCache?.key === key
+        ? turnAuthorityCache
+        : { key, readiness: 'pending' as const };
     if (authority.readiness === 'pending') {
-        scheduleTurnStatusCacheObservation(TURN_STATUS_AUTHORITY_SETTLE_MS);
+        turnStatusBarItem.hide();
         return;
     }
     if (authority.readiness === 'unavailable') {
@@ -576,7 +597,6 @@ function refreshTurnStatusNow(reason: string): void {
             + (authority.error ?? 'Start or reconnect the Project Controller.');
         turnStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
         turnStatusBarItem.show();
-        scheduleTurnStatusCacheObservation(TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS);
         return;
     }
     const presentation = buildTurnStatePresentation(authority.projection ?? null);
@@ -595,12 +615,11 @@ function refreshTurnStatusNow(reason: string): void {
         turnStatusBarItem.backgroundColor = undefined;
         turnStatusBarItem.hide();
     }
-    scheduleTurnStatusCacheObservation(TURN_STATUS_CACHE_OBSERVE_INTERVAL_MS);
 }
 
 function refreshActiveTurnStatus(): void {
     configureTurnStatusWatcher();
-    refreshTurnStatus('active-editor', true);
+    refreshTurnStatusNow('active-editor');
 }
 
 // ---------------------------------------------------------------------------
@@ -2052,7 +2071,7 @@ function forgetObservedSurfaces(): void {
                 caller: EDITOR_SURFACE_CLIENT_ID,
             },
             controller.signal,
-            TURN_STATUS_PROJECTION_TIMEOUT_MS,
+            EDITOR_SURFACE_FORGET_TIMEOUT_MS,
         ).catch(() => {
             // The controller may already be gone; generation fencing makes
             // an unacknowledged retirement harmless.

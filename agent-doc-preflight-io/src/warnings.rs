@@ -122,30 +122,6 @@ pub fn semantic_completion_warnings(file: &Path) -> Vec<PreflightWarning> {
     }
 }
 
-/// Build the warning companion for semantic-merge acks carried from the prior
-/// cycle into this preflight output.
-pub fn document_cell_merge_ack_warning(
-    document_cell_merge_acks: &[agent_doc_cycle_state_io::PendingSemanticMergeAck],
-) -> Option<PreflightWarning> {
-    if document_cell_merge_acks.is_empty() {
-        return None;
-    }
-    let summary = document_cell_merge_acks
-        .iter()
-        .map(|ack| format!("{}:{} ({})", ack.component, ack.id, ack.reason))
-        .collect::<Vec<_>>()
-        .join(", ");
-    Some(PreflightWarning {
-        code: "document_cell_merge_ack_pending".to_string(),
-        message: format!(
-            "{} node-keyed semantic-merge ack(s) from the prior cycle: {summary}. The operator's concurrent edit won these node(s); acknowledge the non-applied agent change(s) in an exchange turn this cycle.",
-            document_cell_merge_acks.len()
-        ),
-        document_agent: None,
-        active_harness: None,
-    })
-}
-
 /// Warn when the installed/built `agent-doc` artifacts predate the latest local
 /// source edit, so live sessions (tmux, JetBrains) do not silently run stale code
 /// at an unchanged version string (`#install-stale-guard`). Best-effort: only

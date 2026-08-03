@@ -642,8 +642,8 @@ All editor-facing behavior in this section — `ReplicaPull` application, the
 replace-capable re-bootstrap delivery, and `TurnProjection` consumption — is part
 of the Shared Foundation contract and **must have parity across the JetBrains and
 VS Code plugins**. The reconcile, decision, marker, and projection logic lives in
-the shared Rust/FFI layer; each plugin is a thin consumer of the same FFI
-surface. A change to the editor delivery or turn-state projection is not complete
+the shared Rust/controller layer; each plugin is a thin consumer of the same
+retained controller stream. A change to the editor delivery or turn-state projection is not complete
 until both the IntelliJ and VS Code frontends consume it identically. Divergence
 between the two frontends on any of these paths is a forbidden shape.
 
@@ -652,9 +652,10 @@ per-editor** because the two IDE platforms do not paint the same widgets
 reliably. Both frontends map `TurnProjection` through the identical
 `buildTurnStatePresentation` / `TurnStateBridge.presentation` logic (show
 `⟳ agent-doc: persisting` / `⟳ agent-doc: awaiting response` while the CP turn is
-in flight, append realtime steering such as `prompt deleted` when present, hide
-when idle) and poll the `agent_doc_turn_projection` FFI on the same cadence. They
-differ only in the native surface that renders it:
+in flight, append realtime steering or cycle-local merge-conflict advisories when
+present, hide when idle and advisory-free) from
+`document_turn_authority_stream`. Neither frontend polls or acknowledges turn
+state. They differ only in the native surface that renders it:
 
 - **VS Code** renders it in a **status-bar item** (`turnStatusBarItem`), which
   paints reliably, with a tooltip and attention background while in flight.

@@ -35,7 +35,7 @@ pub mod lossless_tree {
     };
 }
 
-use document_cell_merge::AckRequest;
+use document_cell_merge::MergeConflictAdvisory;
 
 /// Merge implementation to use for a pure three-way merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,8 +85,8 @@ impl<'a> MergeRequest<'a> {
 pub struct MergePlan {
     /// The document text produced by the selected merge engine.
     pub merged_doc: String,
-    /// Ack requests to carry into the next turn lifecycle.
-    pub acknowledgements: Vec<AckRequest>,
+    /// Cycle-local semantic merge conflict advisories.
+    pub conflict_advisories: Vec<MergeConflictAdvisory>,
     /// Cell-level conflicts recorded by the per-cell engine.
     pub conflicts: Vec<CellConflict>,
     pub engine: MergeEngine,
@@ -106,7 +106,7 @@ pub fn merge(request: MergeRequest<'_>) -> MergePlan {
             );
             MergePlan {
                 merged_doc: outcome.merged_doc,
-                acknowledgements: outcome.requires_ack,
+                conflict_advisories: outcome.conflict_advisories,
                 conflicts: Vec::new(),
                 engine: MergeEngine::Semantic,
                 fell_back: false,
@@ -116,7 +116,7 @@ pub fn merge(request: MergeRequest<'_>) -> MergePlan {
             let outcome = cell_merge_3way(request.base, request.agent, request.operator);
             MergePlan {
                 merged_doc: outcome.merged_text,
-                acknowledgements: Vec::new(),
+                conflict_advisories: Vec::new(),
                 conflicts: outcome.conflicts,
                 engine: MergeEngine::Cell,
                 fell_back: outcome.fell_back,
@@ -285,7 +285,7 @@ pub fn merge_contents_crdt_classified(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document_cell_merge::AckReason;
+    use crate::document_cell_merge::MergeConflictReason;
 
     #[test]
     fn classified_sound_merge_is_clean() {
@@ -337,10 +337,10 @@ mod tests {
         assert_eq!(plan.engine, MergeEngine::Semantic);
         assert!(plan.merged_doc.contains("operator typed text"));
         assert!(!plan.merged_doc.contains("agent text"));
-        assert_eq!(plan.acknowledgements.len(), 1);
+        assert_eq!(plan.conflict_advisories.len(), 1);
         assert_eq!(
-            plan.acknowledgements[0].reason,
-            AckReason::SameNodeOperatorOverride
+            plan.conflict_advisories[0].reason,
+            MergeConflictReason::SameNodeOperatorOverride
         );
     }
 

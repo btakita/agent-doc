@@ -698,13 +698,34 @@ fn auto_trigger_inject_command(
         "dispatch",
         "auto_trigger_inject",
     );
-    // `#restartfreshtriggerstranded`: snapshot the cycle state BEFORE the send so the
-    // post-submit check can tell "this inject started a turn" from "some earlier turn
-    // was already open".
-    let cycle_baseline = shared
-        .actor_runtime
-        .as_ref()
-        .and_then(|runtime| agent_doc_cycle_state_io::load(&runtime.file).ok().flatten());
+    // `#restartfreshtriggerstranded`: fence the controller's current turn
+    // projection BEFORE the send so the post-submit subscription can tell
+    // "this effect started a turn" from "some earlier turn was already open".
+    // Failure is fail-closed: submitting without a cursor could mistake an old
+    // cycle for this effect's admission.
+    let admission_baseline = match shared.actor_runtime.as_ref() {
+        Some(runtime) => {
+            match agent_doc_controller_io::project_controller::current_turn_admission_projection_for_file(
+                &runtime.file,
+            ) {
+                Ok(projection) => projection.map(|projection| projection.cycle_id),
+                Err(error) => {
+                    agent_doc_ops_log_io::log_op(
+                        &runtime.file,
+                        &format!(
+                            "auto_trigger_admission_projection_unavailable file={} reason={error:#}",
+                            runtime.file.display(),
+                        ),
+                    );
+                    if let Some(key) = projection_key.as_deref() {
+                        shared.clear_prompt_dispatch_projection_on_failure(key);
+                    }
+                    return AutoTriggerOutcome::SendFailed;
+                }
+            }
+        }
+        None => None,
+    };
     let submitted_text =
         agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(trigger_cmd)
             .to_string();
@@ -727,7 +748,7 @@ fn auto_trigger_inject_command(
                 pane_id,
                 &submitted_text,
                 harness_cfg,
-                cycle_baseline,
+                admission_baseline,
             ),
             Err(_) => AutoTriggerOutcome::SendFailed,
         };
@@ -892,10 +913,10 @@ fn dispatch_submit_text_to_pane(pane: &str, text: &str, harness: &str) -> Result
     dispatch_submit_text_to_tmux(&tmux, pane, text, harness)
 }
 
-/// How long a supervisor auto-trigger inject waits for the harness to acknowledge the
-/// prompt with a document cycle before it inspects the composer
+/// How long a supervisor auto-trigger waits for the controller to project the
+/// admitted document cycle before it inspects the composer
 /// (`#restartfreshtriggerstranded`).
-fn auto_trigger_submit_ack_timeout() -> Duration {
+fn auto_trigger_admission_timeout() -> Duration {
     if cfg!(test) {
         Duration::from_millis(200)
     } else {
@@ -903,38 +924,21 @@ fn auto_trigger_submit_ack_timeout() -> Duration {
     }
 }
 
-/// Whether the document has opened a NEW cycle since `baseline` — i.e. the harness
-/// actually consumed the injected trigger.
-fn auto_trigger_cycle_acknowledged(
+/// Whether the controller projected a NEW document cycle since `baseline` —
+/// i.e. the harness consumed the submitted effect.
+fn auto_trigger_admission_projected(
     file: &Path,
-    baseline: Option<&agent_doc_cycle_state_io::CycleState>,
+    baseline_cycle_id: Option<&str>,
     timeout: Duration,
 ) -> bool {
-    let start = Instant::now();
-    loop {
-        if let Ok(Some(state)) = agent_doc_cycle_state_io::load_with_closeout_projection(file)
-            && agent_doc_turn::cycle_ack::cycle_state_advances_start_ack(
-                agent_doc_turn::cycle_ack::CycleAckState {
-                    cycle_id: &state.cycle_id,
-                    phase: state.phase,
-                    updated_at: state.updated_at,
-                    last_event: &state.last_event,
-                },
-                baseline.map(|base| agent_doc_turn::cycle_ack::CycleAckState {
-                    cycle_id: &base.cycle_id,
-                    phase: base.phase,
-                    updated_at: base.updated_at,
-                    last_event: &base.last_event,
-                }),
-            )
-        {
-            return true;
-        }
-        if start.elapsed() >= timeout {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    agent_doc_controller_io::project_controller::await_turn_admission_projection_for_file(
+        file,
+        baseline_cycle_id,
+        timeout,
+    )
+    .ok()
+    .flatten()
+    .is_some()
 }
 
 /// (`#restartfreshtriggerstranded`) Prove that a supervisor auto-trigger inject was
@@ -948,23 +952,24 @@ fn auto_trigger_cycle_acknowledged(
 /// (`#jbtsiftnosub2`), but a restart-fresh spawn is a different entry point that never
 /// reaches it, so the guarantee has to exist here too.
 ///
-/// A dispatch-ready composer that STILL shows the trigger after the ack window is the
-/// stranded shape: resend one bare submit key and re-check. A busy pane is a running
-/// turn (the trigger landed, the turn is just slow) and is left alone.
+/// A dispatch-ready composer that STILL shows the trigger after the admission
+/// window is the stranded shape: resend one bare submit key and re-check. A busy
+/// pane is a running turn (the trigger landed, the turn is just slow) and is
+/// left alone.
 fn verify_auto_trigger_submitted(
     shared: &SupervisorShared,
     pane_id: &str,
     submitted_text: &str,
     harness_cfg: &agent_doc_harness::HarnessConfig,
-    cycle_baseline: Option<agent_doc_cycle_state_io::CycleState>,
+    admission_baseline: Option<String>,
 ) -> AutoTriggerOutcome {
     let Some(runtime) = shared.actor_runtime.as_ref() else {
         // No document binding to verify against; the caller's send already succeeded.
         return AutoTriggerOutcome::Sent;
     };
     let file = runtime.file.clone();
-    let timeout = auto_trigger_submit_ack_timeout();
-    if auto_trigger_cycle_acknowledged(&file, cycle_baseline.as_ref(), timeout) {
+    let timeout = auto_trigger_admission_timeout();
+    if auto_trigger_admission_projected(&file, admission_baseline.as_deref(), timeout) {
         return AutoTriggerOutcome::Sent;
     }
 
@@ -1051,7 +1056,7 @@ fn verify_auto_trigger_submitted(
                     return AutoTriggerOutcome::SendFailed;
                 }
                 already_resubmitted = true;
-                if auto_trigger_cycle_acknowledged(&file, cycle_baseline.as_ref(), timeout) {
+                if auto_trigger_admission_projected(&file, admission_baseline.as_deref(), timeout) {
                     return AutoTriggerOutcome::Sent;
                 }
             }
@@ -1795,10 +1800,6 @@ pub(crate) struct SupervisorShared {
     /// actor generation. The controller's durable dispatch receipt remains
     /// authoritative; this only prevents a local duplicate write before Ready.
     prompt_dispatch_projection: Mutex<Option<PromptDispatchProjection>>,
-    /// Bounded exact-once admission cache for realtime steering. A selection
-    /// retry carries the same steering id, while a later intentional selection
-    /// receives a fresh id even when its text is identical.
-    turn_steering_admissions: Mutex<std::collections::VecDeque<String>>,
     /// Claimed tmux pane that should receive supervisor-owned injected input.
     inject_pane: Option<String>,
     /// Filtered output and visible terminal projection for the current child process.
@@ -1886,7 +1887,6 @@ impl SupervisorShared {
             harness_binary: Mutex::new(harness_binary.to_string()),
             inject_writer: Mutex::new(None),
             prompt_dispatch_projection: Mutex::new(None),
-            turn_steering_admissions: Mutex::new(std::collections::VecDeque::new()),
             inject_pane,
             output: SupervisorOutputState::default(),
             child_pid: AtomicU32::new(0),
@@ -2407,7 +2407,7 @@ mod th {
             dropped_queue_prompts: Vec::new(),
             active_queue_heads: Vec::new(),
             active_free_text_queue_heads: Vec::new(),
-            pending_semantic_merge_acks: Vec::new(),
+            semantic_merge_conflict_advisories: Vec::new(),
             skipped_queue_head_ids: Vec::new(),
             blocked_closeout: None,
         }

@@ -52,9 +52,15 @@ export interface TurnProjection {
     state: 'idle' | 'awaiting_response' | 'persisting';
     turn_in_flight: boolean;
     transition_authority: string;
-realtime_steering?: {
-observed_content_hash?: string;
-state?: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
+    semantic_merge_conflicts?: Array<{
+        component: string;
+        id: string;
+        reason: string;
+        detail: string;
+    }>;
+    realtime_steering?: {
+        observed_content_hash?: string;
+        state?: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
         count?: number;
         preview?: string;
         verbatim?: string;
@@ -90,8 +96,22 @@ type TurnSteeringState = NonNullable<TurnProjection['realtime_steering']>['state
 export function buildTurnStatePresentation(
     projection: TurnProjection | null,
 ): TurnStatePresentation {
-    if (!projection || projection.state === 'idle' || !projection.turn_in_flight) {
+    if (!projection) {
         return { label: '', guardPromptForwarding: false };
+    }
+    const conflicts = projection.semantic_merge_conflicts ?? [];
+    const conflictLabel = conflicts.length > 0
+        ? `⚠ merge conflict${conflicts.length === 1 ? '' : `s (${conflicts.length})`}`
+        : null;
+    const conflictTooltip = conflicts
+        .map(conflict => `${conflict.component}:${conflict.id} — ${conflict.detail}`)
+        .join('\n') || undefined;
+    if (projection.state === 'idle' || !projection.turn_in_flight) {
+        return {
+            label: conflictLabel ? `agent-doc: ${conflictLabel}` : '',
+            guardPromptForwarding: false,
+            ...(conflictTooltip ? { tooltip: conflictTooltip } : {}),
+        };
     }
     const phaseLabel =
         projection.state === 'awaiting_response'
@@ -102,8 +122,11 @@ export function buildTurnStatePresentation(
     const steering = steeringBase && steeringCount > 1
         ? `${steeringBase} (${steeringCount} edits)`
         : steeringBase;
-    const label = steering ? `${phaseLabel} · ${steering}` : phaseLabel;
-    const tooltip = projection.realtime_steering?.verbatim?.trim() || undefined;
+    const label = [phaseLabel, steering, conflictLabel].filter(Boolean).join(' · ');
+    const tooltip = [
+        projection.realtime_steering?.verbatim?.trim(),
+        conflictTooltip,
+    ].filter(Boolean).join('\n\n') || undefined;
     return { label, guardPromptForwarding: true, ...(tooltip ? { tooltip } : {}) };
 }
 

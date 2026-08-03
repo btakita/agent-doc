@@ -77,12 +77,22 @@ class CpRouteClientCommandPlaneTest {
     }
 
     @Test
-    fun `turn status reads the controller in-memory projection`() {
-        val request = CpRouteClient.documentTurnProjectionRequest("/proj/plan.md")
+    fun `turn status subscribes to the controller reactive projection`() {
+        val request =
+            CpRouteClient.documentTurnAuthorityStreamRequest(
+                "/proj/plan.md",
+                afterControllerGeneration = 7,
+                afterVersion = 41,
+            )
 
-        assertEquals("document_turn_projection", request.get("command").asString)
+        assertEquals("document_turn_authority_stream", request.get("command").asString)
         assertEquals("/proj/plan.md", request.get("file").asString)
         assertEquals(EditorIdentity.id, request.get("caller").asString)
+        val subscription =
+            JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        assertEquals(7L, subscription.get("after_controller_generation").asLong)
+        assertEquals(41L, subscription.get("after_version").asLong)
+        assertEquals(120_000L, subscription.get("timeout_ms").asLong)
     }
 
     @Test
@@ -115,29 +125,6 @@ class CpRouteClientCommandPlaneTest {
         assertEquals(true, payload.get("dispatch_only").asBoolean)
         assertEquals("root:plan.md:run", payload.get("route_key").asString)
         assertEquals("attempt-7", payload.get("attempt_id").asString)
-    }
-
-    @Test
-    fun `editor route payload preserves selected text and uses steering id for dedupe`() {
-        val selected = "Keep this line\n  and these spaces  "
-        val request = CpRouteClient.editorCommandSubmitRequest(
-            filePath = "/proj/plan.md",
-            relativePath = "plan.md",
-            layoutArgs = emptyList(),
-            waitForReadySeconds = 30,
-            attemptId = "attempt-steer",
-            routeKey = "root:plan.md:run",
-            commandId = "cmd-steer",
-            selectedText = selected,
-            steeringId = "steering-exact-1",
-        )
-
-        val message = JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
-        val submit = message.getAsJsonObject("CommandSubmit")
-        val payload = inlinePayload(submit)
-        assertEquals("steering-exact-1", submit.get("idempotency_key").asString)
-        assertEquals(selected, payload.get("selected_text").asString)
-        assertEquals("steering-exact-1", payload.get("steering_id").asString)
     }
 
     @Test
@@ -468,29 +455,6 @@ assertEquals(750L, submit.get("deadline_ms").asLong)
 
         assertEquals(0, result?.exitCode)
         assertEquals("routed ok", result?.output)
-    }
-
-    @Test
-    fun `resolveCommandSubmitTerminalData preserves typed turn steering acknowledgement`() {
-        val data = projectionData("applied", true, "steered").apply {
-            add("payload", com.google.gson.JsonObject().apply {
-                addProperty("exit_code", 0)
-                addProperty("output", "steered")
-                add("steering", com.google.gson.JsonObject().apply {
-                    addProperty("kind", "turn_steering_ack")
-                    addProperty("steering_id", "steering-exact-1")
-                    addProperty("outcome", "delivered")
-                    addProperty("accepted_bytes", 34)
-                })
-            })
-        }
-
-        val result = CpRouteClient.resolveCommandSubmitTerminalData(data, "cmd-1")
-
-        assertEquals("turn_steering_ack", result?.steering?.kind)
-        assertEquals("steering-exact-1", result?.steering?.steeringId)
-        assertEquals("delivered", result?.steering?.outcome)
-        assertEquals(34, result?.steering?.acceptedBytes)
     }
 
     @Test

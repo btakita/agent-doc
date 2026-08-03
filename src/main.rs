@@ -2155,7 +2155,7 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
         /// Resolve the owning pane and send the bare reopen without route-owned
-        /// busy-session recovery, startup-miss gating, or cycle-ack waiting.
+        /// busy-session recovery, startup-miss gating, or turn-admission projection waiting.
         #[arg(long)]
         dispatch_only: bool,
         /// Send the plain `agent-doc <FILE>` reopen even for harnesses whose

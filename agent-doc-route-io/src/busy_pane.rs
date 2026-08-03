@@ -6,7 +6,7 @@ use crate::supervisor_runtime::{query_supervisor_health, restart_via_supervisor}
 use agent_doc_controller::dispatch::busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome;
 use agent_doc_controller::dispatch::{
     BusyPaneAutoFixFacts, BusyPaneAutoFixOutcome, existing_pane_ready_timeout,
-    fresh_route_start_ack_timeout, is_codex_shell_search_blocker,
+    fresh_route_admission_timeout, is_codex_shell_search_blocker,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
@@ -307,7 +307,7 @@ pub fn attempt_busy_existing_pane_interrupt_recovery(
     let ready = wait_for_agent_ready_outcome(
         tmux,
         pane,
-        fresh_route_start_ack_timeout(cfg!(test)),
+        fresh_route_admission_timeout(cfg!(test)),
         harness,
     );
     let recovered = ready.is_ready();
@@ -364,7 +364,7 @@ pub fn attempt_opencode_busy_interrupt_recovery(
     let mut ready = wait_for_agent_ready_outcome(
         tmux,
         pane,
-        fresh_route_start_ack_timeout(cfg!(test)),
+        fresh_route_admission_timeout(cfg!(test)),
         harness,
     );
     if !ready.is_ready() {
@@ -373,7 +373,7 @@ pub fn attempt_opencode_busy_interrupt_recovery(
         ready = wait_for_agent_ready_outcome(
             tmux,
             pane,
-            fresh_route_start_ack_timeout(cfg!(test)),
+            fresh_route_admission_timeout(cfg!(test)),
             harness,
         );
     }

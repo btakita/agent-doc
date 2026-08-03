@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use agent_doc_run_context_io::AgentDocContextExt;
-use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
+use agent_doc_turn::prompt_bearing_route::PromptBearingRouteContext;
 
 pub type RouteWriteDocumentFn =
     fn(file: &Path, next_content: &str, previous_content: &str, reason: &str) -> Result<()>;

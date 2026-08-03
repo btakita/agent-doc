@@ -1708,41 +1708,6 @@ mod tests {
         );
     }
     #[test]
-    fn preflight_output_semantic_merge_acks_roundtrip() {
-        // #semmerge-ack-turn (Phase 4): carried acks serialize for skill
-        // consumption and are omitted when empty.
-        let empty = PreflightOutput::default();
-        let empty_json: serde_json::Value =
-            serde_json::from_str(&serde_json::to_string(&empty).unwrap()).unwrap();
-        assert!(
-            empty_json.get("document_cell_merge_acks").is_none(),
-            "document_cell_merge_acks omitted when empty"
-        );
-
-        let output = PreflightOutput {
-            document_cell_merge_acks: vec![agent_doc_cycle_state_io::PendingSemanticMergeAck {
-                component: "exchange".to_string(),
-                id: "p3kj".to_string(),
-                reason: "operator_deleted_agent_edited_node".to_string(),
-                detail: "operator deleted the node the agent edited".to_string(),
-                recorded_cycle_id: Some("cycle-1".to_string()),
-                surfaced: true,
-            }],
-            ..Default::default()
-        };
-        let parsed: serde_json::Value =
-            serde_json::from_str(&serde_json::to_string(&output).unwrap()).unwrap();
-        assert_eq!(
-            parsed["document_cell_merge_acks"][0]["component"],
-            "exchange"
-        );
-        assert_eq!(parsed["document_cell_merge_acks"][0]["id"], "p3kj");
-        assert_eq!(
-            parsed["document_cell_merge_acks"][0]["reason"],
-            "operator_deleted_agent_edited_node"
-        );
-    }
-    #[test]
     fn preflight_output_includes_inline_annotations() {
         let output = PreflightOutput {
             inline_annotations: vec![

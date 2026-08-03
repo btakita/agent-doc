@@ -3,7 +3,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-use agent_doc_controller::dispatch::fresh_route_start_ack_timeout;
+use agent_doc_controller::dispatch::fresh_route_admission_timeout;
 use agent_doc_harness::HarnessConfig;
 use tmux_router::Tmux;
 
@@ -71,7 +71,7 @@ fn reapply_harness_launch_contract_after_clear(
     if !wait_for_agent_ready(
         tmux,
         &dispatch_pane,
-        fresh_route_start_ack_timeout(cfg!(test)),
+        fresh_route_admission_timeout(cfg!(test)),
         harness,
     ) {
         anyhow::bail!(
@@ -159,7 +159,7 @@ fn reapply_capability_contract_before_reuse(
     if !wait_for_agent_ready(
         tmux,
         &dispatch_pane,
-        fresh_route_start_ack_timeout(cfg!(test)),
+        fresh_route_admission_timeout(cfg!(test)),
         harness,
     ) {
         anyhow::bail!(

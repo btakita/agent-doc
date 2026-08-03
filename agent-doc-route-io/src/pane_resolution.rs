@@ -3,6 +3,10 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+use crate::admission_projection::{
+    RouteAdmissionEffects, pending_prompt_bearing_context_for_route,
+    require_routed_admission_projection,
+};
 use crate::authoritative_actor::{
     RouteDispatchAuthorization, authorize_controller_dispatch,
     dispatch_only_can_use_degraded_authoritative_actor, load_authoritative_actor_binding,
@@ -16,9 +20,6 @@ use crate::busy_pane::{
     BusyPaneInterruptRecoveryOutcome, ExistingPaneDispatchReadiness,
     attempt_busy_existing_pane_auto_fix, attempt_busy_existing_pane_interrupt_recovery,
     ensure_existing_pane_ready_for_dispatch,
-};
-use crate::cycle_ack::{
-    RouteCycleAckEffects, pending_prompt_bearing_context_for_route, require_routed_cycle_ack,
 };
 use crate::dispatch::{RouteDispatchEffects, dispatch_existing_managed_reopen};
 use crate::dispatch_only::{
@@ -764,7 +765,7 @@ pub fn resolve_or_create_pane_dispatch_only(
 #[derive(Clone, Copy)]
 pub struct ManagedPaneResolutionEffects {
     pub route_dispatch_effects: RouteDispatchEffects,
-    pub route_cycle_ack_effects: RouteCycleAckEffects,
+    pub route_admission_effects: RouteAdmissionEffects,
     pub route_busy_pane_retry_effects: RouteBusyPaneRetryEffects,
     pub route_startup_effects: RouteStartupEffects,
     pub route_authoritative_actor_effects: RouteAuthoritativeActorEffects,
@@ -1085,7 +1086,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                                     registered_pane, e
                                 );
                             }
-                            require_routed_cycle_ack(
+                            require_routed_admission_projection(
                                 tmux,
                                 file,
                                 registered_pane,
@@ -1098,10 +1099,11 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                                     .map(|context| context.marker.as_str()),
                                 false,
                                 RoutedDispatchStartProof::CommandAcceptedOnly,
-                                // `#jbroutasync`: cap ACK waits at the command
-                                // deadline carried by the route invocation.
+                                // `#jbroutasync`: cap admission-projection waits
+                                // at the command deadline carried by the route
+                                // invocation.
                                 crate::invocation::wait_for_ready_override(),
-                                effects.route_cycle_ack_effects,
+                                effects.route_admission_effects,
                             )?;
                             return Ok(registered_pane.clone());
                         }
@@ -1259,7 +1261,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                     harness,
                     effects.route_dispatch_effects,
                 )?;
-                require_routed_cycle_ack(
+                require_routed_admission_projection(
                     tmux,
                     file,
                     &registered_pane,
@@ -1272,10 +1274,10 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                         .map(|context| context.marker.as_str()),
                     true,
                     dispatch_start,
-                    // `#jbroutasync`: cap ACK waits at the command deadline
-                    // carried by the route invocation.
+                    // `#jbroutasync`: cap admission-projection waits at the
+                    // command deadline carried by the route invocation.
                     crate::invocation::wait_for_ready_override(),
-                    effects.route_cycle_ack_effects,
+                    effects.route_admission_effects,
                 )?;
                 return Ok(registered_pane);
             }
@@ -1399,7 +1401,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
             harness,
             effects.route_dispatch_effects,
         )?;
-        let ack_pane = require_routed_cycle_ack(
+        let admission_pane = require_routed_admission_projection(
             tmux,
             file,
             &new_pane,
@@ -1412,12 +1414,12 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                 .map(|context| context.marker.as_str()),
             false,
             dispatch_start,
-            // `#jbroutasync`: cap ACK waits at the command deadline carried by
-            // the route invocation.
+            // `#jbroutasync`: cap admission-projection waits at the command
+            // deadline carried by the route invocation.
             crate::invocation::wait_for_ready_override(),
-            effects.route_cycle_ack_effects,
+            effects.route_admission_effects,
         )?;
-        return Ok(ack_pane.unwrap_or(new_pane));
+        return Ok(admission_pane.unwrap_or(new_pane));
     }
 
     let late_associated_resolution = agent_doc_tmux::resolve_associated_panes(
@@ -1650,7 +1652,7 @@ pub fn optimistic_busy_pane_dispatch(
     prompt_bearing_marker: Option<&str>,
     detail: &str,
     route_dispatch_effects: RouteDispatchEffects,
-    route_cycle_ack_effects: RouteCycleAckEffects,
+    route_admission_effects: RouteAdmissionEffects,
 ) -> Result<String> {
     agent_doc_ops_log_io::log_op(
         file,
@@ -1679,7 +1681,7 @@ pub fn optimistic_busy_pane_dispatch(
         harness,
         route_dispatch_effects,
     )?;
-    let ack_pane = require_routed_cycle_ack(
+    let admission_pane = require_routed_admission_projection(
         tmux,
         file,
         pane,
@@ -1690,18 +1692,18 @@ pub fn optimistic_busy_pane_dispatch(
         prompt_bearing_marker,
         true,
         dispatch_start,
-        // `#jbroutasync`: cap ACK waits at the command deadline carried by the
-        // route invocation.
+        // `#jbroutasync`: cap admission-projection waits at the command deadline
+        // carried by the route invocation.
         crate::invocation::wait_for_ready_override(),
-        route_cycle_ack_effects,
+        route_admission_effects,
     )?;
-    Ok(ack_pane.unwrap_or_else(|| pane.to_string()))
+    Ok(admission_pane.unwrap_or_else(|| pane.to_string()))
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct RouteBusyPaneRetryEffects {
     pub route_dispatch_effects: RouteDispatchEffects,
-    pub route_cycle_ack_effects: RouteCycleAckEffects,
+    pub route_admission_effects: RouteAdmissionEffects,
     pub emit_busy_route_diagnostic: fn(&Tmux, &str, &Path, &HarnessConfig),
 }
 
@@ -1794,7 +1796,7 @@ pub fn retry_route_after_busy_pane_auto_fix(
                         prompt_bearing_marker,
                         detail.as_str(),
                         effects.route_dispatch_effects,
-                        effects.route_cycle_ack_effects,
+                        effects.route_admission_effects,
                     );
                 }
                 anyhow::bail!(
@@ -1822,7 +1824,7 @@ pub fn retry_route_after_busy_pane_auto_fix(
                         prompt_bearing_marker,
                         "bounded interrupt recovery never restored a dispatch-ready prompt",
                         effects.route_dispatch_effects,
-                        effects.route_cycle_ack_effects,
+                        effects.route_admission_effects,
                     );
                 }
                 anyhow::bail!(
@@ -1854,7 +1856,7 @@ pub fn retry_route_after_busy_pane_auto_fix(
                 .as_deref()
                 .unwrap_or("pane remained busy after scoped recovery"),
             effects.route_dispatch_effects,
-            effects.route_cycle_ack_effects,
+            effects.route_admission_effects,
         );
     }
     (effects.emit_busy_route_diagnostic)(tmux, busy_pane, file, harness);

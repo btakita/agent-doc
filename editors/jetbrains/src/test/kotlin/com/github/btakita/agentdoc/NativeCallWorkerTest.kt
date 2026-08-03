@@ -20,7 +20,6 @@ class NativeCallWorkerTest {
             "agent_doc_apply_patch_with_boundary",
             "agent_doc_editor_surface_enqueue",
             "agent_doc_state_projection",
-            "agent_doc_turn_projection",
             "agent_doc_sync_tmux_layout_json",
         ).forEach { methodName ->
             assertEquals(NativeCallLane.IsolatedCaller, nativeCallLaneUtil(methodName))

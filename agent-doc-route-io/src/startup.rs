@@ -9,7 +9,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cycle_ack::{RouteCycleAckEffects, wait_for_start_ack};
+use crate::admission_projection::{RouteAdmissionEffects, wait_for_start_projection};
 use crate::dispatch::{RouteDispatchEffects, dispatch_routed_reopen};
 use crate::dispatch_only::{
     DispatchOnlyActiveTurnPolicy, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
@@ -23,10 +23,10 @@ use crate::session_resolution::{
 };
 use crate::startup_harness::resolve_harness_for_file;
 use crate::startup_locks::{StartupLockAcquire, StartupLockMode, acquire_startup_locks};
-use crate::startup_ready::{fresh_start_no_ack_outcome, wait_for_agent_ready};
+use crate::startup_ready::{fresh_start_missing_admission_outcome, wait_for_agent_ready};
 use agent_doc_controller::dispatch::{
-    DispatchOnlyReopenDelivery, DuplicatePanePolicyErrorFacts, FreshStartAckOutcome,
-    RoutedDispatchStartProof, duplicate_pane_policy_error_message, fresh_route_start_ack_timeout,
+    DispatchOnlyReopenDelivery, DuplicatePanePolicyErrorFacts, FreshStartAdmissionOutcome,
+    RoutedDispatchStartProof, duplicate_pane_policy_error_message, fresh_route_admission_timeout,
 };
 use agent_doc_harness::{HarnessConfig, ResumeRequest};
 use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
@@ -37,7 +37,7 @@ use tmux_router::Tmux;
 pub struct RouteStartupEffects {
     pub route_dispatch_effects: RouteDispatchEffects,
     pub dispatch_only_route_effects: DispatchOnlyRouteEffects,
-    pub route_cycle_ack_effects: RouteCycleAckEffects,
+    pub route_admission_effects: RouteAdmissionEffects,
 }
 
 /// `#jbtsiftnosub`: bounded re-verify window for the auto-start cold-start gate.
@@ -946,13 +946,13 @@ pub fn auto_start_in_session_with_lock_mode(
             return Ok(Some(dispatch_pane));
         }
 
-        let ack_timeout = fresh_route_start_ack_timeout(cfg!(test));
-        match wait_for_start_ack(file, cycle_baseline.as_ref(), ack_timeout) {
+        let admission_timeout = fresh_route_admission_timeout(cfg!(test));
+        match wait_for_start_projection(file, cycle_baseline.as_ref(), admission_timeout) {
             Some(state) => {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "fresh_route_start_acknowledged file={} pane={} harness={} cycle={} phase={} timeout_secs={}",
+                        "fresh_route_start_projected file={} pane={} harness={} cycle={} phase={} timeout_secs={}",
                         file.display(),
                         dispatch_pane,
                         harness.binary,
@@ -964,7 +964,7 @@ pub fn auto_start_in_session_with_lock_mode(
                             agent_doc_turn::CyclePhase::Committed => "committed",
                             agent_doc_turn::CyclePhase::Abandoned => "abandoned",
                         },
-                        ack_timeout.as_secs()
+                        admission_timeout.as_secs()
                     ),
                 );
                 let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
@@ -974,23 +974,23 @@ pub fn auto_start_in_session_with_lock_mode(
                     // The harness consumed/submitted the trigger, but a slow
                     // model has not reached agent-doc preflight yet. That is an
                     // in-flight turn, not a startup miss. Reaping it after the
-                    // fixed ACK window produced a stale marker after a proven
+                    // fixed projection window produced a stale marker after a proven
                     // successful dispatch and encouraged duplicate reroutes.
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "fresh_route_start_inflight_kept file={} pane={} harness={} proof={} timeout_secs={} note=dispatch_start_proven_cycle_ack_pending",
+                            "fresh_route_start_inflight_kept file={} pane={} harness={} proof={} timeout_secs={} note=dispatch_start_proven_admission_projection_pending",
                             file.display(),
                             dispatch_pane,
                             harness.binary,
                             dispatch_start.dispatch_stage_label(),
-                            ack_timeout.as_secs()
+                            admission_timeout.as_secs()
                         ),
                     );
                     let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
                     return Ok(Some(dispatch_pane));
                 }
-                // (#jbtsiftnosub2) Classify the no-ack pane from a single
+                // (#jbtsiftnosub2) Classify the missing-projection pane from a single
                 // capture. A dispatch-ready pane whose composer STILL shows the
                 // injected trigger unsubmitted is the JB-created-fresh-pane
                 // "prompt added but not submitted" drift — resubmit it once
@@ -998,8 +998,8 @@ pub fn auto_start_in_session_with_lock_mode(
                 // legitimate idle no-op.
                 let trigger = harness.trigger_command(file_path);
                 let mut outcome =
-                    fresh_start_no_ack_outcome(tmux, &dispatch_pane, harness, &trigger);
-                if matches!(outcome, FreshStartAckOutcome::StrandedTriggerResubmit) {
+                    fresh_start_missing_admission_outcome(tmux, &dispatch_pane, harness, &trigger);
+                if matches!(outcome, FreshStartAdmissionOutcome::StrandedTriggerResubmit) {
                     outcome = resubmit_stranded_fresh_start_trigger(
                         tmux,
                         file,
@@ -1007,31 +1007,31 @@ pub fn auto_start_in_session_with_lock_mode(
                         harness,
                         &trigger,
                         cycle_baseline.as_ref(),
-                        ack_timeout,
+                        admission_timeout,
                     );
                 }
                 match outcome {
-                    FreshStartAckOutcome::CycleAcknowledged => {
+                    FreshStartAdmissionOutcome::AdmissionProjected => {
                         // The resubmit landed a document cycle.
                         agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
-                                "fresh_route_start_acknowledged_after_resubmit file={} pane={} harness={} timeout_secs={} #jbtsiftnosub2",
+                                "fresh_route_start_projected_after_resubmit file={} pane={} harness={} timeout_secs={} #jbtsiftnosub2",
                                 file.display(),
                                 dispatch_pane,
                                 harness.binary,
-                                ack_timeout.as_secs()
+                                admission_timeout.as_secs()
                             ),
                         );
                         let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
                     }
-                    FreshStartAckOutcome::IdleNoOpKeep => {
+                    FreshStartAdmissionOutcome::IdleNoOpKeep => {
                         // (#route-reaps-idle-fresh-start) The trigger was proven
                         // dispatched above, and the pane has returned to a
                         // dispatch-ready prompt with an empty composer: the first
                         // cycle was a legitimate no-op (empty/halted queue,
-                        // preflight `no_changes`) — there was simply nothing to
-                        // acknowledge. Keep the live idle session instead of
+                        // preflight `no_changes`) — there was simply no cycle to
+                        // project. Keep the live idle session instead of
                         // reaping a healthy start (the "I cannot start
                         // lazily-rs.md, killed immediately" symptom).
                         agent_doc_ops_log_io::log_op(
@@ -1041,7 +1041,7 @@ pub fn auto_start_in_session_with_lock_mode(
                                 file.display(),
                                 dispatch_pane,
                                 harness.binary,
-                                ack_timeout.as_secs()
+                                admission_timeout.as_secs()
                             ),
                         );
                         eprintln!(
@@ -1052,8 +1052,8 @@ pub fn auto_start_in_session_with_lock_mode(
                         );
                         let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
                     }
-                    FreshStartAckOutcome::StrandedTriggerResubmit
-                    | FreshStartAckOutcome::GenuineMissReap => {
+                    FreshStartAdmissionOutcome::StrandedTriggerResubmit
+                    | FreshStartAdmissionOutcome::GenuineMissReap => {
                         // Genuine miss: pane never ready / hung, or the trigger is
                         // still stuck unsubmitted even after a resubmit attempt.
                         agent_doc_ops_log_io::log_op(
@@ -1063,7 +1063,7 @@ pub fn auto_start_in_session_with_lock_mode(
                                 file.display(),
                                 dispatch_pane,
                                 harness.binary,
-                                ack_timeout.as_secs()
+                                admission_timeout.as_secs()
                             ),
                         );
                         let baseline_id = cycle_baseline.as_ref().map(|b| b.cycle_id.as_str());
@@ -1075,7 +1075,7 @@ pub fn auto_start_in_session_with_lock_mode(
                             agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
                             baseline_id,
                         );
-                        (effects.route_cycle_ack_effects.emit_startup_miss_diagnostic)(
+                        (effects.route_admission_effects.emit_startup_miss_diagnostic)(
                             tmux,
                             &dispatch_pane,
                             file,
@@ -1085,7 +1085,7 @@ pub fn auto_start_in_session_with_lock_mode(
                             ),
                         );
                         anyhow::bail!(
-                            "fresh {} start for {} never acknowledged with a document cycle after trigger {}",
+                            "fresh {} start for {} never entered the reactive admission projection after trigger {}",
                             harness.binary,
                             file.display(),
                             dispatch_start.startup_miss_label()
@@ -1116,12 +1116,13 @@ pub fn auto_start_in_session_with_lock_mode(
 /// typed but never submitted, then re-classify the pane.
 ///
 /// Sends one bare harness submit key (`Enter`) to the stranded composer draft
-/// and waits a bounded ack window. Returns `CycleAcknowledged` when the resubmit
-/// finally starts a document cycle; otherwise re-captures the pane and returns
-/// the fresh classification (`IdleNoOpKeep` if the composer cleared into a
-/// genuine no-op, or `StrandedTriggerResubmit`/`GenuineMissReap` if the trigger
-/// is still stuck), so the caller records a startup-miss and fails closed
-/// instead of silently keeping the operator's request unsubmitted.
+/// and waits on a bounded admission-projection window. Returns
+/// `AdmissionProjected` when the resubmit finally starts a document cycle;
+/// otherwise re-captures the pane and returns the fresh classification
+/// (`IdleNoOpKeep` if the composer cleared into a genuine no-op, or
+/// `StrandedTriggerResubmit`/`GenuineMissReap` if the trigger is still stuck),
+/// so the caller records a startup-miss and fails closed instead of silently
+/// keeping the operator's request unsubmitted.
 #[allow(clippy::too_many_arguments)]
 fn resubmit_stranded_fresh_start_trigger(
     tmux: &Tmux,
@@ -1130,8 +1131,8 @@ fn resubmit_stranded_fresh_start_trigger(
     harness: &HarnessConfig,
     trigger: &str,
     cycle_baseline: Option<&agent_doc_cycle_state_io::CycleState>,
-    ack_timeout: Duration,
-) -> FreshStartAckOutcome {
+    admission_timeout: Duration,
+) -> FreshStartAdmissionOutcome {
     let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
     agent_doc_ops_log_io::log_op(
         file,
@@ -1160,11 +1161,11 @@ fn resubmit_stranded_fresh_start_trigger(
             "[route] warning: failed to resend submit key to stranded pane {}: {}",
             dispatch_pane, e
         );
-        return FreshStartAckOutcome::GenuineMissReap;
+        return FreshStartAdmissionOutcome::GenuineMissReap;
     }
-    match wait_for_start_ack(file, cycle_baseline, ack_timeout) {
-        Some(_) => FreshStartAckOutcome::CycleAcknowledged,
-        None => fresh_start_no_ack_outcome(tmux, dispatch_pane, harness, trigger),
+    match wait_for_start_projection(file, cycle_baseline, admission_timeout) {
+        Some(_) => FreshStartAdmissionOutcome::AdmissionProjected,
+        None => fresh_start_missing_admission_outcome(tmux, dispatch_pane, harness, trigger),
     }
 }
 

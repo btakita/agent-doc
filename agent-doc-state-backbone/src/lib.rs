@@ -692,7 +692,8 @@ pub enum StateFact {
         response_sha256: String,
         retirement_reason: String,
     },
-    DocumentCellMergeAckRecorded {
+    #[serde(alias = "document_cell_merge_ack_recorded")]
+    DocumentCellMergeConflictObserved {
         document_hash: String,
         cycle_id: String,
         component: String,
@@ -700,7 +701,10 @@ pub enum StateFact {
         reason: String,
         detail: String,
     },
-    DocumentCellMergeAckCarriedForward {
+    /// Read compatibility for ledgers written before conflict advisories became
+    /// cycle-local reactive state. New code never emits this fact.
+    #[serde(rename = "document_cell_merge_ack_carried_forward")]
+    LegacyMergeConflictCarriedForward {
         document_hash: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source_cycle_id: Option<String>,
@@ -937,8 +941,8 @@ impl StateFact {
             | Self::SessionCheckPassed { document_hash, .. }
             | Self::CycleAbandoned { document_hash, .. }
             | Self::FalseStaleCaptureReactivated { document_hash, .. }
-            | Self::DocumentCellMergeAckRecorded { document_hash, .. }
-            | Self::DocumentCellMergeAckCarriedForward { document_hash, .. }
+            | Self::DocumentCellMergeConflictObserved { document_hash, .. }
+            | Self::LegacyMergeConflictCarriedForward { document_hash, .. }
             | Self::OwnerGenerationChanged { document_hash, .. }
             | Self::EditorPatchQueued { document_hash, .. }
             | Self::EditorPatchApplied { document_hash, .. }
@@ -991,8 +995,8 @@ impl StateFact {
             | Self::SessionCheckPassed { .. }
             | Self::CycleAbandoned { .. }
             | Self::FalseStaleCaptureReactivated { .. }
-            | Self::DocumentCellMergeAckRecorded { .. }
-            | Self::DocumentCellMergeAckCarriedForward { .. } => StateDomain::Closeout,
+            | Self::DocumentCellMergeConflictObserved { .. }
+            | Self::LegacyMergeConflictCarriedForward { .. } => StateDomain::Closeout,
             Self::BaselineSaved { .. }
             | Self::DocumentBaselineCheckpointed { .. }
             | Self::DocumentBaselineCleared { .. }
@@ -1106,8 +1110,10 @@ impl StateFact {
             Self::SessionCheckPassed { .. } => "session_check_passed",
             Self::CycleAbandoned { .. } => "cycle_abandoned",
             Self::FalseStaleCaptureReactivated { .. } => "false_stale_capture_reactivated",
-            Self::DocumentCellMergeAckRecorded { .. } => "document_cell_merge_ack_recorded",
-            Self::DocumentCellMergeAckCarriedForward { .. } => {
+            Self::DocumentCellMergeConflictObserved { .. } => {
+                "document_cell_merge_conflict_observed"
+            }
+            Self::LegacyMergeConflictCarriedForward { .. } => {
                 "document_cell_merge_ack_carried_forward"
             }
             Self::OwnerGenerationChanged { .. } => "owner_generation_changed",
@@ -1306,7 +1312,36 @@ pub struct DocumentStateProjection {
     pub rejected_stale_events: Vec<RejectedStaleEvent>,
 }
 
+/// Reactive proof that a submitted turn effect entered a document cycle after
+/// the caller's pre-dispatch projection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnAdmissionProjection {
+    pub cycle_id: String,
+    pub phase: CyclePhase,
+}
+
 impl DocumentStateProjection {
+    /// Project the document cycle created after `baseline_cycle_id`.
+    ///
+    /// A submitter captures the baseline before publishing its effect, then
+    /// awaits this derived projection through the Project Controller's
+    /// state-change condition variable. A terminal phase still proves
+    /// admission: a fast harness may finish the whole cycle before the caller
+    /// wakes.
+    pub fn turn_admission_after(
+        &self,
+        baseline_cycle_id: Option<&str>,
+    ) -> Option<TurnAdmissionProjection> {
+        let cycle_id = self.closeout.cycle_id.as_deref()?;
+        if baseline_cycle_id == Some(cycle_id) {
+            return None;
+        }
+        Some(TurnAdmissionProjection {
+            cycle_id: cycle_id.to_string(),
+            phase: self.closeout.phase?,
+        })
+    }
+
     /// Return the durable document-write effect that still owns the current
     /// captured response, if any.
     ///
@@ -2279,7 +2314,7 @@ impl DocumentStateProjection {
                     self.closeout.session_check_passed = false;
                 }
             }
-            StateFact::DocumentCellMergeAckRecorded {
+            StateFact::DocumentCellMergeConflictObserved {
                 cycle_id,
                 component,
                 id,
@@ -2287,38 +2322,15 @@ impl DocumentStateProjection {
                 detail,
                 ..
             } => {
-                self.closeout.apply_semantic_merge_ack(
+                self.closeout.apply_semantic_merge_conflict_advisory(
                     component,
                     id,
                     reason,
                     detail,
                     Some(cycle_id),
-                    false,
                 );
             }
-            StateFact::DocumentCellMergeAckCarriedForward {
-                source_cycle_id,
-                target_cycle_id,
-                component,
-                id,
-                reason,
-                detail,
-                ..
-            } => {
-                if self.closeout.cycle_id.as_deref() != Some(target_cycle_id) {
-                    self.closeout.cycle_id = Some(target_cycle_id.clone());
-                    self.closeout.phase = Some(CyclePhase::PreflightStarted);
-                    self.closeout.session_check_passed = false;
-                }
-                self.closeout.apply_semantic_merge_ack(
-                    component,
-                    id,
-                    reason,
-                    detail,
-                    source_cycle_id.as_deref(),
-                    true,
-                );
-            }
+            StateFact::LegacyMergeConflictCarriedForward { .. } => {}
             StateFact::OwnerGenerationChanged {
                 owner, generation, ..
             } => {
@@ -3801,8 +3813,12 @@ pub struct CloseoutProjection {
     pub pending_response_clear_reason: Option<String>,
     #[serde(default, skip_serializing_if = "turn_steering_projection_is_none")]
     pub realtime_steering: TurnSteeringProjection,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_semantic_merge_acks: Vec<DocumentCellMergeAckProjection>,
+    #[serde(
+        default,
+        alias = "pending_semantic_merge_acks",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub semantic_merge_conflict_advisories: Vec<DocumentCellMergeConflictProjection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3983,6 +3999,7 @@ impl CloseoutProjection {
                 self.session_check_passed = false;
                 self.tracked_work_maintenance_required = None;
                 self.abandoned_reason = None;
+                self.semantic_merge_conflict_advisories.clear();
             }
             self.cycle_id = Some(cycle_id.to_string());
             self.phase = Some(CyclePhase::PreflightStarted);
@@ -3994,7 +4011,6 @@ impl CloseoutProjection {
             self.response_cell = None;
             self.write_phase = None;
             self.realtime_steering = TurnSteeringProjection::none();
-            self.pending_semantic_merge_acks.clear();
         }
         let current = self.phase.unwrap_or(CyclePhase::PreflightStarted);
         if let Some(next) = CyclePhaseMachine::transition(current, event) {
@@ -4014,35 +4030,34 @@ impl CloseoutProjection {
         }
     }
 
-    fn apply_semantic_merge_ack(
+    fn apply_semantic_merge_conflict_advisory(
         &mut self,
         component: &str,
         id: &str,
         reason: &str,
         detail: &str,
         recorded_cycle_id: Option<&str>,
-        surfaced: bool,
     ) {
-        if let Some(existing) = self
-            .pending_semantic_merge_acks
-            .iter_mut()
-            .find(|existing| {
-                existing.component == component && existing.id == id && existing.reason == reason
-            })
+        if let Some(existing) =
+            self.semantic_merge_conflict_advisories
+                .iter_mut()
+                .find(|existing| {
+                    existing.component == component
+                        && existing.id == id
+                        && existing.reason == reason
+                })
         {
             existing.detail = detail.to_string();
             existing.recorded_cycle_id = recorded_cycle_id.map(str::to_string);
-            existing.surfaced = surfaced;
             return;
         }
-        self.pending_semantic_merge_acks
-            .push(DocumentCellMergeAckProjection {
+        self.semantic_merge_conflict_advisories
+            .push(DocumentCellMergeConflictProjection {
                 component: component.to_string(),
                 id: id.to_string(),
                 reason: reason.to_string(),
                 detail: detail.to_string(),
                 recorded_cycle_id: recorded_cycle_id.map(str::to_string),
-                surfaced,
             });
     }
 }
@@ -4275,15 +4290,13 @@ pub enum CloseoutOwnerClaimOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DocumentCellMergeAckProjection {
+pub struct DocumentCellMergeConflictProjection {
     pub component: String,
     pub id: String,
     pub reason: String,
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recorded_cycle_id: Option<String>,
-    #[serde(default)]
-    pub surfaced: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -6829,7 +6842,7 @@ mod tests {
     }
 
     #[test]
-    fn document_cell_merge_ack_projection_carries_forward_for_one_cycle() {
+    fn semantic_merge_conflict_projection_is_cycle_local_and_legacy_carry_is_ignored() {
         let mut ledger = EventLedger::new();
         ledger.append(state_event(
             "cycle-1-start",
@@ -6841,8 +6854,8 @@ mod tests {
             },
         ));
         ledger.append(state_event(
-            "cycle-1-ack",
-            StateFact::DocumentCellMergeAckRecorded {
+            "cycle-1-conflict",
+            StateFact::DocumentCellMergeConflictObserved {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 component: "exchange".into(),
@@ -6853,8 +6866,10 @@ mod tests {
         ));
 
         let projected = ledger.project_document("doc-a").unwrap();
-        assert_eq!(projected.closeout.pending_semantic_merge_acks.len(), 1);
-        assert!(!projected.closeout.pending_semantic_merge_acks[0].surfaced);
+        assert_eq!(
+            projected.closeout.semantic_merge_conflict_advisories.len(),
+            1
+        );
 
         ledger.append(state_event(
             "cycle-2-start",
@@ -6866,8 +6881,8 @@ mod tests {
             },
         ));
         ledger.append(state_event(
-            "cycle-2-carry",
-            StateFact::DocumentCellMergeAckCarriedForward {
+            "cycle-2-legacy-carry",
+            StateFact::LegacyMergeConflictCarriedForward {
                 document_hash: "doc-a".into(),
                 source_cycle_id: Some("cycle-1".into()),
                 target_cycle_id: "cycle-2".into(),
@@ -6880,21 +6895,13 @@ mod tests {
 
         let projected = ledger.project_document("doc-a").unwrap();
         assert_eq!(projected.closeout.cycle_id.as_deref(), Some("cycle-2"));
-        let ack = &projected.closeout.pending_semantic_merge_acks[0];
-        assert!(ack.surfaced);
-        assert_eq!(ack.recorded_cycle_id.as_deref(), Some("cycle-1"));
-
-        ledger.append(state_event(
-            "cycle-3-start",
-            StateFact::PreflightStarted {
-                document_hash: "doc-a".into(),
-                cycle_id: "cycle-3".into(),
-                session_id: None,
-                tracked_work_maintenance_required: Some(false),
-            },
-        ));
-        let projected = ledger.project_document("doc-a").unwrap();
-        assert!(projected.closeout.pending_semantic_merge_acks.is_empty());
+        assert!(
+            projected
+                .closeout
+                .semantic_merge_conflict_advisories
+                .is_empty(),
+            "legacy courtesy-turn carry facts remain readable but have no projected effect"
+        );
     }
 
     #[test]
@@ -9152,6 +9159,48 @@ mod tests {
         assert_eq!(
             ProofGateMachine::transition(ProofGatePhase::Observed, ProofGateEvent::MarkerDisproved),
             None
+        );
+    }
+
+    #[test]
+    fn turn_admission_projection_advances_only_for_a_new_cycle() {
+        let mut projection = DocumentStateProjection::new("doc");
+        projection.apply_fact(&StateFact::PreflightStarted {
+            document_hash: "doc".into(),
+            cycle_id: "cycle-old".into(),
+            session_id: None,
+            tracked_work_maintenance_required: None,
+        });
+        projection.closeout.phase = Some(CyclePhase::Committed);
+
+        assert_eq!(
+            projection.turn_admission_after(Some("cycle-old")),
+            None,
+            "same-cycle terminal churn is not a routed admission"
+        );
+
+        projection.apply_fact(&StateFact::PreflightStarted {
+            document_hash: "doc".into(),
+            cycle_id: "cycle-new".into(),
+            session_id: None,
+            tracked_work_maintenance_required: None,
+        });
+        assert_eq!(
+            projection.turn_admission_after(Some("cycle-old")),
+            Some(TurnAdmissionProjection {
+                cycle_id: "cycle-new".into(),
+                phase: CyclePhase::PreflightStarted,
+            })
+        );
+
+        projection.closeout.phase = Some(CyclePhase::Committed);
+        assert_eq!(
+            projection.turn_admission_after(Some("cycle-old")),
+            Some(TurnAdmissionProjection {
+                cycle_id: "cycle-new".into(),
+                phase: CyclePhase::Committed,
+            }),
+            "a fast terminal cycle still proves that admission occurred"
         );
     }
 

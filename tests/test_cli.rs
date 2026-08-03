@@ -1260,7 +1260,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-route-io/src/pane_provenance.rs",
         "agent-doc-route-io/src/restart_handoff.rs",
         "agent-doc-route-io/src/supervisor_runtime.rs",
-        "agent-doc-route-io/src/cycle_ack.rs",
+        "agent-doc-route-io/src/admission_projection.rs",
         "agent-doc-session-check-io/src/partial_staging.rs",
         "agent-doc-session-check-io/src/pending_guards.rs",
         "agent-doc-session-check-io/src/closeout_guards.rs",
@@ -11290,7 +11290,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Preflight semantic advisory warning graph",
             "agent-doc-orchestration/src/preflight/run.rs",
             "agent-doc-preflight-io/src/warnings.rs",
-            "Split semantic completion advisory retrieval from semantic merge-ack formatting",
+            "Move remaining queue-stall and stuck-capture warning construction",
         ),
         (
             "Session-check guard IO adapter batch",
@@ -15432,7 +15432,7 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
     }
 
     for relative in [
-        "agent-doc-route-io/src/cycle_ack.rs",
+        "agent-doc-route-io/src/admission_projection.rs",
         "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-route-io/tests/route.rs",
         "agent-doc-supervisor-io/src/detection.rs",
@@ -15993,8 +15993,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_pane_resolution_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/tests/route/pane_resolution.rs"))
             .unwrap();
-    let route_cycle_ack_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/cycle_ack.rs")).unwrap();
+    let route_admission_projection_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/admission_projection.rs"))
+            .unwrap();
     let route_runtime_effects_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/runtime_effects.rs")).unwrap();
     let flow_types_source =
@@ -16020,16 +16021,17 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .join("agent-doc-orchestration/src/route/cycle_ack.rs")
             .exists()
             && !route_source.contains("mod cycle_ack;")
-            && route_source.contains("use agent_doc_route_io::cycle_ack::")
-            && route_runtime_effects_source.contains("pub fn route_cycle_ack_effects()"),
-        "orchestration must not keep a route cycle-ack module after the route cycle acknowledgment graph moves to agent-doc-route-io"
+            && route_source.contains("use agent_doc_route_io::admission_projection::")
+            && route_runtime_effects_source.contains("pub fn route_admission_effects()"),
+        "orchestration must not keep a route cycle-ack module after turn admission moves to the reactive Project Controller projection"
+    );
+    assert!(
+        route_admission_projection_source.contains("await_turn_admission_projection_for_file(")
+            && !route_admission_projection_source
+                .contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)"),
+        "route admission must await the reactive Project Controller projection rather than poll cycle persistence"
     );
     for (source, required, context) in [
-        (
-            route_cycle_ack_source.as_str(),
-            "agent_doc_cycle_state_io::load_with_closeout_projection(file)",
-            "route cycle-ack polling",
-        ),
         (
             route_pane_resolution_io_source.as_str(),
             "agent_doc_cycle_state_io::load_with_closeout_projection(file)?",
@@ -16400,8 +16402,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn startup_miss_superseded_by_later_open_start(",
         "pub fn startup_miss_should_restart_live_owner(",
         "pub fn startup_miss_should_fail_closed(",
-        "pub enum FreshStartAckOutcome",
-        "pub const fn fresh_start_ack_outcome(",
+        "pub enum FreshStartAdmissionOutcome",
+        "pub const fn fresh_start_admission_outcome(",
         "pub struct DeadHarnessShellDispatchFacts",
         "pub fn classify_dead_harness_shell_dispatch_block(",
         "pub struct DispatchTargetBindFacts",
@@ -16442,10 +16444,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub enum CloseoutBlockDispatchDecision",
         "pub fn classify_closeout_block_dispatch(",
         "pub fn route_closeout_user_outcome_fields(",
-        "pub struct RoutedCycleAckFacts",
-        "pub fn should_require_routed_cycle_ack(",
-        "pub struct MissingCycleAckFacts",
-        "pub fn should_optimistically_accept_missing_cycle_ack(",
+        "pub struct RoutedAdmissionFacts",
+        "pub fn should_require_routed_admission_projection(",
+        "pub struct MissingAdmissionProjectionFacts",
+        "pub fn should_optimistically_accept_missing_admission_projection(",
         "pub enum RouteSubmitObservation",
         "pub struct RouteSubmitObservationFacts",
         "pub fn route_submit_observation_message(",
@@ -16487,8 +16489,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn routed_dispatch_start_timeout_for_binary(",
         "pub fn dispatch_start_busy_probe_timeout(",
         "pub fn dispatch_start_early_resubmit_probe_timeout(",
-        "pub fn fresh_route_start_ack_timeout(",
-        "pub fn routed_cycle_ack_timeout(",
+        "pub fn fresh_route_admission_timeout(",
+        "pub fn routed_admission_timeout(",
         "pub fn existing_pane_ready_timeout(",
         "pub struct DispatchOnlyBusyRefusalFacts",
         "pub fn dispatch_only_busy_refusal_message(",
@@ -16629,8 +16631,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_pane_resolution_io_source
                 .contains("attempt_busy_existing_pane_interrupt_recovery(")
             && route_pane_resolution_io_source.contains("RouteDispatchEffects")
-            && route_pane_resolution_io_source.contains("RouteCycleAckEffects")
-            && route_pane_resolution_io_source.contains("require_routed_cycle_ack("),
+            && route_pane_resolution_io_source.contains("RouteAdmissionEffects")
+            && route_pane_resolution_io_source.contains("require_routed_admission_projection("),
         "shared route supervisor/provenance/dispatch-target/recovery/restart-handoff/pane-resolution helper IO should live in agent-doc-route-io"
     );
     for forbidden_snippet in [
@@ -16711,10 +16713,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
                 .contains("startup_miss_superseded_by_later_open_start")
             && route_pane_resolution_io_source.contains("startup_miss_should_restart_live_owner")
             && route_pane_resolution_io_source.contains("startup_miss_should_fail_closed")
-            && route_cycle_ack_source.contains("RoutedCycleAckFacts")
-            && route_cycle_ack_source.contains("should_require_routed_cycle_ack")
-            && route_cycle_ack_source.contains("MissingCycleAckFacts")
-            && route_cycle_ack_source.contains("should_optimistically_accept_missing_cycle_ack")
+            && route_admission_projection_source.contains("RoutedAdmissionFacts")
+            && route_admission_projection_source
+                .contains("should_require_routed_admission_projection")
+            && route_admission_projection_source.contains("MissingAdmissionProjectionFacts")
+            && route_admission_projection_source
+                .contains("should_optimistically_accept_missing_admission_projection")
             && route_diagnostics_source.contains("RouteStartupMissDiagnosticFacts")
             && route_diagnostics_source.contains("route_startup_miss_diagnostic_message(")
             && route_diagnostics_source.contains("RouteBusyDiagnosticFacts")
@@ -16726,8 +16730,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_diagnostics_source.contains("route_dispatch_bug_report_item(")
             && route_authoritative_dispatch_source.contains("DispatchOnlyReopenDelivery")
             && route_dispatch_only_source.contains("dispatch_only_should_print_unproven_progress")
-            && route_startup_source.contains("fresh_route_start_ack_timeout")
-            && route_cycle_ack_source.contains("routed_cycle_ack_timeout")
+            && route_startup_source.contains("fresh_route_admission_timeout")
+            && route_admission_projection_source.contains("routed_admission_timeout")
             && route_authoritative_dispatch_source.contains("DispatchOnlyBusyRefusalFacts")
             && route_authoritative_dispatch_source
                 .contains("controller_dispatch_only_busy_refusal_message(")
@@ -16876,28 +16880,30 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "agent-doc-route-io dispatch_only.rs should adapt route facts into focused controller readiness/proof policy"
     );
     for forbidden_snippet in [
-        "pub(crate) fn fresh_route_start_ack_timeout(",
-        "pub(crate) fn routed_cycle_ack_timeout(",
+        "pub(crate) fn fresh_route_admission_timeout(",
+        "pub(crate) fn routed_admission_timeout(",
     ] {
         assert!(
-            !route_cycle_ack_source.contains(forbidden_snippet),
-            "agent-doc-route-io cycle_ack.rs must not wrap focused route timeout policy: {forbidden_snippet}"
+            !route_admission_projection_source.contains(forbidden_snippet),
+            "agent-doc-route-io admission_projection.rs must not wrap focused route timeout policy: {forbidden_snippet}"
         );
     }
     // `#jbroutasync`: pin the INVARIANT (route/test facts are passed into the
     // controller's timeout policy rather than recomputed locally), not the exact
-    // call syntax — the ack timeout now also takes the client deadline.
+    // call syntax — the admission-projection timeout also takes the client
+    // deadline.
     assert!(
-        route_cycle_ack_source.contains("fresh_route_start_ack_timeout(cfg!(test))")
-            && route_cycle_ack_source.contains("routed_cycle_ack_timeout_with_client_deadline(")
-            && route_cycle_ack_source.contains("live_child_for_file,")
-            && route_cycle_ack_source.contains("cfg!(test),"),
-        "agent-doc-route-io cycle_ack.rs should pass route/test facts into focused controller timeout policy"
+        route_admission_projection_source.contains("fresh_route_admission_timeout(cfg!(test))")
+            && route_admission_projection_source
+                .contains("routed_admission_timeout_with_client_deadline(")
+            && route_admission_projection_source.contains("live_child_for_file,")
+            && route_admission_projection_source.contains("cfg!(test),"),
+        "agent-doc-route-io admission_projection.rs should pass route/test facts into focused controller timeout policy"
     );
     assert!(
         !route_busy_pane_source.contains("fn existing_pane_ready_timeout(")
             && route_busy_pane_source.contains("existing_pane_ready_timeout(cfg!(test))")
-            && route_busy_pane_source.contains("fresh_route_start_ack_timeout(cfg!(test))"),
+            && route_busy_pane_source.contains("fresh_route_admission_timeout(cfg!(test))"),
         "route/busy_pane.rs should pass route/test facts into focused controller timeout policy without wrappers"
     );
     assert!(
@@ -16931,12 +16937,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "route startup IO should adapt tmux/session facts into focused duplicate-pane diagnostic policy"
     );
     for forbidden_snippet in [
-        "pub(crate) enum FreshStartAckOutcome",
-        "pub(crate) fn fresh_start_ack_outcome(",
+        "pub(crate) enum FreshStartAdmissionOutcome",
+        "pub(crate) fn fresh_start_admission_outcome(",
     ] {
         assert!(
             !route_startup_source.contains(forbidden_snippet),
-            "route startup IO must not re-own fresh-start ack policy: {forbidden_snippet}"
+            "route startup IO must not re-own fresh-start admission policy: {forbidden_snippet}"
         );
     }
     for required_snippet in [
@@ -16950,15 +16956,15 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "auto_start_dispatch_ready_confirmed",
         "dispatch_into_starting_pane",
         "dispatch_into_shell",
-        "FreshStartAckOutcome",
-        "fresh_start_ack_outcome",
+        "FreshStartAdmissionOutcome",
+        "fresh_start_admission_outcome",
         "agent_doc_harness::project_pane_composer_at_cursor(",
         "PaneComposerReadinessEvidence",
         "agent_doc_tmux_io::pane_cursor_y(tmux, pane_id)",
     ] {
         assert!(
             route_startup_ready_source.contains(required_snippet),
-            "agent-doc-route-io startup_ready should own startup readiness/fresh-start ack route IO: {required_snippet}"
+            "agent-doc-route-io startup_ready should own startup readiness/fresh-start admission route IO: {required_snippet}"
         );
     }
     for forbidden_snippet in [
@@ -16978,20 +16984,22 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "route startup IO should call focused route startup-ready IO directly"
     );
     for forbidden_snippet in [
-        "pub(crate) fn should_require_routed_cycle_ack(",
-        "pub(crate) fn should_optimistically_accept_missing_cycle_ack(",
+        "pub(crate) fn should_require_routed_admission_projection(",
+        "pub(crate) fn should_optimistically_accept_missing_admission_projection(",
     ] {
         assert!(
-            !route_cycle_ack_source.contains(forbidden_snippet),
-            "agent-doc-route-io cycle_ack.rs must not re-own pure controller dispatch policy: {forbidden_snippet}"
+            !route_admission_projection_source.contains(forbidden_snippet),
+            "agent-doc-route-io admission_projection.rs must not re-own pure controller dispatch policy: {forbidden_snippet}"
         );
     }
     assert!(
-        route_cycle_ack_source.contains("RoutedCycleAckFacts")
-            && route_cycle_ack_source.contains("should_require_routed_cycle_ack(")
-            && route_cycle_ack_source.contains("MissingCycleAckFacts")
-            && route_cycle_ack_source.contains("should_optimistically_accept_missing_cycle_ack("),
-        "agent-doc-route-io cycle_ack.rs should adapt cycle and harness facts into focused controller policy"
+        route_admission_projection_source.contains("RoutedAdmissionFacts")
+            && route_admission_projection_source
+                .contains("should_require_routed_admission_projection(")
+            && route_admission_projection_source.contains("MissingAdmissionProjectionFacts")
+            && route_admission_projection_source
+                .contains("should_optimistically_accept_missing_admission_projection("),
+        "agent-doc-route-io admission_projection.rs should adapt cycle and harness facts into focused controller policy"
     );
     let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
     assert!(
@@ -21265,7 +21273,7 @@ fn test_agent_doc_preflight_io_owns_warning_collection_graph() {
 }
 
 #[test]
-fn test_agent_doc_preflight_io_owns_semantic_advisory_warning_graph() {
+fn test_agent_doc_preflight_io_owns_semantic_completion_warnings_without_merge_courtesy_turns() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight_run =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
@@ -21276,17 +21284,16 @@ fn test_agent_doc_preflight_io_owns_semantic_advisory_warning_graph() {
 
     assert!(
         preflight_manifest.contains("agent-doc-memory =")
-            && preflight_manifest.contains("agent-doc-memory-io =")
-            && preflight_manifest.contains("agent-doc-cycle-state-io ="),
-        "agent-doc-preflight-io must own focused deps for semantic advisory warning collection"
+            && preflight_manifest.contains("agent-doc-memory-io ="),
+        "agent-doc-preflight-io must own focused deps for semantic completion warning collection"
     );
     for forbidden in [
         "agent_doc_memory_io::session::semantic_completion_matches(file, None, 5)",
         "agent_doc_memory::format_semantic_completion_warning",
         "code: \"semantic_completion_match\".to_string()",
         "code: \"semantic_completion_retrieval_unavailable\".to_string()",
-        "code: \"document_cell_merge_ack_pending\".to_string()",
-        ".map(|ack| format!(\"{}:{} ({})\", ack.component, ack.id, ack.reason))",
+        "document_cell_merge_ack_pending",
+        "document_cell_merge_ack_warning",
     ] {
         assert!(
             !orchestration_preflight_run.contains(forbidden),
@@ -21295,25 +21302,26 @@ fn test_agent_doc_preflight_io_owns_semantic_advisory_warning_graph() {
     }
     assert!(
         orchestration_preflight_run
-            .contains("agent_doc_preflight_io::warnings::semantic_completion_warnings(file)")
-            && orchestration_preflight_run
-                .contains("agent_doc_preflight_io::warnings::document_cell_merge_ack_warning("),
-        "preflight command should call focused semantic advisory warning adapters"
+            .contains("agent_doc_preflight_io::warnings::semantic_completion_warnings(file)"),
+        "preflight command should call the focused semantic completion warning adapter"
     );
     for required in [
         "pub fn semantic_completion_warnings(",
-        "pub fn document_cell_merge_ack_warning(",
         "agent_doc_memory_io::session::semantic_completion_matches",
         "agent_doc_memory::format_semantic_completion_warning",
         "code: \"semantic_completion_match\".to_string()",
         "code: \"semantic_completion_retrieval_unavailable\".to_string()",
-        "code: \"document_cell_merge_ack_pending\".to_string()",
     ] {
         assert!(
             preflight_warnings.contains(required),
             "agent-doc-preflight-io warnings module should own semantic advisory warnings: {required}"
         );
     }
+    assert!(
+        !preflight_warnings.contains("document_cell_merge_ack")
+            && !orchestration_preflight_run.contains("semantic_merge_conflict_advisories"),
+        "semantic merge conflicts must remain cycle-local reactive state, not a next-turn warning"
+    );
 }
 
 #[test]
@@ -29031,12 +29039,14 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/queue_dispatch.rs")).unwrap();
     let route_dispatch_only =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_only.rs")).unwrap();
-    let route_cycle_ack =
-        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/cycle_ack.rs")).unwrap();
+    let route_admission_projection =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/admission_projection.rs"))
+            .unwrap();
     let preflight_debounce =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/debounce.rs")).unwrap();
-    let turn_cycle_ack =
-        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/cycle_ack.rs")).unwrap();
+    let turn_prompt_bearing =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/prompt_bearing_route.rs"))
+            .unwrap();
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_runtime =
@@ -29059,7 +29069,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             !route_source.contains(forbidden_snippet)
                 && !route_queue_dispatch.contains(forbidden_snippet)
                 && !route_dispatch_only.contains(forbidden_snippet)
-                && !route_cycle_ack.contains(forbidden_snippet),
+                && !route_admission_projection.contains(forbidden_snippet),
             "route must stay an effect adapter and not re-own route-dispatch queue policy: {forbidden_snippet}"
         );
     }
@@ -29105,8 +29115,8 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             && route_queue_dispatch.contains("pub fn inactive_route_queue_head(")
             && route_source.contains("use agent_doc_route_io::queue_dispatch::{")
             && route_source.contains("route_queue_effects()")
-            && route_cycle_ack.contains("agent_doc_turn::cycle_ack")
-            && turn_cycle_ack
+            && route_admission_projection.contains("agent_doc_turn::prompt_bearing_route")
+            && turn_prompt_bearing
                 .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change")
             && preflight_runtime
                 .contains("agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts")
@@ -29252,7 +29262,7 @@ fn test_agent_doc_route_io_owns_route_runtime_effect_bundles() {
 
     for forbidden_snippet in [
         "fn route_dispatch_effects(",
-        "fn route_cycle_ack_effects(",
+        "fn route_admission_effects(",
         "fn route_busy_pane_retry_effects(",
         "fn route_queue_effects(",
         "fn route_document_prep_effects(",
@@ -29276,7 +29286,7 @@ fn test_agent_doc_route_io_owns_route_runtime_effect_bundles() {
 
     for required_snippet in [
         "pub fn route_dispatch_effects(",
-        "pub fn route_cycle_ack_effects(",
+        "pub fn route_admission_effects(",
         "pub fn route_busy_pane_retry_effects(",
         "pub fn route_queue_effects(",
         "pub fn route_document_prep_effects(",
@@ -29406,7 +29416,7 @@ fn test_agent_doc_route_io_owns_authoritative_dispatch_loop() {
             && authoritative_dispatch.contains("RouteCloseoutDrainOutcome::")
             && authoritative_dispatch.contains("dispatch_only_busy_should_wait_for_ready(")
             && authoritative_dispatch.contains("dispatch_via_supervisor_ipc(")
-            && authoritative_dispatch.contains("require_routed_cycle_ack(")
+            && authoritative_dispatch.contains("require_routed_admission_projection(")
             && authoritative_dispatch.contains("dispatch_only_send_reopen(")
             && authoritative_dispatch.contains("activate_existing_route_queue_head(")
             && authoritative_actor.contains("pub fn managed_capability_proof_status(")

@@ -140,31 +140,6 @@ pub struct ControllerEditorRouteRuntimeResult {
     pub output: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ControllerTurnSteeringInvocation {
-    pub file: PathBuf,
-    pub steering_id: String,
-    pub text: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ControllerTurnSteeringOutcome {
-    Delivered,
-    Duplicate,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ControllerTurnSteeringReceipt {
-    pub kind: String,
-    pub steering_id: String,
-    pub outcome: ControllerTurnSteeringOutcome,
-    pub accepted_bytes: usize,
-    pub actor_session_id: String,
-    pub actor_pane_id: String,
-    pub actor_generation: u64,
-}
-
 /// Outcome of an in-controller git commit (`commit_document`). The commit runs
 /// inside the controller process, where its own converged relay canonical IS the
 /// authority — so a document with a live editor commits authoritatively instead
@@ -2205,6 +2180,7 @@ impl ControllerDocumentAuthorityGraph {
         )
     }
 
+    #[cfg(test)]
     fn projection(
         &self,
         document_hash: &str,
@@ -2294,7 +2270,20 @@ fn project_document_turn_authority(
         Some(_) => agent_doc_turn::CyclePhase::Committed,
         None => projected_phase,
     };
-    let projection = agent_doc_turn::cp_projection::TurnProjection::from_phase(phase);
+    let conflicts = closeout
+        .semantic_merge_conflict_advisories
+        .iter()
+        .map(
+            |advisory| agent_doc_turn::cp_projection::SemanticMergeConflictProjection {
+                component: advisory.component.clone(),
+                id: advisory.id.clone(),
+                reason: advisory.reason.clone(),
+                detail: advisory.detail.clone(),
+            },
+        )
+        .collect();
+    let projection = agent_doc_turn::cp_projection::TurnProjection::from_phase(phase)
+        .with_semantic_merge_conflicts(conflicts);
     if projection.turn_in_flight {
         projection.with_realtime_steering(closeout.realtime_steering.clone())
     } else {
@@ -4155,15 +4144,6 @@ impl ControllerRuntime {
             .release_subscription(document_hash, document_id);
     }
 
-    fn document_turn_authority_projection(
-        &self,
-        document_hash: &str,
-        document_id: &str,
-    ) -> agent_doc_turn::cp_projection::TurnProjection {
-        self.document_authority_graph
-            .projection(document_hash, document_id)
-    }
-
     fn apply_actor_store_write(&self, write: &agent_doc_controller::actor::ActorStoreWrite) {
         self.actor_graph.apply_store_write(write);
     }
@@ -4546,6 +4526,38 @@ impl ControllerRuntime {
             let remaining = timeout.saturating_sub(elapsed);
             let wait = lease_wait.map_or(remaining, |lease| remaining.min(lease));
             self.state_projection_waiters.wait_for(&mut memory, wait);
+        }
+    }
+
+    /// Await a document cycle derived after the route caller's pre-dispatch
+    /// projection.
+    ///
+    /// This is the admission boundary for routed prompts. The controller blocks
+    /// on its reactive state projection and wakes when `PreflightStarted` (or a
+    /// later phase from the same fast cycle) is applied; callers do not poll
+    /// cycle sidecars.
+    fn wait_for_turn_admission_projection(
+        &self,
+        document_hash: &str,
+        baseline_cycle_id: Option<&str>,
+        timeout: Duration,
+    ) -> Option<agent_doc_state_backbone::TurnAdmissionProjection> {
+        let started = Instant::now();
+        let mut memory = self.memory.lock();
+        loop {
+            if let Some(admission) = memory
+                .state_projection
+                .document(document_hash)
+                .and_then(|document| document.turn_admission_after(baseline_cycle_id))
+            {
+                return Some(admission);
+            }
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
+                return None;
+            }
+            self.state_projection_waiters
+                .wait_for(&mut memory, timeout.saturating_sub(elapsed));
         }
     }
 

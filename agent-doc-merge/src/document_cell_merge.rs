@@ -24,13 +24,13 @@
 //! | present | edited | unchanged | [`OutcomeKind::AppliedAgentEdit`] |
 //! | present | unchanged | edited | [`OutcomeKind::AppliedOperatorEdit`] |
 //! | present | edited | edited (same text) | [`OutcomeKind::Convergent`] |
-//! | present | edited | edited (diff text) | [`OutcomeKind::OperatorWonConflict`] + ack |
-//! | present | edited/struck | deleted | [`OutcomeKind::DeletionKept`] + ack |
-//! | present | deleted (struck/absent) | edited | [`OutcomeKind::OperatorRevived`] + ack |
+//! | present | edited | edited (diff text) | [`OutcomeKind::OperatorWonConflict`] + advisory |
+//! | present | edited/struck | deleted | [`OutcomeKind::DeletionKept`] + advisory |
+//! | present | deleted (struck/absent) | edited | [`OutcomeKind::OperatorRevived`] + advisory |
 //! | absent | added | absent | [`OutcomeKind::AppliedAgentAdd`] |
 //! | absent | absent | added | [`OutcomeKind::AppliedOperatorAdd`] |
 //! | absent | added | added (diff ids) | [`OutcomeKind::AppliedBothAdd`] |
-//! | absent | added | added (same id, diff text) | [`OutcomeKind::OperatorWonConflict`] + ack |
+//! | absent | added | added (same id, diff text) | [`OutcomeKind::OperatorWonConflict`] + advisory |
 //!
 //! "edited" means the item's `text` **or** any of its `struck` / `pinned` /
 //! `agent_pinned` flags differ from base. A `struck:true` node is *present-but-
@@ -42,7 +42,7 @@
 //! The leading `---` … `---` YAML block is treated as a set of scalar key-nodes
 //! parsed line-by-line (`key: value`). The same per-key transition applies:
 //! operator-only change ⇒ operator value; agent-only change ⇒ agent value; both
-//! changed differently ⇒ operator wins + ack. This is intentionally *not* a full
+//! changed differently ⇒ operator wins + advisory. This is intentionally *not* a full
 //! YAML parser. If a key's value is non-scalar (the line is not a clean
 //! `key: value`, e.g. a block/sequence value spanning multiple lines) the merge
 //! falls back conservatively: the **operator** frontmatter block wins as a whole
@@ -82,13 +82,13 @@ pub enum OutcomeKind {
     AppliedOperatorEdit,
     /// Both edited the node to the same text — applied once.
     Convergent,
-    /// Both edited the node differently — operator text wins; an ack is emitted.
+    /// Both edited the node differently — operator text wins; an advisory is emitted.
     OperatorWonConflict,
     /// Operator deleted a node the agent edited/struck — the deletion stands and
-    /// the node is omitted from `merged_doc`; an ack is emitted.
+    /// the node is omitted from `merged_doc`; an advisory is emitted.
     DeletionKept,
     /// Agent deleted/struck a node the operator edited — the operator edit wins
-    /// (the node is un-struck / revived); an ack is emitted.
+    /// (the node is un-struck / revived); an advisory is emitted.
     OperatorRevived,
     /// Node added only by the agent (absent in base and operator).
     AppliedAgentAdd,
@@ -108,11 +108,10 @@ pub struct NodeOutcome {
     pub kind: OutcomeKind,
 }
 
-/// Why an acknowledgement is required for the next agent turn.
+/// Why a semantic merge conflict is projected.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AckReason {
-    /// Operator deleted a node the agent had edited or struck — the agent should
-    /// acknowledge the deletion stands.
+pub enum MergeConflictReason {
+    /// Operator deleted a node the agent had edited or struck; the deletion stands.
     OperatorDeletedAgentEditedNode,
     /// Operator and agent edited the same node differently — operator content won.
     SameNodeOperatorOverride,
@@ -120,50 +119,54 @@ pub enum AckReason {
     OperatorRevivedAgentDeletedNode,
 }
 
-impl AckReason {
+impl MergeConflictReason {
     /// Stable snake_case token for serialization, logging, and the Phase-4
-    /// `#semmerge-ack-turn` carry-forward (`cycle_state` persists the token, not
+    /// current-cycle projection (`cycle_state` persists the token, not
     /// the enum, so the orchestration crate stays decoupled from this type's
     /// representation).
     pub fn token(&self) -> &'static str {
         match self {
-            AckReason::OperatorDeletedAgentEditedNode => "operator_deleted_agent_edited_node",
-            AckReason::SameNodeOperatorOverride => "same_node_operator_override",
-            AckReason::OperatorRevivedAgentDeletedNode => "operator_revived_agent_deleted_node",
+            MergeConflictReason::OperatorDeletedAgentEditedNode => {
+                "operator_deleted_agent_edited_node"
+            }
+            MergeConflictReason::SameNodeOperatorOverride => "same_node_operator_override",
+            MergeConflictReason::OperatorRevivedAgentDeletedNode => {
+                "operator_revived_agent_deleted_node"
+            }
         }
     }
 }
 
-/// A request for the next agent turn to acknowledge a non-applied agent change.
+/// A reactive advisory for a non-applied agent change.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AckRequest {
+pub struct MergeConflictAdvisory {
     /// Component name (`__frontmatter__` for frontmatter keys).
     pub component: String,
     /// The node's stable id (item id, or frontmatter key name).
     pub id: String,
-    pub reason: AckReason,
-    /// Human-readable detail the next agent turn will acknowledge.
+    pub reason: MergeConflictReason,
+    /// Human-readable detail for diagnostics and editor presentation.
     pub detail: String,
 }
 
 /// The result of a [`document_cell_merge`]: the merged document plus the per-node
-/// outcomes and any acknowledgement requests.
+/// outcomes and any conflict advisories.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentCellMerge {
     pub merged_doc: String,
     pub outcomes: Vec<NodeOutcome>,
-    pub requires_ack: Vec<AckRequest>,
+    pub conflict_advisories: Vec<MergeConflictAdvisory>,
     /// `#hap7` / `#qdup` deleted-structure rule: human-readable notes for nodes the
     /// operator deleted this cycle that the agent's content had targeted (edited).
     /// The deletion stands — the in-editor document is the source of truth and the
     /// agent change is NOT merged back — but the fact is surfaced in `agent:exchange`
     /// (and recorded here) so the operator sees the dropped agent edit this cycle,
-    /// independent of the next-cycle ack carry-forward. Each note is also injected
+    /// independent of the cycle-local conflict projection. Each note is also injected
     /// into the `exchange` component of [`Self::merged_doc`].
     pub exchange_notes: Vec<String>,
 }
 
-/// Sentinel component name used for frontmatter scalar key-nodes in outcomes/acks.
+/// Sentinel component name used for frontmatter scalar key-nodes in outcomes/advisories.
 pub const FRONTMATTER_COMPONENT: &str = "__frontmatter__";
 
 /// Merge `base`, `ours_agent`, and `theirs_operator` by node identity.
@@ -177,7 +180,7 @@ pub fn document_cell_merge(
     theirs_operator: &str,
 ) -> DocumentCellMerge {
     let mut outcomes = Vec::new();
-    let mut requires_ack = Vec::new();
+    let mut conflict_advisories = Vec::new();
 
     // --- Frontmatter merge -------------------------------------------------
     let (base_fm, _base_body) = split_frontmatter(base);
@@ -188,7 +191,7 @@ pub fn document_cell_merge(
         ours_fm,
         theirs_fm,
         &mut outcomes,
-        &mut requires_ack,
+        &mut conflict_advisories,
     );
 
     // --- Component merge over the operator body (skeleton) -----------------
@@ -203,7 +206,7 @@ pub fn document_cell_merge(
         &ours_comps,
         ours_agent,
         &mut outcomes,
-        &mut requires_ack,
+        &mut conflict_advisories,
     );
 
     // `#hap7` / `#qdup` / `#qnodemerge5`: when the operator's edit wins over
@@ -211,14 +214,14 @@ pub fn document_cell_merge(
     // `agent:exchange`. Deletions and same-node overrides both keep the
     // operator/editor value; the note makes that conflict visible instead of
     // silently fabricating a merged text neither side wrote.
-    let exchange_notes: Vec<String> = requires_ack
+    let exchange_notes: Vec<String> = conflict_advisories
         .iter()
-        .filter_map(|ack| match ack.reason {
-            AckReason::OperatorDeletedAgentEditedNode => {
-                Some(deletion_note(&ack.component, &ack.id))
+        .filter_map(|advisory| match advisory.reason {
+            MergeConflictReason::OperatorDeletedAgentEditedNode => {
+                Some(deletion_note(&advisory.component, &advisory.id))
             }
-            AckReason::SameNodeOperatorOverride => Some(conflict_note(ack)),
-            AckReason::OperatorRevivedAgentDeletedNode => None,
+            MergeConflictReason::SameNodeOperatorOverride => Some(conflict_note(advisory)),
+            MergeConflictReason::OperatorRevivedAgentDeletedNode => None,
         })
         .collect();
 
@@ -232,7 +235,7 @@ pub fn document_cell_merge(
     DocumentCellMerge {
         merged_doc,
         outcomes,
-        requires_ack,
+        conflict_advisories,
         exchange_notes,
     }
 }
@@ -250,8 +253,8 @@ fn deletion_note(component: &str, id: &str) -> String {
 /// `#qnodemerge5`: canonical one-line note for a true same-leaf conflict. The
 /// operator/editor value is already the merged value; the note carries the
 /// rejected agent side so the conflict is visible to the operator.
-fn conflict_note(ack: &AckRequest) -> String {
-    format!("> agent-doc conflict: {}.", ack.detail)
+fn conflict_note(advisory: &MergeConflictAdvisory) -> String {
+    format!("> agent-doc conflict: {}.", advisory.detail)
 }
 
 /// Inject conflict notes into the `exchange` component of a merged body.
@@ -262,7 +265,7 @@ fn conflict_note(ack: &AckRequest) -> String {
 /// present in the exchange inner is not re-added (idempotent across repeated
 /// convergence attempts in a cycle and across cycles where `base` already carries
 /// it). If there is no `exchange` component the notes cannot be surfaced here and
-/// the body is returned unchanged (the next-cycle ack carry-forward still fires).
+/// the body is returned unchanged (the cycle-local conflict projection still fires).
 fn inject_exchange_notes(body: String, notes: &[String]) -> String {
     if notes.is_empty() {
         return body;
@@ -347,13 +350,13 @@ fn inject_exchange_notes(body: String, notes: &[String]) -> String {
 /// The set of structural nodes considered "active" in the current agent turn —
 /// the in-flight prompt and its response area (the `exchange` tail). Used by
 /// [`document_cell_merge_scoped`] to gate which same-node conflicts raise an
-/// [`AckRequest`].
+/// [`MergeConflictAdvisory`].
 ///
 /// `#msn6` / `#smturnactive` (document_cell_merge Phase 6, turn-active-area merge
 /// gating): a same-node operator↔agent collision OUTSIDE the turn-active area
-/// auto-resolves to the operator value with no ack noise; only a collision
-/// INSIDE the active area produces an ack. The merged document is identical
-/// either way (the operator always wins a same-node conflict) — only ack
+/// auto-resolves to the operator value with no advisory noise; only a collision
+/// INSIDE the active area produces an advisory. The merged document is identical
+/// either way (the operator always wins a same-node conflict) — only advisory
 /// emission is scoped, so this can never lose content.
 ///
 /// A node is active when its whole component is marked active
@@ -370,7 +373,7 @@ pub struct ActiveNodes {
 
 impl ActiveNodes {
     /// An empty active set. In [`document_cell_merge_scoped`] this means "nothing is
-    /// active" — every out-of-area conflict auto-resolves and NO acks are emitted.
+    /// active" — every out-of-area conflict auto-resolves and NO advisories are emitted.
     /// Callers that want the legacy all-active behavior call [`document_cell_merge`].
     pub fn new() -> Self {
         Self::default()
@@ -405,17 +408,17 @@ impl ActiveNodes {
     }
 }
 
-/// Like [`document_cell_merge`], but scope ack emission to a turn-active node-set
+/// Like [`document_cell_merge`], but scope advisory emission to a turn-active node-set
 /// (`#msn6` / `#smturnactive`, Phase 6). The merged document and per-node
 /// outcomes are IDENTICAL to [`document_cell_merge`] — the operator still wins every
 /// same-node conflict, so no content is ever lost or changed. Only
-/// [`DocumentCellMerge::requires_ack`] is filtered: a same-node conflict whose node
-/// is NOT in `active` auto-resolves silently (no ack noise), while a conflict
-/// inside the active area still raises its [`AckRequest`].
+/// [`DocumentCellMerge::conflict_advisories`] is filtered: a same-node conflict whose node
+/// is NOT in `active` auto-resolves silently (no advisory noise), while a conflict
+/// inside the active area still raises its [`MergeConflictAdvisory`].
 ///
-/// This lets the live-prompt-drift convergence path ack ONLY when the operator's
+/// This lets the live-prompt-drift convergence path project an advisory only when the operator's
 /// concurrent edit collided with the in-flight turn's own response area, instead
-/// of acking every unrelated operator edit (queue strike, backlog tweak,
+/// of flagging every unrelated operator edit (queue strike, backlog tweak,
 /// frontmatter flip) that happened to touch the same node the agent did.
 pub fn document_cell_merge_scoped(
     base: &str,
@@ -424,8 +427,8 @@ pub fn document_cell_merge_scoped(
     active: &ActiveNodes,
 ) -> DocumentCellMerge {
     let mut sm = document_cell_merge(base, ours_agent, theirs_operator);
-    sm.requires_ack
-        .retain(|ack| active.is_active(&ack.component, &ack.id));
+    sm.conflict_advisories
+        .retain(|advisory| active.is_active(&advisory.component, &advisory.id));
     sm
 }
 
@@ -512,7 +515,7 @@ fn merge_frontmatter_owned(
     ours: Option<&str>,
     theirs: Option<&str>,
     outcomes: &mut Vec<NodeOutcome>,
-    acks: &mut Vec<AckRequest>,
+    advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> Option<String> {
     if base.is_none() && ours.is_none() && theirs.is_none() {
         return None;
@@ -579,11 +582,11 @@ fn merge_frontmatter_owned(
                         if o == t {
                             (t.clone(), Some(OutcomeKind::Convergent))
                         } else {
-                            // operator wins + ack
-                            acks.push(AckRequest {
+                            // operator wins + advisory
+                            advisories.push(MergeConflictAdvisory {
                                 component: FRONTMATTER_COMPONENT.to_string(),
                                 id: key.clone(),
-                                reason: AckReason::SameNodeOperatorOverride,
+                                reason: MergeConflictReason::SameNodeOperatorOverride,
                                 detail: format!(
                                     "frontmatter `{key}`: operator set `{}` (agent wanted `{}`)",
                                     t.clone().unwrap_or_default(),
@@ -716,7 +719,7 @@ fn merge_component_items(
     ours_comp: Option<&Component>,
     theirs_comp: &Component,
     outcomes: &mut Vec<NodeOutcome>,
-    acks: &mut Vec<AckRequest>,
+    advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
 
@@ -745,13 +748,13 @@ fn merge_component_items(
                         lines.push(item_line(t_item));
                         record(outcomes, name, id, OutcomeKind::Convergent);
                     } else {
-                        // Same-node conflict — operator wins + ack.
+                        // Same-node conflict — operator wins + advisory.
                         lines.push(item_line(t_item));
                         record(outcomes, name, id, OutcomeKind::OperatorWonConflict);
-                        acks.push(AckRequest {
+                        advisories.push(MergeConflictAdvisory {
                             component: name.to_string(),
                             id: id.clone(),
-                            reason: AckReason::SameNodeOperatorOverride,
+                            reason: MergeConflictReason::SameNodeOperatorOverride,
                             detail: same_node_conflict_detail(
                                 name,
                                 id,
@@ -783,10 +786,10 @@ fn merge_component_items(
                     let _ = b;
                     lines.push(item_line(t_item));
                     record(outcomes, name, id, OutcomeKind::OperatorRevived);
-                    acks.push(AckRequest {
+                    advisories.push(MergeConflictAdvisory {
                         component: name.to_string(),
                         id: id.clone(),
-                        reason: AckReason::OperatorRevivedAgentDeletedNode,
+                        reason: MergeConflictReason::OperatorRevivedAgentDeletedNode,
                         detail: format!(
                             "{name} `{id}`: agent removed it but operator edited it — operator's version kept (revived)"
                         ),
@@ -804,13 +807,13 @@ fn merge_component_items(
                     lines.push(item_line(t_item));
                     record(outcomes, name, id, OutcomeKind::AppliedBothAdd);
                 } else {
-                    // Same id, different text → operator wins + ack.
+                    // Same id, different text → operator wins + advisory.
                     lines.push(item_line(t_item));
                     record(outcomes, name, id, OutcomeKind::OperatorWonConflict);
-                    acks.push(AckRequest {
+                    advisories.push(MergeConflictAdvisory {
                         component: name.to_string(),
                         id: id.clone(),
-                        reason: AckReason::SameNodeOperatorOverride,
+                        reason: MergeConflictReason::SameNodeOperatorOverride,
                         detail: same_node_conflict_detail(
                             name,
                             id,
@@ -850,18 +853,18 @@ fn merge_component_items(
                     // Present in base, absent in operator → operator deleted it.
                     let agent_edited = !item_unchanged(o_item, b);
                     if agent_edited {
-                        // Deletion stands + ack (operator deleted an agent-edited node).
+                        // Deletion stands + advisory (operator deleted an agent-edited node).
                         record(outcomes, name, id, OutcomeKind::DeletionKept);
-                        acks.push(AckRequest {
+                        advisories.push(MergeConflictAdvisory {
                             component: name.to_string(),
                             id: id.clone(),
-                            reason: AckReason::OperatorDeletedAgentEditedNode,
+                            reason: MergeConflictReason::OperatorDeletedAgentEditedNode,
                             detail: format!(
                                 "{name} `{id}`: operator deleted the node the agent edited — deletion stands"
                             ),
                         });
                     } else {
-                        // Operator deleted an unchanged node → deletion stands, no ack.
+                        // Operator deleted an unchanged node → deletion stands, no advisory.
                         record(outcomes, name, id, OutcomeKind::DeletionKept);
                     }
                 }
@@ -956,7 +959,7 @@ fn merge_exchange_inner(
     theirs_comp: Option<&Component>,
     ours_source: &str,
     outcomes: &mut Vec<NodeOutcome>,
-    acks: &mut Vec<AckRequest>,
+    advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> String {
     let (theirs_leading, theirs_blocks) = split_heading_blocks(theirs_inner);
 
@@ -975,8 +978,14 @@ fn merge_exchange_inner(
         // so the existing bullet-based exchange behavior is preserved exactly.
         let mut out = String::new();
         if let Some(tc) = theirs_comp {
-            let merged =
-                merge_component_items(EXCHANGE_COMPONENT, base_comp, ours_comp, tc, outcomes, acks);
+            let merged = merge_component_items(
+                EXCHANGE_COMPONENT,
+                base_comp,
+                ours_comp,
+                tc,
+                outcomes,
+                advisories,
+            );
             for ml in &merged {
                 out.push_str(ml);
                 out.push('\n');
@@ -1250,7 +1259,7 @@ fn merge_components_into_body(
     ours_comps: &[Component],
     ours_source: &str,
     outcomes: &mut Vec<NodeOutcome>,
-    acks: &mut Vec<AckRequest>,
+    advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> String {
     let mut out = String::new();
     let mut open: Option<String> = None; // currently-open component name
@@ -1284,7 +1293,7 @@ fn merge_components_into_body(
                         theirs_comp,
                         ours_source,
                         outcomes,
-                        acks,
+                        advisories,
                     );
                     out.push_str(&merged_inner);
                 } else if let Some(tc) = theirs_comp {
@@ -1296,7 +1305,7 @@ fn merge_components_into_body(
                     // anti-data-loss gate, and decline forever (the persistent
                     // `live_prompt_drift` churn).
                     let merged =
-                        merge_component_items(name, base_comp, ours_comp, tc, outcomes, acks);
+                        merge_component_items(name, base_comp, ours_comp, tc, outcomes, advisories);
                     out.push_str(&merge_nonexchange_inner(&component_inner, &merged));
                 }
                 component_inner.clear();
@@ -1332,14 +1341,15 @@ fn merge_components_into_body(
                 theirs_comp,
                 ours_source,
                 outcomes,
-                acks,
+                advisories,
             );
             if !out.ends_with('\n') && !out.is_empty() {
                 out.push('\n');
             }
             out.push_str(&merged_inner);
         } else if let Some(tc) = find_comp(theirs_comps, &name) {
-            let merged = merge_component_items(&name, base_comp, ours_comp, tc, outcomes, acks);
+            let merged =
+                merge_component_items(&name, base_comp, ours_comp, tc, outcomes, advisories);
             if !out.ends_with('\n') && !out.is_empty() {
                 out.push('\n');
             }
@@ -1390,18 +1400,18 @@ mod tests {
 
     #[test]
     fn ack_reason_tokens_are_stable() {
-        // #semmerge-ack-turn (Phase 4): these tokens are the wire format
+        // These tokens are the stable cycle-local conflict projection format.
         // cycle_state persists and preflight surfaces — keep them stable.
         assert_eq!(
-            AckReason::OperatorDeletedAgentEditedNode.token(),
+            MergeConflictReason::OperatorDeletedAgentEditedNode.token(),
             "operator_deleted_agent_edited_node"
         );
         assert_eq!(
-            AckReason::SameNodeOperatorOverride.token(),
+            MergeConflictReason::SameNodeOperatorOverride.token(),
             "same_node_operator_override"
         );
         assert_eq!(
-            AckReason::OperatorRevivedAgentDeletedNode.token(),
+            MergeConflictReason::OperatorRevivedAgentDeletedNode.token(),
             "operator_revived_agent_deleted_node"
         );
     }
@@ -1431,7 +1441,7 @@ mod tests {
         let base = q("- do [#a] task\n");
         let m = document_cell_merge(&base, &base, &base);
         assert_eq!(outcome_for(&m, "a").unwrap().kind, OutcomeKind::Keep);
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
         assert_eq!(reparses_to_ids(&m.merged_doc, "queue"), vec!["a"]);
     }
 
@@ -1446,7 +1456,7 @@ mod tests {
             OutcomeKind::AppliedAgentEdit
         );
         assert!(m.merged_doc.contains("EDITED"));
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
     }
 
     #[test]
@@ -1454,7 +1464,7 @@ mod tests {
         // #smqstrike (document_cell_merge Phase 3): an answered/consumed queue head is
         // struck by the agent (ours) while the operator (theirs) concurrently adds
         // a new queue item. The node-keyed merge must keep BOTH — the head struck
-        // on the merged structure AND the operator's add — with no ack
+        // on the merged structure AND the operator's add — with no advisory
         // (node-disjoint), so a drifted operator queue edit never aborts or loses
         // the head strike. This is the merged-tree contract behind the shipped
         // queue_consume node-keyed strike + divergence reconcile.
@@ -1474,9 +1484,9 @@ mod tests {
         );
         assert_eq!(reparses_to_ids(&m.merged_doc, "queue"), vec!["a", "b"]);
         assert!(
-            m.requires_ack.is_empty(),
-            "node-disjoint strike+add needs no ack: {:?}",
-            m.requires_ack
+            m.conflict_advisories.is_empty(),
+            "node-disjoint strike+add needs no advisory: {:?}",
+            m.conflict_advisories
         );
         assert_eq!(
             outcome_for(&m, "a").unwrap().kind,
@@ -1496,7 +1506,7 @@ mod tests {
             OutcomeKind::AppliedOperatorEdit
         );
         assert!(m.merged_doc.contains("OPEDIT"));
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
     }
 
     #[test]
@@ -1508,7 +1518,7 @@ mod tests {
         assert!(m.merged_doc.contains("SAME"));
         // Applied once.
         assert_eq!(m.merged_doc.matches("[#a]").count(), 1);
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
     }
 
     #[test]
@@ -1524,30 +1534,34 @@ mod tests {
         assert!(m.merged_doc.contains("OPERATOR"));
         assert!(!m.merged_doc.contains("AGENT"));
         assert_eq!(
-            m.requires_ack[0].reason,
-            AckReason::SameNodeOperatorOverride
+            m.conflict_advisories[0].reason,
+            MergeConflictReason::SameNodeOperatorOverride
         );
     }
 
-    // ----- #msn6 / #smturnactive: turn-active-area ack gating --------------
+    // ----- #msn6 / #smturnactive: turn-active-area advisory gating --------------
 
     #[test]
     fn scoped_conflict_outside_active_area_drops_ack_but_keeps_operator_value() {
-        // A same-node conflict in the `queue` component. Unscoped, it acks.
+        // A same-node conflict in the `queue` component. Unscoped, it advisories.
         let base = q("- do [#a] task\n");
         let ours = q("- do [#a] task AGENT\n");
         let theirs = q("- do [#a] task OPERATOR\n");
 
         let unscoped = document_cell_merge(&base, &ours, &theirs);
-        assert_eq!(unscoped.requires_ack.len(), 1, "unscoped acks the conflict");
+        assert_eq!(
+            unscoped.conflict_advisories.len(),
+            1,
+            "unscoped advisories the conflict"
+        );
 
         // Scope the active area to `exchange` only — the queue conflict is OUTSIDE
-        // it, so the ack is dropped while the merged doc + outcome are unchanged.
+        // it, so the advisory is dropped while the merged doc + outcome are unchanged.
         let active = ActiveNodes::new().active_component("exchange");
         let scoped = document_cell_merge_scoped(&base, &ours, &theirs, &active);
         assert!(
-            scoped.requires_ack.is_empty(),
-            "out-of-active-area conflict auto-resolves with no ack"
+            scoped.conflict_advisories.is_empty(),
+            "out-of-active-area conflict auto-resolves with no advisory"
         );
         assert_eq!(
             scoped.merged_doc, unscoped.merged_doc,
@@ -1556,7 +1570,7 @@ mod tests {
         assert_eq!(
             outcome_for(&scoped, "a").unwrap().kind,
             OutcomeKind::OperatorWonConflict,
-            "outcome record is unchanged — only ack emission is scoped"
+            "outcome record is unchanged — only advisory emission is scoped"
         );
         assert!(scoped.merged_doc.contains("OPERATOR"));
         assert!(!scoped.merged_doc.contains("AGENT"));
@@ -1568,13 +1582,17 @@ mod tests {
         let ours = q("- do [#a] task AGENT\n");
         let theirs = q("- do [#a] task OPERATOR\n");
 
-        // The conflict lives in `queue`; marking `queue` active keeps the ack.
+        // The conflict lives in `queue`; marking `queue` active keeps the advisory.
         let active = ActiveNodes::new().active_component("queue");
         let scoped = document_cell_merge_scoped(&base, &ours, &theirs, &active);
-        assert_eq!(scoped.requires_ack.len(), 1, "active-area collision acks");
         assert_eq!(
-            scoped.requires_ack[0].reason,
-            AckReason::SameNodeOperatorOverride
+            scoped.conflict_advisories.len(),
+            1,
+            "active-area collision advisories"
+        );
+        assert_eq!(
+            scoped.conflict_advisories[0].reason,
+            MergeConflictReason::SameNodeOperatorOverride
         );
     }
 
@@ -1587,9 +1605,13 @@ mod tests {
 
         let active = ActiveNodes::new().with_node("queue", "a");
         let scoped = document_cell_merge_scoped(&base, &ours, &theirs, &active);
-        assert_eq!(scoped.requires_ack.len(), 1, "only the active node acks");
-        assert_eq!(scoped.requires_ack[0].id, "a");
-        // Both operator values still win regardless of ack scoping.
+        assert_eq!(
+            scoped.conflict_advisories.len(),
+            1,
+            "only the active node advisories"
+        );
+        assert_eq!(scoped.conflict_advisories[0].id, "a");
+        // Both operator values still win regardless of advisory scoping.
         assert!(scoped.merged_doc.contains("one OPERATOR"));
         assert!(scoped.merged_doc.contains("two OPERATOR"));
     }
@@ -1604,7 +1626,7 @@ mod tests {
         assert!(active.is_empty());
         let scoped = document_cell_merge_scoped(&base, &ours, &theirs, &active);
         assert!(
-            scoped.requires_ack.is_empty(),
+            scoped.conflict_advisories.is_empty(),
             "an empty active set means nothing is active → every conflict auto-resolves"
         );
         assert!(scoped.merged_doc.contains("OPERATOR"));
@@ -1624,8 +1646,8 @@ mod tests {
         );
         assert!(!m.merged_doc.contains("[#a]"), "deleted node omitted");
         assert_eq!(
-            m.requires_ack[0].reason,
-            AckReason::OperatorDeletedAgentEditedNode
+            m.conflict_advisories[0].reason,
+            MergeConflictReason::OperatorDeletedAgentEditedNode
         );
     }
 
@@ -1643,8 +1665,8 @@ mod tests {
         );
         assert!(m.merged_doc.contains("OPEDIT"), "operator edit revived");
         assert_eq!(
-            m.requires_ack[0].reason,
-            AckReason::OperatorRevivedAgentDeletedNode
+            m.conflict_advisories[0].reason,
+            MergeConflictReason::OperatorRevivedAgentDeletedNode
         );
     }
 
@@ -1659,7 +1681,7 @@ mod tests {
             OutcomeKind::AppliedAgentAdd
         );
         assert!(m.merged_doc.contains("[#new]"));
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
     }
 
     #[test]
@@ -1673,7 +1695,7 @@ mod tests {
             OutcomeKind::AppliedOperatorAdd
         );
         assert!(m.merged_doc.contains("[#opnew]"));
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
     }
 
     #[test]
@@ -1692,7 +1714,7 @@ mod tests {
             outcome_for(&m, "opadd").unwrap().kind,
             OutcomeKind::AppliedOperatorAdd
         );
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
         let ids = reparses_to_ids(&m.merged_doc, "queue");
         assert!(ids.contains(&"a".to_string()));
         assert!(ids.contains(&"agentadd".to_string()));
@@ -1712,8 +1734,8 @@ mod tests {
         assert!(m.merged_doc.contains("OPERATOR-VERSION"));
         assert!(!m.merged_doc.contains("AGENT-VERSION"));
         assert_eq!(
-            m.requires_ack[0].reason,
-            AckReason::SameNodeOperatorOverride
+            m.conflict_advisories[0].reason,
+            MergeConflictReason::SameNodeOperatorOverride
         );
     }
 
@@ -1797,7 +1819,7 @@ queue: stop
         // Agent's review migration carried (agent-only component).
         assert!(m.merged_doc.contains("[#migrated]"));
 
-        // Zero conflicts / acks — fully node-disjoint.
+        // Zero conflicts / advisories — fully node-disjoint.
         let conflicts: Vec<_> = m
             .outcomes
             .iter()
@@ -1811,7 +1833,11 @@ queue: stop
             })
             .collect();
         assert!(conflicts.is_empty(), "no conflicts: {conflicts:?}");
-        assert!(m.requires_ack.is_empty(), "no acks: {:?}", m.requires_ack);
+        assert!(
+            m.conflict_advisories.is_empty(),
+            "no advisories: {:?}",
+            m.conflict_advisories
+        );
 
         // Re-parses cleanly.
         let queue_ids = reparses_to_ids(&m.merged_doc, "queue");
@@ -1834,12 +1860,12 @@ queue: stop
             outcome_for(&m, "y").unwrap().kind,
             OutcomeKind::DeletionKept
         );
-        assert_eq!(m.requires_ack.len(), 1);
+        assert_eq!(m.conflict_advisories.len(), 1);
         assert_eq!(
-            m.requires_ack[0].reason,
-            AckReason::OperatorDeletedAgentEditedNode
+            m.conflict_advisories[0].reason,
+            MergeConflictReason::OperatorDeletedAgentEditedNode
         );
-        assert_eq!(m.requires_ack[0].id, "y");
+        assert_eq!(m.conflict_advisories[0].id, "y");
     }
 
     #[test]
@@ -1850,10 +1876,10 @@ queue: stop
         let m = document_cell_merge(&base, &ours, &theirs);
         assert!(m.merged_doc.contains("operator version"));
         assert!(!m.merged_doc.contains("agent version"));
-        assert_eq!(m.requires_ack.len(), 1);
+        assert_eq!(m.conflict_advisories.len(), 1);
         assert_eq!(
-            m.requires_ack[0].reason,
-            AckReason::SameNodeOperatorOverride
+            m.conflict_advisories[0].reason,
+            MergeConflictReason::SameNodeOperatorOverride
         );
         assert!(
             m.exchange_notes
@@ -1903,7 +1929,7 @@ Done.
                 m.merged_doc
             );
         }
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
     }
 
     #[test]
@@ -1920,7 +1946,7 @@ Done.
             .find(|o| o.component == FRONTMATTER_COMPONENT && o.id == "queue")
             .unwrap();
         assert_eq!(fm_outcome.kind, OutcomeKind::AppliedOperatorEdit);
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
     }
 
     #[test]
@@ -1930,12 +1956,12 @@ Done.
         let theirs = "---\nqueue: stop\n---\n# body\n";
         let m = document_cell_merge(base, ours, theirs);
         assert!(m.merged_doc.contains("queue: stop"));
-        assert_eq!(m.requires_ack.len(), 1);
+        assert_eq!(m.conflict_advisories.len(), 1);
         assert_eq!(
-            m.requires_ack[0].reason,
-            AckReason::SameNodeOperatorOverride
+            m.conflict_advisories[0].reason,
+            MergeConflictReason::SameNodeOperatorOverride
         );
-        assert_eq!(m.requires_ack[0].component, FRONTMATTER_COMPONENT);
+        assert_eq!(m.conflict_advisories[0].component, FRONTMATTER_COMPONENT);
     }
 
     #[test]
@@ -1945,7 +1971,7 @@ Done.
         let theirs = base.to_string();
         let m = document_cell_merge(base, ours, &theirs);
         assert!(m.merged_doc.contains("model: sonnet"));
-        assert!(m.requires_ack.is_empty());
+        assert!(m.conflict_advisories.is_empty());
     }
 
     #[test]
@@ -2389,11 +2415,11 @@ Prior answer.
             "agent's new turn present exactly once:\n{}",
             m.merged_doc
         );
-        // Node-disjoint change-sets: no ack noise.
+        // Node-disjoint change-sets: no advisory noise.
         assert!(
-            m.requires_ack.is_empty(),
-            "node-disjoint queue-add + exchange-turn need no ack: {:?}",
-            m.requires_ack
+            m.conflict_advisories.is_empty(),
+            "node-disjoint queue-add + exchange-turn need no advisory: {:?}",
+            m.conflict_advisories
         );
     }
 
@@ -2584,7 +2610,7 @@ Prior answer.
             OutcomeKind::DeletionKept
         );
         // The fact is surfaced as an exchange note (so the operator sees it this
-        // cycle, independent of the next-cycle ack carry-forward).
+        // cycle, independent of the cycle-local conflict projection).
         assert!(
             !m.exchange_notes.is_empty(),
             "a deletion-of-agent-targeted-node fact must be surfaced as an exchange note"

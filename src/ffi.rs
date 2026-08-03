@@ -476,53 +476,6 @@ pub unsafe extern "C" fn agent_doc_cancel_preflight_cycle(file_path: *const c_ch
     }
 }
 
-/// Get the Project Controller→plugin turn-state projection for a document, as JSON.
-///
-/// Returns a NUL-terminated JSON string of `TurnProjection`:
-/// `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"project_controller","realtime_steering":{"state":"...","preview":"..."}}`.
-/// The Project Controller owns the authoritative turn phase; the plugin observes
-/// this projection to render turn-in-flight UI and to decide whether a forwarded
-/// operator prompt starts a fresh turn (`turn_in_flight == false`) or would
-/// collide with an in-flight response (the `live_prompt_drift` double-append
-/// guard). Defaults to the idle projection when no cycle state exists or on any
-/// error.
-///
-/// Caller must free with `agent_doc_free_string`.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> *mut c_char {
-    fn idle_json() -> String {
-        let proj = agent_doc_turn::cp_projection::TurnProjection::from_phase(
-            agent_doc_turn::CyclePhase::Committed,
-        );
-        serde_json::to_string(&proj).unwrap_or_else(|_| r#"{"state":"idle"}"#.to_string())
-    }
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return CString::new(idle_json()).unwrap().into_raw(),
-    };
-    // Legacy compatibility-cache read. Current editor adapters query the
-    // controller's in-memory projection directly; this function never opens a
-    // controller request, subscribes, or reads SQLite.
-    let proj = agent_doc_project_root_io::project_root_containing(Path::new(path))
-        .and_then(|project_root| {
-            agent_doc_editor_surface_io::document_authority(&project_root, path)
-                .and_then(|authority| authority.turn)
-        })
-        .unwrap_or_else(|| {
-            agent_doc_turn::cp_projection::TurnProjection::from_phase(
-                agent_doc_turn::CyclePhase::Committed,
-            )
-        });
-    let json = serde_json::to_string(&proj).unwrap_or_else(|_| idle_json());
-    CString::new(json)
-        .unwrap_or_else(|_| CString::new(idle_json()).unwrap())
-        .into_raw()
-}
-
 /// Return the `agent:exchange` nodes of `file_path` as a JSON array
 /// (`[{"id","kind","label"}, …]`), or `[]` on any error or when the document has no
 /// exchange component. This is the Phase 4 read surface of the exchange document-tree
@@ -3593,39 +3546,6 @@ mod tests {
     }
 
     #[test]
-    fn turn_projection_uses_committed_state_backbone_phase() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let doc = tmp.path().join("session.md");
-        let content = "---\nagent_doc_session: session-1\n---\n\nbody\n";
-        std::fs::write(&doc, content).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        agent_doc_cycle_state_io::mark_committed(
-            &doc,
-            "commit_success",
-            Some(content),
-            Some(content),
-        )
-        .unwrap();
-        assert_eq!(
-            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::Committed
-        );
-
-        let doc_c = CString::new(doc.to_string_lossy().as_ref()).unwrap();
-        let projection_ptr = unsafe { agent_doc_turn_projection(doc_c.as_ptr()) };
-        let projection = unsafe { CStr::from_ptr(projection_ptr) }
-            .to_str()
-            .unwrap()
-            .to_string();
-        drop(unsafe { CString::from_raw(projection_ptr) });
-        let projection: serde_json::Value = serde_json::from_str(&projection).unwrap();
-
-        assert_eq!(projection["turn_in_flight"], false);
-        assert_eq!(projection["state"], "idle");
-    }
-
-    #[test]
     fn state_projection_ffi_round_trip() {
         use agent_doc_state_backbone::{StateEvent, StateFact};
 
@@ -3803,20 +3723,6 @@ mod tests {
             document.transport.last_rejected_reason.as_deref(),
             Some("file_apply_failed")
         );
-    }
-
-    #[test]
-    fn turn_projection_ffi_defaults_to_idle_for_unknown_document() {
-        // No cycle state for this path → idle projection, valid JSON, not in flight.
-        let path = CString::new("/nonexistent/agent-doc/turnproj.md").unwrap();
-        let ptr = unsafe { agent_doc_turn_projection(path.as_ptr()) };
-        let json = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
-        drop(unsafe { CString::from_raw(ptr) });
-
-        let value: serde_json::Value = serde_json::from_str(&json).expect("valid projection JSON");
-        assert_eq!(value["state"], "idle");
-        assert_eq!(value["turn_in_flight"], false);
-        assert_eq!(value["transition_authority"], "project_controller");
     }
 
     #[test]

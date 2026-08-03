@@ -1,8 +1,8 @@
 //! Route startup readiness polling.
 
 use agent_doc_controller::dispatch::{
-    AutoStartDispatchBlock, AutoStartDispatchReadyFacts, FreshStartAckOutcome,
-    classify_auto_start_dispatch_ready_block, fresh_start_ack_outcome,
+    AutoStartDispatchBlock, AutoStartDispatchReadyFacts, FreshStartAdmissionOutcome,
+    classify_auto_start_dispatch_ready_block, fresh_start_admission_outcome,
     pane_composer_has_pending_trigger,
 };
 use agent_doc_harness::{HarnessConfig, PaneComposerProjection, PaneComposerReadinessEvidence};
@@ -194,8 +194,8 @@ pub fn wait_for_agent_ready_outcome(
 /// Whether a no-cycle fresh start returned to a dispatch-ready prompt.
 pub fn fresh_start_pane_idle_ready(tmux: &Tmux, pane: &str, harness: &HarnessConfig) -> bool {
     matches!(
-        fresh_start_no_ack_outcome(tmux, pane, harness, ""),
-        FreshStartAckOutcome::IdleNoOpKeep
+        fresh_start_missing_admission_outcome(tmux, pane, harness, ""),
+        FreshStartAdmissionOutcome::IdleNoOpKeep
     )
 }
 
@@ -205,20 +205,20 @@ pub fn fresh_start_pane_idle_ready(tmux: &Tmux, pane: &str, harness: &HarnessCon
 /// "typed but not submitted" trigger (`StrandedTriggerResubmit`) by checking
 /// whether the injected `trigger` is still visible unsubmitted in the composer.
 /// Pass an empty `trigger` to skip the pending-composer check (idle-vs-miss only).
-pub fn fresh_start_no_ack_outcome(
+pub fn fresh_start_missing_admission_outcome(
     tmux: &Tmux,
     pane: &str,
     harness: &HarnessConfig,
     trigger: &str,
-) -> FreshStartAckOutcome {
+) -> FreshStartAdmissionOutcome {
     match agent_doc_tmux_io::capture_pane(tmux, pane) {
         Ok(content) => {
             let pane_dispatch_ready =
                 pane_ready_prompt_candidate(tmux, pane, &content, harness).is_some();
             let trigger_pending = pane_composer_has_pending_trigger(&content, trigger);
-            fresh_start_ack_outcome(false, pane_dispatch_ready, trigger_pending)
+            fresh_start_admission_outcome(false, pane_dispatch_ready, trigger_pending)
         }
-        Err(_) => fresh_start_ack_outcome(false, false, false),
+        Err(_) => fresh_start_admission_outcome(false, false, false),
     }
 }
 

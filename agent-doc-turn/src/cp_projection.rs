@@ -196,6 +196,15 @@ fn turn_steering_projection_is_none(steering: &TurnSteeringProjection) -> bool {
     !steering.is_present() && !steering.has_observation_receipt()
 }
 
+/// Cycle-local semantic merge conflict shown by the controller projection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticMergeConflictProjection {
+    pub component: String,
+    pub id: String,
+    pub reason: String,
+    pub detail: String,
+}
+
 /// The plugin-facing projection of the authoritative turn phase.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnProjection {
@@ -210,6 +219,10 @@ pub struct TurnProjection {
     /// to parse the projection.
     #[serde(default, skip_serializing_if = "turn_steering_projection_is_none")]
     pub realtime_steering: TurnSteeringProjection,
+    /// Conflicts observed while merging this cycle. A new turn clears the set;
+    /// editors observe it directly and never acknowledge it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub semantic_merge_conflicts: Vec<SemanticMergeConflictProjection>,
 }
 
 impl TurnProjection {
@@ -227,11 +240,20 @@ impl TurnProjection {
             // transition today.
             transition_authority: TransitionAuthority::ProjectController,
             realtime_steering: TurnSteeringProjection::none(),
+            semantic_merge_conflicts: Vec::new(),
         }
     }
 
     pub fn with_realtime_steering(mut self, steering: TurnSteeringProjection) -> Self {
         self.realtime_steering = steering;
+        self
+    }
+
+    pub fn with_semantic_merge_conflicts(
+        mut self,
+        conflicts: Vec<SemanticMergeConflictProjection>,
+    ) -> Self {
+        self.semantic_merge_conflicts = conflicts;
         self
     }
 
@@ -362,6 +384,21 @@ mod tests {
         assert!(json.contains("removed prompt"));
         let back: TurnProjection = serde_json::from_str(&json).unwrap();
         assert_eq!(proj, back);
+    }
+
+    #[test]
+    fn semantic_merge_conflicts_round_trip_as_cycle_local_projection() {
+        let projection = TurnProjection::from_phase(CyclePhase::WriteApplied)
+            .with_semantic_merge_conflicts(vec![SemanticMergeConflictProjection {
+                component: "exchange".into(),
+                id: "node-1".into(),
+                reason: "same_node_operator_override".into(),
+                detail: "operator value won".into(),
+            }]);
+        let json = serde_json::to_string(&projection).unwrap();
+        assert!(json.contains("semantic_merge_conflicts"));
+        let back: TurnProjection = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, projection);
     }
 
     #[test]

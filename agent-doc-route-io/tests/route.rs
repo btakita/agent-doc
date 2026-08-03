@@ -25,8 +25,9 @@
 //!      `rescue_from_stash` is attempted (it self-gates on session match) so panes
 //!      stashed within the target session get rescued, but panes in other sessions are
 //!      left in place. When the document already has prompt-bearing user drift after a
-//!      closed cycle, the routed trigger must also produce a new per-document cycle
-//!      acknowledgment before route returns success; otherwise route fails closed.
+//!      closed cycle, the routed trigger must also produce a new reactive
+//!      per-document admission projection before route returns success; otherwise
+//!      route fails closed.
 //!   7. If pane is dead and was previously registered: lazy-claims only to an explicit
 //!      pane override via `find_target_pane` (skipped if the candidate is already claimed
 //!      or is running a non-agent process), sends the command, then calls
@@ -37,7 +38,7 @@
 //! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
 //!   new route-owned agent pane and sends `agent-doc start --route-owned`. Waits for the
 //!   agent's idle prompt before sending the initial command, then requires a real
-//!   document-cycle acknowledgment before treating the fresh start as successful. Called
+//!   reactive document-cycle admission projection before treating the fresh start as successful. Called
 //!   by `sync.rs` for unresolved files.
 //! - **`provision_pane(tmux, file, session_id, file_path, context_session, col_args)`**: Like
 //!   `auto_start` but skips waiting for the agent to be ready. Used by sync when only pane
@@ -58,10 +59,10 @@
 //!   beside an arbitrary registered pane.
 //! - **`send_command(tmux, pane, file_path, harness)`**: Used only for direct tmux/shell
 //!   launch paths plus existing dispatch-only live-pane reroutes. Managed reroutes keep using
-//!   supervisor IPC when route needs queueing/ack semantics, but a dispatch-only reopen types the
+//!   supervisor IPC when route needs queueing/admission semantics, but a dispatch-only reopen types the
 //!   bare harness trigger directly through the resolved live pane so it shares the same terminal
 //!   submit boundary as `session clear`.
-//! - **Dispatch-only editor reroutes** still bypass the managed acceptance/cycle-ack loop on
+//! - **Dispatch-only editor reroutes** still bypass the managed acceptance/admission-projection loop on
 //!   purpose, and for existing managed sessions they send the bare reopen through direct
 //!   live-pane submit instead of a one-shot supervisor IPC inject. Startup-window reroutes,
 //!   including tracked Codex/OpenCode `/clear` restarts, remain prompt-gated and fail closed
@@ -121,11 +122,11 @@
 //!   a second hidden pane in stash.
 //! - **Non-fatal pane focus**: `select_pane` failures are logged as warnings and never abort
 //!   the routing flow. The command is still sent even if focus fails.
-//! - **Cycle acknowledgment for prompt-bearing reruns**: Fresh auto-start success is not
+//! - **Reactive admission for prompt-bearing reruns**: Fresh auto-start success is not
 //!   inferred from pane input acceptance alone. The same fail-closed rule applies when route
 //!   dispatches to an existing pane while the document already has prompt-bearing drift on top
-//!   of a closed cycle: route must observe a new per-document cycle state before considering
-//!   the dispatch successful.
+//!   of a closed cycle: route must observe the Project Controller's new per-document cycle
+//!   projection before considering the dispatch successful.
 //! - **Split direction determinism**: `is_first_column` requires ≥ 2 `col_args` entries to
 //!   return true, ensuring a single-column layout never triggers a left-split.
 //!
@@ -192,6 +193,8 @@ use agent_doc_controller_io::starting_actor_timeout::{
 #[cfg(test)]
 use agent_doc_harness::HarnessConfig;
 #[cfg(test)]
+use agent_doc_route_io::admission_projection::pending_prompt_bearing_context_for_route;
+#[cfg(test)]
 use agent_doc_route_io::authoritative_actor::{
     AuthoritativeActorDispatchTarget, actor_dispatch_state,
 };
@@ -209,8 +212,6 @@ use agent_doc_route_io::closeout_drain::{
 use agent_doc_route_io::command::RouteCommandEffects;
 #[cfg(test)]
 use agent_doc_route_io::command::RouteMode;
-#[cfg(test)]
-use agent_doc_route_io::cycle_ack::pending_prompt_bearing_context_for_route;
 #[cfg(test)]
 use agent_doc_route_io::diagnostics::{
     emit_startup_miss_diagnostic,

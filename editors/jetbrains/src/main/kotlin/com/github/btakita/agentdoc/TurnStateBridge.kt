@@ -84,8 +84,35 @@ object TurnStateBridge {
             val root = JsonParser.parseString(json).asJsonObject
             val state = root.get("state")?.asString ?: "idle"
             val inFlight = root.get("turn_in_flight")?.asBoolean ?: false
+            val conflicts =
+                root.getAsJsonArray("semantic_merge_conflicts")
+                    ?.mapNotNull { element ->
+                        element.takeIf { it.isJsonObject }?.asJsonObject
+                    }
+                    .orEmpty()
+            val conflictLabel =
+                when (conflicts.size) {
+                    0 -> null
+                    1 -> "⚠ merge conflict"
+                    else -> "⚠ merge conflicts (${conflicts.size})"
+                }
+            val conflictTooltip =
+                conflicts
+                    .map { conflict ->
+                        val component = conflict.get("component")?.asString ?: "unknown"
+                        val id = conflict.get("id")?.asString ?: "unknown"
+                        val detail = conflict.get("detail")?.asString ?: "operator value won"
+                        "$component:$id — $detail"
+                    }
+                    .joinToString("\n")
+                    .ifBlank { null }
             if (state == "idle" || !inFlight) {
-                TurnStatePresentation("", false)
+                TurnStatePresentation(
+                    label = conflictLabel?.let { "agent-doc: $it" } ?: "",
+                    guardPromptForwarding = false,
+                    tooltip = conflictTooltip,
+                    showBanner = conflictLabel != null,
+                )
             } else {
                 val phaseLabel =
                     if (state == "awaiting_response") "⟳ agent-doc: awaiting response"
@@ -96,8 +123,13 @@ object TurnStateBridge {
                     steering?.get("state")?.asString?.let(::steeringLabel)?.let { label ->
                         if (steeringCount > 1) "$label ($steeringCount edits)" else label
                     }
-                val label = listOfNotNull(phaseLabel, steeringLabel).joinToString(" · ")
-                val tooltip = steering?.get("verbatim")?.asString?.takeIf(String::isNotBlank)
+                val label =
+                    listOfNotNull(phaseLabel, steeringLabel, conflictLabel).joinToString(" · ")
+                val tooltip =
+                    listOfNotNull(
+                        steering?.get("verbatim")?.asString?.takeIf(String::isNotBlank),
+                        conflictTooltip,
+                    ).joinToString("\n\n").ifBlank { null }
                 TurnStatePresentation(label, true, tooltip)
             }
         } catch (e: Throwable) {

@@ -9564,7 +9564,10 @@ fn semmerge_sim_node_disjoint_operator_add_and_agent_strike_both_apply() {
 
     let sm = world.converge_semantic_merge(base, agent_ours, operator_theirs, Some("queue"));
 
-    assert!(sm.requires_ack.is_empty(), "disjoint merge needs no ack");
+    assert!(
+        sm.conflict_advisories.is_empty(),
+        "disjoint merge needs no ack"
+    );
     assert_eq!(world.coverage.document_cell_merge_node_disjoint, 1);
     assert!(
         world.snapshot.contains("~~do [#a] task~~"),
@@ -9597,7 +9600,7 @@ fn semmerge_sim_same_node_conflict_operator_wins_with_ack_in_active_area() {
         "an in-active-area same-node conflict must raise an ack"
     );
     assert!(
-        !sm.requires_ack.is_empty(),
+        !sm.conflict_advisories.is_empty(),
         "same-node conflict in the active area must ack"
     );
     let item_lines: Vec<&str> = world
@@ -9636,9 +9639,9 @@ fn semmerge_sim_same_node_conflict_outside_active_area_auto_resolves_no_ack() {
     let sm = world.converge_semantic_merge(base, &agent_ours, &operator_theirs, Some("exchange"));
 
     assert!(
-        sm.requires_ack.is_empty(),
+        sm.conflict_advisories.is_empty(),
         "an out-of-active-area conflict must NOT raise ack noise: {:?}",
-        sm.requires_ack
+        sm.conflict_advisories
     );
     assert_eq!(world.coverage.document_cell_merge_scope_gated_acks, 0);
     assert!(
@@ -9672,8 +9675,8 @@ fn semmerge_sim_operator_deleted_agent_edited_node_keeps_deletion_and_acks() {
         "operator-deleted-agent-edited node must raise a deletion ack"
     );
     assert!(
-        sm.requires_ack.iter().any(|a| a.reason
-            == agent_doc_merge::document_cell_merge::AckReason::OperatorDeletedAgentEditedNode),
+        sm.conflict_advisories.iter().any(|a| a.reason
+            == agent_doc_merge::document_cell_merge::MergeConflictReason::OperatorDeletedAgentEditedNode),
         "ack reason must be operator-deleted-agent-edited-node"
     );
     assert!(
@@ -9733,9 +9736,9 @@ fn hap7_sim_operator_queue_add_during_exchange_turn_no_duplication() {
         world.snapshot
     );
     assert!(
-        sm.requires_ack.is_empty(),
+        sm.conflict_advisories.is_empty(),
         "node-disjoint queue-add + exchange-turn need no ack: {:?}",
-        sm.requires_ack
+        sm.conflict_advisories
     );
 }
 

@@ -22,9 +22,10 @@ use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
 use agent_doc_turn::closeout_recovery::blocked_closeout_recovery_command;
-use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
+use agent_doc_turn::prompt_bearing_route::PromptBearingRouteContext;
 use tmux_router::Tmux;
 
+use crate::admission_projection::{RouteAdmissionEffects, require_routed_admission_projection};
 use crate::authoritative_actor::{
     AuthoritativeActorDispatchTarget, PendingHarnessSwitch, RouteDispatchAuthorization,
     actor_dispatch_state, authoritative_actor_dispatch_recovery_hint,
@@ -37,7 +38,6 @@ use crate::closeout_drain::{
     RouteCloseoutDrainEffects, classify_route_closeout_block,
     drain_open_closeout_before_routed_dispatch,
 };
-use crate::cycle_ack::{RouteCycleAckEffects, require_routed_cycle_ack};
 use crate::dispatch::{RouteDispatchEffects, dispatch_via_supervisor_ipc};
 use crate::dispatch_only::{
     DispatchOnlyActiveTurnPolicy, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
@@ -60,7 +60,7 @@ pub struct RouteAuthoritativeActorEffects {
     pub closeout_drain_effects: RouteCloseoutDrainEffects,
     pub queue_effects: RouteQueueEffects,
     pub route_dispatch_effects: RouteDispatchEffects,
-    pub route_cycle_ack_effects: RouteCycleAckEffects,
+    pub route_admission_effects: RouteAdmissionEffects,
     pub dispatch_only_route_effects: DispatchOnlyRouteEffects,
     pub wait_for_ready_override: fn() -> Option<Duration>,
 }
@@ -1092,7 +1092,7 @@ pub fn route_via_authoritative_actor(
                 harness,
                 effects.route_dispatch_effects,
             )?;
-            let ack_pane = require_routed_cycle_ack(
+            let admission_pane = require_routed_admission_projection(
                 tmux,
                 file,
                 &dispatch_pane,
@@ -1106,9 +1106,9 @@ pub fn route_via_authoritative_actor(
                 // `#jbroutasync`: the invocation guard carries the command
                 // deadline from the controller boundary into every route branch.
                 crate::invocation::wait_for_ready_override(),
-                effects.route_cycle_ack_effects,
+                effects.route_admission_effects,
             )?;
-            Ok(ack_pane.unwrap_or(dispatch_pane))
+            Ok(admission_pane.unwrap_or(dispatch_pane))
         }
         AuthoritativeActorDispatchAction::FailClosed => {
             let reason =
@@ -1222,10 +1222,10 @@ pub fn route_via_authoritative_actor(
             );
             // `#preflightinbinary`: pane acceptance does not prove that a
             // long-lived harness process loaded newly installed admission
-            // hooks. Require the same document-cycle acknowledgment as managed
-            // dispatch. Missing-ack recovery restarts supported harnesses fresh
+            // hooks. Require the same reactive admission projection as managed
+            // dispatch. A missing projection restarts supported harnesses fresh
             // once so their startup hook snapshot is reloaded before retry.
-            let ack_pane = require_routed_cycle_ack(
+            let admission_pane = require_routed_admission_projection(
                 tmux,
                 file,
                 &dispatch_pane,
@@ -1237,9 +1237,9 @@ pub fn route_via_authoritative_actor(
                 true,
                 RoutedDispatchStartProof::CommandAcceptedOnly,
                 crate::invocation::wait_for_ready_override(),
-                effects.route_cycle_ack_effects,
+                effects.route_admission_effects,
             )?;
-            Ok(ack_pane.unwrap_or(dispatch_pane))
+            Ok(admission_pane.unwrap_or(dispatch_pane))
         }
         AuthoritativeActorDispatchAction::ManagedSupervisorIpc => {
             match authorize_controller_dispatch(
@@ -1274,7 +1274,7 @@ pub fn route_via_authoritative_actor(
                 effects.route_dispatch_effects,
             )?;
 
-            let ack_pane = require_routed_cycle_ack(
+            let admission_pane = require_routed_admission_projection(
                 tmux,
                 file,
                 &dispatch_pane,
@@ -1288,9 +1288,9 @@ pub fn route_via_authoritative_actor(
                 // `#jbroutasync`: the invocation guard carries the command
                 // deadline from the controller boundary into every route branch.
                 crate::invocation::wait_for_ready_override(),
-                effects.route_cycle_ack_effects,
+                effects.route_admission_effects,
             )?;
-            Ok(ack_pane.unwrap_or(dispatch_pane))
+            Ok(admission_pane.unwrap_or(dispatch_pane))
         }
     }
 }

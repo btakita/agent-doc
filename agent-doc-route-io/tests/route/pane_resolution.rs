@@ -103,19 +103,19 @@ mod tests {
     use agent_doc_supervisor_io::ipc::SupervisorIpc;
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
+    fn resolve_or_create_pane_waits_longer_for_live_child_cycle_projection() {
         use parking_lot::Mutex;
         use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-child-extended-ack");
+        let iso = IsolatedTmux::new("route-test-live-child-extended-projection");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
 
-        let doc = dir.path().join("route-live-child-extended-ack.md");
+        let doc = dir.path().join("route-live-child-extended-projection.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
@@ -137,14 +137,12 @@ mod tests {
         )
         .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        let session_id = "route-live-child-extended-ack";
+        let session_id = "route-live-child-extended-projection";
         sessions::register(session_id, &pane, &file_path).unwrap();
         let injects = Arc::new(Mutex::new(Vec::<String>::new()));
         let injects_for_ipc = injects.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes }
-            | IpcMethod::Steer { bytes, .. }
-            | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -184,25 +182,26 @@ mod tests {
                 )
                 .to_string()
             ],
-            "route should dispatch the bare Codex reopen through supervisor IPC before waiting for the delayed live-child ack"
+            "route should dispatch the bare Codex reopen through supervisor IPC before waiting for the delayed live-child admission projection"
         );
 
         let state = agent_doc_cycle_state_io::load(&doc)
             .unwrap()
-            .expect("cycle state should exist after delayed ack");
+            .expect("cycle state should exist after the delayed projection");
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         ipc.stop();
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_or_create_pane_keeps_live_child_reroute_optimistic_when_cycle_ack_is_missing() {
+    fn resolve_or_create_pane_keeps_live_child_reroute_optimistic_when_cycle_projection_is_missing()
+    {
         use parking_lot::Mutex;
         use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-child-skip-ack");
+        let iso = IsolatedTmux::new("route-test-live-child-skip-projection");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -237,9 +236,7 @@ mod tests {
                 dir.path(),
                 "route-live-child-skip",
                 move |method| match method {
-                    IpcMethod::Inject { bytes }
-                    | IpcMethod::Steer { bytes, .. }
-                    | IpcMethod::Clear { bytes } => {
+                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                         injects_for_ipc.lock().push(bytes.clone());
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
@@ -351,9 +348,7 @@ mod tests {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes }
-                | IpcMethod::Steer { bytes, .. }
-                | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     if let Some(target) = injected_pane_for_ipc.lock().clone() {
                         let _ = ipc_tmux.send_keys(&target, bytes.trim_end_matches('\n'));
                     }
@@ -516,9 +511,7 @@ mod tests {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes }
-                | IpcMethod::Steer { bytes, .. }
-                | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     injects_for_ipc.lock().push(bytes.clone());
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
@@ -974,9 +967,7 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes }
-            | IpcMethod::Steer { bytes, .. }
-            | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1082,9 +1073,7 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes }
-            | IpcMethod::Steer { bytes, .. }
-            | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1192,9 +1181,7 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes }
-            | IpcMethod::Steer { bytes, .. }
-            | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1326,9 +1313,7 @@ mod tests {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes }
-                | IpcMethod::Steer { bytes, .. }
-                | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     if let Some(target) = injected_pane_for_ipc.lock().clone() {
                         let _ = ipc_tmux.send_keys(&target, &bytes);
                     }
@@ -1419,9 +1404,7 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes }
-            | IpcMethod::Steer { bytes, .. }
-            | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1542,7 +1525,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-ack-same-cycle");
+        let iso = IsolatedTmux::new("route-test-live-projection-same-cycle");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1574,9 +1557,7 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes }
-            | IpcMethod::Steer { bytes, .. }
-            | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1641,7 +1622,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-ack-ok");
+        let iso = IsolatedTmux::new("route-test-live-projection-ok");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1673,9 +1654,7 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes }
-            | IpcMethod::Steer { bytes, .. }
-            | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1719,7 +1698,7 @@ mod tests {
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("route should accept the new cycle ack");
+        .expect("route should accept the new routed admission projection");
         assert_eq!(resolved, pane);
 
         let content = wait_for_pane_contains(
@@ -1730,7 +1709,7 @@ mod tests {
         );
         assert!(
             content.contains("GOT:agent-doc "),
-            "route should dispatch the trigger before observing the ack: {content}"
+            "route should dispatch the trigger before observing the admission projection: {content}"
         );
         assert!(
             !content.contains("EXTRA:"),
@@ -1740,7 +1719,7 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_or_create_pane_accepts_content_edit_cycle_ack_without_extra_payload_lines() {
+    fn resolve_or_create_pane_accepts_content_edit_cycle_projection_without_extra_payload_lines() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -1777,9 +1756,7 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes }
-            | IpcMethod::Steer { bytes, .. }
-            | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1823,7 +1800,7 @@ mod tests {
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("route should accept the new cycle ack for content edits");
+        .expect("route should accept the new admission projection for content edits");
         assert_eq!(resolved, pane);
 
         let content = wait_for_pane_contains(
@@ -1834,7 +1811,7 @@ mod tests {
         );
         assert!(
             content.contains("GOT:agent-doc "),
-            "route should dispatch the bare Codex reopen before observing the content-edit ack: {content}"
+            "route should dispatch the bare Codex reopen before observing the content-edit admission projection: {content}"
         );
         assert!(
             !content.contains("EXTRA:"),
@@ -2103,9 +2080,7 @@ mod tests {
                 restart_called_for_ipc.store(true, Ordering::Relaxed);
                 IpcResponse::ok_empty()
             }
-            IpcMethod::Inject { .. } | IpcMethod::Steer { .. } | IpcMethod::Clear { .. } => {
-                IpcResponse::ok_empty()
-            }
+            IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
             IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
@@ -2250,7 +2225,7 @@ mod tests {
                 "actor_state": "starting",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { .. } | IpcMethod::Steer { .. } | IpcMethod::Clear { .. } => {
+            IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => {
                 panic!("ready-prompt dispatch-only reroute must use direct pane submit")
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -2433,17 +2408,17 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_or_create_pane_waits_longer_for_fresh_start_cycle_ack() {
+    fn resolve_or_create_pane_waits_longer_for_fresh_start_cycle_projection() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-fresh-start-extended-ack");
+        let iso = IsolatedTmux::new("route-test-fresh-start-extended-projection");
         let session = "claude";
         let cwd = test_cwd();
         let _anchor_pane = iso.auto_start(session, &cwd).unwrap();
 
-        let doc = dir.path().join("fresh-start-extended-ack.md");
+        let doc = dir.path().join("fresh-start-extended-projection.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let mock_start = write_mock_start_agent_doc(dir.path());
@@ -2470,7 +2445,7 @@ mod tests {
                 &doc,
                 None,
                 &[],
-                "route-fresh-start-extended-ack",
+                "route-fresh-start-extended-projection",
                 &file_path,
                 session,
                 &HarnessConfig::codex(),
@@ -2493,12 +2468,12 @@ mod tests {
         );
         assert!(
             content.contains("GOT:agent-doc "),
-            "route should still dispatch the trigger before observing the delayed ack: {content}"
+            "route should still dispatch the trigger before observing the delayed admission projection: {content}"
         );
 
         let state = agent_doc_cycle_state_io::load(&doc)
             .unwrap()
-            .expect("cycle state should exist after delayed fresh-start ack");
+            .expect("cycle state should exist after the delayed fresh-start projection");
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
     }
     #[test]
@@ -2537,7 +2512,7 @@ mod tests {
         });
 
         let doc_for_thread = doc.clone();
-        let ack_handle = std::thread::spawn(move || {
+        let projection_handle = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1500));
             agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
@@ -2572,7 +2547,7 @@ mod tests {
         .expect("fresh auto-start should rebind the pane before the first guarded dispatch");
 
         clear_handle.join().unwrap();
-        ack_handle.join().unwrap();
+        projection_handle.join().unwrap();
 
         assert_eq!(created_panes, vec![new_pane.clone()]);
 
@@ -2641,11 +2616,11 @@ mod tests {
             )
             .unwrap();
         });
-        let doc_for_ack = doc.clone();
-        let ack = std::thread::spawn(move || {
+        let doc_for_projection = doc.clone();
+        let projection = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1500));
             agent_doc_cycle_state_io::start_preflight(
-                &doc_for_ack,
+                &doc_for_projection,
                 Some("# Session\n"),
                 Some("# Session\n"),
             )
@@ -2677,7 +2652,7 @@ mod tests {
         .expect("fresh auto-start should keep the fresh pane authoritative even if another path rebinds the session during boot");
 
         handoff.join().unwrap();
-        ack.join().unwrap();
+        projection.join().unwrap();
 
         let new_pane = created_panes
             .first()
@@ -2766,11 +2741,11 @@ mod tests {
             )
             .unwrap();
         });
-        let doc_for_ack = doc.clone();
-        let ack = std::thread::spawn(move || {
+        let doc_for_projection = doc.clone();
+        let projection = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1500));
             agent_doc_cycle_state_io::start_preflight(
-                &doc_for_ack,
+                &doc_for_projection,
                 Some("# Session\n"),
                 Some("# Session\n"),
             )
@@ -2802,7 +2777,7 @@ mod tests {
         .expect("fresh auto-start should keep dispatch in the new pane when the old owner still carries startup-miss provenance");
 
         handoff.join().unwrap();
-        ack.join().unwrap();
+        projection.join().unwrap();
 
         assert_eq!(created_panes.len(), 1, "route should still create one pane");
         let new_pane = &created_panes[0];
@@ -2887,9 +2862,7 @@ mod tests {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": null })),
-                IpcMethod::Inject { bytes }
-                | IpcMethod::Steer { bytes, .. }
-                | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),

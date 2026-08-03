@@ -370,8 +370,8 @@ pub fn open_state_db_with_timeout(
 ///
 /// Schema convergence is idempotent and declared entirely by this binary, so
 /// repeating it on every open buys nothing while costing a large `execute_batch`
-/// plus eight `PRAGMA table_info` probes. Poll loops (routed-cycle ack at 200ms,
-/// `log_op`) open the same db hundreds of times per request, which made that
+/// plus eight `PRAGMA table_info` probes. Reactive state projection folds and
+/// `log_op` can open the same db hundreds of times per turn, which made that
 /// per-open cost the dominant redundant work on the route path. Converge once
 /// per path per process; a concurrently-upgraded schema from another binary
 /// would carry columns this process does not know about anyway.

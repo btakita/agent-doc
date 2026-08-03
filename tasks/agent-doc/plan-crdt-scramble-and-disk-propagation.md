@@ -44,19 +44,18 @@ restart cleanly reclaims ownership. `compileKotlin` clean; plugin zip built. Ins
 Bricks landed this session that new phases build on. Each is pure logic with unit tests +
 clippy clean; none is wired into the live path yet, so live sessions are unaffected.
 
-- **Goal 1 — turn-state CP→plugin projection + FFI + parity bindings (LANDED).**
+- **Goal 1 — turn-state CP→plugin projection + retained-stream parity (LANDED; FFI polling retired).**
   `agent-doc-turn/src/cp_projection.rs`: `TurnProjection::from_phase(CyclePhase)` → coarse
   `TurnState` (Idle/AwaitingResponse/Persisting) + `turn_in_flight` + `transition_authority`.
   `would_collide_with_in_flight_response()` is the `live_prompt_drift` double-append guard;
-  `transition_authority()` encodes the single-authority invariant. 5 tests. **Wired:** FFI export
-  `agent_doc_turn_projection(file_path)` in `ffi.rs` (reads the doc's current `CyclePhase` from
-  cycle-state, projects, returns JSON; idle default; 1 FFI test). **Parity bindings declared in
-  BOTH frontends:** JetBrains `NativeLib.agent_doc_turn_projection` + VS Code
-  `turnProjectionForFile` (`native.ts`). **Plugin UI consumption — LANDED (2026-07-03):**
+  `transition_authority()` encodes the single-authority invariant. The original
+  unary FFI projection has since been retired: both frontends now retain
+  `document_turn_authority_stream` and receive the same typed projection frame.
+  **Plugin UI consumption — LANDED (2026-07-03), reactive migration 2026-08-02:**
   VS Code `buildTurnStatePresentation` (consumes the projection → status label + double-append
   forwarding guard; 2 unit tests, 19 sessionUi tests green, tsc clean) **wired live** — `extension.ts`
-  `refreshTurnStatus` *calls* `turnProjectionForFile` on editor-change + a 1.5s interval and reflects
-  the CP turn phase in a status-bar item. JetBrains parity: `TurnStateBridge.kt` (same
+  `refreshTurnStatus` reflects pushed stream frames in a status-bar item. JetBrains parity:
+  `TurnStateBridge.kt` (same
   projection→presentation logic, mirrors the working `StateProjectionBridge` FFI pattern).
   Remaining: JB status-*widget* wiring + a `make bump-plugin` / `npm compile` + editor reload to
   observe live.
@@ -273,7 +272,8 @@ This is `plan-realtime-reconcile-replicas.md` Phase 2 + the `#crdtsvdom` correct
     `RebuiltFromDisk { live_members>=1 }` (goals 4/5); headless → no marker. 3 tests green.
   - **Built + installed (2026-07-03):** `cargo build --release` + `cargo install` (binary carries
     C1b) + `lib-install` (cdylib carries the FFI export; reload broadcast to plugins). `nm` confirms
-    `agent_doc_turn_projection` ships.
+    the then-current turn-projection ABI shipped; it is now replaced by the
+    controller-owned retained stream.
   - **Remaining:** the editor-buffer side of a `RebuiltFromDisk` deletion still needs D2
     (replace-capable delivery); the additive path (`AlreadyReconciled`/additive changes) already
     reaches editors via the existing `ReplicaPull` channel.

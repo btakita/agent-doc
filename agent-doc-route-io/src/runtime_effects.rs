@@ -6,10 +6,10 @@ use agent_doc_controller::dispatch::dispatch_only_starting_pane_ready_timeout_fo
 use agent_doc_harness::HarnessConfig;
 use agent_doc_turn::closeout_recovery::{CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput};
 
+use crate::admission_projection::RouteAdmissionEffects;
 use crate::authoritative_dispatch::RouteAuthoritativeActorEffects;
 use crate::closeout_drain::RouteCloseoutDrainEffects;
 use crate::command::RouteCommandEffects;
-use crate::cycle_ack::RouteCycleAckEffects;
 use crate::diagnostics::{
     emit_busy_route_diagnostic, emit_busy_route_queued_diagnostic,
     emit_busy_route_queued_diagnostic_from_facts, emit_startup_miss_diagnostic,
@@ -30,8 +30,8 @@ pub fn route_dispatch_effects() -> RouteDispatchEffects {
     }
 }
 
-pub fn route_cycle_ack_effects() -> RouteCycleAckEffects {
-    RouteCycleAckEffects {
+pub fn route_admission_effects() -> RouteAdmissionEffects {
+    RouteAdmissionEffects {
         route_dispatch_effects: route_dispatch_effects(),
         emit_startup_miss_diagnostic,
         emit_busy_route_diagnostic,
@@ -41,7 +41,7 @@ pub fn route_cycle_ack_effects() -> RouteCycleAckEffects {
 pub fn route_busy_pane_retry_effects() -> RouteBusyPaneRetryEffects {
     RouteBusyPaneRetryEffects {
         route_dispatch_effects: route_dispatch_effects(),
-        route_cycle_ack_effects: route_cycle_ack_effects(),
+        route_admission_effects: route_admission_effects(),
         emit_busy_route_diagnostic,
     }
 }
@@ -95,7 +95,7 @@ pub fn route_startup_effects() -> RouteStartupEffects {
     RouteStartupEffects {
         route_dispatch_effects: route_dispatch_effects(),
         dispatch_only_route_effects: route_dispatch_only_effects(),
-        route_cycle_ack_effects: route_cycle_ack_effects(),
+        route_admission_effects: route_admission_effects(),
     }
 }
 
@@ -104,7 +104,7 @@ pub fn route_managed_pane_resolution_effects(
 ) -> ManagedPaneResolutionEffects {
     ManagedPaneResolutionEffects {
         route_dispatch_effects: route_dispatch_effects(),
-        route_cycle_ack_effects: route_cycle_ack_effects(),
+        route_admission_effects: route_admission_effects(),
         route_busy_pane_retry_effects: route_busy_pane_retry_effects(),
         route_startup_effects: route_startup_effects(),
         route_authoritative_actor_effects: route_authoritative_actor_effects(repair_closeout),
@@ -118,7 +118,7 @@ pub fn route_authoritative_actor_effects(
         closeout_drain_effects: route_closeout_drain_effects(repair_closeout),
         queue_effects: route_queue_effects(),
         route_dispatch_effects: route_dispatch_effects(),
-        route_cycle_ack_effects: route_cycle_ack_effects(),
+        route_admission_effects: route_admission_effects(),
         dispatch_only_route_effects: route_dispatch_only_effects(),
         wait_for_ready_override: crate::invocation::wait_for_ready_override,
     }

@@ -700,9 +700,6 @@ pub struct PreflightOutput {
     /// Live finalize-pipeline state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipeline: Option<agent_doc_frontmatter::frontmatter::AgentDocPipeline>,
-    /// Semantic merge acknowledgements to surface once.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub document_cell_merge_acks: Vec<agent_doc_cycle_state_io::PendingSemanticMergeAck>,
 }
 
 fn is_zero_usize(n: &usize) -> bool {

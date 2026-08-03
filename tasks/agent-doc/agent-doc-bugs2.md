@@ -119,14 +119,18 @@ Recovered and read all 187 lines of `/tmp/agent-doc-0.35.119-claude-handoff.md` 
 - The one-time full install and controller recycle required by that historical release completed. Later releases through the currently installed `0.35.128` supersede that deployment.
 
 Preserved the handoff's document boundaries: did not recapture, refinalize, or write the already-committed historical `#advance-review` cycle; did not hand-edit either session document; and did not replay Haiven's historical retained closeout. The current Haiven owner pane remains live and separately owns its new benchmark turn.
-<!-- agent:boundary:f621055c:agent-doc-bugs2 -->
+
+### Re: handoff completion proof
+
+> Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.
+
+Completed. The deleted temporary file was recovered verbatim from the durable Claude transcript and read through line 187. Every remaining release step it named had already completed: the full check passed, source commit `953c8163d82bfbbf12e7ea65ff0100a014f513df` and tag `v0.35.119` were pushed, the GitHub Release and PyPI package were published, CI/Release/PyPI were green, and the full install/recycle ran. The completed historical session cycles were not replayed or hand-edited, and the separately owned live Haiven turn was not touched.
+<!-- agent:boundary:efab1ce2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#pcc4]~~
-- ~~do [#panelayoutrace]~~
-- Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.
+- ~~Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.~~
 - do [#recommendedungatereview-b1cb]
 - do [#recommendedungatereview-9g0v]
 - do [#recommendedungatereview-zw66]

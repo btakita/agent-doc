@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -90,13 +90,44 @@ Installed and exercised the committed reactive-projection build. The retained cl
 **Commands/proof:** `make check`, workspace `cargo check`, focused Rust tests, VS Code tests (169/169), JetBrains Gradle tests, `make install`, live Agent Doc admit/finalize cycles, `tsift status` + indexed source inspection, Git history inspection, and the Monster Rod Holders exclusion dry run. Local checks are green. GitHub CI run `30779663452` for `70a407d15` is still in progress with no reported failure, so it was observed but not awaited.
 
 **Confidence:** high. **Escalation:** none.
+
+### Re: do [#multilineheadbullet] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#multilineheadbullet]
+
+
+Implemented and installed the multiline queue-head addressability fix.
+
+The invariant is now explicit: queue parsing, AST node enumeration, and queue completion operate on the same ordered logical item sequence. `agent-doc-markdown-ast::overlay::item_nodes` owns addressability policy through the typed `ItemSurface::{ListItem, MultilinePrompt}` boundary. Canonical bare `---` and `~~~prompt` blocks enumerate as multiline prompt nodes; completed `~~~done` blocks preserve the same logical node identity. This is a pure, one-shot document projection, so there is no long-lived reactive relationship to extract into `Computed` state.
+
+Transition coverage now proves:
+
+- live bare/`~~~prompt` multiline head → addressable AST node → `~~~done` completion;
+- completed multiline node → stable node key → unstrike restores the live bare form;
+- malformed or otherwise unaddressable input → fail closed without striking the neighbouring list item.
+
+The edited surfaces are sufficient because the Markdown AST crate owns node surfaces and mutations, queue I/O supplies the end-to-end consume regression, queue crates document the shared ordering/guard contract, and the document-format specification records the canonical behavior.
+
+Proof:
+
+- Source commit: `2fa106c6a fix: address multiline queue heads by node`, pushed to `origin/main`.
+- `cargo test -p agent-doc-markdown-ast multiline_queue_head_is_addressable_and_consumes_without_touching_neighbour` — green after first confirming the focused test failed before implementation.
+- `cargo test -p agent-doc-queue-io multiline_head_is_addressable_and_strikes_without_touching_a_neighbour` — green.
+- `cargo test -p agent-doc-markdown-ast` — green.
+- `cargo test -p agent-doc-queue -p agent-doc-queue-io` — green.
+- `make check` — green (`.tsift/artifacts/tart-0097c36ae7.test.log`).
+- `cargo fmt --all` and `git diff --check` — clean.
+- `make install` — installed Agent Doc `0.35.118`, native library, skills, and JetBrains plugin `0.2.338`.
+- Latest GitHub CI run `30780651967` for `2fa106c6a` was still in progress at closeout.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#multilineheadbullet]
-- ~~do [#reactive-closeout-install-verify]~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -107,7 +138,6 @@ Installed and exercised the committed reactive-projection build. The retained cl
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#multilineheadbullet] [focused-cycle] Make multiline `---` queue prompts addressable — SHARPENED 2026-07-19. Damage is already PREVENTED (#qconsumenostrike fail-closed guard, 5b3761dfc); this is the remaining correctness half. Refined finding: the ENTRY model already handles multiline correctly — document_queue::parse surfaces the multiline head as a Prompt (preflight lists it), mark_first_n_prompts_completed targets it, and render emits Completed multiline as `~~~done` fences. The mismatch is that markdown_ast::item_nodes (used for IPC node ops and AST-keyed consume) enumerates only list items, so it returns the NEIGHBOUR for the same logical head — observed as node_ops=[queue:1:neighbour:0] while consumed_text was the multiline head. So the fix is to reconcile the two ENUMERATORS, not the entry model: either teach item_nodes the `---` block shape, or render multiline heads with a bullet + indented continuation that both round-trips through parse_spans and yields a node. Needs one clean reproduction to confirm which of the two paths actually mutated the document in the observed strikes.
 <!-- /agent:backlog -->
 
 ## Review

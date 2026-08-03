@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.120
+
+_JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **Queue heads folded into continuation lines by an editor paste are
+  recovered.** Pasting one `do [#id]` per line can arrive from the editor with
+  the bullet of every line but the first replaced by continuation indent. Those
+  lines parsed as inert `Freeform` residue: never drainable, unreachable by
+  `queue consume`/strike, and — because the backlog→queue mirror is multi-id
+  aware — counted as already present, so the mirror never re-emitted them
+  either. One paste of sixteen ids therefore collapsed into a single
+  addressable head and never healed itself. Preflight now re-segments such a
+  block back into one prompt per id, verbatim (an operator `do ` prefix
+  survives), and reports it as a `queue_folded_head_recovered` warning.
+  Genuine multi-line prose heads and fenced `---` prompts are untouched.
+- **PyPI publishing is driven by the tag push.** The Release workflow creates
+  the GitHub Release with the default `GITHUB_TOKEN`, and GitHub does not raise
+  workflow-triggering events for token-authored actions, so the `release:
+  published` trigger had silently stopped firing and 0.35.97 through 0.35.118
+  never reached PyPI.
+
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.35.119

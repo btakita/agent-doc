@@ -340,8 +340,15 @@ editors/
 5. **No operator gate on agent-doable steps (`#deploy-just-do-it`):** proceed straight through steps 6-9 without asking. The only operator-gated step is a live human eyeball of the changed behavior in a real editor/pane — record it as a non-blocking `[operator-verify]` follow-up; it never blocks the build/install/push/publish/recycle.
 6. Branch → PR → squash merge to main (or commit + push to main directly in this dogfooding repo)
 7. Tag: `git tag v<version> && git push origin v<version>`
-8. `maturin publish` (PyPI); every agent-doc Cargo package has `publish = false`
-9. `gh release create v<version> --generate-notes` with prebuilt binary (GitHub Release)
+8. The tag push drives both publishes in CI: `.github/workflows/release.yml`
+   builds the five target binaries and runs `gh release create` (GitHub
+   Release), and `.github/workflows/pypi.yml` builds and uploads the wheels
+   (PyPI). Every agent-doc Cargo package has `publish = false`, so there is no
+   crates.io step.
+9. Verify both runs went green (`gh run list --limit 5`) and that
+   `gh release view v<version>` lists five assets. If PyPI needs a rerun, use
+   `gh workflow run PyPI --ref v<version>`; the local fallback is
+   `make publish-pypi`.
 
 ## Agent Backend Contract
 

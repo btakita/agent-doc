@@ -2706,6 +2706,42 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         queue_tag_attrs_normalized = true;
         eprintln!("[preflight] queue: normalized malformed queue marker attributes");
     }
+    // `#qfoldedhead`: an editor paste can land one `do [#id]` per line with every
+    // bullet but the first replaced by continuation indent. Those lines parse as
+    // inert `Freeform` residue — never drainable, unreachable by strike, and
+    // invisible to the backlog mirror (which counts their ids as already
+    // present), so the fold silently swallows every id after the first and never
+    // heals itself. Re-segment before any worklist projection reads the queue.
+    if let Some(healed) = agent_doc_queue::document_queue::heal_folded_id_per_line_prompts(&entries)
+    {
+        let promoted = healed.len() - entries.len();
+        let new_body = agent_doc_queue::document_queue::render(&healed);
+        current_content = comp.replace_content(&current_content, &new_body);
+        content = current_content.clone();
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = components
+            .iter()
+            .find(|c| c.name == "queue")
+            .context("queue maintenance: queue component vanished after folded-head heal")?
+            .clone();
+        entries = healed;
+        mutated = true;
+        queue_warnings.push(PreflightWarning {
+            code: "queue_folded_head_recovered".to_string(),
+            message: format!(
+                "{}: recovered {promoted} queue head(s) that an editor paste folded into \
+                 bullet-less continuation lines. Until re-segmented they were inert: not \
+                 drainable, unreachable by strike, and counted as already-present by the \
+                 backlog→queue mirror (#qfoldedhead).",
+                file.display()
+            ),
+            document_agent: None,
+            active_harness: None,
+        });
+        eprintln!(
+            "[preflight] queue: re-segmented {promoted} folded queue head(s) into addressable prompts (#qfoldedhead)"
+        );
+    }
     let persisted_active_before_binding = frontmatter::parse(&current_content)
         .ok()
         .and_then(|(fm, _)| fm.queue_active)

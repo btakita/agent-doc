@@ -1,6 +1,14 @@
 name: PyPI
 
+# Tag pushes are the trigger of record. The Release workflow creates the GitHub
+# Release with the default GITHUB_TOKEN, and GitHub deliberately does not raise
+# workflow-triggering events for token-authored actions — so `release: published`
+# silently stopped firing once release creation moved into CI, and 0.35.97
+# through 0.35.118 never reached PyPI. `release: published` is kept for releases
+# published by hand, and `skip-existing` makes the overlap harmless.
 on:
+  push:
+    tags: ["v*"]
   release:
     types: [published]
   workflow_dispatch:

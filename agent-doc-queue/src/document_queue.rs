@@ -692,6 +692,87 @@ pub fn queue_entry_reference_ids(entry: &QueueEntry) -> Vec<String> {
     }
 }
 
+/// True when `line` is a bullet-less, indented continuation line that is really
+/// its own id-bearing queue directive (`#qfoldedhead`).
+///
+/// An operator paste of one `do [#id]` per line can arrive from the editor with
+/// the bullet of every line but the first replaced by continuation indent:
+///
+/// ```text
+/// - do [#a]
+///   do [#b]
+///   do [#c]
+/// ```
+///
+/// `parse` keeps the first line as a `Prompt` and demotes the rest to
+/// [`QueueEntry::Freeform`] residue. They still render back verbatim, so
+/// nothing is lost on disk — but a `Freeform` line is not an addressable queue
+/// head: it can never drain, `queue consume` / strike cannot reach it, and
+/// because [`queue_entry_reference_ids`] is multi-id aware (`#provauth2`) the
+/// backlog→queue mirror ALSO never re-emits those ids as their own prompts. The
+/// fold is therefore self-perpetuating and silent.
+fn is_folded_continuation_directive(line: &str) -> bool {
+    // Must be indented; a flush-left line was never a continuation.
+    if !line.starts_with([' ', '\t']) {
+        return false;
+    }
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // A line that already carries a list marker parses as its own entry.
+    if trimmed.starts_with(['-', '*', '+']) {
+        return false;
+    }
+    // Only heal id-bearing directives. Indented prose under a prompt is a
+    // genuine continuation and must be left exactly as the operator wrote it.
+    !queue_prompt_reference_ids(trimmed).is_empty()
+}
+
+/// Restore one addressable head per operator-authored id after an editor paste
+/// folded them into bullet-less continuation residue (`#qfoldedhead`).
+///
+/// Only `Freeform` residue that directly follows an id-bearing `Prompt` (or
+/// another line already healed in the same run) is promoted, so unrelated
+/// free-text and prose continuations are untouched. See
+/// [`is_folded_continuation_directive`] for the per-line predicate.
+///
+/// Returns `Some(new_entries)` when at least one folded line was promoted and
+/// `None` when the queue is already well-segmented, so callers can run it on
+/// every cycle without churning the document.
+pub fn heal_folded_id_per_line_prompts(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
+    let mut healed: Vec<QueueEntry> = Vec::with_capacity(entries.len());
+    let mut changed = false;
+    // Only the run of residue directly beneath an id-bearing prompt is a fold.
+    let mut in_id_prompt_run = false;
+    for entry in entries {
+        match entry {
+            QueueEntry::Prompt(prompt) if !prompt.multiline => {
+                in_id_prompt_run = !queue_prompt_reference_ids(&prompt.text).is_empty();
+                healed.push(entry.clone());
+            }
+            QueueEntry::Freeform(line)
+                if in_id_prompt_run && is_folded_continuation_directive(line) =>
+            {
+                changed = true;
+                healed.push(QueueEntry::Prompt(QueuePrompt {
+                    // Verbatim text: healing re-segments lines, it never
+                    // rewrites them, so an operator `do ` prefix survives.
+                    text: line.trim().to_string(),
+                    multiline: false,
+                    indent: 0,
+                    ordered_marker: None,
+                }));
+            }
+            _ => {
+                in_id_prompt_run = false;
+                healed.push(entry.clone());
+            }
+        }
+    }
+    changed.then_some(healed)
+}
+
 /// Build a single-line `do [#id]` queue prompt entry.
 fn do_prompt_entry(id: &str) -> QueueEntry {
     QueueEntry::Prompt(QueuePrompt {
@@ -2936,6 +3017,7 @@ fn first_live_control_or_prompt(entries: &[QueueEntry]) -> Option<&QueueEntry> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use agent_doc_document::queue_projection::has_in_progress_marker;
 
@@ -5393,6 +5475,77 @@ mod tests {
     /// (double-pinned heads, stray `~~~done` openers without closers, runs of
     /// empty `---` separators that previously split or dropped a real head like
     /// `#fbwire`) must collapse to a stable canonical form after a single
+    /// `#qfoldedhead`: the exact shape committed as `b48c6d6cf` after an editor
+    /// paste replaced the bullets of every line but the first with continuation
+    /// indent. Sixteen operator-authored ids collapsed into ONE addressable
+    /// head, so a single drain would have struck all sixteen.
+    #[test]
+    fn folded_id_per_line_paste_is_split_back_into_one_head_per_id() {
+        let folded = concat!(
+            "- Read the handoff completely, then continue its remaining work.\n",
+            "- [#recommendedungatereview-b1cb]\n",
+            "  [#recommendedungatereview-9g0v]\n",
+            "  [#recommendedungatereview-zw66]\n",
+        );
+        let entries = parse(folded).unwrap();
+        // The fold really is a single head before healing.
+        let prompt_count = entries
+            .iter()
+            .filter(|e| matches!(e, QueueEntry::Prompt(_)))
+            .count();
+        assert_eq!(prompt_count, 2, "fold must present as one id-bearing head");
+
+        let healed = heal_folded_id_per_line_prompts(&entries).expect("fold must be healed");
+        assert_eq!(
+            render(&healed),
+            concat!(
+                "- Read the handoff completely, then continue its remaining work.\n",
+                "- [#recommendedungatereview-b1cb]\n",
+                "- [#recommendedungatereview-9g0v]\n",
+                "- [#recommendedungatereview-zw66]\n",
+            )
+        );
+        // Idempotent: a well-segmented queue is left untouched.
+        assert!(heal_folded_id_per_line_prompts(&healed).is_none());
+    }
+
+    /// The operator's `do ` directive prefix must survive the split verbatim —
+    /// healing re-segments lines, it never rewrites their text.
+    #[test]
+    fn folded_head_split_preserves_the_do_directive_prefix() {
+        let folded = "- do [#aaa]\n  do [#bbb]\n";
+        let healed =
+            heal_folded_id_per_line_prompts(&parse(folded).unwrap()).expect("fold must be healed");
+        assert_eq!(render(&healed), "- do [#aaa]\n- do [#bbb]\n");
+    }
+
+    /// A genuine multi-line prompt whose continuation lines are prose is NOT a
+    /// fold; splitting it would shred one operator prompt into fragments.
+    #[test]
+    fn multiline_prose_head_is_not_treated_as_a_folded_paste() {
+        let prose = "- do [#aaa] and then\n  explain the tradeoffs in the response\n";
+        assert!(heal_folded_id_per_line_prompts(&parse(prose).unwrap()).is_none());
+    }
+
+    /// After healing, the backlog mirror sees each id on its own head, so the
+    /// queue converges instead of the fold hiding fifteen ids forever.
+    #[test]
+    fn healed_fold_lets_the_backlog_mirror_address_every_id() {
+        let folded = "- [#aaa]\n  [#bbb]\n";
+        let entries = parse(folded).unwrap();
+        let healed = heal_folded_id_per_line_prompts(&entries).expect("fold must be healed");
+        let heads: Vec<Vec<String>> = healed
+            .iter()
+            .filter(|e| matches!(e, QueueEntry::Prompt(_)))
+            .map(queue_entry_reference_ids)
+            .collect();
+        assert_eq!(
+            heads,
+            vec![vec!["aaa".to_string()], vec!["bbb".to_string()]],
+            "each id must be its own addressable head"
+        );
+    }
+
     /// `render(parse(x))` pass, and every subsequent pass must be a no-op. If the
     /// round-trip ever grew the body (re-mangled an entry, multiplied a pin, or
     /// re-injected a stray separator) it would feed the qchurn loop forever.

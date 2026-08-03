@@ -296,6 +296,35 @@ Closed all three hand-transcription gaps with real fixture-driven behavior.
 **Verification and proof.** Changed paths are limited to Go's arena implementation/new conformance test/coverage ledger and C++'s two runners/CMake wiring/coverage ledger. `make check` passes in lazily-go (131/139 fixtures opened, 132/132 scenarios replayed, zero excuses) and lazily-cpp (56/56 CTest targets; 119 fixtures and 119/119 scenarios replayed, zero excuses). GitHub CI is green on exact pushed heads: Go run `30841682230` at `81f3dac`; C++ run `30841681058` at `bbda265` on both g++ and clang++. The superproject pins both in `4b14448b5`. Its tmux CI job is green; its check job again hit the unrelated hosted `rust-lld`/LLVM signal-7 bus error while linking an agent-doc test crate. Locally, the root gate ran 8,584 integration tests green before four unrelated Corky ephemeral-port tests collided under parallel execution; their isolated rerun passed 67/67.
 
 Commits are pushed: Go `81f3dac`, C++ `bbda265`, superproject gitlinks `4b14448b5`. Confidence is high: the runtime manifests record the target files as opened, the scenario ledgers record all six C++ scenarios at the replay payload, assertion blocks are bound and exhausted, both affected binding gates pass, and both affected hosted CIs are green. No escalation or follow-up is needed for this item.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Re: Response
+
+Completed [#lzwireencodingrunner].
+
+- Added generated `expect.wire_input_fnv1a64` evidence to the NodeId, NodeKey, and blob-backend fixtures. The spec checker independently recomputes the digest over the exact UTF-8 JSON bytes or decoded MessagePack bytes and accepts only that executable key as discharge of `wire_encoding`.
+- Updated Rust, Python, JavaScript, Go, C++, Dart, Kotlin, Zig, and C# runners to compute the same FNV-1a-64 digest over the exact buffer handed to each library decoder, assert it before decoding, and then decode that unchanged buffer.
+- Added a scratch mutation probe: replacing the first digest with zeros was rejected by both the canonical prose-key checker and the JavaScript runner, each reporting the actual digest `ec8672bb65e82279`.
+- Full local `make check` passed in lazily-spec and all nine bindings. All ten task-scoped pushed CI workflows passed, including the complete Rust workflow.
+- Pushed the binding/spec commits and root gitlink commit `423e757a9a489d0104d5c4f435c351dc4b294c98` (`test: assert exact codec wire inputs`). Root `tmux-ci` passed. Root aggregate `check` was retried once and twice encountered the same unrelated LLVM `rust-lld` signal-7 bus error while linking different agent-doc test binaries; no lazily assertion or test failed.
+- Preserved all pre-existing unrelated working-tree changes.
 <!-- agent:boundary:d04a6333:lazily -->
 <!-- /agent:exchange -->
 
@@ -326,7 +355,7 @@ Commits are pushed: Go `81f3dac`, C++ `bbda265`, superproject gitlinks `4b14448b
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwireencodingrunner] wire_encoding states an obligation on the RUNNER that no assertion key can redden, and all nine bindings now discharge it by proxy. The paragraph says the runner must parse the raw wire_json / wire_msgpack_hex rather than re-serialize a pre-parsed object — a claim about the corpus file and the runner's reading of it, not about the library, so nothing in any expect block moves when a runner takes the shortcut. Five bindings reported this independently under #lzprosekeyconvention and it is recorded in docs/conformance.md as an open gap. The CORPUS half is now checked (scripts/check-prose-keys.mjs: every wire_json raw parseable text and never a pre-parsed object, every wire_msgpack_hex even-length lowercase hex, a declaring fixture carrying both codecs). The RUNNER half is still unreachable. Options: an executable corpus key the runner can only satisfy by reading the text (a per-scenario wire byte length or a digest over the raw string, which a re-serialized object will not reproduce because key order and whitespace differ), or a static per-binding check that the fixture's wire field is never handed to a JSON parser twice. Pick one and bring the nine to it — until then three paragraphs in three fixtures rest entirely on review.
+- [x] [#lzwireencodingrunner] wire_encoding states an obligation on the RUNNER that no assertion key can redden, and all nine bindings now discharge it by proxy. The paragraph says the runner must parse the raw wire_json / wire_msgpack_hex rather than re-serialize a pre-parsed object — a claim about the corpus file and the runner's reading of it, not about the library, so nothing in any expect block moves when a runner takes the shortcut. Five bindings reported this independently under #lzprosekeyconvention and it is recorded in docs/conformance.md as an open gap. The CORPUS half is now checked (scripts/check-prose-keys.mjs: every wire_json raw parseable text and never a pre-parsed object, every wire_msgpack_hex even-length lowercase hex, a declaring fixture carrying both codecs). The RUNNER half is still unreachable. Options: an executable corpus key the runner can only satisfy by reading the text (a per-scenario wire byte length or a digest over the raw string, which a re-serialized object will not reproduce because key order and whitespace differ), or a static per-binding check that the fixture's wire field is never handed to a JSON parser twice. Pick one and bring the nine to it — until then three paragraphs in three fixtures rest entirely on review.
 - [ ] [#lzgeneratorprovenance] assertions.generator is a fourth category the prose-key convention does not name, and all nine bindings are now excusing it in their own words — precisely the undocumented-default shape #lzprosekeyconvention removed one category over. It is a script path (scripts/gen_*.py) in three of the five codec fixtures: not prose (the corpus does not declare it and the shape detector agrees — no whitespace), not a reserved annotation, and carrying nothing a run can compare. lazily-go, lazily-cpp, lazily-cs, lazily-js and lazily-py each flagged it unprompted. The clean fix is to stop making it an assertion key at all: move generator out of assertions to the fixture top level, where it is provenance metadata no tracker sees, update the three generator scripts, and delete the nine excuses. Alternatively name it in docs/conformance.md as a declared provenance category with one required spelling. Do the first unless there is a reason not to — a key that exists only to be excused nine times is not an assertion.
 - [ ] [#lzstepnoteoblig] Five reactive-graph step notes state a real obligation from a key every binding exempts by NAME. Found by #lzprosekeyconvention's new corpus guard on its first run: churn_returns_to_baseline steps[2] (REQUIRED: after 500 subscribe/unsubscribe cycles the dependent set tracks live subscribers, not total ever), cross_scope_teardown_hazard steps[7] (REQUIRED failure) and steps[14] (ending a scope whose members read already-disposed nodes MUST NOT itself error; teardown is idempotent), read_after_dispose_is_an_error steps[6] (a live reader that still names a disposed dependency errors on its next recompute; it MUST NOT return the value), recycled_id_inherits_nothing steps[12] (a stale cell handle whose id has been recycled onto a slot MUST be a no-op). Same defect as #lzprosekeyconvention one level down: an obligation carried by note/description/reason, which all nine trackers exempt by reserved name, so no runner can be made to discharge it and none does. They are allowlisted in scripts/check-prose-keys.mjs (ANNOTATIONS_STATING_OBLIGATIONS, checked in both directions) so the set cannot grow silently. Work: for each, promote the obligation into an executable expect key the step asserts — the teardown-idempotence and no-op-recycled-handle rules in particular are behaviour a binding can get wrong today with nothing red — then delete the allowlist entry. Check the other ~92 step notes for the same class while there.
 - [ ] [#lzzcpyuntracked] The coined id #lzzcpy is referenced throughout lazily-dart's lib/src/transport.dart and lib/src/ipc.dart but is tracked in no agent:backlog, agent:queue, agent:done or agent:review entry, so agent-doc's coined-id-pre-tool-use hook blocks any NEW file that mentions it - it blocked the v2 runner rewrite mid-fan-out until the tag was dropped from the prose. The block is correct behaviour; the untracked id is the defect. Either register #lzzcpy with the work it names (zero-copy transport) or strip it from the two source files, so the hook stops being a tax on unrelated edits. Check the other eight bindings for the same class of orphaned coined id while there.

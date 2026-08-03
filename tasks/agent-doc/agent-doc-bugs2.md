@@ -57,13 +57,29 @@ Changed paths: `agent-doc-document/src/authority_hashes.rs`, its module export, 
 Verification: focused affected-crate suite passed 499 tests; full `make check` passed all 8,575 tests plus formal models; private-name denylist found no new matches; latest pre-push CI was green and the new push CI is in progress.
 
 Commits: agent-doc `403fb0263` (feature) and `e37326a14` (requested formatting cleanup), pushed to `origin/main`; parent gitlink commit `317163c1b`. Confidence: high for the diagnostic-only phase. Escalation: none; haiven’s retained capture remains fail-closed pending convergence rather than risking operator text.
+
+### Re: #pcc3 — gpt-5.6
+
+> **Queue prompt:**
+>
+> do [#pcc3]
+
+
+Implemented and pushed phase 3 as `e23a640a0` (`feat: scope convergence to owned components`). Terminal convergence remains whole-document by default; projects may opt in with `agent_doc_per_component_convergence = true`. In opt-in mode, retained expected→target transitions derive the exact owned component set, authority/disk equality is required only for those components, malformed or legacy transitions fall back to whole-document equality, and the whole-document hash remains audit evidence. The adversarial simulation types into `agent:queue` throughout an `agent:exchange` closeout and proves every operator edit survives; the paired over-claim mutation makes that oracle fail.
+
+Dogfooding the change against the wedged Haiven session exposed three independent Agent Doc defects, fixed and pushed as `7afd2b568` (`fix: recover tracked clears without wedging`):
+
+- tracked `/clear` now distinguishes accepted, rejected, and unavailable supervisor restarts; an open retained closeout may use forced controller replacement only with independent idle-pane proof and a durable `ResponseCaptured`/`WriteApplied` boundary, followed by proof of a newer actor generation;
+- supervisor and auto-trigger pane probes preserve ANSI, so an unlisted SGR-2 Codex composer suggestion is recognized as idle placeholder chrome rather than drafted input;
+- the response-cell fast path now proves the entire patch is canonical assistant-only content before controller submission, so a valid legacy `## Re:` response or a mixed response/prompt patch falls through to compatibility patchback instead of repeating the same parser rejection forever.
+
+Verification passed: focused tests for every modified crate, `make check` with 8,585 tests, release-projection checks, and all TLA+ model checks. The private-name denylist and `git diff --check` are clean. Both public commits are on `origin/main`, CI run `30842884764` was started, and the exact committed `agent-doc 0.35.128` build is installed. Live recovery then crossed the retained closeout, restored the editor replica, committed the previously wedged response, admitted the next Haiven queue cycle, and completed its Agent Doc closeout cleanly.
 <!-- agent:boundary:f621055c:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#pcc2]~~
-- do [#pcc3]
+- ~~do [#pcc3]~~
 - do [#pcc4]
 - do [#panelayoutrace]
 - Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.
@@ -93,7 +109,6 @@ Commits: agent-doc `403fb0263` (feature) and `e37326a14` (requested formatting c
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcc3] #agent-doc-feature Per-component convergence phase 3: scope the convergence gate to owned components. Change decide_read_only_terminal_projection and the session-check divergence INTERRUPT to require equality only on components the turn wrote, so a divergence confined to an unowned component is non-blocking. This is the phase that makes the queue drain during live editing AND the phase that can destroy an operator buffer if the ownership set is computed too broadly, so it ships behind a default-off config flag. REQUIRED BEFORE IT SHIPS: a SimWorld test where the agent writes exchange while a simulated operator edits queue every tick, asserting every keystroke SURVIVES; an over-claim test forcing queue into the owned set and proving that survival test can go RED; and a replay of the three real 2026-08-03 documents (lazily.md, haiven-dev.md, agent-doc-bugs2.md) at their state_events hashes asserting none reaches a permanent INTERRUPT. Depends on #pcc2. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#pcc4] #agent-doc-feature Per-component convergence phase 4: per-component commit. Commit only the owned components, rebasing onto whatever the operator has since written elsewhere in the document, instead of writing the whole file. Non-goal to preserve: the agent still never component-merges a disk candidate under a live editor - per-component scope narrows WHAT must converge, it does not grant new authority to overwrite. Depends on #pcc3. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#panelayoutrace] #agent-doc-bug Pane-layout/dispatch race leaves an unmanaged pane in the agent-doc tmux window, and layout convergence has no concept of physical pane order. Plan: tasks/agent-doc/plan-pane-layout-dispatch-race.md. OPERATOR REPRO (2026-08-03): Run Agent Doc on lazily.md, then navigate the editor to agent-doc-bugs2.md WHILE that dispatch is still occurring; the yellow tmux bar offering to run lazily.md appears and lazily.md's pane stays in the window. Confirmed at 07:02:00Z - phase=retry_pending observation=pane_count_mismatch, expected=[bugs2, haiven-dev] (2, editor-visible) vs actual=[bugs2, lazily, haiven-dev] (3), panes=[%72,%77,%95]. Dispatch routes/creates a pane for its target while the editor-surface observation recomputes columns from what is visible NOW, so navigating away mid-dispatch excludes the document dispatch is still setting up and its pane becomes an extra the layout cannot model. TWO defects, do not conflate: (A) pane_count_mismatch retries forever because it will not close a pane hosting an active agent and the column set has no slot for it - it needs a terminal named outcome; (B) convergence compares expected/actual as ordered DOCUMENT lists and never checks that the hosting panes are in corresponding left-to-right order, so at 06:31:30Z it reported converged/synced with panes=[%77,%95] while %77 was at x=181 and %95 at x=121 (physically reversed) and %72 at x=0 was unmodelled - focus then picks column 0 faithfully and lands on the rightmost pane, which is the wrong-pane-focus symptom. DO NOT fix B by indexing focus into the physical pane list: in this state that selects %72, injecting into a different document's agent, which is worse. Both recorded projections can be replayed as fixtures without a live IDE
 - [ ] [#recommendedungatereview-b1cb] [recommended] Ungate review item #compactreactiveprojectionverify — validate and move to done

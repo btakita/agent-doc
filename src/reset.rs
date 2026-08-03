@@ -82,10 +82,14 @@ pub fn run(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "reset_preserve_session_authority_disk_divergence file={} authority_hash={} disk_hash={} recovery=automatic_native_editor_save operator_action=none",
+                        "reset_preserve_session_authority_disk_divergence file={} authority_hash={} disk_hash={} component_divergence={} recovery=automatic_native_editor_save operator_action=none",
                         file.display(),
                         agent_doc_hash::content_hash(&content),
                         agent_doc_hash::content_hash(&disk_content),
+                        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+                            &content,
+                            &disk_content,
+                        ),
                     ),
                 );
                 if !agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
@@ -93,10 +97,14 @@ pub fn run(
                     "reset_preserve_session_editor_authority_convergence",
                 )? {
                     anyhow::bail!(
-                        "reset --from-current --preserve-session is waiting for automatic editor-authority convergence for {} (authority_hash={}, disk_hash={}); the exact editor revision remains authoritative and retained, and no operator save, reload, or retry is required",
+                        "reset --from-current --preserve-session is waiting for automatic editor-authority convergence for {} (authority_hash={}, disk_hash={}, component_divergence={}); the exact editor revision remains authoritative and retained, and no operator save, reload, or retry is required",
                         file.display(),
                         agent_doc_hash::content_hash(&content),
                         agent_doc_hash::content_hash(&disk_content),
+                        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+                            &content,
+                            &disk_content,
+                        ),
                     );
                 }
                 let settled_authority =
@@ -111,10 +119,14 @@ pub fn run(
                     )?;
                 anyhow::ensure!(
                     settled_authority == settled_disk,
-                    "reset --from-current --preserve-session automatic editor save for {} returned without exact authority/disk convergence (authority_hash={}, disk_hash={}); the convergence effect remains controller-owned and no operator save, reload, or retry is required",
+                    "reset --from-current --preserve-session automatic editor save for {} returned without exact authority/disk convergence (authority_hash={}, disk_hash={}, component_divergence={}); the convergence effect remains controller-owned and no operator save, reload, or retry is required",
                     file.display(),
                     agent_doc_hash::content_hash(&settled_authority),
                     agent_doc_hash::content_hash(&settled_disk),
+                    agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+                        &settled_authority,
+                        &settled_disk,
+                    ),
                 );
                 content = settled_authority;
             }

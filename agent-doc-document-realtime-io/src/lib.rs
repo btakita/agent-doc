@@ -1323,11 +1323,14 @@ pub fn settle_committed_projection_if_current_through_authority(
     let disk = resolve_disk_current_document_content(path, source)?;
     anyhow::ensure!(
         canonical == expected_current && disk == expected_current,
-        "{source}: refusing committed projection settlement for {} without exact authority/disk current-content proof (expected_hash={}, canonical_hash={}, disk_hash={})",
+        "{source}: refusing committed projection settlement for {} without exact authority/disk current-content proof (expected_hash={}, canonical_hash={}, disk_hash={}, component_divergence={})",
         path.display(),
         agent_doc_hash::content_hash(expected_current),
         agent_doc_hash::content_hash(&canonical),
         agent_doc_hash::content_hash(&disk),
+        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+            &canonical, &disk,
+        ),
     );
     clear_all_deferred_document_write_intents(path, source)?;
     atomic_write_if_current_through_authority(path, committed_content, expected_current, source)?;
@@ -1335,11 +1338,14 @@ pub fn settle_committed_projection_if_current_through_authority(
     let disk = resolve_disk_current_document_content(path, source)?;
     anyhow::ensure!(
         canonical == committed_content && disk == committed_content,
-        "{source}: committed projection settlement for {} did not converge exactly (committed_hash={}, canonical_hash={}, disk_hash={})",
+        "{source}: committed projection settlement for {} did not converge exactly (committed_hash={}, canonical_hash={}, disk_hash={}, component_divergence={})",
         path.display(),
         agent_doc_hash::content_hash(committed_content),
         agent_doc_hash::content_hash(&canonical),
         agent_doc_hash::content_hash(&disk),
+        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+            &canonical, &disk,
+        ),
     );
     clear_all_deferred_document_write_intents(path, source)?;
     agent_doc_ops_log_io::log_op(
@@ -1419,11 +1425,14 @@ pub fn settle_retained_committed_projection_through_authority(
     let disk = resolve_disk_current_document_content(path, source)?;
     anyhow::ensure!(
         canonical == committed_content && disk == committed_content,
-        "{source}: retained committed projection for {} did not converge exactly (committed_hash={}, canonical_hash={}, disk_hash={})",
+        "{source}: retained committed projection for {} did not converge exactly (committed_hash={}, canonical_hash={}, disk_hash={}, component_divergence={})",
         path.display(),
         committed_hash,
         agent_doc_hash::content_hash(&canonical),
         agent_doc_hash::content_hash(&disk),
+        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+            &canonical, &disk,
+        ),
     );
     clear_all_deferred_document_write_intents(path, source)?;
     agent_doc_ops_log_io::log_op(
@@ -2073,11 +2082,14 @@ pub fn atomic_repair_write_if_current_through_authority(
     let disk = resolve_disk_current_document_content(path, source)?;
     anyhow::ensure!(
         canonical == content && disk == content,
-        "{source}: successful repair write for {} did not converge exactly before settling deferred lineage (expected_hash={}, canonical_hash={}, disk_hash={})",
+        "{source}: successful repair write for {} did not converge exactly before settling deferred lineage (expected_hash={}, canonical_hash={}, disk_hash={}, component_divergence={})",
         path.display(),
         agent_doc_hash::content_hash(content),
         agent_doc_hash::content_hash(&canonical),
         agent_doc_hash::content_hash(&disk),
+        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+            &canonical, &disk,
+        ),
     );
     clear_all_deferred_document_write_intents(path, source)?;
     Ok(canonical)

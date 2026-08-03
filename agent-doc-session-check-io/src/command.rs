@@ -402,10 +402,14 @@ fn ensure_terminal_authority_disk_convergence(
         )?;
         anyhow::ensure!(
             settled_authority == authority_content && settled_disk == authority_content,
-            "[session-check] retained non-capture projection settlement for {} returned without exact authority/disk convergence (authority_hash={}, disk_hash={})",
+            "[session-check] retained non-capture projection settlement for {} returned without exact authority/disk convergence (authority_hash={}, disk_hash={}, component_divergence={})",
             file.display(),
             agent_doc_hash::content_hash(&settled_authority),
             agent_doc_hash::content_hash(&settled_disk),
+            agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+                &settled_authority,
+                &settled_disk,
+            ),
         );
         agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
@@ -453,11 +457,15 @@ fn ensure_terminal_authority_disk_convergence(
         )?;
         anyhow::ensure!(
             settled_authority == authority_content && settled_disk == authority_content,
-            "[session-check] retained committed projection settlement for {} returned without exact HEAD/authority/disk convergence (head_hash={}, authority_hash={}, disk_hash={})",
+            "[session-check] retained committed projection settlement for {} returned without exact HEAD/authority/disk convergence (head_hash={}, authority_hash={}, disk_hash={}, component_divergence={})",
             file.display(),
             agent_doc_hash::content_hash(authority_content),
             agent_doc_hash::content_hash(&settled_authority),
             agent_doc_hash::content_hash(&settled_disk),
+            agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+                &settled_authority,
+                &settled_disk,
+            ),
         );
         agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
@@ -472,10 +480,14 @@ fn ensure_terminal_authority_disk_convergence(
             "session_check_terminal_convergence",
         );
     anyhow::bail!(
-        "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); refusing a false successful closeout. Automatic editor recovery status: {}. Replica re-registration and projection settlement are scheduled automatically; supervisor recycle is fallback-only when the targeted event cannot be published. `session-check` is status-only. Do not rerun `finalize`, run `write --commit`, repair, or force-disk the response.",
+        "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); refusing a false successful closeout. Automatic editor recovery status: {}. Replica re-registration and projection settlement are scheduled automatically; supervisor recycle is fallback-only when the targeted event cannot be published. `session-check` is status-only. Do not rerun `finalize`, run `write --commit`, repair, or force-disk the response.",
         file.display(),
         agent_doc_hash::content_hash(authority_content),
         agent_doc_hash::content_hash(disk_content),
+        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+            authority_content,
+            disk_content,
+        ),
         recovery_status,
     );
 }
@@ -530,11 +542,15 @@ fn self_heal_transiently_stale_committed_projection(
         crate::resolve_disk_document_content(file, "session_check_committed_projection_settled")?;
     anyhow::ensure!(
         settled_authority == committed_content && settled_disk == committed_content,
-        "[session-check] committed projection settlement for {} returned without exact HEAD/authority/disk convergence (head_hash={}, authority_hash={}, disk_hash={})",
+        "[session-check] committed projection settlement for {} returned without exact HEAD/authority/disk convergence (head_hash={}, authority_hash={}, disk_hash={}, component_divergence={})",
         file.display(),
         agent_doc_hash::content_hash(&committed_content),
         agent_doc_hash::content_hash(&settled_authority),
         agent_doc_hash::content_hash(&settled_disk),
+        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+            &settled_authority,
+            &settled_disk,
+        ),
     );
     agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
@@ -865,10 +881,14 @@ fn run_with_options_inner(
         };
         anyhow::ensure!(
             authority_content == disk_content,
-            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); {}. {}",
+            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); {}. {}",
             file.display(),
             agent_doc_hash::content_hash(&authority_content),
             agent_doc_hash::content_hash(&disk_content),
+            agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+                &authority_content,
+                &disk_content,
+            ),
             match terminal_projection_decision {
                 ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery =>
                     "the exact editor delivery acknowledgement is pending",
@@ -898,10 +918,14 @@ fn run_with_options_inner(
                     )?;
                     anyhow::ensure!(
                         authority_content == disk_content,
-                        "[session-check] INTERRUPTED: retained closeout resumed after editor-native save, but canonical authority and disk diverged again for {} (authority_hash={}, disk_hash={})",
+                        "[session-check] INTERRUPTED: retained closeout resumed after editor-native save, but canonical authority and disk diverged again for {} (authority_hash={}, disk_hash={}, component_divergence={})",
                         file.display(),
                         agent_doc_hash::content_hash(&authority_content),
                         agent_doc_hash::content_hash(&disk_content),
+                        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+                            &authority_content,
+                            &disk_content,
+                        ),
                     );
                 }
                 CapturedFinalizeResumeOutcome::Retained { reason } => {

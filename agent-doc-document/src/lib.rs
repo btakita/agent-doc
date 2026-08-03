@@ -3,6 +3,7 @@
 //! This crate owns rules that can be evaluated from document text and typed
 //! facts without touching disk, git, editors, tmux, snapshots, or turn state.
 
+pub mod authority_hashes;
 pub mod claim_scaffold;
 pub mod commit_integrity;
 pub mod commit_normalization;

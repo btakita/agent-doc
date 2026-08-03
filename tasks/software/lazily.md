@@ -23,129 +23,22 @@ gated: npm security-key user presence required
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/44ae7f3a5c03b112ffe17aa5c85d000e3d79a6e9a4875e16442309ebf1c06a1c-20260802-201633.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/44ae7f3a5c03b112ffe17aa5c85d000e3d79a6e9a4875e16442309ebf1c06a1c-20260803-001727.md`*
 
 Compacted content:
-- Archived 10 response topic(s): do [#lzspecdecoderbound]; do [#lzkeynullstrict]; do [#lzreadmelinkrot]; 7 more
-- Prior summary/context: prior compacted content: Archived 7 response topic(s): do [#coveragejsonscores]; do [#lzcppmsgpackwire]; do [#lzcppco...
-
-### Re: do [#failcloseddispatch] — opus-5
-
-Done in all six remaining bindings. One agent per repo, six repos, no overlap.
-
-**76 fail-open dispatch chains found and closed**, every one mutation-checked by feeding a discriminator value no arm names, every one confirmed red before the mutation was reverted.
-
-| repo | fixed | commit | suite | CI |
-|---|---|---|---|---|
-| go | 8 | `0cd58a9` | 129/138 fixtures, 118/118 scenarios | green |
-| py | 25 | `6d924be` | 686 passed, 134/138 fixtures | green |
-| kt | 24 | `6819ac6` | 423 tests, 118/118 scenarios | green |
-| dart | 16 (30 sites) | `bca5750` | 657 tests, 118/118 scenarios | green |
-| zig | 16 | `97afb05` | 916 tests × 3 pinned toolchains | green |
-| cpp | 12 + 20 asserts | `4cdb143` | 55 tests, 99/103 scenarios | green |
-
-Superproject pointer bump: `d952e9139`. `lazily-spec` was never edited — every mutation ran against a scratch corpus or a temporary runner-source edit, and the shared corpus is byte-identical and clean.
-
-**The defect was bigger than the shape we named.** We went looking for a missing `default:` and found three classes:
-
-- *Expectation-side dispatch.* The nastiest. `test_coordination_conformance.cpp:120` dispatched on the expected `role`; an unrecognised spelling didn't skip the assertion, it silently **changed which assertion ran** — the fixture said one thing and the runner checked another and passed. Same shape in cpp membership/resilience/service, and in dart's `durability` chains, which compared the observed durability against a value the fixture never named.
-- *The discriminator nobody read.* Ten drivers across py, kt, zig and dart replayed every op as a single variant while a `type` field sat unread in the fixture. `windowing` tumbling/sliding counts, `rateshape` sample_count and probabilistic_sample, in four bindings each. Those runners were not dispatching at all.
-- *The assumed last variant.* The `assert(policy == "Max")` shape, in every spelling: Kotlin `else -> tick(now)`, Dart `direction != 'client'` running the server codec, Zig bare `else`, Python `else: assert res.is_ignore` — where `resync_gap_converge.json` carries no `Ignore` frame at all, so that arm had never once executed.
-
-**Two corrections to the record.**
-
-`c264241`'s commit message says NDEBUG compiles the cpp asserts out. It doesn't: `tests/CMakeLists.txt` adds `-UNDEBUG`, and the generated flags are `-O3 -std=c++17 -UNDEBUG`. Those asserts fire today, including in the Release default. They were one build-flag edit from vanishing and they named nothing when they fired, so converting them was right — but they were not live false greens, and the cpp finds that *were* live are the silent-default class instead.
-
-Zig's `signaling_conformance.zig:349` `else => unreachable`, the lead we carried, is **not** this defect class. It switches on a tagged union already narrowed by the enclosing prong, not on fixture data. It's now an explicit error return anyway — `unreachable` is unchecked UB under ReleaseFast and a runner should not spell a refusal in a form that only traps in Debug — but no fixture value can reach it, so that one change is unverified by execution. Stated plainly rather than counted as a mutation-checked fix.
-
-**One real corpus bug fell out.** `nodekey_null_leniency`'s non-snapshot field is spelled `node_add`, not `delta`. The dart fail-open had been hiding which value it was actually handling.
-
-**One method note worth keeping.** The py sweep's first pass reported five false "still green" mutation results — stale `__pycache__` let pytest reuse pre-mutation bytecode when mutate and restore landed inside the same filesystem second. Only the re-run with `PYTHONDONTWRITEBYTECODE=1` and the cache cleared per case is reported above. A mutation check that can't invalidate its own build is just another false green, one level up.
-
-Queued the js/cs/rs sweep at the top of the backlog. Those three were marked "already have theirs" on the strength of the chains we happened to inspect, not an audit — and the six repos we did audit averaged twelve fail-opens apiece.
-
-### Re: do [#nevergotsystematic] — opus-5
-
-Done. The premise held: all three had been marked "already have theirs" on the strength of the chains we happened to inspect, and a systematic audit found **98 more fail-opens**.
-
-| repo | fixed | commit | suite | CI |
-|---|---|---|---|---|
-| js | 40 | `c271814` | 581 tests, 118/118 scenarios | green |
-| cs | 34 | `33ab72f` | 249 tests, Debug + Release | green |
-| rs | 24 | `956a36a` | 6018 passed, + release profile | green |
-
-Superproject pointer bump: `f9d39c8b8`. `lazily-spec` clean throughout — every mutation was runner-side.
-
-**174 fail-opens across nine bindings.** The sweep is complete.
-
-Each agent built a real AST analyzer rather than grepping — TypeScript compiler API for js, Roslyn for cs, `syn` for rs — and each ran a *separate* corpus-vocabulary cross-check for class 3, collecting every discriminator value the fixtures actually carry and reporting the ones no runner names as a literal. That second pass is what found the class the AST cannot see, and it found the same four drivers in all three repos that it found in the six before: `windowing` tumbling/sliding count, `rateshape` sample_count and probabilistic_sample. Four bindings, then three more. Seven of nine shipped the identical bug because the runners were written from the same shape.
-
-**The "already fail-closed" record was half right, which is why it survived.** lazily-rs is the clean case: 71 `match` chains already panic on the unmatched value. Every single fail-open there was a *different* syntax — if/else tails, `==` binaries against a literal where a third value exists, and unread discriminators. Whoever checked this repo checked `match` and was right about `match`. The audit was scoped to the shape we already knew about, and the shapes we didn't know about were the ones that were broken.
-
-**A negative test that passed for the wrong reason.** `signaling_negative_conformance.rs:54` dispatched on `direction` and returned `Err` on an unrecognised value — into a loop asserting `is_err()`. A misspelled direction passed the rejection test because the *runner* didn't recognise it, never because the codec rejected the frame. `test/signaling.test.js:37` had the same shape in js. A fail-open inside a negative test doesn't skip an assertion; it satisfies one.
-
-**Two mutation checks reported "survived" and both were the harness, not the code.**
-
-The rs pass reported all five stdlib sites as surviving. `cargo test` was filtered on `timer`/`timeout`/`revision_barrier`, but that file has exactly two tests with neither name — the filter matched zero tests and cargo exited 0. The cs pass first mutated a delta op the corpus doesn't carry, so the mutation never reached the arm it was aiming at; re-aimed at a value the corpus does carry, it went red. Neither was the stale-cache route we hit in py last cycle, and that's the point worth keeping: *a mutation check has at least three ways to report a false green* — stale artifact, a filter that selects nothing, and a probe aimed at a value the corpus never produces. All three exit 0 and look identical from outside. The cs agent's guard is the generalizable one: it asserted the test assembly's mtime advanced, which also caught two "RED" results that were actually compile failures from warnings-as-errors.
-
-**The corpus corrected us again.** cs's new `field` guard went red immediately on the real fixtures: `nodekey_null_leniency.json` spells the delta case `node_add`, not `delta`. That's the second binding to learn this from a guard — dart hit it last cycle. The bare ternary could not have surfaced it in either.
-
-Queued the library-side audit. This whole sweep looked at runners only, and cs came back with five concrete unassessed sites in `src/Lazily`. rs flagged two of its own and argued both are deliberate wire leniency — which is exactly why it needs a per-site verdict rather than a blanket conversion, and why an intentional default deserves a fixture pinning it. From the outside, a documented leniency and a forgotten `_ => {}` look the same.
-
-### Re: do [#failclosedsweep] — opus-5
-
-Done, and the premise inverted under examination. The two sites that seeded this task as deliberate wire leniency were both dispatching on **closed enums**, and the corpus said so in files nobody had read.
-
-Nine agents, one per binding, each building a real AST analyzer — `syn`, Roslyn, the TypeScript compiler API, `go/ast` + `go/types`, Python `ast`, Kotlin compiler PSI, the Dart analyzer, `std.zig.Ast`, libclang. **~2,600 candidate sites triaged → 75 failed closed, 51 verdicted intentional and pinned with a test stating the wire reason.**
-
-| repo | examined | closed | intentional | commit | suite |
-|---|---|---|---|---|---|
-| rs | 259 → 20 material | 11 | 6 | `753e82f` | 775 × ok, clippy + fmt clean |
-| cs | 353 → 26 | 17 | 9 | `0031c92` | 286 Debug + Release, 139/139 fixtures |
-| cpp | 1346 → 18 | 12 | 6 | `991c2e1` | 56/56, 118 fixtures |
-| js | 115 → 21 | 10 | 6 | `659aa67` | 597 |
-| py | 51 → 15 | 9 | 6 | `0f40c00` | 704 |
-| go | 125 | 4 | 5 | `f6d89dc` | `-race` clean, 130/139 |
-| kt | 248 | 3 | 6 | `7b95051` | 436 |
-| dart | 56 → 8 | 6 | 2 | `6d5476a` | 684 |
-| zig | 63 adjudicated | 3 | 5 | `8f69469` | 3 toolchains: 869 / 931 / 815 |
-
-Spec: `c038d85` + `06a8956`. Superproject pointer bump `1bb27b03b`. CI green everywhere it runs.
-
-**The adjudication.** `schemas/statechart.json` closes `kind` to five values under `additionalProperties: false` and says a chart *"is never serialized over IPC/FFI as a distinct type"* — so no forward-compat argument reaches it at all. `schemas/defs.json` closes `backend` to three, and `docs/zero-copy-transport.md` proves `resolve_wrong_backend`: *a descriptor of one kind never resolves against a different backend's table — receivers route by kind.*
-
-On `backend` the family had split **5–2 the wrong way**, and every one of the five had *written a forward-compat rationale*. All five defended it identically: the shm backend fails the checksum, so it resolves to nothing rather than to another backend's bytes. That defence inverts the theorem. Reading an unknown kind as `shm` **is** routing a non-shm descriptor into the shm table; what the theorem discharges **structurally, by routing**, normalization downgrades to a **probabilistic** guarantee discharged by a 64-bit checksum — against a backend this build genuinely resolves, so a collision hands back bytes. It is the same substitution `#lzspecdecoderbound` already outlaws for `NodeId`. And the enum is not open: a new backend enters by *adding an enum value*, a spec change carrying a fixture, so an unknown token is a corrupt producer, never a newer peer.
-
-lazily-rs reversed its own seed verdict before I asked. lazily-js had shipped the refusal all along and had already named the stakes: *"One of the two is wrong, and a fixture is how the family finds out which."*
-
-**So I built the fixture, and it found five defects in itself.** `conformance/codec/blob_backend_discriminator.json` — 8 scenarios, both codecs, both outcomes, with `arrow` as the control that forces the discriminator to be read and re-encode assertions pinning the encoder half. Replayed in all nine. Then the bindings replaying it reported back:
-
-- **`in_process` is declared in `assertions.backends` and carried by no scenario** — so a binding knowing only `{shm, arrow}` passes all eight while contradicting the enum the clause declares. Found independently by py, go, rs. The `arrow` control proves the field is *read*; it proves nothing about the vocabulary being *complete*.
-- **No `null` scenario** — and four bindings had already split three ways on it.
-- **No non-string scenario.** The clause is written entirely about tokens; cs's only real defect was a non-string `backend` escaping as `InvalidOperationException`, outside the failure mode both MUST-level codecs document *"so a caller can handle both through one catch."*
-- **`expect.epoch` is ambiguous** — frame and descriptor both carry `9` (kt, rs).
-- **Two codecs are not two implementations** — cpp bridges msgpack into the same DOM, rs shares one `serde` impl.
-
-All five are recorded in `protocol.md` rather than left implied, along with the adjudications they force: `null` is the **absent** form per `#lzkeynullstrict`; `shm` is the **permanent** default; a refusal must be **catchable through the codec's documented decode-error type**; naming the token is **bounded** and truncation satisfies it; and the accepted cost — refusal fails the whole frame — is stated rather than inferred.
-
-**I got one instruction wrong and cpp caught it.** I told it to throw `std::invalid_argument`, which derives from `std::logic_error`. That repo had *just* fixed a defect of exactly that shape — `std::stoll` throwing `std::out_of_range`, a `logic_error`, escaping the `std::runtime_error` every caller guards a decode with. It refused, used `runtime_error`, and pinned the refusal as positively **not** a `logic_error`.
-
-**Two findings bigger than the sweep.** lazily-rs found the `json-base64` codec had **no executing test target at all** — its `#[cfg(feature = ...)]` blocks compiled under clippy and ran nowhere, as did `statechart-json`, `durable-sqlite`, and the signaling client. Feature-gated code that compiles and never runs is the vacuous-run defect one level up. And zig found a **fourth** false-green mode beyond the three catalogued: `-Dfilters` reported `4/4 tests passed` while selecting the target test *not at all*, which defeats the assert-a-non-zero-count guard itself.
-
-Two audits reported "no `backend` dispatch site" and both were wrong — cs had a real string→enum switch in `IpcWire.cs`, dart a `for`-loop scan in `ipc.dart:133`. The AST passes keyed on named shapes (`byName`, `switch`, `firstWhere`, `TryParse`) and were blind to a hand-rolled scan. Same sentence the runner sweep wrote about itself: the audit was scoped to the shape we already knew about.
-
-Also worth keeping: three bindings independently found the same durable-outbox journal defect — cs, zig, dart, a scan over the on-disk journal with **no default case**, where an ignored `delete` resurrects a pruned suffix and the outbox re-delivers acked frames while reporting success. And two independently found `CapabilityHandshake.max_frame_size` decoded, negotiated, and never read.
-
-Queued five follow-ups: fixture v2 hardening (`#lzblobbackendstrict`, rewritten to the five defects above), the handshake dead fields, statechart `kind` authority plus reference validation, the outbox journal opcode pair, and the decorative wire fields — including `required_features`, whose own doc says *"the submit fails closed"* against a rule no code enforces.
-
-One thing I did **not** do: `src/agent-doc` has a concurrent session's uncommitted refactor across ~20 files, so I left the `stale_install` warning alone rather than build another session's in-progress tree into the binary all seven sessions share.
+- Archived 3 response topic(s): do [#failcloseddispatch]; do [#nevergotsystematic]; do [#failclosedsweep]
+- Prior summary/context: prior compacted content: Archived 10 response topic(s): do [#lzspecdecoderbound]; do [#lzkeynullstrict]; do [#lzreadm...
 <!-- agent:boundary:ebcdbd84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#failclosedsweep]~~
+- 🚧 do [#lzblobbackendstrict]
+- do [#lzhandshakedeadfields]
+- do [#lzstatechartkindauthority]
+- do [#lzoutboxjournalop]
+- do [#lzdecorativewirefields]
 - 📌 do [#lzassertionblockschema]
 - 📌 do [#lzdependencyavailability]
 - 📌 do [#lzcpptranscribedrunners]
@@ -161,7 +54,7 @@ One thing I did **not** do: `src/agent-doc` has a concurrent session's uncommitt
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzblobbackendstrict] Harden conformance/codec/blob_backend_discriminator.json. The clause and the fixture LANDED under #failclosedsweep (lazily-spec c038d85 + 06a8956, replayed in all nine bindings); do NOT re-litigate the clause, it is settled. What remains is fixture v2, and every defect below was found by a binding REPLAYING the fixture rather than by review of it. (1) in_process is declared in assertions.backends and carried by NO scenario, so a binding knowing only {shm, arrow} - which would reject in_process naming the token, conformingly - passes all eight while contradicting the enum the clause declares; the arrow control proves the discriminator is READ, not that the vocabulary is COMPLETE. Found independently by lazily-py, lazily-go and lazily-rs. (2) No null scenario, so the adjudication landed in 06a8956 (an explicit backend null is the ABSENT form per #lzkeynullstrict and decodes as shm) is prose the corpus does not execute; four bindings raised this edge and had already split three ways - accept-as-shm, an ExpectedString error naming nothing, and a refusal naming the empty token. (3) No non-string scenario: the clause is written entirely about TOKENS, and a runtime whose JSON reader coerces rather than throws on a number in a string position normalizes silently there. lazily-cs's only real defect was exactly this, escaping as InvalidOperationException outside the failure mode both MUST-level codecs document so a caller can handle both through one catch. (4) expect.epoch is ambiguous - the Delta frame and the ShmBlobRef descriptor both carry 9, so a runner reading the frame's epoch and one reading the descriptor's both pass; make them differ. Found by lazily-kt and lazily-rs. (5) Two codecs are not two implementations: lazily-cpp bridges msgpack into the same JsonValue DOM the JSON decoder produces and lazily-rs shares one serde impl, so the msgpack half yields ONE discriminator verdict and 8/8 green must not be read as two implementations agreeing. Work: regenerate via scripts/gen_blob_backend_discriminator_fixture.py adding in_process, null and non-string scenarios plus a disambiguated epoch, then re-sync the five vendored mirrors (py, dart, rs, go, zig - byte-checked by sync-conformance-fixtures.mjs) and bump each binding's MIN_FIXTURES/MIN_SCENARIOS floors. Runners are data-driven over scenarios, so most bindings need only a mirror re-sync plus a floor bump. Carry two methodology findings with it: lazily-zig proved a filtered build run can report 4/4 tests passed while selecting the target test NOT AT ALL, a FOURTH false-green mode beyond the three catalogued (stale artifact, filter matching nothing, probe aimed at a value the corpus never carries); and lazily-kt plus lazily-cs both had to make their runners COLLECT per-scenario failures instead of aborting at the first, because otherwise the msgpack twin of a broken json scenario never executes and half the fixture is unfalsifiable under mutation.
+- [ ] 🚧 [#lzblobbackendstrict] Harden conformance/codec/blob_backend_discriminator.json. The clause and the fixture LANDED under #failclosedsweep (lazily-spec c038d85 + 06a8956, replayed in all nine bindings); do NOT re-litigate the clause, it is settled. What remains is fixture v2, and every defect below was found by a binding REPLAYING the fixture rather than by review of it. (1) in_process is declared in assertions.backends and carried by NO scenario, so a binding knowing only {shm, arrow} - which would reject in_process naming the token, conformingly - passes all eight while contradicting the enum the clause declares; the arrow control proves the discriminator is READ, not that the vocabulary is COMPLETE. Found independently by lazily-py, lazily-go and lazily-rs. (2) No null scenario, so the adjudication landed in 06a8956 (an explicit backend null is the ABSENT form per #lzkeynullstrict and decodes as shm) is prose the corpus does not execute; four bindings raised this edge and had already split three ways - accept-as-shm, an ExpectedString error naming nothing, and a refusal naming the empty token. (3) No non-string scenario: the clause is written entirely about TOKENS, and a runtime whose JSON reader coerces rather than throws on a number in a string position normalizes silently there. lazily-cs's only real defect was exactly this, escaping as InvalidOperationException outside the failure mode both MUST-level codecs document so a caller can handle both through one catch. (4) expect.epoch is ambiguous - the Delta frame and the ShmBlobRef descriptor both carry 9, so a runner reading the frame's epoch and one reading the descriptor's both pass; make them differ. Found by lazily-kt and lazily-rs. (5) Two codecs are not two implementations: lazily-cpp bridges msgpack into the same JsonValue DOM the JSON decoder produces and lazily-rs shares one serde impl, so the msgpack half yields ONE discriminator verdict and 8/8 green must not be read as two implementations agreeing. Work: regenerate via scripts/gen_blob_backend_discriminator_fixture.py adding in_process, null and non-string scenarios plus a disambiguated epoch, then re-sync the five vendored mirrors (py, dart, rs, go, zig - byte-checked by sync-conformance-fixtures.mjs) and bump each binding's MIN_FIXTURES/MIN_SCENARIOS floors. Runners are data-driven over scenarios, so most bindings need only a mirror re-sync plus a floor bump. Carry two methodology findings with it: lazily-zig proved a filtered build run can report 4/4 tests passed while selecting the target test NOT AT ALL, a FOURTH false-green mode beyond the three catalogued (stale artifact, filter matching nothing, probe aimed at a value the corpus never carries); and lazily-kt plus lazily-cs both had to make their runners COLLECT per-scenario failures instead of aborting at the first, because otherwise the msgpack twin of a broken json scenario never executes and half the fixture is unfalsifiable under mutation.
 - [ ] [#lzhandshakedeadfields] CapabilityHandshake.max_frame_size and fragmentation_supported are decoded, carried, and negotiated - and never read by any compatibility check. Found INDEPENDENTLY by the lazily-zig and lazily-cpp library audits under #failclosedsweep, in different languages, neither aware of the other; lazily-rs's shape-6 pass separately reported CapabilityHandshake.session_id in the same never-read class. Consequence: a peer advertising a 1 KiB frame limit is deemed compatible with one advertising 16 MiB, so fragmentation is negotiated and then ignored. check_compatible compares protocol_id, protocol_major_version, codec, ordered_reliable and features only. Both audit agents declined to fix it unilaterally on the correct grounds that adding a comparison could redden the other eight bindings - whether a handshake MUST reconcile frame size is a spec clause, not a per-binding decision. Work: decide the clause in protocol.md (reconcile-and-take-the-minimum vs advertise-only), then make it executable with a fixture, then implement in all nine. Related: lazily-zig ships CapabilityHandshake as dead weight (nothing in src/ constructs, decodes or tests it - it is only re-exported from root.zig), so zig is the outlier to check first.
 - [ ] [#lzstatechartkindauthority] Decide what an explicit statechart `kind` MEANS, then make it executable. schemas/statechart.json closes `kind` to {atomic, compound, parallel, history, final} and documents an inference rule for its ABSENCE, but says nothing about whether a PRESENT `kind` is authoritative or merely a restatement - and lazily-js found that every parser derives structure from `parallel: true` / `initial` and never from `kind`, so today it is only ever a redundant restatement. That gap is why the nine-binding audit under #failclosedsweep split 3-3 on an unknown `kind`, with lazily-rs, lazily-go and lazily-py calling it an open annotation slot and lazily-dart, lazily-kt and lazily-js failing it closed. lazily-rs has since reversed to fail-closed. Second, larger half in the same family: ChartDef reference validation. lazily-rs, lazily-cpp and lazily-dart each independently found that `parent`/`initial`/`default`/transition `target` may name undeclared states, and that kind() of an unknown id returns Atomic - so a typo'd target transitions INTO A PHANTOM STATE that then enters the active configuration as a leaf. lazily-cpp gated it in ChartBuilder::build and lazily-dart threw ArgumentError; the other seven are unverified. Work: state both clauses in the spec, add conformance/statechart/malformed_rejected.json covering unknown kind, declared-vs-inferred contradiction, non-bool parallel/internal, non-string history/parent/initial/default, and undeclared id references, then bring all nine to it.
 - [ ] [#lzoutboxjournalop] Pin the durable-outbox journal's opcode strictness with a canonical fixture, and pin its deliberate opposite in the same file. THREE bindings independently found the same defect under #failclosedsweep - lazily-cs DurableOutbox.cs:340, lazily-zig reliable_sync.zig:482, lazily-dart reliable_sync.dart:363 - a scan over the on-disk journal with NO default case, where an unrecognised opcode is skipped exactly like a cursor mark. All three reached the same consequence: an ignored delete/delete_after resurrects a pruned suffix, so the outbox re-delivers already-acked frames while reporting success. The journal is written by a possibly-different build of the same binding, which is what makes it a wire surface rather than an internal one. lazily-cs and lazily-dart both also split it the same way and that split is the fixture: an unknown opcode INTERIOR to the log MUST be refused, while a TORN TRAILING record MUST be forgiven and the earlier records must survive, because a crash leaves exactly one truncated final line. The two cases arrive through the same code path and demand opposite answers, which is precisely why neither survives being left to per-binding judgement.

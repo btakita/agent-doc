@@ -2994,8 +2994,7 @@ mod core_tests {
              Your new queue head is queued and untouched — it needs a `> **Queue prompt:**` echo \
              to be consumed, which the next cycle will do.\n"
         );
-        let keys =
-            answered_free_text_head_node_keys(&content, &deferring_response, None).unwrap();
+        let keys = answered_free_text_head_node_keys(&content, &deferring_response, None).unwrap();
         assert!(
             keys.is_empty(),
             "a head the response itself calls untouched must not be struck: {keys:?}"

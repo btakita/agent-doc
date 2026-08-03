@@ -111,6 +111,25 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
         self.kill_child();
     }
 
+    fn agent_doc_cycle_open(&self) -> bool {
+        // `#haivendupsession`: same source the recycle gate reads, so restart and
+        // recycle cannot disagree about whether a turn is still in flight. Fail
+        // CLOSED — an unreadable projection defers the restart rather than
+        // risking a second child on the pane.
+        let Some(file) = self.actor_runtime.as_ref().map(|runtime| runtime.file.clone()) else {
+            return false;
+        };
+        match agent_doc_cycle_state_io::load_with_closeout_projection(&file) {
+            Ok(state) => state.map(|state| state.is_open()).unwrap_or(false),
+            Err(_) => true,
+        }
+    }
+
+    fn child_alive(&self) -> bool {
+        let pid = self.child_pid.load(Ordering::Relaxed);
+        pid != 0 && std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+
     fn wake_restart_prompt(&self) -> Result<(), String> {
         let pane = self
             .inject_pane

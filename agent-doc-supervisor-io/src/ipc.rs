@@ -224,6 +224,14 @@ pub trait SupervisorIpcLifecycleState {
     /// restart/quit prompt. This is used only when `actor_waiting_input()` was
     /// true before the lifecycle transition.
     fn wake_restart_prompt(&self) -> Result<(), String>;
+    /// True when a document cycle is open for this supervisor's document.
+    ///
+    /// `#haivendupsession`: the restart path needs the same fact the recycle
+    /// path gates on, so both refuse to replace a child that still owns a turn.
+    fn agent_doc_cycle_open(&self) -> bool;
+    /// True when the current harness child process is still running. A restart
+    /// after the child is gone has nothing to double up and must still spawn.
+    fn child_alive(&self) -> bool;
 }
 
 pub fn mark_supervisor_inject_dispatched<S>(state: &S)
@@ -267,6 +275,24 @@ where
     S: SupervisorIpcLifecycleState + ?Sized,
 {
     let (mode, restart_agent) = decode_restart_intent(mode);
+    // `#haivendupsession`: refuse to spawn a replacement while the current child
+    // still owns an open cycle. The recycle path has always deferred here; the
+    // restart path did not, and with a keep-alive reap policy the un-reaped old
+    // child kept rendering through the same pane's PTY proxy underneath the new
+    // one. Fail loudly rather than silently dropping the operator's request —
+    // a silent no-op is the failure mode this whole area keeps reproducing.
+    if agent_doc_supervisor::lifecycle::supervisor_restart_admission(
+        state.agent_doc_cycle_open(),
+        state.child_alive(),
+    ) == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::DeferCycleOpen
+    {
+        return Err(
+            "supervisor restart deferred: a document cycle is open and the current harness \
+             child still owns it, so spawning now would leave two children on this pane. \
+             Retry once the turn reaches its boundary (#haivendupsession)"
+                .to_string(),
+        );
+    }
     let waiting_input = state.actor_waiting_input();
     state.transition_actor_busy("supervisor", "ipc_restart_requested");
     state.set_restart_mode(mode);
@@ -836,11 +862,76 @@ mod tests {
         child_killed: AtomicBool,
         prompt_woken: AtomicBool,
         restart_mode: Mutex<String>,
+        /// `#haivendupsession`: default false so every pre-existing restart test
+        /// keeps its original meaning — the gate only engages when a test
+        /// explicitly sets up an open cycle over a live child.
+        cycle_open: bool,
+        child_alive: bool,
+    }
+
+    /// `#haivendupsession`: an operator `session_restart` arriving while the
+    /// current child still owns an open cycle must be refused, not spawned. The
+    /// controller logs `ipc_accepted_deferred reason=live_supervisor_owns_drain`
+    /// for this case, but that only means the CONTROLLER declined to escalate —
+    /// the request had already been accepted here, and this path spawned anyway,
+    /// leaving two children on one pane under a keep-alive reap policy.
+    #[test]
+    fn restart_over_a_live_child_mid_cycle_is_refused_not_spawned() {
+        let state = RestartLifecycleState {
+            cycle_open: true,
+            child_alive: true,
+            waiting_input: false,
+            binary_stale: false,
+            restart_requested: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
+        };
+        let result = request_supervisor_restart(&state, "continue".to_string());
+        assert!(result.is_err(), "an open cycle over a live child must refuse");
+        let message = result.unwrap_err();
+        assert!(
+            message.contains("two children"),
+            "the refusal must say why, not just decline: {message}"
+        );
+        // Nothing may be armed — a half-applied restart is how the second child
+        // appeared in the first place.
+        assert!(!state.restart_requested.load(Ordering::Relaxed));
+        assert!(!state.child_killed.load(Ordering::Relaxed));
+    }
+
+    /// The same request with the child already gone must still spawn, otherwise
+    /// a crashed harness could never be restarted.
+    #[test]
+    fn restart_after_the_child_died_still_arms_mid_cycle() {
+        let state = RestartLifecycleState {
+            cycle_open: true,
+            child_alive: false,
+            waiting_input: false,
+            binary_stale: false,
+            restart_requested: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
+        };
+        request_supervisor_restart(&state, "continue".to_string())
+            .expect("a dead child must not block the restart");
+        assert!(state.restart_requested.load(Ordering::Relaxed));
     }
 
     impl SupervisorIpcLifecycleState for RestartLifecycleState {
         fn actor_waiting_input(&self) -> bool {
             self.waiting_input
+        }
+
+        fn agent_doc_cycle_open(&self) -> bool {
+            self.cycle_open
+        }
+
+        fn child_alive(&self) -> bool {
+            self.child_alive
         }
 
         fn transition_actor_busy(&self, _caller: &str, _reason: &str) {}
@@ -871,6 +962,8 @@ mod tests {
     #[test]
     fn restart_request_wakes_waiting_supervisor_prompt() {
         let state = RestartLifecycleState {
+                cycle_open: false,
+                child_alive: false,
             waiting_input: true,
             binary_stale: false,
             restart_requested: AtomicBool::new(false),
@@ -889,6 +982,8 @@ mod tests {
     #[test]
     fn restart_agent_replaces_child_even_when_supervisor_binary_is_stale() {
         let state = RestartLifecycleState {
+                cycle_open: false,
+                child_alive: false,
             waiting_input: false,
             binary_stale: true,
             restart_requested: AtomicBool::new(false),
@@ -909,6 +1004,8 @@ mod tests {
     #[test]
     fn controller_recycle_preserves_child_during_stale_binary_reexec() {
         let state = RestartLifecycleState {
+                cycle_open: false,
+                child_alive: false,
             waiting_input: false,
             binary_stale: true,
             restart_requested: AtomicBool::new(false),

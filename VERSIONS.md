@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.124
+
+_JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **An operator `session_restart` no longer spawns a second harness child over
+  a live one.** The recycle path has always deferred while a document cycle is
+  open (`supervisor_recycle_deferred_cycle_open`); the restart path had no
+  equivalent gate. On 2026-08-03 recycle deferred on `agent_doc_cycle_open` at
+  07:27:54 and again at 07:28:32 while `restart_continue_spawn` fired between
+  them at 07:28:29, and with `--route-owned-reap-policy keep-alive` the previous
+  child was never reaped — so two children rendered through one pane's PTY
+  proxy and clearing the visible session revealed the other underneath. The
+  controller's `ipc_accepted_deferred reason=live_supervisor_owns_drain` was
+  misleading here: it only means the *controller* declined to escalate, while
+  the request had already been accepted by the live supervisor. Restart now
+  refuses when a cycle is open **and** the child is still alive, and says why
+  rather than half-applying. A dead child still restarts, so a crashed harness
+  is never stranded.
+
 ## 0.35.125
 
 _JetBrains plugin 0.2.339; VS Code extension 0.2.65; Zed extension 0.1.0._

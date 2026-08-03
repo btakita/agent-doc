@@ -7623,7 +7623,7 @@ mod tests {
     /// advisory naming the remedy.
     #[test]
     fn replica_refusal_logging_throttles_and_raises_one_storm_advisory() {
-        use super::rpc::{RefusalLogDecision, REFUSAL_STORM_THRESHOLD, refusal_log_decision};
+        use super::rpc::{REFUSAL_STORM_THRESHOLD, RefusalLogDecision, refusal_log_decision};
 
         // The opening refusals are always loud — a one-off detach stays visible.
         for count in 1..=3 {

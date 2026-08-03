@@ -65,6 +65,116 @@ pub fn boot_resume_action(
     BootResumeAction::RedispatchInterruptedTurn
 }
 
+/// Whether an operator `session_restart` may replace the harness child now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorRestartAdmission {
+    /// No live child is at risk — spawn the replacement.
+    Spawn,
+    /// A document cycle is open and the current child still owns it. Spawning
+    /// now would leave two children rendering through one pane's PTY proxy.
+    DeferCycleOpen,
+}
+
+/// Gate an operator restart on the same open-cycle condition the recycle path
+/// uses (`#haivendupsession`).
+///
+/// The recycle path has always deferred here — `supervisor_recycle_action`
+/// returns `DeferCycleOpen`, logged as `supervisor_recycle_deferred_cycle_open`.
+/// The restart path had no equivalent gate, and the asymmetry is visible in
+/// `src/haiven-dev/.agent-doc/logs/ops.log` on 2026-08-03: recycle deferred on
+/// `agent_doc_cycle_open` at 07:27:54 and again at 07:28:32, while
+/// `restart_continue_spawn` fired between them at 07:28:29. The controller had
+/// already logged `ipc_accepted_deferred reason=live_supervisor_owns_drain` —
+/// but that deferral only means the *controller* declined to escalate; the IPC
+/// request had been accepted by the live supervisor, which spawned anyway.
+///
+/// With `--route-owned-reap-policy keep-alive` the previous child is not
+/// reaped, so both stayed attached to pane `%95` and clearing the visible
+/// session revealed the other underneath.
+///
+/// `child_alive` is required as well as `cycle_open`: once the child is gone
+/// there is nothing to double up, so a restart after a crash must still spawn.
+pub fn supervisor_restart_admission(
+    cycle_open: bool,
+    child_alive: bool,
+) -> SupervisorRestartAdmission {
+    if cycle_open && child_alive {
+        return SupervisorRestartAdmission::DeferCycleOpen;
+    }
+    SupervisorRestartAdmission::Spawn
+}
+
+#[cfg(test)]
+mod restart_admission_tests {
+    use super::*;
+
+
+
+    /// `#haivendupsession`: the exact 2026-08-03 shape. A cycle was open (the
+    /// recycle path deferred on it at 07:27:54 and 07:28:32) and the child was
+    /// still live, yet `restart_continue_spawn` fired at 07:28:29 between them,
+    /// leaving two children on pane %95 under a keep-alive reap policy.
+    #[test]
+    fn open_cycle_with_live_child_defers_the_restart() {
+        assert_eq!(
+            supervisor_restart_admission(true, true),
+            SupervisorRestartAdmission::DeferCycleOpen
+        );
+    }
+
+    /// A restart after the child is gone has nothing to double up. Deferring
+    /// here would strand the operator with no harness at all, which is why the
+    /// gate needs both facts and not just `cycle_open`.
+    #[test]
+    fn dead_child_still_spawns_even_mid_cycle() {
+        assert_eq!(
+            supervisor_restart_admission(true, false),
+            SupervisorRestartAdmission::Spawn
+        );
+    }
+
+    /// No open cycle is the ordinary operator restart and must stay immediate.
+    #[test]
+    fn closed_cycle_spawns_regardless_of_child_state() {
+        for child_alive in [true, false] {
+            assert_eq!(
+                supervisor_restart_admission(false, child_alive),
+                SupervisorRestartAdmission::Spawn,
+                "a closed cycle must never defer (child_alive={child_alive})"
+            );
+        }
+    }
+
+    /// The restart gate must agree with the recycle gate on the same facts —
+    /// the whole defect was the two paths disagreeing.
+    #[test]
+    fn restart_gate_agrees_with_recycle_gate_on_an_open_cycle() {
+        // The operator-request shape: an explicit request, away from a turn
+        // boundary, with a cycle open. `explicit_admin` is the recycle-path
+        // analogue of an operator `session_restart`.
+        let recycle = supervisor_recycle_action(
+            false, // stale
+            true,  // auto_recycle
+            false, // turn_boundary
+            false, // head_pending
+            true,  // explicit_admin
+            false, // write_wedged
+            false, // editor_delivery_stale
+            false, // reexec_failed
+            true,  // cycle_open
+        );
+        assert!(
+            matches!(recycle, SupervisorRecycleAction::DeferCycleOpen),
+            "recycle must defer on an open cycle, got {recycle:?}"
+        );
+        assert_eq!(
+            supervisor_restart_admission(true, true),
+            SupervisorRestartAdmission::DeferCycleOpen,
+            "restart must defer on the same facts"
+        );
+    }
+}
+
 /// A `start_session` failure during supervisor recycle is a transient controller
 /// teardown race while retry budget remains.
 pub fn start_session_retryable_during_recycle(

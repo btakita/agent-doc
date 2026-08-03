@@ -102,6 +102,31 @@ That marker proves the menu path was actually invoked; the later
 `agent_restart_performed` marker proves the supervisor boundary restart spawned
 the fresh harness.
 
+"Restart Agent" travels the wire as `agent:<mode>` (`agent:continue` /
+`agent:fresh`), distinguishing an explicit operator harness replacement from a
+plain controller recycle (`#agentrestartwire`). Every hop must preserve that
+prefix verbatim:
+
+- `session_actor_cmd::restart_agent` encodes it.
+- The controller (`parse_supervisor_replacement_request` →
+  `SupervisorReplacementIntent`) accepts it, keeps `restart_agent` alongside the
+  mode, and forwards `intent.wire_mode()` on the supervisor IPC `Restart`
+  request. A controller that normalizes the prefix away silently downgrades the
+  request to a recycle; a controller that rejects it fails the operator's action
+  outright with `unsupported supervisor replacement mode `agent:continue``.
+- `agent_doc_supervisor_io::ipc::decode_restart_intent` decodes it, and a
+  Restart Agent never takes the stale-binary in-place `execve` path — that path
+  preserves the very child the operator asked to replace.
+- On the cold-start path a Restart Agent authorizes `RestartLiveHarness` even in
+  continue mode. The foreign-pane guard is unchanged: only a pane running *this
+  document's* harness is replaceable.
+
+A restart iteration that re-resolves the harness records its outcome in
+`.agent-doc/logs/ops.log` whether or not the harness changed
+(`agent_restart_performed` / `agent_restart_respec_inert` /
+`agent_restart_respec_failed` / `agent_restart_respec_skipped`), so "the restart
+came back on the old agent" is answerable from the log instead of inferred.
+
 Route/startup code must not cold-replace a healthy live authoritative actor
 solely because the document's `agent:` frontmatter changed. A live wrong-harness
 actor is deferred to the boundary restart path; only an unhealthy supervisor or

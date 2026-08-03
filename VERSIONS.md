@@ -2,6 +2,46 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.128
+
+- **The editor's "Restart Agent" action reached the controller and was rejected
+  outright (`#agentrestartwire`).** `session_actor_cmd::restart_agent` encodes
+  the operator's harness-replacement intent as `agent:<mode>` so it stays
+  distinguishable from a plain controller recycle across transport. The
+  supervisor IPC layer has always decoded that prefix
+  (`decode_restart_intent`), but the controller's
+  `parse_supervisor_replacement_request` did not — so every Restart Agent
+  invocation failed with ``agent-doc command failed (exit 1): ... unsupported
+  supervisor replacement mode `agent:continue` `` before any supervisor was
+  asked, and the operator's `agent:` change never took effect. Live evidence:
+  three `restart_agent_menu_invoked` markers for `tasks/software/lazily.md` on
+  2026-08-03 with no matching
+  `controller_supervisor_replacement_accepted`. The controller now parses the
+  request into a `SupervisorReplacementIntent { mode, restart_agent }`, forwards
+  `intent.wire_mode()` verbatim on the supervisor IPC `Restart` so the prefix
+  still reaches `decode_restart_intent`, and — on the cold-start path — treats a
+  Restart Agent as authorization to `RestartLiveHarness` even in continue mode.
+  Preserving the child there would have discarded the operator's request and,
+  after an `agent:` switch, kept the old harness for the rest of the session.
+  The foreign-pane guard is unchanged: a live pane that is not running this
+  document's own harness is still `BlockLiveNonShell`. Coverage:
+  `supervisor_replacement_accepts_the_restart_agent_wire_prefix`,
+  `restart_agent_wire_mode_round_trips_through_the_controller`,
+  `restart_agent_intent_replaces_a_live_harness_even_in_continue_mode`,
+  `restart_agent_prefix_still_rejects_an_unsupported_mode`,
+  `restart_agent_intent_restarts_the_live_harness_in_continue_mode`.
+- **A restart that re-resolved the harness and found no change left no trace.**
+  `#agentreloadrestart` Phase 1b re-reads the current frontmatter on every
+  restart iteration, but only the *changed* branch logged. That made "the
+  restart came back on the old agent" undiagnosable after the fact: nothing in
+  the logs separates "re-read the document and it still resolved `claude`" from
+  "never re-read it at all", which is precisely the question an operator asks
+  after editing `agent:`. The inert, failed, and unreadable-frontmatter branches
+  now each write an ops-log line
+  (`agent_restart_respec_inert` / `agent_restart_respec_failed` /
+  `agent_restart_respec_skipped`) carrying the running harness, the re-resolved
+  harness, and the frontmatter `agent:` value they resolved from.
+
 ## 0.35.127
 
 _JetBrains plugin 0.2.340; VS Code extension 0.2.65; Zed extension 0.1.0._

@@ -18,8 +18,8 @@ use agent_doc_controller::supervisor_replacement::{
 };
 #[cfg(any(test, not(feature = "test-support")))]
 use agent_doc_controller::supervisor_replacement::{
-    SupervisorReplacementMode, SupervisorReplacementPaneDecision, SupervisorReplacementPaneFacts,
-    decide_supervisor_replacement_pane,
+    SupervisorReplacementIntent, SupervisorReplacementMode, SupervisorReplacementPaneDecision,
+    SupervisorReplacementPaneFacts, decide_supervisor_replacement_pane,
 };
 use agent_doc_controller::supervisor_replacement::{
     SupervisorReplacementRequestFields, parse_supervisor_replacement_request,
@@ -19482,7 +19482,7 @@ enum SupervisorReplacementIpcStatus {
 /// assuming it.
 #[cfg(any(test, not(feature = "test-support")))]
 fn supervisor_replacement_pane_start_decision(
-    mode: SupervisorReplacementMode,
+    intent: SupervisorReplacementIntent,
     pane_alive: bool,
     current_command: Option<&str>,
     document_harness_binary: Option<&str>,
@@ -19500,7 +19500,7 @@ fn supervisor_replacement_pane_start_decision(
             _ => false,
         };
     decide_supervisor_replacement_pane(
-        mode,
+        intent,
         SupervisorReplacementPaneFacts {
             pane_alive,
             current_command_is_shell: current_command
@@ -19521,7 +19521,11 @@ pub(crate) fn handle_supervisor_replacement(
         reason: request.reason.as_deref(),
         diagnostic_payload: request.diagnostic_payload.as_deref(),
     })?;
-    let mode = parsed.mode.as_str().to_string();
+    // `#agentrestartwire`: keep the operator's wire form (`agent:continue`)
+    // verbatim. The supervisor's own `decode_restart_intent` is what stops a
+    // Restart Agent from being downgraded to an in-place re-exec that preserves
+    // the very harness child the operator asked to replace.
+    let mode = parsed.wire_mode();
     let force = parsed.force;
     let authorization = handle_operator_command(
         bootstrap,
@@ -19944,7 +19948,8 @@ fn quit_live_harness_pane_to_shell(
 #[cfg(not(any(test, feature = "test-support")))]
 fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
     let tmux = tmux_router::Tmux::default_server();
-    let mode = SupervisorReplacementMode::parse(&work.mode)?;
+    let intent = SupervisorReplacementIntent::parse(&work.mode)?;
+    let mode = intent.mode;
     // The editor/controller model is the document authority. Cold recovery must
     // not select a harness or conversation from a stale disk replica.
     let current_document = match current_text_via_controller_model_read_for_doc(
@@ -20006,7 +20011,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             None
         };
         let initial_pane_decision = supervisor_replacement_pane_start_decision(
-            mode,
+            intent,
             pane_alive,
             current_command.as_deref(),
             Some(document_harness.as_str()),
@@ -20067,7 +20072,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             }
         }
         match supervisor_replacement_pane_start_decision(
-            mode,
+            intent,
             pane_alive,
             // Re-read: the quit above may have turned this into a bare shell.
             agent_doc_tmux_io::target_current_command(&tmux, &work.pane_id).as_deref(),
@@ -24194,11 +24199,19 @@ mod tests {
         );
     }
 
+    /// A plain controller recycle: no operator "Restart Agent" intent attached.
+    const fn recycle_intent(mode: SupervisorReplacementMode) -> SupervisorReplacementIntent {
+        SupervisorReplacementIntent {
+            mode,
+            restart_agent: false,
+        }
+    }
+
     #[test]
     fn supervisor_replacement_preserves_only_bare_shell_panes() {
         assert_eq!(
             supervisor_replacement_pane_start_decision(
-                SupervisorReplacementMode::Continue,
+                recycle_intent(SupervisorReplacementMode::Continue),
                 false,
                 None,
                 Some("claude"),
@@ -24209,7 +24222,7 @@ mod tests {
         for shell in ["sh", "bash", "zsh", "-zsh", "fish"] {
             assert_eq!(
                 supervisor_replacement_pane_start_decision(
-                    SupervisorReplacementMode::Continue,
+                    recycle_intent(SupervisorReplacementMode::Continue),
                     true,
                     Some(shell),
                     Some("claude"),
@@ -24221,7 +24234,7 @@ mod tests {
         }
         assert_eq!(
             supervisor_replacement_pane_start_decision(
-                SupervisorReplacementMode::Continue,
+                recycle_intent(SupervisorReplacementMode::Continue),
                 true,
                 None,
                 Some("claude"),
@@ -24239,7 +24252,7 @@ mod tests {
         for harness in ["claude", "codex", "opencode"] {
             assert_eq!(
                 supervisor_replacement_pane_start_decision(
-                    SupervisorReplacementMode::Continue,
+                    recycle_intent(SupervisorReplacementMode::Continue),
                     true,
                     Some(harness),
                     Some(harness),
@@ -24250,7 +24263,7 @@ mod tests {
             );
             assert_eq!(
                 supervisor_replacement_pane_start_decision(
-                    SupervisorReplacementMode::Fresh,
+                    recycle_intent(SupervisorReplacementMode::Fresh),
                     true,
                     Some(harness),
                     Some(harness),
@@ -24280,7 +24293,7 @@ mod tests {
         ] {
             assert_eq!(
                 supervisor_replacement_pane_start_decision(
-                    SupervisorReplacementMode::Continue,
+                    recycle_intent(SupervisorReplacementMode::Continue),
                     true,
                     Some(foreign),
                     Some("claude"),
@@ -24293,7 +24306,7 @@ mod tests {
         // A codex pane must not be quit just because a claude document asked.
         assert_eq!(
             supervisor_replacement_pane_start_decision(
-                SupervisorReplacementMode::Continue,
+                recycle_intent(SupervisorReplacementMode::Continue),
                 true,
                 Some("codex"),
                 Some("claude"),
@@ -24306,7 +24319,7 @@ mod tests {
         // the exact binary would make any Node process look restartable.
         assert_eq!(
             supervisor_replacement_pane_start_decision(
-                SupervisorReplacementMode::Continue,
+                recycle_intent(SupervisorReplacementMode::Continue),
                 true,
                 Some("node"),
                 Some("claude"),
@@ -24318,7 +24331,7 @@ mod tests {
         // Unknown document harness proves nothing, so it cannot authorise a quit.
         assert_eq!(
             supervisor_replacement_pane_start_decision(
-                SupervisorReplacementMode::Continue,
+                recycle_intent(SupervisorReplacementMode::Continue),
                 true,
                 Some("claude"),
                 None,
@@ -24329,11 +24342,49 @@ mod tests {
         );
     }
 
+    /// `#agentrestartwire`: the editor's "Restart Agent" action exists to
+    /// re-resolve frontmatter and replace the harness child. Preserving that
+    /// child on the cold-start path would discard the operator's request — and
+    /// when the request came from an `agent:` switch, keep the OLD harness
+    /// running for the rest of the session.
+    #[test]
+    fn restart_agent_intent_restarts_the_live_harness_in_continue_mode() {
+        let restart_agent = SupervisorReplacementIntent {
+            mode: SupervisorReplacementMode::Continue,
+            restart_agent: true,
+        };
+        for harness in ["claude", "codex", "opencode"] {
+            assert_eq!(
+                supervisor_replacement_pane_start_decision(
+                    restart_agent,
+                    true,
+                    Some(harness),
+                    Some(harness),
+                    false,
+                ),
+                SupervisorReplacementPaneDecision::RestartLiveHarness,
+                "{harness} Restart Agent must replace the live child, not preserve it"
+            );
+        }
+        // The foreign-pane guard is unchanged: Restart Agent authorises replacing
+        // THIS document's harness, never someone else's live pane.
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(
+                restart_agent,
+                true,
+                Some("vim"),
+                Some("claude"),
+                false,
+            ),
+            SupervisorReplacementPaneDecision::BlockLiveNonShell,
+        );
+    }
+
     #[test]
     fn supervisor_replacement_preserves_owned_codex_node_wrapper() {
         assert_eq!(
             supervisor_replacement_pane_start_decision(
-                SupervisorReplacementMode::Continue,
+                recycle_intent(SupervisorReplacementMode::Continue),
                 true,
                 Some("node"),
                 Some("codex"),

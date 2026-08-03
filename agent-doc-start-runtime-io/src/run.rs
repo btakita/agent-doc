@@ -1072,13 +1072,45 @@ pub fn run_with_reap_policy_and_resume(
                             );
                         }
                         // Unchanged harness (the common case) — INERT, no swap.
-                        Ok(_) => {}
+                        //
+                        // Record it anyway. "The restart came back on the OLD
+                        // agent" is only diagnosable if the log distinguishes
+                        // "re-read the document and it still says `claude`" from
+                        // "never re-read it at all" — an inert arm that logs
+                        // nothing makes those two identical after the fact, and
+                        // the operator's `agent:` edit is exactly what is in
+                        // question.
+                        Ok(restart_spec) => {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "agent_restart_respec_inert file={} running_harness={} resolved_harness={} resolved_from={} note=no_harness_change",
+                                    file.display(),
+                                    harness.binary,
+                                    restart_spec.harness.binary,
+                                    restart_fm
+                                        .agent
+                                        .as_deref()
+                                        .map(|agent| format!("frontmatter:{agent}"))
+                                        .unwrap_or_else(|| "frontmatter:<unset>".to_string()),
+                                ),
+                            );
+                        }
                         Err(e) => {
                             log_event(
                                 &mut session_log,
                                 &format!(
                                     "agent_restart_respec_failed error={} note=keeping_running_harness",
                                     e
+                                ),
+                            );
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "agent_restart_respec_failed file={} running_harness={} error={} note=keeping_running_harness",
+                                    file.display(),
+                                    harness.binary,
+                                    format!("{e:#}").replace('\n', "\\n"),
                                 ),
                             );
                         }
@@ -1088,6 +1120,14 @@ pub fn run_with_reap_policy_and_resume(
                     log_event(
                         &mut session_log,
                         "agent_restart_respec_skipped reason=frontmatter_unreadable note=keeping_running_harness",
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "agent_restart_respec_skipped file={} running_harness={} reason=frontmatter_unreadable note=keeping_running_harness",
+                            file.display(),
+                            harness.binary,
+                        ),
                     );
                 }
             }

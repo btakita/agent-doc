@@ -108,11 +108,40 @@ Not done, and not something this session can settle: the credential is still in 
 
 Exchange is long and preflight reports `session_accretion: warn`; the queue is active so I am noting it and continuing rather than pausing to compact.
 
+### Re: do [#censiblecorefollow] — opus-5
+
+> **Queue prompt:**
+>
+> do [#censiblecorefollow]
+
+
+I have to correct myself first, because the premise this item inherited from me was wrong.
+
+**The tracked file was not carrying a secret.** `apps/finegar-etl/.env` held `"$(passage finegar/FACTSET_FTP_LOGIN)"` and `"$(passage finegar/FACTSET_FTP_PASSWORD)"` — shell substitutions that read from passage at load time. The "36-char login / 39-char password" in `#censible-env-committed-creds` was measuring the length of those *reference strings*, and my own redacted inventory made the same mistake: my placeholder detector recognised `${...}` but not `$(...)`, so a passage reference scored as VALUE-PRESENT. Commit `f839e701b` (2026-03-14, "Replace hardcoded FTP credentials with pass references") had already fixed this five months ago. So the censible-core commit body I wrote saying the file "carries a real FactSet FTP login and password" was false in the present tense.
+
+The `.gitignore` fix and the `.env.sample` postgres placeholder from last cycle stand on their own — the root-anchored rules really are why literals reached the index in 2022, and that really was a committed password.
+
+**The actual exposure is in history, and it is live.** Real literals — a 12-character login and an **8-character** password — sat in `apps/finegar-etl/.env` from `d19a6c0f` (2022-06-10) until `f839e701b` (2026-03-14). Five commits carry them.
+
+The decisive test: I SHA-256'd the historical literals and compared against what `passage finegar/FACTSET_FTP_*` returns today, without printing either.
+
+```
+FACTSET_FTP_LOGIN     history=12 chars, passage=12 chars -> IDENTICAL
+FACTSET_FTP_PASSWORD  history= 8 chars, passage= 8 chars -> IDENTICAL
+```
+
+**It has never been rotated.** The value sitting in four-year-old git history is byte-for-byte the credential the ETL would authenticate with right now. That converts the item's open question from "is this worth worrying about" into a concrete answer.
+
+**And the endpoint is live.** `FTS.Factset.com` resolves to `192.234.235.5` and port 21 answers with `220-Security Notice / You are about to access a secured resource. FactSet: File Transfer`. I read the banner only — I did not authenticate, since doing so would put a live credential on the wire against a third party to learn something the banner already implies.
+
+**Recommendation, in order.** Rotate with FactSet, then update `passage finegar/FACTSET_FTP_*`. Rotation is what actually closes this: it makes every historical copy worthless in one step, and it is the only step that helps if the repo was ever cloned. History rewriting is *optional cleanup afterwards*, not an alternative — it cannot un-disclose anything, it only tidies a private repo, and it invalidates every existing clone. An 8-character password is weak enough that rotating to something longer is worth doing on its own merits.
+
+What I cannot do from here is the rotation itself: it needs a FactSet account action. The item is gated on that rather than left open, and its text now carries the corrected facts so the next reader is not working from the wrong premise.
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#censiblecorefollow]
+- ~~do [#censiblecorefollow]~~
 - ~~do [#recommendeddeploybrowser]~~
 - ~~do [#censible-env-committed-creds]~~
 - do [#tmo-prod-schedule-artifact-confirm]
@@ -121,13 +150,13 @@ Exchange is long and preflight reports `session_accretion: warn`; the queue is a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#censiblecorefollow] Censible-core follow-up, do it from a censible-core session: decide the FactSet FTP credential's fate. apps/finegar-etl/.env is untracked as of censible-core d2eec547 and the .gitignore mechanism is fixed, but the 36-char FACTSET_FTP_LOGIN / 39-char FACTSET_FTP_PASSWORD remain in git history. First question is whether that FactSet FTP account still exists — the project is dormant. If it is live, rotate with FactSet; if it is dead, no rotation is needed. Separately decide whether to rewrite history (private repo, dormant project, so a judgement call, not an obvious yes). Local values are preserved on disk in apps/finegar-etl/.env. NOTE: tasks/censible-core.md has no agent:backlog component, which is why this is filed here.
 - [ ] [#tmo-prod-schedule-artifact-confirm] Confirm the first schedule-bearing PRODUCTION TMO backup artifact. Production went live on 20d7a416 at 2026-08-01T04:16Z, but tmo_backup_interval_hours is 24 and the last run was 2026-07-31T17:00:53Z on the old build, so the next daily job around 2026-08-01T17:00Z is the first artifact that can carry payment schedules. Check: read tmo_backup_last_key and tmo_backup_last_status from production platform_settings, confirm the key advanced to a 2026-08-01 object and status is complete, then pull that object from R2 bucket equityfundingsource-tmo-cache-production and count schedule rows - expect roughly 12 of 31 loans to carry one, versus 0 on every prior artifact. Sandbox already measured 34 rows over 26 loans. Unblocks #tmo-clone-apply, which needs a schedule-bearing clone source. Do not read the artifact contents into the transcript - it holds production PII; count and discard.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#censiblecorefollow] Rotate the FactSet FTP credential with FactSet, then update passage finegar/FACTSET_FTP_LOGIN and FACTSET_FTP_PASSWORD. Proven 2026-08-02: the 12-char login and 8-char password sitting in censible-core git history (5 commits, d19a6c0f 2022-06-10 through f839e701b 2026-03-14) are SHA-256 identical to what passage serves today, so the credential has never been rotated and the historical copy is live. FTS.Factset.com:21 is reachable and answers. The tracked working-tree file was NOT carrying a secret - it holds passage command substitutions since f839e701b. Rotation supersedes any history rewrite; rewriting is optional cleanup for a private repo and cannot un-disclose anything. Blocked on a FactSet account action.
 - [/] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge only after explicit operator go. The auto-mirrored queue directive is not approval for permanent `DeleteLoan` operations. Before any approved purge, take the documented snapshot; preserve the existing 16-loan target list, keep-list, dry-run evidence, and warning that attachment bytes and RecIDs are not recoverable. Recipes: `docs/TMO/delete-loan.md`, `docs/TMO/snapshot.md`.
 - [/] [#tmo-orphan-apply] [operator-verify] Apply the orphan reconcile plan: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-orphan-reconcile.ts --remote --apply. Dry run re-verified 2026-07-18 against remote D1: reconcile_cache=12 + tombstone=6, push_funding=0, blocked_no_vesting=0, zero TMO writes (EFS-local only). CORRECTION 2026-07-18: this targets the STAGING database (equityfundingsource, 280e1539-b940-4c59-8988-fbed63c12ac0), NOT production — the earlier 'mutates PRODUCTION D1' note was wrong; --d1 defaults to the staging binding and production (293f0a4d) is untouched. TMO side is the sandbox database (001-8553-000-Equity Funding - Sandbox, sandbox=true). All 6 tombstone rows (TST217, TST254, TST374, TST723, TST762, TST999) verified inert: efs_id NULL, zero rows in loans.tmo_loan_number, zero rows in funds (funds is empty entirely). Operator confirmed 2026-07-18 that staging data is test data. Remaining gate is operator go only.
 - [/] [#tmo-reconcile-auto] Automated reconciliation attempt over tmo_unmatched_fundings: for each unmatched TMO funding try RecID -> Account against lender_vestings.tmo_lender_account -> lender email, record confidence plus evidence, auto-bind above a threshold and queue the rest with the candidate ranking pre-computed. Per PRD D4 a bind reconciles EFS to TMO (TMO funding wins) and must record what it overrode. The matcher must be a pure function over pulled fundings + the lender/vesting roster so it is testable without TMO, mirroring vesting_gap_. Phase 3 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.

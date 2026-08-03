@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.126
+
+_JetBrains plugin 0.2.340; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- Version-only release so the operator-restart open-cycle gate from 0.35.124
+  can actually be installed. A concurrent session had built and installed an
+  unpushed local `0.35.125` whose tree predates that fix, so `binary-install`
+  correctly refused the 0.35.124 downgrade and the landed gate was not the code
+  running. Releasing from `main` — which carries the fix — supersedes that local
+  build without overriding the downgrade guard.
+
 ## 0.35.124
 
 _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._

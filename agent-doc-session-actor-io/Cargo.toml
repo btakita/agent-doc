@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-session-actor-io"
-version = "0.35.124"
+version = "0.35.126"
 edition = "2024"
 description = "Focused session actor store and mailbox IO for agent-doc"
 license = "MIT"
@@ -16,15 +16,15 @@ name = "agent_doc_session_actor_io"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.124" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.124" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.124" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.124" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.124" }
-agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.124" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.124" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.124" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.124" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.126" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.126" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.126" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.126" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.126" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.126" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.126" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.126" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.126" }
 anyhow = "1"
 serde_json = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }

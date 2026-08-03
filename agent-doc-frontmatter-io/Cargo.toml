@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-frontmatter-io"
-version = "0.35.124"
+version = "0.35.126"
 edition = "2024"
 description = "I/O adapters for agent-doc frontmatter policy"
 license = "MIT"
@@ -11,9 +11,9 @@ publish = false
 name = "agent_doc_frontmatter_io"
 
 [dependencies]
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.124" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.124" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.124" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.126" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.126" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.126" }
 anyhow = "1"
 
 [dev-dependencies]

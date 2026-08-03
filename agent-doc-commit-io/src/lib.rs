@@ -357,6 +357,13 @@ impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLive
         }
     }
 
+    fn retained_write_ownership(
+        &self,
+        file: &Path,
+    ) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
+        agent_doc_capture_io::retained_write_ownership(file)
+    }
+
     fn log_op(&self, file: &Path, message: &str) {
         agent_doc_ops_log_io::log_op(file, message);
     }

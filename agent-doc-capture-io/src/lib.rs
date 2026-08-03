@@ -446,6 +446,48 @@ fn checkpoint_partial_response_for_cycle_with_current_content(
     })
 }
 
+/// Read the one ownership predicate every retained-write refusal shares.
+///
+/// See `agent_doc_turn::write_ownership` for why this exists. This is the I/O
+/// shell: it reads the two durable facts and hands them to the pure predicate,
+/// so the three refusal sites cannot drift into three answers about the same
+/// state.
+///
+/// A read error is **not** ownership. A site that cannot prove a holder must say
+/// stranded and name a recovery, because the alternative — assuming a holder —
+/// is the failure this predicate exists to remove.
+pub fn retained_write_ownership(
+    file: &Path,
+) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
+    let cycle_open = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
+        Ok(state) => state.is_some_and(|state| state.phase.is_open()),
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "retained_write_ownership_cycle_read_failed file={} error={err}",
+                    file.display()
+                ),
+            );
+            false
+        }
+    };
+    let retained_capture = match load_active(file) {
+        Ok(capture) => capture.is_some(),
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "retained_write_ownership_capture_read_failed file={} error={err}",
+                    file.display()
+                ),
+            );
+            false
+        }
+    };
+    agent_doc_turn::write_ownership::RetainedWriteOwnership::new(cycle_open, retained_capture)
+}
+
 pub fn load_active(file: &Path) -> Result<Option<CaptureRecord>> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(None);

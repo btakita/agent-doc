@@ -29,6 +29,7 @@ pub mod salient_response;
 pub mod turn_scope;
 pub mod turn_status;
 pub mod wait_machine;
+pub mod write_ownership;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

@@ -838,21 +838,30 @@ fn run_with_options_inner(
         // and backlog edits sat uncommitted until a human intervened. A session
         // that follows this instruction faithfully loses the work, so the claim
         // has to be earned rather than assumed.
-        let divergence_owner_note = if cycle_phase.is_some_and(agent_doc_turn::CyclePhase::is_open)
-            || agent_doc_capture_io::load_active(file)
+        //
+        // `#percellconverge`: the predicate now lives in
+        // `agent_doc_turn::write_ownership` and the write path calls the same
+        // one. Fixing this site alone left an agent obeying whichever of the
+        // other two refusals it happened to reach first.
+        let ownership = agent_doc_turn::write_ownership::RetainedWriteOwnership::new(
+            cycle_phase.is_some_and(agent_doc_turn::CyclePhase::is_open),
+            agent_doc_capture_io::load_active(file)
                 .ok()
                 .flatten()
-                .is_some()
-        {
-            "The controller owns the next closeout attempt and will wake on that state edge. \
-             Do not ask the operator to save, rerun session-check, or resubmit finalize"
-        } else {
-            "NO cycle is open and NO response capture is retained, so nothing owns this \
-             divergence and no state edge will fire — the visible edits are STRANDED, not \
-             deferred, and waiting will not commit them. Recover from the pane that OWNS this \
-             session: `agent-doc commit <FILE>`, or `agent-doc write --commit <FILE>` if an \
-             unwritten response body remains. From any other pane both abort with `pane \
-             ownership mismatch`"
+                .is_some(),
+        );
+        let divergence_owner_note = match ownership.verdict() {
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred => {
+                "The controller owns the next closeout attempt and will wake on that state edge. \
+                 Do not ask the operator to save, rerun session-check, or resubmit finalize"
+                    .to_string()
+            }
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded => {
+                agent_doc_turn::write_ownership::retained_write_remedy(
+                    ownership,
+                    &file.display().to_string(),
+                )
+            }
         };
         anyhow::ensure!(
             authority_content == disk_content,

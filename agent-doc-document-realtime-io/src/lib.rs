@@ -175,6 +175,17 @@ fn await_editor_replica_no_disk_write(message: String) -> anyhow::Error {
     AwaitEditorReplicaNoDiskWrite(message).into()
 }
 
+/// The shared retained-write remedy for this crate's refusals.
+///
+/// See `agent_doc_turn::write_ownership`. The point is that this site does not
+/// get to decide on its own whether waiting is correct.
+fn retained_write_remedy_for(file: &Path) -> String {
+    agent_doc_turn::write_ownership::retained_write_remedy(
+        agent_doc_capture_io::retained_write_ownership(file),
+        &file.display().to_string(),
+    )
+}
+
 #[derive(Debug)]
 struct ForceDiskAuthorityChanged(String);
 
@@ -4973,16 +4984,25 @@ pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<(
                     live_editors,
                 );
             }
+            // `#percellconverge`: both branches used to assert retention with no
+            // owner. `EditorAttachedMissingReplica` in particular fires off the
+            // one-way editor-attachment latch (`#editormodelmissing`), which
+            // reports an editor as attached forever once one ever has — so this
+            // site could report a durable holder for a document nothing was
+            // holding. Ask the same predicate `session-check` and the write path
+            // ask, so an agent gets one answer whichever refusal it reaches first.
             agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
                 return Err(await_editor_replica_no_disk_write(format!(
-                    "visible document write for {} is retained by the lazy delivery projection; the attached editor replica is not registered, so no snapshot or commit effect is eligible",
+                    "visible document write for {} is retained by the lazy delivery projection; the attached editor replica is not registered, so no snapshot or commit effect is eligible. {}",
                     file.display(),
+                    retained_write_remedy_for(file),
                 )));
             }
             agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
                 return Err(await_editor_replica_no_disk_write(format!(
-                    "visible document write for {} is retained by the lazy delivery projection while editor synchronization is pending; no snapshot or commit effect is eligible",
+                    "visible document write for {} is retained by the lazy delivery projection while editor synchronization is pending; no snapshot or commit effect is eligible. {}",
                     file.display(),
+                    retained_write_remedy_for(file),
                 )));
             }
         }

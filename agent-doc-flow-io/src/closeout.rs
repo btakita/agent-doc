@@ -151,7 +151,10 @@ pub fn complete_required_closeout_with_options(
         );
         anyhow::bail!(
             "{}",
-            agent_doc_git_io::live_buffer_guard::crdt_relay_pending_refusal(file)
+            agent_doc_git_io::live_buffer_guard::crdt_relay_pending_refusal(
+                file,
+                agent_doc_capture_io::retained_write_ownership(file),
+            )
         );
     }
 

@@ -2,6 +2,47 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.124
+
+_JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **A retained write now proves it has an owner before forbidding recovery.**
+  Three sites tell an agent that its write is retained and that re-sending,
+  `--force-disk`, `admin recycle`, and `admin reload-lib` are all forbidden:
+  `crdt_relay_pending_refusal` (`agent-doc-git-io`), the authority/disk
+  divergence INTERRUPT (`agent-doc-session-check-io`), and
+  `await_editor_replica_no_disk_write` (`agent-doc-document-realtime-io`). That
+  instruction is correct only while something durable actually holds the write.
+  With no holder, no state edge can fire, so waiting never commits — and an
+  agent that obeys loses the work.
+
+  0.35.123 fixed `session-check` alone, which left the two paths contradicting
+  each other. Observed three times on 2026-08-03 on
+  `tasks/agent-doc/agent-doc-bugs2.md`: `write --commit` printed "this is a
+  deferral, not a lost response" while `session-check` printed "STRANDED, not
+  deferred" about the same state. `session-check` was right every time, each was
+  recovered by hand with `agent-doc commit`, and whichever text the agent
+  reached first decided whether the work survived.
+
+  The predicate now lives once, in `agent_doc_turn::write_ownership`
+  (`RetainedWriteOwnership::verdict` + `retained_write_remedy`), with
+  `agent_doc_capture_io::retained_write_ownership` as its I/O shell, and all
+  three sites derive their wording from it. The unowned case names the recovery
+  instead of forbidding it; the 2026-07-26 do-NOT guidance is unchanged for the
+  genuinely-owned case. A failed read is not ownership — an unproven site says
+  stranded. Ownership is deliberately not keyed on editor attachment, which is a
+  one-way latch (`#editormodelmissing`).
+
+  Note that consolidating the *wording* into one function had already been tried
+  and did not prevent this; the **predicate** is what drifted. So two guards in
+  `agent-doc-turn/tests/retained_write_ownership_guard.rs` hold both halves: no
+  site may re-author a verdict phrase, and every site must actually call the
+  predicate. `commit_blocked_crdt_relay_pending` now records
+  `ownership=deferred|stranded` so `ops.log` shows which verdict was printed.
+
+  This is the write-path half of `#percellconverge`. Per-component ownership
+  replaces the predicate's inputs later without changing the call sites.
+
 ## 0.35.123
 
 _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._

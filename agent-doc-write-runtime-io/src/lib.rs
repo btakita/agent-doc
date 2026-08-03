@@ -2545,7 +2545,10 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                     if session_document {
                         anyhow::bail!(
                             "{}",
-                            agent_doc_git_io::live_buffer_guard::crdt_relay_pending_refusal(file)
+                            agent_doc_git_io::live_buffer_guard::crdt_relay_pending_refusal(
+                                file,
+                                agent_doc_capture_io::retained_write_ownership(file),
+                            )
                         );
                     }
                     return Ok(());

@@ -238,7 +238,20 @@ pub struct ControllerTmuxLayoutSyncStateReport {
     pub reason: String,
     pub expected_documents: Vec<String>,
     pub actual_documents: Vec<String>,
+    /// Model-owned file-to-pane assignments in desired column order.
+    ///
+    /// `panes` is the separately observed physical left-to-right order. A
+    /// layout is converged only when these sequences agree.
+    #[serde(default)]
+    pub expected_panes: Vec<String>,
     pub panes: Vec<String>,
+    /// Active actor documents occupying panes in the observed window without
+    /// a corresponding editor-surface column.
+    ///
+    /// These panes are operator/dispatch-owned. The layout projection must not
+    /// repeatedly try to evict them while their actor binding is live.
+    #[serde(default)]
+    pub operator_owned_documents: Vec<String>,
     #[serde(default)]
     pub session_name: Option<String>,
     #[serde(default)]
@@ -409,6 +422,7 @@ pub(crate) enum PaneLayoutProjection {
     NeedsEffect(PaneLayoutDesired),
     Applying(PaneLayoutDesired),
     RetryPending(PaneLayoutDesired),
+    OperatorOwned(PaneLayoutDesired),
     Converged(PaneLayoutDesired),
 }
 
@@ -418,6 +432,7 @@ pub enum ControllerPaneLayoutPhase {
     NeedsEffect,
     Applying,
     RetryPending,
+    OperatorOwned,
     Converged,
 }
 
@@ -429,6 +444,7 @@ pub enum ControllerPaneLayoutReasonCode {
     ObservedConvergence,
     PaneCountMismatch,
     PaneOrderMismatch,
+    ActiveDispatchOutsideSurface,
     TmuxUnavailable,
     EffectFailed,
     ObservationFailed,
@@ -477,6 +493,32 @@ fn derive_pane_layout_projection(
             .is_some_and(|observed| observed.report.synced)
     {
         return PaneLayoutProjection::Converged(desired);
+    }
+    if observation_is_current
+        && observed.as_ref().is_some_and(|observed| {
+            observed.report.reason == "pane_count_mismatch"
+                && observed.report.actual_documents.len() > observed.report.expected_documents.len()
+                && observed
+                    .report
+                    .expected_documents
+                    .iter()
+                    .all(|document| observed.report.actual_documents.contains(document))
+                && observed
+                    .report
+                    .operator_owned_documents
+                    .iter()
+                    .any(|document| {
+                        actor_bindings
+                            .iter()
+                            .any(|binding| binding.document_path == *document)
+                    })
+        })
+    {
+        // An active dispatch owns a pane that the editor surface has not
+        // adopted. Reapplying the same two-column model cannot remove that
+        // pane safely, so this generation is terminal until either the
+        // surface generation or the live actor binding changes.
+        return PaneLayoutProjection::OperatorOwned(desired);
     }
     if receipt_is_current {
         match receipt.phase {
@@ -633,27 +675,53 @@ fn derive_layout_actor_bindings(
     let Some(desired) = desired else {
         return Vec::new();
     };
-    desired
+    let desired_documents = desired
         .invocation
         .columns
         .iter()
         .flat_map(|column| column.split(','))
         .map(str::trim)
         .filter(|document| !document.is_empty())
-        .filter_map(|document| {
-            // The ingress adapter canonicalizes desired document IDs before
-            // publishing this Source. Keep this Computed a pure join over
-            // already-published values: no filesystem canonicalization, RPC,
-            // SQLite reads, or tmux probes belong here.
-            let record = actors.get(document)?;
-            Some(ControllerTmuxActorBinding {
-                document_path: document.to_string(),
-                session_id: record.session_id.clone(),
-                pane_id: record.pane_id.clone(),
-                generation: record.generation,
-            })
-        })
-        .collect()
+        .collect::<Vec<_>>();
+    let desired_windows = desired_documents
+        .iter()
+        .filter_map(|document| actors.get(*document))
+        .map(|record| record.window_id.as_str())
+        .filter(|window| !window.is_empty())
+        .collect::<BTreeSet<_>>();
+    let mut seen = BTreeSet::new();
+    let mut bindings = Vec::new();
+    for document in desired_documents {
+        // The ingress adapter canonicalizes desired document IDs before
+        // publishing this Source. Keep this Computed a pure join over
+        // already-published values: no filesystem canonicalization, RPC,
+        // SQLite reads, or tmux probes belong here.
+        let Some(record) = actors.get(document) else {
+            continue;
+        };
+        seen.insert(document);
+        bindings.push(ControllerTmuxActorBinding {
+            document_path: document.to_string(),
+            session_id: record.session_id.clone(),
+            pane_id: record.pane_id.clone(),
+            generation: record.generation,
+        });
+    }
+    for record in actors.values() {
+        if desired_windows.is_empty()
+            || !desired_windows.contains(record.window_id.as_str())
+            || !seen.insert(record.document_id.as_str())
+        {
+            continue;
+        }
+        bindings.push(ControllerTmuxActorBinding {
+            document_path: record.document_id.clone(),
+            session_id: record.session_id.clone(),
+            pane_id: record.pane_id.clone(),
+            generation: record.generation,
+        });
+    }
+    bindings
 }
 
 /// Controller-lifetime Lazily graph for the pane layout projection.
@@ -836,6 +904,7 @@ impl ControllerPaneLayoutGraph {
             PaneLayoutProjection::NeedsEffect(_) => ControllerPaneLayoutPhase::NeedsEffect,
             PaneLayoutProjection::Applying(_) => ControllerPaneLayoutPhase::Applying,
             PaneLayoutProjection::RetryPending(_) => ControllerPaneLayoutPhase::RetryPending,
+            PaneLayoutProjection::OperatorOwned(_) => ControllerPaneLayoutPhase::OperatorOwned,
             PaneLayoutProjection::Converged(_) => ControllerPaneLayoutPhase::Converged,
         };
         let observation = self
@@ -860,6 +929,9 @@ impl ControllerPaneLayoutGraph {
             }
             ControllerPaneLayoutPhase::Applying => ControllerPaneLayoutReasonCode::EffectInFlight,
             ControllerPaneLayoutPhase::NeedsEffect => ControllerPaneLayoutReasonCode::Unobserved,
+            ControllerPaneLayoutPhase::OperatorOwned => {
+                ControllerPaneLayoutReasonCode::ActiveDispatchOutsideSurface
+            }
             ControllerPaneLayoutPhase::RetryPending => {
                 let observation_reason = observation
                     .as_ref()
@@ -968,7 +1040,8 @@ impl ControllerPaneLayoutGraph {
         loop {
             let projection = self.projection();
             let terminal = match &projection {
-                PaneLayoutProjection::Converged(desired) => desired.generation == generation,
+                PaneLayoutProjection::Converged(desired)
+                | PaneLayoutProjection::OperatorOwned(desired) => desired.generation == generation,
                 PaneLayoutProjection::NeedsEffect(desired)
                 | PaneLayoutProjection::Applying(desired)
                 | PaneLayoutProjection::RetryPending(desired) => desired.generation != generation,
@@ -6842,8 +6915,10 @@ mod tests {
         );
 
         let scope = agent_doc_state_scope::ProcessScope::new();
-        let actor_graph =
-            ControllerActorGraph::new_in(&scope, BTreeMap::from([(document_id.clone(), ready)]));
+        let actor_graph = ControllerActorGraph::new_in(
+            &scope,
+            BTreeMap::from([(document_id.clone(), ready.clone())]),
+        );
         let pane_graph = ControllerPaneLayoutGraph::new_in(
             &scope,
             Vec::new(),
@@ -6870,6 +6945,35 @@ mod tests {
                 pane_id: "%41".to_string(),
                 generation: 7,
             }]
+        );
+
+        let dispatched_document_id = root.path().join("tasks/lazily.md").display().to_string();
+        let dispatched = actor_record_for_test(
+            &dispatched_document_id,
+            "%72",
+            agent_doc_controller::actor::ActorState::Busy,
+        );
+        actor_graph.set(BTreeMap::from([
+            (document_id.clone(), ready),
+            (dispatched_document_id.clone(), dispatched),
+        ]));
+        assert_eq!(
+            pane_graph.actor_bindings(),
+            vec![
+                ControllerTmuxActorBinding {
+                    document_path: document_id.clone(),
+                    session_id: "session-%41".to_string(),
+                    pane_id: "%41".to_string(),
+                    generation: 7,
+                },
+                ControllerTmuxActorBinding {
+                    document_path: dispatched_document_id,
+                    session_id: "session-%72".to_string(),
+                    pane_id: "%72".to_string(),
+                    generation: 7,
+                },
+            ],
+            "a live actor sharing the desired actor's window must participate in layout ownership",
         );
 
         let closed = actor_record_for_test(
@@ -7096,7 +7200,9 @@ mod tests {
                 reason: "pane_order_mismatch".to_string(),
                 expected_documents: desired.invocation.columns.clone(),
                 actual_documents: vec!["tasks/two.md".to_string()],
+                expected_panes: Vec::new(),
                 panes: vec!["%1".to_string()],
+                operator_owned_documents: Vec::new(),
                 session_name: Some("agent-doc".to_string()),
                 window_id: Some("@1".to_string()),
                 window_name: Some("agent-doc".to_string()),
@@ -7120,6 +7226,102 @@ mod tests {
                 },
             ),
             PaneLayoutProjection::RetryPending(desired.clone())
+        );
+        let dispatched_document = "tasks/lazily.md".to_string();
+        let dispatch_actor_bindings = vec![
+            actor_bindings[0].clone(),
+            ControllerTmuxActorBinding {
+                document_path: dispatched_document.clone(),
+                session_id: "session-lazily".to_string(),
+                pane_id: "%72".to_string(),
+                generation: 9,
+            },
+        ];
+        let dispatch_race = PaneLayoutObservation {
+            generation: 7,
+            actor_bindings: dispatch_actor_bindings.clone(),
+            report: ControllerTmuxLayoutSyncStateReport {
+                synced: false,
+                reason: "pane_count_mismatch".to_string(),
+                expected_documents: desired.invocation.columns.clone(),
+                actual_documents: vec![
+                    desired.invocation.columns[0].clone(),
+                    dispatched_document.clone(),
+                    desired.invocation.columns[1].clone(),
+                ],
+                expected_panes: vec!["%77".to_string(), "%95".to_string()],
+                panes: vec!["%77".to_string(), "%72".to_string(), "%95".to_string()],
+                operator_owned_documents: vec![dispatched_document],
+                session_name: Some("agent-doc".to_string()),
+                window_id: Some("@1".to_string()),
+                window_name: Some("agent-doc".to_string()),
+                focus: desired.invocation.focus.clone(),
+            },
+        };
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                dispatch_actor_bindings.clone(),
+                Some(dispatch_race),
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    actor_bindings: dispatch_actor_bindings,
+                    attempt: 41,
+                    phase: PaneLayoutEffectPhase::RetryPending,
+                    reason: "pane_count_mismatch".to_string(),
+                    file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: false,
+                },
+            ),
+            PaneLayoutProjection::OperatorOwned(desired.clone()),
+            "an active dispatched pane outside the surface is a named terminal state, not an unbounded retry",
+        );
+        let missing_surface_pane = PaneLayoutObservation {
+            generation: 7,
+            actor_bindings: vec![ControllerTmuxActorBinding {
+                document_path: "tasks/lazily.md".to_string(),
+                session_id: "session-lazily".to_string(),
+                pane_id: "%72".to_string(),
+                generation: 9,
+            }],
+            report: ControllerTmuxLayoutSyncStateReport {
+                synced: false,
+                reason: "pane_count_mismatch".to_string(),
+                expected_documents: desired.invocation.columns.clone(),
+                actual_documents: vec!["tasks/lazily.md".to_string()],
+                expected_panes: Vec::new(),
+                panes: vec!["%72".to_string()],
+                operator_owned_documents: vec!["tasks/lazily.md".to_string()],
+                session_name: Some("agent-doc".to_string()),
+                window_id: Some("@1".to_string()),
+                window_name: Some("agent-doc".to_string()),
+                focus: desired.invocation.focus.clone(),
+            },
+        };
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                missing_surface_pane.actor_bindings.clone(),
+                Some(missing_surface_pane),
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    actor_bindings: vec![ControllerTmuxActorBinding {
+                        document_path: "tasks/lazily.md".to_string(),
+                        session_id: "session-lazily".to_string(),
+                        pane_id: "%72".to_string(),
+                        generation: 9,
+                    }],
+                    attempt: 42,
+                    phase: PaneLayoutEffectPhase::RetryPending,
+                    reason: "pane_count_mismatch".to_string(),
+                    file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: false,
+                },
+            ),
+            PaneLayoutProjection::RetryPending(desired.clone()),
+            "an extra owner cannot hide a requested surface pane that is actually missing",
         );
         let changed_actor_bindings = vec![ControllerTmuxActorBinding {
             generation: 4,
@@ -7153,7 +7355,9 @@ mod tests {
                 reason: "synced".to_string(),
                 expected_documents: desired.invocation.columns.clone(),
                 actual_documents: desired.invocation.columns.clone(),
+                expected_panes: vec!["%1".to_string(), "%2".to_string()],
                 panes: vec!["%1".to_string(), "%2".to_string()],
+                operator_owned_documents: Vec::new(),
                 session_name: Some("agent-doc".to_string()),
                 window_id: Some("@1".to_string()),
                 window_name: Some("agent-doc".to_string()),
@@ -7256,7 +7460,9 @@ mod tests {
             reason: "synced".to_string(),
             expected_documents: first.invocation.columns.clone(),
             actual_documents: first.invocation.columns.clone(),
+            expected_panes: vec!["%1".to_string(), "%2".to_string()],
             panes: vec!["%1".to_string(), "%2".to_string()],
+            operator_owned_documents: Vec::new(),
             session_name: Some("agent-doc".to_string()),
             window_id: Some("@1".to_string()),
             window_name: Some("agent-doc".to_string()),

@@ -337,6 +337,21 @@ impl ControllerEditorSurfaceGraph {
         current.retired = true;
         true
     }
+
+    fn active_observation_generations(&self, project_root: &Path) -> Vec<(String, u64, u64)> {
+        self.roots
+            .lock()
+            .iter()
+            .filter(|((root, _), observation)| root == project_root && !observation.retired)
+            .map(|((_, client_id), observation)| {
+                (
+                    client_id.clone(),
+                    observation.generation,
+                    observation.sequence,
+                )
+            })
+            .collect()
+    }
 }
 /// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
@@ -16371,10 +16386,18 @@ pub(crate) fn handle_dispatch(
             dispatch_start_proven: false,
         },
     )?;
+    let surface_observations = runtime
+        .map(|runtime| {
+            runtime
+                .editor_surface_graph
+                .active_observation_generations(&bootstrap.project_root)
+        })
+        .unwrap_or_default();
     agent_doc_ops_log_io::log_op(
         &file,
         &format!(
-            "controller_dispatch_accepted session={} pane={} generation={} state={} kind={} stage={} receipt_id={} proof_scope={}",
+            "controller_dispatch_accepted target={} session={} pane={} generation={} state={} kind={} stage={} receipt_id={} proof_scope={} surface_observations={:?}",
+            document_id,
             session_id,
             pane_id,
             generation,
@@ -16382,7 +16405,8 @@ pub(crate) fn handle_dispatch(
             command_kind,
             accepted_stage,
             receipt.receipt_id,
-            receipt.proof_scope.as_str()
+            receipt.proof_scope.as_str(),
+            surface_observations,
         ),
     );
     Ok(DispatchAuthorization {
@@ -16671,7 +16695,9 @@ fn layout_sync_state_report(
         reason: reason.into(),
         expected_documents,
         actual_documents,
+        expected_panes: Vec::new(),
         panes,
+        operator_owned_documents: Vec::new(),
         session_name: target.session_name,
         window_id: target.window_id,
         window_name: target.window_name,
@@ -16682,14 +16708,54 @@ fn layout_sync_state_report(
 fn layout_sync_state_result(
     expected_documents: &[String],
     actual_documents: &[String],
+    expected_panes: &[String],
+    physical_panes: &[String],
 ) -> (bool, &'static str) {
-    if expected_documents == actual_documents {
-        (true, "synced")
-    } else if expected_documents.len() != actual_documents.len() {
-        (false, "pane_count_mismatch")
-    } else {
-        (false, "pane_order_mismatch")
+    if expected_documents.len() != actual_documents.len() {
+        return (false, "pane_count_mismatch");
     }
+    if expected_documents != actual_documents {
+        return (false, "pane_order_mismatch");
+    }
+    if expected_panes.len() == expected_documents.len() && expected_panes != physical_panes {
+        return (false, "pane_order_mismatch");
+    }
+    (true, "synced")
+}
+
+fn layout_sync_state_expected_panes(
+    project_root: &Path,
+    expected_documents: &[String],
+    effect_file_panes: &[(String, String)],
+) -> Vec<String> {
+    expected_documents
+        .iter()
+        .filter_map(|expected| {
+            effect_file_panes
+                .iter()
+                .find(|(file, _)| canonical_layout_document_id(project_root, file) == *expected)
+                .map(|(_, pane)| pane.clone())
+        })
+        .collect()
+}
+
+fn layout_sync_state_operator_owned_documents(
+    project_root: &Path,
+    expected_documents: &[String],
+    physical_panes: &[String],
+    actor_store: &BTreeMap<String, agent_doc_controller::actor::ActorRecord>,
+) -> Vec<String> {
+    actor_store
+        .values()
+        .filter(|record| {
+            record.state != agent_doc_controller::actor::ActorState::Closed
+                && physical_panes.contains(&record.pane_id)
+        })
+        .map(|record| canonical_layout_document_id(project_root, &record.document_id))
+        .filter(|document| !expected_documents.contains(document))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 pub(crate) fn handle_tmux_layout_sync_state(
@@ -17072,8 +17138,24 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
             )
         })
         .collect::<Vec<_>>();
-    let (synced, reason) = layout_sync_state_result(&expected_documents, &actual_documents);
-    Ok(layout_sync_state_report(
+    let expected_panes = layout_sync_state_expected_panes(
+        &bootstrap.project_root,
+        &expected_documents,
+        effect_file_panes,
+    );
+    let operator_owned_documents = layout_sync_state_operator_owned_documents(
+        &bootstrap.project_root,
+        &expected_documents,
+        &panes,
+        &actor_store,
+    );
+    let (synced, reason) = layout_sync_state_result(
+        &expected_documents,
+        &actual_documents,
+        &expected_panes,
+        &panes,
+    );
+    let mut report = layout_sync_state_report(
         synced,
         reason,
         expected_documents,
@@ -17085,7 +17167,10 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
             window_name,
             focus,
         },
-    ))
+    );
+    report.expected_panes = expected_panes;
+    report.operator_owned_documents = operator_owned_documents;
+    Ok(report)
 }
 
 fn state_plane_message_metadata(message: &lazily::IpcMessage) -> Result<(u64, Option<u64>)> {
@@ -17701,12 +17786,16 @@ fn pane_layout_effect_worker(
             active_generation = desired.generation;
             attempt = 0;
         }
-        let already_converged = matches!(
+        let already_terminal = matches!(
             runtime.pane_layout_projection(),
             PaneLayoutProjection::Converged(ref converged)
-                if converged.generation == desired.generation
+            if converged.generation == desired.generation
+        ) || matches!(
+            runtime.pane_layout_projection(),
+            PaneLayoutProjection::OperatorOwned(ref owned)
+            if owned.generation == desired.generation
         );
-        if already_converged {
+        if already_terminal {
             if pane_layout_effect_worker_retire_if_current(
                 &runtime,
                 &state,
@@ -17951,7 +18040,9 @@ fn pane_layout_effect_worker(
         let focus_reason = focus_receipt.reason.clone();
         let logged_expected_documents = report.expected_documents.clone();
         let logged_actual_documents = report.actual_documents.clone();
+        let logged_expected_panes = report.expected_panes.clone();
         let logged_panes = report.panes.clone();
+        let logged_operator_owned_documents = report.operator_owned_documents.clone();
         if report.synced {
             runtime.record_pane_layout_structural_assignment(
                 &desired,
@@ -17987,16 +18078,26 @@ fn pane_layout_effect_worker(
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} focus={} expected={:?} actual={:?} panes={:?}",
+                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?}",
                 desired.generation,
                 attempt,
-                if synced { "converged" } else { "retry_pending" },
+                if synced {
+                    "converged"
+                } else if observation_reason == "pane_count_mismatch"
+                    && !logged_operator_owned_documents.is_empty()
+                {
+                    "operator_owned"
+                } else {
+                    "retry_pending"
+                },
                 observation_reason,
                 effect_reason,
                 focus_reason,
                 logged_expected_documents,
                 logged_actual_documents,
+                logged_expected_panes,
                 logged_panes,
+                logged_operator_owned_documents,
             ),
         );
         if pane_layout_effect_worker_retire_if_current(
@@ -18023,7 +18124,11 @@ fn pane_layout_effect_worker_retire_if_current(
     let projection_is_terminal_for_current_inputs = matches!(
         runtime.pane_layout_projection(),
         PaneLayoutProjection::Converged(ref converged)
-            if converged.generation == completed_generation
+        if converged.generation == completed_generation
+    ) || matches!(
+        runtime.pane_layout_projection(),
+        PaneLayoutProjection::OperatorOwned(ref owned)
+        if owned.generation == completed_generation
     ) || matches!(
         runtime.pane_layout_projection(),
         PaneLayoutProjection::RetryPending(ref pending)
@@ -20853,6 +20958,15 @@ mod tests {
             serde_json::to_string(&ControllerPaneLayoutReasonCode::PaneOrderMismatch).unwrap(),
             r#""pane_order_mismatch""#
         );
+        assert_eq!(
+            serde_json::to_string(&ControllerPaneLayoutPhase::OperatorOwned).unwrap(),
+            r#""operator_owned""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ControllerPaneLayoutReasonCode::ActiveDispatchOutsideSurface)
+                .unwrap(),
+            r#""active_dispatch_outside_surface""#
+        );
         assert!(
             serde_json::from_str::<ControllerPaneLayoutPhase>(r#""future_phase""#).is_err(),
             "unknown protocol phases fail closed instead of becoming free-form control flow"
@@ -21753,8 +21867,24 @@ mod tests {
         ];
 
         assert_eq!(
-            layout_sync_state_result(&expected, &actual),
+            layout_sync_state_result(&expected, &actual, &[], &[]),
             (false, "pane_order_mismatch")
+        );
+    }
+
+    #[test]
+    fn tmux_layout_sync_state_result_rejects_physically_reversed_model_panes() {
+        let expected = vec![
+            "/repo/tasks/left.md".to_string(),
+            "/repo/tasks/right.md".to_string(),
+        ];
+        let model_panes = vec!["%77".to_string(), "%95".to_string()];
+        let physical_panes = vec!["%95".to_string(), "%77".to_string()];
+
+        assert_eq!(
+            layout_sync_state_result(&expected, &expected, &model_panes, &physical_panes,),
+            (false, "pane_order_mismatch"),
+            "matching document labels cannot overclaim convergence when pane_left order is reversed",
         );
     }
 
@@ -21792,8 +21922,18 @@ mod tests {
         let actual = vec!["/repo/tasks/left.md".to_string()];
 
         assert_eq!(
-            layout_sync_state_result(&expected, &actual),
+            layout_sync_state_result(&expected, &actual, &[], &[]),
             (false, "pane_count_mismatch")
+        );
+        let extra = vec![
+            expected[0].clone(),
+            "/repo/tasks/lazily.md".to_string(),
+            expected[1].clone(),
+        ];
+        assert_eq!(
+            layout_sync_state_result(&expected, &extra, &[], &[]),
+            (false, "pane_count_mismatch"),
+            "the captured three-pane/two-column dispatch race remains a count mismatch",
         );
     }
 
@@ -21805,7 +21945,12 @@ mod tests {
         ];
 
         assert_eq!(
-            layout_sync_state_result(&expected, &expected),
+            layout_sync_state_result(
+                &expected,
+                &expected,
+                &["%77".to_string(), "%95".to_string()],
+                &["%77".to_string(), "%95".to_string()],
+            ),
             (true, "synced")
         );
     }

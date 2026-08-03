@@ -63,6 +63,7 @@ internal enum class PaneLayoutPhase(val token: String) {
     NeedsEffect("needs_effect"),
     Applying("applying"),
     RetryPending("retry_pending"),
+    OperatorOwned("operator_owned"),
     Converged("converged");
 
     companion object {
@@ -76,6 +77,7 @@ internal enum class PaneLayoutReasonCode(val token: String) {
     ObservedConvergence("observed_convergence"),
     PaneCountMismatch("pane_count_mismatch"),
     PaneOrderMismatch("pane_order_mismatch"),
+    ActiveDispatchOutsideSurface("active_dispatch_outside_surface"),
     TmuxUnavailable("tmux_unavailable"),
     EffectFailed("effect_failed"),
     ObservationFailed("observation_failed"),

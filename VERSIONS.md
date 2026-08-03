@@ -4,6 +4,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.128
 
+- **A dispatch-created pane outside the current editor surface no longer keeps
+  pane-layout reconciliation in an unbounded retry
+  (`#panelayoutrace`).** Same-window actor bindings now participate in the
+  reactive projection even when their document is absent from the desired
+  columns. If every requested document is still present and the additional pane
+  has a live dispatch owner, the controller reports terminal `operator_owned`
+  with reason `active_dispatch_outside_surface` until either the surface
+  generation or actor ownership changes. A missing requested pane still remains
+  retryable. Dispatch acceptance logs the canonical target and the active
+  editor-surface observation generations so the ordering is reconstructable.
+- **Pane-layout convergence independently proves physical pane order.** The
+  generation-scoped effect receipt's file-to-pane mapping is projected in
+  desired document order and compared with tmux's observed left-to-right pane
+  sequence. Matching document labels can no longer overclaim convergence when
+  physical panes are reversed. Focus remains a file-to-pane lookup rather than
+  a physical index.
 - **Terminal convergence can now be scoped to exact retained-write component
   ownership (`#percellconverge` phase 3).** The default remains whole-document
   equality. Projects may explicitly opt in with

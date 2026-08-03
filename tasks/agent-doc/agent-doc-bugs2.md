@@ -171,11 +171,22 @@ Proof:
 - Latest GitHub CI run `30780651967` for `2fa106c6a` was still in progress at closeout.
 
 Confidence: high. Escalation: none.
+
+### Re: #advance-review — gpt-5
+
+Reviewed the 16 remaining gated items against the current session state and agent-doc `0.35.118` / JetBrains plugin `0.2.338`. None has new document evidence sufficient to resolve it: each still names live IDE/pane observation, operator-secret access, or another explicit external proof.
+
+Added one canonical recommended follow-up for every review item, in existing review priority order. The document’s priority-queue policy mirrors these backlog additions into the queue, so subsequent cycles can validate each gate, refresh stale version-specific instructions where necessary, and then either resolve it or leave a precise operator blocker:
+
+`#compactreactiveprojectionverify`, `#steeringmirrorverifylive313`, `#preflightinbinary`, `#jbsurfaceswap`, `#boundaryaccumverify`, `#r4gq`, `#zqv8`, `#compactindcellsverify`, `#crdtpushdrainverify`, `#bbpe`, `#hvw0`, `#c8tb`, `#operatorverifylive`, `#mtds`, `#editormodelmissing`, and `#falsetyping-guard`.
+
+Changed paths: only this session document through binary-owned granular backlog mutations. Commands/evidence: admitted and planned the connected cycle, read the document, ran `tsift status`, queried `agent-doc review list --json`, inspected the canonical `review ungate-tasks` contract, and checked the current release notes. Verification: 16 gated review items produced 16 ordered recommended follow-ups; no source or test files changed. Confidence: high. Escalation: none.
 <!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- #advance-review
 <!-- /agent:queue -->
 
 ## Notes
@@ -186,6 +197,22 @@ Confidence: high. Escalation: none.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#recommendedungatereview-b1cb] [recommended] Ungate review item #compactreactiveprojectionverify — validate and move to done
+- [ ] [#recommendedungatereview-9g0v] [recommended] Ungate review item #steeringmirrorverifylive313 — validate and move to done
+- [ ] [#recommendedungatereview-zw66] [recommended] Ungate review item #preflightinbinary — validate and move to done
+- [ ] [#recommendedungatereview-e8jn] [recommended] Ungate review item #jbsurfaceswap — validate and move to done
+- [ ] [#recommendedungatereview-jcgv] [recommended] Ungate review item #boundaryaccumverify — validate and move to done
+- [ ] [#recommendedungatereview-a3ew] [recommended] Ungate review item #r4gq — validate and move to done
+- [ ] [#recommendedungatereview-jfxh] [recommended] Ungate review item #zqv8 — validate and move to done
+- [ ] [#recommendedungatereview-w90z] [recommended] Ungate review item #compactindcellsverify — validate and move to done
+- [ ] [#recommendedungatereview-sskd] [recommended] Ungate review item #crdtpushdrainverify — validate and move to done
+- [ ] [#recommendedungatereview-0xc5] [recommended] Ungate review item #bbpe — validate and move to done
+- [ ] [#recommendedungatereview-krpw] [recommended] Ungate review item #hvw0 — validate and move to done
+- [ ] [#recommendedungatereview-h9sm] [recommended] Ungate review item #c8tb — validate and move to done
+- [ ] [#recommendedungatereview-xfmh] [recommended] Ungate review item #operatorverifylive — validate and move to done
+- [ ] [#recommendedungatereview-rht8] [recommended] Ungate review item #mtds — validate and move to done
+- [ ] [#recommendedungatereview-z0ps] [recommended] Ungate review item #editormodelmissing — validate and move to done
+- [ ] [#recommendedungatereview] [recommended] Ungate review item #falsetyping-guard — validate and move to done
 <!-- /agent:backlog -->
 
 ## Review

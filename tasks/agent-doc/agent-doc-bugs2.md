@@ -73,14 +73,30 @@ Added regressions proving same-text history shrink plus stale-lineage fencing, a
 Also fixed the reported stale Claude admission-hook snapshot path while this source build was open: prompt-bearing dispatch-only tmux delivery now requires the same per-document cycle acknowledgment as managed delivery. Accepted pane input alone is no longer success. A missing acknowledgment triggers one fresh supervisor restart for Claude Code or Codex, reloading startup hook settings, then retries and fails closed if admission is still absent. Updated the session/harness contracts and added supported-harness recovery coverage.
 
 Verification: focused realtime/relay/compact suites passed (384 tests); route-io passed (72 tests, 13 live-tmux tests ignored); `make check` passed all 8,553 tests with 244 skipped, release-projection checks, and all TLA+ models. Changed public files passed the private-name scan and `git diff --check`. Installed the exact committed binary/library and refreshed skills/editor packages.
+
+### Re: do [#reactive-closeout-install-verify] — codex
+
+Installed and exercised the committed reactive-projection build. The retained closeout crossed a terminal boundary cleanly, and all acceptance checks were performed without recycling an active closeout owner.
+
+- **Installed source:** Agent Doc commit `70a407d15` (`refactor: project turn state reactively`) is pushed on `origin/main`; `make install` installed Agent Doc `0.35.118`, the native library, skills, and JetBrains plugin package `0.2.338`.
+- **tsift.md terminal delivery:** the fresh installed build admitted and finalized `cycle-1785724031373`; the response committed as superproject commit `16ca39dfc`. The first template-less write failed before mutation, and the correctly wrapped retry reached committed terminal state without a follow-up session check.
+- **Equity Funding Source queue strike:** read-only inspection found committed response `### Re: do [#recommendedprunestale]` and commit `8884a04d8`; the queue has advanced to active head `#recommendeddeploybrowser`. Its live owner remained untouched—no admission, recycle, or closeout interference.
+- **Monster Rod Holders corruption rejection:** the wrong-pane direct write was rejected before mutation by the pane-ownership guard. The canonical owner then restored the missing capture and committed `947cfff4`; `#accessoriesspendredirect` exists once, while `#ga4-collection-gap-724` remains unconsumed. The already-applied production state was not replayed; a read-only dry run reported `needs_apply=false changed=0` for all four product IDs.
+- **Compact Exchange recovery:** `#compacttombgc` finalized successfully in `cycle-1785716963463`; the compact epoch/reload fence is present in commit `1ffbc7b98`, and the queue continued normally afterward.
+- **Responsiveness:** tsift editor delivery admitted and committed through the reactive state stream, the Monster Rod Holders owner-pane repair committed normally, and the active Equity Funding Source and Lazily owners were observed without recycle/reload or duplicate response submission.
+
+**Changed paths:** the implementation is concentrated in `agent-doc-controller-io/src/project_controller/rpc.rs` plus controller/supervisor/editor adapters, tests, and `specs/14-realtime-workflow.md`; unary turn-request/ACK paths were removed in favor of typed `TurnAdmissionProjectionOperation::{Current, Await { baseline_cycle_id, wait_ms }}` state projection.
+
+**Commands/proof:** `make check`, workspace `cargo check`, focused Rust tests, VS Code tests (169/169), JetBrains Gradle tests, `make install`, live Agent Doc admit/finalize cycles, `tsift status` + indexed source inspection, Git history inspection, and the Monster Rod Holders exclusion dry run. Local checks are green. GitHub CI run `30779663452` for `70a407d15` is still in progress with no reported failure, so it was observed but not awaited.
+
+**Confidence:** high. **Escalation:** none.
 <!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - do [#multilineheadbullet]
-- ~~do [#compacttombgc]~~
-- do [#reactive-closeout-install-verify]
+- ~~do [#reactive-closeout-install-verify]~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -92,7 +108,6 @@ Verification: focused realtime/relay/compact suites passed (384 tests); route-io
 
 <!-- agent:backlog priority queue -->
 - [ ] [#multilineheadbullet] [focused-cycle] Make multiline `---` queue prompts addressable — SHARPENED 2026-07-19. Damage is already PREVENTED (#qconsumenostrike fail-closed guard, 5b3761dfc); this is the remaining correctness half. Refined finding: the ENTRY model already handles multiline correctly — document_queue::parse surfaces the multiline head as a Prompt (preflight lists it), mark_first_n_prompts_completed targets it, and render emits Completed multiline as `~~~done` fences. The mismatch is that markdown_ast::item_nodes (used for IPC node ops and AST-keyed consume) enumerates only list items, so it returns the NEIGHBOUR for the same logical head — observed as node_ops=[queue:1:neighbour:0] while consumed_text was the multiline head. So the fix is to reconcile the two ENUMERATORS, not the entry model: either teach item_nodes the `---` block shape, or render multiline heads with a bullet + indented continuation that both round-trips through parse_spans and yields a node. Needs one clean reproduction to confirm which of the two paths actually mutated the document in the observed strikes.
-- [ ] [#reactive-closeout-install-verify] After the retained tsift.md editor-delivery capture reaches a terminal boundary, install the committed Agent Doc binary and verify the equityfundingsource.md queue strike, Monster Rod Holders corruption rejection, Compact Exchange recovery, and editor/tmux responsiveness without recycling an active closeout owner.
 <!-- /agent:backlog -->
 
 ## Review

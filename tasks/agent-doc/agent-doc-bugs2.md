@@ -190,12 +190,107 @@ Processed `#advance-review` and committed the cycle.
 - Added 16 ordered recommended validation/ungate tasks to the backlog and queue.
 - Closeout reached terminal `commit_success`.
 - No code or test files changed.
-<!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
+
+### Re: do [#percellconverge] — opus-5
+
+Shipped the write-path half in `0.35.124`: one ownership predicate, called from all three refusal sites.
+
+The plan's diagnosis was right, and the irony it recorded is the whole lesson. `crdt_relay_pending_refusal`'s doc comment says it was made a single function "so all three call sites give the same instruction rather than drifting into three dialects." Consolidating the *wording* did not stop the *predicate* from diverging — each site went on asserting the deferral unconditionally, and `0.35.123` fixed only one of them.
+
+The predicate now lives once, in `agent_doc_turn::write_ownership`: `RetainedWriteOwnership { cycle_open, retained_capture }` → `verdict()` → `retained_write_remedy()`. `agent_doc_capture_io::retained_write_ownership` is the I/O shell that reads the two durable facts. All three sites derive their wording from it, so `write --commit` can no longer print "a deferral, not a lost response" while `session-check` calls the same state stranded.
+
+Three decisions worth stating, because each is the direction that loses work if taken wrong:
+
+- **A failed read is not ownership.** An unproven site reports stranded and names the recovery. Assuming a holder is the failure being removed.
+- **The 2026-07-26 guidance is unchanged for the owned case.** "Do NOT re-send / force disk / `admin recycle` / `admin reload-lib`" was written for a real incident where two sessions invented recoveries that each perturbed the capture being awaited. Only the *unowned* case gains a remedy.
+- **Ownership is not keyed on editor attachment.** `TransportProjection::editor_generation` is a one-way latch (`#editormodelmissing`); a predicate that trusted it would answer "owned" for every document ever opened in an editor.
+
+Two guards in `agent-doc-turn/tests/retained_write_ownership_guard.rs` hold both halves — no site may re-author a verdict phrase, and every site must actually call the predicate. Worth recording that the second guard's first draft was **satisfied by a doc comment** that merely mentioned the module: deleting the call kept it green. It now matches call forms on non-comment lines only. A guard satisfied by prose about the rule is not a guard.
+
+Mutation-checked red three ways: re-authoring a verdict phrase in `session-check`, deleting the predicate call from `document-realtime-io`, and forcing `verdict()` to always return `Deferred`.
+
+The four per-component phases are not done. They are now separate backlog items rather than a parent that gets gated after partial progress, and the plan file records the write-path half as shipped.
+
+**Proof.** `4abb52061`. `make check` — 8558 passed, 244 skipped, all TLA+ models green. Installed `0.35.125`. Not pushed — you declined that step.
+
+### Re: parallel haiven-dev.md sessions — opus-5
+
+Found concrete evidence in `src/haiven-dev/.agent-doc/logs/ops.log`, and it is a real defect, not a display artifact.
+
+Two different `foreground-finalize` PIDs each **acquired** the closeout-owner lease for the same document 56 seconds apart:
+
+```
+07:25:11 closeout_owner_actor_claim owner_id=foreground-finalize-2493430-... outcome=Acquired
+07:26:07 closeout_owner_actor_claim owner_id=foreground-finalize-2556204-... outcome=Acquired
+```
+
+after which the supervisor's own resume owner got `HeldByOther` three times. The spawn that produced the second one is visible at 07:28:29:
+
+```
+controller_operator_command_accepted kind=session_restart stage=operator_busy proof_scope=accepted_only
+controller_supervisor_replacement_background_completed stage=ipc_accepted_deferred reason=live_supervisor_owns_drain
+controller_lifecycle reason=restart_continue_spawn
+```
+
+The replacement path *deferred* (`live_supervisor_owns_drain`) while the IPC restart still reached the live supervisor, which spawned a fresh harness child in `continue` mode. The pane's `--route-owned-reap-policy keep-alive` means the previous child is not reaped, so two harness children ended up rendering through one pane's PTY proxy — clearing the pane revealed the one underneath. Note also that `supervisor_recycle_deferred_cycle_open` gated the *recycle* path repeatedly at 07:18/07:25/07:27/07:28 while the *restart* path was not subject to that gate.
+
+I did **not** fix this — it is a distinct defect in the supervisor replacement/restart gate, and I have a diagnosis rather than a verified fix. It is filed at the top of the backlog with the log lines above so the queue takes it next. The duplicate is gone from the live process table now (you cleared it).
+
+### Re: agent-doc self-heal from reboots — opus-5
+
+Fixed and shipped in `0.35.125`, with both reboot states proven end-to-end against the installed library.
+
+Your two errors were the same bug in its two shapes. A reboot leaves `.agent-doc/controller.sock` either stale-with-no-listener (`ECONNREFUSED` — what you hit first) or gone with the tmpfs (`ENOENT` — what you hit after I removed the stale file). Neither is fixable by retrying the connect, so the plugin surfaced both verbatim and stayed broken until a human deleted the socket by hand.
+
+The binary already recovered from both — `connect_or_launch` adopts or launches, and the bind path unlinks a stale socket before listening. The editors simply had no way to ask. New FFI export `agent_doc_ensure_controller_running` exposes that existing recovery, and JetBrains calls it once on a failure that *proves* no listener, then retries. It stays a single delegation: a plugin carrying its own unlink/launch logic is exactly how the editor and the binary drift into disagreeing about controller liveness.
+
+Two constraints shaped the scope:
+
+- **The passive lane still may not launch a controller.** `editors/SPEC.md` requires editor-surface observation to send "over the existing-controller socket; it never launches the controller". My first attempt put the retry in the shared send helper, which would have let every tab click start one. The self-heal is now confined to operator-initiated lanes (Sync Tmux Layout, Run Agent Doc, focus handoff), and a test asserts the passive lane keeps the non-launching path.
+- **An ambiguous failure is never proof of death.** Permission, timeout, broken pipe — relaunching over a live-but-slow controller is worse than reporting the error. Same rule the binary's `SocketLiveness` probe already follows.
+
+**Live proof**, not just unit tests — reproduced both states against `libagent_doc.so` as installed:
+
+| state | before | after `agent_doc_ensure_controller_running` |
+|---|---|---|
+| stale socket, no listener | `[Errno 111] Connection refused` | connected — socket reclaimed, controller serving |
+| socket file missing | `No such file or directory` | connected — socket recreated, controller serving |
+
+`agent-doc sync` now returns 0 for you instead of failing on the socket.
+
+### Re: editor plugin parity — opus-5
+
+> **Queue prompt:**
+>
+> do [#percellconverge]
+
+
+Good question, and the answer was **no** — my first fix was JetBrains-only. Checking properly changed the shape of the change.
+
+| editor | state |
+|---|---|
+| JetBrains | **was the gap** — direct socket connect, no launch path. Now self-heals. |
+| VS Code | **already covered** — `controller status --ensure` runs before an operator route, and it has no separate sync-layout socket request. |
+| Zed | no controller socket transport at all; `staged` in the parity matrix by policy. |
+
+So VS Code had reached the same outcome by a different mechanism, and nothing enforced that it stay that way. I added `controller_reboot_self_heal_v1` to the editor capability contract and as a **required** row in `editors/plugin-parity.tsv`, so the existing conformance test now fails if a peer claims the capability without advertising it, or silently drops it later. Verified the gate bites by removing VS Code's advertisement and watching it go red.
+
+While checking this I also found that JetBrains has a *second* direct controller-socket path in `CrdtReplicaForwarder`. I left it alone deliberately — replica transport is a passive lane under the same never-launch rule — but it is worth a look when the per-component work lands.
+
+**Proof.** `af5e37262`. `make check` — 8558 passed, 244 skipped. VS Code 169/169. Full JetBrains Gradle suite green. Installed agent-doc `0.35.125` and JetBrains plugin `0.2.339`.
+
+**The plugin needs an IDE restart to activate `0.2.339`** — `reload-lib` swaps the cdylib but not the Kotlin package, so the reboot self-heal will not be live in your running IDE until you restart it.
+<!-- agent:boundary:f621055c:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#percellconverge]
+- do [#haivendupsession]
+- do [#pcc1]
+- do [#pcc2]
+- do [#pcc3]
+- do [#pcc4]
+- ~~do [#percellconverge]~~
 - do [#panelayoutrace]
 - Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.
 - do [#recommendedungatereview-b1cb]
@@ -224,8 +319,12 @@ Processed `#advance-review` and committed the cycle.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#haivendupsession] #agent-doc-bug Two harness children render through one pane's PTY proxy after an operator session_restart; clearing the visible session reveals the other underneath. OPERATOR-REPORTED 2026-08-03 on haiven-dev.md (pane %95). Evidence in src/haiven-dev/.agent-doc/logs/ops.log: two different foreground-finalize PIDs each Acquired the closeout-owner lease for the same document 56s apart (07:25:11 pid 2493430, 07:26:07 pid 2556204), after which captured-finalize-resume-1499605 got HeldByOther three times. The spawn is at 07:28:29: controller_operator_command_accepted kind=session_restart stage=operator_busy proof_scope=accepted_only, then controller_supervisor_replacement_background_completed stage=ipc_accepted_deferred reason=live_supervisor_owns_drain, then controller_lifecycle reason=restart_continue_spawn. The replacement path DEFERRED while the IPC restart still reached the live supervisor, which spawned a fresh child in continue mode; --route-owned-reap-policy keep-alive means the old child is not reaped, so both stay attached to the same pane. Note supervisor_recycle_deferred_cycle_open gated the RECYCLE path at 07:18/07:25/07:27/07:28 while the RESTART path had no equivalent open-cycle gate. Fix direction: gate restart_continue_spawn (agent-doc-start-runtime-io/src/run.rs, agent-doc-supervisor/src/route_runtime.rs) on the same replacement-deferral/open-cycle condition the recycle path uses, and prove the old child is gone before spawning. Both projections are replayable from ops.log without a live IDE
+- [ ] [#pcc1] #agent-doc-feature Per-component convergence phase 1: record per-component ops. Make the editor->controller path record operations per component so op_log has a row per changed item instead of one whole-document text swap. Success criterion is empirical, not structural: replay the sixteen-line paste from 2026-08-03 and assert op_log contains sixteen queue-item inserts where today it contains zero. No later phase has a substrate until this assertion passes. Plan: tasks/agent-doc/plan-per-component-convergence.md
+- [ ] [#pcc2] #agent-doc-feature Per-component convergence phase 2: per-component authority hashes. Extend the authority/disk comparison from one document hash to a hash per component, keeping the whole-document hash as a derived value so existing diagnostics keep working. No behavior change: the point is to be able to SAY which components diverge before anything acts on it. Depends on #pcc1. Plan: tasks/agent-doc/plan-per-component-convergence.md
+- [ ] [#pcc3] #agent-doc-feature Per-component convergence phase 3: scope the convergence gate to owned components. Change decide_read_only_terminal_projection and the session-check divergence INTERRUPT to require equality only on components the turn wrote, so a divergence confined to an unowned component is non-blocking. This is the phase that makes the queue drain during live editing AND the phase that can destroy an operator buffer if the ownership set is computed too broadly, so it ships behind a default-off config flag. REQUIRED BEFORE IT SHIPS: a SimWorld test where the agent writes exchange while a simulated operator edits queue every tick, asserting every keystroke SURVIVES; an over-claim test forcing queue into the owned set and proving that survival test can go RED; and a replay of the three real 2026-08-03 documents (lazily.md, haiven-dev.md, agent-doc-bugs2.md) at their state_events hashes asserting none reaches a permanent INTERRUPT. Depends on #pcc2. Plan: tasks/agent-doc/plan-per-component-convergence.md
+- [ ] [#pcc4] #agent-doc-feature Per-component convergence phase 4: per-component commit. Commit only the owned components, rebasing onto whatever the operator has since written elsewhere in the document, instead of writing the whole file. Non-goal to preserve: the agent still never component-merges a disk candidate under a live editor - per-component scope narrows WHAT must converge, it does not grant new authority to overwrite. Depends on #pcc3. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#panelayoutrace] #agent-doc-bug Pane-layout/dispatch race leaves an unmanaged pane in the agent-doc tmux window, and layout convergence has no concept of physical pane order. Plan: tasks/agent-doc/plan-pane-layout-dispatch-race.md. OPERATOR REPRO (2026-08-03): Run Agent Doc on lazily.md, then navigate the editor to agent-doc-bugs2.md WHILE that dispatch is still occurring; the yellow tmux bar offering to run lazily.md appears and lazily.md's pane stays in the window. Confirmed at 07:02:00Z - phase=retry_pending observation=pane_count_mismatch, expected=[bugs2, haiven-dev] (2, editor-visible) vs actual=[bugs2, lazily, haiven-dev] (3), panes=[%72,%77,%95]. Dispatch routes/creates a pane for its target while the editor-surface observation recomputes columns from what is visible NOW, so navigating away mid-dispatch excludes the document dispatch is still setting up and its pane becomes an extra the layout cannot model. TWO defects, do not conflate: (A) pane_count_mismatch retries forever because it will not close a pane hosting an active agent and the column set has no slot for it - it needs a terminal named outcome; (B) convergence compares expected/actual as ordered DOCUMENT lists and never checks that the hosting panes are in corresponding left-to-right order, so at 06:31:30Z it reported converged/synced with panes=[%77,%95] while %77 was at x=181 and %95 at x=121 (physically reversed) and %72 at x=0 was unmodelled - focus then picks column 0 faithfully and lands on the rightmost pane, which is the wrong-pane-focus symptom. DO NOT fix B by indexing focus into the physical pane list: in this state that selects %72, injecting into a different document's agent, which is worse. Both recorded projections can be replayed as fixtures without a live IDE
-- [ ] [#percellconverge] #percellconverge #agent-doc-feature Per-component convergence: a turn must require only the components it OWNS to be settled, so the queue drains while the operator is live-editing an unowned component and that edit is never overwritten. Plan: tasks/agent-doc/plan-per-component-convergence.md. Root cause shared by the 2026-08-03 family that 0.35.120/0.35.121/0.35.123 each patched at the edge: every convergence gate compares the WHOLE document (editor authority vs disk), which can never hold while a buffer is being typed into, so live editing starves the drain by construction. op_log recorded ZERO per-item ops for a sixteen-item operator queue paste, so reconciliation has only whole-document text and every guard above it inherits that granularity. INCLUDES THE WRITE-PATH HALF: crdt_relay_pending_refusal in agent-doc-git-io/src/live_buffer_guard.rs still tells every agent unconditionally that this is a deferral not a lost response and to NOT re-send, force disk, admin recycle, or reload-lib. Observed three times on 2026-08-03 on this document: write --commit printed that refusal while session-check, carrying the 0.35.123 fix, contradicted it with NO cycle open and NO capture retained, STRANDED not deferred. session-check was right every time and each was recovered with agent-doc commit, so the two paths disagree and whichever an agent hits FIRST is the wrong one. Apply the same ownership test to the write path, keeping the do-NOT-recycle guidance intact for the genuinely-owned case. Four shippable phases: (1) record per-component ops, asserting the sixteen-line paste yields sixteen queue-item inserts in op_log where today it yields zero; (2) per-component authority hashes with no behavior change; (3) scope the convergence gate to owned components only, the phase that makes the drain run during live editing and the phase that can destroy an operator buffer if the ownership set is too broad; (4) per-component commit that rebases onto concurrent operator edits. Ship phase 3 behind a default-off flag. Required before phase 3: a SimWorld test where the agent writes exchange while a simulated operator edits queue every tick asserting every keystroke SURVIVES, an over-claim test proving that survival test can go red, and a replay of the three real 2026-08-03 documents at their state_events hashes asserting none reaches a permanent INTERRUPT
 - [ ] [#recommendedungatereview-b1cb] [recommended] Ungate review item #compactreactiveprojectionverify — validate and move to done
 - [ ] [#recommendedungatereview-9g0v] [recommended] Ungate review item #steeringmirrorverifylive313 — validate and move to done
 - [ ] [#recommendedungatereview-zw66] [recommended] Ungate review item #preflightinbinary — validate and move to done
@@ -247,6 +346,7 @@ Processed `#advance-review` and committed the cycle.
 ## Review
  
 <!-- agent:review -->
+- [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
 - [/] [#compactreactiveprojectionverify] [operator-verify] With IntelliJ IDEA 2026.1 running JetBrains plugin 0.2.319 / native agent-doc 0.35.83, retry Compact Exchange from a saved large session without restarting IDEA. Verify ACK replay/hot reload either completes the retained editor delivery exactly once or leaves it retained without duplicate mutation, disk fallback, focus change, or a fresh agent session. Then type a sustained burst and confirm recovery is coalesced rather than per-keystroke. Record any residual queued-EDT late effect for #implementlazilyintent. Do not queue this item automatically; it requires operator UI observation.
 - [/] [#steeringmirrorverifylive313] [operator-verify] With IntelliJ IDEA running JetBrains plugin 0.2.313 / native agent-doc 0.35.71, make two separate exchange edits during one active turn. Confirm the banner/status item shows the aggregate edit count and its hover contains both edits verbatim; then run Agent Doc once and verify the controller records one aggregate handoff without submitting a partial edit. Do not queue this item automatically; it requires operator UI observation.
 - [/] [#preflightinbinary] [operator-verify] Live proof for #preflightinbinary AFTER the default flip (5ce9b06e6). The flip has landed: SKILL.md now says do NOT run preflight when the '[agent-doc] cycle contract ...' marker is present, and the hook is registered in this project's .claude/settings.json under UserPromptSubmit alongside turn-status. Needing a live session to confirm: (a) invoke /agent-doc <FILE> in a FRESH Claude Code session and confirm the marker + contract appear in context before the agent runs any tool, and that the agent does NOT shell to 'agent-doc preflight'; (b) confirm exactly ONE cycle id is opened for that turn — grep .agent-doc/logs/ops.log for preflight_diff_start, and confirm 'repaired stale preflight_started cycle' does NOT appear; that line is the tell that the agent still ran preflight and the round trip was merely absorbed by repair rather than removed; (c) confirm an ordinary prompt that merely mentions agent-doc produces no marker and no cycle; (d) confirm a Codex/OpenCode turn (no Claude hook, so no marker) still runs preflight explicitly and closes out normally. Scope note: reusable_by_reentrant_preflight is defence in depth only — start_preflight runs at preflight step 4, after repair at step 1, so in the live pipeline repair closes any prior open cycle before the guard sees it. What removes the double-open is the flip itself.

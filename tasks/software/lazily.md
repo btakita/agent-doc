@@ -139,13 +139,62 @@ Every binding independently added a second witness that shares no code with its 
 **What I am not claiming.** Rung 0 ran in dart, kt, cpp and rs; corpus perturbation ran in go, cpp and rs. py, js and zig finished before either pass existed, so neither has been run there, and cs has had neither. That is queued as `#lzblockbindsweep` rather than closed over — the item's stated scope is complete everywhere, but these two passes each found a live defect in every binding that ran them, so their absence elsewhere is a real gap and not a formality.
 
 Backlogged three follow-ups: `#lzblockbindsweep` (the two passes, in the six bindings that have not had them), `#lzassertordering` (an assertion ordered ahead of the work it describes, or behind an earlier fatal — found in nearly every binding, guarded nowhere), and `#lzarenablobtranscribed` (the three hand-transcribed fixtures a coverage ledger counts as covered because they are never opened).
+
+### Re: do [#lzblockbindsweep] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzblockbindsweep]
+
+Both passes now exist in all nine bindings. Rung 0 landed in py, js, zig and cs; the corpus perturbation ran in py, js, zig, dart, kt and cs. Five repos changed, all pushed and CI-green on the exact commits: lazily-py `f1471ae`, lazily-js `21dea81`, lazily-zig `78cb03a`, lazily-cs `f5108ff`, lazily-dart `869287a`.
+
+**Rung 0 — the assertion-block bind ledger.** The pattern is the same everywhere: the loader inventories every `assertions` block at read time, the tracker constructor books one as BOUND, and the two sides are matched by the block's CONTENT digest rather than its label — several runners book every per-frame block under the bare name `assertions`, so a label-keyed ledger collapses them and reports green over a mismatch. Two transport choices differ: rs and js carry a separate ledger file, while zig and cs ride the existing manifest under a prefixed channel, which needs no second env var and no second CI wiring but does require the scenario parser to skip those prefixes.
+
+| binding | declared | unbound found | outcome |
+|---|---|---|---|
+| py | 31 | 0 | clean, including the three blocks unbound elsewhere |
+| js | 32 | 0 | clean |
+| zig | 31 | **22** | all fixed |
+| cs | 33 | **31** | all fixed |
+
+zig and cs were both blind for the same reason: they round-trip the `wire` frame and validate it against the JSON Schema, which proves the codec agrees with itself and says nothing about what the corpus claims.
+
+- **`arena_blob.json`'s `assertions`** was read by nothing in either binding. Both replay `input` against `expected` and never open the sibling block — six silent claims, one of them the header magic. It is checked against the bytes the arena really wrote, not against the constant: comparing the magic to itself would pass over a writer that stopped emitting it.
+- **`signaling/frames.json` (17 blocks) and `distributed/crdt_sync_frames.json` (4).** In zig these were checked by hand-rolled loops that do refuse an unknown key — but a hand-rolled loop is invisible to every ledger rung, so the read-but-not-asserted rung could not reach a key it never saw declared. In cs they were not opened at all.
+- **cs's two `agent-doc` blocks were worse than unread.** Every claim in them was already asserted against a hardcoded literal, so editing the fixture changed nothing. They now drive the comparison from the fixture's own values, with a second projection carrying the snapshot alone so `cycle_phase` is not read off post-delta state.
+
+Each guard is validated rather than believed — stubbing out the bind recorder makes it name 37 / 38 / 39 sites instead of reporting clean, an absent ledger fails as missing evidence, and a raised floor fails.
+
+**Corpus perturbation.** Every top-level `assertions` key, one at a time, in a scratch copy of the corpus — never lazily-spec in place. Redirecting each suite at the scratch sibling is the fiddly part and differs per binding; kt's gradle `workingDir` override in particular is silently discarded unless it is wrapped in `afterEvaluate`, which would have produced a false clean.
+
+| binding | keys | red | prose (by design) | findings |
+|---|---|---|---|---|
+| py | 113 | 92 | 18 | 3 × `generator` |
+| js | 122 | 96 | 23 | 3 × `generator` |
+| zig | 113 | 102 | 9 | **1 new**, then 2 × `generator` |
+| cs | 128 | 107 | 18 | 3 × `generator` |
+| dart | 107 | 107 | 0 | **1 new**, then none |
+| kt | 128 | 107 | 18 | 3 × `generator` |
+
+Every `generator` green is the already-queued `#lzgeneratorprovenance` class — a key that exists only to be excused in nine bindings — so the pass corroborates that item in five more places rather than finding anything new.
+
+**Two defects only the corpus edit could show.**
+
+*zig, `arena_blob.json:descriptor`.* Planting a key inside the descriptor object left the suite green: the check compared five named sub-fields and never the key set, so a sixth field added upstream would be compared by nothing. That is the null form one level down, inside an assertion key rather than beside one. Fixed in zig and, pre-emptively, in cs.
+
+*dart, `receipts/causal_receipts.json:current_generation`.* The runner read that key out of the assertion block and fed it into `ReceiptProjection.observe` as the generation each receipt was observed at. The projection's generation is the max of whatever is passed in, so the assertion two lines later compared the fixture's value against itself — setting it to 8 in the corpus moved both sides. Every other rung agreed: the key is read, typed, and reaches `assertKey`, so the consumption ledger, the read-but-not-asserted ledger and the bind ledger were all satisfied. The generation now comes from each receipt's own wire field, and the re-run is 107 red out of 107.
+
+kt needed no code change and its AGENTS.md is held by another session, so it carries no commit.
+
+**What I am not claiming.** The sub-object key-set shape zig's pass found is audited in exactly two bindings. The other seven have never had an object-valued assertion key checked for it, and `descriptor` is unlikely to be the only one — queued as `#lzsubblockkeyset`, with the generic fix being for the tracker to hold an object-valued key's key set rather than each call site remembering to count.
 <!-- agent:boundary:ebcdbd84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzblockbindsweep]
+- do [#lzsubblockkeyset]
+- ~~do [#lzblockbindsweep]~~
 - do [#lzassertordering]
 - do [#lzarenablobtranscribed]
 - do [#lzwireencodingrunner]
@@ -171,7 +220,7 @@ Backlogged three follow-ups: `#lzblockbindsweep` (the two passes, in the six bin
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzblockbindsweep] Run the two passes that were DISCOVERED mid-fan-out under #lznullformblind in the bindings that finished before they existed. Neither is a static check and neither is optional — each found a live defect in the bindings that did run it. (1) RUNG 0, an assertion-block bind ledger: a top-level assertions block that no runner binds is invisible to every existing rung, because its keys are not unread — nothing reads them. The fixture loader inventories every block at read time, the tracker books a block bound BY CONTENT DIGEST rather than by its where-label (runners spell labels inconsistently, so label-keying silently misses), and the coverage script fails on leftovers with a reason-required excuse list. lazily-dart found two unbound blocks (reliable-sync/multi_epoch_delta.json, distributed/anti_spoof_session.json — eight silent keys including the anti-spoof invariant that a forwarded from must be the server's registered peer id); lazily-cpp found a third (receipts/causal_receipts.json). Done in dart, kt, cpp, rs (30/30 bound). STILL NEEDED: py, js, zig, cs. (2) CORPUS PERTURBATION: change every key of every assertions block, one at a time, in a SCRATCH copy of lazily-spec (never in place — it reddens every other binding concurrently), and check the suite reddens. The expected result is that everything reddens EXCEPT keys declared assertions.prose, which are green by design. Anything else staying green is a finding. lazily-go found signaling/anti_spoof_session.json's forwarded_from_is_server_registered and roster_sorted_ascending gated behind if want != nil && *want, so setting either false in the corpus silently retired the rule — read, typed, three live grep references, and every other rung green. lazily-rs found the same three keys excused rather than gated, with the same effect. Done in go, cpp, rs. STILL NEEDED: py, js, zig, dart, kt, cs. Also validate whatever detector you write against pre-fix sources before believing a clean result: kt's first detector reported zero because a git-archive strip-components was off by one, and cpp's first two reported clean over known instances until it found five defects in its own tool, one of which parsed COMMENT TEXT as identifiers so the best-commented vacuous assertions escaped most reliably.
+- [ ] [#lzsubblockkeyset] An assertion key whose VALUE is an object is checked field by field and never by its KEY SET, so a field added to it upstream is compared by nothing — the null form one level down, inside an assertion key rather than beside one. The corpus perturbation pass found it in lazily-zig: planting a key inside arena_blob.json's descriptor object left the suite green while every scalar sibling reddened, because the check compared five named sub-fields and stopped. Fixed in zig and cs (both now assert the descriptor's field count). STILL NEEDED in rs, py, js, go, cpp, dart, kt — and not only for descriptor: audit every assertion key the corpus gives an object value. The per-call-site count is the cheap fix and the wrong one, since it relies on each site remembering; the real fix is for the tracker itself to hold an object-valued key's key set the way it already holds the block's, so an unrecognised sub-field reports as unconsumed. Validate whatever you write by planting a key in a SCRATCH corpus copy first — a detector that reports clean over a planted violation is the vacuity this whole rung exists to remove.
 - [ ] [#lzassertordering] An assertion ordered before or behind the work it describes cannot observe it, and this class survived every rung until #lznullformblind's sweep tripped over it in binding after binding. Two shapes, both found repeatedly. (1) ASSERTION AHEAD OF THE WORK: lazily-zig's distributed_conformance.zig:128 asserts resolution against RESOLUTION_IMPLEMENTED before the ingest loop, so it is satisfied by a run that replays and never ingests; making it observed means computing the max-stamp winner independently and checking the runtime agrees, complicated by the keyed/family-materialization path. (2) ASSERTION BEHIND AN EARLIER FATAL: essentially every binding had its runner-side coverage floor (replayed != 3, accepted != 4, MIN_SCENARIOS) sitting AHEAD of the corpus's own scenario_count, so the floor aborted first on exactly the input scenario_count exists to catch — the corpus assertion was unreachable for its own falsifying case. Fixed where the sweep touched it (rs, kt, cpp, go, zig, dart); the ORDERING RULE itself is guarded nowhere, so it can be reintroduced by the next runner edit with nothing red. Work: state the rule in lazily-spec docs/conformance.md (a fixture's own assertion block is evaluated before any runner-side floor, and any assertion about a run is evaluated after that run), then make it checkable — a static pass per binding, or a corpus-side ordering fixture. Then sweep the nine for shape (1), which no one has audited outside zig.
 - [ ] [#lzarenablobtranscribed] Three fixtures are hand-transcribed rather than replayed, so their assertion blocks are outside every rung by construction. lazily-go reports conformance/arena_blob.json unbindable — all six keys pin a 40-byte LZSH header and arena capacity its in-process ShmBlobArena has no concept of, so binding it is a library change, not a test change. lazily-cpp reports reliable-sync/multi_epoch_delta.json and test_outbox_store.cpp hand-transcribe: assert(span3.epoch == 43) checks a locally-constructed Delta against the literal that built it, which is coverage that cannot detect drift. All are declared KNOWN_UNCOVERED with stated reasons, so the gap is reported every run rather than hidden — both agents correctly declined to fabricate a runner. This item is the shrink-KNOWN_UNCOVERED work: decide per fixture whether the library gains the capability (go's arena header) or the transcription becomes a real replay (cpp's outbox and multi-epoch delta), and check the other seven bindings for the same hand-transcription shape, which a coverage ledger counts as covered because the fixture is never opened.
 - [ ] [#lzwireencodingrunner] wire_encoding states an obligation on the RUNNER that no assertion key can redden, and all nine bindings now discharge it by proxy. The paragraph says the runner must parse the raw wire_json / wire_msgpack_hex rather than re-serialize a pre-parsed object — a claim about the corpus file and the runner's reading of it, not about the library, so nothing in any expect block moves when a runner takes the shortcut. Five bindings reported this independently under #lzprosekeyconvention and it is recorded in docs/conformance.md as an open gap. The CORPUS half is now checked (scripts/check-prose-keys.mjs: every wire_json raw parseable text and never a pre-parsed object, every wire_msgpack_hex even-length lowercase hex, a declaring fixture carrying both codecs). The RUNNER half is still unreachable. Options: an executable corpus key the runner can only satisfy by reading the text (a per-scenario wire byte length or a digest over the raw string, which a re-serialized object will not reproduce because key order and whitespace differ), or a static per-binding check that the fixture's wire field is never handed to a JSON parser twice. Pick one and bring the nine to it — until then three paragraphs in three fixtures rest entirely on review.

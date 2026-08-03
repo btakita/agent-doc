@@ -34,7 +34,6 @@ Compacted content:
 >
 > do [#lzblobbackendstrict]
 
-
 Fixture v2 landed and is replayed in all nine bindings. Ten repos committed, pushed, and CI-green; superproject gitlinks bumped in `ba75ba6f7`.
 
 **Corpus** (`lazily-spec` 077cfcd, records in 08edd54 + 4d378cb): 8 scenarios → 14, seven wire shapes in both codecs.
@@ -216,8 +215,6 @@ Binding commits:
 - cs `f58b684`
 
 The superproject now pins those heads in `949a121cf`; all commits are pushed. No follow-up is needed for this item.
-### Re: do [#lzsubblockkeyset] — gpt-5
-
 ### Re: do [#lzsubblockkeyset] — gpt-5
 
 > **Queue prompt:**

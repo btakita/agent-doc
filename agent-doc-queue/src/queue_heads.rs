@@ -569,7 +569,7 @@ mod tests {
         let product_name_prose = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue go -->\n",
-            "- equityfundingsource.md has queue items for already done tasks. ",
+            "- sampleorders.md has queue items for already done tasks. ",
             "Please investigate why agent-doc did not strike the done items and whether ",
             "the cause(s) were fixed in previous versions or not. Fix all remaining ",
             "contributing factors.\n",

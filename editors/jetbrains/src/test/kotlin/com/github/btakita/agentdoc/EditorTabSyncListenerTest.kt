@@ -134,6 +134,58 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `exhausted selection settling substitutes the event edge into stale editor projections`() {
+        val settled =
+            EditorTabSyncListener.SelectionProjectionSettling.reconcileEventEdge(
+                preferredFile = "/repo/left-next.md",
+                previousFile = "/repo/left-old.md",
+                visibleMdFiles = listOf("/repo/left-old.md", "/repo/right.md"),
+                editorLayout =
+                    EditorLayout(
+                        listOf(
+                            LayoutColumn(listOf("/repo/left-old.md")),
+                            LayoutColumn(listOf("/repo/right.md")),
+                        ),
+                    ),
+            )
+
+        assertEquals(
+            listOf("/repo/left-next.md", "/repo/right.md"),
+            settled.visibleMdFiles,
+        )
+        assertEquals(
+            listOf(
+                LayoutColumn(listOf("/repo/left-next.md")),
+                LayoutColumn(listOf("/repo/right.md")),
+            ),
+            settled.editorLayout?.columns,
+        )
+    }
+
+    @Test
+    fun `selection settling never invents a replacement without the prior event file`() {
+        val staleVisible = listOf("/repo/left-old.md", "/repo/right.md")
+        val staleLayout =
+            EditorLayout(
+                listOf(
+                    LayoutColumn(listOf("/repo/left-old.md")),
+                    LayoutColumn(listOf("/repo/right.md")),
+                ),
+            )
+
+        val settled =
+            EditorTabSyncListener.SelectionProjectionSettling.reconcileEventEdge(
+                preferredFile = "/repo/left-next.md",
+                previousFile = null,
+                visibleMdFiles = staleVisible,
+                editorLayout = staleLayout,
+            )
+
+        assertEquals(staleVisible, settled.visibleMdFiles)
+        assertEquals(staleLayout, settled.editorLayout)
+    }
+
+    @Test
     fun `selected editor file is used when no selection event file is supplied`() {
         val activeFile =
             EditorTabSyncListener.SurfaceReport.resolveActiveFilePath(
@@ -311,6 +363,7 @@ class EditorTabSyncListenerTest {
         assertFalse(selection.contains("requestImmediateFocus"))
         assertFalse(selection.contains("CpRouteClient"))
         assertTrue(selection.contains("forceReconcile = false"))
+        assertTrue(selection.contains("previousFile = event.oldFile"))
         assertFalse(
             "ordinary tab focus must not force a competing full layout reconcile",
             selection.contains("forceReconcile = true"),

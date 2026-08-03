@@ -97,21 +97,58 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
     /**
      * `selectionChanged` may be delivered before IDEA updates `selectedFiles` and
-     * the split-window model. Keep the selected-document fact authoritative and
-     * re-read the editor projection on a bounded number of later EDT turns. This is
-     * event settling, not a timer/retry ladder: every pass yields the EDT, the
-     * generation guard cancels stale work, and exhaustion retains the observation
-     * for the next real layout/focus event.
-     */
-    internal object SelectionProjectionSettling {
-        const val MAX_REPROJECTION_PASSES = 3
+ * the split-window model. Keep the selected-document fact authoritative and
+ * re-read the editor projection on a bounded number of later EDT turns. This is
+ * event settling, not a timer/retry ladder: every pass yields the EDT, the
+ * generation guard cancels stale work, and exhaustion applies the authoritative
+ * old-to-new selection edge when IDEA's projection still contains the old file.
+ */
+internal object SelectionProjectionSettling {
+    const val MAX_REPROJECTION_PASSES = 3
 
-        fun shouldReproject(
-            authority: ObservationAuthority,
-            remainingPasses: Int,
-        ): Boolean =
-            authority == ObservationAuthority.DocumentSelection && remainingPasses > 0
+    data class SettledProjection(
+        val visibleMdFiles: List<String>,
+        val editorLayout: EditorLayout?,
+    )
+
+    fun shouldReproject(
+        authority: ObservationAuthority,
+        remainingPasses: Int,
+    ): Boolean =
+        authority == ObservationAuthority.DocumentSelection && remainingPasses > 0
+
+    fun reconcileEventEdge(
+        preferredFile: String?,
+        previousFile: String?,
+        visibleMdFiles: List<String>,
+        editorLayout: EditorLayout?,
+    ): SettledProjection {
+        if (
+            preferredFile.isNullOrBlank() ||
+            previousFile.isNullOrBlank() ||
+            preferredFile in visibleMdFiles ||
+            previousFile !in visibleMdFiles
+        ) {
+            return SettledProjection(visibleMdFiles, editorLayout)
+        }
+
+        fun replacePrevious(files: List<String>): List<String> =
+            files
+                .map { file -> if (file == previousFile) preferredFile else file }
+                .distinct()
+
+        return SettledProjection(
+            visibleMdFiles = replacePrevious(visibleMdFiles),
+            editorLayout =
+                editorLayout?.copy(
+                    columns =
+                        editorLayout.columns.map { column ->
+                            column.copy(files = replacePrevious(column.files))
+                        },
+                ),
+        )
     }
+}
 
     /** One column of the reported split layout. Wire shape of Rust `SurfaceColumn`. */
     internal data class SurfaceColumnPayload(val files: List<String>)
@@ -131,12 +168,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
         @SerializedName("force_reconcile") val forceReconcile: Boolean,
     )
 
-    private data class PendingSurfaceObservation(
-        val project: Project,
-        val preferredFile: VirtualFile?,
-        val forceReconcile: Boolean,
-        val authority: ObservationAuthority,
-    )
+private data class PendingSurfaceObservation(
+    val project: Project,
+    val preferredFile: VirtualFile?,
+    val previousFile: VirtualFile? = null,
+    val forceReconcile: Boolean,
+    val authority: ObservationAuthority,
+)
 
     private data class PendingSurface(
         val projectRoot: String,
@@ -287,11 +325,15 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 }
                 val observation = latestSurfaceObservation.get() ?: return@invokeLater
                 val pending =
-                    captureSurface(
-                        project = observation.project,
-                        preferredFile = observation.preferredFile,
-                        forceReconcile = observation.forceReconcile,
-                    )
+                captureSurface(
+                    project = observation.project,
+                    preferredFile = observation.preferredFile,
+                    previousFile = observation.previousFile,
+                    forceReconcile = observation.forceReconcile,
+                    reconcileStaleSelection =
+                        observation.authority == ObservationAuthority.DocumentSelection &&
+                            remainingSelectionPasses == 0,
+                )
                         ?: run {
                             // The selection event can precede IDEA's visible-editor projection.
                             // Re-read on a bounded later EDT turn so a single tab switch is a
@@ -342,14 +384,33 @@ class EditorTabSyncListener : FileEditorManagerListener {
         }
     }
 
-    private fun captureSurface(
-        project: Project,
-        preferredFile: VirtualFile? = null,
-        forceReconcile: Boolean = false,
-    ): PendingSurface? {
-        val manager = FileEditorManager.getInstance(project)
-        val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
-        if (visibleMdFiles.isEmpty()) return null
+private fun captureSurface(
+    project: Project,
+    preferredFile: VirtualFile? = null,
+    previousFile: VirtualFile? = null,
+    forceReconcile: Boolean = false,
+    reconcileStaleSelection: Boolean = false,
+): PendingSurface? {
+    val manager = FileEditorManager.getInstance(project)
+    val rawVisibleMdFiles =
+        SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
+    val rawEditorLayout = LayoutDetector.detectEditorLayout(project)
+    val settledProjection =
+        if (reconcileStaleSelection) {
+            SelectionProjectionSettling.reconcileEventEdge(
+                preferredFile = preferredFile?.path,
+                previousFile = previousFile?.path,
+                visibleMdFiles = rawVisibleMdFiles,
+                editorLayout = rawEditorLayout,
+            )
+        } else {
+            SelectionProjectionSettling.SettledProjection(
+                visibleMdFiles = rawVisibleMdFiles,
+                editorLayout = rawEditorLayout,
+            )
+        }
+    val visibleMdFiles = settledProjection.visibleMdFiles
+    if (visibleMdFiles.isEmpty()) return null
         val openMarkdownFiles = manager.openFiles.filter { it.name.endsWith(".md") }
         val preferredMarkdownFile = preferredFile?.takeIf { candidate ->
             candidate.isValid &&
@@ -414,11 +475,11 @@ class EditorTabSyncListener : FileEditorManagerListener {
             SyncLayoutAction.absolutizeEditorLayout(
                 surfaceProjectRoot,
                 SyncLayoutAction.normalizeEditorLayout(
-                    project.basePath,
-                    surfaceProjectRoot,
-                    LayoutDetector.detectEditorLayout(project),
-                ),
-            )
+                project.basePath,
+                surfaceProjectRoot,
+                settledProjection.editorLayout,
+            ),
+        )
         return PendingSurface(
             projectRoot = surfaceProjectRoot,
             relativePath = focusedRelativePath,
@@ -468,12 +529,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
         // reconcile on every tab switch made ordinary focus navigation contend
         // with layout sync and briefly expose stale extra panes.
         requestObservation(
-            PendingSurfaceObservation(
-                project = project,
-                preferredFile = file,
-                forceReconcile = false,
-                authority = ObservationAuthority.DocumentSelection,
-            ),
+        PendingSurfaceObservation(
+            project = project,
+            preferredFile = file,
+            previousFile = event.oldFile,
+            forceReconcile = false,
+            authority = ObservationAuthority.DocumentSelection,
+        ),
         )
         TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
     }

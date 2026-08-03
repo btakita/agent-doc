@@ -1,7 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 24f78fda-2db5-41b6-8eb1-52772d913df8
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -187,14 +186,76 @@ Every `generator` green is the already-queued `#lzgeneratorprovenance` class —
 kt needed no code change and its AGENTS.md is held by another session, so it carries no commit.
 
 **What I am not claiming.** The sub-object key-set shape zig's pass found is audited in exactly two bindings. The other seven have never had an object-valued assertion key checked for it, and `descriptor` is unlikely to be the only one — queued as `#lzsubblockkeyset`, with the generic fix being for the tracker to hold an object-valued key's key set rather than each call site remembering to count.
-<!-- agent:boundary:ebcdbd84 -->
+
+> **Queue prompt:**
+> do [#lzsubblockkeyset]
+
+Implemented and closed across every binding that was still listed: rs, py, js, go, cpp, dart, kt, plus the already-corrected zig and cs runners.
+
+The fix is tracker-level, not a collection of remembered field counts. Object-valued assertion keys now have an explicit discharge path: descend into a tracked child object, compare a produced key vocabulary, or compare the whole value structurally. Opaque object callbacks fail closed. Nested child trackers own their own consumed/asserted key sets, so a field introduced upstream reports as unconsumed at its full assertion path.
+
+The corpus call sites were audited and migrated, including descriptor objects, outcome vocabularies, invalidation matrices, collections and queue state maps, ingress scopes and nested authority/retry objects, membership/presence maps, service projections, statechart matches, and reactive-graph tail maps.
+
+Validation included isolated scratch-corpus negative controls. Adding `assertions.descriptor.planted_subfield` to a scratch copy of `arena_blob.json` caused:
+
+- rs: `assertion key(s) ["planted_subfield"] in assertions.descriptor were never consumed`
+- zig: `UnconsumedAssertionKey` naming `descriptor.planted_subfield`
+
+The unchanged corpora pass. Rust and Zig each pass `make check`; the superproject passes `make check`. GitHub Actions is green for all affected heads (Python's equivalent workflow is `poe precommit`), including Zig 0.15.2, 0.16.0, and master, and Rust's complete feature, conformance, loom, coverage, benchmark, signaling, and formal-model matrix.
+
+Binding commits:
+
+- rs `baabeb0`
+- py `cd8ef59`
+- js `081857d`
+- go `7630274`
+- cpp `0e2a798`
+- dart `0f547cd`
+- kt `3333bae`
+- zig `ed2bbd4`
+- cs `f58b684`
+
+The superproject now pins those heads in `949a121cf`; all commits are pushed. No follow-up is needed for this item.
+### Re: do [#lzsubblockkeyset] — gpt-5
+
+### Re: do [#lzsubblockkeyset] — gpt-5
+
+> **Queue prompt:**
+> do [#lzsubblockkeyset]
+
+Implemented and closed across every binding that was still listed: rs, py, js, go, cpp, dart, kt, plus the already-corrected zig and cs runners.
+
+The fix is tracker-level, not a collection of remembered field counts. Object-valued assertion keys now have an explicit discharge path: descend into a tracked child object, compare a produced key vocabulary, or compare the whole value structurally. Opaque object callbacks fail closed. Nested child trackers own their own consumed/asserted key sets, so a field introduced upstream reports as unconsumed at its full assertion path.
+
+The corpus call sites were audited and migrated, including descriptor objects, outcome vocabularies, invalidation matrices, collections and queue state maps, ingress scopes and nested authority/retry objects, membership/presence maps, service projections, statechart matches, and reactive-graph tail maps.
+
+Validation included isolated scratch-corpus negative controls. Adding `assertions.descriptor.planted_subfield` to a scratch copy of `arena_blob.json` caused:
+
+- rs: `assertion key(s) ["planted_subfield"] in assertions.descriptor were never consumed`
+- zig: `UnconsumedAssertionKey` naming `descriptor.planted_subfield`
+
+The unchanged corpora pass. Rust and Zig each pass `make check`; the superproject passes `make check`. GitHub Actions is green for all affected heads (Python's equivalent workflow is `poe precommit`), including Zig 0.15.2, 0.16.0, and master, and Rust's complete feature, conformance, loom, coverage, benchmark, signaling, and formal-model matrix.
+
+Binding commits:
+
+- rs `baabeb0`
+- py `cd8ef59`
+- js `081857d`
+- go `7630274`
+- cpp `0e2a798`
+- dart `0f547cd`
+- kt `3333bae`
+- zig `ed2bbd4`
+- cs `f58b684`
+
+The superproject now pins those heads in `949a121cf`; all commits are pushed. No follow-up is needed for this item.
+<!-- agent:boundary:9377c98a:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzsubblockkeyset]
-- ~~do [#lzblockbindsweep]~~
+- ~~do [#lzsubblockkeyset]~~
 - do [#lzassertordering]
 - do [#lzarenablobtranscribed]
 - do [#lzwireencodingrunner]
@@ -220,7 +281,6 @@ kt needed no code change and its AGENTS.md is held by another session, so it car
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzsubblockkeyset] An assertion key whose VALUE is an object is checked field by field and never by its KEY SET, so a field added to it upstream is compared by nothing — the null form one level down, inside an assertion key rather than beside one. The corpus perturbation pass found it in lazily-zig: planting a key inside arena_blob.json's descriptor object left the suite green while every scalar sibling reddened, because the check compared five named sub-fields and stopped. Fixed in zig and cs (both now assert the descriptor's field count). STILL NEEDED in rs, py, js, go, cpp, dart, kt — and not only for descriptor: audit every assertion key the corpus gives an object value. The per-call-site count is the cheap fix and the wrong one, since it relies on each site remembering; the real fix is for the tracker itself to hold an object-valued key's key set the way it already holds the block's, so an unrecognised sub-field reports as unconsumed. Validate whatever you write by planting a key in a SCRATCH corpus copy first — a detector that reports clean over a planted violation is the vacuity this whole rung exists to remove.
 - [ ] [#lzassertordering] An assertion ordered before or behind the work it describes cannot observe it, and this class survived every rung until #lznullformblind's sweep tripped over it in binding after binding. Two shapes, both found repeatedly. (1) ASSERTION AHEAD OF THE WORK: lazily-zig's distributed_conformance.zig:128 asserts resolution against RESOLUTION_IMPLEMENTED before the ingest loop, so it is satisfied by a run that replays and never ingests; making it observed means computing the max-stamp winner independently and checking the runtime agrees, complicated by the keyed/family-materialization path. (2) ASSERTION BEHIND AN EARLIER FATAL: essentially every binding had its runner-side coverage floor (replayed != 3, accepted != 4, MIN_SCENARIOS) sitting AHEAD of the corpus's own scenario_count, so the floor aborted first on exactly the input scenario_count exists to catch — the corpus assertion was unreachable for its own falsifying case. Fixed where the sweep touched it (rs, kt, cpp, go, zig, dart); the ORDERING RULE itself is guarded nowhere, so it can be reintroduced by the next runner edit with nothing red. Work: state the rule in lazily-spec docs/conformance.md (a fixture's own assertion block is evaluated before any runner-side floor, and any assertion about a run is evaluated after that run), then make it checkable — a static pass per binding, or a corpus-side ordering fixture. Then sweep the nine for shape (1), which no one has audited outside zig.
 - [ ] [#lzarenablobtranscribed] Three fixtures are hand-transcribed rather than replayed, so their assertion blocks are outside every rung by construction. lazily-go reports conformance/arena_blob.json unbindable — all six keys pin a 40-byte LZSH header and arena capacity its in-process ShmBlobArena has no concept of, so binding it is a library change, not a test change. lazily-cpp reports reliable-sync/multi_epoch_delta.json and test_outbox_store.cpp hand-transcribe: assert(span3.epoch == 43) checks a locally-constructed Delta against the literal that built it, which is coverage that cannot detect drift. All are declared KNOWN_UNCOVERED with stated reasons, so the gap is reported every run rather than hidden — both agents correctly declined to fabricate a runner. This item is the shrink-KNOWN_UNCOVERED work: decide per fixture whether the library gains the capability (go's arena header) or the transcription becomes a real replay (cpp's outbox and multi-epoch delta), and check the other seven bindings for the same hand-transcription shape, which a coverage ledger counts as covered because the fixture is never opened.
 - [ ] [#lzwireencodingrunner] wire_encoding states an obligation on the RUNNER that no assertion key can redden, and all nine bindings now discharge it by proxy. The paragraph says the runner must parse the raw wire_json / wire_msgpack_hex rather than re-serialize a pre-parsed object — a claim about the corpus file and the runner's reading of it, not about the library, so nothing in any expect block moves when a runner takes the shortcut. Five bindings reported this independently under #lzprosekeyconvention and it is recorded in docs/conformance.md as an open gap. The CORPUS half is now checked (scripts/check-prose-keys.mjs: every wire_json raw parseable text and never a pre-parsed object, every wire_msgpack_hex even-length lowercase hex, a declaring fixture carrying both codecs). The RUNNER half is still unreachable. Options: an executable corpus key the runner can only satisfy by reading the text (a per-scenario wire byte length or a digest over the raw string, which a re-serialized object will not reproduce because key order and whitespace differ), or a static per-binding check that the fixture's wire field is never handed to a JSON parser twice. Pick one and bring the nine to it — until then three paragraphs in three fixtures rest entirely on review.

@@ -85,19 +85,64 @@ The account landed on a **vesting**, not on the user row — the `#lender-accoun
 Both verification tabs were opened isolated via CDP `PUT /json/new` and closed afterward; your existing tabs were never navigated.
 
 Two things worth knowing. The staging lender `Dial Verify` / `L-DIALVERIFY` is left in place — it is legitimate staging test data, it makes the picker demonstrable there (staging had zero active lenders before), and deleting a user row risks the soft-delete trigger for no benefit. And creating it sent a real portal-invite email to `btak.dev+dialverify@gmail.com`.
-<!-- agent:boundary:3972fcb2 -->
+
+### Re: do [#censible-env-committed-creds] — opus-5
+
+Fixed the tracked-file half in censible-core and pushed. The rotation question is genuinely external, so it moved to the censible-core document rather than staying here — the item's own note said to work this from a censible-core session, and that is where the remainder belongs.
+
+**Root cause, which the item did not name.** `.gitignore` had `/.env` and `/.env.*` — root-anchored, so only the repo-root env files were ever ignored. `apps/esg-web/.env`, `apps/finegar-etl/.env` and `apps/root-web/.env` were never covered, which is how a real credential got committed in the first place. Fixing only the file would have left the mechanism in place.
+
+**Landed — censible-core `e3ce5aaf` + `d2eec547`, pushed to `origin/main`:**
+
+- `.gitignore` now matches `.env` / `.env.*` at any depth, with `!.env.sample` so the template stays tracked.
+- All three `apps/*/.env` untracked. They stay on disk with their current contents, so direnv's `dotenv` still loads them locally — only the index changed. `git ls-tree HEAD` now shows `.env.sample` as the sole remaining env file, and `git grep FACTSET_FTP_PASSWORD= HEAD` is empty.
+- `.env.sample`: `SESSION_KEY` emptied to match that file's own convention for secrets (`ADMIN_PASSWORD=`, `AWS_SECRET_ACCESS_KEY=` and a dozen others are already blank), and the password embedded in `FACTSET_PG_URL` replaced with `__PASSWORD__`.
+
+**Two corrections to the item's picture.** The `FACTSET_PG_URL` password was a second committed credential the item never mentioned — though it is `postgres://admin:…@localhost/censible-dashboard-development`, a local dev database, so low value. And the item's `SESSION_KEY` is 25 characters, not 26.
+
+**Swept the rest of the repo rather than trusting the original list.** No other tracked file embeds a credential. Two things that look alarming and are not: the `ftp://…:…@` in `apps/finegar-etl/src/factset/ftp_transfer.ts` is a template literal built from env accessors, not a hardcoded secret; and the four tracked `caddy/*-key.pem` private keys are **mkcert local development certificates** (issuer `O=mkcert development CA`, expired 2024), trusted only by the CA on the machine that made them.
+
+One process note worth recording: the first commit silently did not untrack anything. `git commit --only <paths>` rebuilds those paths from the **working tree**, and since the `.env` files still existed on disk it restored them to the index and undid the `git rm --cached`. `git status` came back clean, which reads like success. The untracking only landed on the second attempt, staging the deletions and committing the index directly.
+
+Not done, and not something this session can settle: the credential is still in git history, and whether the FactSet FTP account is even live — and therefore whether it needs rotating with FactSet — is an external question. Both are now tracked in `tasks/censible-core.md`. The private repo plus a dormant project is why history rewriting is a judgement call rather than an obvious yes.
+
+Exchange is long and preflight reports `session_accretion: warn`; the queue is active so I am noting it and continuing rather than pausing to compact.
+
+### Re: do [#censible-env-committed-creds] — opus-5
+
+Fixed the tracked-file half in censible-core and pushed. The rotation question is genuinely external, so it moved to the censible-core document rather than staying here — the item's own note said to work this from a censible-core session, and that is where the remainder belongs.
+
+**Root cause, which the item did not name.** `.gitignore` had `/.env` and `/.env.*` — root-anchored, so only the repo-root env files were ever ignored. `apps/esg-web/.env`, `apps/finegar-etl/.env` and `apps/root-web/.env` were never covered, which is how a real credential got committed in the first place. Fixing only the file would have left the mechanism in place.
+
+**Landed — censible-core `e3ce5aaf` + `d2eec547`, pushed to `origin/main`:**
+
+- `.gitignore` now matches `.env` / `.env.*` at any depth, with `!.env.sample` so the template stays tracked.
+- All three `apps/*/.env` untracked. They stay on disk with their current contents, so direnv's `dotenv` still loads them locally — only the index changed. `git ls-tree HEAD` now shows `.env.sample` as the sole remaining env file, and `git grep FACTSET_FTP_PASSWORD= HEAD` is empty.
+- `.env.sample`: `SESSION_KEY` emptied to match that file's own convention for secrets (`ADMIN_PASSWORD=`, `AWS_SECRET_ACCESS_KEY=[REDACTED] and a dozen others are already blank), and the password embedded in `FACTSET_PG_URL` replaced with `__PASSWORD__`.
+
+**Two corrections to the item's picture.** The `FACTSET_PG_URL` password was a second committed credential the item never mentioned — though it is `postgres://admin:…@localhost/censible-dashboard-development`, a local dev database, so low value. And the item's `SESSION_KEY` is 25 characters, not 26.
+
+**Swept the rest of the repo rather than trusting the original list.** No other tracked file embeds a credential. Two things that look alarming and are not: the `ftp://…:…@` in `apps/finegar-etl/src/factset/ftp_transfer.ts` is a template literal built from env accessors, not a hardcoded secret; and the four tracked `caddy/*-key.pem` private keys are **mkcert local development certificates** (issuer `O=mkcert development CA`, expired 2024), trusted only by the CA on the machine that made them.
+
+One process note worth recording: the first commit silently did not untrack anything. `git commit --only <paths>` rebuilds those paths from the **working tree**, and since the `.env` files still existed on disk it restored them to the index and undid the `git rm --cached`. `git status` came back clean, which reads like success. The untracking only landed on the second attempt, staging the deletions and committing the index directly.
+
+Not done, and not something this session can settle: the credential is still in git history, and whether the FactSet FTP account is even live — and therefore whether it needs rotating with FactSet — is an external question. Both are now tracked in `tasks/censible-core.md`. The private repo plus a dormant project is why history rewriting is a judgement call rather than an obvious yes.
+
+Exchange is long and preflight reports `session_accretion: warn`; the queue is active so I am noting it and continuing rather than pausing to compact.
+<!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#censiblecorefollow]
 - ~~do [#recommendeddeploybrowser]~~
-- do [#censible-env-committed-creds]
+- ~~do [#censible-env-committed-creds]~~
 - do [#tmo-prod-schedule-artifact-confirm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#censible-env-committed-creds] Sibling-repo fallout from the same gap: censible-core commits real env files, not just samples. apps/finegar-etl/.env carries FACTSET_FTP_LOGIN plus a 39-char FACTSET_FTP_PASSWORD, and .env.sample carries a 26-char SESSION_KEY. Repo is private (btakita/censible-core) and the project looks dormant, so the first question is whether the FactSet FTP account still exists. If it does, rotate with FactSet and drop the credential out of the tracked file; if it does not, replace both with placeholders so the pattern does not get copied forward. Do this from a censible-core session, not from EFS. Checked and clean: every other sibling tracks only .env.sample / .env.example with placeholder values; presence SERVICE_API_JWT_TOKEN is a 16-char dev placeholder.
+- [ ] [#censiblecorefollow] Censible-core follow-up, do it from a censible-core session: decide the FactSet FTP credential's fate. apps/finegar-etl/.env is untracked as of censible-core d2eec547 and the .gitignore mechanism is fixed, but the 36-char FACTSET_FTP_LOGIN / 39-char FACTSET_FTP_PASSWORD remain in git history. First question is whether that FactSet FTP account still exists — the project is dormant. If it is live, rotate with FactSet; if it is dead, no rotation is needed. Separately decide whether to rewrite history (private repo, dormant project, so a judgement call, not an obvious yes). Local values are preserved on disk in apps/finegar-etl/.env. NOTE: tasks/censible-core.md has no agent:backlog component, which is why this is filed here.
 - [ ] [#tmo-prod-schedule-artifact-confirm] Confirm the first schedule-bearing PRODUCTION TMO backup artifact. Production went live on 20d7a416 at 2026-08-01T04:16Z, but tmo_backup_interval_hours is 24 and the last run was 2026-07-31T17:00:53Z on the old build, so the next daily job around 2026-08-01T17:00Z is the first artifact that can carry payment schedules. Check: read tmo_backup_last_key and tmo_backup_last_status from production platform_settings, confirm the key advanced to a 2026-08-01 object and status is complete, then pull that object from R2 bucket equityfundingsource-tmo-cache-production and count schedule rows - expect roughly 12 of 31 loans to carry one, versus 0 on every prior artifact. Sandbox already measured 34 rows over 26 loans. Unblocks #tmo-clone-apply, which needs a schedule-bearing clone source. Do not read the artifact contents into the transcript - it holds production PII; count and discard.
 <!-- /agent:backlog -->
 

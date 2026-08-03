@@ -90,6 +90,15 @@ The loop now counts uploads and skips, prints `published=N skipped=M`, and annot
 **Fail-fast on the first error I left alone deliberately.** The list is in dependency order, so a crate that can't publish makes everything downstream of it unpublishable too — continuing past `tsift-astgrep` would have produced 23 more failures that all say the same thing. The problem was never that it stopped; it was that a green run had been meaning nothing for months.
 
 `#8wqk` is closed — the registration it was gating is done for all 26 crates. The real proof is the next tag, which will either print `published=26` or tell us exactly which crate is still missing.
+
+### Re: reactive projection acceptance — codex
+
+Clean installed-build acceptance run for reactive turn projection:
+
+- Binary-owned admission entered `cycle-1785724031373` immediately at `preflight_started`.
+- `maintenance_required=false` and `preflight_required=false`; no legacy preflight or caller ACK was needed.
+- The document had no new prompt, queue head, or backlog work, so this cycle intentionally performs no tsift mutation.
+- Strict binary-owned finalize/commit is the terminal acceptance edge for this run.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 

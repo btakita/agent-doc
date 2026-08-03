@@ -131,6 +131,18 @@ pub fn decide_read_only_terminal_projection(
         }
         return ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave;
     }
+    // `#unowneddivergence`: a divergence with no durable owner — the cycle is
+    // terminal and no retained write blocks — cannot be waited out. Nothing
+    // holds the write, so no controller state edge will ever fire, and
+    // `ObserveOnly` turns that into a permanent INTERRUPT that stops the queue
+    // drain and strands the visible edits (observed twice on
+    // tasks/software/lazily.md, 2026-08-03). Asking the live editor to persist
+    // its own buffer is the same editor-owned effect the retained path already
+    // uses — never a competing document replacement — and it is the only action
+    // that can converge this state without the agent writing the document.
+    if !retained_document_write_blocks && cycle_phase.is_none_or(|phase| !phase.is_open()) {
+        return ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave;
+    }
     ReadOnlyTerminalProjectionDecision::ObserveOnly
 }
 
@@ -815,9 +827,36 @@ fn run_with_options_inner(
             )?;
             retained_closeout_resume.observe_native_save(true, authority_content == disk_content);
         }
+        // `#divergenceowner`: this branch used to promise unconditionally that
+        // "the controller owns the next closeout attempt and will wake on that
+        // state edge", and to forbid every recovery. That is only true while
+        // something durable actually holds the write. Observed 2026-08-03 on
+        // tasks/software/lazily.md, twice: the newest cycle was `committed`
+        // over an hour earlier and no response capture was retained, so nothing
+        // owned the divergence and no state edge could ever fire — yet the
+        // message told the session to stand down, and two batches of response
+        // and backlog edits sat uncommitted until a human intervened. A session
+        // that follows this instruction faithfully loses the work, so the claim
+        // has to be earned rather than assumed.
+        let divergence_owner_note = if cycle_phase.is_some_and(agent_doc_turn::CyclePhase::is_open)
+            || agent_doc_capture_io::load_active(file)
+                .ok()
+                .flatten()
+                .is_some()
+        {
+            "The controller owns the next closeout attempt and will wake on that state edge. \
+             Do not ask the operator to save, rerun session-check, or resubmit finalize"
+        } else {
+            "NO cycle is open and NO response capture is retained, so nothing owns this \
+             divergence and no state edge will fire — the visible edits are STRANDED, not \
+             deferred, and waiting will not commit them. Recover from the pane that OWNS this \
+             session: `agent-doc commit <FILE>`, or `agent-doc write --commit <FILE>` if an \
+             unwritten response body remains. From any other pane both abort with `pane \
+             ownership mismatch`"
+        };
         anyhow::ensure!(
             authority_content == disk_content,
-            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); {}. The controller owns the next closeout attempt and will wake on that state edge. Do not ask the operator to save, rerun session-check, or resubmit finalize",
+            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); {}. {}",
             file.display(),
             agent_doc_hash::content_hash(&authority_content),
             agent_doc_hash::content_hash(&disk_content),
@@ -831,6 +870,7 @@ fn run_with_options_inner(
                 ReadOnlyTerminalProjectionDecision::Converged =>
                     "the projection changed after its converged observation",
             },
+            divergence_owner_note,
         );
         if retained_closeout_resume.should_resume() {
             match crate::profile::timed("resume_retained_closeout_after_native_save", || {
@@ -2692,6 +2732,46 @@ mod terminal_convergence_tests {
         assert_eq!(
             decide_read_only_terminal_projection(true, Some(CyclePhase::WriteApplied), true, false,),
             ReadOnlyTerminalProjectionDecision::Converged,
+        );
+    }
+
+    /// `#unowneddivergence`: a divergence whose cycle is already terminal and
+    /// which no retained write blocks has NO owner — no controller state edge
+    /// can fire for it. Classifying that as `ObserveOnly` made session-check
+    /// INTERRUPT forever, which stopped the queue drain and stranded the
+    /// visible edits; it happened twice on tasks/software/lazily.md on
+    /// 2026-08-03, both times with the newest cycle `committed` over an hour
+    /// earlier and zero retained captures. Ask the editor to persist its own
+    /// buffer instead, which is the only action that converges this state
+    /// without the agent writing the document.
+    #[test]
+    fn unowned_divergence_requests_editor_save_instead_of_stalling_forever() {
+        for phase in [
+            None,
+            Some(CyclePhase::Committed),
+            Some(CyclePhase::Abandoned),
+        ] {
+            assert_eq!(
+                decide_read_only_terminal_projection(false, phase, false, true),
+                ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave,
+                "terminal phase {phase:?} with no retained block must try to converge"
+            );
+        }
+        // A retained write still has an owner, so it keeps waiting rather than
+        // racing the controller with an editor save.
+        assert_eq!(
+            decide_read_only_terminal_projection(false, Some(CyclePhase::Committed), true, true),
+            ReadOnlyTerminalProjectionDecision::ObserveOnly,
+        );
+        // An OPEN cycle is owned by definition — unchanged.
+        assert_eq!(
+            decide_read_only_terminal_projection(
+                false,
+                Some(CyclePhase::PreflightStarted),
+                false,
+                true
+            ),
+            ReadOnlyTerminalProjectionDecision::ObserveOnly,
         );
     }
 

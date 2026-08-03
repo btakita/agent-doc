@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.123
+
+_JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **An authority/disk divergence with no owner now tries to converge instead of
+  stalling the queue forever.** `session-check` classified a divergence as
+  `ObserveOnly` whenever the cycle was not `write_applied` with a retained
+  block — including the case where the cycle is already terminal and nothing is
+  retained. Nothing owns that state, so no controller edge can ever fire, yet
+  the INTERRUPT told the session to stand down and stop draining. It stranded
+  two separate batches of response and backlog edits on one document in a
+  single evening. That case now asks the live editor to persist its own buffer
+  — the same editor-owned effect the retained path already uses, never a
+  competing document replacement — which is the only action that converges it
+  without the agent writing the document. An open cycle or a retained write is
+  still owned and still waits.
+- **The divergence INTERRUPT no longer promises a recovery it has no record
+  of.** It claimed unconditionally that "the controller owns the next closeout
+  attempt and will wake on that state edge" and forbade every remedy. When no
+  cycle is open and no capture is retained it now says the edits are stranded
+  rather than deferred, and names the recovery — from the owning pane, since
+  both commands abort elsewhere with `pane ownership mismatch`.
+
 ## 0.35.122
 
 _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._

@@ -108,27 +108,6 @@ Not done, and not something this session can settle: the credential is still in 
 
 Exchange is long and preflight reports `session_accretion: warn`; the queue is active so I am noting it and continuing rather than pausing to compact.
 
-### Re: do [#censible-env-committed-creds] — opus-5
-
-Fixed the tracked-file half in censible-core and pushed. The rotation question is genuinely external, so it moved to the censible-core document rather than staying here — the item's own note said to work this from a censible-core session, and that is where the remainder belongs.
-
-**Root cause, which the item did not name.** `.gitignore` had `/.env` and `/.env.*` — root-anchored, so only the repo-root env files were ever ignored. `apps/esg-web/.env`, `apps/finegar-etl/.env` and `apps/root-web/.env` were never covered, which is how a real credential got committed in the first place. Fixing only the file would have left the mechanism in place.
-
-**Landed — censible-core `e3ce5aaf` + `d2eec547`, pushed to `origin/main`:**
-
-- `.gitignore` now matches `.env` / `.env.*` at any depth, with `!.env.sample` so the template stays tracked.
-- All three `apps/*/.env` untracked. They stay on disk with their current contents, so direnv's `dotenv` still loads them locally — only the index changed. `git ls-tree HEAD` now shows `.env.sample` as the sole remaining env file, and `git grep FACTSET_FTP_PASSWORD= HEAD` is empty.
-- `.env.sample`: `SESSION_KEY` emptied to match that file's own convention for secrets (`ADMIN_PASSWORD=`, `AWS_SECRET_ACCESS_KEY=[REDACTED] and a dozen others are already blank), and the password embedded in `FACTSET_PG_URL` replaced with `__PASSWORD__`.
-
-**Two corrections to the item's picture.** The `FACTSET_PG_URL` password was a second committed credential the item never mentioned — though it is `postgres://admin:…@localhost/censible-dashboard-development`, a local dev database, so low value. And the item's `SESSION_KEY` is 25 characters, not 26.
-
-**Swept the rest of the repo rather than trusting the original list.** No other tracked file embeds a credential. Two things that look alarming and are not: the `ftp://…:…@` in `apps/finegar-etl/src/factset/ftp_transfer.ts` is a template literal built from env accessors, not a hardcoded secret; and the four tracked `caddy/*-key.pem` private keys are **mkcert local development certificates** (issuer `O=mkcert development CA`, expired 2024), trusted only by the CA on the machine that made them.
-
-One process note worth recording: the first commit silently did not untrack anything. `git commit --only <paths>` rebuilds those paths from the **working tree**, and since the `.env` files still existed on disk it restored them to the index and undid the `git rm --cached`. `git status` came back clean, which reads like success. The untracking only landed on the second attempt, staging the deletions and committing the index directly.
-
-Not done, and not something this session can settle: the credential is still in git history, and whether the FactSet FTP account is even live — and therefore whether it needs rotating with FactSet — is an external question. Both are now tracked in `tasks/censible-core.md`. The private repo plus a dormant project is why history rewriting is a judgement call rather than an obvious yes.
-
-Exchange is long and preflight reports `session_accretion: warn`; the queue is active so I am noting it and continuing rather than pausing to compact.
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 

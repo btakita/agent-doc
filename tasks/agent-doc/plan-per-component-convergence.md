@@ -26,6 +26,42 @@ on top inherits that granularity.
 Tracked previously as the per-cell CRDT merge intent (`qcellmerge` in the
 operator memory index); this plan is that work, scoped and sequenced.
 
+## The write path still asserts the claim session-check no longer does
+
+`crdt_relay_pending_refusal` (`agent-doc-git-io/src/live_buffer_guard.rs`) is the
+refusal printed by `write --commit` when the commit defers on relay convergence.
+It states unconditionally:
+
+> The capture is already durable and the same intent commits itself once
+> delivery converges — this is a deferral, not a lost response. […] do NOT
+> re-send the response, force disk, `admin recycle`, or `admin reload-lib`
+
+Its own doc comment records why the wording is emphatic: on 2026-07-26 a bare
+`Error:` with no next step made two sessions invent recoveries that each
+perturbed the capture being awaited. That reasoning is sound, and the guard
+should stay — but the promise is only true while a durable owner exists.
+
+Observed twice on 2026-08-03, adding backlog items to `agent-doc-bugs2.md`: the
+mutation applied, `write --commit` printed this refusal, and `session-check` —
+carrying the 0.35.123 fix — contradicted it:
+
+> NO cycle is open and NO response capture is retained, so nothing owns this
+> divergence and no state edge will fire — the visible edits are STRANDED, not
+> deferred, and waiting will not commit them.
+
+`session-check` was right both times; each was recovered with `agent-doc commit`.
+So the two paths now disagree about the same state, and the one an agent hits
+*first* is the one that is wrong. A session that obeys it waits forever on a
+state edge that cannot fire.
+
+Fold into this work rather than patching separately, because the correct
+predicate is the per-component one: whether anything owns **the components this
+turn wrote**. Until that exists, apply the same ownership test 0.35.123 added to
+`session-check` — no open cycle and no retained capture means stranded, not
+deferred — so the two paths stop contradicting each other. The "do NOT re-send /
+recycle / force disk" guidance stays intact for the genuinely-owned case; only
+the unowned case gains a remedy.
+
 ## The invariant to establish
 
 > A turn requires only the components it **owns** to be settled. An operator

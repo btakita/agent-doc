@@ -693,6 +693,13 @@ pub fn answered_free_text_head_node_keys(
         if !crate::queue_response::free_text_head_answered_by_response(response_body, text) {
             continue;
         }
+        // `#ftstrikedefer`: the quoted echo is the responding agent's assertion
+        // that it answered the head, not proof. When the response says next to
+        // that quote that the head is still outstanding, believe the sentence
+        // over the echo and leave it queued.
+        if crate::queue_response::response_defers_free_text_head(response_body, text) {
+            continue;
+        }
         if let Some(baseline) = baseline
             && !crate::queue_response::free_text_head_present_in_baseline(baseline, text)
         {

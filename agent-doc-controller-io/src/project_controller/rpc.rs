@@ -7402,6 +7402,74 @@ fn handle_crdt_text_adopt_rpc(
     anyhow::bail!("crdt_text_adopt is retired; consume the controller canonical projection instead")
 }
 
+/// What to do with one `detached_authority` replica refusal
+/// (`#replicarefusalstorm`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RefusalLogDecision {
+    /// Write the ordinary refusal line.
+    Emit,
+    /// Write the refusal line AND a one-shot storm advisory naming the cause.
+    EmitStormAdvisory,
+    /// Identical refusal already reported recently — stay quiet.
+    Suppress,
+}
+
+/// Emit the first few refusals, then at most one per minute, and raise a single
+/// storm advisory once the same document has been refused
+/// [`REFUSAL_STORM_THRESHOLD`] times.
+///
+/// A detached document is refused for as long as the editor keeps retrying,
+/// which is forever: on 2026-08-03 a stale JetBrains plugin generation drove
+/// ~50 identical refusals per minute indefinitely, burying every real
+/// diagnostic in the ops log and leaving the operator with a Run Agent Doc that
+/// silently did nothing. Throttling keeps the signal; the advisory names the
+/// fix.
+pub(crate) const REFUSAL_STORM_THRESHOLD: u64 = 25;
+const REFUSAL_VERBATIM_COUNT: u64 = 3;
+const REFUSAL_THROTTLE_SECS: u64 = 60;
+
+pub(crate) fn refusal_log_decision(count: u64, secs_since_last_log: u64) -> RefusalLogDecision {
+    if count == REFUSAL_STORM_THRESHOLD {
+        return RefusalLogDecision::EmitStormAdvisory;
+    }
+    if count <= REFUSAL_VERBATIM_COUNT {
+        return RefusalLogDecision::Emit;
+    }
+    if secs_since_last_log >= REFUSAL_THROTTLE_SECS {
+        return RefusalLogDecision::Emit;
+    }
+    RefusalLogDecision::Suppress
+}
+
+/// Per-document refusal bookkeeping: `(count, last_logged_unix_secs)`.
+fn refusal_ledger() -> &'static Mutex<BTreeMap<PathBuf, (u64, u64)>> {
+    static LEDGER: OnceLock<Mutex<BTreeMap<PathBuf, (u64, u64)>>> = OnceLock::new();
+    LEDGER.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn note_replica_refusal(file: &Path) -> (RefusalLogDecision, u64) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut ledger = refusal_ledger().lock();
+    let entry = ledger.entry(file.to_path_buf()).or_insert((0, 0));
+    entry.0 = entry.0.saturating_add(1);
+    let count = entry.0;
+    let since = now.saturating_sub(entry.1);
+    let decision = refusal_log_decision(count, since);
+    if decision != RefusalLogDecision::Suppress {
+        entry.1 = now;
+    }
+    (decision, count)
+}
+
+/// Clear the refusal ledger for a document once it registers successfully, so a
+/// later detach starts from a fresh, loud count.
+fn clear_replica_refusals(file: &Path) {
+    refusal_ledger().lock().remove(file);
+}
+
 fn handle_crdt_replica_rpc(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -7424,17 +7492,39 @@ fn handle_crdt_replica_rpc(
     let method_name = method.label();
     let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "controller_crdt_replica_refused file={} method={} source={} reason=detached_authority",
-                canonical.display(),
-                method_name,
-                source,
-            ),
-        );
+        // `#replicarefusalstorm`: the editor retries a refused registration
+        // forever, so log the first few, then throttle, and raise one advisory
+        // naming the usual cause.
+        let (decision, count) = note_replica_refusal(&canonical);
+        if decision != RefusalLogDecision::Suppress {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_crdt_replica_refused file={} method={} source={} reason=detached_authority refusals={}",
+                    canonical.display(),
+                    method_name,
+                    source,
+                    count,
+                ),
+            );
+        }
+        if decision == RefusalLogDecision::EmitStormAdvisory {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_crdt_replica_refusal_storm file={} source={} refusals={} \
+                     likely_cause=stale_editor_plugin_generation \
+                     remedy=restart_the_editor_ide \
+                     note=reload-lib_and_recycle_cannot_fix_a_kotlin_plugin_generation_mismatch",
+                    canonical.display(),
+                    source,
+                    count,
+                ),
+            );
+        }
         return Ok(crdt_replica_refused_data("detached_authority"));
     }
+    clear_replica_refusals(&canonical);
 
     // Capture the rolling Lazily/CRDT canonical before accepting the editor
     // delta. Queue control gestures must be compared with the immediately

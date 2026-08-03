@@ -2,6 +2,30 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.121
+
+_JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **A response that calls a queue head untouched no longer strikes it.**
+  `#ftstrike` treated a quoted-prompt echo as proof that the cycle answered a
+  free-text head, but the echo is only the responding agent's assertion —
+  nothing verified the work happened. A response that quoted a head and in the
+  same breath called it "queued and untouched" still struck it, silently marking
+  unrun work complete and losing the operator's request. The strike now reads
+  the sentence next to the quote and defers when it says the head is still
+  outstanding. Genuinely answered heads strike exactly as before, and the guard
+  can only ever prevent a strike, never cause one.
+- **A refused replica registration no longer floods the ops log.** A detached
+  document is refused for as long as the editor retries, which is forever: a
+  stale JetBrains plugin generation drove ~50 identical
+  `controller_crdt_replica_refused` lines per minute indefinitely, burying every
+  real diagnostic while Run Agent Doc silently did nothing. The first three
+  refusals are logged verbatim, then at most one per minute, and crossing 25
+  raises a single `controller_crdt_replica_refusal_storm` advisory naming the
+  cause and the remedy — restart the IDE, since `reload-lib` and `recycle`
+  cannot fix a Kotlin plugin generation mismatch. A successful registration
+  clears the ledger so a later detach is loud again.
+
 ## 0.35.120
 
 _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._

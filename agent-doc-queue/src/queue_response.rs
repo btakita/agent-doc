@@ -528,6 +528,68 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
     response_blockquote_text(response_body).contains(&head_norm)
 }
 
+/// Phrases with which a response states that a head it quoted was NOT actually
+/// done this cycle (`#ftstrikedefer`).
+///
+/// Kept deliberately narrow and literal: each one is an explicit statement about
+/// pending work, not a hedge.
+const FREE_TEXT_HEAD_DEFERRAL_MARKERS: &[&str] = &[
+    "queued and untouched",
+    "still queued",
+    "remains queued",
+    "left queued",
+    "not been started",
+    "have not started",
+    "has not started",
+    "next cycle will",
+    "the next cycle",
+    "a later cycle",
+    "deferred to the next",
+    "left for the next",
+    "will be handled next",
+];
+
+/// True when the response both quotes `head_text` AND states, next to that quote,
+/// that the head is still outstanding (`#ftstrikedefer`).
+///
+/// `#ftstrike` treats a quoted-prompt echo as proof that the cycle answered the
+/// head. That is only an assertion by the responding agent — nothing verifies the
+/// work happened. A response that quotes a head and in the same breath calls it
+/// "queued and untouched" is explicitly saying it did NOT do the work, yet the
+/// echo alone still struck it, silently marking unrun work complete.
+///
+/// The scan is scoped to the blockquote block that carries the quote plus the
+/// block immediately after it, so an unrelated deferral elsewhere in a long
+/// response does not hold back a genuinely answered head. Returning `true` only
+/// ever PREVENTS a strike, so a false positive costs one extra cycle while a
+/// false negative loses the operator's work.
+pub fn response_defers_free_text_head(response_body: &str, head_text: &str) -> bool {
+    let head_clean = strip_priority_markers(head_text);
+    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
+    if head_norm.is_empty() {
+        return false;
+    }
+    let blocks: Vec<&str> = response_body.split("\n\n").collect();
+    for (index, block) in blocks.iter().enumerate() {
+        if !normalize_for_answer_match(block).contains(&head_norm) {
+            continue;
+        }
+        let mut scope = String::from(*block);
+        if let Some(next) = blocks.get(index + 1) {
+            scope.push(' ');
+            scope.push_str(next);
+        }
+        let scope = scope.to_ascii_lowercase();
+        if FREE_TEXT_HEAD_DEFERRAL_MARKERS
+            .iter()
+            .any(|marker| scope.contains(marker))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// True when `head_text`'s normalized prose prefix matches a free-text queue head
 /// present in the stable pre-turn `baseline` document.
 ///

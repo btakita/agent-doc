@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-test-support"
-version = "0.35.120"
+version = "0.35.121"
 edition = "2024"
 description = "Shared test support helpers for agent-doc crates"
 license = "MIT"
@@ -16,16 +16,16 @@ name = "agent_doc_test_support"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.120" }
-agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.120" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.120" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.120" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.120" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.120" }
-agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.120" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.120" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.120" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.120" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.120" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.121" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.121" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.121" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.121" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.121" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.121" }
+agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.121" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.121" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.121" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.121" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.121" }
 serde_json = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }

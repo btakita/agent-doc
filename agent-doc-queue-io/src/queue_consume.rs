@@ -2980,6 +2980,44 @@ mod core_tests {
     }
 
     #[test]
+    fn answered_free_text_head_not_struck_when_response_calls_it_untouched() {
+        // `#ftstrikedefer`, from the real 2026-08-03 loss on haiven-dev.md: the
+        // response quoted the operator's head AND said it was untouched, and the
+        // echo alone still struck it — silently marking unrun work complete.
+        let head = "fpe-embedding.md was exploratory. Please make a new md file to explain the case why we don't want to embed.";
+        let content = format!(
+            "---\nqueue_active: true\n---\n\n<!-- agent:queue go -->\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        let deferring_response = format!(
+            "### Re: two things — opus\n\n\
+             > **Queue prompt:**\n> {head}\n\n\
+             Your new queue head is queued and untouched — it needs a `> **Queue prompt:**` echo \
+             to be consumed, which the next cycle will do.\n"
+        );
+        let keys =
+            answered_free_text_head_node_keys(&content, &deferring_response, None).unwrap();
+        assert!(
+            keys.is_empty(),
+            "a head the response itself calls untouched must not be struck: {keys:?}"
+        );
+
+        // Control: the same quoted head, actually answered, still strikes.
+        let answering_response = format!(
+            "### Re: two things — opus\n\n\
+             > **Queue prompt:**\n> {head}\n\n\
+             Wrote `docs/case-against-embedding.md` and `docs/fpe-deployment-tradeoffs.md`, \
+             and recorded the thread-pool sweep results.\n"
+        );
+        let struck =
+            answered_free_text_head_node_keys(&content, &answering_response, None).unwrap();
+        assert_eq!(
+            struck.len(),
+            1,
+            "a genuinely answered head must still be struck: {struck:?}"
+        );
+    }
+
+    #[test]
     fn answered_free_text_head_not_struck_when_absent_from_baseline() {
         // #qstrikeexplain Phase 2: the operator is TYPING a new queue line this turn.
         // It is answered by the response (it fuzzy-matches a quoted prompt) but is

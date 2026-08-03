@@ -7616,6 +7616,45 @@ mod tests {
         assert!(ops_log.contains("reason=detached_authority"));
     }
 
+    /// `#replicarefusalstorm`: a detached document is refused for as long as the
+    /// editor retries, which is forever. On 2026-08-03 a stale JetBrains plugin
+    /// generation drove ~50 identical refusals per minute indefinitely, burying
+    /// every real diagnostic. Log the first few, then throttle, and raise one
+    /// advisory naming the remedy.
+    #[test]
+    fn replica_refusal_logging_throttles_and_raises_one_storm_advisory() {
+        use super::rpc::{RefusalLogDecision, REFUSAL_STORM_THRESHOLD, refusal_log_decision};
+
+        // The opening refusals are always loud — a one-off detach stays visible.
+        for count in 1..=3 {
+            assert_eq!(
+                refusal_log_decision(count, 0),
+                RefusalLogDecision::Emit,
+                "refusal {count} must be logged verbatim"
+            );
+        }
+        // Past that, a retry loop is silenced until the throttle window lapses.
+        assert_eq!(refusal_log_decision(4, 0), RefusalLogDecision::Suppress);
+        assert_eq!(refusal_log_decision(500, 59), RefusalLogDecision::Suppress);
+        assert_eq!(refusal_log_decision(500, 60), RefusalLogDecision::Emit);
+        // Exactly one advisory, at the threshold — not on every later refusal.
+        assert_eq!(
+            refusal_log_decision(REFUSAL_STORM_THRESHOLD, 0),
+            RefusalLogDecision::EmitStormAdvisory
+        );
+        assert_eq!(
+            refusal_log_decision(REFUSAL_STORM_THRESHOLD + 1, 0),
+            RefusalLogDecision::Suppress
+        );
+
+        // A sustained storm must not grow the log without bound: 10k refusals
+        // inside one throttle window produce the 3 opening lines plus 1 advisory.
+        let emitted = (1..=10_000u64)
+            .filter(|count| refusal_log_decision(*count, 0) != RefusalLogDecision::Suppress)
+            .count();
+        assert_eq!(emitted, 4, "throttled storm must stay bounded");
+    }
+
     fn seed_reliable_sync_editor_open(doc: &std::path::Path, tag: &str) {
         let document_hash = agent_doc_hash::document_id_for_path(doc);
         agent_doc_reliable_sync_io::global_liveness_plane()

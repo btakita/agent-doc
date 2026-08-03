@@ -4,6 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.119
+
+_JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **Codex Stop no longer reopens a committed turn for an explicitly stopped
+  queue.** The hook now distinguishes an ordinary manual queue head, which
+  still protects against a chat-only response, from a head parked by
+  frontmatter `queue: stop`. A committed cycle with a visible stopped head now
+  passes through exactly like `session-check`'s `no_drainable_work` outcome
+  instead of repeatedly demanding another finalize/write attempt.
+
 ## 0.35.118
 
 _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._

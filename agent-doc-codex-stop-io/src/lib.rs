@@ -423,6 +423,9 @@ fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
 }
 
 fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
+    if agent_doc_queue::queue_heads::queue_is_explicitly_stopped(content) {
+        return None;
+    }
     let components = agent_doc_element::element::parse(content).ok()?;
     let queue = components
         .iter()
@@ -2417,6 +2420,51 @@ Done.\n\
             turn_id: "turn-1".to_string(),
             cwd: dir.path().display().to_string(),
             last_assistant_message: "Done.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn stop_passes_through_committed_cycle_with_stopped_queue_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let original = "---\nsession: sid\nqueue: stop\n---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: #advance-review — gpt-5\n\n\
+Reviewed the gated items.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue priority go -->\n\
+- #advance-review\n\
+<!-- /agent:queue -->\n";
+        fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(original),
+            Some(original),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-stopped-queue");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-stopped-queue".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Processed #advance-review.".to_string(),
             stop_hook_active: false,
         })
         .unwrap();

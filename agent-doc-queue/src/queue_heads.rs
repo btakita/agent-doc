@@ -81,6 +81,18 @@ pub fn active_queue_prompt(content: &str) -> Option<String> {
         .map(|prompt| strip_in_progress_marker(&prompt.text))
 }
 
+/// True when document frontmatter explicitly parks queue execution.
+///
+/// This is distinct from a queue that is merely not activated yet: Codex Stop
+/// recovery still treats an ordinary manual queue head as pending document
+/// work, but must not reopen a committed turn for an operator-stopped queue.
+pub fn queue_is_explicitly_stopped(content: &str) -> bool {
+    agent_doc_frontmatter::frontmatter::parse(content)
+        .ok()
+        .and_then(|(frontmatter, _)| frontmatter.queue_active)
+        == Some(false)
+}
+
 /// True when the current diff activates the document queue for prompt
 /// extraction, including explicit `do queue` / `run queue` triggers.
 pub fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
@@ -509,6 +521,19 @@ mod tests {
         );
 
         assert_eq!(active_queue_prompt(doc), None);
+    }
+
+    #[test]
+    fn queue_is_explicitly_stopped_distinguishes_stop_from_default_inactive() {
+        let stopped = "---\nqueue: stop\n---\n\n<!-- agent:queue go -->\n- #advance-review\n<!-- /agent:queue -->\n";
+        let legacy_stopped = "---\nqueue_active: false\n---\n\n<!-- agent:queue -->\n- #advance-review\n<!-- /agent:queue -->\n";
+        let default_inactive = "---\nsession: sid\n---\n\n<!-- agent:queue -->\n- #advance-review\n<!-- /agent:queue -->\n";
+        let active = "---\nqueue: go\n---\n\n<!-- agent:queue -->\n- #advance-review\n<!-- /agent:queue -->\n";
+
+        assert!(queue_is_explicitly_stopped(stopped));
+        assert!(queue_is_explicitly_stopped(legacy_stopped));
+        assert!(!queue_is_explicitly_stopped(default_inactive));
+        assert!(!queue_is_explicitly_stopped(active));
     }
 
     #[test]

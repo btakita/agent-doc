@@ -42,6 +42,14 @@ Regression coverage must include the full follow-up lifecycle: a routed dispatch
 
 The Codex stop hook does not replace the documented `finalize` / `write --commit` + `session-check` path. It is a backstop for the exact Codex `session_id` that `UserPromptSubmit` durably bound to the document. When Codex reaches `Stop` with an open bound `agent-doc` cycle, the binary validates `last_assistant_message` before replay. A single assistant closeout may be captured into the existing pending/capture ledger and replayed through the normal recover/write/commit path automatically. Transcript-shaped payloads such as full `agent:exchange` dumps, prompt-target lines, or repeated response headings must not enter the replay ledger; they are captured only as diagnostics and the hook blocks or fails closed instead. If `last_assistant_message` is empty because a tool-only/authentication step ended the turn before the assistant emitted the final closeout, the hook must also fail closed, save a diagnostic record with the tracked prompt, and require the normal `finalize` / `session-check` recovery path. If the exact session has no tracked binding, the hook is a no-op even when another document in the project has a durable queue marker. If the validated auto-close succeeds, `session-check` should be green and the tracked hook state should be cleared.
 
+After a cycle is committed, a visible queue line is not by itself proof that the
+same turn still owes document work. Frontmatter `queue: stop` explicitly parks
+that head, so the Stop hook must agree with `session-check`'s
+`no_drainable_work` outcome, clear the tracked hook state, and return
+`continue=true`. A manual queue head without an explicit stop remains a
+writeback guard for chat-only responses, and active go/auto queue continuation
+is unchanged.
+
 When the repo-local Codex config registers the `agent-doc` MCP server, Stop-hook queue-continuation blocks must prefer the MCP tool path for the active turn: `agent_doc_admit`, `agent_doc_plan` / `agent_doc_read` as needed, `agent_doc_finalize` for the strict write/commit closeout, and `agent_doc_session_check` for the final gate. If MCP tools are unavailable in the current Codex run, the same block must retain the in-pane CLI fallback (`agent-doc finalize <FILE>` or `agent-doc write --commit <FILE>`) and must still forbid running `agent-doc <FILE>` from the owner pane. Claude, OpenCode, and direct CLI flows remain unchanged.
 
 When the Codex Stop hook blocks to continue an active go-mode `agent:queue` head, it must also write file-scoped ops-log proof with `codex_stop_queue_continuation`, the continuation source (`tracked_state`), MCP availability, prompt byte count, and prompt hash. The hook must not log the raw prompt body.

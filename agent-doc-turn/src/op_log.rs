@@ -524,6 +524,87 @@ mod tests {
         assert_eq!(beta.clock.lamport, 0);
     }
 
+    /// `#pcc1` success criterion, stated empirically: replay the sixteen-line
+    /// operator paste from 2026-08-03 and assert the op log gets one row per
+    /// queue item. The original incident recorded ZERO ops for that paste.
+    #[test]
+    fn sixteen_line_operator_paste_records_one_op_per_queue_item() {
+        const IDS: [&str; 16] = [
+            "recommendedungatereview-b1cb",
+            "recommendedungatereview-9g0v",
+            "recommendedungatereview-zw66",
+            "recommendedungatereview-e8jn",
+            "recommendedungatereview-jcgv",
+            "recommendedungatereview-a3ew",
+            "recommendedungatereview-jfxh",
+            "recommendedungatereview-w90z",
+            "recommendedungatereview-sskd",
+            "recommendedungatereview-0xc5",
+            "recommendedungatereview-krpw",
+            "recommendedungatereview-h9sm",
+            "recommendedungatereview-xfmh",
+            "recommendedungatereview-rht8",
+            "recommendedungatereview-z0ps",
+            "recommendedungatereview",
+        ];
+        let before = "<!-- agent:queue -->\n- Read the handoff completely.\n<!-- /agent:queue -->\n";
+        let mut after = String::from("<!-- agent:queue -->\n- Read the handoff completely.\n");
+        for id in IDS {
+            after.push_str(&format!("- do [#{id}]\n"));
+        }
+        after.push_str("<!-- /agent:queue -->\n");
+
+        let summary = semantic_diff_summary(before, &after, &[]).unwrap();
+        let ops = build_ops_from_semantic_diff("bugs2.md", Some("sess-1"), "100", &summary);
+        let inserts: Vec<&DocumentOp> = ops
+            .iter()
+            .filter(|op| op.component == "queue" && op.op_kind == "insert")
+            .collect();
+        assert_eq!(
+            inserts.len(),
+            16,
+            "each pasted queue item needs its own op row, got {}: {:?}",
+            inserts.len(),
+            inserts.iter().map(|op| &op.node_key).collect::<Vec<_>>()
+        );
+        // Every id must be individually addressable — a single op covering the
+        // block would leave fifteen items invisible to reconciliation.
+        for id in IDS {
+            assert!(
+                inserts.iter().any(|op| op.item_id == id),
+                "no op recorded for {id}"
+            );
+        }
+    }
+
+    /// Why the fold-heal must run BEFORE the semantic diff (`#qfoldedhead`,
+    /// fixed 0.35.120): if the paste is still folded when the diff runs, the
+    /// whole block is ONE node and fifteen ids never reach the op log. This
+    /// pins the ordering dependency that makes the test above pass.
+    #[test]
+    fn a_folded_paste_would_record_only_one_op() {
+        let before = "<!-- agent:queue -->\n- Read the handoff completely.\n<!-- /agent:queue -->\n";
+        let folded = concat!(
+            "<!-- agent:queue -->\n",
+            "- Read the handoff completely.\n",
+            "- do [#alpha]\n",
+            "  do [#beta]\n",
+            "  do [#gamma]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let summary = semantic_diff_summary(before, folded, &[]).unwrap();
+        let ops = build_ops_from_semantic_diff("bugs2.md", Some("sess-1"), "100", &summary);
+        let queue_ids: Vec<&str> = ops
+            .iter()
+            .filter(|op| op.component == "queue")
+            .map(|op| op.item_id.as_str())
+            .collect();
+        assert!(
+            !queue_ids.contains(&"beta") && !queue_ids.contains(&"gamma"),
+            "a folded block must not yield per-id ops before the heal runs: {queue_ids:?}"
+        );
+    }
+
     #[test]
     fn sibling_queue_insert_beside_driver_is_independent() {
         // The motivating case: the turn answers queue item A while the user

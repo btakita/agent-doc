@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.127
+
+_JetBrains plugin 0.2.340; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **Per-component ops are now recorded from the post-maintenance document.**
+  `compute_with_current` runs before `run_queue_maintenance`, so any structural
+  normalization maintenance applied was invisible to the content the op log was
+  built from. The `#qfoldedhead` re-segmentation is the case that mattered: a
+  pasted block that arrived folded is a single node in the pre-maintenance cut,
+  so every id after the first never reached `op_log`. That is why a sixteen-item
+  operator paste on 2026-08-03 recorded zero per-item ops, which starves every
+  later per-component convergence phase of its substrate. Op recording now
+  re-resolves the document as maintenance left it. Scoped to the op log — the
+  preflight contract still reports from the original cut, so what is durably
+  recorded changes without moving contract semantics.
+
 ## 0.35.126
 
 _JetBrains plugin 0.2.340; VS Code extension 0.2.65; Zed extension 0.1.0._

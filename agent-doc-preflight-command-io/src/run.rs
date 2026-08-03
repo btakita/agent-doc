@@ -1104,18 +1104,45 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // #op-scoped-drift-1: persist this cycle's node ops to the durable op log,
     // tagged with actor + causal (Lamport / session-origin) clock. Best effort:
     // the durable substrate must never block or fail a preflight cycle.
+    // `#pcc1`: `compute_with_current` ran BEFORE `run_queue_maintenance`, so any
+    // structural normalization maintenance applied is invisible to that cut. The
+    // `#qfoldedhead` re-segmentation is the case that matters: a pasted block
+    // that arrived folded is ONE node in the pre-maintenance content, so ops
+    // recorded from it cover the whole block and every id after the first never
+    // reaches the op log. That is the zero-op result observed for a sixteen-item
+    // paste on 2026-08-03, and it starves every later per-component phase of its
+    // substrate. Record ops from the document as maintenance left it.
+    //
+    // Deliberately scoped to the op log: `semantic_diff` still feeds the
+    // preflight contract from the original cut, so this changes what is
+    // DURABLY RECORDED without moving contract semantics.
     if !options.probe
-        && let Some(summary) = semantic_diff.as_ref()
         && let Some(project_root) = rc.project_root()
     {
-        let document_path = file.to_string_lossy().to_string();
-        if let Err(err) = agent_doc_sqlite::op_log::append_semantic_diff_ops(
-            &project_root,
-            &document_path,
-            initial_frontmatter.session.as_deref(),
-            summary,
-        ) {
-            eprintln!("[preflight] op-log persist skipped: {err}");
+        let post_maintenance_current =
+            agent_doc_document_realtime_io::try_resolve_current_document_content(
+                file,
+                "preflight_op_log_post_maintenance",
+            )
+            .ok();
+        let op_summary = match post_maintenance_current.as_deref() {
+            Some(current) if current != diff_result_with_current.current => semantic_diff_summary(
+                &diff_result_with_current.previous,
+                current,
+                &prompt_bearing_changes,
+            ),
+            _ => semantic_diff.clone(),
+        };
+        if let Some(summary) = op_summary.as_ref() {
+            let document_path = file.to_string_lossy().to_string();
+            if let Err(err) = agent_doc_sqlite::op_log::append_semantic_diff_ops(
+                &project_root,
+                &document_path,
+                initial_frontmatter.session.as_deref(),
+                summary,
+            ) {
+                eprintln!("[preflight] op-log persist skipped: {err}");
+            }
         }
     }
 

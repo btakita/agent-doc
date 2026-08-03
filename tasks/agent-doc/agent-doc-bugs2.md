@@ -280,12 +280,33 @@ While checking this I also found that JetBrains has a *second* direct controller
 **Proof.** `af5e37262`. `make check` — 8558 passed, 244 skipped. VS Code 169/169. Full JetBrains Gradle suite green. Installed agent-doc `0.35.125` and JetBrains plugin `0.2.339`.
 
 **The plugin needs an IDE restart to activate `0.2.339`** — `reload-lib` swaps the cdylib but not the Kotlin package, so the reboot self-heal will not be live in your running IDE until you restart it.
+
+### Re: do [#haivendupsession] — opus-5
+
+> **Queue prompt:**
+>
+> do [#haivendupsession]
+
+
+Fixed and released as `0.35.124` (`ecfad5441`, tag `v0.35.124`). Full suite green at **8564/8564**.
+
+**The asymmetry, confirmed from `ops.log`.** The recycle path has always deferred while a document cycle is open — `supervisor_recycle_deferred_cycle_open ... reason=agent_doc_cycle_open` at 07:18:57, 07:25:01, 07:27:54 and 07:28:32. The restart path had no equivalent gate, and `restart_continue_spawn` fired at 07:28:29 — *between* two of those defers. With `--route-owned-reap-policy keep-alive` the previous child was never reaped, so both stayed attached to pane `%95`.
+
+**The misleading log line.** `controller_supervisor_replacement_background_completed stage=ipc_accepted_deferred reason=live_supervisor_owns_drain` reads like the restart was deferred. It was not. That branch is `SupervisorReplacementEscalation::AwaitAcceptedInPlace` — the *controller* declining to escalate to a kill-and-relaunch. The IPC request had already been **Accepted** by the live supervisor one second earlier, and `request_supervisor_restart` armed the spawn with no open-cycle check of any kind.
+
+**The fix.** `supervisor_restart_admission(cycle_open, child_alive)` in `agent-doc-supervisor/src/lifecycle.rs` — pure, beside the recycle decision it mirrors. `request_supervisor_restart` now refuses when a cycle is open **and** the child is alive, returning a message that says why rather than half-arming the restart. Both facts are required: deferring on `cycle_open` alone would strand a crashed harness with no way back, so a dead child still spawns. The adapter reads the same `load_with_closeout_projection` source the recycle gate uses and fails **closed** on an unreadable projection.
+
+**Coverage.** Four pure decision tests plus two at the IPC boundary, including one asserting that a refused restart leaves `restart_requested` and `child_killed` untouched — a half-applied restart is how the second child appeared. The cross-gate test pins restart and recycle to the same verdict on the same facts, since the defect *was* the two disagreeing. I got that test wrong first: I assumed a fact set that makes recycle defer, and it returned `None`. I probed the actual matrix instead of asserting my guess — recycle defers on an open cycle only when a recycle is genuinely wanted (`explicit_admin` or `turn_boundary`), which is the operator-request shape.
+
+**Install is deferred, not skipped.** A concurrent session has `0.35.125` installed locally — there is no such tag on origin and no such commit in this checkout, so that build predates this fix. `binary-install` refused the downgrade, correctly, and I did not override it with `AGENT_DOC_ALLOW_DOWNGRADE=1`: installing an older binary over a newer one is exactly what that guard exists to prevent. The fix is on `main`, so the next version bumped from `main` carries it.
+
+Session note: the exchange is at 248 lines across 13 sections; the queue is active so I am not stalling to compact.
 <!-- agent:boundary:f621055c:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#haivendupsession]
+- ~~do [#haivendupsession]~~
 - do [#pcc1]
 - do [#pcc2]
 - do [#pcc3]
@@ -319,7 +340,6 @@ While checking this I also found that JetBrains has a *second* direct controller
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#haivendupsession] #agent-doc-bug Two harness children render through one pane's PTY proxy after an operator session_restart; clearing the visible session reveals the other underneath. OPERATOR-REPORTED 2026-08-03 on haiven-dev.md (pane %95). Evidence in src/haiven-dev/.agent-doc/logs/ops.log: two different foreground-finalize PIDs each Acquired the closeout-owner lease for the same document 56s apart (07:25:11 pid 2493430, 07:26:07 pid 2556204), after which captured-finalize-resume-1499605 got HeldByOther three times. The spawn is at 07:28:29: controller_operator_command_accepted kind=session_restart stage=operator_busy proof_scope=accepted_only, then controller_supervisor_replacement_background_completed stage=ipc_accepted_deferred reason=live_supervisor_owns_drain, then controller_lifecycle reason=restart_continue_spawn. The replacement path DEFERRED while the IPC restart still reached the live supervisor, which spawned a fresh child in continue mode; --route-owned-reap-policy keep-alive means the old child is not reaped, so both stay attached to the same pane. Note supervisor_recycle_deferred_cycle_open gated the RECYCLE path at 07:18/07:25/07:27/07:28 while the RESTART path had no equivalent open-cycle gate. Fix direction: gate restart_continue_spawn (agent-doc-start-runtime-io/src/run.rs, agent-doc-supervisor/src/route_runtime.rs) on the same replacement-deferral/open-cycle condition the recycle path uses, and prove the old child is gone before spawning. Both projections are replayable from ops.log without a live IDE
 - [ ] [#pcc1] #agent-doc-feature Per-component convergence phase 1: record per-component ops. Make the editor->controller path record operations per component so op_log has a row per changed item instead of one whole-document text swap. Success criterion is empirical, not structural: replay the sixteen-line paste from 2026-08-03 and assert op_log contains sixteen queue-item inserts where today it contains zero. No later phase has a substrate until this assertion passes. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#pcc2] #agent-doc-feature Per-component convergence phase 2: per-component authority hashes. Extend the authority/disk comparison from one document hash to a hash per component, keeping the whole-document hash as a derived value so existing diagnostics keep working. No behavior change: the point is to be able to SAY which components diverge before anything acts on it. Depends on #pcc1. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#pcc3] #agent-doc-feature Per-component convergence phase 3: scope the convergence gate to owned components. Change decide_read_only_terminal_projection and the session-check divergence INTERRUPT to require equality only on components the turn wrote, so a divergence confined to an unowned component is non-blocking. This is the phase that makes the queue drain during live editing AND the phase that can destroy an operator buffer if the ownership set is computed too broadly, so it ships behind a default-off config flag. REQUIRED BEFORE IT SHIPS: a SimWorld test where the agent writes exchange while a simulated operator edits queue every tick, asserting every keystroke SURVIVES; an over-claim test forcing queue into the owned set and proving that survival test can go RED; and a replay of the three real 2026-08-03 documents (lazily.md, haiven-dev.md, agent-doc-bugs2.md) at their state_events hashes asserting none reaches a permanent INTERRUPT. Depends on #pcc2. Plan: tasks/agent-doc/plan-per-component-convergence.md

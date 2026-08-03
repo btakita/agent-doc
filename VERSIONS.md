@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.122
+
+_JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **The document-only drift remedy now names the pane it must run in.** Both
+  recovery commands go through `verify_pane_ownership`, so running the
+  prescribed `agent-doc commit` from any other pane aborts with `pane ownership
+  mismatch` — which reads as a second, unrelated failure rather than as the
+  guard doing its job. The hint now states the constraint up front, names
+  `agent-doc claim` as the only way out from another pane, and qualifies it:
+  reclaiming seizes the document from a live session, so it is for a session
+  that has finished, not a shortcut around the guard.
+
 ## 0.35.121
 
 _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._

@@ -408,6 +408,15 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_editor_surface_forget(project_root: String): Int
 
+    /**
+     * Ensure a project controller is listening, launching one if it is not (`#rebootselfheal`).
+     *
+     * Returns `1` when a controller is listening on return, `0` when the launch did not come up,
+     * `-1` on a bad argument. The recovery itself (adopt a live controller, unlink a stale socket
+     * file, launch) lives in the shared library — do not reimplement any of it here.
+     */
+    fun agent_doc_ensure_controller_running(project_root: String): Int
+
     /** Controller-backed `admin queue pause|resume|drain --json` wrapper. */
     fun agent_doc_admin_queue_control_json(
         project_root: String?,

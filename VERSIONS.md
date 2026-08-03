@@ -2,6 +2,44 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.125
+
+_JetBrains plugin 0.2.339; VS Code extension 0.2.65; Zed extension 0.1.0._
+
+- **The IDE recovers from a host reboot on its own (`#rebootselfheal`).** A
+  reboot leaves `.agent-doc/controller.sock` in one of two states that mean
+  exactly the same thing — nothing is listening. The file went away with the
+  tmpfs (`ENOENT`), or it outlived the process that bound it (`ECONNREFUSED`).
+  Neither is fixable by retrying the connect, so the JetBrains plugin surfaced
+  them verbatim — `Sync failed: pane-layout state projection publish failed via
+  .../controller.sock: Connection refused` — and stayed broken until a human
+  deleted the socket by hand. Reported 2026-08-03 after an X11 wedge and reboot.
+
+  The binary already recovered from both: `connect_or_launch` adopts a live
+  controller or launches one, and the bind path unlinks a stale socket file
+  before listening. The editors simply had no way to ask. New FFI export
+  `agent_doc_ensure_controller_running` exposes that existing recovery, and
+  JetBrains calls it once on a connect failure that *proves* no listener, then
+  retries. Recovery stays a single delegation — a plugin that grows its own
+  unlink/launch logic is how the editor and the binary drift into disagreeing
+  about controller liveness.
+
+  Scoped to operator-initiated lanes (Sync Tmux Layout, Run Agent Doc, focus
+  handoff). `editors/SPEC.md` requires the passive editor-surface observation
+  lane to send "over the existing-controller socket; it never launches the
+  controller", so a tab click still cannot start one. An ambiguous failure —
+  permission, timeout, broken pipe — is never treated as proof of death, because
+  relaunching over a live-but-slow controller is worse than reporting the error;
+  that is the same rule the binary's `SocketLiveness` probe follows.
+
+- **Editor parity for the above is machine-checked, not asserted.** VS Code
+  already had this via a different mechanism (`controller status --ensure`
+  before an operator route), and Zed has no controller socket transport at all,
+  so the gap was JetBrains-only — but nothing enforced that. New capability
+  `controller_reboot_self_heal_v1` in the editor contract, `required` in
+  `editors/plugin-parity.tsv`, so the existing conformance test fails if a peer
+  claims it without advertising it or drops it later.
+
 ## 0.35.124
 
 _JetBrains plugin 0.2.338; VS Code extension 0.2.65; Zed extension 0.1.0._

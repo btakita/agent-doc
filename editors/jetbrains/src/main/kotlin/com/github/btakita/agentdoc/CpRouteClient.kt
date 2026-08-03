@@ -514,7 +514,7 @@ internal object CpRouteClient {
             callerKind = callerKind,
         )
         return try {
-            val data = sendRequestDataToSocket(socket, request)
+            val data = sendOperatorRequestDataToSocket(socket, request)
             val publishedPlaneVersion = jsonLongFieldOrNull(data, "plane_version")
             val accepted = if (
                 jsonBooleanFieldOrNull(data, "accepted") == true &&
@@ -1042,8 +1042,76 @@ private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
         Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }
     }
 
+    /// `#rebootselfheal`: a connect failure that proves nothing is listening.
+    ///
+    /// After a host reboot the controller socket is in one of two states, and
+    /// both mean the same thing: the file is gone with the tmpfs
+    /// (`NoSuchFileException`), or it outlived the process that bound it and the
+    /// kernel actively refuses (`ECONNREFUSED`). Retrying the connect cannot fix
+    /// either, so these used to surface verbatim — "Sync failed: ... Connection
+    /// refused" — and the IDE stayed broken until a human deleted the socket by
+    /// hand. Reported 2026-08-03 after an X11 wedge and reboot.
+    ///
+    /// Deliberately narrow. Any *other* connect error (permission, a wedged but
+    /// live controller, a timeout) is NOT proof of death, and relaunching over a
+    /// live controller is worse than reporting the error — the same reasoning as
+    /// the binary's `SocketLiveness` probe, which treats an ambiguous error as
+    /// live.
+    internal fun provesNoControllerListening(e: Throwable): Boolean {
+        var cause: Throwable? = e
+        while (cause != null) {
+            if (cause is java.nio.file.NoSuchFileException) return true
+            if (cause is java.net.ConnectException) return true
+            val message = cause.message
+            if (message != null &&
+                (message.contains("Connection refused") || message.contains("No such file"))
+            ) {
+                return true
+            }
+            cause = cause.cause
+        }
+        return false
+    }
+
     private fun sendRequestDataToSocket(socket: File, request: JsonObject): JsonObject {
         return sendRequestDataToSocketWithTimeout(socket, request, SOCKET_REQUEST_TIMEOUT_MS)
+    }
+
+    /// An operator-initiated request, which may start a controller if none is up.
+    ///
+    /// Advertises `controller_reboot_self_heal_v1` for the editor parity matrix.
+    ///
+    /// Scoped deliberately. `editors/SPEC.md` requires the passive
+    /// editor-surface observation lane to send "over the existing-controller
+    /// socket; it never launches the controller" — a tab click must stay free.
+    /// So the reboot self-heal belongs only on lanes a human actually asked for
+    /// (Sync Tmux Layout, Run Agent Doc, focus handoff), where starting a
+    /// controller is the expected cost of the action.
+    private fun sendOperatorRequestDataToSocket(socket: File, request: JsonObject): JsonObject {
+        return try {
+            sendRequestDataToSocketWithTimeout(socket, request, SOCKET_REQUEST_TIMEOUT_MS)
+        } catch (e: Exception) {
+            if (!provesNoControllerListening(e)) throw e
+            // The shared library owns the recovery: adopt a live controller,
+            // unlink a stale socket file, launch. This call must stay a single
+            // delegation — a plugin that grows its own socket recovery is how the
+            // two paths drift apart.
+            val projectRoot = socket.parentFile?.parentFile?.path
+                ?: throw e
+            log.warn(
+                "[cp] no controller listening on ${socket.path}; " +
+                    "ensuring one is running (#rebootselfheal)"
+            )
+            val lib = AgentDocLib.get() ?: throw e
+            val ensured = try {
+                lib.agent_doc_ensure_controller_running(projectRoot)
+            } catch (linkError: Throwable) {
+                log.warn("[cp] ensure-controller unavailable: ${linkError.message}")
+                throw e
+            }
+            if (ensured != 1) throw e
+            sendRequestDataToSocketWithTimeout(socket, request, SOCKET_REQUEST_TIMEOUT_MS)
+        }
     }
 
     private fun sendRequestDataToSocketWithTimeout(
@@ -1096,7 +1164,7 @@ private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
     }
 
     private fun sendToSocket(socket: File, request: JsonObject): CpEditorRouteResult {
-        val data = sendRequestDataToSocket(socket, request)
+        val data = sendOperatorRequestDataToSocket(socket, request)
         return CpEditorRouteResult(
             exitCode = data.get("exit_code")?.asInt ?: 1,
             output = data.get("output")?.asString ?: "",
@@ -1109,7 +1177,7 @@ private fun sendAcceptedCommandSubmitToSocket(
         commandId: String,
         commandName: String,
     ): CpEditorRouteResult {
-    val data = sendRequestDataToSocket(socket, request)
+    val data = sendOperatorRequestDataToSocket(socket, request)
     return resolveCommandSubmitAcceptedData(data, commandId, commandName)
 }
 

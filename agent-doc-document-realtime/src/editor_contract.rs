@@ -33,6 +33,22 @@ pub const PEER_REPLICA_PULL_CAPABILITY: &str = "peer_replica_pull_v1";
 /// native FFI node through the headless cross-editor conformance harness.
 pub const CROSS_EDITOR_NATIVE_HARNESS_CAPABILITY: &str = "cross_editor_native_harness_v1";
 
+/// The adapter recovers on its own when the controller socket has no listener.
+///
+/// `#rebootselfheal`. A host reboot leaves the socket in one of two states that
+/// both mean "nothing is listening" — the file vanished with the tmpfs
+/// (`ENOENT`), or it outlived the process that bound it (`ECONNREFUSED`) — and
+/// neither is fixable by retrying the connect. An adapter that surfaces either
+/// verbatim stays broken until a human deletes the socket by hand, which is what
+/// happened on 2026-08-03 after an X11 wedge and reboot.
+///
+/// Recovery must **delegate**: the binary already adopts a live controller,
+/// unlinks a stale socket file, and launches. An adapter that reimplements any
+/// of that is how the editor and the binary drift into disagreeing about
+/// controller liveness. It applies only to operator-initiated lanes — the
+/// passive editor-surface observation lane must still never launch a controller.
+pub const CONTROLLER_REBOOT_SELF_HEAL_CAPABILITY: &str = "controller_reboot_self_heal_v1";
+
 /// Required capabilities for a plugin that participates in live authority.
 pub const REQUIRED_LAZILY_EDITOR_CAPABILITIES: [&str; 2] = [
     OPERATOR_TEXT_AUTHORITY_CAPABILITY,
@@ -58,11 +74,15 @@ mod tests {
         include_str!(
             "../../editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/CrossEditorHarnessMain.kt"
         ),
+        include_str!(
+            "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt"
+        ),
     ];
     const VSCODE_SOURCES: &[&str] = &[
         include_str!("../../editors/vscode/src/native.ts"),
         include_str!("../../editors/vscode/src/editorIntent.ts"),
         include_str!("../../editors/vscode/src/crossEditorHarness.ts"),
+        include_str!("../../editors/vscode/src/extension.ts"),
     ];
     const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
 
@@ -121,6 +141,7 @@ mod tests {
             PEER_REPLICA_PULL_CAPABILITY,
             "native_hot_reload_generation_v1",
             CROSS_EDITOR_NATIVE_HARNESS_CAPABILITY,
+            CONTROLLER_REBOOT_SELF_HEAL_CAPABILITY,
         ];
         assert_eq!(
             rows.iter().map(|row| row.feature).collect::<Vec<_>>(),

@@ -1007,6 +1007,15 @@ function controllerSocketPath(projectRoot: string): string {
     return path.join(projectRoot, '.agent-doc', 'controller.sock');
 }
 
+/**
+ * Ensure a controller is listening before an operator-initiated controller request.
+ *
+ * Advertises `controller_reboot_self_heal_v1`. A reboot leaves the socket either
+ * absent or stale-with-no-listener, and neither is fixable by retrying the
+ * connect; `--ensure` delegates the recovery (adopt, unlink, launch) to the
+ * binary rather than reimplementing it here. Operator lanes only — the passive
+ * surface-observation lane must never launch a controller.
+ */
 async function ensureProjectControllerRunning(projectRoot: string, signal: AbortSignal): Promise<void> {
     await runCli(
         ['controller', 'status', '--project-root', projectRoot, '--ensure'],

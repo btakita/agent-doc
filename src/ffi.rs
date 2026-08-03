@@ -3042,6 +3042,57 @@ pub unsafe extern "C" fn agent_doc_editor_surface_forget(project_root: *const c_
     )))
 }
 
+/// Ensure a project controller is listening, launching one if it is not.
+///
+/// `#rebootselfheal`. Editor plugins connect to `.agent-doc/controller.sock`
+/// directly, and after a host reboot that connect fails in two ways that both
+/// mean exactly "nothing is listening": `ENOENT` when the socket file is gone
+/// with the tmpfs, and `ECONNREFUSED` when the file outlived the process that
+/// bound it. Neither is recoverable by retrying the connect, so the plugin
+/// surfaced them verbatim — "Sync failed: ... Connection refused" — and stayed
+/// broken until a human intervened. Reported 2026-08-03 after an X11 wedge and
+/// reboot.
+///
+/// The binary already recovers from both: `connect_or_launch` adopts a live
+/// controller or launches one, and the bind path unlinks a stale socket file
+/// before listening. Only the editors lacked a way to ask for it, so this
+/// exposes the existing recovery rather than reimplementing it — per the
+/// Shared-Foundation rule, plugins must not carry their own socket recovery
+/// logic.
+///
+/// Returns `1` when a controller is listening on return (already running or
+/// freshly launched), `0` when the launch was attempted but did not come up,
+/// and `-1` on a bad argument.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_ensure_controller_running(project_root: *const c_char) -> c_int {
+    let Ok(project_root) = (unsafe { required_ffi_string(project_root, "project_root") }) else {
+        return -1;
+    };
+    let project_root = Path::new(&project_root);
+    match agent_doc_controller_io::project_controller::ensure_controller_running(
+        project_root,
+        agent_doc_controller::status::LaunchMode::Lazy,
+    ) {
+        Ok(()) => 1,
+        Err(err) => {
+            // Never swallow: a failed launch is why the caller is stuck.
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "ffi_ensure_controller_running_failed project_root={} error={err:#}",
+                    project_root.display()
+                ),
+            );
+            eprintln!("[agent-doc] ensure controller running failed: {err:#}");
+            0
+        }
+    }
+}
+
 /// Focus the actor pane for a document through the Project Controller.
 ///
 /// This centralizes pane selection behind the controller so JetBrains does not

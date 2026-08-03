@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 019fc4eb-4476-7a30-9adf-2222a81b14ee
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -40,12 +40,35 @@ complete
 Compacted content:
 - Archived 8 response topic(s): Review triage; Closeout convergence, live-session recovery, and “legacy Markdown”; `#f1s3`; 5 more
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): Response; haiven-dev retained closeout and editor route
+
+### Re: #realtimesalient — gpt-5
+
+The real-time salient-response path was already implemented and released in agent-doc `0.35.117`; the installed build is `0.35.118`. I verified the structural salient checkpoint, CRDT/Lazily response node, final-response replay/cleanup, specification, runbook, release note, and focused Rust coverage. The queue item is complete.
+
+### Re: tmux auto-sync latency — gpt-5
+
+The manual `Sync Tmux Layout` run completed in about four seconds; its largest measured costs were ownership proof/per-file ownership work and tmux routing. The later editor tab switch was a separate failure: it never published an editor-surface observation to the controller, so the apparent wedge was before tmux reconciliation.
+
+The cause was JetBrains selection ordering under load. `selectionChanged` could arrive while IDEA still exposed the old file through `selectedFiles`; after three immediate EDT reprojection passes, the listener retained the observation but had no dependency edge that would wake it again. The listener now carries the selection event's old file and, only after the bounded settling budget is exhausted, substitutes the exact old-to-new event edge into a still-stale visible/layout projection. It never invents a pane or replacement unless the old event file is actually present. The JetBrains specification records this behavior.
+
+Regression coverage first failed on the missing event-edge reconciler, then passed after implementation. The focused `EditorTabSyncListenerTest` and the repository-wide `make check` both pass. The CLI/native library and JetBrains plugin package were installed locally; two live native endpoints reloaded and one was unavailable, while the Kotlin listener package will activate on the next IDE restart. The implementation is committed as `d471faf5d` (`fix: settle stale editor selection observations`).
+
+The previously red hosted CI run was unrelated to this listener: Gradle could not download unpublished `io.github.lazily:lazily:0.39.0`. CI now checks out the public `lazily-kt` sibling composite dependency at the path already used by local builds, and the full local suite passes through that path.
+
+### Re: haiven Compact Exchange commit — gpt-5
+
+> **Queue prompt:**
+>
+> do [#realtimesalient]
+
+
+The earlier haiven session-check proved a synthetic closeout but did not prove the response repository commit. I corrected that: `tasks/haiven-dev.md` and its done archive are committed in the haiven-dev repository as `f9a49e4`. `agent-doc session status` now reports `committed_after_latest_run=true`, and session doctor reports no issues. A newer four-line queue/in-progress editor projection remains outside that response commit so concurrent document state was not swept into it.
 <!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#realtimesalient]
+- ~~do [#realtimesalient]~~
 - do [#multilineheadbullet]
 - do [#compacttombgc]
 - do [#reactive-closeout-install-verify]
@@ -59,7 +82,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
 - [ ] [#multilineheadbullet] [focused-cycle] Make multiline `---` queue prompts addressable — SHARPENED 2026-07-19. Damage is already PREVENTED (#qconsumenostrike fail-closed guard, 5b3761dfc); this is the remaining correctness half. Refined finding: the ENTRY model already handles multiline correctly — document_queue::parse surfaces the multiline head as a Prompt (preflight lists it), mark_first_n_prompts_completed targets it, and render emits Completed multiline as `~~~done` fences. The mismatch is that markdown_ast::item_nodes (used for IPC node ops and AST-keyed consume) enumerates only list items, so it returns the NEIGHBOUR for the same logical head — observed as node_ops=[queue:1:neighbour:0] while consumed_text was the multiline head. So the fix is to reconcile the two ENUMERATORS, not the entry model: either teach item_nodes the `---` block shape, or render multiline heads with a bullet + indented continuation that both round-trips through parse_spans and yields a node. Needs one clean reproduction to confirm which of the two paths actually mutated the document in the observed strikes.
 - [ ] [#compacttombgc] [recommended] Fenced Compact Exchange CRDT epoch — RE-SCOPED 2026-07-19 away from tombstone GC. The #bootstrapsize measurement (crdt_sync.rs) on a real 57KB document found 88,630 ops and ZERO tombstones, so TextCrdt tombstone GC would reclaim nothing on the observed shape; the payload is pre-compaction INSERT history. The valuable half is the epoch itself: rebootstrap attached replicas from the compacted snapshot and reject/component-rebase older-epoch deltas, which discards that insert history — the only mechanism that makes compaction actually shrink the register bootstrap. Keep tombstone GC as a trailing step for delete-heavy documents, not the headline. Still needs the all-replica stability frontier before any epoch fence is safe.
 - [ ] [#reactive-closeout-install-verify] After the retained tsift.md editor-delivery capture reaches a terminal boundary, install the committed Agent Doc binary and verify the equityfundingsource.md queue strike, Monster Rod Holders corruption rejection, Compact Exchange recovery, and editor/tmux responsiveness without recycling an active closeout owner.

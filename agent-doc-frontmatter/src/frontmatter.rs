@@ -515,6 +515,15 @@ pub struct Frontmatter {
         rename = "agent_doc_queue_context_reset"
     )]
     pub queue_context_reset: Option<bool>,
+    /// Explicit opt-in for terminal convergence scoped to the components owned
+    /// by retained agent write transitions. Off by default while the
+    /// adversarial live-edit survival suite accumulates production evidence.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_per_component_convergence"
+    )]
+    pub per_component_convergence: Option<bool>,
     /// Explicit opt-in for opportunistic gated-review auto-verification
     /// (`#optverify`). When true, preflight may flip a gated `[/]` review item
     /// carrying a verify predicate to `[x]` once its proof marker is provable
@@ -2609,6 +2618,7 @@ mod tests {
             links: vec![],
             auto_compact: None,
             queue_context_reset: None,
+            per_component_convergence: None,
             gate_autoverify: None,
             clear_threshold: None,
             supervisor_auto_recycle: None,
@@ -2898,6 +2908,22 @@ mod tests {
         let content = "---\nauto_done: true\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.auto_done, Some(true));
+    }
+
+    #[test]
+    fn per_component_convergence_round_trips_with_canonical_default_off_key() {
+        let content = "---\nagent_doc_per_component_convergence: true\n---\nBody\n";
+        let (fm, body) = parse(content).unwrap();
+        assert_eq!(fm.per_component_convergence, Some(true));
+        assert_eq!(body, "Body\n");
+
+        let written = write(&fm, body).unwrap();
+        assert!(written.contains("agent_doc_per_component_convergence: true"));
+        assert_eq!(
+            parse(&written).unwrap().0.per_component_convergence,
+            Some(true)
+        );
+        assert_eq!(Frontmatter::default().per_component_convergence, None);
     }
 
     #[test]

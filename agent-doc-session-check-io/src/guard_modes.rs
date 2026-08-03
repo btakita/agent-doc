@@ -89,3 +89,14 @@ pub fn resolve_auto_done_with_force_disk(file: &Path, force_disk: bool) -> Resul
         &project_config,
     ))
 }
+
+pub fn resolve_per_component_convergence(file: &Path) -> Result<bool> {
+    let fm = frontmatter_for_mode(file, "per_component_convergence", false)?;
+    let project_config = agent_doc_project_config_io::load_project_for_doc(file);
+    Ok(
+        agent_doc_frontmatter::project_config::resolve_per_component_convergence(
+            &fm,
+            &project_config,
+        ),
+    )
+}

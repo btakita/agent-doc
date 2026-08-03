@@ -1,8 +1,10 @@
 //! Pure whole-document and per-component authority hash projections.
 //!
 //! The whole-document hash remains the compatibility identity used by existing
-//! convergence gates. Component hashes are diagnostic-only in this phase: they
-//! explain which document regions diverge without changing any equality rule.
+//! convergence gates. Component hashes also support the explicitly opted-in
+//! owned-component convergence gate: a retained transition derives its owned
+//! component names from the exact expected/target pair, and only those names
+//! participate in terminal equality.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -25,7 +27,7 @@ impl ComponentAuthorityKey {
         }
     }
 
-    fn label(&self) -> String {
+    pub fn label(&self) -> String {
         if self.occurrence == 0 {
             self.name.clone()
         } else {
@@ -134,6 +136,34 @@ impl DocumentAuthorityHashes {
             })
             .collect()
     }
+
+    /// Component names changed by a transition from `self` to `other`.
+    ///
+    /// Names deliberately collapse occurrences. A turn that changes one
+    /// repeated component owns convergence for every occurrence of that name;
+    /// otherwise a concurrent reorder could silently retarget occurrence
+    /// indices while satisfying the gate.
+    pub fn changed_component_names(&self, other: &Self) -> BTreeSet<String> {
+        self.divergences(other)
+            .into_iter()
+            .map(|divergence| divergence.key.name)
+            .collect()
+    }
+
+    /// Whether all components named in `required_names` have equal hashes.
+    ///
+    /// An empty set is vacuously converged: no retained agent transition owns
+    /// any part of the document, so operator-only divergence cannot block the
+    /// closeout queue.
+    pub fn component_names_converged(
+        &self,
+        other: &Self,
+        required_names: &BTreeSet<String>,
+    ) -> bool {
+        self.divergences(other)
+            .into_iter()
+            .all(|divergence| !required_names.contains(&divergence.key.name))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +171,27 @@ pub struct ComponentAuthorityDivergence {
     pub key: ComponentAuthorityKey,
     pub authority_hash: Option<String>,
     pub disk_hash: Option<String>,
+}
+
+/// Derive the component names owned by one exact retained write transition.
+pub fn changed_component_names(
+    expected_content: &str,
+    target_content: &str,
+) -> Result<BTreeSet<String>> {
+    let expected = DocumentAuthorityHashes::from_content(expected_content)?;
+    let target = DocumentAuthorityHashes::from_content(target_content)?;
+    Ok(expected.changed_component_names(&target))
+}
+
+/// Compare authority and disk only across the supplied owned component names.
+pub fn owned_component_names_converged(
+    authority_content: &str,
+    disk_content: &str,
+    owned_component_names: &BTreeSet<String>,
+) -> Result<bool> {
+    let authority = DocumentAuthorityHashes::from_content(authority_content)?;
+    let disk = DocumentAuthorityHashes::from_content(disk_content)?;
+    Ok(authority.component_names_converged(&disk, owned_component_names))
 }
 
 fn short(hash: Option<&str>) -> &str {
@@ -184,7 +235,12 @@ pub fn format_authority_disk_component_divergence(
 
 #[cfg(test)]
 mod tests {
-    use super::{DocumentAuthorityHashes, format_authority_disk_component_divergence};
+    use std::collections::BTreeSet;
+
+    use super::{
+        DocumentAuthorityHashes, changed_component_names,
+        format_authority_disk_component_divergence, owned_component_names_converged,
+    };
 
     #[test]
     fn whole_document_hash_preserves_the_existing_content_hash() {
@@ -208,6 +264,46 @@ mod tests {
         assert!(summary.starts_with("exchange:"));
         assert!(!summary.contains("queue:"));
         assert!(!summary.contains("@unscoped:"));
+    }
+
+    #[test]
+    fn exact_transition_derives_only_the_component_the_agent_changed() {
+        let expected = concat!(
+            "<!-- agent:exchange -->\nold response\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- operator draft\n<!-- /agent:queue -->\n",
+        );
+        let target = expected.replace("old response", "new response");
+
+        assert_eq!(
+            changed_component_names(expected, &target).unwrap(),
+            BTreeSet::from(["exchange".to_string()])
+        );
+    }
+
+    #[test]
+    fn owned_scope_ignores_operator_only_queue_divergence() {
+        let authority = concat!(
+            "<!-- agent:exchange -->\nnew response\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- operator typing\n<!-- /agent:queue -->\n",
+        );
+        let disk = authority.replace("- operator typing", "- prior queue");
+
+        assert!(
+            owned_component_names_converged(
+                authority,
+                &disk,
+                &BTreeSet::from(["exchange".to_string()]),
+            )
+            .unwrap()
+        );
+        assert!(
+            !owned_component_names_converged(
+                authority,
+                &disk,
+                &BTreeSet::from(["exchange".to_string(), "queue".to_string()]),
+            )
+            .unwrap()
+        );
     }
 
     #[test]

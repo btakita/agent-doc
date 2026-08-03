@@ -79,6 +79,128 @@ mod pane_layout_projection_model {
     }
 }
 
+/// Adversarial model for `#percellconverge` phase 3. The retained agent
+/// transition owns only `exchange`; the editor changes `queue` on every tick.
+/// The survival assertion is paired with an ownership-overclaim mutation proof
+/// so the test demonstrates sensitivity to the exact ownership set.
+#[cfg(test)]
+mod owned_component_convergence_model {
+    use std::collections::BTreeSet;
+
+    use agent_doc_document::authority_hashes::{
+        changed_component_names, owned_component_names_converged,
+    };
+
+    fn document(exchange: &str, queue: &str) -> String {
+        format!(
+            "<!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\
+             <!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    fn component_body<'a>(document: &'a str, name: &str) -> &'a str {
+        agent_doc_element::element::parse(document)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == name)
+            .unwrap()
+            .content(document)
+    }
+
+    /// Project the agent target only for owned names, retaining the editor cut
+    /// everywhere else. This is intentionally tiny and test-only: it makes an
+    /// ownership over-claim observably destructive instead of merely blocked.
+    fn project_owned_components(
+        agent_target: &str,
+        editor_cut: &str,
+        owned: &BTreeSet<String>,
+    ) -> String {
+        let mut projected = editor_cut.to_string();
+        for name in owned {
+            let agent_components = agent_doc_element::element::parse(agent_target).unwrap();
+            let Some(agent_component) = agent_components
+                .into_iter()
+                .find(|component| component.name == *name)
+            else {
+                continue;
+            };
+            let editor_components = agent_doc_element::element::parse(&projected).unwrap();
+            let Some(editor_component) = editor_components
+                .into_iter()
+                .find(|component| component.name == *name)
+            else {
+                continue;
+            };
+            projected =
+                editor_component.replace_content(&projected, agent_component.content(agent_target));
+        }
+        projected
+    }
+
+    fn run_ticks(owned: &BTreeSet<String>, ticks: usize) -> (String, String) {
+        let baseline = document("prior response", "- queued work");
+        let agent_target = document("new agent response", "- queued work");
+        let mut disk = agent_target.clone();
+        let mut typed = String::new();
+
+        for tick in 0..ticks {
+            typed.push(char::from(b'a' + (tick % 26) as u8));
+            let authority = document(
+                "new agent response",
+                &format!("- queued work\n- operator keystrokes: {typed}"),
+            );
+
+            if owned_component_names_converged(&authority, &disk, owned).unwrap() {
+                disk = project_owned_components(&agent_target, &authority, owned);
+            }
+        }
+
+        assert_eq!(
+            changed_component_names(&baseline, &agent_target).unwrap(),
+            BTreeSet::from(["exchange".to_string()])
+        );
+        (disk, typed)
+    }
+
+    #[test]
+    fn exchange_write_commits_while_every_operator_queue_keystroke_survives() {
+        let owned = BTreeSet::from(["exchange".to_string()]);
+        let (committed, typed) = run_ticks(&owned, 64);
+
+        assert_eq!(
+            component_body(&committed, "exchange").trim(),
+            "new agent response"
+        );
+        assert!(
+            component_body(&committed, "queue").contains(&typed),
+            "all operator keystrokes must survive the scoped commit"
+        );
+    }
+
+    #[test]
+    fn ownership_overclaim_proves_the_survival_oracle_can_go_red() {
+        let overclaimed = BTreeSet::from(["exchange".to_string(), "queue".to_string()]);
+        let baseline = document("prior response", "- queued work");
+        let agent_target = document("new agent response", "- queued work");
+        let editor_cut = document(
+            "new agent response",
+            "- queued work\n- operator keystrokes: abcdef",
+        );
+        let destructive_projection =
+            project_owned_components(&agent_target, &editor_cut, &overclaimed);
+
+        assert!(
+            !component_body(&destructive_projection, "queue").contains("abcdef"),
+            "the mutation proof must show an over-claimed queue drops operator text"
+        );
+        assert_eq!(
+            changed_component_names(&baseline, &agent_target).unwrap(),
+            BTreeSet::from(["exchange".to_string()]),
+            "the real ownership derivation must reject the over-claim"
+        );
+    }
+}
+
 /// `#jbcoldstartcrdtowner` reference model. Pane focus/layout sync is an
 /// independent fast lane while a replacement controller fences a retained
 /// editor lineage and lazily reprojects the retained canonical target.

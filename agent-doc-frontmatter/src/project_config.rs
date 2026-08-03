@@ -115,6 +115,17 @@ pub fn resolve_auto_done(frontmatter: &Frontmatter, project_config: &ProjectConf
         .unwrap_or(false)
 }
 
+/// Resolve the default-off per-component convergence experiment.
+pub fn resolve_per_component_convergence(
+    frontmatter: &Frontmatter,
+    project_config: &ProjectConfig,
+) -> bool {
+    frontmatter
+        .per_component_convergence
+        .or(project_config.agent_doc_per_component_convergence)
+        .unwrap_or(false)
+}
+
 /// Workspace-level lint configuration (`[lint]` section in
 /// `.agent-doc/config.toml`).
 ///
@@ -299,6 +310,10 @@ pub struct ProjectConfig {
     /// `/clear` that churns the session or is rejected mid-turn.
     #[serde(default, alias = "queue_context_reset")]
     pub agent_doc_queue_context_reset: Option<bool>,
+    /// Explicit opt-in for terminal convergence scoped to retained-write-owned
+    /// components. Omit to preserve whole-document equality.
+    #[serde(default, alias = "per_component_convergence")]
+    pub agent_doc_per_component_convergence: Option<bool>,
     /// Explicit opt-in for opportunistic gated-review auto-verification
     /// (`#optverify`). When true, preflight may auto-flip a gated `[/]` review
     /// item carrying a verify predicate to `[x]` once its proof marker is
@@ -658,6 +673,32 @@ mod guard_resolution_tests {
             &Frontmatter::default(),
             &ProjectConfig::default()
         ));
+    }
+
+    #[test]
+    fn per_component_convergence_is_default_off_and_frontmatter_overrides_project() {
+        let fm = Frontmatter {
+            per_component_convergence: Some(false),
+            ..Default::default()
+        };
+        let cfg = ProjectConfig {
+            agent_doc_per_component_convergence: Some(true),
+            ..Default::default()
+        };
+
+        assert!(!resolve_per_component_convergence(&fm, &cfg));
+        assert!(resolve_per_component_convergence(
+            &Frontmatter::default(),
+            &cfg
+        ));
+        assert!(!resolve_per_component_convergence(
+            &Frontmatter::default(),
+            &ProjectConfig::default()
+        ));
+
+        let parsed =
+            parse_project_toml("per_component_convergence = true\n").expect("alias must parse");
+        assert_eq!(parsed.agent_doc_per_component_convergence, Some(true));
     }
 }
 

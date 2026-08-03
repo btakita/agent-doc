@@ -4,6 +4,21 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.128
 
+- **Terminal convergence can now be scoped to exact retained-write component
+  ownership (`#percellconverge` phase 3).** The default remains whole-document
+  equality. Projects may explicitly opt in with
+  `agent_doc_per_component_convergence = true` (or document frontmatter
+  `agent_doc_per_component_convergence: true`). When enabled, `session-check`
+  derives the owned component-name set from every retained write journal entry's
+  exact expected→target transition and requires authority/disk equality only
+  for that set. Operator-only divergence in `queue` therefore cannot hold an
+  `exchange` response closeout, while malformed transitions and legacy intents
+  without expected content fall back to whole-document equality. The gate does
+  not authorize a disk merge or remove the whole-document hash. Adversarial
+  SimWorld coverage types into `queue` on every tick during an `exchange`
+  closeout and asserts every keystroke survives; a paired ownership-overclaim
+  mutation demonstrates that the survival oracle goes red when `queue` is
+  incorrectly claimed.
 - **The editor's "Restart Agent" action reached the controller and was rejected
   outright (`#agentrestartwire`).** `session_actor_cmd::restart_agent` encodes
   the operator's harness-replacement intent as `agent:<mode>` so it stays

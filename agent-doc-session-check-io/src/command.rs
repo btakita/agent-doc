@@ -75,6 +75,7 @@ use agent_doc_turn::op_log::{
 use agent_doc_workflow::session_check::{BlockedCloseoutMessage, GuardResult};
 use anyhow::Result;
 use lazily::{Computed, Source};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::{
@@ -117,12 +118,12 @@ pub enum ReadOnlyTerminalProjectionDecision {
 /// projection. This is an editor-owned persistence effect, not a competing
 /// document replacement.
 pub fn decide_read_only_terminal_projection(
-    authority_matches_disk: bool,
+    authority_matches_required_scope: bool,
     cycle_phase: Option<CyclePhase>,
     retained_document_write_blocks: bool,
     editor_delivery_converged: bool,
 ) -> ReadOnlyTerminalProjectionDecision {
-    if authority_matches_disk {
+    if authority_matches_required_scope {
         return ReadOnlyTerminalProjectionDecision::Converged;
     }
     if retained_document_write_blocks && cycle_phase == Some(CyclePhase::WriteApplied) {
@@ -144,6 +145,69 @@ pub fn decide_read_only_terminal_projection(
         return ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave;
     }
     ReadOnlyTerminalProjectionDecision::ObserveOnly
+}
+
+/// Resolve terminal convergence using whole-document equality by default and
+/// exact retained-transition ownership only under the explicit experiment.
+///
+/// Every pending intent contributes the component names changed between its
+/// expected and target cuts. Missing legacy `expected_content` or malformed
+/// component structure fails closed to whole-document equality.
+fn terminal_projection_matches_required_scope(
+    file: &Path,
+    authority_content: &str,
+    disk_content: &str,
+) -> Result<bool> {
+    if authority_content == disk_content {
+        return Ok(true);
+    }
+    if !crate::guard_modes::resolve_per_component_convergence(file)? {
+        return Ok(false);
+    }
+
+    let mut owned_component_names = BTreeSet::new();
+    for intent in agent_doc_document_realtime_io::pending_document_write_journal(file) {
+        let Some(expected_content) = intent.expected_content.as_deref() else {
+            agent_doc_ops_log_io::log_op(
+                file,
+                "per_component_convergence_fallback reason=legacy_intent_missing_expected_content",
+            );
+            return Ok(false);
+        };
+        let changed = match agent_doc_document::authority_hashes::changed_component_names(
+            expected_content,
+            &intent.target_content,
+        ) {
+            Ok(changed) => changed,
+            Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "per_component_convergence_fallback reason=transition_parse_failed error={error:#}"
+                    ),
+                );
+                return Ok(false);
+            }
+        };
+        owned_component_names.extend(changed);
+    }
+
+    match agent_doc_document::authority_hashes::owned_component_names_converged(
+        authority_content,
+        disk_content,
+        &owned_component_names,
+    ) {
+        Ok(converged) => Ok(converged),
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "per_component_convergence_fallback reason=authority_parse_failed error={error:#}"
+                ),
+            );
+            Ok(false)
+        }
+    }
 }
 
 fn derive_read_only_retained_closeout_resume(
@@ -808,6 +872,8 @@ fn run_with_options_inner(
         let cycle_phase =
             agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|state| state.phase);
         let retained_document_write_blocks = effects.retained_document_write_blocks(file);
+        let terminal_projection_converged =
+            terminal_projection_matches_required_scope(file, &authority_content, &disk_content)?;
         let editor_delivery_converged = authority_content == disk_content
             || agent_doc_document_realtime_io::live_editor_projection_ready_for_native_save(
                 file,
@@ -815,7 +881,7 @@ fn run_with_options_inner(
                 "session_check_read_only_retained_delivery_gate",
             )?;
         let terminal_projection_decision = decide_read_only_terminal_projection(
-            authority_content == disk_content,
+            terminal_projection_converged,
             cycle_phase,
             retained_document_write_blocks,
             editor_delivery_converged,
@@ -880,7 +946,7 @@ fn run_with_options_inner(
             }
         };
         anyhow::ensure!(
-            authority_content == disk_content,
+            terminal_projection_matches_required_scope(file, &authority_content, &disk_content,)?,
             "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); {}. {}",
             file.display(),
             agent_doc_hash::content_hash(&authority_content),

@@ -71,6 +71,20 @@ terminal boundary, the error includes a stable `ACTIONABLE_AGENT_DOC_FIX_PROMPT`
 issue key and asks the active agent to fix the underlying product defect.
 `agent_doc_dogfood: false` disables legacy path-inferred dogfood behavior.
 
+To opt a document into retained-write-owned terminal convergence:
+
+```yaml
+---
+agent_doc_per_component_convergence: true
+---
+```
+
+The same experiment can be enabled project-wide in `.agent-doc/config.toml`
+with `agent_doc_per_component_convergence = true`. It is off by default.
+When enabled, an operator edit in an unowned component such as `agent:queue`
+does not block an agent response that owns only `agent:exchange`. Invalid or
+legacy ownership evidence falls back to whole-document equality.
+
 ## Environment Variables
 
 ### Runtime Tuning

@@ -74,13 +74,25 @@ Dogfooding the change against the wedged Haiven session exposed three independen
 - the response-cell fast path now proves the entire patch is canonical assistant-only content before controller submission, so a valid legacy `## Re:` response or a mixed response/prompt patch falls through to compatibility patchback instead of repeating the same parser rejection forever.
 
 Verification passed: focused tests for every modified crate, `make check` with 8,585 tests, release-projection checks, and all TLA+ model checks. The private-name denylist and `git diff --check` are clean. Both public commits are on `origin/main`, CI run `30842884764` was started, and the exact committed `agent-doc 0.35.128` build is installed. Live recovery then crossed the retained closeout, restored the editor replica, committed the previously wedged response, admitted the next Haiven queue cycle, and completed its Agent Doc closeout cleanly.
+
+### Re: do [#pcc4] — gpt-5.6
+
+> **Queue prompt:**
+>
+> do [#pcc4]
+
+
+Implemented and pushed per-component convergence phase 4 in `btakita/agent-doc` as `af8b9bbad` (`fix: rebase owned component commits`).
+
+With `agent_doc_per_component_convergence` enabled, the commit coordinator now derives the same owned component-name set from exact retained expected→target transitions before Git staging. It proves that each owned component in the binary snapshot has reached current Lazily/editor authority, then checkpoints that current authority cut as the commit candidate. Unowned operator edits therefore survive byte-for-byte instead of being replaced by the older whole-document snapshot. An owned mismatch fails closed so Git cannot outrun editor delivery. Legacy intents without expected content and malformed transitions retain the whole-document fallback. The path never elects or component-merges an independent disk candidate while a live editor owns the document.
+
+Regression coverage includes 64 ticks of concurrent queue typing during an exchange-only closeout, an ownership-overclaim negative control, owned-target delivery refusal, and legacy fallback. Focused tests passed, and the complete `make check` gate passed with artifact `.tsift/artifacts/tart-08d4bb6eea.test.log`. The exact committed `agent-doc 0.35.128` build is installed; CI run `30844635498` was observed once in progress after push.
 <!-- agent:boundary:f621055c:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#pcc3]~~
-- do [#pcc4]
+- ~~do [#pcc4]~~
 - do [#panelayoutrace]
 - Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.
 - do [#recommendedungatereview-b1cb]
@@ -109,7 +121,6 @@ Verification passed: focused tests for every modified crate, `make check` with 8
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcc4] #agent-doc-feature Per-component convergence phase 4: per-component commit. Commit only the owned components, rebasing onto whatever the operator has since written elsewhere in the document, instead of writing the whole file. Non-goal to preserve: the agent still never component-merges a disk candidate under a live editor - per-component scope narrows WHAT must converge, it does not grant new authority to overwrite. Depends on #pcc3. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#panelayoutrace] #agent-doc-bug Pane-layout/dispatch race leaves an unmanaged pane in the agent-doc tmux window, and layout convergence has no concept of physical pane order. Plan: tasks/agent-doc/plan-pane-layout-dispatch-race.md. OPERATOR REPRO (2026-08-03): Run Agent Doc on lazily.md, then navigate the editor to agent-doc-bugs2.md WHILE that dispatch is still occurring; the yellow tmux bar offering to run lazily.md appears and lazily.md's pane stays in the window. Confirmed at 07:02:00Z - phase=retry_pending observation=pane_count_mismatch, expected=[bugs2, haiven-dev] (2, editor-visible) vs actual=[bugs2, lazily, haiven-dev] (3), panes=[%72,%77,%95]. Dispatch routes/creates a pane for its target while the editor-surface observation recomputes columns from what is visible NOW, so navigating away mid-dispatch excludes the document dispatch is still setting up and its pane becomes an extra the layout cannot model. TWO defects, do not conflate: (A) pane_count_mismatch retries forever because it will not close a pane hosting an active agent and the column set has no slot for it - it needs a terminal named outcome; (B) convergence compares expected/actual as ordered DOCUMENT lists and never checks that the hosting panes are in corresponding left-to-right order, so at 06:31:30Z it reported converged/synced with panes=[%77,%95] while %77 was at x=181 and %95 at x=121 (physically reversed) and %72 at x=0 was unmodelled - focus then picks column 0 faithfully and lands on the rightmost pane, which is the wrong-pane-focus symptom. DO NOT fix B by indexing focus into the physical pane list: in this state that selects %72, injecting into a different document's agent, which is worse. Both recorded projections can be replayed as fixtures without a live IDE
 - [ ] [#recommendedungatereview-b1cb] [recommended] Ungate review item #compactreactiveprojectionverify — validate and move to done
 - [ ] [#recommendedungatereview-9g0v] [recommended] Ungate review item #steeringmirrorverifylive313 — validate and move to done

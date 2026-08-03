@@ -26,6 +26,43 @@ on top inherits that granularity.
 Tracked previously as the per-cell CRDT merge intent (`qcellmerge` in the
 operator memory index); this plan is that work, scoped and sequenced.
 
+## Every refusal site must share one ownership predicate
+
+There are three places that tell an agent a write is retained and forbid
+recovery. They live in three crates and have drifted into three dialects:
+
+| Site | Message |
+|---|---|
+| `agent-doc-git-io/src/live_buffer_guard.rs` — `crdt_relay_pending_refusal` | "the same intent commits itself once delivery converges — this is a deferral, not a lost response" |
+| `agent-doc-session-check-io/src/command.rs` — divergence INTERRUPT | "the controller owns the next closeout attempt and will wake on that state edge" (**fixed in 0.35.123**) |
+| `agent-doc-document-realtime-io/src/lib.rs` — `await_editor_replica_no_disk_write` | "retained by the lazy delivery projection; the attached editor replica is not registered" / "…while editor synchronization is pending" |
+
+None of them checks whether anything actually owns the write. All three fired on
+`agent-doc-bugs2.md` on 2026-08-03 with the newest cycle `committed` over three
+hours earlier and `editor_op_captures` at zero, and each instructed the session
+to stand down. Every one was recovered by hand with `agent-doc commit`.
+
+The irony is recorded in the code: `crdt_relay_pending_refusal`'s doc comment
+says it was made a single function "so all three call sites give the same
+instruction rather than drifting into three dialects." Consolidating the
+*wording* did not stop the *predicate* from diverging — which is the actual
+lesson. Fixing one site, as 0.35.123 did, leaves an agent obeying whichever of
+the other two it happens to reach first.
+
+So the deliverable is one shared ownership predicate, called from all three
+sites, not three parallel patches. Until per-component ownership exists, the
+interim predicate is the one 0.35.123 already proved: no open cycle and no
+retained capture means stranded, not deferred. The "do NOT re-send / recycle /
+force disk" guidance stays intact wherever a real owner is found — that guidance
+is correct and was written for a real 2026-07-26 incident. Only the unowned case
+gains a remedy.
+
+Note the third site's `EditorAttachedMissingReplica` branch fires off the
+one-way editor-attachment latch (`editormodelmissing` in the operator memory
+index), which reports an editor as attached forever once one has ever attached.
+An ownership predicate that trusts that flag inherits the latch, so the
+predicate must key on cycle state and retained captures, not on attachment.
+
 ## The write path still asserts the claim session-check no longer does
 
 `crdt_relay_pending_refusal` (`agent-doc-git-io/src/live_buffer_guard.rs`) is the

@@ -868,15 +868,11 @@ pub fn queue_prompt_node_keys_for_count(
 ) -> Result<QueuePromptNodeKeys> {
     let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
         .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
-    // `#qconsumenostrike`: taking the first `count` unstruck nodes assumed the
-    // node enumerator and `parse_spans` segment the queue identically. They do
-    // not: a multiline `---` prompt renders without a `- ` bullet, so
-    // `item_nodes` skips it while `parse_spans` sees it. The first enumerable
-    // node was then the NEIGHBOUR, and a count-only match (1 == 1) declared
-    // correspondence that did not exist — striking unrun work. Verify each
-    // selected node against the head `parse_spans` actually identifies, the way
-    // the text-driven sibling above already does, so disagreement falls through
-    // to the fail-closed caller instead of silently retargeting.
+    // `#qconsumenostrike`: never assume a second enumerator segments the queue
+    // identically. `item_nodes` now includes canonical multiline prompt
+    // surfaces, but this text correspondence remains the fail-closed proof for
+    // any future or malformed shape. A count-only match could otherwise target
+    // the next enumerable node and strike unrun work.
     let unstruck = nodes
         .into_iter()
         .filter(|node| !node.item.struck)

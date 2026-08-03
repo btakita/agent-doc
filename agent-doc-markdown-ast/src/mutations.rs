@@ -4,7 +4,7 @@
 //! items by durable node key rather than by matching raw text lines or logical
 //! `[#id]` targets.
 
-use crate::overlay::{self, Component, Item};
+use crate::overlay::{self, Component, Item, ItemSurface};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -169,20 +169,37 @@ pub fn consume_nodes(source: &str, component: &str, node_keys: &[&str]) -> Mutat
             });
         }
     }
-    let mut ranges = Vec::new();
+    let mut replacements = Vec::new();
     for node_key in node_keys {
         let node = find_node(&nodes, component, node_key)?;
         if !node.item.struck {
-            ranges.push(raw_range(source, component, node)?);
+            let (start, end) = raw_range(source, component, node)?;
+            replacements.push((start, end, render_struck_item(&node.item)));
         }
     }
     let mut out = source.to_string();
-    ranges.sort_by_key(|(start, _)| *start);
-    ranges.dedup();
-    for (start, end) in ranges.into_iter().rev() {
-        out.replace_range(start..end, &format!("~~{}~~", &source[start..end]));
+    replacements.sort_by_key(|(start, _, _)| *start);
+    replacements.dedup_by(|left, right| left.0 == right.0 && left.1 == right.1);
+    for (start, end, replacement) in replacements.into_iter().rev() {
+        out.replace_range(start..end, &replacement);
     }
     Ok(out)
+}
+
+fn render_multiline_item(marker: &str, text: &str) -> String {
+    let mut rendered = format!("{marker}\n{text}");
+    if !text.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered.push_str(if marker == "---" { "---" } else { "~~~" });
+    rendered
+}
+
+fn render_struck_item(item: &Item) -> String {
+    match item.surface {
+        ItemSurface::ListItem => format!("~~{}~~", item.raw),
+        ItemSurface::MultilinePrompt => render_multiline_item("~~~done", &item.text),
+    }
 }
 
 /// Remove duplicate nodes by node key, preserving intentional text/id duplicates.
@@ -455,6 +472,11 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
         return Ok(source.to_string());
     }
     let (start, end) = raw_range(source, &patch.component, node)?;
+    if node.item.surface == ItemSurface::MultilinePrompt {
+        let mut out = source.to_string();
+        out.replace_range(start..end, &render_multiline_item("---", &node.item.text));
+        return Ok(out);
+    }
     let raw = &source[start..end];
     // Strip both the `~~…~~` wrapper and any `#qstrikenote` annotation appended
     // outside it (`~~text~~ — auto-struck: …`). The annotated shape closes the
@@ -662,6 +684,58 @@ mod tests {
         let twice = consume_node(&once, "queue", &alpha).unwrap();
 
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn multiline_queue_head_is_addressable_and_consumes_without_touching_neighbour() {
+        let doc = concat!(
+            "<!-- agent:queue priority go -->\n",
+            "---\n",
+            "I ran JB `Compact Exchange` but it did not compact.\n",
+            "```\n",
+            "some fenced error output\n",
+            "```\n",
+            "---\n",
+            "- do [#neighbour]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let nodes = item_nodes(doc, "queue").unwrap();
+
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(
+            nodes[0].item.text,
+            "I ran JB `Compact Exchange` but it did not compact.\n```\nsome fenced error output\n```"
+        );
+        assert_eq!(nodes[1].item.id, "neighbour");
+
+        let updated = consume_node(doc, "queue", &nodes[0].node_key).unwrap();
+        assert!(
+            updated.contains(
+                "~~~done\nI ran JB `Compact Exchange` but it did not compact.\n```\nsome fenced error output\n```\n~~~\n"
+            ),
+            "{updated}"
+        );
+        assert!(updated.contains("- do [#neighbour]\n"), "{updated}");
+        assert!(!updated.contains("- ~~do [#neighbour]~~\n"), "{updated}");
+
+        let struck_nodes = item_nodes(&updated, "queue").unwrap();
+        assert_eq!(struck_nodes[0].node_key, nodes[0].node_key);
+        assert!(struck_nodes[0].item.struck);
+        let reopened = apply_node_patch(
+            &updated,
+            &node_patch(
+                &struck_nodes[0].node_key,
+                MutationNodePatchOp::Unstrike,
+                None,
+                None,
+                None,
+            ),
+        )
+        .unwrap();
+        assert!(reopened.contains(
+            "---\nI ran JB `Compact Exchange` but it did not compact.\n```\nsome fenced error output\n```\n---\n"
+        ));
+        assert!(reopened.contains("- do [#neighbour]\n"));
     }
 
     #[test]

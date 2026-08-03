@@ -247,10 +247,10 @@ fn split_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
 /// range. [`parse`] is the entry-only thin wrapper over this. This is the SINGLE
 /// source of queue-head segmentation (multiline `---`/```/~~~ fenced Prompt heads
 /// included): any second enumerator that disagrees lets a head class evade the
-/// strike/consume path. That divergence is exactly how multiline `:round_pushpin:`
-/// paste blocks (surfaced here as `Prompt { multiline: true }`, but invisible to
-/// the bullet-only `markdown_ast` `item_nodes`) accumulated in the queue forever
-/// with no way for `queue prune-noise` to clear them (#qnoise-multiline-strike).
+/// strike/consume path. `markdown_ast::item_nodes` mirrors the canonical
+/// `---`/`~~~prompt`/`~~~done` item surfaces and cross-crate integration tests
+/// lock its ordering to this parser (#qnoise-multiline-strike,
+/// #multilineheadbullet).
 pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>)>> {
     let body_len = body.len();
     // Mirror `str::lines()` line content while retaining each line's byte start,

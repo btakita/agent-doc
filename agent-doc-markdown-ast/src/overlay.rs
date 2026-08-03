@@ -88,9 +88,21 @@ pub enum ItemKind {
     FreeText,
 }
 
+/// Surface syntax that owns an item's byte span.
+///
+/// Queue multiline prompts are logical items even though they are not Markdown
+/// list items. Keeping the surface typed lets node mutations render lifecycle
+/// changes without guessing from raw strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemSurface {
+    ListItem,
+    MultilinePrompt,
+}
+
 /// A single component item as a typed node: stable id, byte span, surface flags,
 /// and kind. `text` is the content with strike/pin markers removed; `raw` keeps
-/// the original line content (after the `- ` / `N.` bullet).
+/// the original item content (after the `- ` / `N.` bullet for list items, or
+/// the complete fence block for multiline prompts).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub id: String,
@@ -102,6 +114,7 @@ pub struct Item {
     pub pinned: bool,
     pub agent_pinned: bool,
     pub kind: ItemKind,
+    pub surface: ItemSurface,
 }
 
 /// A parsed `<!-- agent:name attrs -->` … `<!-- /agent:name -->` component and
@@ -280,11 +293,153 @@ fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Ite
         pinned,
         agent_pinned,
         kind,
+        surface: ItemSurface::ListItem,
     }
 }
 
+fn parse_multiline_item(
+    source: &str,
+    start_byte: usize,
+    raw_end_byte: usize,
+    end_byte: usize,
+    text: String,
+    struck: bool,
+) -> Item {
+    let raw = source[start_byte..raw_end_byte].to_string();
+    let kind = classify(&text);
+    let id = item_id(&kind, &text);
+    Item {
+        id,
+        text,
+        raw,
+        start_byte,
+        end_byte,
+        struck,
+        pinned: false,
+        agent_pinned: false,
+        kind,
+        surface: ItemSurface::MultilinePrompt,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceLine<'a> {
+    content: &'a str,
+    start_byte: usize,
+    content_end_byte: usize,
+    end_byte: usize,
+}
+
+fn source_lines(source: &str, start_byte: usize, end_byte: usize) -> Vec<SourceLine<'_>> {
+    let mut lines = Vec::new();
+    let mut offset = start_byte;
+    for raw in source[start_byte..end_byte].split_inclusive('\n') {
+        let without_nl = raw.strip_suffix('\n').unwrap_or(raw);
+        let content = without_nl.strip_suffix('\r').unwrap_or(without_nl);
+        lines.push(SourceLine {
+            content,
+            start_byte: offset,
+            content_end_byte: offset + content.len(),
+            end_byte: offset + raw.len(),
+        });
+        offset += raw.len();
+    }
+    lines
+}
+
+/// Parse the multiline queue surfaces that `document_queue::parse_spans`
+/// recognizes as one logical prompt. This lower AST overlay cannot depend on
+/// `agent-doc-queue` (that crate already depends on this one), so the tiny
+/// surface grammar lives beside the list-item overlay and is locked to the
+/// queue parser by cross-crate integration tests.
+fn queue_multiline_items(
+    source: &str,
+    body_start: usize,
+    body_end: usize,
+    code_ranges: &[(usize, usize)],
+) -> Vec<Item> {
+    let lines = source_lines(source, body_start, body_end);
+    let mut items = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        let trimmed = line.content.trim();
+        let fence = match trimmed {
+            // A bare thematic-break fence is queue syntax only outside a
+            // Markdown code block.
+            "---" if !in_code(code_ranges, line.start_byte) => Some(("---", false)),
+            // tree-sitter classifies these blocks as fenced code, but in an
+            // agent:queue component they are the canonical prompt lifecycle
+            // surfaces.
+            "~~~prompt" => Some(("~~~", false)),
+            "~~~done" => Some(("~~~", true)),
+            _ => None,
+        };
+        let Some((closer, struck)) = fence else {
+            index += 1;
+            continue;
+        };
+        let close_index = (index + 1..lines.len()).find(|candidate| {
+            let candidate_line = lines[*candidate];
+            candidate_line.content.trim() == closer
+                && (closer != "---" || !in_code(code_ranges, candidate_line.start_byte))
+        });
+        let Some(close_index) = close_index else {
+            // Match document_queue's fail-closed treatment of unclosed fences:
+            // the opener is inert and later list items remain addressable.
+            index += 1;
+            continue;
+        };
+        let text = lines[index + 1..close_index]
+            .iter()
+            .map(|line| line.content)
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !text.trim().is_empty() {
+            items.push(parse_multiline_item(
+                source,
+                line.start_byte,
+                lines[close_index].content_end_byte,
+                lines[close_index].end_byte,
+                text,
+                struck,
+            ));
+        }
+        index = close_index + 1;
+    }
+    items
+}
+
+fn include_queue_multiline_items(
+    source: &str,
+    component: &mut Component,
+    body_end: usize,
+    code_ranges: &[(usize, usize)],
+) {
+    if component.name != "queue" {
+        return;
+    }
+    let body_start = source[component.start_byte..]
+        .find('\n')
+        .map(|relative| component.start_byte + relative + 1)
+        .unwrap_or(body_end)
+        .min(body_end);
+    let multiline = queue_multiline_items(source, body_start, body_end, code_ranges);
+    if multiline.is_empty() {
+        return;
+    }
+    component.items.retain(|item| {
+        !multiline
+            .iter()
+            .any(|block| item.start_byte < block.end_byte && block.start_byte < item.end_byte)
+    });
+    component.items.extend(multiline);
+    component.items.sort_by_key(|item| item.start_byte);
+}
+
 /// Parse all agent-components in `source` into typed nodes, in document order.
-/// Markers and list lines inside fenced/indented code are ignored.
+/// Markers and list lines inside fenced/indented code are ignored. Queue
+/// multiline prompt fences are retained as one typed item spanning the block.
 pub fn components(source: &str) -> Vec<Component> {
     let ranges = code_ranges(source);
     let mut out: Vec<Component> = Vec::new();
@@ -304,6 +459,7 @@ pub fn components(source: &str) -> Vec<Component> {
             if let Some(mut comp) = open.take() {
                 if comp.name == name {
                     comp.end_byte = offset;
+                    include_queue_multiline_items(source, &mut comp, line_start, &ranges);
                     out.push(comp);
                     continue;
                 }
@@ -314,7 +470,8 @@ pub fn components(source: &str) -> Vec<Component> {
         }
         if let Some((name, attrs)) = parse_open_marker(trimmed) {
             // A new open marker closes any dangling component implicitly.
-            if let Some(comp) = open.take() {
+            if let Some(mut comp) = open.take() {
+                include_queue_multiline_items(source, &mut comp, line_start, &ranges);
                 out.push(comp);
             }
             open = Some(Component {
@@ -333,7 +490,8 @@ pub fn components(source: &str) -> Vec<Component> {
                 .push(parse_item(item_content, line_start, offset));
         }
     }
-    if let Some(comp) = open.take() {
+    if let Some(mut comp) = open.take() {
+        include_queue_multiline_items(source, &mut comp, source.len(), &ranges);
         out.push(comp);
     }
     out

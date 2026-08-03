@@ -1025,13 +1025,9 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
             };
             let new_body = agent_doc_queue::document_queue::render(&new_entries);
             // `#qconsumenostrike`: a targeted consume whose head is NOT
-            // AST-addressable must fail closed. The whole-component re-render
-            // below marks entries complete by POSITION, so when `parse_spans`
-            // and `markdown_ast::item_nodes` disagree about segmentation — as
-            // they still do for multiline `---`-fenced prompts, which render
-            // without a bullet — it strikes a NEIGHBOUR and silently marks
-            // unrun work complete. Observed twice on this repo's own session
-            // document (`#c8tb`, then `#orphandrain` + `#c8tb` again).
+            // AST-addressable must fail closed. Canonical multiline fences are
+            // addressable now; this guard remains for malformed or future
+            // surfaces so a positional re-render can never strike a neighbour.
             //
             // A full drain has no targeting ambiguity (every entry goes), so it
             // keeps the re-render path.
@@ -1039,10 +1035,8 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 anyhow::bail!(
                     "queue consume: refusing to strike — the target head is not addressable as a \
                      markdown node, so a positional re-render could mark unrelated queue work \
-                     complete (#qconsumenostrike). This shape is typically a multiline `---` \
-                     prompt, which renders without a `- ` bullet and is invisible to the node \
-                     enumerator. Resolve the head through its id (`--done <id>` / \
-                     `--backlog-gate <id>`), or leave it queued."
+                     complete (#qconsumenostrike). The queue parser and node enumerator disagree \
+                     about this surface; leave it queued until the shape is made addressable."
                 );
             }
             let mut current = if drained {
@@ -1284,17 +1278,15 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
         completed_entries
     };
     let new_body = agent_doc_queue::document_queue::render(&new_entries);
-    // `#qconsumenostrike`: see the sibling guard above — a targeted consume of a
-    // head the node enumerator cannot address must fail closed rather than fall
-    // back to a positional whole-component re-render that can strike a
-    // neighbour and mark unrun work complete.
+    // `#qconsumenostrike`: see the sibling guard above — a targeted consume of
+    // a head the node enumerator cannot address must fail closed rather than
+    // strike a neighbour by position.
     if !drained && !consumed_node_keys.ast_backed {
         anyhow::bail!(
             "queue consume: refusing to strike — the target head is not addressable as a \
              markdown node, so a positional re-render could mark unrelated queue work complete \
-             (#qconsumenostrike). This shape is typically a multiline `---` prompt, which renders \
-             without a `- ` bullet and is invisible to the node enumerator. Resolve the head \
-             through its id (`--done <id>` / `--backlog-gate <id>`), or leave it queued."
+             (#qconsumenostrike). The queue parser and node enumerator disagree about this \
+             surface; leave it queued until the shape is made addressable."
         );
     }
     let mut current = if drained {
@@ -2054,7 +2046,7 @@ mod core_tests {
     /// unrun work complete (observed against `#c8tb` and `#orphandrain`).
     /// It must now fail closed, and must leave every other head untouched.
     #[test]
-    fn multiline_unaddressable_head_fails_closed_instead_of_striking_a_neighbour() {
+    fn multiline_head_is_addressable_and_strikes_without_touching_a_neighbour() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("session.md");
         let content = concat!(
@@ -2077,25 +2069,25 @@ mod core_tests {
         let result =
             consume_free_text_queue_prompts_with_outcome(&file, 1, true, &TestQueueConsumeEffects);
 
-        assert!(
-            result.is_err(),
-            "an unaddressable multiline head must fail closed, got: {result:?}"
-        );
-        let rendered = format!("{:#}", result.unwrap_err());
-        assert!(
-            rendered.contains("#qconsumenostrike"),
-            "error must name the defect: {rendered}"
-        );
+        let outcome = result.expect("the multiline head must be AST-addressable");
+        assert!(outcome.is_some(), "the multiline head should be consumed");
 
-        // The critical property: nothing was struck.
+        // The critical property: the selected multiline head, and only that head,
+        // crossed to the completed fence shape.
         let after = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            after.contains(
+                "~~~done\nI ran JB `Compact Exchange` but it did not compact.\n```\nsome fenced error output\n```\n~~~\n"
+            ),
+            "the multiline head must be struck: {after}"
+        );
         assert!(
             after.contains("- do [#neighbour]"),
             "the neighbour head must remain unstruck: {after}"
         );
         assert!(
-            !after.contains("~~"),
-            "a refused consume must not strike anything: {after}"
+            !after.contains("- ~~do [#neighbour]~~"),
+            "the neighbour must not be struck: {after}"
         );
     }
 

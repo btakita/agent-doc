@@ -141,3 +141,9 @@ When the queue drains to empty: `auto` is stripped from the opening tag, `queue_
 5. `--- stop`, `~~~stop` → stop fence.
 6. Blank lines between items are ignored.
 7. Content outside list items, fences, or control fences is a parse error.
+
+Single-line list prompts and canonical multiline prompt fences are one ordered,
+AST-addressable item sequence. Node-keyed consumption of a multiline live item
+renders `~~~done` / `~~~` around the same prompt text; unstrike restores the
+bare `---` / `---` live shape. A malformed or unknown surface that cannot be
+matched between queue parsing and node enumeration fails closed before mutation.

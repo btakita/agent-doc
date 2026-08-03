@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -137,20 +137,46 @@ FACTSET_FTP_PASSWORD  history= 8 chars, passage= 8 chars -> IDENTICAL
 **Recommendation, in order.** Rotate with FactSet, then update `passage finegar/FACTSET_FTP_*`. Rotation is what actually closes this: it makes every historical copy worthless in one step, and it is the only step that helps if the repo was ever cloned. History rewriting is *optional cleanup afterwards*, not an alternative — it cannot un-disclose anything, it only tidies a private repo, and it invalidates every existing clone. An 8-character password is weak enough that rotating to something longer is worth doing on its own merits.
 
 What I cannot do from here is the rotation itself: it needs a FactSet account action. The item is gated on that rather than left open, and its text now carries the corrected facts so the next reader is not working from the wrong premise.
+
+### Re: do [#tmo-prod-schedule-artifact-confirm] — opus-5
+
+> **Queue prompt:**
+>
+> do [#tmo-prod-schedule-artifact-confirm]
+
+
+Confirmed, with a control. Production `platform_settings` reports `tmo_backup_last_key = tmo-backups/2026-08-02/2026-08-02T17-15-48-000Z.json`, `tmo_backup_last_status = complete`, `tmo_backup_last_error` empty, interval still 24h.
+
+I counted the two post-deploy artifacts **and** the two before them, because a count with no baseline cannot distinguish "schedules started flowing" from "schedules were always there and nobody looked."
+
+```
+artifact      loans  w/sched   rows
+2026-07-30       30        0      0
+2026-07-31       31        0      0
+2026-08-01       31       14     43
+2026-08-02       31       14     43
+```
+
+**`tmo-backups/2026-08-01/2026-08-01T17-15-48-000Z.json` is the first schedule-bearing production artifact** — exactly the prediction. The two pre-deploy runs are flat zero across 61 loan records, so the jump is attributable to the 20d7a416 deploy and not to sampling.
+
+The estimate was close: 14 of 31 loans rather than "roughly 12", 43 rows. One shape difference worth noting against the sandbox figure of 34 rows over 26 loans — production is carrying about 3.1 rows per schedule-bearing loan versus sandbox's 1.3, and the distribution is tight (thirteen loans at 3 rows, one at 4). That is a real difference in the underlying data, not a defect, but it means sandbox row counts are not a proxy for production volume if anything downstream sizes off them.
+
+Both artifacts are byte-identical in these counts, which is expected: the 08-02 run re-pulled the same 31 loans a day later with no schedule churn.
+
+Handling: each artifact was written to a scratch file, counted programmatically, and deleted. No record contents entered this transcript or any durable file — the loan and borrower arrays carry production PII (names, DOB, email, phone, income).
+
+I have edited `#tmo-clone-apply` to name the confirmed source key. Its third precondition — "use a backup captured after 20d7a416, the recorded 2026-07-30 key carries no payment-schedule rows" — is now settled rather than pending. It stays gated, because its other two blockers are unchanged and genuinely operator-owned: creating `passage btak/equityfundingsource/anonymize_seed` (permanent once set), and an explicit go for the destructive sandbox-delete and staging wipe-and-load.
+
+On this cycle's admission: the contract arrived with its marker but an empty body again, and `plan` and `session-check` both failed with `editor is still attached ... missing_replica recovery exhausted and disk read authority is refused`. IntelliJ is live, so neither force-disk nor hand-aligning disk was permissible. `agent-doc admin reload-lib` cleared it — delivery reached 1 of 3 editor endpoints with 2 unavailable, the stale-peer signature that preflight's `stale_install` warning has been flagging on every cycle this session. After that, `session-check` returned ok and `plan` produced a normal contract, which is what this cycle ran from.
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#censiblecorefollow]~~
-- ~~do [#recommendeddeploybrowser]~~
-- ~~do [#censible-env-committed-creds]~~
-- do [#tmo-prod-schedule-artifact-confirm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-prod-schedule-artifact-confirm] Confirm the first schedule-bearing PRODUCTION TMO backup artifact. Production went live on 20d7a416 at 2026-08-01T04:16Z, but tmo_backup_interval_hours is 24 and the last run was 2026-07-31T17:00:53Z on the old build, so the next daily job around 2026-08-01T17:00Z is the first artifact that can carry payment schedules. Check: read tmo_backup_last_key and tmo_backup_last_status from production platform_settings, confirm the key advanced to a 2026-08-01 object and status is complete, then pull that object from R2 bucket equityfundingsource-tmo-cache-production and count schedule rows - expect roughly 12 of 31 loans to carry one, versus 0 on every prior artifact. Sandbox already measured 34 rows over 26 loans. Unblocks #tmo-clone-apply, which needs a schedule-bearing clone source. Do not read the artifact contents into the transcript - it holds production PII; count and discard.
 <!-- /agent:backlog -->
 
 ## Review
@@ -195,7 +221,7 @@ What I cannot do from here is the rotation itself: it needs a FactSet account ac
 - [/] [#next-steps] Remaining EFS workers.dev production state: D1 API token unblocked (Cloudflare API token at `passage btak/d1/CLOUDFLARE_API_TOKEN`); migrations 0025/0026 are already applied; Cloudflare Access env vars are deployed for /login/access-callback on workers.dev using the one-time PIN IdP. Custom domain cutover remains intentionally deferred; true Google Workspace SSO remains gated on Google admin credentials.
 - [/] [#dzmm] TMO webhooks UNAVAILABLE per operator (2026-06-13). Read-side tightened polling is shipped (scheduled tmo-sync with configurable interval + due-gating + tmo_cache read mirror). Remaining gated: EFS to TMO writeback (tmo_cache_outbox replay) needs the #7a4d write field map + #k2xg support answers before it can replay.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: #dropbox-sync-contract shipped the shared documents Dropbox metadata, document_sync_logs idempotency schema, pure sync planner, and mocked adapter tests. Remaining: after Dropbox access is available, wire the real credential-backed worker to push/pull R2_DOCUMENTS with retries, backfill, tombstone replay, and per-document sync logs.
-- [/] [#tmo-clone-apply] [operator-verify] Execute the anonymized live-to-sandbox TMO clone and the staging D1 refresh per prds/tmo-sandbox-clone-and-staging-refresh-plan.md section 8. Blocked on two operator actions: (1) create passage btak/equityfundingsource/anonymize_seed, which must be stable forever because regenerating it re-pseudonymizes everything and breaks the sandbox-to-staging joins; (2) an explicit go for the destructive steps, which delete sandbox loans and wipe-and-load staging D1. Everything else is built and green as of EFS 20d7a416: rehearse with tmo-sandbox-clone.ts --simulate, then --from-r2 dry run, then --from-r2 --apply, then d1-staging-refresh.ts dry run and --apply. Use a backup captured AFTER EFS 20d7a416 - the recorded tmo_backup_last_key from 2026-07-30T17:00 predates #tmo-backup-schedule-inline and carries no payment-schedule rows; the next daily scheduled backup does. Coordinate with #tmo-sandbox-purge-apply, which gates the same purge.
+- [/] [#tmo-clone-apply] [operator-verify] Execute the anonymized live-to-sandbox TMO clone and the staging D1 refresh per prds/tmo-sandbox-clone-and-staging-refresh-plan.md section 8. CLONE SOURCE CONFIRMED 2026-08-02: use tmo-backups/2026-08-01/2026-08-01T17-15-48-000Z.json or later - it is the first schedule-bearing production artifact (14 of 31 loans, 43 schedule rows; the 2026-07-30 and 2026-07-31 artifacts are flat zero). Still blocked on two operator actions: (1) create passage btak/equityfundingsource/anonymize_seed, which must be stable forever because regenerating it re-pseudonymizes everything and breaks the sandbox-to-staging joins; (2) an explicit go for the destructive steps, which delete sandbox loans and wipe-and-load staging D1. Everything else is built and green as of EFS 20d7a416: rehearse with tmo-sandbox-clone.ts --simulate, then --from-r2 dry run, then --from-r2 --apply, then d1-staging-refresh.ts dry run and --apply. Coordinate with #tmo-sandbox-purge-apply, which gates the same purge.
 - [/] [#efs-email-subdomain] [operator-verify] Grant `passage:btak/equityfundingsource/production/cloudflare_api_token` Email Sending, Email Routing, and required DNS write access on `equityfundingsource.com`; then enable the `efs.equityfundingsource.com` sending/routing subdomain, route `reply@efs.equityfundingsource.com` plus-addressed replies to the EFS Worker, push and deploy EFS commit `c6d4133e`, and verify login, invite, notification, and inbound-reply delivery end to end. Current evidence: Email Sending list succeeds for the apex, but Wrangler enable and direct POST `/zones/426085c68d8d584075c824ff1d715926/email/sending/subdomains` fail with Cloudflare code 10000; the separate infra token has no production-account access.
 <!-- /agent:review -->
 

@@ -301,13 +301,36 @@ Fixed and released as `0.35.124` (`ecfad5441`, tag `v0.35.124`). Full suite gree
 **Install is deferred, not skipped.** A concurrent session has `0.35.125` installed locally — there is no such tag on origin and no such commit in this checkout, so that build predates this fix. `binary-install` refused the downgrade, correctly, and I did not override it with `AGENT_DOC_ALLOW_DOWNGRADE=1`: installing an older binary over a newer one is exactly what that guard exists to prevent. The fix is on `main`, so the next version bumped from `main` carries it.
 
 Session note: the exchange is at 248 lines across 13 sections; the queue is active so I am not stalling to compact.
+
+### Re: do [#pcc1] — opus-5
+
+> **Queue prompt:**
+>
+> do [#pcc1]
+
+
+Done, released as `0.35.127` (`c516236`, tag `v0.35.127`), suite green at **8566/8566**. Also released `0.35.126` first so the `0.35.124` restart gate could actually install — see below.
+
+**The substrate already existed; the input to it was stale.** I expected phase 1 to mean building per-component op recording. It is already there: `append_semantic_diff_ops` writes one `op_log` row per `node_event` from the semantic diff, at preflight. So the real question was why the sixteen-item paste produced zero rows.
+
+**Ordering.** `compute_with_current` runs at `run.rs:800`; `run_queue_maintenance` — which carries the `#qfoldedhead` re-segmentation from `0.35.120` — runs at `:858`; the semantic diff runs at `:1098` against the content captured at `:800`. So maintenance heals the fold, and then the op log is built from the **pre-heal** cut where the whole pasted block is a single node. Every id after the first never reaches `op_log`.
+
+I nearly closed this as already-fixed. Both new tests passed on the unmodified tree, and the tempting read was "0.35.120 solved it." That was wrong, and the thing that caught it was checking whether the diff actually sees post-maintenance content instead of assuming the ordering was favourable. It is not.
+
+**The fix.** Op recording re-resolves the document as maintenance left it and builds its summary from that. Deliberately scoped to the op log: `semantic_diff` still feeds the preflight contract from the original cut, so what is **durably recorded** changes without moving contract semantics — this phase is explicitly "no behavior change" groundwork for phases 2-4.
+
+**Coverage** is the phase's own success criterion, stated empirically rather than structurally: replay the real sixteen-line paste and assert sixteen queue-item inserts, each id individually addressable. Plus a second test pinning *why* the fold-heal must precede the diff — a folded block yields no per-id ops — so the ordering dependency cannot be silently reintroduced.
+
+**On the install skew.** The running binary was `0.35.125`, an unpushed local build from a concurrent session whose tree predates `ecfad5441`, so my landed restart gate was not the code running and `binary-install` correctly refused the `0.35.124` downgrade. I did not override that guard with `AGENT_DOC_ALLOW_DOWNGRADE=1` — installing older code over newer is exactly what it prevents. Releasing `0.35.126` from `main`, which carries the fix, superseded it cleanly. `origin/main` confirms my commit is the tip.
+
+Session note: the exchange is at 269 lines across 14 sections; the queue is active so I am not stalling to compact.
 <!-- agent:boundary:f621055c:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#haivendupsession]~~
-- do [#pcc1]
+- ~~do [#pcc1]~~
 - do [#pcc2]
 - do [#pcc3]
 - do [#pcc4]
@@ -340,7 +363,6 @@ Session note: the exchange is at 248 lines across 13 sections; the queue is acti
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pcc1] #agent-doc-feature Per-component convergence phase 1: record per-component ops. Make the editor->controller path record operations per component so op_log has a row per changed item instead of one whole-document text swap. Success criterion is empirical, not structural: replay the sixteen-line paste from 2026-08-03 and assert op_log contains sixteen queue-item inserts where today it contains zero. No later phase has a substrate until this assertion passes. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#pcc2] #agent-doc-feature Per-component convergence phase 2: per-component authority hashes. Extend the authority/disk comparison from one document hash to a hash per component, keeping the whole-document hash as a derived value so existing diagnostics keep working. No behavior change: the point is to be able to SAY which components diverge before anything acts on it. Depends on #pcc1. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#pcc3] #agent-doc-feature Per-component convergence phase 3: scope the convergence gate to owned components. Change decide_read_only_terminal_projection and the session-check divergence INTERRUPT to require equality only on components the turn wrote, so a divergence confined to an unowned component is non-blocking. This is the phase that makes the queue drain during live editing AND the phase that can destroy an operator buffer if the ownership set is computed too broadly, so it ships behind a default-off config flag. REQUIRED BEFORE IT SHIPS: a SimWorld test where the agent writes exchange while a simulated operator edits queue every tick, asserting every keystroke SURVIVES; an over-claim test forcing queue into the owned set and proving that survival test can go RED; and a replay of the three real 2026-08-03 documents (lazily.md, haiven-dev.md, agent-doc-bugs2.md) at their state_events hashes asserting none reaches a permanent INTERRUPT. Depends on #pcc2. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#pcc4] #agent-doc-feature Per-component convergence phase 4: per-component commit. Commit only the owned components, rebasing onto whatever the operator has since written elsewhere in the document, instead of writing the whole file. Non-goal to preserve: the agent still never component-merges a disk candidate under a live editor - per-component scope narrows WHAT must converge, it does not grant new authority to overwrite. Depends on #pcc3. Plan: tasks/agent-doc/plan-per-component-convergence.md

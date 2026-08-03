@@ -480,10 +480,26 @@ registration therefore returns an opaque `lineage`; JetBrains and VS Code attach
 it to each durable document-op frame. Whole-document rebuild/adopt operations
 rotate the lineage. A receiver applies only a matching-lineage frame. A stale
 lineage, or an unscoped legacy frame after rotation, is terminally quarantined
-and quarantined so retry cannot duplicate the exchange, resurrect a queue tombstone,
-or wedge the reliable-sync cursor. The lineage is checkpointed beside the `.yrs`
+so retry cannot duplicate the exchange, resurrect a queue tombstone, or wedge
+the reliable-sync cursor. The lineage is checkpointed beside the `.yrs`
 projection with that projection's SHA-256; recovery preserves it only when the
 hash matches and otherwise mints a new fail-closed lineage.
+
+Compact Exchange uses that fence to discard pre-compaction operation history,
+not merely deletion tombstones. After the compacted target has converged through
+the normal editor path, closeout must prove every live member's visible content
+hash and the exact disk projection before requesting a fresh canonical epoch.
+Closeout makes that request only after the commit barrier has consumed the
+old-epoch proof. If commit repositioning emits a newer canonical delivery, the
+relay retains the request until the final exact visible projection settles that
+delivery; otherwise it rebuilds immediately. The rebuild inserts the equal text
+as one fresh snapshot, rotates lineage, updates the retained canonical
+projection, and queues every live member for replace-capable re-bootstrap even
+though its visible buffer already matches. Older-lineage and unscoped legacy
+deltas are then quarantined by the rule above. Missing live replica proof retains
+the request behind the moving delivery without crossing the epoch fence;
+forced-disk mode cannot manufacture the stability proof. Detached documents have
+no live epoch to rebuild.
 
    **Full-state delivery projection.** Every delta item also carries the SHA-256
    `expected_content_hash` of the canonical visible target. After applying the

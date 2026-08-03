@@ -74,7 +74,7 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
     ack_timeout: Duration,
     effects: RouteCycleAckEffects,
 ) -> Result<Option<String>> {
-    if harness.binary != "codex" {
+    if !fresh_cycle_ack_restart_supported(&harness.binary) {
         return Ok(None);
     }
     if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
@@ -273,6 +273,10 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
             Ok(None)
         }
     }
+}
+
+fn fresh_cycle_ack_restart_supported(harness_binary: &str) -> bool {
+    matches!(harness_binary, "claude" | "codex")
 }
 
 pub fn pending_prompt_bearing_context_for_route(
@@ -486,6 +490,13 @@ pub fn require_routed_cycle_ack(
 mod tests {
     use super::*;
     use agent_doc_controller::dispatch::routed_cycle_ack_timeout;
+
+    #[test]
+    fn stale_hook_snapshot_recovery_restarts_supported_harnesses() {
+        assert!(fresh_cycle_ack_restart_supported("claude"));
+        assert!(fresh_cycle_ack_restart_supported("codex"));
+        assert!(!fresh_cycle_ack_restart_supported("opencode"));
+    }
 
     struct TestPipelineFrontmatterEffects;
 

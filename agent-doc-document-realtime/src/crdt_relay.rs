@@ -256,6 +256,7 @@ pub struct RetainedCanonicalProjection {
     pub state: Vec<u8>,
     pub lineage: String,
     pub last_committed_text: Option<String>,
+    pub compact_epoch_requested: bool,
 }
 
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
@@ -287,6 +288,10 @@ pub struct RelayHub {
     /// `RebuiltFromDisk`; drained by the caller which delivers the replace and
     /// calls [`Self::clear_rebootstrap`].
     pending_rebootstrap: HashSet<u64>,
+    /// Compact Exchange requested a fresh lineage, but a newer canonical
+    /// delivery still lacks the all-live visible-state proof. The final matching
+    /// projection settles this retained effect and then queues rebootstrap.
+    compact_epoch_requested: bool,
     /// Members carrying retained state into a restarted relay, whether
     /// registration or update arrives first. Their retained CRDT lineage cannot
     /// be union-merged with a canonical freshly seeded from disk: both lineages
@@ -639,6 +644,7 @@ impl RelayHub {
             awareness: AwarenessChannel::new(),
             last_committed_text: None,
             pending_rebootstrap: HashSet::new(),
+            compact_epoch_requested: false,
             canonical_projection_required,
             live_document_projection,
             ctx,
@@ -707,6 +713,7 @@ impl RelayHub {
             Some(&projection.lineage),
         )?;
         hub.last_committed_text = projection.last_committed_text.clone();
+        hub.compact_epoch_requested = projection.compact_epoch_requested;
         Ok(hub)
     }
 
@@ -717,6 +724,7 @@ impl RelayHub {
             state: self.canonical.encode_state(),
             lineage: self.lineage.clone(),
             last_committed_text: self.last_committed_text.clone(),
+            compact_epoch_requested: self.compact_epoch_requested,
         }
     }
 
@@ -1376,7 +1384,11 @@ impl RelayHub {
             .get_mut(&client_id)
             .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
         if member.pending.is_empty() {
-            return Ok(visible_content_hash == canonical_content_hash);
+            let projected = visible_content_hash == canonical_content_hash;
+            if projected {
+                self.settle_requested_epoch_compaction()?;
+            }
+            return Ok(projected);
         }
         let matched_pos = member
             .pending
@@ -1403,6 +1415,7 @@ impl RelayHub {
                 .set(&self.ctx, client_id, false);
         }
         self.bump_delivery_epoch();
+        self.settle_requested_epoch_compaction()?;
         Ok(true)
     }
 
@@ -1641,13 +1654,63 @@ impl RelayHub {
             self.last_committed_text = Some(text.to_string());
             return Ok(false);
         }
+        self.rebuild_authoritative_epoch(&before_text, text)?;
+        Ok(true)
+    }
+
+    /// Fence a stable canonical snapshot into a fresh CRDT lineage.
+    ///
+    /// Compact Exchange calls this only after every live replica has proved the
+    /// same visible content hash. Unlike [`Self::adopt_authoritative_text`], an
+    /// equal text value is the reason to rebuild: the fresh snapshot discards
+    /// pre-compaction insert/delete history, rotates the lineage so older durable
+    /// deltas are quarantined, and queues every live member for replace-capable
+    /// re-bootstrap.
+    pub fn compact_authoritative_epoch(&mut self, expected_text: &str) -> Result<()> {
+        let before_text = self.canonical.text();
+        if before_text != expected_text {
+            return Err(anyhow!(
+                "cannot compact CRDT epoch across a moving canonical (expected {} bytes, found {} bytes)",
+                expected_text.len(),
+                before_text.len(),
+            ));
+        }
+        self.rebuild_authoritative_epoch(&before_text, expected_text)?;
+        self.compact_epoch_requested = false;
+        Ok(())
+    }
+
+    /// Retain or immediately settle a Compact Exchange epoch fence.
+    ///
+    /// Returns `true` when the lineage was rebuilt now. If a live member still
+    /// owes a visible projection, the request stays in the retained canonical
+    /// projection and the final matching observation settles it.
+    pub fn request_authoritative_epoch_compaction(&mut self) -> Result<bool> {
+        self.compact_epoch_requested = true;
+        self.settle_requested_epoch_compaction()
+    }
+
+    pub fn compact_epoch_requested(&self) -> bool {
+        self.compact_epoch_requested
+    }
+
+    fn settle_requested_epoch_compaction(&mut self) -> Result<bool> {
+        if !self.compact_epoch_requested || !self.delivery_converged() {
+            return Ok(false);
+        }
+        let text = self.canonical.text();
+        self.compact_authoritative_epoch(&text)?;
+        Ok(true)
+    }
+
+    fn rebuild_authoritative_epoch(&mut self, before_text: &str, text: &str) -> Result<()> {
         let fresh = ReplicaState::new(self.canonical_id);
         if !text.is_empty() {
             fresh.apply_local_edit(0, 0, text);
         }
         let bootstrap = fresh.encode_state();
         self.canonical = fresh;
-        self.sync_live_document_projection(&before_text, text);
+        self.sync_live_document_projection(before_text, text);
         self.rotate_lineage();
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
@@ -1664,7 +1727,7 @@ impl RelayHub {
             .collect();
         self.pending_rebootstrap.extend(live);
         self.last_committed_text = Some(text.to_string());
-        Ok(true)
+        Ok(())
     }
 
     /// Route a settled out-of-band disk change into the hub — the CP-replica
@@ -2003,6 +2066,78 @@ mod tests {
             DocumentOpDeltaOutcome::Applied { changed: true }
         );
         assert_eq!(hub.canonical_text(), "rebuilt\ncurrent\n");
+    }
+
+    #[test]
+    fn compact_epoch_discards_history_and_fences_same_text_stale_deltas() {
+        let mut hub = RelayHub::from_text(1, "keep\n");
+        hub.register(2).unwrap();
+
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        for _ in 0..64 {
+            let frontier = editor.state_vector();
+            editor.apply_local_edit(5, 0, "discard");
+            hub.relay_update(2, &editor.diff(&frontier).unwrap())
+                .unwrap();
+
+            let frontier = editor.state_vector();
+            editor.apply_local_edit(5, 7, "");
+            hub.relay_update(2, &editor.diff(&frontier).unwrap())
+                .unwrap();
+        }
+        assert_eq!(hub.canonical_text(), "keep\n");
+
+        let old_lineage = hub.lineage().to_string();
+        let old_state_len = hub.canonical_encoded_state().len();
+        let stale_frontier = editor.state_vector();
+        editor.apply_local_edit(5, 0, "stale\n");
+        let stale_delta = editor.diff(&stale_frontier).unwrap();
+
+        hub.compact_authoritative_epoch("keep\n").unwrap();
+
+        assert_ne!(hub.lineage(), old_lineage);
+        assert!(
+            hub.canonical_encoded_state().len() < old_state_len,
+            "the fresh epoch must discard accumulated insert/delete history"
+        );
+        assert_eq!(hub.canonical_text(), "keep\n");
+        assert_eq!(hub.pending_rebootstrap_members(), vec![2]);
+        assert_eq!(
+            hub.apply_document_op_delta_in_lineage(Some(&old_lineage), &stale_delta)
+                .unwrap(),
+            DocumentOpDeltaOutcome::StaleLineage,
+        );
+        assert_eq!(hub.canonical_text(), "keep\n");
+    }
+
+    #[test]
+    fn compact_epoch_request_settles_on_final_visible_projection() {
+        let mut hub = RelayHub::from_text(1, "keep\n");
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let frontier = editor.state_vector();
+        editor.apply_local_edit(5, 0, "next\n");
+        hub.relay_update_capture(2, &editor.diff(&frontier).unwrap())
+            .unwrap();
+        let prior_lineage = hub.lineage().to_string();
+
+        assert!(
+            !hub.request_authoritative_epoch_compaction().unwrap(),
+            "the queued peer delivery must retain the fence request"
+        );
+        assert!(hub.compact_epoch_requested());
+        assert_eq!(hub.lineage(), prior_lineage);
+
+        assert!(
+            hub.observe_delivery_projection(3, &content_hash("keep\nnext\n"))
+                .unwrap()
+        );
+
+        assert!(!hub.compact_epoch_requested());
+        assert_ne!(hub.lineage(), prior_lineage);
+        assert_eq!(hub.canonical_text(), "keep\nnext\n");
+        assert_eq!(hub.pending_rebootstrap_members(), vec![2, 3]);
     }
 
     #[test]

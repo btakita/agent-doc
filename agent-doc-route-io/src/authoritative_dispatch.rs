@@ -7,10 +7,11 @@ use std::time::Duration;
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativeActorDispatchIntent, CloseoutBlockDispatchDecision, DispatchOnlyBusyRefusalFacts,
-    DispatchOnlyReopenDelivery, ReopenMode, RouteCloseoutDrainOutcome, RoutedReopenFacts,
-    RoutedReopenGuardReason, StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
-    actor_dispatch_blocker_reason, busy_projection_repaired_by_ready_prompt,
-    classify_authoritative_actor_dispatch_action, decide_authoritative_reopen,
+    DispatchOnlyReopenDelivery, ReopenMode, RouteCloseoutDrainOutcome, RoutedDispatchStartProof,
+    RoutedReopenFacts, RoutedReopenGuardReason, StartingTimeoutActorFacts,
+    actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
+    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
+    decide_authoritative_reopen,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_probe_active_turn_cue,
@@ -1219,7 +1220,26 @@ pub fn route_via_authoritative_actor(
                     actor.record.generation
                 ),
             );
-            Ok(dispatch_pane)
+            // `#preflightinbinary`: pane acceptance does not prove that a
+            // long-lived harness process loaded newly installed admission
+            // hooks. Require the same document-cycle acknowledgment as managed
+            // dispatch. Missing-ack recovery restarts supported harnesses fresh
+            // once so their startup hook snapshot is reloaded before retry.
+            let ack_pane = require_routed_cycle_ack(
+                tmux,
+                file,
+                &dispatch_pane,
+                session_id,
+                file_path,
+                harness,
+                baseline,
+                prompt_bearing_marker,
+                true,
+                RoutedDispatchStartProof::CommandAcceptedOnly,
+                crate::invocation::wait_for_ready_override(),
+                effects.route_cycle_ack_effects,
+            )?;
+            Ok(ack_pane.unwrap_or(dispatch_pane))
         }
         AuthoritativeActorDispatchAction::ManagedSupervisorIpc => {
             match authorize_controller_dispatch(

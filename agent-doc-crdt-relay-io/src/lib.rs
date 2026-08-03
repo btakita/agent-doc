@@ -92,6 +92,27 @@ pub enum ColdStartReplicaUpdateDecision {
     ReprojectCanonical,
 }
 
+/// Observable result of fencing a stable Compact Exchange snapshot into a fresh
+/// CRDT lineage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactEpochOutcome {
+    pub prior_lineage: String,
+    pub lineage: String,
+    pub state_bytes_before: usize,
+    pub state_bytes_after: usize,
+    pub rebootstrap_members: usize,
+}
+
+/// Observable result of requesting a Compact Exchange lineage fence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompactEpochRequestOutcome {
+    /// Delivery was already stable, so the epoch was rebuilt synchronously.
+    Fenced(CompactEpochOutcome),
+    /// A newer canonical delivery is still in flight. The relay retained the
+    /// request and will rebuild when the final visible projection arrives.
+    Retained { lineage: String, state_bytes: usize },
+}
+
 pub const fn decide_cold_start_replica_update(
     registered: bool,
     controller_projection_established: bool,
@@ -2547,13 +2568,23 @@ pub fn observe_replica_projection_for_file(
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
-    let Some(projected) = with_existing_hub(file, |hub| {
-        hub.observe_delivery_projection(client_id, visible_content_hash)
+    let Some(observation) = with_existing_hub(file, |hub| {
+        let prior_lineage = hub.lineage().to_string();
+        let state_bytes_before = hub.canonical_encoded_state().len();
+        let projected = hub.observe_delivery_projection(client_id, visible_content_hash)?;
+        let compacted = (hub.lineage() != prior_lineage).then(|| CompactEpochOutcome {
+            prior_lineage,
+            lineage: hub.lineage().to_string(),
+            state_bytes_before,
+            state_bytes_after: hub.canonical_encoded_state().len(),
+            rebootstrap_members: hub.pending_rebootstrap_members().len(),
+        });
+        Ok::<_, anyhow::Error>((projected, compacted))
     })?
     else {
         return Ok(None);
     };
-    let projected = projected?;
+    let (projected, compacted) = observation?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -2564,6 +2595,22 @@ pub fn observe_replica_projection_for_file(
             projected,
         ),
     );
+    if let Some(outcome) = compacted {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_compact_epoch_settled_from_projection file={} client_id={} prior_lineage={} lineage={} state_bytes_before={} state_bytes_after={} rebootstrap_members={} content_hash={}",
+                file.display(),
+                client_id,
+                outcome.prior_lineage,
+                outcome.lineage,
+                outcome.state_bytes_before,
+                outcome.state_bytes_after,
+                outcome.rebootstrap_members,
+                visible_content_hash,
+            ),
+        );
+    }
     Ok(Some(projected))
 }
 
@@ -2956,6 +3003,85 @@ pub fn adopt_authoritative_text_for_file(file: &Path, text: &str) -> Result<Opti
         ),
     );
     Ok(Some(changed))
+}
+
+/// Fence an already-converged Compact Exchange snapshot into a fresh CRDT epoch.
+///
+/// The caller must first prove all live editor buffers and disk hold
+/// the current canonical text. This function rebuilds that canonical from one
+/// snapshot insertion, rotates its lineage, and queues every live member for
+/// replace-capable re-bootstrap. An attached document with no relay model fails
+/// closed rather than silently
+/// retaining pre-compaction history. `Ok(None)` means the document is detached
+/// and therefore has no live CRDT epoch to compact.
+pub fn request_authoritative_epoch_compaction_for_file(
+    file: &Path,
+) -> Result<Option<CompactEpochRequestOutcome>> {
+    let file_str = file.display().to_string();
+    let authority = authority_for_file(&file_str);
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let Some(outcome) = with_existing_hub(file, |hub| {
+        let prior_lineage = hub.lineage().to_string();
+        let state_bytes_before = hub.canonical_encoded_state().len();
+        let fenced = hub.request_authoritative_epoch_compaction()?;
+        Ok::<_, anyhow::Error>(if fenced {
+            CompactEpochRequestOutcome::Fenced(CompactEpochOutcome {
+                prior_lineage,
+                lineage: hub.lineage().to_string(),
+                state_bytes_before,
+                state_bytes_after: hub.canonical_encoded_state().len(),
+                rebootstrap_members: hub.pending_rebootstrap_members().len(),
+            })
+        } else {
+            CompactEpochRequestOutcome::Retained {
+                lineage: prior_lineage,
+                state_bytes: state_bytes_before,
+            }
+        })
+    })?
+    else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_compact_epoch_request_deferred file={} authority=multi_replica reason=missing_relay_model",
+                file.display(),
+            ),
+        );
+        anyhow::bail!(
+            "cannot request CRDT epoch compaction for {}: editor authority is attached but the live relay model is missing",
+            file.display(),
+        );
+    };
+    let outcome = outcome?;
+    match &outcome {
+        CompactEpochRequestOutcome::Fenced(outcome) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_compact_epoch file={} prior_lineage={} lineage={} state_bytes_before={} state_bytes_after={} rebootstrap_members={}",
+                file.display(),
+                outcome.prior_lineage,
+                outcome.lineage,
+                outcome.state_bytes_before,
+                outcome.state_bytes_after,
+                outcome.rebootstrap_members,
+            ),
+        ),
+        CompactEpochRequestOutcome::Retained {
+            lineage,
+            state_bytes,
+        } => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_compact_epoch_request_retained file={} lineage={} state_bytes={} settlement=final_visible_projection",
+                file.display(),
+                lineage,
+                state_bytes,
+            ),
+        ),
+    }
+    Ok(Some(outcome))
 }
 
 /// Fold a durably-replicated document-op **delta frame** into the relay canonical

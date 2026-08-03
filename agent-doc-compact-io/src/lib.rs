@@ -18,8 +18,10 @@
 //!   - The preamble (content before the first `### Re:` heading) is always preserved; use
 //!     `--message` to replace it with a fresh session summary.
 //!   - If section count ≤ N, logs to stderr and exits `Ok(())` without modifying the document.
-//!   - If the document uses CRDT write strategy, the CRDT state is compacted (GC tombstones)
-//!     before the component replacement.
+//!   - If the document uses CRDT write strategy, Compact Exchange first converges every live
+//!     replica on the compacted visible snapshot, then fences that stable snapshot into a fresh
+//!     lineage. Older-epoch deltas are quarantined and attached replicas re-bootstrap through the
+//!     replace channel; this discards pre-compaction insert/delete history.
 //! - Archive filenames are derived from the snapshot hash + a UTC timestamp computed without
 //!   the `chrono` crate.
 //! - Document replacement uses the same visible-buffer idle and compare-and-swap guard as direct
@@ -134,7 +136,6 @@ struct CompactDocumentTargets {
 
 struct CompactApplyOptions<'a> {
     target_component: Option<&'a str>,
-    refresh_crdt: bool,
     force_disk: bool,
 }
 
@@ -607,7 +608,6 @@ fn run_in_controller_scoped(
         // `apply_compacted_document` then checkpoints only the resulting baseline
         // and cold restart projection in `state.db`.
         let target = component_name.unwrap_or("exchange");
-        let is_crdt = resolved.is_crdt();
         match keep {
             Some(n) => run_component_compact_partial(
                 file,
@@ -617,7 +617,6 @@ fn run_in_controller_scoped(
                     target,
                     keep: n,
                     message,
-                    is_crdt,
                     force_disk,
                 },
             ),
@@ -627,7 +626,6 @@ fn run_in_controller_scoped(
                 &observed_write_base_content,
                 target,
                 message,
-                is_crdt,
                 force_disk,
             ),
         }?
@@ -677,7 +675,6 @@ fn run_in_controller_scoped(
             &observed_write_base_content,
             CompactApplyOptions {
                 target_component: None,
-                refresh_crdt: false,
                 force_disk,
             },
         )?;
@@ -862,6 +859,12 @@ fn run_in_controller_scoped(
             file.display(),
             file.display()
         );
+    }
+    // Cross the epoch fence only after an optional commit has consumed the
+    // already-proven old-epoch delivery frontier. Detached documents return
+    // `None`; `force_disk` intentionally cannot manufacture replica stability.
+    if resolved.is_crdt() && !force_disk {
+        fence_compacted_crdt_epoch(file)?;
     }
     let commit_ms = commit_started.elapsed().as_millis();
     let total_ms = compact_started.elapsed().as_millis();
@@ -1098,6 +1101,50 @@ fn commit_compacted_authoritative(
     // does not land the compacted content.
     closeout_compact_with_commit(file)?;
     verify_compact_head_landed(file, authoritative_snapshot)
+}
+
+fn fence_compacted_crdt_epoch(file: &Path) -> Result<()> {
+    // #compacttombgc: `apply_compacted_document` already proved every live
+    // replica's visible hash and the exact disk projection. For `--commit`, wait
+    // until the commit barrier has consumed that old-epoch proof before
+    // requesting rotation. If the commit itself minted a newer canonical
+    // delivery, the relay retains the request until that delivery's final exact
+    // visible projection arrives.
+    if let Some(outcome) =
+        agent_doc_crdt_relay_io::request_authoritative_epoch_compaction_for_file(file)?
+    {
+        match outcome {
+            agent_doc_crdt_relay_io::CompactEpochRequestOutcome::Fenced(outcome) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "compact_crdt_epoch_fenced file={} prior_lineage={} lineage={} state_bytes_before={} state_bytes_after={} rebootstrap_members={}",
+                        file.display(),
+                        outcome.prior_lineage,
+                        outcome.lineage,
+                        outcome.state_bytes_before,
+                        outcome.state_bytes_after,
+                        outcome.rebootstrap_members,
+                    ),
+                );
+            }
+            agent_doc_crdt_relay_io::CompactEpochRequestOutcome::Retained {
+                lineage,
+                state_bytes,
+            } => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "compact_crdt_epoch_retained file={} lineage={} state_bytes={} settlement=final_visible_projection",
+                        file.display(),
+                        lineage,
+                        state_bytes,
+                    ),
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Preserve a converged live editor and repair only the stale relay fallback.
@@ -1528,7 +1575,6 @@ fn apply_compacted_document(
 ) -> Result<CompactDocumentTargets> {
     let CompactApplyOptions {
         target_component,
-        refresh_crdt,
         force_disk,
     } = options;
     // Fail closed before any write if the rebuilt exchange is structurally
@@ -1659,8 +1705,6 @@ fn apply_compacted_document(
         agent_doc_ops_log_io::log_op,
     )?;
 
-    let _ = refresh_crdt;
-
     Ok(targets)
 }
 
@@ -1674,9 +1718,9 @@ fn run_component_compact(
     content: &str,
     target: &str,
     message: Option<&str>,
-    is_crdt: bool,
+    _is_crdt: bool,
 ) -> Result<String> {
-    run_component_compact_with_options(file, content, content, target, message, is_crdt, false)
+    run_component_compact_with_options(file, content, content, target, message, false)
         .map(|targets| targets.committed)
 }
 
@@ -1686,14 +1730,14 @@ fn run_component_compact_force_disk(
     content: &str,
     target: &str,
     message: Option<&str>,
-    is_crdt: bool,
+    _is_crdt: bool,
 ) -> Result<String> {
     let _force_disk_authority_scope =
         agent_doc_document_realtime_io::begin_force_disk_authority_scope(
             file,
             "compact_test_force_disk_authorization",
         )?;
-    run_component_compact_with_options(file, content, content, target, message, is_crdt, true)
+    run_component_compact_with_options(file, content, content, target, message, true)
         .map(|targets| targets.committed)
 }
 
@@ -1761,7 +1805,6 @@ fn run_component_compact_with_options(
     write_base_content: &str,
     target: &str,
     message: Option<&str>,
-    is_crdt: bool,
     force_disk: bool,
 ) -> Result<CompactDocumentTargets> {
     let components = element::parse(content)?;
@@ -1849,7 +1892,6 @@ fn run_component_compact_with_options(
         write_base_content,
         CompactApplyOptions {
             target_component: Some(target),
-            refresh_crdt: is_crdt,
             force_disk,
         },
     )?;
@@ -1874,7 +1916,6 @@ struct PartialCompactOptions<'a> {
     target: &'a str,
     keep: usize,
     message: Option<&'a str>,
-    is_crdt: bool,
     force_disk: bool,
 }
 
@@ -1888,7 +1929,6 @@ fn run_component_compact_partial(
         target,
         keep,
         message,
-        is_crdt,
         force_disk,
     } = options;
     let components = element::parse(content)?;
@@ -2008,7 +2048,6 @@ fn run_component_compact_partial(
         write_base_content,
         CompactApplyOptions {
             target_component: Some(target),
-            refresh_crdt: is_crdt,
             force_disk,
         },
     )?;
@@ -2586,7 +2625,6 @@ mod tests {
                 target: "exchange",
                 keep: 1,
                 message: None,
-                is_crdt: false,
                 force_disk: true,
             },
         )
@@ -2795,7 +2833,6 @@ mod tests {
                 target: "exchange",
                 keep: 1,
                 message: None,
-                is_crdt: false,
                 force_disk: true,
             },
         )
@@ -4795,7 +4832,6 @@ mod tests {
             source,
             CompactApplyOptions {
                 target_component: Some("exchange"),
-                refresh_crdt: false,
                 force_disk: false,
             },
         )

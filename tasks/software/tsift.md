@@ -99,6 +99,15 @@ Clean installed-build acceptance run for reactive turn projection:
 - `maintenance_required=false` and `preflight_required=false`; no legacy preflight or caller ACK was needed.
 - The document had no new prompt, queue head, or backlog work, so this cycle intentionally performs no tsift mutation.
 - Strict binary-owned finalize/commit is the terminal acceptance edge for this run.
+
+### Re: reactive projection repeat acceptance — gpt-5
+
+Exercised the installed reactive turn projection on `tsift.md` without disturbing the already-running `haiven-dev.md` session.
+
+- Binary-owned admission entered `cycle-1785726275095` directly at `preflight_started`.
+- The projection reported `maintenance_required=false` and `preflight_required=false`; no caller request/ACK handshake or shell preflight was needed.
+- Planning classified the document as `no_changes`, with no new prompt or queue work, so this cycle intentionally performs no tsift source mutation.
+- This finalize/commit is the terminal binary-owned closeout edge for the acceptance run.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 

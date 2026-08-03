@@ -106,6 +106,19 @@ Dispatch acceptance logs now include the canonical target document and active ed
 Regression coverage includes the captured three-pane/two-column count mismatch at attempt 41, a missing-surface-pane negative case, same-window actor-binding invalidation, and reversed `%77`/`%95` physical panes. Targeted Rust suites, JetBrains tests, `cargo check`, formatting, diff checks, and the full `make check` pass.
 
 Committed and pushed public agent-doc commit `8c5efe1a0` (`fix: bound editor pane layout dispatch races`). The exact commit's binary and native library are installed; controller/supervisor recycle is marked for idle boundaries. The matching JetBrains plugin is staged in IntelliJIdea2026.1 and requires one more IDE restart to activate its new enum handling.
+
+### Re: historical 0.35.119 handoff
+
+Recovered and read all 187 lines of `/tmp/agent-doc-0.35.119-claude-handoff.md` from the durable Claude transcript after the reboot removed the temporary file. The handoff's remaining work was already completed in that original session and is independently verifiable now:
+
+- The Stop-hook fix landed as commit `953c8163d82bfbbf12e7ea65ff0100a014f513df` (`fix: pass Codex Stop through an explicitly stopped queue head`).
+- Remote tag `v0.35.119` resolves to that commit.
+- The original full `make check` completed green with 8,543 tests plus clippy, sim, version-sync, dev-harness, lean, and TLA+ gates.
+- `main` and `v0.35.119` were pushed; the GitHub Release is published at `https://github.com/btakita/agent-doc/releases/tag/v0.35.119` with its release assets.
+- The original transcript records CI and Release green and PyPI publication green. PyPI's live version endpoint confirms `agent-doc==0.35.119` remains published.
+- The one-time full install and controller recycle required by that historical release completed. Later releases through the currently installed `0.35.128` supersede that deployment.
+
+Preserved the handoff's document boundaries: did not recapture, refinalize, or write the already-committed historical `#advance-review` cycle; did not hand-edit either session document; and did not replay Haiven's historical retained closeout. The current Haiven owner pane remains live and separately owns its new benchmark turn.
 <!-- agent:boundary:f621055c:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue

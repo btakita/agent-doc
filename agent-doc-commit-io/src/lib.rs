@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -67,6 +67,115 @@ fn retained_pending_commit_proof(
         Some("converged_pending_write_exact_target")
     } else {
         None
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum OwnedComponentCommitRebase {
+    Rebased {
+        candidate: String,
+        owned_component_names: BTreeSet<String>,
+    },
+    WholeDocumentFallback {
+        reason: &'static str,
+    },
+}
+
+/// Plan a per-component commit from exact retained expected→target
+/// transitions. The current authority cut supplies every unowned byte.
+///
+/// Legacy intents and malformed transitions retain the pre-experiment
+/// whole-document behavior. A proven ownership set whose target has not
+/// reached current authority is an error: commit must not outrun delivery.
+fn plan_owned_component_commit_rebase<'a>(
+    agent_target: &str,
+    operator_current: &str,
+    transitions: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
+) -> Result<OwnedComponentCommitRebase> {
+    let mut owned_component_names = BTreeSet::new();
+    for (expected_content, target_content) in transitions {
+        let Some(expected_content) = expected_content else {
+            return Ok(OwnedComponentCommitRebase::WholeDocumentFallback {
+                reason: "legacy_intent_missing_expected_content",
+            });
+        };
+        let changed = match agent_doc_document::authority_hashes::changed_component_names(
+            expected_content,
+            target_content,
+        ) {
+            Ok(changed) => changed,
+            Err(_) => {
+                return Ok(OwnedComponentCommitRebase::WholeDocumentFallback {
+                    reason: "transition_parse_failed",
+                });
+            }
+        };
+        owned_component_names.extend(changed);
+    }
+
+    let candidate = agent_doc_document::authority_hashes::rebase_owned_component_commit_candidate(
+        agent_target,
+        operator_current,
+        &owned_component_names,
+    )
+    .context("refusing per-component commit before owned target delivery")?;
+    Ok(OwnedComponentCommitRebase::Rebased {
+        candidate,
+        owned_component_names,
+    })
+}
+
+fn rebase_snapshot_onto_operator_current_if_enabled(
+    file: &Path,
+    agent_target: &str,
+    operator_current: &str,
+) -> Result<Option<String>> {
+    if agent_target == operator_current
+        || !agent_doc_session_check_io::guard_modes::resolve_per_component_convergence(file)?
+    {
+        return Ok(None);
+    }
+    let journal = agent_doc_document_realtime_io::pending_document_write_journal(file);
+    match plan_owned_component_commit_rebase(
+        agent_target,
+        operator_current,
+        journal.iter().map(|intent| {
+            (
+                intent.expected_content.as_deref(),
+                intent.target_content.as_str(),
+            )
+        }),
+    )? {
+        OwnedComponentCommitRebase::Rebased {
+            candidate,
+            owned_component_names,
+        } => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "per_component_commit_rebase file={} owned={} old_snap_hash={} rebased_hash={}",
+                    file.display(),
+                    owned_component_names
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    agent_doc_hash::content_hash(agent_target),
+                    agent_doc_hash::content_hash(&candidate),
+                ),
+            );
+            Ok(Some(candidate))
+        }
+        OwnedComponentCommitRebase::WholeDocumentFallback { reason } => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "per_component_commit_fallback file={} reason={reason}",
+                    file.display()
+                ),
+            );
+            Ok(None)
+        }
     }
 }
 
@@ -941,6 +1050,17 @@ where
         })?;
     guard_committable_document_content(file, &file_content, "initial_authority")?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
+    if let Some(snapshot) = snapshot_content.as_deref()
+        && let Some(rebased) =
+            rebase_snapshot_onto_operator_current_if_enabled(file, snapshot, &file_content)?
+    {
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &rebased,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        snapshot_content = Some(rebased);
+    }
     let snapshot_matched_head_before_absorb = snapshot_content
         .as_deref()
         .zip(head_doc.as_deref())
@@ -2115,6 +2235,83 @@ mod controller_commit_scope_tests {
         assert_eq!(
             retained_pending_commit_proof("abc", Some("def"), Some("ghi")),
             None
+        );
+    }
+
+    fn component_document(exchange: &str, queue: &str) -> String {
+        format!(
+            "<!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\
+             <!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    #[test]
+    fn per_component_commit_preserves_every_operator_queue_keystroke() {
+        let expected = component_document("old response", "- queued work");
+        let target = component_document("new response", "- queued work");
+        let mut current = target.clone();
+        let mut typed = String::new();
+        for tick in 0..64 {
+            typed.push(char::from(b'a' + (tick % 26) as u8));
+            current = component_document(
+                "new response",
+                &format!("- queued work\n- operator keystrokes: {typed}"),
+            );
+        }
+
+        let planned = plan_owned_component_commit_rebase(
+            &target,
+            &current,
+            [(Some(expected.as_str()), target.as_str())],
+        )
+        .unwrap();
+
+        let OwnedComponentCommitRebase::Rebased {
+            candidate,
+            owned_component_names,
+        } = planned
+        else {
+            panic!("exact transition should produce a scoped commit candidate");
+        };
+        assert_eq!(
+            owned_component_names,
+            BTreeSet::from(["exchange".to_string()])
+        );
+        assert_eq!(candidate, current);
+        assert!(candidate.contains(&typed));
+    }
+
+    #[test]
+    fn per_component_commit_overclaim_is_a_live_negative_control() {
+        let expected = component_document("old response", "- queued work");
+        let target = component_document("new response", "- agent rewrote queue");
+        let current = component_document(
+            "new response",
+            "- queued work\n- operator keystrokes: abcdef",
+        );
+
+        let error = plan_owned_component_commit_rebase(
+            &target,
+            &current,
+            [(Some(expected.as_str()), target.as_str())],
+        )
+        .expect_err("an over-claimed queue must block instead of losing operator text");
+
+        assert!(format!("{error:#}").contains("queue"));
+        assert!(current.contains("operator keystrokes: abcdef"));
+    }
+
+    #[test]
+    fn per_component_commit_legacy_transition_uses_whole_document_fallback() {
+        let target = component_document("new response", "- queued work");
+        let current = target.replace("- queued work", "- operator typing");
+
+        assert_eq!(
+            plan_owned_component_commit_rebase(&target, &current, [(None, target.as_str())],)
+                .unwrap(),
+            OwnedComponentCommitRebase::WholeDocumentFallback {
+                reason: "legacy_intent_missing_expected_content"
+            }
         );
     }
 

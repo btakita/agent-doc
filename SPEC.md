@@ -1,5 +1,11 @@
 # agent-doc Functional Specification
 
+- With `agent_doc_per_component_convergence` explicitly enabled, the commit
+  candidate uses the same exact retained expected→target ownership set as the
+  terminal convergence gate. Every owned component must already equal current
+  Lazily/editor authority; the candidate is then rebased onto that current cut
+  so all unowned operator bytes survive. An owned mismatch blocks commit, and a
+  live editor never grants authority to merge an independent disk candidate.
 - A capacity-paused or otherwise detached closeout must reconcile exact pending
   editor operations before treating an on-disk document equal to the cycle base
   as evidence that no concurrent edit occurred. The on-disk bytes remain the

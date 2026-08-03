@@ -194,6 +194,39 @@ pub fn owned_component_names_converged(
     Ok(authority.component_names_converged(&disk, owned_component_names))
 }
 
+/// Build the Git commit candidate for an owned-component closeout.
+///
+/// `agent_target` is the binary-owned snapshot and `operator_current` is the
+/// current Lazily/editor cut. The retained write has already delivered only
+/// when every owned component in those cuts agrees. Once that proof holds, the
+/// operator cut is the rebased commit candidate: it contains the exact agent
+/// target in owned components and preserves every byte written elsewhere.
+///
+/// This is deliberately not a component merge of a disk candidate. Callers
+/// must supply the current authority cut, and an owned-component mismatch
+/// fails closed instead of selecting either side.
+pub fn rebase_owned_component_commit_candidate(
+    agent_target: &str,
+    operator_current: &str,
+    owned_component_names: &BTreeSet<String>,
+) -> Result<String> {
+    let target = DocumentAuthorityHashes::from_content(agent_target)?;
+    let current = DocumentAuthorityHashes::from_content(operator_current)?;
+    let unsettled = target
+        .divergences(&current)
+        .into_iter()
+        .filter(|divergence| owned_component_names.contains(&divergence.key.name))
+        .map(|divergence| divergence.key.label())
+        .collect::<Vec<_>>();
+    if !unsettled.is_empty() {
+        anyhow::bail!(
+            "owned component(s) have not reached the current document authority: {}",
+            unsettled.join(",")
+        );
+    }
+    Ok(operator_current.to_string())
+}
+
 fn short(hash: Option<&str>) -> &str {
     hash.map(|value| &value[..value.len().min(12)])
         .unwrap_or("missing")
@@ -240,6 +273,7 @@ mod tests {
     use super::{
         DocumentAuthorityHashes, changed_component_names,
         format_authority_disk_component_divergence, owned_component_names_converged,
+        rebase_owned_component_commit_candidate,
     };
 
     #[test]
@@ -304,6 +338,67 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    #[test]
+    fn owned_commit_rebases_onto_the_exact_operator_cut() {
+        let target = concat!(
+            "<!-- agent:exchange -->\nnew response\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- prior queue\n<!-- /agent:queue -->\n",
+        );
+        let current = target.replace(
+            "- prior queue",
+            "- prior queue\n- operator keystrokes: abcdef",
+        );
+
+        let candidate = rebase_owned_component_commit_candidate(
+            target,
+            &current,
+            &BTreeSet::from(["exchange".to_string()]),
+        )
+        .unwrap();
+
+        assert_eq!(candidate, current);
+        assert!(candidate.contains("operator keystrokes: abcdef"));
+    }
+
+    #[test]
+    fn owned_commit_refuses_until_the_agent_target_has_landed() {
+        let target = concat!(
+            "<!-- agent:exchange -->\nnew response\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- prior queue\n<!-- /agent:queue -->\n",
+        );
+        let current = target.replace("new response", "old response");
+
+        let error = rebase_owned_component_commit_candidate(
+            target,
+            &current,
+            &BTreeSet::from(["exchange".to_string()]),
+        )
+        .expect_err("the commit must not outrun owned-component delivery");
+
+        assert!(error.to_string().contains("exchange"));
+    }
+
+    #[test]
+    fn ownership_overclaim_makes_operator_queue_drift_fail_closed() {
+        let target = concat!(
+            "<!-- agent:exchange -->\nnew response\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- prior queue\n<!-- /agent:queue -->\n",
+        );
+        let current = target.replace(
+            "- prior queue",
+            "- prior queue\n- operator keystrokes: abcdef",
+        );
+
+        let error = rebase_owned_component_commit_candidate(
+            target,
+            &current,
+            &BTreeSet::from(["exchange".to_string(), "queue".to_string()]),
+        )
+        .expect_err("over-claiming queue must make the survival oracle go red");
+
+        assert!(error.to_string().contains("queue"));
     }
 
     #[test]

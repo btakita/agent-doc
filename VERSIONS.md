@@ -17,8 +17,20 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   not authorize a disk merge or remove the whole-document hash. Adversarial
   SimWorld coverage types into `queue` on every tick during an `exchange`
   closeout and asserts every keystroke survives; a paired ownership-overclaim
-  mutation demonstrates that the survival oracle goes red when `queue` is
+mutation demonstrates that the survival oracle goes red when `queue` is
 incorrectly claimed.
+- **Opt-in commits now rebase the owned target onto the current operator cut
+  (`#percellconverge` phase 4).** Before staging the session-document blob, the
+  commit coordinator derives the same owned component-name set from exact
+  retained expected→target transitions. It verifies that those owned components
+  have reached current Lazily/editor authority, then checkpoints that current
+  authority cut as the Git candidate. Operator edits in unowned components are
+  therefore committed byte-for-byte instead of being replaced by the older
+  whole-document snapshot. An owned mismatch fails closed rather than letting
+  Git outrun editor delivery. Legacy intents without expected content and
+  malformed transitions retain the whole-document fallback. The commit path
+  never elects or component-merges an independent disk candidate while a live
+  editor owns the document.
 - **Retained closeout replay no longer wedges when a valid legacy response
   heading reaches the atomic response-cell fast path
   (`#responsecelllegacyfallback`).** Strict template compatibility accepts

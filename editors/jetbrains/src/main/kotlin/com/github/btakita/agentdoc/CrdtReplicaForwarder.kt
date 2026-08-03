@@ -17,6 +17,30 @@ import java.util.concurrent.TimeUnit
 private const val CRDT_IDLE_PULL_WARN_MS = 1_000L
 
 /**
+ * Minimum gap between controller-launch attempts per project root (`#rebootselfheal`).
+ *
+ * The register retry ladder backs off to 8s and never gives up, so without a
+ * floor here a dead project would attempt a launch on every rung forever. One
+ * attempt per 30s is enough to recover a reboot promptly while keeping a
+ * genuinely unlaunchable project cheap.
+ */
+private const val ENSURE_CONTROLLER_MIN_INTERVAL_MS = 30_000L
+
+/**
+ * Whether a controller-launch attempt is allowed now (`#rebootselfheal`).
+ *
+ * A pure function on purpose. The first version of this rate limit was guarded
+ * only by a source-scanning test, and a mutation that deleted the check stayed
+ * green because the constant was still named in a comment. Behaviour has to be
+ * asserted by calling it.
+ *
+ * @param lastAttemptMs epoch millis of the previous attempt; `0` means none
+ *   since the last successful send.
+ */
+internal fun shouldAttemptControllerLaunch(nowMs: Long, lastAttemptMs: Long): Boolean =
+    lastAttemptMs == 0L || nowMs - lastAttemptMs >= ENSURE_CONTROLLER_MIN_INTERVAL_MS
+
+/**
  * Thin editor-as-replica forwarding seam (`#crdtauth5`, plan phase 3/5).
  *
  * The plugin stays THIN: it owns no CRDT logic. The lazily replica, state-vector
@@ -697,16 +721,67 @@ class CpSocketReplicaTransport(
     @Volatile
     private var lastSendError: String? = null
 
+    /// Last controller-launch attempt for this project root, epoch millis.
+    /// `0` means "not attempted since the last successful send".
+    @Volatile
+    private var controllerEnsuredAtMs: Long = 0L
+
     private fun send(request: JsonObject): CpResponse? {
         val socket = cpcSocket()
         return try {
             val response = sendToSocket(socket, request)
             lastSendError = null
+            controllerEnsuredAtMs = 0L
             response
         } catch (e: Exception) {
             lastSendError = "${socket.path}: ${e.javaClass.simpleName}: ${e.message}"
             log.debug("[crdt-replica] CP socket ${socket.path} unavailable: ${e.message}")
+            if (CpRouteClient.provesNoControllerListening(e) && ensureControllerOnce()) {
+                return try {
+                    val response = sendToSocket(socket, request)
+                    lastSendError = null
+                    response
+                } catch (retry: Exception) {
+                    lastSendError = "${socket.path}: ${retry.javaClass.simpleName}: ${retry.message}"
+                    null
+                }
+            }
             null
+        }
+    }
+
+    /**
+     * Bring this project's controller back after a host reboot (`#rebootselfheal`).
+     *
+     * Without this the replica lane never recovers: a reboot leaves every
+     * project's socket either absent or stale-with-no-listener, and the register
+     * retry ladder re-attempts a connect that cannot succeed, forever. Observed
+     * 2026-08-03 — five projects sat dead across an IDE restart while the ladder
+     * logged `failure_count` into the teens, and a human had to run
+     * `controller status --ensure` per project.
+     *
+     * Rate-limited to one launch attempt per [ENSURE_CONTROLLER_MIN_INTERVAL_MS]
+     * per forwarder (one forwarder per project root), so the retry ladder cannot
+     * turn into a launch loop. Cleared on the next successful send, so a
+     * controller that dies again is recoverable rather than latched off.
+     *
+     * The launch decision itself lives in the shared library — this must stay a
+     * single delegation.
+     */
+    private fun ensureControllerOnce(): Boolean {
+        val now = System.currentTimeMillis()
+        if (!shouldAttemptControllerLaunch(now, controllerEnsuredAtMs)) return false
+        controllerEnsuredAtMs = now
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            val ensured = lib.agent_doc_ensure_controller_running(projectRoot)
+            if (ensured == 1) {
+                log.info("[crdt-replica] launched a controller for $projectRoot (#rebootselfheal)")
+            }
+            ensured == 1
+        } catch (e: Throwable) {
+            log.warn("[crdt-replica] ensure-controller unavailable: ${e.message}")
+            false
         }
     }
 

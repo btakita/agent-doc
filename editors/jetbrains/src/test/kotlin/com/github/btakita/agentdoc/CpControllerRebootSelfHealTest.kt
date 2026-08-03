@@ -105,6 +105,69 @@ class CpControllerRebootSelfHealTest {
     }
 
     /**
+     * The replica lane must self-heal too, and this is the half I got wrong first.
+     *
+     * I originally excluded `CrdtReplicaForwarder` on the theory that replica
+     * transport is a passive lane. It is not: replica registration is what makes
+     * the editor a live authority for a document, so with every project's
+     * controller dead after a reboot the register retry ladder re-attempts a
+     * connect that cannot succeed — forever. Observed 2026-08-03: five projects
+     * sat dead across a full IDE restart, `failure_count` climbing into the
+     * teens at an 8s backoff, until a human ran `controller status --ensure` per
+     * project. "I restarted but it's not recovering" was exactly this.
+     */
+    @Test
+    fun `the replica lane recovers a dead project controller`() {
+        val forwarder = source("CrdtReplicaForwarder.kt")
+
+        assertTrue(
+            "a register failure that proves no listener must ensure the controller",
+            forwarder.contains("agent_doc_ensure_controller_running("),
+        )
+        assertTrue(
+            "the dead-socket classification is shared, not re-derived here",
+            forwarder.contains("CpRouteClient.provesNoControllerListening("),
+        )
+        assertTrue(
+            "a successful send must clear the rate limit so a later death is recoverable",
+            forwarder.contains("controllerEnsuredAtMs = 0L"),
+        )
+    }
+
+    /**
+     * The rate limit, asserted by calling it.
+     *
+     * The first version of this was a source scan for the constant's name, and a
+     * mutation that deleted the check stayed green because the constant was still
+     * named in a comment — the same hole that let an earlier guard here pass on
+     * prose. A source scan can say a rule is mentioned; only a call can say it
+     * holds.
+     */
+    @Test
+    fun `the controller launch is rate limited per project root`() {
+        val interval = 30_000L
+
+        assertTrue(
+            "the first failure after a successful send must be allowed to launch",
+            shouldAttemptControllerLaunch(nowMs = 1_000_000L, lastAttemptMs = 0L),
+        )
+        assertFalse(
+            "a second attempt inside the window would turn the retry ladder into a launch loop",
+            shouldAttemptControllerLaunch(
+                nowMs = 1_000_000L + interval - 1,
+                lastAttemptMs = 1_000_000L,
+            ),
+        )
+        assertTrue(
+            "once the window elapses a genuinely dead project may be retried",
+            shouldAttemptControllerLaunch(
+                nowMs = 1_000_000L + interval,
+                lastAttemptMs = 1_000_000L,
+            ),
+        )
+    }
+
+    /**
      * `editors/SPEC.md`: the passive editor-surface lane sends "over the
      * existing-controller socket; it never launches the controller". A tab click
      * must stay free, so the self-heal is confined to lanes a human asked for.

@@ -33,101 +33,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260802-060832.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260803-012144.md`*
 
 Compacted content:
-- Archived 15 response topic(s): cycle check; denied applications showing in Available Deals; lender annual Requirements; 12 more
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): Production logs; Production logs follow-up; Fixing the product...
-
-### Re: #efs-prod-deploy-20d7a416 — production is on the schedule-capture build — opus-5
-
-> **Queue prompt:**
->
-> do [#efs-prod-deploy-20d7a416]
-
-Production is live on `20d7a416`: version `4e040d1b-df18-4083-b144-a8449f2a1e74`, deployed 2026-08-01T04:16:42Z, active at 100%. `EFS_ENVIRONMENT="production"`, both `equityfundingsource.com` and `www.` return 200. Repo was in sync with origin/main (0 ahead / 0 behind).
-
-Pre-deploy per `runbooks/deployment.md`: `make check` green (2282 pass, 0 fail, build + worker build clean); **no migrations pending on production D1** before or after, so this was code-only; Time Travel bookmark recorded (`000005f9-0000000e-000050ba-…`). Rollback target if you need it: `3b7d6d2d-bdf8-4847-8ba1-a45ab111a5e6` (2026-07-30T18:19Z).
-
-**On what the build-identity evidence does and does not prove.** Content-hashed assets on production match my clean local build exactly — `index.browser-7YCODNTY.js`, `index.server-45257KN3_YJAK3EWU.css`. But this change is server-side, so matching asset hashes only show the build came from this tree; the deployment timestamp and version ID are what establish the *server* bundle is new. I tried to byte-compare the deployed worker script against local `dist/worker/index.js` and could not: `.env` stores `passage:` references rather than literal credentials, so a raw Cloudflare API fetch does not authenticate. The wrappers resolve those at run time, and I am not resolving secrets by hand on a livestreamed session.
-
-**The scheduled path is verified running clean on the new build.** The 04:15Z sync tick fired 90 seconds *before* the deploy, so I waited for the next one:
-
-```
-tmo_sync_last_started_at    2026-08-01T04:45:48Z
-tmo_sync_last_completed_at  2026-08-01T04:45:50Z
-tmo_sync_cursor_ts          2026-08-01T04:45:48Z
-```
-
-The cursor advancing is the signal that matters, not the two-second runtime. A `partial` batch leaves the cursor stuck — that was the whole shape of `#tmo-sync-cron-failures`, where four consecutive runs re-swept the same 28 loans because the cursor never moved. It moved. No error recorded.
-
-**The change itself is still inert on production, and will be until ~17:00Z today.** The backup interval is 24 hours and the last run was `2026-07-31T17:00:53Z` — cut on the old build, so `schedule_rows=0` like every production artifact before it. The next daily job is the first that can carry schedules. I can force it early by setting `tmo_backup_interval_hours` to 0 and restoring it after a tick, but that is a production settings write you did not ask for, so I left it. Filed as `#tmo-prod-schedule-artifact-confirm` instead, with the check spelled out — that is what unblocks `#tmo-clone-apply`, which needs a schedule-bearing source.
-
-Both environments now run the same build: staging `410b3c74` (2026-07-30T23:18Z), production `4e040d1b`.
-
-### Re: #efs-dev-vars-secret-history — the per-environment files are clean; the tracked example was not — opus-5
-
-> **Queue prompt:**
->
-> do [#efs-dev-vars-secret-history]
-
-**The thing you asked about is clean.** `.dev.vars.production` and `.dev.vars.staging` were never committed. Three independent checks agree:
-
-- `git log --all --diff-filter=A -- '.dev.vars*'` returns exactly one path ever added: `.dev.vars.example`, at `c9aa3b92` (2026-04-23).
-- `git rev-list --objects --all | grep dev.vars` — across every ref including remotes and the three stashes — yields that same single path and nothing else.
-- Content identity: `git hash-object` on the current `.dev.vars`, `.dev.vars.production`, and `.dev.vars.staging` produces three hashes that `git cat-file -e` cannot find. Those bytes are not in the object database at all, not even as dangling blobs from an amended commit.
-
-So no rotation is required on that account, and there is nothing to purge. `.gitignore` now carries both `.dev.vars` and `.dev.vars.*` (EFS `292b52d6`), and all three files are confirmed `!!` ignored.
-
-**The audit found a different exposure, in the file that is supposed to be committed.** `.dev.vars.example` has carried a real 44-character base64url `AUTH_SECRET` and a 27-character `ADMIN_GLOBAL_PASSWORD` since the first commit, unchanged across all nine revisions that touched it. Neither is a placeholder. I compared values without printing them:
-
-- The example's `ADMIN_GLOBAL_PASSWORD` is **byte-identical** to the one local `.dev.vars` uses.
-- The example's `AUTH_SECRET` matches none of the three — `.dev.vars` (64), `.dev.vars.production` (55), `.dev.vars.staging` (52) all differ.
-
-Blast radius is narrower than it first reads. The repo is private, both deployed environments use different values, Cloudflare Worker secrets are write-only so the example was never a deploy source, and the only reference to it anywhere in the tree is a line in `docs/deploy.md` — `bin/cf-secrets-dev-vars.ts` syncs secret *names* into `.dev.vars` and explicitly cannot pull values. It is a committed local-dev admin password in a private repo, not a live production credential. But nothing in the repo stopped the next real value from being pasted straight back into that file.
-
-**Fixed and pushed** (EFS `3a2bfe30`): both values replaced with obvious placeholders, plus `tests/dev-vars-example-no-secrets.test.ts`, which fails when any secret-shaped key in the example holds a ≥16-char non-placeholder value, and when `.gitignore` loses the `.dev.vars.*` rule. I mutation-checked both assertions rather than trusting a green run — restoring the pre-fix example turns the first red, deleting the `.dev.vars.*` line turns the second red, and each returns to green on restore. Full suite: 2285 pass, 0 fail (2282 before, +3).
-
-**Sibling audit — one real hit.** EFS is the only repo in `src/` that uses `.dev.vars` at all, so the specific `.gitignore` gap did not propagate. Scanning every sibling's *tracked* env files for long opaque values under secret-shaped keys turned up `censible-core`, which commits real env files rather than samples: `apps/finegar-etl/.env` holds a FactSet FTP login and a 39-char password, and `.env.sample` holds a 26-char `SESSION_KEY`. Also private, also apparently dormant. Filed as `#censible-env-committed-creds` to handle from a censible-core session rather than reaching across from here. Everything else tracks placeholders only.
-
-Two follow-ups queued: `#efs-dev-vars-local-rotate` for the local-dev password that is still recoverable from EFS history, and the censible item above.
-
-Unrelated, for whoever owns it: preflight reports the installed `agent-doc` binary is missing commit `55dd1851d`. I did not run `make install` in `src/agent-doc` — pane `%72` is holding that repo.
-
-### Re: do [#efs-dev-vars-local-rotate] — opus-5
-
-Rotated. The local-dev `ADMIN_GLOBAL_PASSWORD` is new, and the leaked value is dead everywhere it was live.
-
-**Confirmed the exposure first (hashes only, never printed the values):**
-
-| source | sha256[:12] |
-|---|---|
-| `.dev.vars` (before rotation) | `42df2acf` |
-| `.dev.vars.example` @ `5ad74a66`…`ccf41967` | `42df2acf` — **match** |
-| `.dev.vars.example` @ `3a2bfe30` (placeholder) | `e2988059` |
-| `.dev.vars.production` | `7bde7267` — unaffected |
-| `.dev.vars.staging` | `725041499` — unaffected |
-
-So the backlog item was right: the working-copy value was byte-identical to what sat tracked in `.dev.vars.example` from `5ad74a66` through `ccf41967`, and prod/staging were never affected.
-
-**One thing the item missed: `passage` held the same value.** `btak/equityfundingsource/admin_global_password` hashed to `42df2acf` too, so rotating `.dev.vars` alone would have left the two out of sync. Rotated both.
-
-**AUTH_SECRET re-verified, still no action needed.** The committed example value (`fc3a4667`) matches none of `.dev.vars` (`9835a0cc`), `.dev.vars.production` (`908fa5cc`), or `.dev.vars.staging` (`d9badd98`).
-
-**What changed:** new 32-char base64url value written to `.dev.vars` (gitignored, mode `600`, all 9 keys intact, no malformed lines) and to `passage btak/equityfundingsource/admin_global_password`. Both now hash to `dae5c7e2`. Nothing tracked changed — `git status` in the submodule is clean, so there is no commit for this.
-
-**Live verification against `wrangler dev` on :8787**, using the `/admin/signup` global-password gate with an email that already exists (so the request cannot mutate anything):
-
-- new value → **409 "already exists"** — passed the gate, env value loaded
-- old leaked value → **403 "global admin password you entered is incorrect"**
-
-Local D1 unchanged afterward (5 users, 0 rows with the probe name). `make check` green: 2285 tests across 199 files, 0 fail, worker build succeeded.
-
-**History-purge decision: don't purge.** The repo is private with a single remote and one non-owner-facing collaborator surface, the value was local-dev-only, and it is now rotated, so the historical blob is dead credential material. A `filter-repo` rewrite plus force-push across every clone and the superproject submodule pointer costs more than it buys.
-
-**One loose end worth knowing about.** A full-tree scan found the old value still on disk in `.claude/worktrees/playful-strolling-wilkinson/.dev.vars.example` — a stale Claude Code worktree pinned at `8c6434ec` (2026-07-10), which predates the `3a2bfe30` placeholder fix. That branch is also **pushed to origin** as `worktree-playful-strolling-wilkinson`, so the value is at a live branch tip, not just deep history. It is dead now that the value is rotated, but the branch is 3 weeks behind main and looks like leftover scratch. I did not delete it — that is your call. Filed as a backlog recommendation.
-
-**Also worth flagging, since it nearly broke this audit:** `grep -rlF` and `git grep -lF` both returned *nothing* for a value sitting in `.dev.vars` in the same directory. The RTK wrapper swallowed the hits. A `python3` `os.walk` scan of the same tree found both files immediately. A security scan that silently reports "no exposure" is worse than no scan, so I extended the RTK false-pass memory to cover grep and corrected its "use grep to confirm" advice.
+- Archived 3 response topic(s): #efs-prod-deploy-20d7a416; #efs-dev-vars-secret-history; do [#efs-dev-vars-local-rotate]
+- Prior summary/context: prior compacted content: Archived 15 response topic(s): cycle check; denied applications showing in Available Deals; ...
 <!-- agent:boundary:3972fcb2 -->
 <!-- /agent:exchange -->
 

@@ -195,23 +195,24 @@ Processed `#advance-review` and committed the cycle.
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#percellconverge]
 - Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.
-- [#recommendedungatereview-b1cb]
-  [#recommendedungatereview-9g0v]
-  [#recommendedungatereview-zw66]
-  [#recommendedungatereview-e8jn]
-  [#recommendedungatereview-jcgv]
-  [#recommendedungatereview-a3ew]
-  [#recommendedungatereview-jfxh]
-  [#recommendedungatereview-w90z]
-  [#recommendedungatereview-sskd]
-  [#recommendedungatereview-0xc5]
-  [#recommendedungatereview-krpw]
-  [#recommendedungatereview-h9sm]
-  [#recommendedungatereview-xfmh]
-  [#recommendedungatereview-rht8]
-  [#recommendedungatereview-z0ps]
-  [#recommendedungatereview] [r
+- do [#recommendedungatereview-b1cb]
+- do [#recommendedungatereview-9g0v]
+- do [#recommendedungatereview-zw66]
+- do [#recommendedungatereview-e8jn]
+- do [#recommendedungatereview-jcgv]
+- do [#recommendedungatereview-a3ew]
+- do [#recommendedungatereview-jfxh]
+- do [#recommendedungatereview-w90z]
+- do [#recommendedungatereview-sskd]
+- do [#recommendedungatereview-0xc5]
+- do [#recommendedungatereview-krpw]
+- do [#recommendedungatereview-h9sm]
+- do [#recommendedungatereview-xfmh]
+- do [#recommendedungatereview-rht8]
+- do [#recommendedungatereview-z0ps]
+- do [#recommendedungatereview]
 <!-- /agent:queue -->
 
 ## Notes
@@ -222,6 +223,7 @@ Processed `#advance-review` and committed the cycle.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#percellconverge] #agent-doc-feature Per-component convergence: a turn must require only the components it OWNS to be settled, so the queue drains while the operator is live-editing an unowned component and that edit is never overwritten. Plan: tasks/agent-doc/plan-per-component-convergence.md. Root cause shared by the 2026-08-03 family that 0.35.120/0.35.121/0.35.123 each patched at the edge: every convergence gate compares the WHOLE document (editor authority vs disk), which can never hold while a buffer is being typed into, so live editing starves the drain by construction. op_log recorded ZERO per-item ops for a sixteen-item operator queue paste, so reconciliation has only whole-document text and every guard above it inherits that granularity. Four shippable phases: (1) record per-component ops - assert the 2026-08-03 sixteen-line paste yields sixteen queue-item inserts in op_log, today it yields zero; (2) per-component authority hashes, no behavior change; (3) scope the convergence gate (decide_read_only_terminal_projection and the session-check divergence INTERRUPT) to owned components only - this is the phase that makes the drain run during live editing AND the phase that can destroy an operator buffer if the ownership set is too broad; (4) per-component commit that rebases onto concurrent operator edits. Ship phase 3 behind a default-off flag. Required before phase 3: a SimWorld test where the agent writes exchange while a simulated operator edits queue every tick, asserting every keystroke SURVIVES; an over-claim test proving that survival test can go red; and a replay of the three real 2026-08-03 documents at their state_events hashes asserting none reaches a permanent INTERRUPT. Non-goals: the agent still never component-merges a disk candidate under a live editor, and the whole-document hash stays as a derived value
 - [ ] [#recommendedungatereview-b1cb] [recommended] Ungate review item #compactreactiveprojectionverify — validate and move to done
 - [ ] [#recommendedungatereview-9g0v] [recommended] Ungate review item #steeringmirrorverifylive313 — validate and move to done
 - [ ] [#recommendedungatereview-zw66] [recommended] Ungate review item #preflightinbinary — validate and move to done

@@ -468,12 +468,13 @@ mod tests {
             }
         );
 
-        let parsed_fresh = parse_supervisor_replacement_request(SupervisorReplacementRequestFields {
-            state: Some(" agent:fresh "),
-            reason: None,
-            diagnostic_payload: None,
-        })
-        .unwrap();
+        let parsed_fresh =
+            parse_supervisor_replacement_request(SupervisorReplacementRequestFields {
+                state: Some(" agent:fresh "),
+                reason: None,
+                diagnostic_payload: None,
+            })
+            .unwrap();
 
         assert_eq!(
             parsed_fresh,

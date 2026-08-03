@@ -889,7 +889,10 @@ mod tests {
             restart_mode: Mutex::new(String::new()),
         };
         let result = request_supervisor_restart(&state, "continue".to_string());
-        assert!(result.is_err(), "an open cycle over a live child must refuse");
+        assert!(
+            result.is_err(),
+            "an open cycle over a live child must refuse"
+        );
         let message = result.unwrap_err();
         assert!(
             message.contains("two children"),
@@ -962,8 +965,8 @@ mod tests {
     #[test]
     fn restart_request_wakes_waiting_supervisor_prompt() {
         let state = RestartLifecycleState {
-                cycle_open: false,
-                child_alive: false,
+            cycle_open: false,
+            child_alive: false,
             waiting_input: true,
             binary_stale: false,
             restart_requested: AtomicBool::new(false),
@@ -982,8 +985,8 @@ mod tests {
     #[test]
     fn restart_agent_replaces_child_even_when_supervisor_binary_is_stale() {
         let state = RestartLifecycleState {
-                cycle_open: false,
-                child_alive: false,
+            cycle_open: false,
+            child_alive: false,
             waiting_input: false,
             binary_stale: true,
             restart_requested: AtomicBool::new(false),
@@ -1004,8 +1007,8 @@ mod tests {
     #[test]
     fn controller_recycle_preserves_child_during_stale_binary_reexec() {
         let state = RestartLifecycleState {
-                cycle_open: false,
-                child_alive: false,
+            cycle_open: false,
+            child_alive: false,
             waiting_input: false,
             binary_stale: true,
             restart_requested: AtomicBool::new(false),

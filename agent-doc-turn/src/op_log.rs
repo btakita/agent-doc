@@ -547,7 +547,8 @@ mod tests {
             "recommendedungatereview-z0ps",
             "recommendedungatereview",
         ];
-        let before = "<!-- agent:queue -->\n- Read the handoff completely.\n<!-- /agent:queue -->\n";
+        let before =
+            "<!-- agent:queue -->\n- Read the handoff completely.\n<!-- /agent:queue -->\n";
         let mut after = String::from("<!-- agent:queue -->\n- Read the handoff completely.\n");
         for id in IDS {
             after.push_str(&format!("- do [#{id}]\n"));
@@ -583,7 +584,8 @@ mod tests {
     /// pins the ordering dependency that makes the test above pass.
     #[test]
     fn a_folded_paste_would_record_only_one_op() {
-        let before = "<!-- agent:queue -->\n- Read the handoff completely.\n<!-- /agent:queue -->\n";
+        let before =
+            "<!-- agent:queue -->\n- Read the handoff completely.\n<!-- /agent:queue -->\n";
         let folded = concat!(
             "<!-- agent:queue -->\n",
             "- Read the handoff completely.\n",

@@ -108,8 +108,6 @@ pub fn supervisor_restart_admission(
 mod restart_admission_tests {
     use super::*;
 
-
-
     /// `#haivendupsession`: the exact 2026-08-03 shape. A cycle was open (the
     /// recycle path deferred on it at 07:27:54 and 07:28:32) and the child was
     /// still live, yet `restart_continue_spawn` fired at 07:28:29 between them,

@@ -116,7 +116,11 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
         // recycle cannot disagree about whether a turn is still in flight. Fail
         // CLOSED — an unreadable projection defers the restart rather than
         // risking a second child on the pane.
-        let Some(file) = self.actor_runtime.as_ref().map(|runtime| runtime.file.clone()) else {
+        let Some(file) = self
+            .actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.file.clone())
+        else {
             return false;
         };
         match agent_doc_cycle_state_io::load_with_closeout_projection(&file) {

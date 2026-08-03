@@ -56,12 +56,40 @@ Mutation-checked: deleting the `lender_vesting_attach_account_` block turns the 
 **The prune itself:** `git worktree remove` on `.claude/worktrees/playful-strolling-wilkinson`, local branch deleted, `origin` branch deleted. `git worktree list` now shows only `main`, `.claude/worktrees/` is empty. The stale tracked `.dev.vars.example` carrying the pre-`3a2bfe30` `ADMIN_GLOBAL_PASSWORD` went with it — dead since `#efs-dev-vars-local-rotate`, so cleanup, not exposure.
 
 Not deployed. EFS has no CI workflow, so a live deploy is the remaining gate for this change; queued as a backlog item rather than pushed to production unasked.
+
+### Re: do [#recommendeddeploybrowser] — opus-5
+
+> **Queue prompt:**
+>
+> do [#recommendeddeploybrowser]
+
+
+Deployed to both environments and verified in a real browser. You approved the production deploy mid-cycle, so both went out.
+
+**Staging** — `equityfundingsource.brian-takita.workers.dev`, version `29dc8278`. **Production** — `equityfundingsource.com` + `www`, version `03a6be21`. The production D1 migrate step reported `No migrations to apply!`, as expected: this change adds no schema.
+
+**Bundle grep** (both environments serve the identical 2,153,308-byte `index.browser-LWKIMFQ3.js`): `Search by name or email`, `Search existing lenders`, `TMO lender account`, `No matching active lenders`, `Not found — add a new lender`, `Open TMO LOS` all present; the old `Create from lender info below` `<option>` is gone. Note the asset 404s for roughly a minute after each deploy while it propagates — that is lag, not a failed upload.
+
+**Staging, end-to-end through the real UI.** Opened Loan #60's Interested Lenders tab, created a lender through the modal's "not found" path with TMO account `L-DIALVERIFY`, and got "Lender marked interested". Then confirmed the backend half in staging D1:
+
+```
+lender_vestings.tmo_lender_account = L-DIALVERIFY
+vesting_name                       = Dial Verify
+user                               = btak.dev+dialverify@gmail.com, role=lender, status=active
+```
+
+The account landed on a **vesting**, not on the user row — the `#lender-account-retire` behavior the port was written for, now proven against a live D1 rather than only a source-contract test. That lender then made the search path testable: typing `dial` surfaced `Dial Verify · btak.dev+dialverify@gmail.com`, clicking it collapsed the field to the selected chip with a "Change" button and enabled Submit.
+
+**Production, read-only.** Opened a deal's Add Interested Lender modal on `equityfundingsource.com`. The dropdown showed the real active-lender list — Gallante LLC, Wendy O'Brien, Robert W. Clemmer, RSLF Corp, Tadashi Graves, Tanaz Alishahi, scrolling past the panel — which is exactly the list that had gotten slow to scan. Typing `clemmer` narrowed it to one row. No submit, no writes, no rows created in production.
+
+Both verification tabs were opened isolated via CDP `PUT /json/new` and closed afterward; your existing tabs were never navigated.
+
+Two things worth knowing. The staging lender `Dial Verify` / `L-DIALVERIFY` is left in place — it is legitimate staging test data, it makes the picker demonstrable there (staging had zero active lenders before), and deleting a user row risks the soft-delete trigger for no benefit. And creating it sent a real portal-invite email to `btak.dev+dialverify@gmail.com`.
 <!-- agent:boundary:3972fcb2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#recommendeddeploybrowser]
-- ~~do [#recommendedprunestale]~~
+- ~~do [#recommendeddeploybrowser]~~
 - do [#censible-env-committed-creds]
 - do [#tmo-prod-schedule-artifact-confirm]
 <!-- /agent:queue -->
@@ -69,7 +97,6 @@ Not deployed. EFS has no CI workflow, so a live deploy is the remaining gate for
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendeddeploybrowser] [recommended] Deploy + browser-verify #dial-lender-search in the EFS admin portal: Add Interested Lender modal search-combobox (name/email, Enter picks top match) and the TMO lender account field attaching a first vesting via lender_vesting_attach_account_. Landed on EFS main cde6a247; EFS has no CI workflow so live deploy + admin-portal check is the remaining gate.
 - [ ] [#censible-env-committed-creds] Sibling-repo fallout from the same gap: censible-core commits real env files, not just samples. apps/finegar-etl/.env carries FACTSET_FTP_LOGIN plus a 39-char FACTSET_FTP_PASSWORD, and .env.sample carries a 26-char SESSION_KEY. Repo is private (btakita/censible-core) and the project looks dormant, so the first question is whether the FactSet FTP account still exists. If it does, rotate with FactSet and drop the credential out of the tracked file; if it does not, replace both with placeholders so the pattern does not get copied forward. Do this from a censible-core session, not from EFS. Checked and clean: every other sibling tracks only .env.sample / .env.example with placeholder values; presence SERVICE_API_JWT_TOKEN is a 16-char dev placeholder.
 - [ ] [#tmo-prod-schedule-artifact-confirm] Confirm the first schedule-bearing PRODUCTION TMO backup artifact. Production went live on 20d7a416 at 2026-08-01T04:16Z, but tmo_backup_interval_hours is 24 and the last run was 2026-07-31T17:00:53Z on the old build, so the next daily job around 2026-08-01T17:00Z is the first artifact that can carry payment schedules. Check: read tmo_backup_last_key and tmo_backup_last_status from production platform_settings, confirm the key advanced to a 2026-08-01 object and status is complete, then pull that object from R2 bucket equityfundingsource-tmo-cache-production and count schedule rows - expect roughly 12 of 31 loans to carry one, versus 0 on every prior artifact. Sandbox already measured 34 rows over 26 loans. Unblocks #tmo-clone-apply, which needs a schedule-bearing clone source. Do not read the artifact contents into the transcript - it holds production PII; count and discard.
 <!-- /agent:backlog -->

@@ -87,13 +87,32 @@ Implemented and pushed per-component convergence phase 4 in `btakita/agent-doc` 
 With `agent_doc_per_component_convergence` enabled, the commit coordinator now derives the same owned component-name set from exact retained expected→target transitions before Git staging. It proves that each owned component in the binary snapshot has reached current Lazily/editor authority, then checkpoints that current authority cut as the commit candidate. Unowned operator edits therefore survive byte-for-byte instead of being replaced by the older whole-document snapshot. An owned mismatch fails closed so Git cannot outrun editor delivery. Legacy intents without expected content and malformed transitions retain the whole-document fallback. The path never elects or component-merges an independent disk candidate while a live editor owns the document.
 
 Regression coverage includes 64 ticks of concurrent queue typing during an exchange-only closeout, an ownership-overclaim negative control, owned-target delivery refusal, and legacy fallback. Focused tests passed, and the complete `make check` gate passed with artifact `.tsift/artifacts/tart-08d4bb6eea.test.log`. The exact committed `agent-doc 0.35.128` build is installed; CI run `30844635498` was observed once in progress after push.
+
+### Re: `#panelayoutrace`
+
+> **Queue prompt:**
+>
+> do [#panelayoutrace]
+
+
+Implemented and deployed `#panelayoutrace`.
+
+The pane-layout projection now treats a live same-window dispatch pane outside the current editor surface as the named terminal state `operator_owned` with reason `active_dispatch_outside_surface`, instead of indefinitely re-running structural reconciliation. That state is only allowed when every requested surface document is still present and the live dispatch is genuinely an extra pane; a missing requested pane remains `retry_pending`. Same-window actor bindings now participate in the reactive join so closing the extra actor or publishing a new editor surface invalidates the terminal state naturally.
+
+Convergence now independently compares the generation-scoped model file-to-pane mapping, projected in desired document order, with tmux's physical left-to-right pane sequence. Matching document labels no longer overclaim convergence when the physical panes are reversed. Focus remains the existing file-to-pane lookup and does not index physical panes.
+
+Dispatch acceptance logs now include the canonical target document and active editor-surface observation generations, making dispatch/surface ordering reconstructable. Rust and JetBrains wire enums include the new phase and reason.
+
+Regression coverage includes the captured three-pane/two-column count mismatch at attempt 41, a missing-surface-pane negative case, same-window actor-binding invalidation, and reversed `%77`/`%95` physical panes. Targeted Rust suites, JetBrains tests, `cargo check`, formatting, diff checks, and the full `make check` pass.
+
+Committed and pushed public agent-doc commit `8c5efe1a0` (`fix: bound editor pane layout dispatch races`). The exact commit's binary and native library are installed; controller/supervisor recycle is marked for idle boundaries. The matching JetBrains plugin is staged in IntelliJIdea2026.1 and requires one more IDE restart to activate its new enum handling.
 <!-- agent:boundary:f621055c:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#pcc4]~~
-- do [#panelayoutrace]
+- ~~do [#panelayoutrace]~~
 - Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.
 - do [#recommendedungatereview-b1cb]
 - do [#recommendedungatereview-9g0v]
@@ -121,7 +140,6 @@ Regression coverage includes 64 ticks of concurrent queue typing during an excha
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#panelayoutrace] #agent-doc-bug Pane-layout/dispatch race leaves an unmanaged pane in the agent-doc tmux window, and layout convergence has no concept of physical pane order. Plan: tasks/agent-doc/plan-pane-layout-dispatch-race.md. OPERATOR REPRO (2026-08-03): Run Agent Doc on lazily.md, then navigate the editor to agent-doc-bugs2.md WHILE that dispatch is still occurring; the yellow tmux bar offering to run lazily.md appears and lazily.md's pane stays in the window. Confirmed at 07:02:00Z - phase=retry_pending observation=pane_count_mismatch, expected=[bugs2, haiven-dev] (2, editor-visible) vs actual=[bugs2, lazily, haiven-dev] (3), panes=[%72,%77,%95]. Dispatch routes/creates a pane for its target while the editor-surface observation recomputes columns from what is visible NOW, so navigating away mid-dispatch excludes the document dispatch is still setting up and its pane becomes an extra the layout cannot model. TWO defects, do not conflate: (A) pane_count_mismatch retries forever because it will not close a pane hosting an active agent and the column set has no slot for it - it needs a terminal named outcome; (B) convergence compares expected/actual as ordered DOCUMENT lists and never checks that the hosting panes are in corresponding left-to-right order, so at 06:31:30Z it reported converged/synced with panes=[%77,%95] while %77 was at x=181 and %95 at x=121 (physically reversed) and %72 at x=0 was unmodelled - focus then picks column 0 faithfully and lands on the rightmost pane, which is the wrong-pane-focus symptom. DO NOT fix B by indexing focus into the physical pane list: in this state that selects %72, injecting into a different document's agent, which is worse. Both recorded projections can be replayed as fixtures without a live IDE
 - [ ] [#recommendedungatereview-b1cb] [recommended] Ungate review item #compactreactiveprojectionverify — validate and move to done
 - [ ] [#recommendedungatereview-9g0v] [recommended] Ungate review item #steeringmirrorverifylive313 — validate and move to done
 - [ ] [#recommendedungatereview-zw66] [recommended] Ungate review item #preflightinbinary — validate and move to done

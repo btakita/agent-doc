@@ -123,6 +123,54 @@ Proof:
 - Latest GitHub CI run `30780651967` for `2fa106c6a` was still in progress at closeout.
 
 Confidence: high. Escalation: none.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Re: do [#multilineheadbullet] — gpt-5
+
+Implemented and installed the multiline queue-head addressability fix.
+
+The invariant is now explicit: queue parsing, AST node enumeration, and queue completion operate on the same ordered logical item sequence. `agent-doc-markdown-ast::overlay::item_nodes` owns addressability policy through the typed `ItemSurface::{ListItem, MultilinePrompt}` boundary. Canonical bare `---` and `~~~prompt` blocks enumerate as multiline prompt nodes; completed `~~~done` blocks preserve the same logical node identity. This is a pure, one-shot document projection, so there is no long-lived reactive relationship to extract into `Computed` state.
+
+Transition coverage now proves:
+
+- live bare/`~~~prompt` multiline head → addressable AST node → `~~~done` completion;
+- completed multiline node → stable node key → unstrike restores the live bare form;
+- malformed or otherwise unaddressable input → fail closed without striking the neighbouring list item.
+
+The edited surfaces are sufficient because the Markdown AST crate owns node surfaces and mutations, queue I/O supplies the end-to-end consume regression, queue crates document the shared ordering/guard contract, and the document-format specification records the canonical behavior.
+
+Proof:
+
+- Source commit: `2fa106c6a fix: address multiline queue heads by node`, pushed to `origin/main`.
+- `cargo test -p agent-doc-markdown-ast multiline_queue_head_is_addressable_and_consumes_without_touching_neighbour` — green after first confirming the focused test failed before implementation.
+- `cargo test -p agent-doc-queue-io multiline_head_is_addressable_and_strikes_without_touching_a_neighbour` — green.
+- `cargo test -p agent-doc-markdown-ast` — green.
+- `cargo test -p agent-doc-queue -p agent-doc-queue-io` — green.
+- `make check` — green (`.tsift/artifacts/tart-0097c36ae7.test.log`).
+- `cargo fmt --all` and `git diff --check` — clean.
+- `make install` — installed Agent Doc `0.35.118`, native library, skills, and JetBrains plugin `0.2.338`.
+- Latest GitHub CI run `30780651967` for `2fa106c6a` was still in progress at closeout.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue

@@ -63,14 +63,23 @@ The previously red hosted CI run was unrelated to this listener: Gradle could no
 
 
 The earlier haiven session-check proved a synthetic closeout but did not prove the response repository commit. I corrected that: `tasks/haiven-dev.md` and its done archive are committed in the haiven-dev repository as `f9a49e4`. `agent-doc session status` now reports `committed_after_latest_run=true`, and session doctor reports no issues. A newer four-line queue/in-progress editor projection remains outside that response commit so concurrent document state was not swept into it.
+
+### Re: Response
+
+Implemented and committed `#compacttombgc` in agent-doc source as `1ffbc7b98` (`fix: fence compact epochs and reload stale admission hooks`). Compact Exchange now crosses a retained CRDT epoch fence only after its compacted snapshot has converged and optional commit closeout has consumed the old delivery frontier. An immediately stable relay rebuilds the canonical from one snapshot insertion, rotates lineage, discards accumulated insert/delete history, quarantines same-text stale deltas, and queues every live replica for replace-capable re-bootstrap. If a newer post-commit delivery is still in flight, the compaction request persists in the retained canonical projection and settles when the final exact visible projection arrives. Detached and explicit force-disk paths do not invent replica stability.
+
+Added regressions proving same-text history shrink plus stale-lineage fencing, and retained settlement on the final peer projection. Updated the realtime and compact-exchange contracts.
+
+Also fixed the reported stale Claude admission-hook snapshot path while this source build was open: prompt-bearing dispatch-only tmux delivery now requires the same per-document cycle acknowledgment as managed delivery. Accepted pane input alone is no longer success. A missing acknowledgment triggers one fresh supervisor restart for Claude Code or Codex, reloading startup hook settings, then retries and fails closed if admission is still absent. Updated the session/harness contracts and added supported-harness recovery coverage.
+
+Verification: focused realtime/relay/compact suites passed (384 tests); route-io passed (72 tests, 13 live-tmux tests ignored); `make check` passed all 8,553 tests with 244 skipped, release-projection checks, and all TLA+ models. Changed public files passed the private-name scan and `git diff --check`. Installed the exact committed binary/library and refreshed skills/editor packages.
 <!-- agent:boundary:b825cf56:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#realtimesalient]~~
 - do [#multilineheadbullet]
-- do [#compacttombgc]
+- ~~do [#compacttombgc]~~
 - do [#reactive-closeout-install-verify]
 <!-- /agent:queue -->
 
@@ -83,7 +92,6 @@ The earlier haiven session-check proved a synthetic closeout but did not prove t
 
 <!-- agent:backlog priority queue -->
 - [ ] [#multilineheadbullet] [focused-cycle] Make multiline `---` queue prompts addressable — SHARPENED 2026-07-19. Damage is already PREVENTED (#qconsumenostrike fail-closed guard, 5b3761dfc); this is the remaining correctness half. Refined finding: the ENTRY model already handles multiline correctly — document_queue::parse surfaces the multiline head as a Prompt (preflight lists it), mark_first_n_prompts_completed targets it, and render emits Completed multiline as `~~~done` fences. The mismatch is that markdown_ast::item_nodes (used for IPC node ops and AST-keyed consume) enumerates only list items, so it returns the NEIGHBOUR for the same logical head — observed as node_ops=[queue:1:neighbour:0] while consumed_text was the multiline head. So the fix is to reconcile the two ENUMERATORS, not the entry model: either teach item_nodes the `---` block shape, or render multiline heads with a bullet + indented continuation that both round-trips through parse_spans and yields a node. Needs one clean reproduction to confirm which of the two paths actually mutated the document in the observed strikes.
-- [ ] [#compacttombgc] [recommended] Fenced Compact Exchange CRDT epoch — RE-SCOPED 2026-07-19 away from tombstone GC. The #bootstrapsize measurement (crdt_sync.rs) on a real 57KB document found 88,630 ops and ZERO tombstones, so TextCrdt tombstone GC would reclaim nothing on the observed shape; the payload is pre-compaction INSERT history. The valuable half is the epoch itself: rebootstrap attached replicas from the compacted snapshot and reject/component-rebase older-epoch deltas, which discards that insert history — the only mechanism that makes compaction actually shrink the register bootstrap. Keep tombstone GC as a trailing step for delete-heavy documents, not the headline. Still needs the all-replica stability frontier before any epoch fence is safe.
 - [ ] [#reactive-closeout-install-verify] After the retained tsift.md editor-delivery capture reaches a terminal boundary, install the committed Agent Doc binary and verify the equityfundingsource.md queue strike, Monster Rod Holders corruption rejection, Compact Exchange recovery, and editor/tmux responsiveness without recycling an active closeout owner.
 <!-- /agent:backlog -->
 

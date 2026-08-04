@@ -382,13 +382,26 @@ Validated [#mtds], but the required three-case live proof is not available.
 The current panes and ops logs do not contain a complete sequence for the exact Claude footer variant: empty-composer dispatch success, unsent-draft refusal with `submit_or_clear_pane_draft` and no injection, and genuine mid-turn busy refusal. Producing that evidence would require commandeering a suitable live Claude pane and deliberately injecting both submitted and unsubmitted test input.
 
 I did not interfere with an unrelated live pane or infer the UI result from unit coverage. [#mtds] remains active as `[operator-verify]`; [#recommendedungatereview-rht8] is complete as an evidence-backed review of its current state.
-<!-- agent:boundary:6b42be8e:agent-doc-bugs2 -->
+
+### Re: do [#recommendedungatereview-z0ps] — gpt-5
+
+Validated and resolved [#editormodelmissing], [#jetbrainsrunroute-77k5], and [#jetbrainsrunroute] with live JetBrains evidence.
+
+- After the actual IDE restart, the new JetBrains process (PID 3017541) registered `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md` as an exact CRDT replica under plugin 0.2.340 and projected the retained write after exact editor registration.
+- Reliable-sync status now reports the document as live with the required lossless-tree CRDT capabilities.
+- Retrying the dispatch-only route activated the existing queue head, sent it to pane `%4`, and returned `pane_state_changed` dispatch-start proof.
+- A pane capture shows the submitted Agent Doc prompt, assistant tool output, and the Codex `Working` busy cue, so this is execution-start proof rather than pane-input acceptance alone.
+- The root `agent-doc-bugs2.md` missing-replica path also recovered after the rebuilt plugin/shared library was activated and has completed multiple editor-authoritative closeouts.
+- No forced disk fallback or disk-read authority bypass was used; the exact live-editor replica supplied the authority.
+
+The permanent missing-replica wedge and the false-negative JetBrains/Codex route proof are therefore both resolved in the live reproductions.
+<!-- agent:boundary:94d765d2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#recommendedungatereview-rht8]~~
-- do [#recommendedungatereview-z0ps]
+- ~~do [#recommendedungatereview-z0ps]~~
 - do [#recommendedungatereview]
 <!-- /agent:queue -->
 
@@ -400,8 +413,6 @@ I did not interfere with an unrelated live pane or infer the UI result from unit
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jetbrainsrunroute-77k5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785815283483-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
-- [ ] [#recommendedungatereview-z0ps] [recommended] Ungate review item #editormodelmissing — validate and move to done
 - [ ] [#recommendedungatereview] [recommended] Ungate review item #falsetyping-guard — validate and move to done
 <!-- /agent:backlog -->
 
@@ -413,7 +424,6 @@ I did not interfere with an unrelated live pane or infer the UI result from unit
 - [/] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
 - [/] [#operatorverifylive] [operator-verify] #relaylockpoison live proof: with the JB plugin loaded, force a replica panic (the crash-2026-07-09 shape: agent_doc_replica_apply_local) and confirm later replica calls still succeed instead of returning -1/null for the life of the IDE. This is the behavior the whole migration exists to guarantee and it cannot be proven without a host IDE.
 - [/] [#mtds] [operator-verify] #panedraftunblocker live proof: on a Claude pane whose footer reads `⏵⏵ bypass permissions on · 1 shell · ← for agents` (the variant without `(shift+tab to cycle)`), with an EMPTY composer and no active turn, trigger JB Run Agent Doc. Expect dispatch to succeed instead of refusing with `timed_out` / `unblocker=wait_for_dispatch_ready_prompt`. Then repeat with unsent text typed in the composer and expect the new refusal naming the draft with `unblocker=submit_or_clear_pane_draft`, and NO injection over that text. Finally confirm a genuinely mid-turn pane (live spinner, bare `❯`) still refuses as busy. Fixed in 17848a927, installed 0.35.6; needs the supervisor idle-boundary recycle to pick up the fresh binary.
-- [/] [#editormodelmissing] [operator-verify] #agent-doc-bug editor_attached_model_missing permanently wedges every write needing editor authority (agent-doc-bugs2 gen=1518, equityfundingsource gen=1452; healthy docs are gen 14-82). NARROWED 2026-07-18: survives admin recycle x2, admin reload-lib, AND a full IntelliJ restart, so it is NOT a plugin model-rebuild problem as first filed. Root cause is a one-way latch in editor-attachment state: TransportProjection.editor_generation (agent-doc-state-backbone/src/lib.rs:3394) is SET on StateFact::OwnerGenerationChanged (line ~1985) and never cleared — there is no editor-detach/close StateFact in the enum at all. document_has_live_editor_transport (agent-doc-document-realtime/src/crdt_authority.rs:165) therefore returns MultiReplica forever once an editor has ever attached, with NO liveness proof, even though the sibling authority_from_liveness (line 122) exists precisely to demote a stale listener via pid liveness. The ONLY predicate that flips it false is TransportPatchPhase::ForceDiskFallback — which is exactly why --force-disk is the sole escape the operator ever found. Second candidate latch, same shape: observe_editor_open's durable reliable-sync receiver journal may replay a stale editor-open assertion across an IDE restart (resolve_closed_editor_disk_fallback_current_doc, agent-doc-document-realtime-io/src/lib.rs:3774 bails only when it reports open). DECISIVE EXPERIMENT before coding: instrument which of the two reports attached — log editor_generation + observe_editor_open together at the EditorAttachedMissingReplica branch (agent-doc-crdt-relay-io/src/lib.rs:696). Both present identically, and the fix differs by which. DO NOT ship a speculative authority-demotion change: wrongly demoting a live editor lets the binary overwrite an operator buffer, which is the exact failure every guard on this path exists to prevent. Also worth shipping regardless: admin detect reported 'No fleet anomalies detected' while two documents were hard-wedged — add an attached-but-no-replica detector so this is visible instead of silent.
 - [/] [#falsetyping-guard] #agent-doc-bug provenance-aware visible-write guard. INTEGRATED to main (merge on 5bcfc07b) + binary/cdylib installed + recycled; guard tests 7/7 green; JB 0.2.205 zip + VS Code 0.2.38 compiled. REMAINING (operator): install JB plugin zip (build/distributions/agent-doc-jetbrains-0.2.205.zip) + reload IDE, install VS Code 0.2.38, then live proof — type during replica churn (no wedge) + genuine unsaved edit still fails closed. NOTE: bugs2.md can still wedge until the IDE plugin is reloaded (loaded plugin still calls FFI v2 → conservative fail-closed).
 <!-- /agent:review -->
 

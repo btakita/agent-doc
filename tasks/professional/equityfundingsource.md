@@ -68,11 +68,25 @@ Done. The large rounded border and tinted wrapper around the Google Reviews sect
 - Postflight: staging reports no pending D1 migrations; the repository is clean and synchronized. No GitHub Actions `CI` workflow is configured in this repository.
 
 Confidence: high. Escalation: none.
+
+### Re: Deploy borderless Google Reviews to production — gpt-5
+
+> **Queue prompt:** deploy to production
+
+Done. The borderless Google Reviews layout from commit `cbeecd8d` is deployed to production.
+
+- Changed paths: none this cycle; production deployed the already committed and verified `main` build.
+- Command: `bun run --cwd app/equityfundingsource deploy:worker:production` completed successfully, including the Worker build and production deployment.
+- Production Worker version: `4d595a43-fbfa-4a7f-ada6-4e4916b923b8`, active at 100%.
+- Verification: https://equityfundingsource.com/ and https://www.equityfundingsource.com/ both return HTTP 200 and serve the new `data-google-reviews-layout` wrapper without border or rounded classes. Cloudflare propagation was briefly uneven, then converged on both domains.
+- Postflight: production reports no pending D1 migrations; `main` is clean and synchronized with `origin/main`.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Please remove the surrounding border box around the Google ratings ![img_4.png](img_4.png). deploy to staging~~ — auto-struck: answered this cycle (#ftstrike)
+- deploy to production
 <!-- /agent:queue -->
 
 ## Backlog

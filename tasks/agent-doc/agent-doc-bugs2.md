@@ -173,6 +173,23 @@ Validated and resolved `#preflightinbinary`. Its original four-part live recipe 
 - This live cycle itself admitted as `cycle-1785813153721` with `maintenance_required=false` and `preflight_required=false`, without a model-owned preflight call.
 
 No source changes were required. The current full `make check` was already green in this turn. The obsolete manual review can move to done with high confidence.
+
+### Re: JetBrains editor-surface swap verification — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-e8jn]
+
+
+Validated and resolved `#jbsurfaceswap`. The 0.2.296 manual checklist is superseded by the current controller-owned editor-surface protocol and substantially stronger coverage:
+
+- JetBrains tests prove document selection publishes one latest-wins observation, ordinary focus does not force a competing full reconcile, layout changes retain selected-document intent until acceptance, the short structural coalescing window is bounded, and controller submission happens off the EDT.
+- The reactive surface graph proves first-layout `Sync`, changed-document `Focus`, identical observations becoming silent/idle, returning layouts firing again, and tmux drift alone driving reconciliation with no new editor event.
+- Controller generation tests reject duplicate, stale, retired, and late-after-forget observations while allowing the next plugin generation.
+- Registry tests prove project roots are independent, `forget` discards history, and `forget_all` disposes every local effect.
+- Current pane-layout tests additionally prove stale generations cannot apply focus, automatic structural edges cannot reuse a prior generation, physical pane order is independently checked, and an active dispatch pane outside the surface reaches terminal `operator_owned` rather than retrying forever.
+
+The old “Sync hint exactly once” observation is no longer the authority boundary: plugins report facts and do not plan tmux consequences or derive receipts locally. This turn also exercised the live JetBrains/Haiven route that exposed the newer pane-layout race; the fix is committed and pushed, and the current JetBrains tests plus full `make check` passed. Confidence is high; no operator escalation remains for this legacy review.
 <!-- agent:boundary:efab1ce2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -182,7 +199,7 @@ No source changes were required. The current full `make check` was already green
 - ~~do [#recommendedungatereview-b1cb]~~
 - ~~do [#recommendedungatereview-9g0v]~~
 - ~~do [#recommendedungatereview-zw66]~~
-- do [#recommendedungatereview-e8jn]
+- ~~do [#recommendedungatereview-e8jn]~~
 - do [#recommendedungatereview-jcgv]
 - do [#recommendedungatereview-a3ew]
 - do [#recommendedungatereview-jfxh]
@@ -205,7 +222,6 @@ No source changes were required. The current full `make check` was already green
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedungatereview-e8jn] [recommended] Ungate review item #jbsurfaceswap — validate and move to done
 - [ ] [#recommendedungatereview-jcgv] [recommended] Ungate review item #boundaryaccumverify — validate and move to done
 - [ ] [#recommendedungatereview-a3ew] [recommended] Ungate review item #r4gq — validate and move to done
 - [ ] [#recommendedungatereview-jfxh] [recommended] Ungate review item #zqv8 — validate and move to done
@@ -224,7 +240,6 @@ No source changes were required. The current full `make check` was already green
  
 <!-- agent:review -->
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
-- [/] [#jbsurfaceswap] [operator-verify] Live IDE proof for #jbsurfaceswap (agent-doc 27beeae2e, JB plugin 0.2.296). Both plugins now report one EditorSurface observation per event and the graph derives the intent; the planners are deleted. With the IDE restarted onto 0.2.296, confirm in a real session: (a) clicking between two side-by-side split editors moves the tmux active pane (derived Focus); (b) changing the editor split layout reconciles tmux (derived Sync) and shows the 'Sync: --col ... [focus: ...]' hint exactly once; (c) repeat focus events on the same editor cost nothing — the JB log line '[layout-sync] observe: ... intent=idle' with no controller command; (d) swap two tmux panes by hand, then click an editor tab WITHOUT changing the split, and confirm the pulled tmux probe reconciles the layout instead of only moving focus (#tmuxsyncstate); (e) closing the project releases the root (no growth in surface graphs across open/close cycles). Headless tests cover the fold, the probe seam, and the observation wire shape, but not the debounce/generation interaction with real editor event storms.
 - [/] [#boundaryaccumverify] [operator-verify] After restarting any JetBrains IDE still on the older package generation, reproduce a wedged finalize/direct-commit handoff and confirm visible document, snapshot, and committed HEAD each retain exactly one agent:boundary marker; report any boundary_invariant_violation that does not self-heal.
 - [/] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).
 - [/] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.

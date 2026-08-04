@@ -72,7 +72,7 @@ Confidence: high. Escalation: none.
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Please remove the surrounding border box around the Google ratings ![img_4.png](img_4.png). deploy to staging
+- ~~Please remove the surrounding border box around the Google ratings ![img_4.png](img_4.png). deploy to staging~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

@@ -56,7 +56,7 @@ Confidence: high. Escalation: none.
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Add the Google Reviews for Equity Funding Source to the staging + production site. Place in the home page in an appropriate place for social proof. https://www.google.com/search?q=Equity+Funding+Source&stick=H4sIAAAAAAAA_-NgU1I1qLAwSDZKNk9JNU8zMEhLTTK0Mqgws7AwNDYzSjExNUg2NLVIWcQq6lpYmllSqeBWmpeSmZeuEJxfWpScCgCpNvZ-QQAAAA&hl=en&mat=CT2gUovxbaZtElcBa0lj_-TpmTUq8otGeH49HaUiQeNxD8gJEjPAQqixOC-YVe3hGa7-R6wHSDG3IFfzjwFsrkVxdHIElEh6xeNNkkupP1U6tcrPkt9ISbEN11GdkS-HlHU&authuser=1
+- ~~Add the Google Reviews for Equity Funding Source to the staging + production site. Place in the home page in an appropriate place for social proof. https://www.google.com/search?q=Equity+Funding+Source&stick=H4sIAAAAAAAA_-NgU1I1qLAwSDZKNk9JNU8zMEhLTTK0Mqgws7AwNDYzSjExNUg2NLVIWcQq6lpYmllSqeBWmpeSmZeuEJxfWpScCgCpNvZ-QQAAAA&hl=en&mat=CT2gUovxbaZtElcBa0lj_-TpmTUq8otGeH49HaUiQeNxD8gJEjPAQqixOC-YVe3hGa7-R6wHSDG3IFfzjwFsrkVxdHIElEh6xeNNkkupP1U6tcrPkt9ISbEN11GdkS-HlHU&authuser=1~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

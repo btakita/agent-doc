@@ -50,6 +50,30 @@ class FileRenameListenerTest {
     }
 
     @Test
+    fun `cross-subproject moves use one controller that owns both paths`() {
+        assertEquals(
+            "/work/agent-loop",
+            documentPathTransitionControllerRoot(
+                projectBasePath = "/work/agent-loop",
+                resolvedOldRoot = "/work/agent-loop",
+                resolvedNewRoot = "/work/agent-loop/src/nested-app",
+                oldPath = "/work/agent-loop/tasks/candidate.md",
+                newPath = "/work/agent-loop/src/nested-app/tasks/candidate.md",
+            ),
+        )
+        assertEquals(
+            null,
+            documentPathTransitionControllerRoot(
+                projectBasePath = "/work/first",
+                resolvedOldRoot = "/work/first",
+                resolvedNewRoot = "/work/second",
+                oldPath = "/work/first/tasks/candidate.md",
+                newPath = "/work/second/tasks/candidate.md",
+            ),
+        )
+    }
+
+    @Test
     fun `rename listener never invokes sync or a layout process`() {
         val source =
             File(

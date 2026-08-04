@@ -16840,6 +16840,8 @@ fn layout_sync_state_report(
         window_id: target.window_id,
         window_name: target.window_name,
         focus: target.focus,
+        expected_focus_pane: None,
+        active_pane: None,
     }
 }
 
@@ -16848,6 +16850,9 @@ fn layout_sync_state_result(
     actual_documents: &[String],
     expected_panes: &[String],
     physical_panes: &[String],
+    focus_requested: bool,
+    expected_focus_pane: Option<&str>,
+    active_pane: Option<&str>,
 ) -> (bool, &'static str) {
     if expected_documents.len() != actual_documents.len() {
         return (false, "pane_count_mismatch");
@@ -16857,6 +16862,15 @@ fn layout_sync_state_result(
     }
     if expected_panes.len() == expected_documents.len() && expected_panes != physical_panes {
         return (false, "pane_order_mismatch");
+    }
+    if focus_requested && expected_focus_pane.is_none() {
+        return (false, "focus_pane_not_found");
+    }
+    if focus_requested && active_pane.is_none() {
+        return (false, "missing_active_pane");
+    }
+    if focus_requested && expected_focus_pane != active_pane {
+        return (false, "focus_pane_mismatch");
     }
     (true, "synced")
 }
@@ -16875,6 +16889,18 @@ fn layout_sync_state_expected_panes(
                 .map(|(_, pane)| pane.clone())
         })
         .collect()
+}
+
+fn layout_sync_state_expected_focus_pane(
+    project_root: &Path,
+    focus: Option<&str>,
+    effect_file_panes: &[(String, String)],
+) -> Option<String> {
+    let focus = canonical_layout_document_id(project_root, focus?);
+    effect_file_panes
+        .iter()
+        .find(|(file, _)| canonical_layout_document_id(project_root, file) == focus)
+        .map(|(_, pane)| pane.clone())
 }
 
 fn layout_sync_state_operator_owned_documents(
@@ -17284,6 +17310,12 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
         &expected_documents,
         effect_file_panes,
     );
+    let expected_focus_pane = layout_sync_state_expected_focus_pane(
+        &bootstrap.project_root,
+        focus.as_deref(),
+        effect_file_panes,
+    );
+    let active_pane = agent_doc_tmux_io::target_pane_id(&tmux, &window_id_value);
     let operator_owned_documents = layout_sync_state_operator_owned_documents(
         &bootstrap.project_root,
         &expected_documents,
@@ -17295,6 +17327,9 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
         &actual_documents,
         &expected_panes,
         &panes,
+        focus.is_some(),
+        expected_focus_pane.as_deref(),
+        active_pane.as_deref(),
     );
     let mut report = layout_sync_state_report(
         synced,
@@ -17311,6 +17346,8 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
     );
     report.expected_panes = expected_panes;
     report.operator_owned_documents = operator_owned_documents;
+    report.expected_focus_pane = expected_focus_pane;
+    report.active_pane = active_pane;
     Ok(report)
 }
 
@@ -18005,7 +18042,7 @@ fn pane_layout_effect_worker(
         });
         publish_pane_layout_status(&runtime);
 
-        if let Some(mut reusable) = reusable_structure {
+        if let Some(reusable) = reusable_structure {
             let tmux = tmux_router::Tmux::default_server();
             let focus_receipt = apply_pane_layout_focus_effect(
                 &state,
@@ -18026,14 +18063,24 @@ fn pane_layout_effect_worker(
                 attempt = 0;
                 continue;
             }
+            let mut observation_invocation = pane_layout_state_invocation(&desired);
+            observation_invocation.focus = projected_focus.clone();
+            let fresh_report = tmux_layout_sync_state_for_invocation_with_effect_assignment(
+                &bootstrap,
+                &runtime,
+                &observation_invocation,
+                &reusable.file_panes,
+            );
             if (!focus_receipt.required || focus_receipt.applied)
-                && let Some(mut report) = reusable.report.take()
+                && let Ok(report) = fresh_report
+                && report.synced
             {
-                report.focus = projected_focus.clone();
                 let focus_reason = focus_receipt.reason.clone();
                 let logged_expected_documents = report.expected_documents.clone();
                 let logged_actual_documents = report.actual_documents.clone();
                 let logged_panes = report.panes.clone();
+                let logged_expected_focus_pane = report.expected_focus_pane.clone();
+                let logged_active_pane = report.active_pane.clone();
                 runtime.record_pane_layout_observation(PaneLayoutObservation {
                     generation: desired.generation,
                     actor_bindings: actor_bindings.clone(),
@@ -18053,13 +18100,15 @@ fn pane_layout_effect_worker(
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
-                        "pane_layout_projection generation={} attempt={} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?}",
+                        "pane_layout_projection generation={} attempt={} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?} expected_focus_pane={:?} active_pane={:?}",
                         desired.generation,
                         attempt,
                         focus_reason,
                         logged_expected_documents,
                         logged_actual_documents,
                         logged_panes,
+                        logged_expected_focus_pane,
+                        logged_active_pane,
                     ),
                 );
                 match pane_layout_effect_worker_complete(
@@ -18150,10 +18199,12 @@ fn pane_layout_effect_worker(
                 },
             }
         };
+        let mut observation_invocation = pane_layout_state_invocation(&desired);
+        observation_invocation.focus = projected_focus.clone();
         let report = tmux_layout_sync_state_for_invocation_with_effect_assignment(
             &bootstrap,
             &runtime,
-            &pane_layout_state_invocation(&desired),
+            &observation_invocation,
             &effect_file_panes,
         );
         let (report, effect_reason) = match (report, effect_result) {
@@ -18200,6 +18251,8 @@ fn pane_layout_effect_worker(
         let logged_expected_panes = report.expected_panes.clone();
         let logged_panes = report.panes.clone();
         let logged_operator_owned_documents = report.operator_owned_documents.clone();
+        let logged_expected_focus_pane = report.expected_focus_pane.clone();
+        let logged_active_pane = report.active_pane.clone();
         if report.synced {
             runtime.record_pane_layout_structural_assignment(
                 &desired,
@@ -18235,7 +18288,7 @@ fn pane_layout_effect_worker(
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?}",
+                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?} expected_focus_pane={:?} active_pane={:?}",
                 desired.generation,
                 attempt,
                 if synced { "converged" } else { "retry_pending" },
@@ -18247,6 +18300,8 @@ fn pane_layout_effect_worker(
                 logged_expected_panes,
                 logged_panes,
                 logged_operator_owned_documents,
+                logged_expected_focus_pane,
+                logged_active_pane,
             ),
         );
         match pane_layout_effect_worker_complete(
@@ -19099,6 +19154,52 @@ fn publish_pane_layout_desired_invocation(
     Ok((desired, invocation))
 }
 
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn refresh_pane_layout_observation_before_await(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    desired: &PaneLayoutDesired,
+) {
+    let effect_file_panes = runtime.pane_layout_effect_file_panes(desired.generation);
+    if effect_file_panes.is_empty() {
+        return;
+    }
+    let actor_bindings = runtime.pane_layout_actor_bindings();
+    let mut guarded = desired.invocation.clone();
+    suppress_inactive_automatic_layout_focus(&mut guarded, desktop_editor_focus_state());
+    let invocation = ControllerTmuxLayoutSyncStateInvocation {
+        columns: guarded.columns,
+        window: guarded.window,
+        focus: guarded.focus,
+    };
+    let report = tmux_layout_sync_state_for_invocation_with_effect_assignment(
+        bootstrap,
+        runtime,
+        &invocation,
+        &effect_file_panes,
+    )
+    .unwrap_or_else(|error| {
+        layout_sync_state_report(
+            false,
+            format!("tmux_observation_failed:{error:#}"),
+            invocation.columns.clone(),
+            Vec::new(),
+            Vec::new(),
+            LayoutSyncStateTarget {
+                window_id: invocation.window.clone(),
+                focus: invocation.focus.clone(),
+                ..LayoutSyncStateTarget::default()
+            },
+        )
+    });
+    runtime.record_pane_layout_observation(PaneLayoutObservation {
+        generation: desired.generation,
+        actor_bindings,
+        report,
+    });
+    publish_pane_layout_status(runtime);
+}
+
 pub(crate) fn handle_sync_tmux_layout(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -19128,6 +19229,10 @@ pub(crate) fn handle_sync_tmux_layout(
                 file_panes: Vec::new(),
             });
         }
+        // A repeated foreground command is also a physical observation edge.
+        // Re-observe before awaiting so an identical desired Source cannot reuse
+        // a stale Converged projection after pane focus or geometry drift.
+        refresh_pane_layout_observation_before_await(bootstrap, runtime, &desired);
         let projection =
             runtime.await_pane_layout_generation(desired.generation, PANE_LAYOUT_COMMAND_AWAIT);
         let (applied, reason) = match projection {
@@ -22301,7 +22406,7 @@ mod tests {
         ];
 
         assert_eq!(
-            layout_sync_state_result(&expected, &actual, &[], &[]),
+            layout_sync_state_result(&expected, &actual, &[], &[], false, None, None),
             (false, "pane_order_mismatch")
         );
     }
@@ -22316,7 +22421,15 @@ mod tests {
         let physical_panes = vec!["%95".to_string(), "%77".to_string()];
 
         assert_eq!(
-            layout_sync_state_result(&expected, &expected, &model_panes, &physical_panes,),
+            layout_sync_state_result(
+                &expected,
+                &expected,
+                &model_panes,
+                &physical_panes,
+                false,
+                None,
+                None,
+            ),
             (false, "pane_order_mismatch"),
             "matching document labels cannot overclaim convergence when pane_left order is reversed",
         );
@@ -22356,7 +22469,7 @@ mod tests {
         let actual = vec!["/repo/tasks/left.md".to_string()];
 
         assert_eq!(
-            layout_sync_state_result(&expected, &actual, &[], &[]),
+            layout_sync_state_result(&expected, &actual, &[], &[], false, None, None),
             (false, "pane_count_mismatch")
         );
         let extra = vec![
@@ -22365,7 +22478,7 @@ mod tests {
             expected[1].clone(),
         ];
         assert_eq!(
-            layout_sync_state_result(&expected, &extra, &[], &[]),
+            layout_sync_state_result(&expected, &extra, &[], &[], false, None, None),
             (false, "pane_count_mismatch"),
             "the captured three-pane/two-column dispatch race remains a count mismatch",
         );
@@ -22384,8 +22497,45 @@ mod tests {
                 &expected,
                 &["%77".to_string(), "%95".to_string()],
                 &["%77".to_string(), "%95".to_string()],
+                false,
+                None,
+                None,
             ),
             (true, "synced")
+        );
+    }
+
+    #[test]
+    fn tmux_layout_sync_state_result_requires_observed_focus_convergence() {
+        let documents = vec![
+            "/repo/tasks/left.md".to_string(),
+            "/repo/tasks/right.md".to_string(),
+        ];
+        let panes = vec!["%77".to_string(), "%95".to_string()];
+
+        assert_eq!(
+            layout_sync_state_result(
+                &documents,
+                &documents,
+                &panes,
+                &panes,
+                true,
+                Some("%95"),
+                Some("%77"),
+            ),
+            (false, "focus_pane_mismatch"),
+        );
+        assert_eq!(
+            layout_sync_state_result(
+                &documents,
+                &documents,
+                &panes,
+                &panes,
+                true,
+                Some("%95"),
+                Some("%95"),
+            ),
+            (true, "synced"),
         );
     }
 

@@ -293,6 +293,11 @@ class TypingTrackerEdtBudgetTest {
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
         ).first { Files.exists(it) }
         val watcher = Files.readString(watcherPath)
+        val visualHighlighterPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
+        ).first { Files.exists(it) }
+        val visualHighlighter = Files.readString(visualHighlighterPath)
         val componentApplyBody = watcher.substringAfter("\"applyPatch.component\"")
             .substringBefore("wrote = true")
         val refreshBody = watcher.substringAfter("\"refreshContent.postcommit\"")
@@ -309,6 +314,12 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("private fun appendOpsLog")
         val disposeBody = watcher.substringAfter("override fun dispose()")
             .substringBefore("companion object")
+        val edtSocketApplyBody = watcher
+            .substringAfter("ApplicationManager.getApplication().invokeAndWait {")
+            .substringBefore("if (applied || wasNoOp) {")
+        val workerProjectionBody = watcher
+            .substringAfter("if (applied || wasNoOp) {")
+            .substringBefore("StateProjectionBridge.recordEditorPatchApplied")
 
         assertTrue(
             "agent-doc IPC patch writes should not set the unsynced-local-operator flag",
@@ -344,6 +355,20 @@ class TypingTrackerEdtBudgetTest {
             nativeSideEffectBody.contains("SwingUtilities.isEventDispatchThread()") &&
                 nativeSideEffectBody.contains("executeOnPooledThread(block)") &&
                 disposeBody.contains("runNativeSideEffectOffEdt"),
+        )
+        assertFalse(
+            "content projection FFI must not run inside the socket EDT apply closure",
+            edtSocketApplyBody.contains("writeEditorContentProjection"),
+        )
+        assertTrue(
+            "the socket worker must publish the immutable post-apply content before acknowledging",
+            workerProjectionBody.contains("writeEditorContentProjection"),
+        )
+        assertTrue(
+            "late visual refresh callbacks must become inert after plugin generation disposal",
+            visualHighlighter.contains("private val disposed = AtomicBoolean(false)") &&
+                visualHighlighter.contains("catch (_: RejectedExecutionException)") &&
+                visualHighlighter.contains("if (!disposed.compareAndSet(false, true)) return"),
         )
     }
 

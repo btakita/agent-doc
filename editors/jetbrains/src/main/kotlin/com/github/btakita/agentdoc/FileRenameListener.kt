@@ -42,6 +42,23 @@ internal fun documentPathTransitionRetryDelayMs(attempt: Int): Long {
     return (250L shl exponent).coerceAtMost(30_000L)
 }
 
+internal fun documentPathTransitionControllerRoot(
+    projectBasePath: String?,
+    resolvedOldRoot: String?,
+    resolvedNewRoot: String?,
+    oldPath: String,
+    newPath: String,
+): String? {
+    val old = Path.of(oldPath).toAbsolutePath().normalize()
+    val new = Path.of(newPath).toAbsolutePath().normalize()
+    return listOfNotNull(projectBasePath, resolvedOldRoot, resolvedNewRoot)
+        .map { Path.of(it).toAbsolutePath().normalize() }
+        .distinct()
+        .filter { old.startsWith(it) && new.startsWith(it) }
+        .maxByOrNull { it.nameCount }
+        ?.toString()
+}
+
 /**
  * Reactively converges a VFS path transition without invoking layout sync.
  *
@@ -144,10 +161,15 @@ class FileRenameListener(private val project: Project) : BulkFileListener {
 
             if (projection.phase == DocumentPathTransitionPhase.LivenessProjected) {
                 val projectRoot =
-                    NativePatching.resolveProjectPath(projection.newPath)?.first
-                        ?: project.basePath
+                    documentPathTransitionControllerRoot(
+                        projectBasePath = project.basePath,
+                        resolvedOldRoot = NativePatching.resolveProjectPath(projection.oldPath)?.first,
+                        resolvedNewRoot = NativePatching.resolveProjectPath(projection.newPath)?.first,
+                        oldPath = projection.oldPath,
+                        newPath = projection.newPath,
+                    )
                         ?: run {
-                            retry(projection, "project root unavailable")
+                            retry(projection, "no controller root contains both transition paths")
                             return
                         }
                 val receipt =

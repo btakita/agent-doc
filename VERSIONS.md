@@ -22,6 +22,20 @@ desired surface are no longer terminal `operator_owned` panes: reconciliation
 moves them to `stash` without killing the harness and remains retryable until
 pane count and order converge. This closes the route-time race that appended
 a third pane beside an already-correct two-pane editor projection.
+- **Foreground commands now re-observe focus and geometry before accepting a
+cached layout projection.** Repeating the same desired columns no longer
+reuses an old `Converged` value after tmux drift. Physical convergence includes
+the active pane in the target window, so a successful `select-pane` effect is
+not sufficient by itself; a focus mismatch remains retryable until the
+requested document's actor pane is actually active.
+- **JetBrains generation handoff no longer leaks disposed callbacks or native
+receipt calls onto the EDT.** Patch application captures immutable post-write
+content inside the editor closure, then publishes the content receipt from the
+socket worker before acknowledgement. Visual-highlighter callbacks become
+inert once their plugin generation is disposed and tolerate the narrow
+scheduler-shutdown race. Cross-subproject markdown moves also choose one
+controller root that contains both paths, instead of retaining an impossible
+new-subproject transition forever.
 
 ## 0.35.132
 

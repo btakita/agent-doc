@@ -91,6 +91,9 @@ class PatchWatcher(private val project: Project) : Disposable {
      */
     @Volatile private var lastApplyWasNoOp = false
 
+    /** Immutable post-apply content captured on the EDT for worker-side receipt publication. */
+    @Volatile private var lastApplyProjectionContent: String? = null
+
     @Volatile private var lastApplyBlockedForFileCacheConflict = false
 
     @Volatile private var running = false
@@ -377,14 +380,17 @@ class PatchWatcher(private val project: Project) : Disposable {
                 }
                 var applied = false
                 var wasNoOp = false
+                var projectionContent: String? = null
                 ApplicationManager.getApplication().invokeAndWait {
                     // Re-check under EDT to avoid TOCTOU race with file watcher
                     if (isAlreadyApplied(patch.patchId)) {
                         LOG.info("[socket] dedup (EDT): patch_id ${patch.patchId} already applied — emitting already_applied")
-                        wasNoOp = writeAlreadyAppliedContentProjection(patch, "socket_edt_recheck")
+                        projectionContent = currentContentForProjection(patch.file)
+                        wasNoOp = projectionContent != null
                         return@invokeAndWait
                     }
                     lastApplyWasNoOp = false
+                    lastApplyProjectionContent = null
                     applied = try {
                         applyPatch(patch)
                     } catch (e: Exception) {
@@ -392,10 +398,21 @@ class PatchWatcher(private val project: Project) : Disposable {
                         false
                     }
                     if (applied) {
-                        recordApplied(patch.patchId)
                         wasNoOp = lastApplyWasNoOp
+                        projectionContent = lastApplyProjectionContent
                         lastApplyWasNoOp = false
+                        lastApplyProjectionContent = null
                     }
+                }
+                if (applied || wasNoOp) {
+                    val content = projectionContent
+                    if (content == null || !writeEditorContentProjection(patch.patchId, content, patch.file)) {
+                        applied = false
+                        wasNoOp = false
+                    }
+                }
+                if (applied) {
+                    recordApplied(patch.patchId)
                 }
                 if (applied || wasNoOp) {
                     StateProjectionBridge.recordEditorPatchApplied(
@@ -741,6 +758,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     private fun applyPatch(patch: IpcPatch): Boolean {
         lastApplyWasNoOp = false
+        lastApplyProjectionContent = null
         lastApplyBlockedForFileCacheConflict = false
 
         val localFileSystem = LocalFileSystem.getInstance()
@@ -829,9 +847,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
         ) {
             LOG.info("[patch-watcher] dedup: response patch_id ${patch.patchId} already present in live disk/committed content — skipping stale replay")
-            if (!writeEditorContentProjection(patch.patchId, diskContent ?: content, patch.file)) {
-                return false
-            }
+            lastApplyProjectionContent = diskContent ?: content
             lastApplyWasNoOp = true
             return true
         }
@@ -905,9 +921,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         if (result == content) {
             LOG.warn("Patch produced no changes for ${patch.file}")
-            if (!writeEditorContentProjection(patch.patchId, document.text, patch.file)) {
-                return false
-            }
+            lastApplyProjectionContent = document.text
             lastApplyWasNoOp = true
             return true
         }
@@ -946,9 +960,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             return false
         }
 
-        if (!writeEditorContentProjection(patch.patchId, document.text, patch.file)) {
-            return false
-        }
+        lastApplyProjectionContent = document.text
         // Note: do NOT call agent_doc_commit here. The plugin committing within the IPC
         // window races with the skill's `agent-doc commit` call, causing the binary commit
         // to be a no-op (FFI already committed). The binary's git::commit handles boundary
@@ -1157,9 +1169,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
             ) {
                 LOG.info("[patch-watcher] dedup: VFS response patch_id ${patch.patchId} already present in disk/committed content — skipping stale replay")
-                if (!writeEditorContentProjection(patch.patchId, content, patch.file)) {
-                    return false
-                }
+                lastApplyProjectionContent = content
                 lastApplyWasNoOp = true
                 return true
             }

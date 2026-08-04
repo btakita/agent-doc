@@ -260,6 +260,12 @@ pub struct ControllerTmuxLayoutSyncStateReport {
     pub window_name: Option<String>,
     #[serde(default)]
     pub focus: Option<String>,
+    /// Pane that the desired focused document is expected to own.
+    #[serde(default)]
+    pub expected_focus_pane: Option<String>,
+    /// Active pane observed in the target tmux window.
+    #[serde(default)]
+    pub active_pane: Option<String>,
 }
 
 /// First cross-process state-plane channel: the editor's desired pane layout.
@@ -7304,6 +7310,8 @@ mod tests {
                 window_id: Some("@1".to_string()),
                 window_name: Some("agent-doc".to_string()),
                 focus: desired.invocation.focus.clone(),
+                expected_focus_pane: None,
+                active_pane: None,
             },
         };
         assert_eq!(
@@ -7353,6 +7361,8 @@ mod tests {
                 window_id: Some("@1".to_string()),
                 window_name: Some("agent-doc".to_string()),
                 focus: desired.invocation.focus.clone(),
+                expected_focus_pane: None,
+                active_pane: None,
             },
         };
         assert_eq!(
@@ -7394,6 +7404,8 @@ mod tests {
                 window_id: Some("@1".to_string()),
                 window_name: Some("agent-doc".to_string()),
                 focus: desired.invocation.focus.clone(),
+                expected_focus_pane: None,
+                active_pane: None,
             },
         };
         assert_eq!(
@@ -7459,6 +7471,8 @@ mod tests {
                 window_id: Some("@1".to_string()),
                 window_name: Some("agent-doc".to_string()),
                 focus: desired.invocation.focus.clone(),
+                expected_focus_pane: None,
+                active_pane: None,
             },
         };
         assert_eq!(
@@ -7564,6 +7578,8 @@ mod tests {
             window_id: Some("@1".to_string()),
             window_name: Some("agent-doc".to_string()),
             focus: first.invocation.focus.clone(),
+            expected_focus_pane: None,
+            active_pane: None,
         };
         graph.record_structural_assignment(
             &first,

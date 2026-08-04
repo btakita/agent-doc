@@ -455,7 +455,7 @@ One.
     }
 
     @Test
-    fun `file patch success requires content projection before deleting patch file`() {
+    fun `file patch success publishes immutable content from the worker before acknowledgement`() {
         val patchWatcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
@@ -464,8 +464,9 @@ One.
 
         assertTrue(patchWatcher.contains("private fun writeEditorContentProjection(patchId: String?, content: String, filePath: String? = null): Boolean"))
         assertTrue(patchWatcher.contains("FFI unavailable, cannot write content projection"))
-        assertTrue(patchWatcher.contains("if (!writeEditorContentProjection(patch.patchId, document.text, patch.file))"))
-        assertTrue(patchWatcher.contains("if (!writeEditorContentProjection(patch.patchId, content, patch.file))"))
+        assertTrue(patchWatcher.contains("lastApplyProjectionContent = document.text"))
+        assertTrue(patchWatcher.contains("projectionContent = lastApplyProjectionContent"))
+        assertTrue(patchWatcher.contains("!writeEditorContentProjection(patch.patchId, content, patch.file)"))
         assertTrue(patchWatcher.contains("applyMinimalDocumentEditUtil(document, content, result)"))
         assertFalse(patchWatcher.contains("document.setText(result)"))
         assertFalse(patchWatcher.contains("setBinaryContent("))

@@ -30,8 +30,10 @@ import java.awt.Color
 import java.awt.Font
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
 
@@ -52,6 +54,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
         Thread(r, "agent-doc-visual-highlighter-events").apply { isDaemon = true }
     }
     private val pendingRefreshes = ConcurrentHashMap<Document, ScheduledFuture<*>>()
+    private val disposed = AtomicBoolean(false)
 
     init {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(object : DocumentListener {
@@ -102,28 +105,35 @@ class VisualHighlighterManager private constructor(private val project: Project)
     private fun refreshMarkdownFileAfterEditorEvent(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         ApplicationManager.getApplication().invokeLater {
-            if (project.isDisposed) return@invokeLater
+            if (disposed.get() || project.isDisposed) return@invokeLater
             refreshFile(file)
         }
     }
 
     private fun scheduleRefresh(document: Document) {
-        if (!isMarkdown(document)) return
+        if (disposed.get() || project.isDisposed || refreshExecutor.isShutdown || !isMarkdown(document)) return
         pendingRefreshes.remove(document)?.cancel(false)
         lateinit var future: ScheduledFuture<*>
-        future = refreshExecutor.schedule({
-            try {
-                val snapshot = collectVisualTokens(document)
-                if (snapshot != null) {
-                    ApplicationManager.getApplication().invokeLater {
-                        if (project.isDisposed) return@invokeLater
-                        applyVisualTokens(document, snapshot)
+        try {
+            future = refreshExecutor.schedule({
+                try {
+                    if (disposed.get() || project.isDisposed) return@schedule
+                    val snapshot = collectVisualTokens(document)
+                    if (snapshot != null) {
+                        ApplicationManager.getApplication().invokeLater {
+                            if (disposed.get() || project.isDisposed) return@invokeLater
+                            applyVisualTokens(document, snapshot)
+                        }
                     }
+                } finally {
+                    pendingRefreshes.remove(document, future)
                 }
-            } finally {
-                pendingRefreshes.remove(document, future)
-            }
-        }, 120, TimeUnit.MILLISECONDS)
+            }, 120, TimeUnit.MILLISECONDS)
+        } catch (_: RejectedExecutionException) {
+            // A queued editor/VFS callback may race plugin unload. Disposal is
+            // terminal for this manager; the replacement generation owns refreshes.
+            return
+        }
         pendingRefreshes[document] = future
     }
 
@@ -330,6 +340,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
     }
 
     override fun dispose() {
+        if (!disposed.compareAndSet(false, true)) return
         pendingRefreshes.values.forEach { it.cancel(false) }
         pendingRefreshes.clear()
         refreshExecutor.shutdownNow()

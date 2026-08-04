@@ -340,6 +340,19 @@ Validated [#hvw0], but it cannot move to done yet.
 
 Rotating a GitHub repository secret is an external operator-gated action and was not authorized by the current Agent Doc task. [#hvw0] therefore remains active as `[operator-verify]`; [#recommendedungatereview-krpw] is complete as an evidence-backed review of its current state.
 ### Re: do [#recommendedungatereview-krpw] — gpt-5
+
+### Re: do [#recommendedungatereview-h9sm] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-h9sm]
+
+
+Validated [#c8tb], but the exact operator proof is not present yet.
+
+The ops log contains a live fast-path event for the healthy authoritative-actor branch: `route_dispatch_only_busy_active_turn_skip_wait` on a genuinely busy Claude pane. It does not contain the required degraded-route pair `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket` plus `route_existing_pane_busy_active_turn_skip_wait`.
+
+Producing that missing evidence requires intentionally taking a live supervisor socket down and invoking JetBrains Run Agent Doc while its pane is mid-turn. I did not disrupt a live supervisor or synthesize UI evidence. [#c8tb] therefore remains active as `[operator-verify]`; [#recommendedungatereview-h9sm] is complete as an evidence-backed review of its current state.
 <!-- agent:boundary:f8be95a3:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -357,7 +370,7 @@ Rotating a GitHub repository secret is an external operator-gated action and was
 - ~~do [#recommendedungatereview-sskd]~~
 - ~~do [#recommendedungatereview-0xc5]~~
 - ~~do [#recommendedungatereview-krpw]~~
-- do [#recommendedungatereview-h9sm]
+- ~~do [#recommendedungatereview-h9sm]~~
 - do [#recommendedungatereview-xfmh]
 - do [#recommendedungatereview-rht8]
 - do [#recommendedungatereview-z0ps]
@@ -373,7 +386,6 @@ Rotating a GitHub repository secret is an external operator-gated action and was
 
 <!-- agent:backlog priority queue -->
 - [ ] [#jetbrainsrunroute-77k5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785815283483-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
-- [ ] [#recommendedungatereview-h9sm] [recommended] Ungate review item #c8tb — validate and move to done
 - [ ] [#recommendedungatereview-xfmh] [recommended] Ungate review item #operatorverifylive — validate and move to done
 - [ ] [#recommendedungatereview-rht8] [recommended] Ungate review item #mtds — validate and move to done
 - [ ] [#recommendedungatereview-z0ps] [recommended] Ungate review item #editormodelmissing — validate and move to done

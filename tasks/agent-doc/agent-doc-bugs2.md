@@ -223,6 +223,22 @@ Validated and resolved `#r4gq` with the requested live evidence on the current i
 - `queued_behind_active_turn_is_accepted_even_when_proof_required` proves that outcome remains accepted for Codex's proof-required path, and `busy_dispatch_start_outcome_short_circuits_queued_when_busy_without_probe_proof` pins the no-proof busy case directly.
 
 The owner pane subsequently drained and completed its Haiven work. No source changes were needed for this review; the current full `make check` was already green in this turn. Confidence is high and no operator escalation remains.
+
+### Re: JetBrains dim-suggestion relay verification — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-jfxh]
+
+
+Validated and resolved `#zqv8`. The exact historical input shape is now deterministic and the current IDE path was exercised live:
+
+- `codex_dim_suggestion_is_not_protected_but_identical_operator_draft_is` feeds the ANSI-dim `Summarize recent commits` composer suggestion to the direct-pane classifier and proves it is not protected; the identical non-dim operator draft remains protected as `drafted prompt input`.
+- `protected_prompt_input_reason_ignores_unlisted_dim_codex_suggestion` independently proves the dim suggestion makes the current composer visible/ready without being mistaken for an approved literal prompt line.
+- The route path preserves SGR attributes specifically so that distinction survives pane capture.
+- During this turn, repeated JetBrains `Run Agent Doc` actions against `haiven-dev.md` entered the controller route. A representative current attempt (`1785781244900-9`) started at `18:20:44Z` and settled with exit code 0 at `18:21:00Z`; the available log contains no protected-input block for the document. The UI remained responsive while the controller-owned route ran asynchronously.
+
+No source changes were needed. The current JetBrains tests and full `make check` were already green in this turn. Confidence is high; no restart or operator escalation remains for the obsolete 0.2.247 review.
 <!-- agent:boundary:efab1ce2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -235,7 +251,7 @@ The owner pane subsequently drained and completed its Haiven work. No source cha
 - ~~do [#recommendedungatereview-e8jn]~~
 - ~~do [#recommendedungatereview-jcgv]~~
 - ~~do [#recommendedungatereview-a3ew]~~
-- do [#recommendedungatereview-jfxh]
+- ~~do [#recommendedungatereview-jfxh]~~
 - do [#recommendedungatereview-w90z]
 - do [#recommendedungatereview-sskd]
 - do [#recommendedungatereview-0xc5]
@@ -255,7 +271,6 @@ The owner pane subsequently drained and completed its Haiven work. No source cha
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedungatereview-jfxh] [recommended] Ungate review item #zqv8 — validate and move to done
 - [ ] [#recommendedungatereview-w90z] [recommended] Ungate review item #compactindcellsverify — validate and move to done
 - [ ] [#recommendedungatereview-sskd] [recommended] Ungate review item #crdtpushdrainverify — validate and move to done
 - [ ] [#recommendedungatereview-0xc5] [recommended] Ungate review item #bbpe — validate and move to done
@@ -271,7 +286,6 @@ The owner pane subsequently drained and completed its Haiven work. No source cha
  
 <!-- agent:review -->
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
-- [/] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
 - [/] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [/] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
 - [/] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one

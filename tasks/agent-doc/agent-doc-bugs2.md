@@ -315,7 +315,6 @@ Validated and resolved [#bbpe] against the restarted JetBrains editor and the fr
 - The probe was inspection-only and did not open a cycle or modify the document.
 
 The operator verification is complete, so [#bbpe] and [#recommendedungatereview-0xc5] can move to done.
-### Re: do [#recommendedungatereview-0xc5] — gpt-5
 
 ### Re: do [#recommendedungatereview-krpw] — gpt-5
 
@@ -339,7 +338,6 @@ Validated [#hvw0], but it cannot move to done yet.
 - There is no later tagged release proving that the repository secret was rotated successfully.
 
 Rotating a GitHub repository secret is an external operator-gated action and was not authorized by the current Agent Doc task. [#hvw0] therefore remains active as `[operator-verify]`; [#recommendedungatereview-krpw] is complete as an evidence-backed review of its current state.
-### Re: do [#recommendedungatereview-krpw] — gpt-5
 
 ### Re: do [#recommendedungatereview-h9sm] — gpt-5
 
@@ -373,7 +371,6 @@ The current JetBrains logs contain no `agent_doc_replica_apply_local` panic, rep
 
 I did not manufacture the fault or infer recovery from ordinary replica traffic. [#operatorverifylive] remains active as `[operator-verify]`; [#recommendedungatereview-xfmh] is complete as an evidence-backed review of its current state.
 
-### Re: do [#recommendedungatereview-xfmh] — gpt-5
 
 ### Re: do [#recommendedungatereview-rht8] — gpt-5
 
@@ -472,12 +469,59 @@ Protobuf support is justified for cross-language schema identity, evolution, and
 Live rollout installed the final core binary and matching native library without a second controller recycle. `haiven-dev.md` then resumed the retained closeout and reached `committed` without force-disk, resubmission, or a duplicate response. Controller inspection reports the installed inode active for both controller and supervisor and `projection_lag: false`.
 
 Verification: Rust focused regressions plus full `make check` passed (8,610 passed, 244 skipped, TLA+/Lean green); VS Code passed 170 tests; JetBrains `test buildPlugin` passed; formatting passed. Source commits are `fa1a82524` (`fix: converge reactive editor recovery`) and root pointer `4248af9c6` (`agent-doc: converge retained editor recovery`). The latest visible GitHub CI run was green; it predates these local commits.
+
+### Re: tmux pane auto-sync wedge — gpt-5.6
+
+> **Queue prompt:**
+>
+> Tmux pane auto-sync is wedged. Please fix all agent-doc contributing factors.
+
+Fixed and released as agent-doc 0.35.132.
+
+The live controller log reproduced the wedge at `2026-08-04T15:58:54Z`: generation 2 completed its first automatic attempt as `retry_pending` with `pane_count_mismatch`, one requested pane absent, and `focus_pane_not_found`. No automatic attempt followed; only a manual full sync at 16:15 generated new work and converged. The worker was incorrectly treating current-generation `RetryPending` as terminal and deactivating itself.
+
+The policy owner is now `ControllerPaneLayoutProjectionSink` and its single latest-wins effect worker. Its transition contract is:
+
+| Current projection/fact | Transition | Worker consequence |
+| --- | --- | --- |
+| `Converged` or terminal `OperatorOwned` for the current generation | `Retire` | Deactivate the current worker |
+| `RetryPending` for the current generation | `RetryCurrent` | Retain ownership, wait with bounded backoff, then retry |
+| New desired generation, actor-binding revision, or work revision | `Superseded` | Interrupt the wait and recompute immediately |
+| Controller teardown | terminal teardown | Deactivate without detached work |
+
+The reactive topology remains editor desired-layout and actor-binding Sources → controller projection Computed → one tmux structural/focus Effect → observation and receipt Sources. Retry timing lives inside the retained effect owner; it does not poll the IPC accept loop or create a detached periodic timer. The imperative leaves remain `sync_tmux_layout` and `select_pane`, fenced by the latest work revision. Both the structural path and the reusable-structure/focus-only path now use the same interruptible retry wait.
+
+Contributing fixes:
+
+- `RetryPending` no longer retires the worker after the first attempt.
+- A sink-owned condition variable wakes the retained worker as soon as newer desired-layout or actor-binding work is scheduled.
+- Exponential retry delay is bounded from 250 ms through the documented five-second ceiling; the prior shift cap only reached four seconds.
+- Specs were aligned in `SPEC.md` and `specs/07-session-tmux-commands.md`; release notes and regression tests were added.
+
+Verification:
+
+- Red regression proof: the old terminal mapping failed `retry_pending_layout_attempt_remains_owned_for_retry` (`tart-64a83bb6b6`).
+- Focused pane-layout tests pass, including retained ownership and the exact backoff sequence (`tart-70a47a54a1`).
+- The controller-I/O crate passes (`tart-e9f514d627`).
+- Final full `make check` passes with zero failures (`tart-9ba4086b84`).
+- Formatting, staged diff checks, and the public-subrepo private-name denylist pass.
+- The latest pre-change CI run was green. CI and Release for commit `94a8515860161622b83ebde85a75e871f6af5ebb` are in progress; PyPI is queued, so local verification is the completion evidence rather than waiting on external runners.
+
+Release/deployment:
+
+- Source commit `94a851586` (`fix: retain pane layout retries`) is pushed to `origin/main`.
+- Tag `v0.35.132` is pushed.
+- `make install-full` completed; `agent-doc --version` reports `0.35.132`.
+- The project controller recycled successfully onto the installed build.
+- The private superproject gitlink is committed locally as `f8a19eae8`. I did not push that private branch because it is already 33 commits ahead and 2 behind with extensive unrelated work; the public source release itself is fully pushed.
+
+No state migration is required. Restarting an IDE host will activate its matching repackaged plugin generation, but the controller-side retry fix is installed and active now. No additional backlog follow-up is needed because the reproduced failure class is covered at the state transition, timing, specification, full-suite, release, and live-controller activation boundaries.
 <!-- agent:boundary:52f9ac8b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- [#jetbrainsrunroute-tgp5] + [#jetbrainsrunroute]
+- Tmux pane auto-sync is wedged. Please fix all agent-doc contributing factors.
 <!-- /agent:queue -->
 
 ## Notes

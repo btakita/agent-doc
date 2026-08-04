@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -432,7 +432,7 @@ Confidence: high. Escalation: no code or release blocker. A non-blocking operato
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Moving from fpe-service-topology.md with 1 tmux pane to agent-doc-bugs2.md does not auto-sync back to 2 tmux panes. Forward navigation to lazily.md then auto-syncs back to 2 tmux panes. It seems the first move from 1 -> 2 tmux panes is not autosynced.
+- ~~Moving from fpe-service-topology.md with 1 tmux pane to agent-doc-bugs2.md does not auto-sync back to 2 tmux panes. Forward navigation to lazily.md then auto-syncs back to 2 tmux panes. It seems the first move from 1 -> 2 tmux panes is not autosynced.~~ — auto-struck: answered this cycle (#ftstrike)
 - Fix "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [integrity-gate] INTERRUPTED: response heading `### Re: do [#recommendedungatereview-0xc5] — gpt-5` in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md has no response body; prompt/response ordering was interrupted [dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class=interrupted_closeout issue_key=c3ca409e1d2b8a91c170585dd64afd055632bf159af8818c5563822996a237bf Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy. Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic."
 <!-- /agent:queue -->
 

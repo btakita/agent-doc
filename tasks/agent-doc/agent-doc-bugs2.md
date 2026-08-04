@@ -190,6 +190,23 @@ Validated and resolved `#jbsurfaceswap`. The 0.2.296 manual checklist is superse
 - Current pane-layout tests additionally prove stale generations cannot apply focus, automatic structural edges cannot reuse a prior generation, physical pane order is independently checked, and an active dispatch pane outside the surface reaches terminal `operator_owned` rather than retrying forever.
 
 The old “Sync hint exactly once” observation is no longer the authority boundary: plugins report facts and do not plan tmux consequences or derive receipts locally. This turn also exercised the live JetBrains/Haiven route that exposed the newer pane-layout race; the fix is committed and pushed, and the current JetBrains tests plus full `make check` passed. Confidence is high; no operator escalation remains for this legacy review.
+
+### Re: boundary accumulation verification — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-jcgv]
+
+
+Validated and resolved `#boundaryaccumverify` using both the live wedge recovered in this turn and current invariant coverage:
+
+- A retained finalize was genuinely wedged behind a missing editor replica, then converged after the native/plugin recovery without recapturing or resending the response. The recovered response appears exactly once.
+- The current visible document and committed `HEAD` each contain exactly one standalone `agent:boundary` marker.
+- The document's ops log contains no `boundary_invariant_violation` for `agent-doc-bugs2.md`.
+- `reposition_collapses_snapshot_boundaries_even_during_active_run` constructs the exact wedged/direct-commit shape with three stale snapshot boundaries and an active retained response, then proves the binary snapshot collapses to exactly one boundary.
+- The post-commit guard independently inspects committed `HEAD`, self-heals any count above one through a single collapse commit, re-verifies the result, and fails closed if collapse cannot produce exactly one marker.
+
+No source changes were needed. The current full `make check` was already green in this turn. Confidence is high; the old restart-and-reproduce checklist is now satisfied by the live recovery plus deterministic snapshot/commit coverage.
 <!-- agent:boundary:efab1ce2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -200,7 +217,7 @@ The old “Sync hint exactly once” observation is no longer the authority boun
 - ~~do [#recommendedungatereview-9g0v]~~
 - ~~do [#recommendedungatereview-zw66]~~
 - ~~do [#recommendedungatereview-e8jn]~~
-- do [#recommendedungatereview-jcgv]
+- ~~do [#recommendedungatereview-jcgv]~~
 - do [#recommendedungatereview-a3ew]
 - do [#recommendedungatereview-jfxh]
 - do [#recommendedungatereview-w90z]
@@ -222,7 +239,6 @@ The old “Sync hint exactly once” observation is no longer the authority boun
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedungatereview-jcgv] [recommended] Ungate review item #boundaryaccumverify — validate and move to done
 - [ ] [#recommendedungatereview-a3ew] [recommended] Ungate review item #r4gq — validate and move to done
 - [ ] [#recommendedungatereview-jfxh] [recommended] Ungate review item #zqv8 — validate and move to done
 - [ ] [#recommendedungatereview-w90z] [recommended] Ungate review item #compactindcellsverify — validate and move to done
@@ -240,7 +256,6 @@ The old “Sync hint exactly once” observation is no longer the authority boun
  
 <!-- agent:review -->
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
-- [/] [#boundaryaccumverify] [operator-verify] After restarting any JetBrains IDE still on the older package generation, reproduce a wedged finalize/direct-commit handoff and confirm visible document, snapshot, and committed HEAD each retain exactly one agent:boundary marker; report any boundary_invariant_violation that does not self-heal.
 - [/] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).
 - [/] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
 - [/] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.

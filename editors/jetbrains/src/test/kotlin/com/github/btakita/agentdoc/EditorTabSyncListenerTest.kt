@@ -163,6 +163,44 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `exhausted selection settling repairs stale layout after selected files advance`() {
+        assertEquals(
+            EditorTabSyncListener.SurfaceReport.ProjectionReadiness.AwaitingSelectedDocument,
+            EditorTabSyncListener.SurfaceReport.projectionReadiness(
+                preferredActiveFile = "/repo/left-next.md",
+                visibleMdFiles = listOf("/repo/left-next.md", "/repo/right.md"),
+                layoutMdFiles = listOf("/repo/left-old.md", "/repo/right.md"),
+            ),
+        )
+
+        val settled =
+            EditorTabSyncListener.SelectionProjectionSettling.reconcileEventEdge(
+                preferredFile = "/repo/left-next.md",
+                previousFile = "/repo/left-old.md",
+                visibleMdFiles = listOf("/repo/left-next.md", "/repo/right.md"),
+                editorLayout =
+                    EditorLayout(
+                        listOf(
+                            LayoutColumn(listOf("/repo/left-old.md")),
+                            LayoutColumn(listOf("/repo/right.md")),
+                        ),
+                    ),
+            )
+
+        assertEquals(
+            listOf("/repo/left-next.md", "/repo/right.md"),
+            settled.visibleMdFiles,
+        )
+        assertEquals(
+            listOf(
+                LayoutColumn(listOf("/repo/left-next.md")),
+                LayoutColumn(listOf("/repo/right.md")),
+            ),
+            settled.editorLayout?.columns,
+        )
+    }
+
+    @Test
     fun `selection settling never invents a replacement without the prior event file`() {
         val staleVisible = listOf("/repo/left-old.md", "/repo/right.md")
         val staleLayout =

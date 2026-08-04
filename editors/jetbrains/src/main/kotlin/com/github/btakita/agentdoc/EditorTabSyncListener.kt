@@ -123,30 +123,32 @@ internal object SelectionProjectionSettling {
         visibleMdFiles: List<String>,
         editorLayout: EditorLayout?,
     ): SettledProjection {
-        if (
-            preferredFile.isNullOrBlank() ||
-            previousFile.isNullOrBlank() ||
-            preferredFile in visibleMdFiles ||
-            previousFile !in visibleMdFiles
-        ) {
-            return SettledProjection(visibleMdFiles, editorLayout)
-        }
+            if (
+                preferredFile.isNullOrBlank() ||
+                    previousFile.isNullOrBlank()
+            ) {
+                return SettledProjection(visibleMdFiles, editorLayout)
+            }
 
-        fun replacePrevious(files: List<String>): List<String> =
-            files
-                .map { file -> if (file == previousFile) preferredFile else file }
-                .distinct()
+            fun replacePreviousIfStale(files: List<String>): List<String> =
+                if (preferredFile in files || previousFile !in files) {
+                    files
+                } else {
+                    files
+                        .map { file -> if (file == previousFile) preferredFile else file }
+                        .distinct()
+                }
 
-        return SettledProjection(
-            visibleMdFiles = replacePrevious(visibleMdFiles),
-            editorLayout =
-                editorLayout?.copy(
-                    columns =
-                        editorLayout.columns.map { column ->
-                            column.copy(files = replacePrevious(column.files))
-                        },
-                ),
-        )
+            return SettledProjection(
+                visibleMdFiles = replacePreviousIfStale(visibleMdFiles),
+                editorLayout =
+                    editorLayout?.copy(
+                        columns =
+                            editorLayout.columns.map { column ->
+                                column.copy(files = replacePreviousIfStale(column.files))
+                            },
+                    ),
+            )
     }
 }
 
@@ -191,8 +193,15 @@ private data class PendingSurfaceObservation(
         fun projectionReadiness(
             preferredActiveFile: String?,
             visibleMdFiles: List<String>,
+            layoutMdFiles: List<String>? = null,
         ): ProjectionReadiness =
-            if (!preferredActiveFile.isNullOrBlank() && preferredActiveFile !in visibleMdFiles) {
+            if (
+                !preferredActiveFile.isNullOrBlank() &&
+                (
+                    preferredActiveFile !in visibleMdFiles ||
+                        layoutMdFiles?.let { preferredActiveFile !in it } == true
+                )
+            ) {
                 ProjectionReadiness.AwaitingSelectedDocument
             } else {
                 ProjectionReadiness.Current
@@ -422,6 +431,10 @@ private fun captureSurface(
             SurfaceReport.projectionReadiness(
                 preferredActiveFile = preferredMarkdownFile?.path,
                 visibleMdFiles = visibleMdFiles,
+                layoutMdFiles =
+                    settledProjection.editorLayout
+                        ?.columns
+                        ?.flatMap(LayoutColumn::files),
             ) != SurfaceReport.ProjectionReadiness.Current
         ) {
             return null

@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.129
+
+- **The first navigation from a one-pane document to a split editor surface now
+  restores the complete tmux layout.** JetBrains selection events wait until
+  both `FileEditorManager.selectedFiles` and the detected split columns contain
+  the newly selected document. If IntelliJ leaves only one projection stale
+  through the bounded later-EDT reads, the adapter applies the exact event
+  old→new edge to that projection independently. A current selected-files list
+  can therefore no longer mask stale one-column geometry until a second
+  navigation event. Missing prior-file evidence remains fail-closed, and the
+  Project Controller still exclusively owns focus/layout decisions and tmux
+  effects.
+
 ## 0.35.128
 
 - **Codex routed dispatch no longer rejects positive pane-start evidence while

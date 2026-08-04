@@ -29,6 +29,8 @@ Common behavior required of all `agent-doc` editor plugins.
 
 ## 4. Tab-to-Pane Sync (Automatic)
 
+- **Selection/layout coherence:** A selection event must not publish a surface while the selected-files view has advanced to the new document but the split-layout view still names the prior document. Adapters may reread that external editor projection on bounded later event-loop turns; after the budget, they may apply only the exact old→new event edge to each stale projection independently. Missing prior-file evidence remains fail-closed.
+
 Automatic tab-to-pane sync is **reported, not planned** (`#jbsurfaceswap` / `#jbpluginlazilyeffects`). A plugin publishes an ordered fact to an already-running Project Controller; the controller's process-scoped reactive graph derives the intent and its local `Effect` owns the tmux consequence.
 
 - **Trigger:** Editor tab selection changes, visible-layout changes, and editor-specific focus-only activation (JetBrains focus/mouse activation, VS Code active-editor changes while clicking between already-open split editors).

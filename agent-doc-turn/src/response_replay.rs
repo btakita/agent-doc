@@ -306,11 +306,74 @@ pub fn materialize_response_in_current_exchange(
         .iter()
         .find(|component| component.name == "exchange")?;
     let mut exchange_body = exchange.content(current).to_string();
+    if let Some(repaired) = repair_response_heading_after_body(&exchange_body, &response) {
+        return Some(exchange.replace_content(current, &repaired));
+    }
     agent_doc_template::response_materialization::push_materialization_segment(
         &mut exchange_body,
         &response,
     );
     Some(exchange.replace_content(current, &exchange_body))
+}
+
+/// Repair a response cell whose body materialized immediately before its
+/// matching heading.
+///
+/// A response-cell delivery can race a later retained whole-document
+/// projection: the body survives on the newer authority cut while the
+/// transient `(HEAD)` heading is replayed at the exchange tail. Appending the
+/// captured cell again would duplicate the body and leave the first heading
+/// bodyless. Move only that exact matching heading in front of the exact
+/// captured body, preserving every unrelated line and any transient guard
+/// markers between them.
+fn repair_response_heading_after_body(exchange: &str, response: &str) -> Option<String> {
+    let expected_heading = first_response_heading_line(response)?;
+    let heading_offset = response.find(expected_heading)?;
+    let expected_body = response[heading_offset + expected_heading.len()..]
+        .trim_matches('\n')
+        .trim_end();
+    if expected_body.is_empty() {
+        return None;
+    }
+
+    let body_start = exchange.rfind(expected_body)?;
+    let body_end = body_start + expected_body.len();
+    let mut cursor = body_end;
+    let mut matching_heading = None;
+    while cursor < exchange.len() {
+        let line_end = exchange[cursor..]
+            .find('\n')
+            .map_or(exchange.len(), |offset| cursor + offset);
+        let line = &exchange[cursor..line_end];
+        let trimmed = line.trim();
+        if normalize_replay_topic(trimmed) == normalize_replay_topic(expected_heading)
+            && trimmed.starts_with("### Re:")
+        {
+            matching_heading = Some((cursor, line_end, line));
+            break;
+        }
+        if !trimmed.is_empty() && !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+            return None;
+        }
+        cursor = line_end.saturating_add(1);
+    }
+    let (heading_start, heading_end, actual_heading) = matching_heading?;
+
+    let after_heading = &exchange[heading_end..];
+    if after_heading.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty() && !(trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+    }) {
+        return None;
+    }
+
+    let mut repaired = String::with_capacity(exchange.len() + 2);
+    repaired.push_str(&exchange[..body_start]);
+    repaired.push_str(actual_heading.trim_end());
+    repaired.push_str("\n\n");
+    repaired.push_str(&exchange[body_start..heading_start]);
+    repaired.push_str(after_heading.strip_prefix('\n').unwrap_or(after_heading));
+    Some(repaired)
 }
 
 /// Remove consecutive duplicate `### Re:` blocks from document content.
@@ -848,6 +911,51 @@ mod tests {
         assert_eq!(
             materialize_response_in_current_exchange(current, current).as_deref(),
             Some(current)
+        );
+    }
+
+    #[test]
+    fn materialize_response_repairs_body_before_matching_tail_heading_without_duplication() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "Earlier response.\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#ship]\n\n",
+            "Done once.\n",
+            "<!-- no-pending-capture -->\n",
+            "### Re: do [#ship] — gpt-5 (HEAD)\n",
+            "<!-- agent:boundary:live -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#ship]\n\n",
+            "Done once.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let repaired = materialize_response_in_current_exchange(current, response)
+            .expect("reversed response cell should be repairable");
+
+        assert!(response_materialized_in_content(response, &repaired));
+        assert_eq!(repaired.matches("Done once.").count(), 1);
+        assert_eq!(
+            repaired
+                .matches("### Re: do [#ship] — gpt-5 (HEAD)")
+                .count(),
+            1
+        );
+        assert!(
+            repaired.find("### Re: do [#ship]").unwrap()
+                < repaired.find("> **Queue prompt:**").unwrap()
+        );
+        assert!(
+            repaired.find("Done once.").unwrap()
+                < repaired.find("<!-- no-pending-capture -->").unwrap()
         );
     }
 

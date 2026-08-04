@@ -2024,7 +2024,7 @@ pub fn settle_projected_captured_response_through_authority(
 ) -> Result<Option<String>> {
     let current = observe_live_editor_authority_after_model_ensure(path, source)?;
     let agent_doc_crdt_relay_io::CurrentText::Current {
-        text,
+        mut text,
         live_editors,
         delivery_converged: true,
         ..
@@ -2032,11 +2032,38 @@ pub fn settle_projected_captured_response_through_authority(
     else {
         return Ok(None);
     };
-    if live_editors == 0
-        || !agent_doc_turn::response_replay::response_materialized_in_content(
-            captured_response,
+    if live_editors == 0 {
+        return Ok(None);
+    }
+    if !agent_doc_turn::response_replay::response_materialized_in_content(captured_response, &text)
+    {
+        let Some(replayed_target) =
+            agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+                &text,
+                captured_response,
+            )
+        else {
+            return Ok(None);
+        };
+        if replayed_target == text {
+            return Ok(None);
+        }
+        validate_canonical_document_target(path, &replayed_target, source)?;
+        let Some(relay_write) = apply_canonical_replace_if_attached(
+            path,
             &text,
-        )
+            &replayed_target,
+            "projected_captured_response_cell_replay",
+        )?
+        else {
+            return Ok(None);
+        };
+        if !relay_write.delivery_converged {
+            return Ok(None);
+        }
+        text = try_resolve_current_document_content(path, source)?;
+    }
+    if !agent_doc_turn::response_replay::response_materialized_in_content(captured_response, &text)
     {
         return Ok(None);
     }
@@ -10053,6 +10080,84 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), replayed_target);
+    }
+
+    #[test]
+    fn captured_response_without_retained_intent_repairs_reversed_heading_and_body() {
+        let editor_cut = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange -->\n",
+            "Please investigate.\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#repair]\n\n",
+            "Recovered exactly once.\n",
+            "<!-- no-pending-capture -->\n",
+            "### Re: do [#repair] — test (HEAD)\n",
+            "<!-- agent:boundary:live -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let captured_response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: do [#repair] — test\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#repair]\n\n",
+            "Recovered exactly once.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let repaired_target =
+            agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+                editor_cut,
+                captured_response,
+            )
+            .expect("reversed response cell should materialize");
+        let (_dir, file, _canonical) = temp_doc(editor_cut);
+        let identity = "test-captured-response-without-retained-intent";
+        seed_reliable_sync_open(&file, identity);
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        assert!(
+            pending_document_write(&file).is_none(),
+            "fixture must exercise the post-retirement recovery path"
+        );
+
+        let ack = project_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
+        assert!(
+            settle_projected_captured_response_through_authority(
+                &file,
+                captured_response,
+                "captured_response_without_retained_intent_test",
+            )
+            .unwrap()
+            .is_none(),
+            "foreground recovery should wait for the response-cell delivery receipt"
+        );
+        ack.join().unwrap();
+        assert_eq!(
+            settle_projected_captured_response_through_authority(
+                &file,
+                captured_response,
+                "captured_response_without_retained_intent_after_ack_test",
+            )
+            .unwrap()
+            .as_deref(),
+            Some(repaired_target.as_str()),
+        );
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "captured_response_without_retained_intent_current",
+            )
+            .unwrap(),
+            repaired_target,
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), repaired_target);
+        assert_eq!(
+            repaired_target.matches("Recovered exactly once.").count(),
+            1
+        );
     }
 
     #[test]

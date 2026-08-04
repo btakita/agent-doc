@@ -2468,6 +2468,26 @@ pub fn classify_codex_routed_dispatch_start_proof(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodexPaneDispatchStartProofFacts<'a> {
+    pub pre_dispatch_content: &'a str,
+    pub current_content: &'a str,
+    pub pre_dispatch_has_busy_cue: bool,
+    pub current_has_busy_cue: bool,
+}
+
+/// A new Codex busy cue after accepted pane input proves that the routed
+/// command left the composer and started a turn. The submitted command remains
+/// visible in Codex scrollback while the turn runs, so trigger visibility
+/// cannot distinguish an active turn from an unsubmitted draft here.
+pub fn codex_pane_busy_transition_after_acceptance(
+    facts: CodexPaneDispatchStartProofFacts<'_>,
+) -> bool {
+    facts.current_content != facts.pre_dispatch_content
+        && !facts.pre_dispatch_has_busy_cue
+        && facts.current_has_busy_cue
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenCodePaneDispatchStartProofFacts<'a> {
     pub trigger: &'a str,
     pub pre_dispatch_content: &'a str,
@@ -3135,6 +3155,60 @@ mod tests {
             current_prompt: "agent-doc /tmp/task.md",
         };
         assert_eq!(classify_codex_routed_dispatch_start_proof(facts), None);
+    }
+
+    #[test]
+    fn codex_pane_busy_transition_proves_dispatch_when_hook_state_lags() {
+        let before = "\
+›
+
+  gpt-5.6 · ~/work/sample-app · 40% left
+";
+        let active = "\
+› agent-doc /work/sample-app/tasks/sampleorders.md
+
+• I’m opening the Agent Doc session and checking the repository context first.
+
+• Ran tsift status
+  └ Index status: fresh
+
+• Working (4s • esc to interrupt)
+
+› Write tests for @filename
+";
+        assert!(
+            codex_pane_busy_transition_after_acceptance(CodexPaneDispatchStartProofFacts {
+                pre_dispatch_content: before,
+                current_content: active,
+                pre_dispatch_has_busy_cue: false,
+                current_has_busy_cue: true,
+            }),
+            "a new Codex Working cue after accepted pane input is dispatch-start proof even when the prompt remains in scrollback"
+        );
+
+        let drafted = "\
+› agent-doc /work/sample-app/tasks/sampleorders.md
+
+  gpt-5.6 · ~/work/sample-app · 40% left
+";
+        assert!(
+            !codex_pane_busy_transition_after_acceptance(CodexPaneDispatchStartProofFacts {
+                pre_dispatch_content: before,
+                current_content: drafted,
+                pre_dispatch_has_busy_cue: false,
+                current_has_busy_cue: false,
+            }),
+            "a drafted command without an active-turn cue is not dispatch-start proof"
+        );
+        assert!(
+            !codex_pane_busy_transition_after_acceptance(CodexPaneDispatchStartProofFacts {
+                pre_dispatch_content: active,
+                current_content: active,
+                pre_dispatch_has_busy_cue: true,
+                current_has_busy_cue: true,
+            }),
+            "an unchanged pane that was already busy is not proof for a newly routed command"
+        );
     }
 
     #[test]

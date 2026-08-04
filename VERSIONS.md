@@ -4,6 +4,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.128
 
+- **Codex routed dispatch no longer rejects positive pane-start evidence while
+waiting for a delayed prompt hook (`#jetbrainsrunroute`).** The tracker now
+captures the pre-dispatch pane baseline and treats a changed pane with a newly
+appeared `Working`/`esc to interrupt` cue as dispatch-start proof after direct
+input acceptance. The submitted command may remain visible in Codex scrollback
+without being mistaken for an unsubmitted draft. An unchanged pane, a drafted
+command without a busy cue, and a pane that was already busy remain unproven.
+- **Captured closeout recovery no longer loops forever after a retained
+projection reverses the response body and heading.** Recovery recognizes the
+  exact captured body immediately before its matching heading-only exchange
+  tail, moves that existing heading ahead of the body without duplicating
+  either, and preserves unrelated operator lines. If the deferred-write intent
+  has already retired, `session-check` may now replay that semantic response
+  cell through live editor/CRDT authority, wait for its delivery receipt, and
+  persist the exact repaired cut. It still never force-writes disk or replaces
+  concurrent operator edits.
 - **A dispatch-created pane outside the current editor surface no longer keeps
   pane-layout reconciliation in an unbounded retry
   (`#panelayoutrace`).** Same-window actor bindings now participate in the

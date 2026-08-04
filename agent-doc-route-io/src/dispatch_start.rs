@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use agent_doc_controller::dispatch::{
-    CodexRoutedDispatchStartProofFacts, OpenCodePaneDispatchStartProofFacts,
-    RoutedDispatchStartProof, classify_codex_routed_dispatch_start_proof,
+    CodexPaneDispatchStartProofFacts, CodexRoutedDispatchStartProofFacts,
+    OpenCodePaneDispatchStartProofFacts, RoutedDispatchStartProof,
+    classify_codex_routed_dispatch_start_proof, codex_pane_busy_transition_after_acceptance,
     opencode_pane_state_changed_from_idle,
 };
 use agent_doc_harness::HarnessConfig;
@@ -17,6 +18,8 @@ pub enum RoutedDispatchStartTracker {
         previous_session_id: Option<String>,
         previous_turn_id: Option<String>,
         previous_updated_at: Option<u64>,
+        pane: Option<String>,
+        pre_dispatch_content: Option<String>,
     },
     OpenCodePane {
         pane: String,
@@ -82,11 +85,26 @@ pub fn build_routed_dispatch_start_tracker(
     match harness.binary.as_str() {
         "codex" if codex_dispatch_start_tracking_enabled(file) => {
             let latest = agent_doc_codex_hook_io::load_latest_prompt_state_for_file(file)?;
+            let (pane, pre_dispatch_content) = match (tmux, pane) {
+                (Some(tmux), Some(pane)) => match agent_doc_tmux_io::capture_pane(tmux, pane) {
+                    Ok(content) => (Some(pane.to_string()), Some(content)),
+                    Err(err) => {
+                        eprintln!(
+                            "[route] warning: failed to capture Codex pane {} before routed dispatch: {}",
+                            pane, err
+                        );
+                        (None, None)
+                    }
+                },
+                _ => (None, None),
+            };
             Ok(Some(RoutedDispatchStartTracker::CodexHook {
                 trigger: harness.trigger_command(file_path),
                 previous_session_id: latest.as_ref().map(|state| state.session_id.clone()),
                 previous_turn_id: latest.as_ref().map(|state| state.last_turn_id.clone()),
                 previous_updated_at: latest.as_ref().map(|state| state.updated_at),
+                pane,
+                pre_dispatch_content,
             }))
         }
         "opencode" => {
@@ -119,6 +137,7 @@ fn codex_routed_dispatch_start_proof_facts<'a>(
         previous_session_id,
         previous_turn_id,
         previous_updated_at,
+        ..
     } = tracker
     else {
         return None;
@@ -133,6 +152,19 @@ fn codex_routed_dispatch_start_proof_facts<'a>(
         current_updated_at: state.updated_at,
         current_prompt: state.last_prompt.as_str(),
     })
+}
+
+fn codex_pane_dispatch_start_proof_facts<'a>(
+    harness: &HarnessConfig,
+    pre_dispatch_content: &'a str,
+    current_content: &'a str,
+) -> CodexPaneDispatchStartProofFacts<'a> {
+    CodexPaneDispatchStartProofFacts {
+        pre_dispatch_content,
+        current_content,
+        pre_dispatch_has_busy_cue: harness.busy_proof_line(pre_dispatch_content).is_some(),
+        current_has_busy_cue: harness.busy_proof_line(current_content).is_some(),
+    }
 }
 
 fn opencode_pane_dispatch_start_proof_facts<'a>(
@@ -180,13 +212,35 @@ pub fn wait_for_routed_dispatch_start(
 
     while start.elapsed() < timeout {
         match tracker {
-            RoutedDispatchStartTracker::CodexHook { .. } => {
+            RoutedDispatchStartTracker::CodexHook {
+                pane,
+                pre_dispatch_content,
+                ..
+            } => {
                 if let Some(state) =
                     agent_doc_codex_hook_io::load_latest_prompt_state_for_file(file)?
                     && let Some(facts) = codex_routed_dispatch_start_proof_facts(tracker, &state)
                     && let Some(proof) = classify_codex_routed_dispatch_start_proof(facts)
                 {
                     return Ok(Some(proof));
+                }
+                if let (Some(pane), Some(pre_dispatch_content)) =
+                    (pane.as_deref(), pre_dispatch_content.as_deref())
+                {
+                    let content = agent_doc_tmux_io::capture_pane(tmux, pane).with_context(|| {
+                        format!(
+                            "failed to capture Codex pane {} while awaiting routed dispatch proof",
+                            pane
+                        )
+                    })?;
+                    let facts = codex_pane_dispatch_start_proof_facts(
+                        harness,
+                        pre_dispatch_content,
+                        &content,
+                    );
+                    if codex_pane_busy_transition_after_acceptance(facts) {
+                        return Ok(Some(RoutedDispatchStartProof::PaneStateChanged));
+                    }
                 }
             }
             RoutedDispatchStartTracker::OpenCodePane {
@@ -220,6 +274,33 @@ pub fn wait_for_routed_dispatch_start(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_pane_facts_recognize_working_snapshot_after_idle_baseline() {
+        let harness = HarnessConfig::codex();
+        let before = "\
+›
+
+  gpt-5.6 · ~/work/sample-app · 40% left
+";
+        let active = "\
+› agent-doc /work/sample-app/tasks/sampleorders.md
+
+• I’m opening the Agent Doc session and checking the repository context first.
+
+• Ran tsift status
+  └ Index status: fresh
+
+• Working (4s • esc to interrupt)
+
+› Write tests for @filename
+";
+        let facts = codex_pane_dispatch_start_proof_facts(&harness, before, active);
+
+        assert!(!facts.pre_dispatch_has_busy_cue);
+        assert!(facts.current_has_busy_cue);
+        assert!(codex_pane_busy_transition_after_acceptance(facts));
+    }
 
     #[test]
     fn codex_dispatch_start_tracking_enabled_accepts_workspace_hook_for_nested_agent_doc_root() {

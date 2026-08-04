@@ -867,7 +867,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                     &capture.response_body,
                     &current,
                 );
-            if current != disk && response_materialized {
+            if current != disk || !response_materialized {
                 match agent_doc_document_realtime_io::
                     settle_projected_captured_response_through_authority(
                         file,

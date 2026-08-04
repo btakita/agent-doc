@@ -156,6 +156,23 @@ Validated and resolved `#steeringmirrorverifylive313`. The old JetBrains 0.2.313
 - The current `0.34.131` release contract explicitly retains the aggregate on the active cycle until commit or abandonment, without submitting incomplete edits.
 
 No source changes were required. The current agent-doc tree's JetBrains tests and full `make check` had already passed in this turn, so the stale manual review can move to done with high confidence.
+
+### Re: binary-owned preflight admission — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-zw66]
+
+
+Validated and resolved `#preflightinbinary`. Its original four-part live recipe predates the current admission protocol and is now covered more strongly:
+
+- The binary hook emits the explicit `cycle contract (preflight already ran in the binary...)` marker only after recognizing a real harness-native Agent Doc trigger; parser tests prove a prompt that merely mentions the command is a no-op and does not resolve a session document.
+- Hook installation is idempotently tested to install exactly one Claude `UserPromptSubmit` admission command while preserving existing hooks.
+- Direct run admission is tested to open one `preflight_started` cycle through `realtime_admit`, return `preflight_required=false`, and emit no `preflight_diff_start` or maintenance/repair side effects.
+- The connected MCP integration contract pins admit → plan/read → finalize to the original cycle id and explicitly proves no `repaired stale preflight_started` recovery.
+- This live cycle itself admitted as `cycle-1785813153721` with `maintenance_required=false` and `preflight_required=false`, without a model-owned preflight call.
+
+No source changes were required. The current full `make check` was already green in this turn. The obsolete manual review can move to done with high confidence.
 <!-- agent:boundary:efab1ce2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -164,7 +181,7 @@ No source changes were required. The current agent-doc tree's JetBrains tests an
 - ~~Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.~~
 - ~~do [#recommendedungatereview-b1cb]~~
 - ~~do [#recommendedungatereview-9g0v]~~
-- do [#recommendedungatereview-zw66]
+- ~~do [#recommendedungatereview-zw66]~~
 - do [#recommendedungatereview-e8jn]
 - do [#recommendedungatereview-jcgv]
 - do [#recommendedungatereview-a3ew]
@@ -188,7 +205,6 @@ No source changes were required. The current agent-doc tree's JetBrains tests an
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedungatereview-zw66] [recommended] Ungate review item #preflightinbinary — validate and move to done
 - [ ] [#recommendedungatereview-e8jn] [recommended] Ungate review item #jbsurfaceswap — validate and move to done
 - [ ] [#recommendedungatereview-jcgv] [recommended] Ungate review item #boundaryaccumverify — validate and move to done
 - [ ] [#recommendedungatereview-a3ew] [recommended] Ungate review item #r4gq — validate and move to done
@@ -208,7 +224,6 @@ No source changes were required. The current agent-doc tree's JetBrains tests an
  
 <!-- agent:review -->
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
-- [/] [#preflightinbinary] [operator-verify] Live proof for #preflightinbinary AFTER the default flip (5ce9b06e6). The flip has landed: SKILL.md now says do NOT run preflight when the '[agent-doc] cycle contract ...' marker is present, and the hook is registered in this project's .claude/settings.json under UserPromptSubmit alongside turn-status. Needing a live session to confirm: (a) invoke /agent-doc <FILE> in a FRESH Claude Code session and confirm the marker + contract appear in context before the agent runs any tool, and that the agent does NOT shell to 'agent-doc preflight'; (b) confirm exactly ONE cycle id is opened for that turn — grep .agent-doc/logs/ops.log for preflight_diff_start, and confirm 'repaired stale preflight_started cycle' does NOT appear; that line is the tell that the agent still ran preflight and the round trip was merely absorbed by repair rather than removed; (c) confirm an ordinary prompt that merely mentions agent-doc produces no marker and no cycle; (d) confirm a Codex/OpenCode turn (no Claude hook, so no marker) still runs preflight explicitly and closes out normally. Scope note: reusable_by_reentrant_preflight is defence in depth only — start_preflight runs at preflight step 4, after repair at step 1, so in the live pipeline repair closes any prior open cycle before the guard sees it. What removes the double-open is the flip itself.
 - [/] [#jbsurfaceswap] [operator-verify] Live IDE proof for #jbsurfaceswap (agent-doc 27beeae2e, JB plugin 0.2.296). Both plugins now report one EditorSurface observation per event and the graph derives the intent; the planners are deleted. With the IDE restarted onto 0.2.296, confirm in a real session: (a) clicking between two side-by-side split editors moves the tmux active pane (derived Focus); (b) changing the editor split layout reconciles tmux (derived Sync) and shows the 'Sync: --col ... [focus: ...]' hint exactly once; (c) repeat focus events on the same editor cost nothing — the JB log line '[layout-sync] observe: ... intent=idle' with no controller command; (d) swap two tmux panes by hand, then click an editor tab WITHOUT changing the split, and confirm the pulled tmux probe reconciles the layout instead of only moving focus (#tmuxsyncstate); (e) closing the project releases the root (no growth in surface graphs across open/close cycles). Headless tests cover the fold, the probe seam, and the observation wire shape, but not the debounce/generation interaction with real editor event storms.
 - [/] [#boundaryaccumverify] [operator-verify] After restarting any JetBrains IDE still on the older package generation, reproduce a wedged finalize/direct-commit handoff and confirm visible document, snapshot, and committed HEAD each retain exactly one agent:boundary marker; report any boundary_invariant_violation that does not self-heal.
 - [/] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).

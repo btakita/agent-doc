@@ -10,12 +10,15 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   tmux effect before touching the routed pane. Editor-relative paths are
   canonicalized at that boundary. If the focused document is absent, exactly
   one explicit empty-column placeholder is materialized with it; zero or
-  multiple candidates fail before desired-state publication. A missing layout
-  or a routed document outside those columns fails closed. Live actors outside the desired
-  surface are no longer terminal `operator_owned` panes: reconciliation moves
-  them to `stash` without killing the harness and remains retryable until pane
-  count and order converge. This closes the route-time race that appended a
-  third pane beside an already-correct two-pane editor projection.
+multiple candidates fail before desired-state publication. A missing layout
+or a routed document outside those columns fails closed. The convergence
+observer derives an unconfigured shared tmux session from the structural
+effect's file-to-pane assignment, so nested-project routes can acknowledge
+the same session the effect actually changed. Live actors outside the desired
+surface are no longer terminal `operator_owned` panes: reconciliation moves
+them to `stash` without killing the harness and remains retryable until pane
+count and order converge. This closes the route-time race that appended a
+third pane beside an already-correct two-pane editor projection.
 
 ## 0.35.132
 

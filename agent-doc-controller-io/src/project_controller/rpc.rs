@@ -16703,6 +16703,18 @@ fn configured_tmux_session_for_project(project_root: &Path) -> Option<String> {
         .filter(|session| !session.trim().is_empty())
 }
 
+fn pane_layout_observation_session(
+    configured_session: Option<String>,
+    effect_file_panes: &[(String, String)],
+    mut pane_session: impl FnMut(&str) -> Option<String>,
+) -> Option<String> {
+    configured_session.or_else(|| {
+        effect_file_panes
+            .iter()
+            .find_map(|(_, pane)| pane_session(pane))
+    })
+}
+
 fn active_tmux_window_for_session(
     tmux: &tmux_router::Tmux,
     session_name: &str,
@@ -17178,8 +17190,12 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
         ));
     }
 
-    let Some(configured_session) = configured_tmux_session_for_project(&bootstrap.project_root)
-    else {
+    let tmux = tmux_router::Tmux::default_server();
+    let Some(configured_session) = pane_layout_observation_session(
+        configured_tmux_session_for_project(&bootstrap.project_root),
+        effect_file_panes,
+        |pane| tmux.pane_session(pane).ok(),
+    ) else {
         return Ok(layout_sync_state_report(
             false,
             "missing_tmux_session",
@@ -17193,7 +17209,6 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
             },
         ));
     };
-    let tmux = tmux_router::Tmux::default_server();
     if !tmux.session_alive(&configured_session) {
         return Ok(layout_sync_state_report(
             false,
@@ -22371,6 +22386,29 @@ mod tests {
                 &["%77".to_string(), "%95".to_string()],
             ),
             (true, "synced")
+        );
+    }
+
+    #[test]
+    fn pane_layout_observation_session_falls_back_to_effect_assignment() {
+        let effect_file_panes = vec![
+            ("/repo/tasks/left.md".to_string(), "%77".to_string()),
+            ("/repo/tasks/right.md".to_string(), "%95".to_string()),
+        ];
+
+        assert_eq!(
+            pane_layout_observation_session(None, &effect_file_panes, |pane| {
+                (pane == "%77").then(|| "0".to_string())
+            }),
+            Some("0".to_string()),
+        );
+        assert_eq!(
+            pane_layout_observation_session(
+                Some("configured".to_string()),
+                &effect_file_panes,
+                |_| panic!("an explicit project session must remain authoritative"),
+            ),
+            Some("configured".to_string()),
         );
     }
 

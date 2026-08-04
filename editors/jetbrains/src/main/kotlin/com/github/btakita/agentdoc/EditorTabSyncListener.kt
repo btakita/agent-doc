@@ -96,6 +96,26 @@ class EditorTabSyncListener : FileEditorManagerListener {
     }
 
     /**
+     * The pending slot protects editor-event ordering only until the EDT has captured a
+     * self-consistent surface. Controller delivery can take seconds while it proves pane
+     * ownership and realizes a layout, so retaining a DocumentSelection in this slot during
+     * that I/O would incorrectly reject a newer ComponentFocus as a stale opposite-editor
+     * callback. Release before entering the delivery executor; restore only when the same
+     * generation failed and no newer observation has occupied the slot.
+     */
+    internal object ObservationDeliveryOwnership {
+        fun <T : Any> releaseForDelivery(
+            slot: AtomicReference<T?>,
+            captured: T,
+        ): Boolean = slot.compareAndSet(captured, null)
+
+        fun <T : Any> retainAfterFailure(
+            slot: AtomicReference<T?>,
+            captured: T,
+        ): Boolean = slot.compareAndSet(null, captured)
+    }
+
+    /**
      * `selectionChanged` may be delivered before IDEA updates `selectedFiles` and
  * the split-window model. Keep the selected-document fact authoritative and
  * re-read the editor projection on a bounded number of later EDT turns. This is
@@ -366,6 +386,15 @@ private data class PendingSurfaceObservation(
                             }
                             return@invokeLater
                         }
+                if (
+                    !ObservationDeliveryOwnership.releaseForDelivery(
+                        latestSurfaceObservation,
+                        observation,
+                    )
+                ) {
+                    log("socket delivery: observation superseded before enqueue gen=$requestedGeneration")
+                    return@invokeLater
+                }
                 surfaceDeliveryExecutor.execute {
                     if (generation.get() != requestedGeneration) {
                         log("socket delivery: superseded gen=$requestedGeneration")
@@ -378,13 +407,18 @@ private data class PendingSurfaceObservation(
                             surfaceJson = pending.surfaceJson,
                         )
                     if (receipt.exitCode != 0) {
+                        if (generation.get() == requestedGeneration) {
+                            ObservationDeliveryOwnership.retainAfterFailure(
+                                latestSurfaceObservation,
+                                observation,
+                            )
+                        }
                         LOG.warn(
                             "[layout-sync] surface observation unavailable for " +
                                 "${pending.relativePath}: ${receipt.output}",
                         )
                         return@execute
                     }
-                    latestSurfaceObservation.compareAndSet(observation, null)
                     log("observe: published file=${pending.relativePath}")
                 }
             } catch (e: Exception) {

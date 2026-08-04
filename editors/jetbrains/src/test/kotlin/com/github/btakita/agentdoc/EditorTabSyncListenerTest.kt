@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -74,6 +75,48 @@ class EditorTabSyncListenerTest {
                 incomingFile = "/repo/right.md",
             ),
         )
+    }
+
+    @Test
+    fun `captured selection releases precedence while controller delivery is in flight`() {
+        val captured = Any()
+        val newerFocus = Any()
+        val slot = AtomicReference<Any?>(captured)
+
+        assertTrue(
+            EditorTabSyncListener.ObservationDeliveryOwnership.releaseForDelivery(
+                slot,
+                captured,
+            ),
+        )
+        assertTrue(slot.compareAndSet(null, newerFocus))
+        assertFalse(
+            EditorTabSyncListener.ObservationDeliveryOwnership.retainAfterFailure(
+                slot,
+                captured,
+            ),
+        )
+        assertEquals(newerFocus, slot.get())
+    }
+
+    @Test
+    fun `failed delivery retains the captured observation when no newer event exists`() {
+        val captured = Any()
+        val slot = AtomicReference<Any?>(captured)
+
+        assertTrue(
+            EditorTabSyncListener.ObservationDeliveryOwnership.releaseForDelivery(
+                slot,
+                captured,
+            ),
+        )
+        assertTrue(
+            EditorTabSyncListener.ObservationDeliveryOwnership.retainAfterFailure(
+                slot,
+                captured,
+            ),
+        )
+        assertEquals(captured, slot.get())
     }
 
     @Test
@@ -472,7 +515,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `layout changes retain selected document intent until the projection is accepted`() {
+    fun `layout changes retain selected intent only until the surface is captured`() {
         val listenerPath =
             listOf(
                     Paths.get(
@@ -498,10 +541,11 @@ class EditorTabSyncListenerTest {
         assertTrue(layoutChange.contains("latestSurfaceObservation.get()"))
         assertTrue(layoutChange.contains("it.preferredFile != null"))
         assertFalse(layoutChange.contains("delayMs"))
-assertTrue(report.contains("ApplicationManager.getApplication().invokeLater"))
-assertTrue(report.contains("SelectionProjectionSettling.shouldReproject"))
-assertTrue(report.contains("remainingSelectionPasses - 1"))
-assertTrue(report.contains("compareAndSet(observation, null)"))
+        assertTrue(report.contains("ApplicationManager.getApplication().invokeLater"))
+        assertTrue(report.contains("SelectionProjectionSettling.shouldReproject"))
+        assertTrue(report.contains("remainingSelectionPasses - 1"))
+        assertTrue(report.contains("ObservationDeliveryOwnership.releaseForDelivery"))
+        assertTrue(report.contains("ObservationDeliveryOwnership.retainAfterFailure"))
         assertFalse(report.contains("requestObservation("))
         assertFalse(report.contains("invokeAndWait"))
         assertFalse(report.contains("schedule("))

@@ -47,11 +47,19 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   projection, without emitting another selection or container event. The
   `fileOpened` adapter edge now re-observes that completed surface; the
   controller-owned Lazily graph still exclusively derives and applies the tmux
-  effect. A cross-adapter contract test proves JetBrains and VS Code both bridge
-  visible-membership changes into `editor_surface_observe`, preserving plugin
-  parity.
+effect. A cross-adapter contract test proves JetBrains and VS Code both bridge
+visible-membership changes into `editor_surface_observe`, preserving plugin
+parity.
+- **JetBrains automatic layout projection no longer drops a tab/focus change
+behind a slow prior sync.** A document-selection observation used to retain
+pending-event precedence throughout controller delivery, which can spend
+seconds proving pane ownership. A genuine later component-focus event for a
+different visible document was then misclassified as a stale opposite-editor
+callback and discarded. The pending slot now releases once the EDT captures a
+self-consistent surface, restores only after a same-generation delivery
+failure, and lets newer observations supersede in-flight work latest-wins.
 - **Automatic editor-surface reconciliation now realizes missing visible panes
-  instead of requiring an imperative republish.** The controller previously
+instead of requiring an imperative republish.** The controller previously
   translated every Lazily-derived `Sync` effect to `no_autostart=true`, so
   startup/file-open/tab-switch observations could only rearrange panes that
   already existed; switching to `lazily.md` stayed invisible until explicit

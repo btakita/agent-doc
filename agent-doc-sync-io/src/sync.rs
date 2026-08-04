@@ -539,6 +539,26 @@ pub fn run_provision_only_in_project_root(
     )
 }
 
+pub fn run_provision_only_exact_visible_with_actor_bindings_in_project_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+) -> Result<()> {
+    run_with_options_internal_at_root(
+        project_root,
+        col_args,
+        window,
+        focus,
+        AutoStartMode::Full,
+        true,
+        false,
+        actor_bindings,
+        &Tmux::default_server(),
+    )
+}
+
 fn run_with_options(
     col_args: &[String],
     window: Option<&str>,
@@ -2670,12 +2690,12 @@ fn run_with_options_internal_at_root(
             // ledger, and the durable registry merely to reconstruct the same
             // file→pane relationship. Missing/ambiguous actors still fall
             // through to the full fail-closed proof path below.
-            if skip_autostart_diagnostics
+            if exact_visible_projection
                 && let Some(binding) = reactive_actor_bindings.get(file_path)
                 && tmux.pane_alive(&binding.pane_id)
             {
                 sync_log(&format!(
-                    "safe_passive_actor_projection_reused file={} pane={} generation={}",
+                    "exact_visible_actor_projection_reused file={} pane={} generation={}",
                     file_path.display(),
                     binding.pane_id,
                     binding.generation

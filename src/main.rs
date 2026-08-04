@@ -275,6 +275,14 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                 invocation.window.as_deref(),
                 invocation.focus.as_deref(),
             )
+        } else if invocation.exact_visible {
+            agent_doc_sync_io::sync::run_provision_only_exact_visible_with_actor_bindings_in_project_root(
+                project_root,
+                &invocation.columns,
+                invocation.window.as_deref(),
+                invocation.focus.as_deref(),
+                &invocation.actor_bindings,
+            )
         } else {
             agent_doc_sync_io::sync::run_provision_only_in_project_root(
                 project_root,

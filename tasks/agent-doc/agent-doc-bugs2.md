@@ -353,7 +353,27 @@ Validated [#c8tb], but the exact operator proof is not present yet.
 The ops log contains a live fast-path event for the healthy authoritative-actor branch: `route_dispatch_only_busy_active_turn_skip_wait` on a genuinely busy Claude pane. It does not contain the required degraded-route pair `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket` plus `route_existing_pane_busy_active_turn_skip_wait`.
 
 Producing that missing evidence requires intentionally taking a live supervisor socket down and invoking JetBrains Run Agent Doc while its pane is mid-turn. I did not disrupt a live supervisor or synthesize UI evidence. [#c8tb] therefore remains active as `[operator-verify]`; [#recommendedungatereview-h9sm] is complete as an evidence-backed review of its current state.
-<!-- agent:boundary:f8be95a3:agent-doc-bugs2 -->
+
+### Re: do [#recommendedungatereview-xfmh] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-xfmh]
+
+
+Validated [#operatorverifylive], but its required live fault-injection proof is not available.
+
+The current JetBrains logs contain no `agent_doc_replica_apply_local` panic, replica lock-poisoning event, or subsequent successful replica-call sequence that could establish the requested recovery behavior. Producing that evidence requires deliberately forcing a replica panic in the live IDE, which is disruptive and was not authorized by the current task.
+
+I did not manufacture the fault or infer recovery from ordinary replica traffic. [#operatorverifylive] remains active as `[operator-verify]`; [#recommendedungatereview-xfmh] is complete as an evidence-backed review of its current state.
+
+Validated [#operatorverifylive], but its required live fault-injection proof is not available.
+
+The current JetBrains logs contain no `agent_doc_replica_apply_local` panic, replica lock-poisoning event, or subsequent successful replica-call sequence that could establish the requested recovery behavior. Producing that evidence requires deliberately forcing a replica panic in the live IDE, which is disruptive and was not authorized by the current task.
+
+I did not manufacture the fault or infer recovery from ordinary replica traffic. [#operatorverifylive] remains active as `[operator-verify]`; [#recommendedungatereview-xfmh] is complete as an evidence-backed review of its current state.
+### Re: do [#recommendedungatereview-xfmh] — gpt-5
+<!-- agent:boundary:fe3fd02b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -371,7 +391,7 @@ Producing that missing evidence requires intentionally taking a live supervisor 
 - ~~do [#recommendedungatereview-0xc5]~~
 - ~~do [#recommendedungatereview-krpw]~~
 - ~~do [#recommendedungatereview-h9sm]~~
-- do [#recommendedungatereview-xfmh]
+- ~~do [#recommendedungatereview-xfmh]~~
 - do [#recommendedungatereview-rht8]
 - do [#recommendedungatereview-z0ps]
 - do [#recommendedungatereview]
@@ -386,7 +406,6 @@ Producing that missing evidence requires intentionally taking a live supervisor 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#jetbrainsrunroute-77k5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785815283483-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
-- [ ] [#recommendedungatereview-xfmh] [recommended] Ungate review item #operatorverifylive — validate and move to done
 - [ ] [#recommendedungatereview-rht8] [recommended] Ungate review item #mtds — validate and move to done
 - [ ] [#recommendedungatereview-z0ps] [recommended] Ungate review item #editormodelmissing — validate and move to done
 - [ ] [#recommendedungatereview] [recommended] Ungate review item #falsetyping-guard — validate and move to done

@@ -1079,3 +1079,4 @@
 - 2026-08-03 [#recommendedungatereview-sskd] [recommended] Ungate review item #crdtpushdrainverify — validate and move to done
 - 2026-08-04 [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - 2026-08-04 [#recommendedungatereview-0xc5] [recommended] Ungate review item #bbpe — validate and move to done
+- 2026-08-04 [#recommendedungatereview-krpw] [recommended] Ungate review item #hvw0 — validate and move to done

@@ -316,7 +316,31 @@ Validated and resolved [#bbpe] against the restarted JetBrains editor and the fr
 
 The operator verification is complete, so [#bbpe] and [#recommendedungatereview-0xc5] can move to done.
 ### Re: do [#recommendedungatereview-0xc5] — gpt-5
-<!-- agent:boundary:245c0dfb:agent-doc-bugs2 -->
+
+### Re: do [#recommendedungatereview-krpw] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-krpw]
+
+
+Validated [#hvw0], but it cannot move to done yet.
+
+- `gh secret list --repo btakita/skill-harness` reports `CARGO_REGISTRY_TOKEN` was last updated on 2026-04-05, before the recorded failure.
+- The latest Release run for v0.1.3 still shows `cargo publish` receiving `403 Forbidden: authentication failed`.
+- There is no later tagged release proving that the repository secret was rotated successfully.
+
+Rotating a GitHub repository secret is an external operator-gated action and was not authorized by the current Agent Doc task. [#hvw0] therefore remains active as `[operator-verify]`; [#recommendedungatereview-krpw] is complete as an evidence-backed review of its current state.
+
+Validated [#hvw0], but it cannot move to done yet.
+
+- `gh secret list --repo btakita/skill-harness` reports `CARGO_REGISTRY_TOKEN` was last updated on 2026-04-05, before the recorded failure.
+- The latest Release run for v0.1.3 still shows `cargo publish` receiving `403 Forbidden: authentication failed`.
+- There is no later tagged release proving that the repository secret was rotated successfully.
+
+Rotating a GitHub repository secret is an external operator-gated action and was not authorized by the current Agent Doc task. [#hvw0] therefore remains active as `[operator-verify]`; [#recommendedungatereview-krpw] is complete as an evidence-backed review of its current state.
+### Re: do [#recommendedungatereview-krpw] — gpt-5
+<!-- agent:boundary:f8be95a3:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -332,7 +356,7 @@ The operator verification is complete, so [#bbpe] and [#recommendedungatereview-
 - ~~do [#recommendedungatereview-w90z]~~
 - ~~do [#recommendedungatereview-sskd]~~
 - ~~do [#recommendedungatereview-0xc5]~~
-- do [#recommendedungatereview-krpw]
+- ~~do [#recommendedungatereview-krpw]~~
 - do [#recommendedungatereview-h9sm]
 - do [#recommendedungatereview-xfmh]
 - do [#recommendedungatereview-rht8]
@@ -349,7 +373,6 @@ The operator verification is complete, so [#bbpe] and [#recommendedungatereview-
 
 <!-- agent:backlog priority queue -->
 - [ ] [#jetbrainsrunroute-77k5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785815283483-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
-- [ ] [#recommendedungatereview-krpw] [recommended] Ungate review item #hvw0 — validate and move to done
 - [ ] [#recommendedungatereview-h9sm] [recommended] Ungate review item #c8tb — validate and move to done
 - [ ] [#recommendedungatereview-xfmh] [recommended] Ungate review item #operatorverifylive — validate and move to done
 - [ ] [#recommendedungatereview-rht8] [recommended] Ungate review item #mtds — validate and move to done

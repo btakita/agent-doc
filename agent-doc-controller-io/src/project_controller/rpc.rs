@@ -2482,20 +2482,32 @@ pub(super) fn run_controller_editor_intent(
         }
         SurfaceIntent::Sync { columns, document } => serde_json::to_string(&sync_tmux_layout(
             project_root,
-            ControllerTmuxLayoutSyncInvocation {
-                columns: columns
-                    .iter()
-                    .map(|column| column.files.join(","))
-                    .collect(),
-                window: None,
-                focus: Some(document.clone()),
-                no_autostart: true,
-                exact_visible: true,
-                caller_kind: "automatic".to_string(),
-                actor_bindings: Vec::new(),
-            },
+            automatic_editor_surface_sync_invocation(columns, document),
         )?)
         .context("serialize controller-owned tmux layout receipt"),
+    }
+}
+
+fn automatic_editor_surface_sync_invocation(
+    columns: &[SurfaceColumn],
+    document: &str,
+) -> ControllerTmuxLayoutSyncInvocation {
+    ControllerTmuxLayoutSyncInvocation {
+        columns: columns
+            .iter()
+            .map(|column| column.files.join(","))
+            .collect(),
+        window: None,
+        focus: Some(document.to_string()),
+        // The visible editor surface is desired state, including during
+        // startup restoration. The binary's automatic-caller policy owns safe
+        // autostart, ambiguous-owner refusal, and inactive-desktop focus
+        // suppression; the adapter must not turn a missing visible pane into a
+        // permanent no-op that only an imperative manual sync can repair.
+        no_autostart: false,
+        exact_visible: true,
+        caller_kind: "automatic".to_string(),
+        actor_bindings: Vec::new(),
     }
 }
 
@@ -8826,7 +8838,12 @@ fn controller_crdt_replica_data(
                         "pending_updates": pull.delivery.pending_updates,
                     }))
                 }
-                None => Ok(crdt_replica_refused_data("detached_authority")),
+                // The authority gate above already proved this document is
+                // attached. A missing pull member therefore means the cached
+                // editor identity belongs to a prior controller generation,
+                // not that the document detached. Frontends consume this typed
+                // invalidation by atomically re-registering before pulling.
+                None => Ok(crdt_replica_refused_data("missing_replica")),
             }
         }
         ControllerCrdtReplicaMethod::Awareness => {
@@ -18996,6 +19013,21 @@ mod pane_layout_projection_dispatch_tests {
     }
 
     #[test]
+    fn automatic_editor_surface_sync_allows_binary_owned_safe_autostart() {
+        let columns = vec![SurfaceColumn::new(["/project/tasks/software/lazily.md"])];
+        let invocation =
+            automatic_editor_surface_sync_invocation(&columns, "/project/tasks/software/lazily.md");
+
+        assert!(!invocation.no_autostart);
+        assert!(invocation.exact_visible);
+        assert_eq!(invocation.caller_kind, "automatic");
+        assert_eq!(
+            invocation.columns,
+            vec!["/project/tasks/software/lazily.md".to_string()]
+        );
+    }
+
+    #[test]
     fn automatic_structural_edges_do_not_reuse_a_prior_editor_generation() {
         assert!(!pane_layout_invocation_allows_structural_reuse(
             &invocation("automatic", true)
@@ -27368,6 +27400,55 @@ mod tests {
         assert_eq!(
             crdt_authority_for_file("/tmp/agent-doc-authority-test/other-doc.md"),
             CrdtAuthority::GitAuthoritative
+        );
+    }
+
+    #[test]
+    fn attached_pull_without_controller_member_requests_replica_reregistration() {
+        let _env = reliable_sync_env_lock();
+        use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("missing-pull-member.md");
+        std::fs::write(&file, "# attached\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let frame = encode_liveness_frame(&[LivenessOp::Open {
+            document_hash: document_hash.clone(),
+            pid: u64::from(std::process::id()),
+            tag: "missing-pull-member".into(),
+        }])
+        .unwrap();
+        controller_liveness_plane()
+            .lock()
+            .ingest(&document_hash, 1, &frame)
+            .unwrap();
+
+        let data = controller_crdt_replica_data(
+            None,
+            &canonical,
+            ControllerCrdtReplicaMethod::Pull,
+            "jetbrains:prior-controller",
+            &ControllerCrdtReplicaPayload {
+                method: ControllerCrdtReplicaMethod::Pull,
+                identity: Some("jetbrains:prior-controller".into()),
+                state_vector_b64: None,
+                update_b64: None,
+                content_hash: None,
+                disk_persisted: false,
+                awareness_b64: None,
+                source: Some("test".into()),
+                editor_pid: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            data.get("refused").and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            data.get("reason").and_then(|value| value.as_str()),
+            Some("missing_replica")
         );
     }
 

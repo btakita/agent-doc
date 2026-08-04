@@ -5,6 +5,7 @@ import {
   CrdtReplicaManager,
   coalescedReplicaTextChange,
   localReplicaBaselineDecision,
+    parsePullDelivery,
     parsePullResponse,
     parseRegisterResponse,
     matchingRemoteTargetGeneration,
@@ -1049,5 +1050,21 @@ describe('crdt replica IPC response parsing', () => {
         assert.strictEqual(pull.length, 1);
         assert.deepStrictEqual(Array.from(pull[0].update), [3, 4]);
         assert.strictEqual(pull[0].expectedContentHash, 'canonical-hash');
+    });
+
+    it('treats a missing controller member as replica invalidation', () => {
+        assert.deepStrictEqual(
+            parsePullDelivery({
+                ok: true,
+                data: {
+                    refused: true,
+                    reason: 'missing_replica',
+                },
+            }),
+            {
+                kind: 'unavailable',
+                reason: 'missing_replica',
+            },
+        );
     });
 });

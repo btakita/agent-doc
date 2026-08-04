@@ -2131,20 +2131,35 @@ fn apply_cp_write_on_hub(
         );
     }
     let before_hash = agent_doc_hash::content_hash(&canonical);
+    if canonical == content {
+        // Retained-transition Effects are allowed to re-evaluate after an ACK.
+        // An equal Yrs replace still emits a small transaction, which used to
+        // advance the delivery generation and invalidate the ACK that triggered
+        // the re-evaluation. The successful expected-current CAS proves this
+        // Effect is already at its fixed point, so observe it without publishing
+        // a successor frontier.
+        return Ok(CpRelayWrite {
+            applied: false,
+            content_len: content.len(),
+            content_hash: before_hash,
+            update_bytes: 0,
+            targets: 0,
+            live_editors: hub.live_count(),
+            delivery_converged: hub.delivery_converged(),
+        });
+    }
     let packet = hub.apply_canonical_replace(expected_current, content)?;
-    let applied = before_hash != agent_doc_hash::content_hash(content);
     let targets = packet.targets.len();
     Ok(CpRelayWrite {
-        applied,
+        applied: true,
         content_len: content.len(),
         content_hash: agent_doc_hash::content_hash(content),
         update_bytes: packet.update.len(),
         targets,
         live_editors: hub.live_count(),
-        // An empty delivery set proves convergence only for an idempotent
-        // no-op. If canonical content advanced while a durable editor owner
-        // has no registered replica, nobody has observed that frontier yet.
-        delivery_converged: hub.delivery_converged() && (!applied || targets > 0),
+        // If canonical content advanced while a durable editor owner has no
+        // registered replica, nobody has observed that frontier yet.
+        delivery_converged: hub.delivery_converged() && targets > 0,
     })
 }
 
@@ -4847,6 +4862,56 @@ mod tests {
                 .unwrap();
             assert_eq!(pending.len(), 1);
             assert_eq!(pending[0].origin, CANONICAL_CLIENT_ID);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn idempotent_cp_relay_write_preserves_the_acked_delivery_frontier() {
+        let (_dir, doc) = temp_doc("cp-write-fixed-point.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = "intellij:cp-write-fixed-point";
+        register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let pull = pull_replica_updates_for_file(&doc, identity)
+            .unwrap()
+            .expect("registered editor should expose its initial delivery");
+        for update in pull.updates {
+            assert_eq!(
+                observe_replica_projection_for_file(&doc, identity, &update.expected_content_hash,)
+                    .unwrap(),
+                Some(true),
+            );
+        }
+        let current = match current_text_for_file(&doc).unwrap() {
+            CurrentText::Current { text, .. } => text,
+            other => panic!("expected relay current text, got {other:?}"),
+        };
+        let before = with_hub(&doc, |hub| {
+            assert!(hub.delivery_converged());
+            hub.delivery_snapshot()
+        })
+        .unwrap();
+
+        let result = apply_cp_write_for_file(&doc, &current, &current, "test_cp_fixed_point")
+            .unwrap()
+            .expect("equal canonical CP write should resolve as a relay no-op");
+        assert!(!result.applied);
+        assert_eq!(result.update_bytes, 0);
+        assert_eq!(result.targets, 0);
+        assert!(result.delivery_converged);
+
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.delivery_snapshot(), before);
+            assert!(
+                hub.pending_updates(mint_client_id(identity))
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(hub.delivery_converged());
         })
         .unwrap();
     }

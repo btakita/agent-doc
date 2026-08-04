@@ -502,6 +502,11 @@ sealed interface ReplicaPullDelivery {
     data class Unavailable(val reason: String) : ReplicaPullDelivery
 }
 
+internal fun refusedReplicaPullReasonUtil(data: JsonObject?): String? {
+    if (data?.get("refused")?.asBoolean != true) return null
+    return data.get("reason")?.asString ?: "controller_refused_replica_pull"
+}
+
 /**
  * Transport to the CP-owned document model. Injected so the seam is testable
  * without a real socket.
@@ -678,6 +683,9 @@ class CpSocketReplicaTransport(
             ?: return ReplicaPullDelivery.Unavailable(lastSendError ?: "controller_socket_unavailable")
         if (!response.ok) {
             return ReplicaPullDelivery.Unavailable(response.error ?: "controller_rejected_replica_pull")
+        }
+        refusedReplicaPullReasonUtil(response.data)?.let { reason ->
+            return ReplicaPullDelivery.Unavailable(reason)
         }
         // D2: a replace delivery carries corrected canonical text; the manager
         // performs the editor-buffer baseline check before installing it.

@@ -346,6 +346,17 @@ export function parsePullDelivery(response: ControllerResponse): ReplicaPullDeli
         return { kind: 'unavailable', reason: response.error ?? 'controller_rejected_replica_pull' };
     }
     if (
+        isRecord(response.data)
+        && response.data.refused === true
+    ) {
+        return {
+            kind: 'unavailable',
+            reason: typeof response.data.reason === 'string'
+                ? response.data.reason
+                : 'controller_refused_replica_pull',
+        };
+    }
+    if (
         response.ok &&
         isRecord(response.data) &&
         response.data.kind === 'replace' &&

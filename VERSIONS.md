@@ -4,6 +4,25 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.131
 
+- **Retained Lazily projections now have a reactive, idempotent CRDT fixed
+  point.** If rebasing a retained Base→Target delta over the converged visible
+  cut produces that same cut, the Computed derives `TargetVisible` and resumes
+  closeout without issuing another CP write. The relay also guards its effect
+  boundary against equal content, preserving the acknowledged delivery
+  generation instead of emitting Yrs' otherwise-nonempty equal-replace
+  transaction and making the retained version look stuck again.
+- **The orphan preparing-controller scanner now follows the authoritative
+  handoff clock.** A promoted controller retains its immutable
+  `--handoff-state preparing` argv after bootstrap ownership moves to a fresh
+  replacement. Process age no longer lets that discovery marker reap the
+  predecessor during a healthy ownership transition; only an authoritative
+  handoff that has itself exceeded the stale threshold exposes it to cleanup.
+- **Controller recycle now invalidates cached editor members explicitly.** An
+  attached `replica_pull` whose identity is absent from the replacement
+  controller returns `missing_replica` instead of an inert empty delta batch.
+  JetBrains and VS Code both atomically re-register on that typed projection,
+  preventing a post-install recycle from leaving the new controller permanently
+  memberless while the editor keeps polling with its old local client.
 - **Retained editor delivery now reconciles across a newer converged editor cut
   after controller restart.** The controller can semantically rebase the
   retained response target over intervening operator edits when both cuts share
@@ -15,10 +34,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   before retained delivery resumed, and recovery does not duplicate the
   response or resurrect discarded content.
 - **Codex routed-dispatch start proof now uses the same active-turn window as
-  admission.** Both paths classify the bottom eight pane lines through one
-  harness-owned observation. A stale `Working` line farther up scrollback can
-  no longer make the pre-dispatch baseline appear busy and mask the real
-  false→true start edge (`#jetbrainsrunroute`, `#jetbrainsrunroute-8x66`).
+  admission.** Both paths trim blank terminal padding, then classify the bottom
+  eight meaningful pane rows through one harness-owned observation. A live
+  `Working` line can no longer disappear behind unused tmux viewport rows, while
+  a stale `Working` line farther up scrollback still cannot make the
+  pre-dispatch baseline appear busy and mask the real false→true start edge
+  (`#jetbrainsrunroute`, `#jetbrainsrunroute-8x66`,
+  `#jetbrainsrunroute-tgp5`).
 - **JetBrains startup restoration now publishes the completed editor surface
   when Markdown files finish opening.** IDEA can restore split containers and
   seed their structural shape before restored files enter the selected-file
@@ -28,6 +50,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   effect. A cross-adapter contract test proves JetBrains and VS Code both bridge
   visible-membership changes into `editor_surface_observe`, preserving plugin
   parity.
+- **Automatic editor-surface reconciliation now realizes missing visible panes
+  instead of requiring an imperative republish.** The controller previously
+  translated every Lazily-derived `Sync` effect to `no_autostart=true`, so
+  startup/file-open/tab-switch observations could only rearrange panes that
+  already existed; switching to `lazily.md` stayed invisible until explicit
+  `Sync Tmux Layout` repeated the same desired state with autostart enabled.
+  Derived sync now remains `caller_kind=automatic` but permits the binary-owned
+  safe-autostart policy to provision visible documents. Ambiguous/live owners
+  still fail closed, inactive-editor focus is suppressed, background open files
+  remain outside the desired columns, and JetBrains/VS Code share the same
+  controller consequence.
 - **JetBrains no longer turns a later whole-buffer read into operator-authored
   CRDT state.** Dirty incremental `DocumentEvent`s retain their exact
   offset/old/new fragments, validate them against the actor-owned shadow, and
@@ -39,7 +72,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   Code now advertise and test the shared `bounded_editor_splices_v1`
   capability; regressions cover partial queue typing, cross-cell edits, Unicode
   offsets, reload fencing, and the absence of whole-buffer reads from the
-  ordinary local-mutation path.
+  ordinary local-mutation path. JetBrains also consumes IDEA's explicit
+  before/after file-content-reload lifecycle as non-operator provenance, so an
+  incremental File Cache Conflict reload remains fenced even if the buffer is
+  otherwise dirty.
 
 ## 0.35.130
 

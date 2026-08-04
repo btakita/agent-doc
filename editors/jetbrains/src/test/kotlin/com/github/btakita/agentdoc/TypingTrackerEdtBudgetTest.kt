@@ -490,6 +490,10 @@ class TypingTrackerEdtBudgetTest {
             "only user-attributable incremental editor events may originate CRDT deltas",
             listenerBody.contains("isOperatorDocumentEvent(filePath, event)") &&
                 listenerBody.contains("non-operator-editor-event") &&
+                source.contains("FileDocumentManagerListener.TOPIC") &&
+                source.contains("override fun beforeFileContentReload") &&
+                source.contains("fileContentReloadingPaths.add(filePath)") &&
+                source.contains("isReloadingFileContent(filePath)") &&
                 source.contains("wholeTextReplaced = event.isWholeTextReplaced") &&
                 source.contains("isDocumentUnsaved(event.document)") &&
                 source.contains("stale-operator-event-fenced"),

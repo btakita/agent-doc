@@ -339,6 +339,44 @@ gpt-5.6 · ~/work/sample-app · 40% left
     }
 
     #[test]
+    fn codex_pane_facts_recognize_padded_working_snapshot_after_idle_baseline() {
+        let harness = HarnessConfig::codex();
+        let mut before = "\
+• Working (31s • esc to interrupt)
+• Previous turn completed.
+• Ran agent-doc session.md
+  └ agent-doc completed
+• Retained response was delivered.
+
+›
+
+gpt-5.6 · ~/work/sample-app · 40% left"
+            .to_string();
+        before.push_str(&"\n".repeat(12));
+        let mut active = "\
+› agent-doc /work/sample-app/tasks/session.md
+
+• I’m opening the Agent Doc session and checking the repository context first.
+
+• Ran tsift status
+  └ Index status: fresh
+
+• Working (3s • esc to interrupt)
+
+
+› Write tests for @filename
+
+gpt-5.6 · ~/work/sample-app · 40% left"
+            .to_string();
+        active.push_str(&"\n".repeat(12));
+        let facts = codex_pane_dispatch_start_proof_facts(&harness, &before, &active);
+
+        assert!(!facts.pre_dispatch_has_busy_cue);
+        assert!(facts.current_has_busy_cue);
+        assert!(codex_pane_busy_transition_after_acceptance(facts));
+    }
+
+    #[test]
     fn codex_dispatch_start_tracking_enabled_accepts_workspace_hook_for_nested_agent_doc_root() {
         let dir = tempfile::tempdir().unwrap();
         let workspace = dir.path();

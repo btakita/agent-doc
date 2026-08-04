@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.google.gson.JsonObject
 import java.nio.file.Files
 import java.nio.file.Paths
 import org.junit.Assert.assertEquals
@@ -192,6 +193,22 @@ class CrdtReplicaProjectionFrontierTest {
         )
         assertFalse(pullDeliveryRequestsReplicaRefreshUtil(ReplicaPullDelivery.Deltas(emptyList())))
         assertFalse(pullDeliveryRequestsReplicaRefreshUtil(ReplicaPullDelivery.Replace("current")))
+    }
+
+    @Test
+    fun `controller missing-member pull requests replica re-registration`() {
+        val refused = JsonObject().apply {
+            addProperty("refused", true)
+            addProperty("reason", "missing_replica")
+        }
+        val reason = refusedReplicaPullReasonUtil(refused)
+        assertEquals("missing_replica", reason)
+        assertTrue(
+            pullDeliveryRequestsReplicaRefreshUtil(
+                ReplicaPullDelivery.Unavailable(reason!!),
+            ),
+        )
+        assertEquals(null, refusedReplicaPullReasonUtil(JsonObject()))
     }
 
     @Test

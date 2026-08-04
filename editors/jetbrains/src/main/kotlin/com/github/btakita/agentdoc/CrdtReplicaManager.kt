@@ -10,6 +10,7 @@ import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.FileDocumentManagerListener
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -423,6 +424,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         )
     private val shadows = ConcurrentHashMap<String, String>()
     private val applyingRemote = ConcurrentHashMap.newKeySet<String>()
+    private val fileContentReloadingPaths = ConcurrentHashMap.newKeySet<String>()
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
     private val localEditorFlushVersions = ConcurrentHashMap<String, AtomicLong>()
     private val localEditorFlushTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
@@ -458,6 +460,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     fun start() {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(this, this)
+        ApplicationManager.getApplication().messageBus.connect(this).subscribe(
+            FileDocumentManagerListener.TOPIC,
+            object : FileDocumentManagerListener {
+                override fun beforeFileContentReload(file: VirtualFile, document: Document) {
+                    val filePath = file.path
+                    if (!file.name.endsWith(".md") || managerForFilePath(filePath) !== this@CrdtReplicaManager) {
+                        return
+                    }
+                    fileContentReloadingPaths.add(filePath)
+                    advanceNonOperatorMutationEpoch(filePath)
+                }
+
+                override fun fileContentReloaded(file: VirtualFile, document: Document) {
+                    fileContentReloadingPaths.remove(file.path)
+                }
+            },
+        )
     }
 
     override fun dispose() {
@@ -469,6 +488,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         pendingLocalEditorEdits.clear()
         localEditorFlushPendingPaths.clear()
         pendingLocalEdits.clear()
+        fileContentReloadingPaths.clear()
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
         retainedCanonicalProjectionPaths.clear()
@@ -2839,6 +2859,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         fun isApplyingRemote(filePath: String): Boolean =
             instances.values.any { it.applyingRemote.contains(filePath) }
 
+        private fun isReloadingFileContent(filePath: String): Boolean =
+            instances.values.any { it.fileContentReloadingPaths.contains(filePath) }
+
         /**
          * #ensurereregister: true when some open project already holds a CRDT
          * replica (forwarder) for [filePath].
@@ -2852,7 +2875,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             instances.values.any { it.forwarders.containsKey(filePath) }
 
         fun isApplyingNonOperatorMutation(filePath: String): Boolean =
-            applyingAgentMutations.contains(filePath) || isApplyingRemote(filePath)
+            applyingAgentMutations.contains(filePath) ||
+                isApplyingRemote(filePath) ||
+                isReloadingFileContent(filePath)
 
         fun isOperatorDocumentEvent(filePath: String, event: DocumentEvent): Boolean =
             isOperatorDocumentEventUtil(

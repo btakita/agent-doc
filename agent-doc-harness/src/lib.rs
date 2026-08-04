@@ -948,13 +948,7 @@ impl HarnessConfig {
         if self.binary != "codex" {
             return false;
         }
-        let recent = output
-            .lines()
-            .rev()
-            .take(8)
-            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
-            .map(|line| line.trim().to_ascii_lowercase())
-            .collect::<Vec<_>>();
+        let recent = recent_normalized_bottom_lines(output, 8);
         codex_active_turn_busy(&recent)
     }
 
@@ -1068,13 +1062,7 @@ impl HarnessConfig {
             return None;
         }
 
-        let recent = output
-            .lines()
-            .rev()
-            .take(8)
-            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
-            .map(|line| line.trim().to_ascii_lowercase())
-            .collect::<Vec<_>>();
+        let recent = recent_normalized_bottom_lines(output, 8);
 
         if recent.iter().any(|line| {
             line == "tab to queue message"
@@ -1573,6 +1561,23 @@ fn codex_active_turn_busy(recent_lower: &[String]) -> bool {
             || line.starts_with("• waiting for background terminal"))
             && line.contains("esc to interrupt")
     })
+}
+
+/// Normalize the meaningful bottom of a terminal viewport before taking a
+/// bounded active-card window. tmux captures the full pane height, including
+/// blank rows below Codex's footer after a resize or a shorter redraw. Counting
+/// those rows would push a live `Working` cue outside the shared admission /
+/// dispatch-proof window even though it is still adjacent to the composer.
+fn recent_normalized_bottom_lines(output: &str, max_lines: usize) -> Vec<String> {
+    let mut normalized = output
+        .lines()
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
+        .map(|line| line.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    while normalized.last().is_some_and(|line| line.is_empty()) {
+        normalized.pop();
+    }
+    normalized.into_iter().rev().take(max_lines).collect()
 }
 
 /// True when any of the recent (already lower-cased, trimmed) Claude pane lines
@@ -3060,6 +3065,29 @@ Working (45s - esc to interrupt)
         assert!(
             !h.is_bottom_idle_chrome(output, 12),
             "active Codex turn must fail idle detection"
+        );
+    }
+
+    #[test]
+    fn codex_active_turn_busy_ignores_blank_terminal_padding_below_footer() {
+        let h = HarnessConfig::codex();
+        let mut output = "\
+› agent-doc /work/sample-app/tasks/session.md
+
+• I’m opening the session document.
+
+• Working (3s • esc to interrupt)
+
+
+› Write tests for @filename
+
+gpt-5.6 · ~/work/sample-app · 40% left"
+            .to_string();
+        output.push_str(&"\n".repeat(12));
+
+        assert!(
+            h.codex_active_turn_is_busy(&output),
+            "blank tmux viewport rows below Codex chrome must not hide a live active-turn cue"
         );
     }
 

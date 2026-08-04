@@ -29,7 +29,13 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 
 ## Tab Sync Compatibility
 
-- VS Code tab changes remain JetBrains-compatible for real tab/layout changes: the extension issues the immediate best-effort Project Controller `focus_document_pane` handoff from the active-editor event before tab-sync planner dedup, then keeps the debounced reconciliation on the passive `sync --no-autostart --exact-visible ...` path with the visible `TabGroups` projection, including empty column placeholders.
+- VS Code tab changes remain JetBrains-compatible for real tab/layout changes:
+  the extension publishes the active file and visible `TabGroups` projection,
+  including empty column placeholders, to the controller-owned editor-surface
+  graph. A derived sync is exact-visible and autostart-capable under the
+  binary's automatic-caller safety policy, so a missing visible pane is created
+  without an explicit `Load Tmux Window`; background open files are not added
+  to the desired columns.
 - Repeated clicks between already-open split editors must continue to move tmux focus. The immediate focus handoff is deduped only against the last immediate active editor path, not against the last completed automatic sync state, so rapid A -> B -> A switches cannot be skipped by a stale debounced sync snapshot.
 - Automatic sync subprocesses use a short timeout with exponential retry backoff. A slow tmux/controller repair must not cause repeated 30s automatic sync attempts while the user is only changing focus or tabs. Manual `Sync Tmux Layout` and `Load Tmux Window` use the Project Controller `sync_tmux_layout` receipt path.
 
@@ -43,6 +49,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 
 - VS Code CRDT replica IPC must use `.agent-doc/controller.sock` with the controller `crdt_replica` envelope. It must not connect to `.agent-doc/supervisor/*.sock`.
 - VS Code drains named-document CRDT deliveries from targeted `EditorIntent` events and the Lazily-backed controller subscription. It must not watch a filesystem event directory or use a fixed interval remote-update pull loop.
+- A successful `replica_pull` envelope with `refused=true, reason=missing_replica` invalidates the cached pre-recycle client. VS Code must atomically re-register the stable visible cut before resuming pull/projection; it must not interpret the refusal as an idle empty delta batch. This matches JetBrains.
 - VS Code reads turn-state refreshes from the Project Controller `state_subscribe` Lazily projection and mirrors the returned snapshot/delta locally. It does not read filesystem state for ordinary turn-state UI. If the Project Controller request fails, the status bar shows `agent-doc: Project Controller disconnected`; there is no compatibility fallback. Native-library reload arrives as the targeted `reload_library` editor intent. Turn-state refreshes are coalesced and use a minimum refresh interval; active-editor changes may force one immediate Project Controller refresh.
 - The mirrored closeout payload's Rust-owned `realtime_steering` aggregate and
   body-identity-keyed `elements` set drive the active-turn status label/count,

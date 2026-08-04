@@ -113,6 +113,13 @@ replicas. Re-registration publishes the exact current editor buffer as the new
 replica baseline. It never installs or saves a Lazily-retained whole-document
 target first. Retained agent intents replay afterward through the ordered
 document-cell/CRDT delivery path over that published operator cut.
+If a cached client reaches `replica_pull` after the controller generation has
+already changed, the attached controller returns the typed
+`{ "refused": true, "reason": "missing_replica" }` projection. JetBrains and VS
+Code both classify that response as transport invalidation, atomically
+re-register from the stable visible cut, and only then resume pull/projection.
+An `ok` envelope with no updates is reserved for a registered idle member; it
+cannot hide missing membership as an inert empty pull.
 At controller startup, the replicated missing-replica set emits one targeted
 rebuild request for every stranded registration, including editors that
 advertise peer pull. Peer pull remains a complementary startup and detected
@@ -229,6 +236,17 @@ published the matching visible-state projection. The write remains a successful
 retained continuation. No foreground recovery signal, replay request, refresh,
 or re-registration command is emitted; a later projection invalidates the
 derived settlement Computed and resumes the eligible Effect.
+
+Retained delivery has an explicit reactive fixed point. When the retained
+Base→Target delta projected over the converged visible cut produces that same
+cut, the Computed classifies it as already projected and emits only the existing
+closeout-resume consequence—not another CP write. The relay independently
+guards equal canonical content and publishes no Yrs transaction, no successor
+delivery generation, and no new editor target. In particular, an ACK that
+invalidates and re-evaluates the retained transition Effect remains valid;
+equal-content re-evaluation cannot manufacture work that invalidates that ACK.
+This lets Lazily settle a retained version from graph state alone instead of
+requiring an imperative republish or controller recycle.
 
 The delivery receipt is a proof of one frontier, not a lock on canonical
 authority. A live editor delta may advance canonical text between that receipt
@@ -480,7 +498,10 @@ Path (`plan-crdt-scramble-and-disk-propagation.md`, Phase C/D):
    (fail-open); (c) otherwise installs the canonical wholesale via a minimal edit
    (preserving cursor/undo) and re-bootstraps the native replica so later deltas are
 relative to the corrected state. The `ReplicaPullDelivery` type (`Deltas` |
-`Replace`) is mirrored across both frontends per the Editor Parity Requirement.
+`Replace` | `Unavailable`) is mirrored across both frontends per the Editor
+Parity Requirement; `Unavailable("missing_replica")` invalidates a cached
+pre-recycle member and re-enters registration instead of joining the no-op pull
+backoff.
 
 **CRDT lineage fence.** Additive updates are commutative and idempotent only
 inside the canonical history from which they were produced. Every replica

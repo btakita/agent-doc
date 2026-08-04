@@ -2395,15 +2395,18 @@ struct RetainedDeliveryActivation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RetainedResumeAction {
     ResumeExactDelivery,
+    ResumeRebasedDelivery,
     ReconcileMaterializedCapture,
 }
 
 const RETAINED_DELIVERY_REACTIVE_REASON: &str = "retained_delivery_reactive";
+const RETAINED_REBASED_DELIVERY_REACTIVE_REASON: &str = "retained_rebased_delivery_reactive";
 
 impl RetainedResumeAction {
     fn reason(self) -> &'static str {
         match self {
             Self::ResumeExactDelivery => RETAINED_DELIVERY_REACTIVE_REASON,
+            Self::ResumeRebasedDelivery => RETAINED_REBASED_DELIVERY_REACTIVE_REASON,
             Self::ReconcileMaterializedCapture => {
                 "retained_materialized_capture_reconcile_reactive"
             }
@@ -3972,6 +3975,24 @@ fn retained_transition_state(
         };
     }
     let projected_target_hash = agent_doc_hash::content_hash(&rebased);
+    if rebased == delivery.content.as_ref() {
+        // The retained Base -> Target delta is already present in the converged
+        // visible cut. This is a Computed fixed point, not another CP write:
+        // publishing an equal-content CRDT transaction would only manufacture a
+        // successor delivery generation and invalidate the ACK that exposed it.
+        return RetainedTransitionState::TargetVisible {
+            intent_id: intent.intent_id.clone(),
+            target_hash: projected_target_hash,
+            delivery_version: delivery.delivery_version,
+            controller_generation,
+            resume: retained_resume_signal_for_action(
+                projection,
+                delivery,
+                controller_generation,
+                RetainedResumeAction::ResumeRebasedDelivery,
+            ),
+        };
+    }
     RetainedTransitionState::ApplyTarget(RetainedTransitionProjection {
         file: delivery.file.clone(),
         base_content: delivery.content.clone(),
@@ -3995,7 +4016,6 @@ fn derive_retained_resume_signal(
         .continuation
         .as_ref()
         .or(projection.closeout.captured_response.as_ref())?;
-    let cycle_id = capture.cycle_id.as_str();
     let action = if delivery
         .content_hash
         .eq_ignore_ascii_case(&intent.target_hash)
@@ -4017,11 +4037,25 @@ fn derive_retained_resume_signal(
     } else {
         return None;
     };
+    retained_resume_signal_for_action(projection, delivery, controller_generation, action)
+}
+
+fn retained_resume_signal_for_action(
+    projection: &agent_doc_state_backbone::DocumentStateProjection,
+    delivery: &RetainedDeliveryObservation,
+    controller_generation: u64,
+    action: RetainedResumeAction,
+) -> Option<RetainedResumeSignal> {
+    let intent = projection.document.pending_write.as_ref()?;
+    let capture = intent
+        .continuation
+        .as_ref()
+        .or(projection.closeout.captured_response.as_ref())?;
     Some(RetainedResumeSignal {
         action,
         intent_id: intent.intent_id.clone(),
         target_hash: intent.target_hash.clone(),
-        cycle_id: cycle_id.to_string(),
+        cycle_id: capture.cycle_id.clone(),
         capture_id: capture.capture_id.clone(),
         response_sha256: capture.response_sha256.clone(),
         delivery_version: delivery.delivery_version,
@@ -6361,7 +6395,9 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
     dry_run: bool,
     caller: &str,
 ) -> Result<(usize, usize)> {
-    let generation = read_bootstrap(project_root)?
+    let bootstrap = read_bootstrap(project_root)?;
+    let generation = bootstrap
+        .as_ref()
         .map(|bootstrap| bootstrap.controller_generation)
         .unwrap_or(0);
     let mut reaped = 0;
@@ -6374,6 +6410,17 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
             continue;
         }
         if bootstrap_owns_controller_pid(project_root, pid)? {
+            continue;
+        }
+        if bootstrap
+            .as_ref()
+            .is_some_and(|bootstrap| active_handoff_is_fresh(bootstrap, stale_after))
+        {
+            // A promoted predecessor keeps its immutable "preparing" argv while
+            // the authoritative bootstrap moves to the replacement. Use that
+            // handoff's clock, not the predecessor's process age, or a healthy
+            // ownership transition can reap the process it is replacing.
+            kept += 1;
             continue;
         }
         let age = crate::process::process_start_age_secs(pid).unwrap_or(0);
@@ -6400,6 +6447,18 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
         reaped += 1;
     }
     Ok((reaped, kept))
+}
+
+fn active_handoff_is_fresh(bootstrap: &ControllerBootstrap, stale_after: Duration) -> bool {
+    matches!(
+        bootstrap.handoff_state,
+        ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
+    ) && !preparing_controller_is_stale(
+        bootstrap.handoff_state,
+        bootstrap.handoff_started_at,
+        timestamp_secs(),
+        stale_after,
+    )
 }
 
 fn bootstrap_owns_controller_pid(project_root: &Path, pid: u32) -> Result<bool> {
@@ -6534,6 +6593,14 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
         if bootstrap_owns_controller_pid(&root, pid)? {
             continue;
         }
+        let bootstrap = read_bootstrap(&root)?;
+        if bootstrap
+            .as_ref()
+            .is_some_and(|bootstrap| active_handoff_is_fresh(bootstrap, stale_after))
+        {
+            kept += 1;
+            continue;
+        }
         let age = crate::process::process_start_age_secs(pid).unwrap_or(0);
         if age <= stale_after.as_secs() {
             // Freshly-launched replacement still inside a healthy handoff window.
@@ -6548,7 +6615,8 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
             reaped += 1;
             continue;
         }
-        let generation = read_bootstrap(&root)?
+        let generation = bootstrap
+            .as_ref()
             .map(|bootstrap| bootstrap.controller_generation)
             .unwrap_or(0);
         reap_verified_controller_pid(&root, pid, generation);
@@ -11873,6 +11941,38 @@ agent:queue\n\
     }
 
     #[test]
+    fn orphan_reaper_uses_the_active_handoff_clock_not_predecessor_process_age() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut predecessor = spawn_preparing_controller_sentinel(dir.path());
+        let pid = predecessor.id();
+        assert!(crate::process::cmdline_has_preparing_handoff(pid));
+        std::thread::sleep(Duration::from_millis(1100));
+
+        let mut replacement =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Preparing, None);
+        replacement.pid = u32::MAX;
+        replacement.controller_generation = 8;
+        replacement.handoff_started_at = Some(timestamp_secs().saturating_add(60));
+        write_bootstrap_state(&replacement).unwrap();
+
+        let (reaped, kept) =
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false).unwrap();
+        assert_eq!(
+            (reaped, kept),
+            (0, 1),
+            "an aged promoted predecessor must survive while the authoritative replacement handoff is fresh"
+        );
+        assert!(
+            process_is_alive(pid),
+            "the active handoff, not immutable argv or predecessor age, owns the reap decision"
+        );
+
+        let _ = predecessor.kill();
+        let _ = predecessor.wait();
+    }
+
+    #[test]
     fn removed_project_root_reaper_reaps_stable_temp_controller() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -13282,6 +13382,81 @@ revised operator request
         assert!(
             !retained_transition_matches_intent(&transition, &superseded),
             "a newer durable target must fence the stale projected effect"
+        );
+    }
+
+    #[test]
+    fn retained_rebased_target_already_visible_is_a_reactive_fixed_point() {
+        let mut projection = retained_resume_projection("doc-retained-rebased-fixed-point");
+        let base = "\
+---
+agent_doc_session: retained-fixed-point
+---
+
+<!-- agent:exchange patch=append -->
+### do [#sample]
+
+original operator request
+<!-- /agent:exchange -->
+";
+        let target = "\
+---
+agent_doc_session: retained-fixed-point
+---
+
+<!-- agent:exchange patch=append -->
+### do [#sample]
+
+original operator request
+
+### Re: do [#sample]
+
+retained response body
+<!-- /agent:exchange -->
+";
+        let editor_cut = "\
+---
+agent_doc_session: retained-fixed-point
+---
+
+<!-- agent:exchange patch=append -->
+### do [#sample]
+
+revised operator request
+<!-- /agent:exchange -->
+";
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(base.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(base);
+        intent.target_content = target.to_string();
+        intent.target_hash = agent_doc_hash::content_hash(target);
+
+        let first_delivery = RetainedDeliveryObservation {
+            file: PathBuf::from("/work/session.md"),
+            content: Arc::from(editor_cut),
+            content_hash: agent_doc_hash::content_hash(editor_cut),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 3,
+        };
+        let projected =
+            retained_transition_projection(Some(&projection), Some(&first_delivery), 2).unwrap();
+        let visible = RetainedDeliveryObservation {
+            content: projected.target_content.clone(),
+            content_hash: projected.projected_target_hash.clone(),
+            delivery_version: 4,
+            ..first_delivery
+        };
+
+        let state = retained_transition_state(Some(&projection), Some(&visible), 2);
+        assert_eq!(retained_transition_state_tag(&state), "target_visible");
+        assert_eq!(retained_transition_effect_tag(&state), "resume_closeout");
+        let signal = state.resume_signal().unwrap();
+        assert_eq!(signal.action, RetainedResumeAction::ResumeRebasedDelivery);
+        assert_eq!(
+            state.transition_projection(),
+            None,
+            "equal rebased content must not project another CRDT write"
         );
     }
 

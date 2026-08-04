@@ -28,6 +28,39 @@ complete
 Compacted content:
 - Archived 14 response topic(s): do [#lzblobbackendstrict]; do [#lzprosekeyconvention]; do [#lznullformblind]; 11 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): do [#failcloseddispatch]; do [#nevergotsystematic]; do [#failc...
+
+### Re: authoritative statechart kinds and closed references — gpt-5
+
+Implemented and published `#lzstatechartkindauthority` across the canonical spec and all nine bindings.
+
+- The declarative contract now closes `kind` to `atomic`, `compound`, `parallel`, `history`, or `final`. An explicit kind is authoritative, must agree with its structural markers, and malformed contradictions are rejected rather than silently re-inferred.
+- Chart-level `initial`, state `parent`/`initial`/history `default`, and every transition target must resolve to a declared state before execution. Unknown lookups no longer fall back to phantom atomic states.
+- Structural fields are strict: `parallel` and transition `internal` must be booleans; `history`, `parent`, `initial`, and history `default` must be strings when present.
+- Added canonical `conformance/statechart/malformed_rejected.json` with 12 named cases spanning unknown/contradictory kinds, all requested type errors, and all requested undeclared-id references. Every Rust, Python, JavaScript, Go, C++, Dart, Kotlin, Zig, and C# runner rejects every case.
+
+Negative control: I temporarily changed the `unknown_kind` case into a valid atomic chart and ran the focused corpus test in all nine bindings. All nine failed on `unknown_kind`, including C++ and Zig's vendored mirror; after restoring and re-syncing the fixture, all nine focused runners passed. This proves the shared invalid-definition corpus is load-bearing.
+
+Published commits:
+
+- lazily-spec `0bd0f51713e6718223265a9c6399a985b7af9c87`
+- lazily-rs `3fc00f1392b161c7f0cb35ac42718cf77e2266ef`
+- lazily-py `546157df667cd8241d00b42e46acabb1ecb8529c`
+- lazily-js `fcfe363f054838fc8140ecfab0d5d6c69514fca1`
+- lazily-go `b0f4f7ddca5e4ff478b15b0e0371cf19318148d8`
+- lazily-cpp `d3f4011f457053ece35b98a61fc56cfae9263acd`
+- lazily-dart `cff7cefe707264ab427d833b5fd361c738a57f2d`
+- lazily-kt `da2e802ccdcdfb8873287022fc44aa12450fca42`
+- lazily-zig `035a960a6b81737ae8030c2bbb6ae37e5840aba5`
+- lazily-cs `1273ec5a853ea7e16d68d14f6ed0cd3255c339f3`
+- superproject gitlink pin `334d3b6014fc749b99a8e250f9f568206f654e05`
+
+Verification:
+
+- `make check` is green locally in the spec, all nine bindings, and the superproject (`tart-abfd7a3ba6`).
+- Exact-SHA CI is green for the spec and all nine bindings: spec `30882563055`, Rust `30882580626`, Python `30882580729`, JavaScript `30882580847`, Go `30882580868`, C++ `30882580766`, Dart `30882580903`, Kotlin `30882580616`, Zig `30882580958`, and C# `30882580860`.
+- Root run `30882697583`: `tmux-ci` is green. The `check` job failed twice only at the linker with the known `collect2: fatal error: ld terminated with signal 7 [Bus error]`; the single allowed failed-job retry produced the identical infrastructure-only signature. There were no source, compile, or test-assertion failures.
+
+Unrelated dirty AGENTS/runbook/worktree changes in the shared repositories were preserved and excluded from every commit.
 <!-- agent:boundary:09511004:lazily -->
 <!-- /agent:exchange -->
 
@@ -35,7 +68,7 @@ Compacted content:
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - do [#lzwireencodingrunner]
-- do [#lzstatechartkindauthority]
+- ~~do [#lzstatechartkindauthority]~~
 - do [#lzoutboxjournalop]
 - do [#lzdecorativewirefields]
 - do [#lzprotobufinterop]
@@ -55,7 +88,6 @@ Compacted content:
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzprotobufinterop] Implement optional Protobuf interoperability as a generated encoding of Lazily's canonical graph-boundary algebra, not as a second graph runtime. Define versioned typed envelopes for stable cell identity, bounded CellTextSplice operations, causal epochs/sequences, source membership, projections, effect intents and receipts; keep full snapshots restricted to bootstrap/recovery. Land reproducible Rust/Kotlin/TypeScript generation first, then require shared conformance traces proving partial typing stays one cell, cross-cell edits stay bounded, clean cache reloads fence queued operator splices, remote/native reload does not republish a whole buffer, and all three runtimes derive identical logical projections. Preserve canonical JSON diagnostics/msgpack interop, compare logical hashes rather than protobuf bytes, keep JSON Schema for fixture assertion validation, and roll remaining bindings through capability negotiation and the parity ledger. Plan: tasks/software/plan-lazily-protobuf-interop.md
-- [ ] [#lzstatechartkindauthority] Decide what an explicit statechart `kind` MEANS, then make it executable. schemas/statechart.json closes `kind` to {atomic, compound, parallel, history, final} and documents an inference rule for its ABSENCE, but says nothing about whether a PRESENT `kind` is authoritative or merely a restatement - and lazily-js found that every parser derives structure from `parallel: true` / `initial` and never from `kind`, so today it is only ever a redundant restatement. That gap is why the nine-binding audit under #failclosedsweep split 3-3 on an unknown `kind`, with lazily-rs, lazily-go and lazily-py calling it an open annotation slot and lazily-dart, lazily-kt and lazily-js failing it closed. lazily-rs has since reversed to fail-closed. Second, larger half in the same family: ChartDef reference validation. lazily-rs, lazily-cpp and lazily-dart each independently found that `parent`/`initial`/`default`/transition `target` may name undeclared states, and that kind() of an unknown id returns Atomic - so a typo'd target transitions INTO A PHANTOM STATE that then enters the active configuration as a leaf. lazily-cpp gated it in ChartBuilder::build and lazily-dart threw ArgumentError; the other seven are unverified. Work: state both clauses in the spec, add conformance/statechart/malformed_rejected.json covering unknown kind, declared-vs-inferred contradiction, non-bool parallel/internal, non-string history/parent/initial/default, and undeclared id references, then bring all nine to it.
 - [ ] [#lzoutboxjournalop] Pin the durable-outbox journal's opcode strictness with a canonical fixture, and pin its deliberate opposite in the same file. THREE bindings independently found the same defect under #failclosedsweep - lazily-cs DurableOutbox.cs:340, lazily-zig reliable_sync.zig:482, lazily-dart reliable_sync.dart:363 - a scan over the on-disk journal with NO default case, where an unrecognised opcode is skipped exactly like a cursor mark. All three reached the same consequence: an ignored delete/delete_after resurrects a pruned suffix, so the outbox re-delivers already-acked frames while reporting success. The journal is written by a possibly-different build of the same binding, which is what makes it a wire surface rather than an internal one. lazily-cs and lazily-dart both also split it the same way and that split is the fixture: an unknown opcode INTERIOR to the log MUST be refused, while a TORN TRAILING record MUST be forgiven and the earlier records must survive, because a crash leaves exactly one truncated final line. The two cases arrive through the same code path and demand opposite answers, which is precisely why neither survives being left to per-binding judgement.
 - [ ] [#lzdecorativewirefields] Wire fields that are decoded, documented as load-bearing, and dispatched on by nothing. lazily-rs's shape-6 pass under #failclosedsweep found nine: CommandPolicy.{dedupe,supersede,cancel_on_preempt}, CommandSubmit.{idempotency_key,deadline_ms,payload_type,required_features}, CausalReceipt.observer, CapabilityHandshake.session_id. Two are worse than unused. DedupePolicy is a three-variant wire DISCRIMINATOR that nothing dispatches on - CommandProjection::submit dedupes by command_id only, so a peer sending dedupe: same_idempotency_key gets command_id semantics and no error. And required_features' own doc comment says 'Features the target must advertise or the submit fails closed' - a fail-closed rule that no code anywhere enforces. This is the class no key-tracker and no AST pass can see, because the field IS consumed at decode time and then discarded; lazily-go closed its own instance with a go/ast scan (TestConformanceStructFieldsAreRead) and lazily-cpp reported 56 never-referenced wire fields from the same shape. Work: for each field either implement the behaviour its doc claims, or delete the field and its doc claim - and add the fixture that would have caught it, since a decoded-and-ignored field passes every existing rung of the ladder.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md

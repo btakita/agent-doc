@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.130
+
+- **Compaction now recovers the exact stranded duplicate response-heading
+  replay shape without weakening document integrity.** Response materialization
+  canonicalizes an empty `### Re:` shell when an earlier response with the same
+  normalized topic already has a real body, even after later responses make
+  the shell non-tail. Compact performs that same byte-preserving
+  canonicalization before its integrity gate, logs it, and then validates the
+  resulting authority normally. It removes only the redundant heading line;
+  every body, prompt, comment, and unrelated response byte survives. Unique
+  empty headings and all other malformed documents still fail closed before
+  tags, archives, snapshots, writes, or commits.
+
 ## 0.35.129
 
 - **The first navigation from a one-pane document to a split editor surface now

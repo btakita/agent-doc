@@ -541,10 +541,20 @@ fn run_in_controller_scoped(
     let semantic_base_content = pending_editor_cut
         .map(|cut| cut.content)
         .unwrap_or_else(|| observed_write_base_content.clone());
-    // Compact is not a repair command. Gate the exact realtime/disk authority
-    // before creating tags, composing captures, mutating CRDT state, or
-    // committing. This prevents a no-op compact from laundering a malformed
-    // document into HEAD.
+    let replay_repaired_content =
+        agent_doc_turn::response_replay::repair_stranded_duplicate_response_headings(
+            &semantic_base_content,
+        );
+    if replay_repaired_content != semantic_base_content {
+        agent_doc_ops_log_io::log_op(file, "compact_repaired_stranded_duplicate_response_heading");
+    }
+    let semantic_base_content = replay_repaired_content;
+    // Compact is not an arbitrary repair command. The only normalization before
+    // the integrity gate removes a proven-empty replay heading whose answered
+    // twin already has a body; every user/body byte remains untouched. Gate the
+    // resulting exact realtime/disk authority before creating tags, composing
+    // captures, mutating CRDT state, or committing. This prevents a no-op
+    // compact from laundering any other malformed document into HEAD.
     agent_doc_lint_io::validate_integrity_on_content_with_logger(
         file,
         &semantic_base_content,
@@ -5474,6 +5484,88 @@ mod tests {
         assert!(err.to_string().contains("[integrity-gate] INTERRUPTED"));
         assert_eq!(fs::read_to_string(&doc).unwrap(), malformed);
         assert!(!dir.path().join(".agent-doc/archives").exists());
+    }
+
+    #[test]
+    fn compact_repairs_proven_stranded_duplicate_response_heading() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let stranded = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "Done once.\n",
+            "### Re: do [#ship] — gpt-5 (HEAD)\n",
+            "### Re: next task — gpt-5\n\n",
+            "Next response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, stranded).unwrap();
+
+        run(
+            &doc,
+            Some(1),
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            false,
+            false,
+        )
+        .expect("compact should normalize the proven replay shell before integrity validation");
+
+        let compacted = fs::read_to_string(&doc).unwrap();
+        assert!(compacted.contains("Compacted summary."), "{compacted}");
+        assert_eq!(
+            compacted
+                .lines()
+                .filter(|line| line.contains("do [#ship] — gpt-5"))
+                .count(),
+            0,
+            "{compacted}"
+        );
+        assert!(
+            compacted.contains("### Re: next task — gpt-5"),
+            "{compacted}"
+        );
+    }
+
+    #[test]
+    fn compact_still_rejects_unique_empty_response_heading() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let malformed = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: unanswered task — gpt-5\n",
+            "### Re: next task — gpt-5\n\n",
+            "Next response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, malformed).unwrap();
+
+        let err = run(
+            &doc,
+            Some(1),
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            false,
+            false,
+        )
+        .expect_err("compact must not normalize a unique interrupted heading");
+
+        assert!(err.to_string().contains("has no response body"), "{err:#}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), malformed);
     }
 
     #[test]

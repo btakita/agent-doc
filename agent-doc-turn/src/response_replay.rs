@@ -291,6 +291,8 @@ pub fn materialize_response_in_current_exchange(
     current: &str,
     expected_response: &str,
 ) -> Option<String> {
+    let repaired_current = repair_stranded_duplicate_response_headings(current);
+    let current = repaired_current.as_str();
     if !expected_response.trim().is_empty() && current.contains(expected_response.trim()) {
         return Some(current.to_string());
     }
@@ -314,6 +316,84 @@ pub fn materialize_response_in_current_exchange(
         &response,
     );
     Some(exchange.replace_content(current, &exchange_body))
+}
+
+/// Remove empty replay heading shells when an earlier response with the same
+/// normalized topic already has a body.
+///
+/// A retained response-cell replay can leave the body attached to the first
+/// heading while a later heading-only shell survives. Once another response is
+/// appended, the existing tail repair can no longer move that shell. Removing
+/// only the proven-empty duplicate heading preserves every body, prompt,
+/// comment, and unrelated response byte.
+pub fn repair_stranded_duplicate_response_headings(content: &str) -> String {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return content.to_string();
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return content.to_string();
+    };
+    let exchange_body = exchange.content(content);
+    let Some(repaired_exchange) =
+        repair_stranded_duplicate_response_headings_in_exchange(exchange_body)
+    else {
+        return content.to_string();
+    };
+    exchange.replace_content(content, &repaired_exchange)
+}
+
+fn repair_stranded_duplicate_response_headings_in_exchange(exchange: &str) -> Option<String> {
+    let lines: Vec<&str> = exchange.split_inclusive('\n').collect();
+    let headings: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| line.trim().starts_with("### Re:").then_some(index))
+        .collect();
+    if headings.len() < 2 {
+        return None;
+    }
+
+    let mut completed_topics = HashSet::new();
+    let mut remove = HashSet::new();
+    for (position, heading_index) in headings.iter().copied().enumerate() {
+        let next_heading = headings.get(position + 1).copied().unwrap_or(lines.len());
+        let mut has_body = false;
+        for line in &lines[heading_index + 1..next_heading] {
+            let trimmed = line.trim();
+            if trimmed.starts_with('❯') {
+                break;
+            }
+            if trimmed.is_empty() || trimmed.starts_with("<!--") {
+                continue;
+            }
+            has_body = true;
+            break;
+        }
+
+        let topic = normalize_replay_topic(lines[heading_index]);
+        if topic.is_empty() {
+            continue;
+        }
+        if has_body {
+            completed_topics.insert(topic);
+        } else if completed_topics.contains(&topic) {
+            remove.insert(heading_index);
+        }
+    }
+    if remove.is_empty() {
+        return None;
+    }
+
+    Some(
+        lines
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, line)| (!remove.contains(&index)).then_some(line))
+            .collect(),
+    )
 }
 
 /// Repair a response cell whose body materialized immediately before its
@@ -957,6 +1037,47 @@ mod tests {
             repaired.find("Done once.").unwrap()
                 < repaired.find("<!-- no-pending-capture -->").unwrap()
         );
+    }
+
+    #[test]
+    fn materialize_response_repairs_stranded_duplicate_heading_after_complete_copy() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#ship]\n\n",
+            "Done once.\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#ship]\n\n",
+            "Done once.\n",
+            "### Re: do [#ship] — gpt-5 (HEAD)\n",
+            "### Re: next task — gpt-5\n\n",
+            "Next response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#ship]\n\n",
+            "Done once.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let repaired = materialize_response_in_current_exchange(current, response)
+            .expect("stranded duplicate heading should be repairable");
+
+        assert_eq!(
+            repaired
+                .lines()
+                .filter(|line| normalize_replay_topic(line) == "ship")
+                .count(),
+            1
+        );
+        assert!(repaired.contains("### Re: next task — gpt-5\n\nNext response."));
     }
 
     #[test]

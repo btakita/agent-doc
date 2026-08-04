@@ -2107,19 +2107,61 @@ pub fn atomic_repair_write_if_current_through_authority(
     atomic_write_if_current_through_authority(path, content, expected_current, source)?;
     let canonical = try_resolve_current_document_content(path, source)?;
     let disk = resolve_disk_current_document_content(path, source)?;
+    settle_atomic_repair_projection(path, content, source, canonical, disk)
+}
+
+fn settle_atomic_repair_projection(
+    path: &Path,
+    content: &str,
+    source: &str,
+    canonical: String,
+    disk: String,
+) -> Result<String> {
+    if canonical == content && disk == content {
+        clear_all_deferred_document_write_intents(path, source)?;
+        return Ok(canonical);
+    }
+
+    let target_hash = agent_doc_hash::content_hash(content);
+    if let Some(pending) = pending_document_write_for_target(path, &target_hash) {
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "repair_projection_retained file={} source={} intent_id={} target_hash={} canonical_hash={} disk_hash={} recovery=controller_reactive_projection operator_action=none",
+                path.display(),
+                source,
+                pending.intent_id,
+                target_hash,
+                agent_doc_hash::content_hash(&canonical),
+                agent_doc_hash::content_hash(&disk),
+            ),
+        );
+        return Err(await_editor_replica_no_disk_write(format!(
+            "{source}: repair projection for {} is retained by the controller's reactive \
+             document graph (intent_id={}, target_hash={}, canonical_hash={}, disk_hash={}); \
+             foreground acceptance is not terminal disk equality, and the subscribed \
+             projection effect owns convergence. Do not resubmit, republish, force disk, or \
+             recycle the controller",
+            path.display(),
+            pending.intent_id,
+            target_hash,
+            agent_doc_hash::content_hash(&canonical),
+            agent_doc_hash::content_hash(&disk),
+        )));
+    }
+
     anyhow::ensure!(
         canonical == content && disk == content,
         "{source}: successful repair write for {} did not converge exactly before settling deferred lineage (expected_hash={}, canonical_hash={}, disk_hash={}, component_divergence={})",
         path.display(),
-        agent_doc_hash::content_hash(content),
+        target_hash,
         agent_doc_hash::content_hash(&canonical),
         agent_doc_hash::content_hash(&disk),
         agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
             &canonical, &disk,
         ),
     );
-    clear_all_deferred_document_write_intents(path, source)?;
-    Ok(canonical)
+    unreachable!("exact repair convergence returned above")
 }
 
 /// Apply a binary/CP-authored document update to the live CRDT relay.
@@ -2890,7 +2932,9 @@ fn remove_stale_standalone_exchange_boundary(content: &str) -> Option<String> {
 /// returned target through the current document authority before entering their
 /// generic integrity gate.
 pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Option<String> {
-    if agent_projection_integrity_valid(content) {
+    let response_shell_repaired =
+        agent_doc_turn::response_replay::repair_stranded_duplicate_response_headings(content);
+    if agent_projection_integrity_valid(content) && response_shell_repaired == content {
         return None;
     }
     // `#boundarysplice`: restore a boundary terminator a cell merge welded into
@@ -2907,6 +2951,12 @@ pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Optio
         .ok()
         .flatten()
         .unwrap_or(normalized);
+    // A retained replay can strand a second heading for a response topic whose
+    // earlier cell already has a body. This is the same narrow, lossless shell
+    // repaired by compact: remove only the empty duplicate heading, never a
+    // unique heading or any response/operator body.
+    normalized =
+        agent_doc_turn::response_replay::repair_stranded_duplicate_response_headings(&normalized);
     if !agent_projection_integrity_valid(&normalized)
         && let Some(repaired) = remove_stale_standalone_exchange_boundary(&normalized)
     {
@@ -7477,6 +7527,51 @@ mod tests {
     }
 
     #[test]
+    fn stranded_duplicate_response_heading_is_recoverable_before_integrity_gate() {
+        let interrupted = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original prompt\n\n",
+            "### Re: do [#recommendedungatereview-0xc5] — gpt-5\n\n",
+            "Original response body.\n\n",
+            "### Re: another topic — gpt-5\n\n",
+            "Another response body.\n\n",
+            "### Re: do [#recommendedungatereview-0xc5] — gpt-5\n\n",
+            "### Re: latest topic — gpt-5\n\n",
+            "Latest response body.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let shell_repaired =
+            agent_doc_turn::response_replay::repair_stranded_duplicate_response_headings(
+                interrupted,
+            );
+        assert_ne!(
+            shell_repaired, interrupted,
+            "the shared response-shell canonicalizer must recognize this replay shape"
+        );
+        assert!(
+            agent_projection_integrity_valid(&shell_repaired),
+            "the response-shell repair must restore projection integrity"
+        );
+
+        let normalized = normalize_recoverable_response_replay_duplication(interrupted)
+            .expect("the proven empty duplicate response shell should be recoverable");
+
+        assert!(agent_projection_integrity_valid(&normalized));
+        assert_eq!(
+            normalized
+                .matches("### Re: do [#recommendedungatereview-0xc5] — gpt-5")
+                .count(),
+            1
+        );
+        assert!(normalized.contains("Original response body."));
+        assert!(normalized.contains("Another response body."));
+        assert!(normalized.contains("Latest response body."));
+    }
+
+    #[test]
     fn exact_doubled_projection_retires_only_redundant_deferred_lineage() {
         let trusted = concat!(
             "---\nagent_doc_session: doubled-retirement\nagent_doc_format: template\n---\n\n",
@@ -8963,6 +9058,52 @@ mod tests {
         assert!(
             !delivery_convergence_is_editor_visible(0, false),
             "a disappeared replica must not make an unsaved IDE buffer safe to overwrite",
+        );
+    }
+
+    #[test]
+    fn accepted_repair_intent_is_retained_instead_of_failing_immediate_equality() {
+        let baseline = "# Session\n\n### Re: topic — gpt-5\n\nAnswer.\n\n### Re: topic — gpt-5\n";
+        let target = "# Session\n\n### Re: topic — gpt-5\n\nAnswer.\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let intent_id = retain_deferred_document_write_target(
+            &file,
+            baseline,
+            target,
+            "repair_retained_projection_test",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+
+        let err = settle_atomic_repair_projection(
+            &file,
+            target,
+            "repair_retained_projection_test",
+            baseline.to_string(),
+            baseline.to_string(),
+        )
+        .unwrap_err();
+
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "a controller-owned retained repair is a typed projection deferral, not a false write failure: {err:#}",
+        );
+        let message = format!("{err:#}");
+        assert!(message.contains(&intent_id), "{message}");
+        assert!(message.contains("Do not resubmit"), "{message}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+        assert_eq!(
+            pending_document_write(&file)
+                .expect("reactive projection must retain its owner")
+                .target_content,
+            target,
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("repair_projection_retained"), "{log}");
+        assert!(
+            log.contains("recovery=controller_reactive_projection operator_action=none"),
+            "{log}",
         );
     }
 

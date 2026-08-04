@@ -11,6 +11,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   boundary against equal content, preserving the acknowledged delivery
   generation instead of emitting Yrs' otherwise-nonempty equal-replace
   transaction and making the retained version look stuck again.
+- **Finalize recovery now removes the proven stranded duplicate response shell
+before its integrity gate.** Compact already knew how to remove an empty
+`### Re:` heading when an earlier response with the same normalized topic has
+a real body, but recovery-capable session-check omitted that lossless
+canonicalizer. A retained finalize could therefore reproduce the known shell
+and then fail before reaching its own recovery. The shared realtime replay
+normalizer now applies the same narrow repair through CAS authority, while
+unique empty headings and every ambiguous shape still fail closed.
+- **An accepted repair projection no longer fails on immediate disk equality.**
+When the exact canonical repair target remains in the controller-owned retained
+write graph, the repair boundary now reports the existing typed reactive
+projection deferral and leaves that intent subscribed for convergence. It does
+not mislabel asynchronous JetBrains CRDT/native-save projection as a failed
+write, clear the only resumable lineage, poll, resubmit, republish, force disk,
+or request a controller recycle. A mismatch without that exact retained owner
+still fails closed.
 - **The orphan preparing-controller scanner now follows the authoritative
   handoff clock.** A promoted controller retains its immutable
   `--handoff-state preparing` argv after bootstrap ownership moves to a fresh

@@ -290,10 +290,21 @@ impl ReadOnlyRetainedCloseoutResumeProjection {
 
 pub trait SessionCheckEffects {
     /// Whether this caller owns document/lifecycle recovery. The operator-facing
-    /// `session-check` command sets this false: it is an observer, while
+    /// `session-check` command sets this false for general recovery, while
     /// finalize/write/preflight own mutations.
     fn allows_recovery(&self) -> bool {
         true
+    }
+    /// Whether this caller may apply the one lossless integrity
+    /// canonicalization that removes a proven empty duplicate response shell.
+    ///
+    /// Operator-facing session-check remains status-only for every ambiguous
+    /// or lifecycle-changing repair. This exception is a CAS replacement of a
+    /// redundant protocol heading whose earlier same-topic response already
+    /// owns the body; it is required so the integrity gate cannot block the
+    /// exact interrupted-closeout recovery it recognizes.
+    fn allows_response_replay_canonicalization(&self) -> bool {
+        self.allows_recovery()
     }
     fn closeout_recovery_hint(&self, file: &Path) -> String;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
@@ -661,6 +672,10 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
         false
     }
 
+    fn allows_response_replay_canonicalization(&self) -> bool {
+        true
+    }
+
     fn closeout_recovery_hint(&self, file: &Path) -> String {
         self.inner.closeout_recovery_hint(file)
     }
@@ -671,12 +686,17 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
 
     fn atomic_repair_write_if_current(
         &self,
-        _file: &Path,
-        _content: &str,
-        _expected_current: &str,
-        _source: &str,
+        file: &Path,
+        content: &str,
+        expected_current: &str,
+        source: &str,
     ) -> Result<String> {
-        anyhow::bail!("status-only session-check refused an atomic repair write")
+        anyhow::ensure!(
+            source == "session_check_response_replay_dedup",
+            "status-only session-check refused non-canonicalization repair `{source}`"
+        );
+        self.inner
+            .atomic_repair_write_if_current(file, content, expected_current, source)
     }
 
     fn settle_committed_projection(
@@ -777,7 +797,7 @@ fn run_with_options_inner(
     // cost the next reader a fresh ~491ms authority resolve to observe a
     // document that had not changed. This is `#idlerevisionreactive` at the call
     // site: "might have changed" is not "changed".
-    let replay_healed = if allows_recovery {
+    let replay_healed = if effects.allows_response_replay_canonicalization() {
         crate::profile::timed("self_heal_response_replay_duplication", || {
             self_heal_response_replay_duplication(file, effects)
         })?
@@ -3217,13 +3237,45 @@ mod terminal_convergence_tests {
         );
         std::fs::write(&file, duplicated).unwrap();
 
-        assert!(self_heal_response_replay_duplication(&file, &RepairOnlyEffects).unwrap());
+        let read_only = ReadOnlySessionCheckEffects {
+            inner: &RepairOnlyEffects,
+        };
+        assert!(read_only.allows_response_replay_canonicalization());
+        assert!(!read_only.allows_recovery());
+        assert!(self_heal_response_replay_duplication(&file, &read_only).unwrap());
 
         let healed = std::fs::read_to_string(&file).unwrap();
         assert_eq!(healed.matches("agent:boundary:").count(), 1);
         assert!(healed.contains("agent:boundary:latest"));
         assert!(healed.contains("❯ operator prompt"));
         assert!(healed.contains("Retained response."));
+        agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
+    }
+
+    #[test]
+    fn session_check_self_heals_stranded_duplicate_response_heading_before_integrity() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let interrupted = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "### Re: retained topic — gpt-5\n\nRetained response.\n\n",
+            "### Re: intervening topic — gpt-5\n\nIntervening response.\n\n",
+            "### Re: retained topic — gpt-5\n\n",
+            "### Re: latest topic — gpt-5\n\nLatest response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, interrupted).unwrap();
+
+        assert!(self_heal_response_replay_duplication(&file, &RepairOnlyEffects).unwrap());
+
+        let healed = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(healed.matches("### Re: retained topic — gpt-5").count(), 1);
+        assert!(healed.contains("Retained response."));
+        assert!(healed.contains("Intervening response."));
+        assert!(healed.contains("Latest response."));
         agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
     }
 

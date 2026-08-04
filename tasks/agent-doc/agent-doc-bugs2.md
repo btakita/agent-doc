@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -395,14 +395,23 @@ Validated and resolved [#editormodelmissing], [#jetbrainsrunroute-77k5], and [#j
 - No forced disk fallback or disk-read authority bypass was used; the exact live-editor replica supplied the authority.
 
 The permanent missing-replica wedge and the false-negative JetBrains/Codex route proof are therefore both resolved in the live reproductions.
-<!-- agent:boundary:94d765d2:agent-doc-bugs2 -->
+
+### Re: do [#recommendedungatereview] — gpt-5
+
+Validated [#falsetyping-guard] as far as the available live evidence permits, but left the operator review open.
+
+- The implementation remains integrated, its guard tests were previously green, and the restarted IDE is now running a much newer JetBrains plugin (0.2.340 rather than the 0.2.205 build named by the original review).
+- The current session supplies positive live evidence for the replica-churn half: exact CRDT replicas re-registered after restart, retained writes projected, repeated editor-authoritative Agent Doc closeouts completed, and the `haiven-dev.md` route entered a working Codex turn without a wedge.
+- A repository evidence search found the implemented `unsaved_buffer_ahead_of_disk` classification and regression coverage, but no captured live operator proof for the required second half: a genuine unsaved editor edit must still fail closed.
+
+Because deliberately creating an unsaved edit in the operator’s live IDE would mutate editor state and could interfere with active work, I did not simulate that proof. [#falsetyping-guard] therefore remains open for the final human live check; only this recommendation item is complete.
+
+Verification: `tsift --envelope search 'falsetyping-guard genuine unsaved edit fails closed visible-write guard'`. Changed paths: none in this cycle. Confidence: high that the churn/no-wedge half is satisfied; insufficient evidence to resolve the unsaved-edit half.
+<!-- agent:boundary:c3a3da1f:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#recommendedungatereview-rht8]~~
-- ~~do [#recommendedungatereview-z0ps]~~
-- do [#recommendedungatereview]
 <!-- /agent:queue -->
 
 ## Notes
@@ -413,7 +422,6 @@ The permanent missing-replica wedge and the false-negative JetBrains/Codex route
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedungatereview] [recommended] Ungate review item #falsetyping-guard — validate and move to done
 <!-- /agent:backlog -->
 
 ## Review

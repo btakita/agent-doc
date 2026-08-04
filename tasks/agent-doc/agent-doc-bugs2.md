@@ -521,7 +521,7 @@ No state migration is required. Restarting an IDE host will activate its matchin
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Tmux pane auto-sync is wedged. Please fix all agent-doc contributing factors.
+- ~~Tmux pane auto-sync is wedged. Please fix all agent-doc contributing factors.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Notes

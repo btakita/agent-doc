@@ -372,27 +372,22 @@ Validated [#operatorverifylive], but its required live fault-injection proof is 
 The current JetBrains logs contain no `agent_doc_replica_apply_local` panic, replica lock-poisoning event, or subsequent successful replica-call sequence that could establish the requested recovery behavior. Producing that evidence requires deliberately forcing a replica panic in the live IDE, which is disruptive and was not authorized by the current task.
 
 I did not manufacture the fault or infer recovery from ordinary replica traffic. [#operatorverifylive] remains active as `[operator-verify]`; [#recommendedungatereview-xfmh] is complete as an evidence-backed review of its current state.
+
 ### Re: do [#recommendedungatereview-xfmh] — gpt-5
-<!-- agent:boundary:fe3fd02b:agent-doc-bugs2 -->
+
+### Re: do [#recommendedungatereview-rht8] — gpt-5
+
+Validated [#mtds], but the required three-case live proof is not available.
+
+The current panes and ops logs do not contain a complete sequence for the exact Claude footer variant: empty-composer dispatch success, unsent-draft refusal with `submit_or_clear_pane_draft` and no injection, and genuine mid-turn busy refusal. Producing that evidence would require commandeering a suitable live Claude pane and deliberately injecting both submitted and unsubmitted test input.
+
+I did not interfere with an unrelated live pane or infer the UI result from unit coverage. [#mtds] remains active as `[operator-verify]`; [#recommendedungatereview-rht8] is complete as an evidence-backed review of its current state.
+<!-- agent:boundary:6b42be8e:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.~~
-- ~~do [#recommendedungatereview-b1cb]~~
-- ~~do [#recommendedungatereview-9g0v]~~
-- ~~do [#recommendedungatereview-zw66]~~
-- ~~do [#recommendedungatereview-e8jn]~~
-- ~~do [#recommendedungatereview-jcgv]~~
-- ~~do [#recommendedungatereview-a3ew]~~
-- ~~do [#recommendedungatereview-jfxh]~~
-- ~~do [#recommendedungatereview-w90z]~~
-- ~~do [#recommendedungatereview-sskd]~~
-- ~~do [#recommendedungatereview-0xc5]~~
-- ~~do [#recommendedungatereview-krpw]~~
-- ~~do [#recommendedungatereview-h9sm]~~
-- ~~do [#recommendedungatereview-xfmh]~~
-- do [#recommendedungatereview-rht8]
+- ~~do [#recommendedungatereview-rht8]~~
 - do [#recommendedungatereview-z0ps]
 - do [#recommendedungatereview]
 <!-- /agent:queue -->
@@ -406,7 +401,6 @@ I did not manufacture the fault or infer recovery from ordinary replica traffic.
 
 <!-- agent:backlog priority queue -->
 - [ ] [#jetbrainsrunroute-77k5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785815283483-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
-- [ ] [#recommendedungatereview-rht8] [recommended] Ungate review item #mtds — validate and move to done
 - [ ] [#recommendedungatereview-z0ps] [recommended] Ungate review item #editormodelmissing — validate and move to done
 - [ ] [#recommendedungatereview] [recommended] Ungate review item #falsetyping-guard — validate and move to done
 <!-- /agent:backlog -->

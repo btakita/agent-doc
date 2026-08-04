@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019fc8aa-4c13-7823-9dba-c24de607d84f
+resume: 019fcb26-742b-7ee3-b4b9-b4166e561551
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -349,7 +349,7 @@ Rotating a GitHub repository secret is an external operator-gated action and was
 
 
 Validated [#c8tb], but the exact operator proof is not present yet.
-
+ 
 The ops log contains a live fast-path event for the healthy authoritative-actor branch: `route_dispatch_only_busy_active_turn_skip_wait` on a genuinely busy Claude pane. It does not contain the required degraded-route pair `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket` plus `route_existing_pane_busy_active_turn_skip_wait`.
 
 Producing that missing evidence requires intentionally taking a live supervisor socket down and invoking JetBrains Run Agent Doc while its pane is mid-turn. I did not disrupt a live supervisor or synthesize UI evidence. [#c8tb] therefore remains active as `[operator-verify]`; [#recommendedungatereview-h9sm] is complete as an evidence-backed review of its current state.
@@ -407,11 +407,33 @@ Validated [#falsetyping-guard] as far as the available live evidence permits, bu
 Because deliberately creating an unsaved edit in the operator’s live IDE would mutate editor state and could interfere with active work, I did not simulate that proof. [#falsetyping-guard] therefore remains open for the final human live check; only this recommendation item is complete.
 
 Verification: `tsift --envelope search 'falsetyping-guard genuine unsaved edit fails closed visible-write guard'`. Changed paths: none in this cycle. Confidence: high that the churn/no-wedge half is satisfied; insufficient evidence to resolve the unsaved-edit half.
+
+### Re: first one-to-two pane auto-sync — gpt-5.6
+
+> **Queue prompt:**
+>
+> Moving from fpe-service-topology.md with 1 tmux pane to agent-doc-bugs2.md does not auto-sync back to 2 tmux panes. Forward navigation to lazily.md then auto-syncs back to 2 tmux panes. It seems the first move from 1 -> 2 tmux panes is not autosynced.
+
+Fixed and released as agent-doc `0.35.129`.
+
+The defect was an interstitial JetBrains projection: `selectedFiles` had already advanced to `agent-doc-bugs2.md`, while the detected editor columns still described `fpe-service-topology.md`. Readiness checked only the selected/visible list, and selection settling stopped once that list contained the new document, so the mixed one-column projection reached the controller. The following navigation supplied another event and incidentally repaired it.
+
+`SelectionProjectionSettling` remains the policy owner. A surface is now publishable only when both selected files and detected layout columns contain the preferred document. Its bounded later-EDT reconciliation repairs visible files and layout columns independently, replacing the prior document only where stale evidence exists and otherwise failing closed. The reactive topology remains selection event → generation-fenced observation → bounded EDT surface read → pure settled projection → controller Source/Computed graph → tmux Effect/receipt; the only imperative exception is the existing bounded reread needed because IntelliJ may expose this interstitial state without another layout event.
+
+Regression coverage reproduces the exact transition: selected files advance, layout stays stale, readiness waits, settling exhausts, and the final projection preserves the current visible selection while repairing the stale layout. The paired mixed-projection assertion would fail under the previous readiness rule. Specs now explicitly require selected/layout coherence before publication.
+
+Changed paths: `EditorTabSyncListener.kt`, `EditorTabSyncListenerTest.kt`, `editors/SPEC.md`, `editors/jetbrains/SPEC.md`, `VERSIONS.md`, and the mechanical 0.35.129 release projection across manifests/lockfiles/installed skill copies.
+
+Verification: the focused JetBrains test was red before the fix and green afterward; private-name denylist and `git diff --check` were clean; full `make check` passed 8,596 tests with 244 skipped plus editor, clippy, simulation, version-sync, and TLA+ gates. The exact committed build reports `agent-doc 0.35.129`; its JetBrains package was installed into four detected IDE installations. Public commit `848e58a70` and tag `v0.35.129` are pushed; parent gitlink commit `d7f95bb37` is pushed. CI run `30880394366`, Release run `30880398285`, and PyPI run `30880398283` were observed once in progress.
+
+Confidence: high. Escalation: no code or release blocker. A non-blocking operator review records the one remaining live step: restart JetBrains to activate plugin 0.2.340, then repeat the original one-pane → two-column navigation and confirm the first selection restores both tmux panes.
 <!-- agent:boundary:c3a3da1f:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- Moving from fpe-service-topology.md with 1 tmux pane to agent-doc-bugs2.md does not auto-sync back to 2 tmux panes. Forward navigation to lazily.md then auto-syncs back to 2 tmux panes. It seems the first move from 1 -> 2 tmux panes is not autosynced.
+- Fix "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [integrity-gate] INTERRUPTED: response heading `### Re: do [#recommendedungatereview-0xc5] — gpt-5` in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md has no response body; prompt/response ordering was interrupted [dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class=interrupted_closeout issue_key=c3ca409e1d2b8a91c170585dd64afd055632bf159af8818c5563822996a237bf Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy. Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic."
 <!-- /agent:queue -->
 
 ## Notes
@@ -427,6 +449,7 @@ Verification: `tsift --envelope search 'falsetyping-guard genuine unsaved edit f
 ## Review
  
 <!-- agent:review -->
+- [/] [#operatorverifyrestart] [operator-verify] Restart a running JetBrains IDE to activate plugin 0.2.340, then move from fpe-service-topology.md in a one-pane surface to agent-doc-bugs2.md in its two-column surface and confirm the first selection restores two tmux panes without a second navigation.
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
 - [/] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [/] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.

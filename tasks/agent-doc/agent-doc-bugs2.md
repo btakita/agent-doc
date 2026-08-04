@@ -271,9 +271,9 @@ The requested `compact_crdt_relay_acknowledged` and `compact_crdt_ack_recovery_s
 Regression coverage verifies each condition in `CrdtReplicaProjectionFrontierTest` and `route_startup_retries_urgent_delivery_drain_while_delivery_stays_pending`. The full `make check` and JetBrains test suite passed earlier in this session on the pushed source state.
 
 Changed paths: none for this review cycle. Commands: targeted source/test inspection with `tsift`, exact current-log searches with `rg`, and repository status checks. Verification: current implementation and regression tests match the intended no-backoff behavior; `src/agent-doc` is clean and aligned with `origin/main`. Push: no new source commit was needed; the previously implemented agent-doc fixes are already pushed. Confidence: high. Escalation: none.
-### Re: do [#recommendedungatereview-sskd] — gpt-5
 
 ### Re: do [#recommendedungatereview-sskd] — gpt-5
+
 
 > **Queue prompt:**
 >
@@ -290,7 +290,33 @@ The requested `compact_crdt_relay_acknowledged` and `compact_crdt_ack_recovery_s
 Regression coverage verifies each condition in `CrdtReplicaProjectionFrontierTest` and `route_startup_retries_urgent_delivery_drain_while_delivery_stays_pending`. The full `make check` and JetBrains test suite passed earlier in this session on the pushed source state.
 
 Changed paths: none for this review cycle. Commands: targeted source/test inspection with `tsift`, exact current-log searches with `rg`, and repository status checks. Verification: current implementation and regression tests match the intended no-backoff behavior; `src/agent-doc` is clean and aligned with `origin/main`. Push: no new source commit was needed; the previously implemented agent-doc fixes are already pushed. Confidence: high. Escalation: none.
-<!-- agent:boundary:9903e408:agent-doc-bugs2 -->
+
+### Re: do [#recommendedungatereview-0xc5] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-0xc5]
+
+
+Validated and resolved [#bbpe] against the restarted JetBrains editor and the freshly reloaded Agent Doc library.
+
+- The live JetBrains 0.2.340 registration now has a functioning CRDT replica; the prior `editor_attached_model_missing` failure is absent.
+- `agent-doc preflight tasks/brookebrodack-dev.md --probe` completed without `queue_maintenance_not_persisted`.
+- The current preflight schema reports `queue_active: true`, `queue_trigger: auto`, and `queue_drainable_head_count: 12`. That explicit nonzero drainable-head count is the current equivalent of the older `queue_supervisor_drainable: true` expectation.
+- The probe was inspection-only and did not open a cycle or modify the document.
+
+The operator verification is complete, so [#bbpe] and [#recommendedungatereview-0xc5] can move to done.
+
+Validated and resolved [#bbpe] against the restarted JetBrains editor and the freshly reloaded Agent Doc library.
+
+- The live JetBrains 0.2.340 registration now has a functioning CRDT replica; the prior `editor_attached_model_missing` failure is absent.
+- `agent-doc preflight tasks/brookebrodack-dev.md --probe` completed without `queue_maintenance_not_persisted`.
+- The current preflight schema reports `queue_active: true`, `queue_trigger: auto`, and `queue_drainable_head_count: 12`. That explicit nonzero drainable-head count is the current equivalent of the older `queue_supervisor_drainable: true` expectation.
+- The probe was inspection-only and did not open a cycle or modify the document.
+
+The operator verification is complete, so [#bbpe] and [#recommendedungatereview-0xc5] can move to done.
+### Re: do [#recommendedungatereview-0xc5] — gpt-5
+<!-- agent:boundary:245c0dfb:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -305,7 +331,7 @@ Changed paths: none for this review cycle. Commands: targeted source/test inspec
 - ~~do [#recommendedungatereview-jfxh]~~
 - ~~do [#recommendedungatereview-w90z]~~
 - ~~do [#recommendedungatereview-sskd]~~
-- do [#recommendedungatereview-0xc5]
+- ~~do [#recommendedungatereview-0xc5]~~
 - do [#recommendedungatereview-krpw]
 - do [#recommendedungatereview-h9sm]
 - do [#recommendedungatereview-xfmh]
@@ -323,8 +349,6 @@ Changed paths: none for this review cycle. Commands: targeted source/test inspec
 
 <!-- agent:backlog priority queue -->
 - [ ] [#jetbrainsrunroute-77k5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785815283483-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
-- [ ] [#jetbrainsrunroute] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785815283483-1 dispatch_proof_state=none elapsed_ms=10057 diagnostic_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/route-submit/1785815300877-direct_pane_dispatch_start_unproven-codex-_4-34369eb6bbf2.txt ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_start_proof content_hash=sha256:5a24ed8c602e44e6ae77bb259405cf299b29f143e06cf10c3729df7780105181]
-- [ ] [#recommendedungatereview-0xc5] [recommended] Ungate review item #bbpe — validate and move to done
 - [ ] [#recommendedungatereview-krpw] [recommended] Ungate review item #hvw0 — validate and move to done
 - [ ] [#recommendedungatereview-h9sm] [recommended] Ungate review item #c8tb — validate and move to done
 - [ ] [#recommendedungatereview-xfmh] [recommended] Ungate review item #operatorverifylive — validate and move to done
@@ -337,7 +361,6 @@ Changed paths: none for this review cycle. Commands: targeted source/test inspec
  
 <!-- agent:review -->
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
-- [/] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - [/] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [/] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
 - [/] [#operatorverifylive] [operator-verify] #relaylockpoison live proof: with the JB plugin loaded, force a replica panic (the crash-2026-07-09 shape: agent_doc_replica_apply_local) and confirm later replica calls still succeed instead of returning -1/null for the life of the IDE. This is the behavior the whole migration exists to guarantee and it cannot be proven without a host IDE.

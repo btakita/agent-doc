@@ -370,6 +370,22 @@ Pushed commits:
 - lazily-spec `98ac8bf4e6f84a64715dc70030a1f9a02187b341`;
 - superproject gitlink `b0a6aace637908af13066a214c8c766e87871fd1`.
 
+Resolved `#lzzcpyuntracked` by registering `#lzzcpy` as completed work for the shipped cross-process zero-copy transport rather than deleting useful source traceability.
+
+The nine-binding audit found `#lzzcpy` in 42 committed lines across 37 files:
+
+- Rust: 8 files / 8 lines;
+- Python: 6 / 7;
+- JavaScript: 5 / 7;
+- Go: 6 / 6;
+- Dart: 6 / 7;
+- Kotlin: 3 / 3;
+- Zig: 3 / 4;
+- C++ and C#: no occurrences.
+
+The references span APIs, tests, package/build metadata, READMEs, and changelogs, and all name the same already-shipped blob-backend/shared-memory/Arrow transport feature. Removing only Dart's two source references would have left the same identifier orphaned across six other bindings; removing all 42 would have erased useful history. One completed ledger entry is therefore the minimal cross-binding correction.
+
+Verification used the guard's actual identifier grammar and a committed-tree audit (`git grep -I`) in all nine binding repositories. No runtime source changed, so no language test suite was required for this ledger-only repair.
 ### Re: do [#lzzcpyuntracked]
 
 Resolved `#lzzcpyuntracked` by registering `#lzzcpy` as completed work for the shipped cross-process zero-copy transport rather than deleting useful source traceability.
@@ -388,16 +404,27 @@ The nine-binding audit found `#lzzcpy` in 42 committed lines across 37 files:
 The references span APIs, tests, package/build metadata, READMEs, and changelogs, and all name the same already-shipped blob-backend/shared-memory/Arrow transport feature. Removing only Dart's two source references would have left the same identifier orphaned across six other bindings; removing all 42 would have erased useful history. One completed ledger entry is therefore the minimal cross-binding correction.
 
 Verification used the guard's actual identifier grammar and a committed-tree audit (`git grep -I`) in all nine binding repositories. No runtime source changed, so no language test suite was required for this ledger-only repair.
-<!-- agent:boundary:6950895e:lazily -->
+
+### Re: capability handshake dead fields — gpt-5
+
+Implemented and published the handshake negotiation contract across the canonical spec and all nine bindings.
+
+- The spec now makes the three formerly dead fields executable: the negotiated frame ceiling is `min(local, remote)` with zero rejected; fragmentation is `local && remote`; and both sides must present the same nonempty `session_id`. Peer IDs remain allowed to differ. The canonical `capability_handshake.json` corpus covers smaller ceilings, fragmentation agreement, zero ceilings, mismatched sessions, and empty sessions.
+- Rust, Python, JavaScript, Go, C++, Dart, Kotlin, Zig, and C# now expose one structured negotiation path and retain its negotiated state through their wrapper/API surfaces. C++ additionally applies that state in codec dispatch. Go and Dart corpus runners now hard-fail when the canonical fixture is absent instead of silently skipping it.
+- Corpus perturbation proved observation in every binding: changing the expected minimum ceiling, negotiated fragmentation result, or session mismatch error field made all 9/9 runners fail on the exact changed assertion, and all runners returned green after fixture restoration.
+- Local gates passed for the spec, all nine bindings, and the root superproject. The root result is `make check` artifact `tart-66a63f3343`.
+- Published commits: spec `7c3d57ee`; rs `c03734f6`; py `fab2d34b`; js `6a820ad6`; go `8463d558`; cpp `7ff533ac`; dart `98c0c1db`; kt `99da76d1`; zig `50536f5a`; cs `06caf3a7`. Exact CI for the spec and all nine bindings is green (Rust run `30878892947` includes loom, conformance coverage, assertion ordering, and CI reachability).
+- The superproject pins all ten revisions in published commit `15508a8bf` (still reachable from current `origin/main`). Exact root run `30880050158` has green `tmux-ci`; its aggregate `check` twice reached only the known runner linker fault, `ld terminated with signal 7 [Bus error]`, including the single allowed retry. No test assertion failed, and the same root `make check` passed locally.
+
+Unrelated dirty files and concurrent session changes were preserved and excluded from every commit.
+<!-- agent:boundary:09511004:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - do [#lzwireencodingrunner]
-- ~~do [#lzstepnoteoblig]~~
-- ~~do [#lzzcpyuntracked]~~
-- do [#lzhandshakedeadfields]
+- ~~do [#lzhandshakedeadfields]~~
 - do [#lzstatechartkindauthority]
 - do [#lzoutboxjournalop]
 - do [#lzdecorativewirefields]
@@ -416,7 +443,6 @@ Verification used the guard's actual identifier grammar and a committed-tree aud
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzhandshakedeadfields] CapabilityHandshake.max_frame_size and fragmentation_supported are decoded, carried, and negotiated - and never read by any compatibility check. Found INDEPENDENTLY by the lazily-zig and lazily-cpp library audits under #failclosedsweep, in different languages, neither aware of the other; lazily-rs's shape-6 pass separately reported CapabilityHandshake.session_id in the same never-read class. Consequence: a peer advertising a 1 KiB frame limit is deemed compatible with one advertising 16 MiB, so fragmentation is negotiated and then ignored. check_compatible compares protocol_id, protocol_major_version, codec, ordered_reliable and features only. Both audit agents declined to fix it unilaterally on the correct grounds that adding a comparison could redden the other eight bindings - whether a handshake MUST reconcile frame size is a spec clause, not a per-binding decision. Work: decide the clause in protocol.md (reconcile-and-take-the-minimum vs advertise-only), then make it executable with a fixture, then implement in all nine. Related: lazily-zig ships CapabilityHandshake as dead weight (nothing in src/ constructs, decodes or tests it - it is only re-exported from root.zig), so zig is the outlier to check first.
 - [ ] [#lzstatechartkindauthority] Decide what an explicit statechart `kind` MEANS, then make it executable. schemas/statechart.json closes `kind` to {atomic, compound, parallel, history, final} and documents an inference rule for its ABSENCE, but says nothing about whether a PRESENT `kind` is authoritative or merely a restatement - and lazily-js found that every parser derives structure from `parallel: true` / `initial` and never from `kind`, so today it is only ever a redundant restatement. That gap is why the nine-binding audit under #failclosedsweep split 3-3 on an unknown `kind`, with lazily-rs, lazily-go and lazily-py calling it an open annotation slot and lazily-dart, lazily-kt and lazily-js failing it closed. lazily-rs has since reversed to fail-closed. Second, larger half in the same family: ChartDef reference validation. lazily-rs, lazily-cpp and lazily-dart each independently found that `parent`/`initial`/`default`/transition `target` may name undeclared states, and that kind() of an unknown id returns Atomic - so a typo'd target transitions INTO A PHANTOM STATE that then enters the active configuration as a leaf. lazily-cpp gated it in ChartBuilder::build and lazily-dart threw ArgumentError; the other seven are unverified. Work: state both clauses in the spec, add conformance/statechart/malformed_rejected.json covering unknown kind, declared-vs-inferred contradiction, non-bool parallel/internal, non-string history/parent/initial/default, and undeclared id references, then bring all nine to it.
 - [ ] [#lzoutboxjournalop] Pin the durable-outbox journal's opcode strictness with a canonical fixture, and pin its deliberate opposite in the same file. THREE bindings independently found the same defect under #failclosedsweep - lazily-cs DurableOutbox.cs:340, lazily-zig reliable_sync.zig:482, lazily-dart reliable_sync.dart:363 - a scan over the on-disk journal with NO default case, where an unrecognised opcode is skipped exactly like a cursor mark. All three reached the same consequence: an ignored delete/delete_after resurrects a pruned suffix, so the outbox re-delivers already-acked frames while reporting success. The journal is written by a possibly-different build of the same binding, which is what makes it a wire surface rather than an internal one. lazily-cs and lazily-dart both also split it the same way and that split is the fixture: an unknown opcode INTERIOR to the log MUST be refused, while a TORN TRAILING record MUST be forgiven and the earlier records must survive, because a crash leaves exactly one truncated final line. The two cases arrive through the same code path and demand opposite answers, which is precisely why neither survives being left to per-binding judgement.
 - [ ] [#lzdecorativewirefields] Wire fields that are decoded, documented as load-bearing, and dispatched on by nothing. lazily-rs's shape-6 pass under #failclosedsweep found nine: CommandPolicy.{dedupe,supersede,cancel_on_preempt}, CommandSubmit.{idempotency_key,deadline_ms,payload_type,required_features}, CausalReceipt.observer, CapabilityHandshake.session_id. Two are worse than unused. DedupePolicy is a three-variant wire DISCRIMINATOR that nothing dispatches on - CommandProjection::submit dedupes by command_id only, so a peer sending dedupe: same_idempotency_key gets command_id semantics and no error. And required_features' own doc comment says 'Features the target must advertise or the submit fails closed' - a fail-closed rule that no code anywhere enforces. This is the class no key-tracker and no AST pass can see, because the field IS consumed at decode time and then discarded; lazily-go closed its own instance with a go/ast scan (TestConformanceStructFieldsAreRead) and lazily-cpp reported 56 never-referenced wire fields from the same shape. Work: for each field either implement the behaviour its doc claims, or delete the field and its doc claim - and add the fixture that would have caught it, since a decoded-and-ignored field passes every existing rung of the ladder.

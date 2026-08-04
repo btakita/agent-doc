@@ -248,8 +248,8 @@ pub struct ControllerTmuxLayoutSyncStateReport {
     /// Active actor documents occupying panes in the observed window without
     /// a corresponding editor-surface column.
     ///
-    /// These panes are operator/dispatch-owned. The layout projection must not
-    /// repeatedly try to evict them while their actor binding is live.
+    /// These are diagnostics, not terminal ownership. Reconciliation may move
+    /// the live pane into the stash while preserving its process.
     #[serde(default)]
     pub operator_owned_documents: Vec<String>,
     #[serde(default)]
@@ -422,7 +422,6 @@ pub(crate) enum PaneLayoutProjection {
     NeedsEffect(PaneLayoutDesired),
     Applying(PaneLayoutDesired),
     RetryPending(PaneLayoutDesired),
-    OperatorOwned(PaneLayoutDesired),
     Converged(PaneLayoutDesired),
 }
 
@@ -493,32 +492,6 @@ fn derive_pane_layout_projection(
             .is_some_and(|observed| observed.report.synced)
     {
         return PaneLayoutProjection::Converged(desired);
-    }
-    if observation_is_current
-        && observed.as_ref().is_some_and(|observed| {
-            observed.report.reason == "pane_count_mismatch"
-                && observed.report.actual_documents.len() > observed.report.expected_documents.len()
-                && observed
-                    .report
-                    .expected_documents
-                    .iter()
-                    .all(|document| observed.report.actual_documents.contains(document))
-                && observed
-                    .report
-                    .operator_owned_documents
-                    .iter()
-                    .any(|document| {
-                        actor_bindings
-                            .iter()
-                            .any(|binding| binding.document_path == *document)
-                    })
-        })
-    {
-        // An active dispatch owns a pane that the editor surface has not
-        // adopted. Reapplying the same two-column model cannot remove that
-        // pane safely, so this generation is terminal until either the
-        // surface generation or the live actor binding changes.
-        return PaneLayoutProjection::OperatorOwned(desired);
     }
     if receipt_is_current {
         match receipt.phase {
@@ -904,7 +877,6 @@ impl ControllerPaneLayoutGraph {
             PaneLayoutProjection::NeedsEffect(_) => ControllerPaneLayoutPhase::NeedsEffect,
             PaneLayoutProjection::Applying(_) => ControllerPaneLayoutPhase::Applying,
             PaneLayoutProjection::RetryPending(_) => ControllerPaneLayoutPhase::RetryPending,
-            PaneLayoutProjection::OperatorOwned(_) => ControllerPaneLayoutPhase::OperatorOwned,
             PaneLayoutProjection::Converged(_) => ControllerPaneLayoutPhase::Converged,
         };
         let observation = self
@@ -1040,8 +1012,7 @@ impl ControllerPaneLayoutGraph {
         loop {
             let projection = self.projection();
             let terminal = match &projection {
-                PaneLayoutProjection::Converged(desired)
-                | PaneLayoutProjection::OperatorOwned(desired) => desired.generation == generation,
+                PaneLayoutProjection::Converged(desired) => desired.generation == generation,
                 PaneLayoutProjection::NeedsEffect(desired)
                 | PaneLayoutProjection::Applying(desired)
                 | PaneLayoutProjection::RetryPending(desired) => desired.generation != generation,
@@ -7400,8 +7371,8 @@ mod tests {
                     focus_applied: false,
                 },
             ),
-            PaneLayoutProjection::OperatorOwned(desired.clone()),
-            "an active dispatched pane outside the surface is a named terminal state, not an unbounded retry",
+            PaneLayoutProjection::RetryPending(desired.clone()),
+            "an active dispatched pane outside the surface stays retryable until sync stashes it",
         );
         let missing_surface_pane = PaneLayoutObservation {
             generation: 7,

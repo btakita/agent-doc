@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.133
+
+- **Foreground editor routes now converge their exact visible tmux layout
+  before dispatch.** `Run Agent Doc` promotes its `--col` / `--focus` payload
+  into the controller-owned desired-layout Source and waits for the retained
+  tmux effect before touching the routed pane. Editor-relative paths are
+  canonicalized at that boundary. If the focused document is absent, exactly
+  one explicit empty-column placeholder is materialized with it; zero or
+  multiple candidates fail before desired-state publication. A missing layout
+  or a routed document outside those columns fails closed. Live actors outside the desired
+  surface are no longer terminal `operator_owned` panes: reconciliation moves
+  them to `stash` without killing the harness and remains retryable until pane
+  count and order converge. This closes the route-time race that appended a
+  third pane beside an already-correct two-pane editor projection.
+
 ## 0.35.132
 
 - **Automatic tmux pane-layout reconciliation now retains retryable work until

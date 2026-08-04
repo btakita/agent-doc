@@ -7859,6 +7859,7 @@ fn realtime_steering_event_for_text(
 
 fn handle_editor_route_rpc(
     bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<ControllerEditorRouteResult> {
     let requested_file = request_file(&request)?;
@@ -7886,6 +7887,43 @@ fn handle_editor_route_rpc(
             layout_args.len(),
             payload.attempt_id.as_deref().unwrap_or("none"),
             payload.route_key.as_deref().unwrap_or("none"),
+        ),
+    );
+
+    let layout_invocation = editor_route_layout_invocation(&bootstrap.project_root, &layout_args)?;
+    let routed_document = canonical
+        .canonicalize()
+        .unwrap_or_else(|_| canonical.clone())
+        .to_string_lossy()
+        .to_string();
+    anyhow::ensure!(
+        layout_invocation.focus.as_deref() == Some(routed_document.as_str()),
+        "editor route refused before layout publication: focused document does not match routed document"
+    );
+    let mut sync_request = empty_controller_request("sync_tmux_layout");
+    sync_request.file = Some(canonical.clone());
+    sync_request.diagnostic_payload = Some(
+        serde_json::to_string(&layout_invocation)
+            .context("serialize editor route layout projection")?,
+    );
+    let layout_receipt = handle_sync_tmux_layout(bootstrap, runtime, sync_request)?;
+    anyhow::ensure!(
+        tmux_layout_command_applied(&layout_receipt),
+        "editor route layout did not converge before dispatch: {}",
+        layout_receipt.reason
+    );
+    anyhow::ensure!(
+        layout_receipt.columns.contains(&routed_document),
+        "editor route refused: routed document is absent from the exact visible layout"
+    );
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "controller_editor_route_layout_converged file={} columns={} focus={} reason={}",
+            canonical.display(),
+            layout_receipt.columns.len(),
+            layout_receipt.focus.as_deref().unwrap_or("none"),
+            layout_receipt.reason,
         ),
     );
 
@@ -8516,7 +8554,7 @@ fn dispatch_command_submit_payload(
             let mut route_request = empty_controller_request(command);
             route_request.file = request.file.clone();
             route_request.diagnostic_payload = Some(payload_json);
-            match handle_editor_route_rpc(bootstrap, route_request) {
+            match handle_editor_route_rpc(bootstrap, runtime, route_request) {
                 Ok(result) => {
                     let terminal_applied = result.exit_code == 0;
                     let terminal_reason = (!terminal_applied)
@@ -8682,6 +8720,75 @@ fn validate_editor_route_layout_args(args: &[String]) -> Result<Vec<String>> {
         }
     }
     Ok(validated)
+}
+
+fn editor_route_layout_invocation(
+    project_root: &Path,
+    layout_args: &[String],
+) -> Result<ControllerTmuxLayoutSyncInvocation> {
+    let mut columns = Vec::new();
+    let mut focus = None;
+    let mut iter = layout_args.iter();
+    while let Some(flag) = iter.next() {
+        let value = iter
+            .next()
+            .with_context(|| format!("editor route layout arg {flag} missing value"))?;
+        match flag.as_str() {
+            "--col" => columns.push(value.clone()),
+            "--focus" => focus = Some(value.clone()),
+            other => anyhow::bail!("unsupported editor route layout arg `{other}`"),
+        }
+    }
+    anyhow::ensure!(
+        !columns.is_empty(),
+        "editor route requires the exact visible layout before dispatch"
+    );
+    if let Some(focused) = focus.as_mut() {
+        let canonical_focus = canonical_layout_document_id(project_root, focused);
+        let focused_is_visible = columns.iter().any(|column| {
+            column
+                .split(',')
+                .map(str::trim)
+                .filter(|document| !document.is_empty())
+                .any(|document| {
+                    canonical_layout_document_id(project_root, document) == canonical_focus
+                })
+        });
+        if !focused_is_visible {
+            let empty_columns = columns
+                .iter()
+                .enumerate()
+                .filter_map(|(index, column)| column.is_empty().then_some(index))
+                .collect::<Vec<_>>();
+            anyhow::ensure!(
+                empty_columns.len() == 1,
+                "editor route exact visible layout omitted the focused document without one unique empty column placeholder"
+            );
+            columns[empty_columns[0]] = canonical_focus.clone();
+        }
+        *focused = canonical_focus;
+    }
+    columns = columns
+        .into_iter()
+        .map(|column| {
+            column
+                .split(',')
+                .map(str::trim)
+                .filter(|document| !document.is_empty())
+                .map(|document| canonical_layout_document_id(project_root, document))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect();
+    Ok(ControllerTmuxLayoutSyncInvocation {
+        columns,
+        window: None,
+        focus,
+        no_autostart: false,
+        exact_visible: true,
+        caller_kind: "projection".to_string(),
+        actor_bindings: Vec::new(),
+    })
 }
 
 fn controller_crdt_replica_data(
@@ -12023,9 +12130,11 @@ pub(crate) fn handle_request_locked(
             Some(runtime.as_ref()),
             request,
         )),
-        "editor_route" => {
-            controller_envelope(handle_editor_route_rpc(&bootstrap_snapshot, request))
-        }
+        "editor_route" => controller_envelope(handle_editor_route_rpc(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "editor_command_submit" => controller_envelope(handle_editor_command_submit_rpc(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -17812,10 +17921,6 @@ fn pane_layout_effect_worker(
             runtime.pane_layout_projection(),
             PaneLayoutProjection::Converged(ref converged)
             if converged.generation == desired.generation
-        ) || matches!(
-            runtime.pane_layout_projection(),
-            PaneLayoutProjection::OperatorOwned(ref owned)
-            if owned.generation == desired.generation
         );
         if already_terminal {
             if pane_layout_effect_worker_complete(
@@ -18118,15 +18223,7 @@ fn pane_layout_effect_worker(
                 "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?}",
                 desired.generation,
                 attempt,
-                if synced {
-                    "converged"
-                } else if observation_reason == "pane_count_mismatch"
-                    && !logged_operator_owned_documents.is_empty()
-                {
-                    "operator_owned"
-                } else {
-                    "retry_pending"
-                },
+                if synced { "converged" } else { "retry_pending" },
                 observation_reason,
                 effect_reason,
                 focus_reason,
@@ -18180,9 +18277,7 @@ fn pane_layout_attempt_completion(
         return PaneLayoutAttemptCompletion::Superseded;
     }
     match projection {
-        PaneLayoutProjection::Converged(desired) | PaneLayoutProjection::OperatorOwned(desired)
-            if desired.generation == completed_generation =>
-        {
+        PaneLayoutProjection::Converged(desired) if desired.generation == completed_generation => {
             PaneLayoutAttemptCompletion::Retire
         }
         PaneLayoutProjection::RetryPending(desired)
@@ -21272,6 +21367,153 @@ mod tests {
 
         let whitespace_column = vec!["--col".to_string(), "   ".to_string()];
         assert!(validate_editor_route_layout_args(&whitespace_column).is_err());
+    }
+
+    #[test]
+    fn editor_route_layout_args_become_an_exact_awaited_projection() {
+        let args = vec![
+            "--col".to_string(),
+            "/repo/bugs.md".to_string(),
+            "--col".to_string(),
+            "/repo/other.md".to_string(),
+            "--focus".to_string(),
+            "/repo/other.md".to_string(),
+        ];
+
+        let invocation = editor_route_layout_invocation(Path::new("/"), &args).unwrap();
+        assert_eq!(
+            invocation.columns,
+            vec!["/repo/bugs.md".to_string(), "/repo/other.md".to_string()]
+        );
+        assert_eq!(invocation.focus.as_deref(), Some("/repo/other.md"));
+        assert!(invocation.exact_visible);
+        assert!(!invocation.no_autostart);
+        assert_eq!(invocation.caller_kind, "projection");
+        assert!(pane_layout_invocation_awaits_projection(&invocation));
+    }
+
+    #[test]
+    fn editor_route_layout_materializes_focus_in_unique_empty_column() {
+        let args = vec![
+            "--col".to_string(),
+            "/repo/bugs.md".to_string(),
+            "--col".to_string(),
+            String::new(),
+            "--focus".to_string(),
+            "/repo/other.md".to_string(),
+        ];
+
+        let invocation = editor_route_layout_invocation(Path::new("/"), &args).unwrap();
+        assert_eq!(
+            invocation.columns,
+            vec!["/repo/bugs.md".to_string(), "/repo/other.md".to_string()]
+        );
+        assert_eq!(invocation.focus.as_deref(), Some("/repo/other.md"));
+    }
+
+    #[test]
+    fn editor_route_layout_rejects_missing_focus_without_unique_empty_column() {
+        let no_empty_slot = vec![
+            "--col".to_string(),
+            "/repo/bugs.md".to_string(),
+            "--focus".to_string(),
+            "/repo/other.md".to_string(),
+        ];
+        assert!(editor_route_layout_invocation(Path::new("/"), &no_empty_slot).is_err());
+
+        let ambiguous_empty_slots = vec![
+            "--col".to_string(),
+            String::new(),
+            "--col".to_string(),
+            String::new(),
+            "--focus".to_string(),
+            "/repo/other.md".to_string(),
+        ];
+        assert!(editor_route_layout_invocation(Path::new("/"), &ambiguous_empty_slots).is_err());
+    }
+
+    #[test]
+    fn editor_route_without_a_visible_layout_fails_closed() {
+        let args = vec!["--focus".to_string(), "/repo/other.md".to_string()];
+
+        assert!(editor_route_layout_invocation(Path::new("/"), &args).is_err());
+    }
+
+    #[test]
+    fn editor_route_layout_canonicalizes_relative_editor_paths() {
+        let args = vec![
+            "--col".to_string(),
+            "tasks/bugs.md".to_string(),
+            "--col".to_string(),
+            String::new(),
+            "--focus".to_string(),
+            "tasks/other.md".to_string(),
+        ];
+
+        let invocation = editor_route_layout_invocation(Path::new("/repo"), &args).unwrap();
+        assert_eq!(
+            invocation.columns,
+            vec![
+                "/repo/tasks/bugs.md".to_string(),
+                "/repo/tasks/other.md".to_string()
+            ]
+        );
+        assert_eq!(invocation.focus.as_deref(), Some("/repo/tasks/other.md"));
+    }
+
+    #[test]
+    fn editor_route_publishes_exact_layout_before_dispatch() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: plan\nagent: codex\n---\n# plan\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        let request = ControllerRequest {
+            command: "editor_route".to_string(),
+            file: Some(file.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::json!({
+                    "relative_path": "plan.md",
+                    "layout_args": [
+                        "--col",
+                        file.display().to_string(),
+                        "--focus",
+                        file.display().to_string()
+                    ],
+                    "dispatch_only": true,
+                    "plain_trigger": true
+                })
+                .to_string(),
+            ),
+        };
+
+        let result = handle_editor_route_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
+        assert_eq!(result.exit_code, 0);
+        let desired = runtime.pane_layout_desired().unwrap();
+        assert_eq!(
+            desired.invocation.columns,
+            vec![file.canonicalize().unwrap().display().to_string()]
+        );
+        assert_eq!(
+            desired.invocation.focus.as_deref(),
+            Some(file.canonicalize().unwrap().display().to_string().as_str())
+        );
+        assert_eq!(desired.invocation.caller_kind, "projection");
     }
 
     #[test]

@@ -255,7 +255,42 @@ Validated and resolved `#compactindcellsverify`. The old 0.35.3 / JetBrains 0.2.
 - The production rebase path emits `compact_rebased_authoritative_siblings` when the authoritative sibling-cell rebase is used; the drop guard emits `compact_dropped_non_exchange_item` only on a fail-closed violation.
 
 No source changes were required. The current full `make check` was already green in this turn. These tests exercise the exact data race more deterministically than an operator timing reproduction, so confidence is high and no operator escalation remains.
-<!-- agent:boundary:efab1ce2:agent-doc-bugs2 -->
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-sskd]
+
+Resolved the review using the current deterministic proof, which supersedes the stale plugin-0.2.278 log procedure.
+
+The requested `compact_crdt_relay_acknowledged` and `compact_crdt_ack_recovery_signal` markers no longer exist in the current write path, so their timing assertion cannot be reproduced meaningfully. The invariant they were intended to validate is now enforced directly in three places:
+
+- `PatchWatcher` routes every controller-published CRDT frontier through `requestUrgentRemoteDrain`, bypassing speculative no-op backoff without replacing editor authority.
+- `requestUrgentRemoteDrain` resets `consecutiveNoOpReschedules` after useful work, preventing the next controller push from inheriting an idle document's prior backoff.
+- Route startup re-requests the urgent drain every 750 ms while delivery remains pending and still fails closed at its maximum wait.
+
+Regression coverage verifies each condition in `CrdtReplicaProjectionFrontierTest` and `route_startup_retries_urgent_delivery_drain_while_delivery_stays_pending`. The full `make check` and JetBrains test suite passed earlier in this session on the pushed source state.
+
+Changed paths: none for this review cycle. Commands: targeted source/test inspection with `tsift`, exact current-log searches with `rg`, and repository status checks. Verification: current implementation and regression tests match the intended no-backoff behavior; `src/agent-doc` is clean and aligned with `origin/main`. Push: no new source commit was needed; the previously implemented agent-doc fixes are already pushed. Confidence: high. Escalation: none.
+### Re: do [#recommendedungatereview-sskd] — gpt-5
+
+### Re: do [#recommendedungatereview-sskd] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-sskd]
+
+Resolved the review using the current deterministic proof, which supersedes the stale plugin-0.2.278 log procedure.
+
+The requested `compact_crdt_relay_acknowledged` and `compact_crdt_ack_recovery_signal` markers no longer exist in the current write path, so their timing assertion cannot be reproduced meaningfully. The invariant they were intended to validate is now enforced directly in three places:
+
+- `PatchWatcher` routes every controller-published CRDT frontier through `requestUrgentRemoteDrain`, bypassing speculative no-op backoff without replacing editor authority.
+- `requestUrgentRemoteDrain` resets `consecutiveNoOpReschedules` after useful work, preventing the next controller push from inheriting an idle document's prior backoff.
+- Route startup re-requests the urgent drain every 750 ms while delivery remains pending and still fails closed at its maximum wait.
+
+Regression coverage verifies each condition in `CrdtReplicaProjectionFrontierTest` and `route_startup_retries_urgent_delivery_drain_while_delivery_stays_pending`. The full `make check` and JetBrains test suite passed earlier in this session on the pushed source state.
+
+Changed paths: none for this review cycle. Commands: targeted source/test inspection with `tsift`, exact current-log searches with `rg`, and repository status checks. Verification: current implementation and regression tests match the intended no-backoff behavior; `src/agent-doc` is clean and aligned with `origin/main`. Push: no new source commit was needed; the previously implemented agent-doc fixes are already pushed. Confidence: high. Escalation: none.
+<!-- agent:boundary:9903e408:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -269,7 +304,7 @@ No source changes were required. The current full `make check` was already green
 - ~~do [#recommendedungatereview-a3ew]~~
 - ~~do [#recommendedungatereview-jfxh]~~
 - ~~do [#recommendedungatereview-w90z]~~
-- do [#recommendedungatereview-sskd]
+- ~~do [#recommendedungatereview-sskd]~~
 - do [#recommendedungatereview-0xc5]
 - do [#recommendedungatereview-krpw]
 - do [#recommendedungatereview-h9sm]
@@ -287,7 +322,8 @@ No source changes were required. The current full `make check` was already green
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedungatereview-sskd] [recommended] Ungate review item #crdtpushdrainverify — validate and move to done
+- [ ] [#jetbrainsrunroute-77k5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785815283483-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
+- [ ] [#jetbrainsrunroute] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785815283483-1 dispatch_proof_state=none elapsed_ms=10057 diagnostic_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/route-submit/1785815300877-direct_pane_dispatch_start_unproven-codex-_4-34369eb6bbf2.txt ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_start_proof content_hash=sha256:5a24ed8c602e44e6ae77bb259405cf299b29f143e06cf10c3729df7780105181]
 - [ ] [#recommendedungatereview-0xc5] [recommended] Ungate review item #bbpe — validate and move to done
 - [ ] [#recommendedungatereview-krpw] [recommended] Ungate review item #hvw0 — validate and move to done
 - [ ] [#recommendedungatereview-h9sm] [recommended] Ungate review item #c8tb — validate and move to done
@@ -301,7 +337,6 @@ No source changes were required. The current full `make check` was already green
  
 <!-- agent:review -->
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
-- [/] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
 - [/] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - [/] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [/] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.

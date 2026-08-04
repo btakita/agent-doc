@@ -125,13 +125,28 @@ Preserved the handoff's document boundaries: did not recapture, refinalize, or w
 > Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.
 
 Completed. The deleted temporary file was recovered verbatim from the durable Claude transcript and read through line 187. Every remaining release step it named had already completed: the full check passed, source commit `953c8163d82bfbbf12e7ea65ff0100a014f513df` and tag `v0.35.119` were pushed, the GitHub Release and PyPI package were published, CI/Release/PyPI were green, and the full install/recycle ran. The completed historical session cycles were not replayed or hand-edited, and the separately owned live Haiven turn was not touched.
+
+### Re: do `#recommendedungatereview-b1cb`
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-b1cb]
+
+
+Validated and resolved `compactreactiveprojectionverify` using current 0.35.128 / JetBrains 0.2.340 evidence, which supersedes the original 0.35.83 / 0.2.319 UI recipe.
+
+Live evidence from this turn covered the retained-delivery branch: the exact-head closeout became `crdt_delivery_ack_pending` after native-library hot reload, remained retained without force-disk or a second payload, then converged and advanced the queue automatically in the same pane without an IDE restart, focus handoff, or fresh agent session. The current exchange contains exactly one `### Re: handoff completion proof` block.
+
+The remaining burst and queued-EDT requirements are now deterministic rather than operator-eyeball-only. `CrdtLocalEditCoalescingTest` proves a typing burst collapses to one exact Unicode-safe splice; `TypingTrackerEdtBudgetTest` proves one quiet burst crosses native persistence as one batch; `CrdtReplicaReregisterCoalescingTest` bounds ACK recovery replacement to one per interval. The `post_registration_editor_effect_model` SimWorld tests exhaust schedules and prove a queued EDT effect cannot mutate after intent retirement, supersession, or editor-model loss, directly closing the former `implementlazilyintent` residual. These paths passed in the JetBrains suite and full `make check` earlier this turn.
+
+Changed paths: only this session document through binary-owned review resolution and tracked-item completion. Commands/evidence: connected admit/plan/read/finalize, tsift source/history inspection, current exchange exact-once inspection, and the already-green JetBrains/full-suite artifacts. Verification: live exact-once retained replay plus deterministic burst, ACK-coalescing, and stale-EDT schedule coverage. Confidence: high. Escalation: none.
 <!-- agent:boundary:efab1ce2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~Read /tmp/agent-doc-0.35.119-claude-handoff.md completely, then continue its remaining work to completion. Preserve every session-document boundary stated in the handoff.~~
-- do [#recommendedungatereview-b1cb]
+- ~~do [#recommendedungatereview-b1cb]~~
 - do [#recommendedungatereview-9g0v]
 - do [#recommendedungatereview-zw66]
 - do [#recommendedungatereview-e8jn]
@@ -157,7 +172,6 @@ Completed. The deleted temporary file was recovered verbatim from the durable Cl
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedungatereview-b1cb] [recommended] Ungate review item #compactreactiveprojectionverify — validate and move to done
 - [ ] [#recommendedungatereview-9g0v] [recommended] Ungate review item #steeringmirrorverifylive313 — validate and move to done
 - [ ] [#recommendedungatereview-zw66] [recommended] Ungate review item #preflightinbinary — validate and move to done
 - [ ] [#recommendedungatereview-e8jn] [recommended] Ungate review item #jbsurfaceswap — validate and move to done
@@ -179,7 +193,6 @@ Completed. The deleted temporary file was recovered verbatim from the durable Cl
  
 <!-- agent:review -->
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
-- [/] [#compactreactiveprojectionverify] [operator-verify] With IntelliJ IDEA 2026.1 running JetBrains plugin 0.2.319 / native agent-doc 0.35.83, retry Compact Exchange from a saved large session without restarting IDEA. Verify ACK replay/hot reload either completes the retained editor delivery exactly once or leaves it retained without duplicate mutation, disk fallback, focus change, or a fresh agent session. Then type a sustained burst and confirm recovery is coalesced rather than per-keystroke. Record any residual queued-EDT late effect for #implementlazilyintent. Do not queue this item automatically; it requires operator UI observation.
 - [/] [#steeringmirrorverifylive313] [operator-verify] With IntelliJ IDEA running JetBrains plugin 0.2.313 / native agent-doc 0.35.71, make two separate exchange edits during one active turn. Confirm the banner/status item shows the aggregate edit count and its hover contains both edits verbatim; then run Agent Doc once and verify the controller records one aggregate handoff without submitting a partial edit. Do not queue this item automatically; it requires operator UI observation.
 - [/] [#preflightinbinary] [operator-verify] Live proof for #preflightinbinary AFTER the default flip (5ce9b06e6). The flip has landed: SKILL.md now says do NOT run preflight when the '[agent-doc] cycle contract ...' marker is present, and the hook is registered in this project's .claude/settings.json under UserPromptSubmit alongside turn-status. Needing a live session to confirm: (a) invoke /agent-doc <FILE> in a FRESH Claude Code session and confirm the marker + contract appear in context before the agent runs any tool, and that the agent does NOT shell to 'agent-doc preflight'; (b) confirm exactly ONE cycle id is opened for that turn — grep .agent-doc/logs/ops.log for preflight_diff_start, and confirm 'repaired stale preflight_started cycle' does NOT appear; that line is the tell that the agent still ran preflight and the round trip was merely absorbed by repair rather than removed; (c) confirm an ordinary prompt that merely mentions agent-doc produces no marker and no cycle; (d) confirm a Codex/OpenCode turn (no Claude hook, so no marker) still runs preflight explicitly and closes out normally. Scope note: reusable_by_reentrant_preflight is defence in depth only — start_preflight runs at preflight step 4, after repair at step 1, so in the live pipeline repair closes any prior open cycle before the guard sees it. What removes the double-open is the flip itself.
 - [/] [#jbsurfaceswap] [operator-verify] Live IDE proof for #jbsurfaceswap (agent-doc 27beeae2e, JB plugin 0.2.296). Both plugins now report one EditorSurface observation per event and the graph derives the intent; the planners are deleted. With the IDE restarted onto 0.2.296, confirm in a real session: (a) clicking between two side-by-side split editors moves the tmux active pane (derived Focus); (b) changing the editor split layout reconciles tmux (derived Sync) and shows the 'Sync: --col ... [focus: ...]' hint exactly once; (c) repeat focus events on the same editor cost nothing — the JB log line '[layout-sync] observe: ... intent=idle' with no controller command; (d) swap two tmux panes by hand, then click an editor tab WITHOUT changing the split, and confirm the pulled tmux probe reconciles the layout instead of only moving focus (#tmuxsyncstate); (e) closing the project releases the root (no growth in surface graphs across open/close cycles). Headless tests cover the fold, the probe seam, and the observation wire shape, but not the debounce/generation interaction with real editor event storms.

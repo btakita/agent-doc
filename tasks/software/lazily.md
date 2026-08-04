@@ -341,16 +341,42 @@ Completed [#lzgeneratorprovenance].
 ### Re: do [#lzgeneratorprovenance]
 
 Recovered closeout record: completed by moving all three generated codec fixtures' `generator` paths from `assertions` to root provenance, adding a fail-closed nested-location guard and mutation proof, and deleting all 27 binding-side excuses. Full local gates and all ten exact-SHA task CIs passed. Pushed spec `de53659`, rs `e075669`, py `e8bb7f9`, js `1bc9046`, go `828957e`, cpp `8faad4f`, dart `57cc374`, kt `fff4639`, zig `d72cde5`, cs `26d220e`, and root gitlinks `6c197226ad`. Root `tmux-ci` passed; root aggregate `check` twice hit the unrelated recurring LLVM `rust-lld` signal-7 crash.
+
+### Re: do [#lzstepnoteoblig]
+
+Implemented and pushed `#lzstepnoteoblig`.
+
+The five reactive-graph notes no longer carry hidden RFC-2119 obligations. Each now names the executable sibling assertions that already prove the behavior in every binding:
+
+- churn uses `dependents_of.topic = 8` to distinguish the eight live subscribers from all 508 ever created;
+- cross-scope read-after-dispose and ordinary read-after-dispose use `error = "read_after_dispose"`, which excludes returning a cached value;
+- repeated/cross-scope teardown uses `error = null` plus `readable` to prove idempotent teardown without collateral disposal;
+- stale recycled-handle disposal uses `readable.successor = true` plus `read.successor = 1` to prove the operation is a no-op.
+
+No binding-source change was needed: I traced these handlers in all nine runners, and their unknown/unconsumed-key guards already require these keys to execute. Adding duplicate booleans would have created weaker parallel vocabulary instead of strengthening the proof.
+
+Removed `ANNOTATIONS_STATING_OBLIGATIONS` and all associated stale-ledger machinery from `scripts/check-prose-keys.mjs`. The resulting corpus audit checks all 97 reserved annotations with zero exceptions. A mutation probe inserted a fresh `MUST` at `steps[6].expect.note`; the checker failed and named that exact path.
+
+Verification:
+
+- `make fixture-copies-sync`: 128 inspected, 0 updates;
+- `make check`: green in lazily-spec and all nine bindings (Rust, Python, JavaScript, Go, C++, Dart, Kotlin, Zig, C#);
+- root `make check`: green locally;
+- lazily-spec CI run 30875745610: green;
+- root Agent Doc run 30875964791: `tmux-ci` green; aggregate `make check` twice reached the unrelated hosted linker failure `ld terminated with signal 7 [Bus error]`, including the single failed-job rerun. No lazily/spec test failed.
+
+Pushed commits:
+
+- lazily-spec `98ac8bf4e6f84a64715dc70030a1f9a02187b341`;
+- superproject gitlink `b0a6aace637908af13066a214c8c766e87871fd1`.
 <!-- agent:boundary:6950895e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzarenablobtranscribed]~~
 - do [#lzwireencodingrunner]
-- ~~do [#lzgeneratorprovenance]~~
-- do [#lzstepnoteoblig]
+- ~~do [#lzstepnoteoblig]~~
 - do [#lzzcpyuntracked]
 - do [#lzhandshakedeadfields]
 - do [#lzstatechartkindauthority]
@@ -371,7 +397,6 @@ Recovered closeout record: completed by moving all three generated codec fixture
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstepnoteoblig] Five reactive-graph step notes state a real obligation from a key every binding exempts by NAME. Found by #lzprosekeyconvention's new corpus guard on its first run: churn_returns_to_baseline steps[2] (REQUIRED: after 500 subscribe/unsubscribe cycles the dependent set tracks live subscribers, not total ever), cross_scope_teardown_hazard steps[7] (REQUIRED failure) and steps[14] (ending a scope whose members read already-disposed nodes MUST NOT itself error; teardown is idempotent), read_after_dispose_is_an_error steps[6] (a live reader that still names a disposed dependency errors on its next recompute; it MUST NOT return the value), recycled_id_inherits_nothing steps[12] (a stale cell handle whose id has been recycled onto a slot MUST be a no-op). Same defect as #lzprosekeyconvention one level down: an obligation carried by note/description/reason, which all nine trackers exempt by reserved name, so no runner can be made to discharge it and none does. They are allowlisted in scripts/check-prose-keys.mjs (ANNOTATIONS_STATING_OBLIGATIONS, checked in both directions) so the set cannot grow silently. Work: for each, promote the obligation into an executable expect key the step asserts — the teardown-idempotence and no-op-recycled-handle rules in particular are behaviour a binding can get wrong today with nothing red — then delete the allowlist entry. Check the other ~92 step notes for the same class while there.
 - [ ] [#lzzcpyuntracked] The coined id #lzzcpy is referenced throughout lazily-dart's lib/src/transport.dart and lib/src/ipc.dart but is tracked in no agent:backlog, agent:queue, agent:done or agent:review entry, so agent-doc's coined-id-pre-tool-use hook blocks any NEW file that mentions it - it blocked the v2 runner rewrite mid-fan-out until the tag was dropped from the prose. The block is correct behaviour; the untracked id is the defect. Either register #lzzcpy with the work it names (zero-copy transport) or strip it from the two source files, so the hook stops being a tax on unrelated edits. Check the other eight bindings for the same class of orphaned coined id while there.
 - [ ] [#lzhandshakedeadfields] CapabilityHandshake.max_frame_size and fragmentation_supported are decoded, carried, and negotiated - and never read by any compatibility check. Found INDEPENDENTLY by the lazily-zig and lazily-cpp library audits under #failclosedsweep, in different languages, neither aware of the other; lazily-rs's shape-6 pass separately reported CapabilityHandshake.session_id in the same never-read class. Consequence: a peer advertising a 1 KiB frame limit is deemed compatible with one advertising 16 MiB, so fragmentation is negotiated and then ignored. check_compatible compares protocol_id, protocol_major_version, codec, ordered_reliable and features only. Both audit agents declined to fix it unilaterally on the correct grounds that adding a comparison could redden the other eight bindings - whether a handshake MUST reconcile frame size is a spec clause, not a per-binding decision. Work: decide the clause in protocol.md (reconcile-and-take-the-minimum vs advertise-only), then make it executable with a fixture, then implement in all nine. Related: lazily-zig ships CapabilityHandshake as dead weight (nothing in src/ constructs, decodes or tests it - it is only re-exported from root.zig), so zig is the outlier to check first.
 - [ ] [#lzstatechartkindauthority] Decide what an explicit statechart `kind` MEANS, then make it executable. schemas/statechart.json closes `kind` to {atomic, compound, parallel, history, final} and documents an inference rule for its ABSENCE, but says nothing about whether a PRESENT `kind` is authoritative or merely a restatement - and lazily-js found that every parser derives structure from `parallel: true` / `initial` and never from `kind`, so today it is only ever a redundant restatement. That gap is why the nine-binding audit under #failclosedsweep split 3-3 on an unknown `kind`, with lazily-rs, lazily-go and lazily-py calling it an open annotation slot and lazily-dart, lazily-kt and lazily-js failing it closed. lazily-rs has since reversed to fail-closed. Second, larger half in the same family: ChartDef reference validation. lazily-rs, lazily-cpp and lazily-dart each independently found that `parent`/`initial`/`default`/transition `target` may name undeclared states, and that kind() of an unknown id returns Atomic - so a typo'd target transitions INTO A PHANTOM STATE that then enters the active configuration as a leaf. lazily-cpp gated it in ChartBuilder::build and lazily-dart threw ArgumentError; the other seven are unverified. Work: state both clauses in the spec, add conformance/statechart/malformed_rejected.json covering unknown kind, declared-vs-inferred contradiction, non-bool parallel/internal, non-string history/parent/initial/default, and undeclared id references, then bring all nine to it.

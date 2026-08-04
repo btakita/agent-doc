@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.132
+
+- **Automatic tmux pane-layout reconciliation now retains retryable work until
+  it converges.** A transient pane-count or focus mismatch no longer retires
+  the only structural-effect worker after its first attempt. The latest-wins
+  worker keeps ownership, retries with bounded exponential backoff, and wakes
+  immediately when a newer desired layout or actor binding supersedes the
+  pending attempt. Convergence and operator-owned layouts remain terminal.
+  The backoff calculation also reaches its documented five-second ceiling
+  instead of capping one step early.
+
 ## 0.35.131
 
 - **Retained Lazily projections now have a reactive, idempotent CRDT fixed

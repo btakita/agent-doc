@@ -70,8 +70,8 @@ const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_dea
 const PANE_LAYOUT_COMMAND_AWAIT: Duration = Duration::from_secs(30);
 const ASYNC_EDITOR_COMMAND_MIN_AWAIT_MS: u64 = 1;
 const STATE_PLANE_SUBSCRIBE_MAX: Duration = Duration::from_secs(120);
-const PANE_LAYOUT_DESIRED_PROJECTION_RETRY_MIN: Duration = Duration::from_millis(250);
-const PANE_LAYOUT_DESIRED_PROJECTION_RETRY_MAX: Duration = Duration::from_secs(5);
+const PANE_LAYOUT_PROJECTION_RETRY_MIN: Duration = Duration::from_millis(250);
+const PANE_LAYOUT_PROJECTION_RETRY_MAX: Duration = Duration::from_secs(5);
 const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
 const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
 const DOCUMENT_TURN_AUTHORITY_TYPE_TAG: &str = "agent-doc.document-turn-authority.v1";
@@ -17613,7 +17613,7 @@ fn pane_layout_desired_projection_worker(
                         ),
                     );
                 }
-                let retry_delay = pane_layout_desired_projection_retry_delay(attempt);
+                let retry_delay = pane_layout_projection_retry_delay(attempt);
                 let mut projection = state.lock();
                 if projection
                     .pending_frame
@@ -17636,11 +17636,11 @@ fn pane_layout_desired_projection_worker(
     }
 }
 
-fn pane_layout_desired_projection_retry_delay(attempt: u64) -> Duration {
-    let shift = attempt.saturating_sub(1).min(4) as u32;
-    PANE_LAYOUT_DESIRED_PROJECTION_RETRY_MIN
+fn pane_layout_projection_retry_delay(attempt: u64) -> Duration {
+    let shift = attempt.saturating_sub(1).min(5) as u32;
+    PANE_LAYOUT_PROJECTION_RETRY_MIN
         .saturating_mul(1_u32 << shift)
-        .min(PANE_LAYOUT_DESIRED_PROJECTION_RETRY_MAX)
+        .min(PANE_LAYOUT_PROJECTION_RETRY_MAX)
 }
 
 pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRuntime>) {
@@ -17659,6 +17659,7 @@ pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRunti
 struct ControllerPaneLayoutProjectionSink {
     runtime: std::sync::Weak<ControllerRuntime>,
     state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
+    wake: Arc<Condvar>,
     next_work_revision: AtomicU64,
 }
 
@@ -17669,15 +17670,17 @@ impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
             let mut state = self.state.lock();
             state.schedule(work_revision)
         };
+        self.wake.notify_all();
         if !should_spawn {
             return;
         }
         let runtime = self.runtime.clone();
         let state = Arc::clone(&self.state);
+        let wake = Arc::clone(&self.wake);
         let spawn = std::thread::Builder::new()
             .name("agent-doc-pane-layout-effect".to_string())
             .spawn(move || {
-                pane_layout_effect_worker(runtime, state);
+                pane_layout_effect_worker(runtime, state, wake);
             });
         if let Err(error) = spawn {
             self.state.lock().deactivate();
@@ -17695,6 +17698,7 @@ pub(super) fn install_pane_layout_projection_sink(runtime: &Arc<ControllerRuntim
             state: Arc::new(Mutex::new(
                 agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
             )),
+            wake: Arc::new(Condvar::new()),
             next_work_revision: AtomicU64::new(1),
         }));
 }
@@ -17786,6 +17790,7 @@ fn apply_pane_layout_focus_effect(
 fn pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
     state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
+    wake: Arc<Condvar>,
 ) {
     let mut attempt = 0_u64;
     let mut active_generation = 0_u64;
@@ -17813,12 +17818,13 @@ fn pane_layout_effect_worker(
             if owned.generation == desired.generation
         );
         if already_terminal {
-            if pane_layout_effect_worker_retire_if_current(
+            if pane_layout_effect_worker_complete(
                 &runtime,
                 &state,
                 work_revision,
                 desired.generation,
-            ) {
+            ) == PaneLayoutAttemptCompletion::Retire
+            {
                 return;
             }
             attempt = 0;
@@ -17936,15 +17942,29 @@ fn pane_layout_effect_worker(
                         logged_panes,
                     ),
                 );
-                if pane_layout_effect_worker_retire_if_current(
+                match pane_layout_effect_worker_complete(
                     &runtime,
                     &state,
                     work_revision,
                     desired.generation,
                 ) {
-                    return;
+                    PaneLayoutAttemptCompletion::Retire => return,
+                    PaneLayoutAttemptCompletion::Superseded => {
+                        attempt = 0;
+                    }
+                    PaneLayoutAttemptCompletion::RetryCurrent => {
+                        if pane_layout_effect_worker_wait_for_retry(
+                            &bootstrap.project_root,
+                            &state,
+                            &wake,
+                            work_revision,
+                            desired.generation,
+                            attempt,
+                        ) {
+                            attempt = 0;
+                        }
+                    }
                 }
-                attempt = 0;
                 continue;
             }
         }
@@ -18117,44 +18137,111 @@ fn pane_layout_effect_worker(
                 logged_operator_owned_documents,
             ),
         );
-        if pane_layout_effect_worker_retire_if_current(
+        match pane_layout_effect_worker_complete(
             &runtime,
             &state,
             work_revision,
             desired.generation,
         ) {
-            return;
+            PaneLayoutAttemptCompletion::Retire => return,
+            PaneLayoutAttemptCompletion::Superseded => {
+                attempt = 0;
+                continue;
+            }
+            PaneLayoutAttemptCompletion::RetryCurrent => {
+                if pane_layout_effect_worker_wait_for_retry(
+                    &bootstrap.project_root,
+                    &state,
+                    &wake,
+                    work_revision,
+                    desired.generation,
+                    attempt,
+                ) {
+                    attempt = 0;
+                }
+            }
         }
-        attempt = 0;
     }
 }
 
-fn pane_layout_effect_worker_retire_if_current(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaneLayoutAttemptCompletion {
+    Retire,
+    RetryCurrent,
+    Superseded,
+}
+
+fn pane_layout_attempt_completion(
+    desired_generation: Option<u64>,
+    projection: &PaneLayoutProjection,
+    completed_generation: u64,
+) -> PaneLayoutAttemptCompletion {
+    if desired_generation != Some(completed_generation) {
+        return PaneLayoutAttemptCompletion::Superseded;
+    }
+    match projection {
+        PaneLayoutProjection::Converged(desired) | PaneLayoutProjection::OperatorOwned(desired)
+            if desired.generation == completed_generation =>
+        {
+            PaneLayoutAttemptCompletion::Retire
+        }
+        PaneLayoutProjection::RetryPending(desired)
+            if desired.generation == completed_generation =>
+        {
+            PaneLayoutAttemptCompletion::RetryCurrent
+        }
+        _ => PaneLayoutAttemptCompletion::Superseded,
+    }
+}
+
+fn pane_layout_effect_worker_complete(
     runtime: &ControllerRuntime,
     state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
     completed_work_revision: u64,
     completed_generation: u64,
-) -> bool {
-    let desired_is_current = runtime
+) -> PaneLayoutAttemptCompletion {
+    let desired_generation = runtime
         .pane_layout_desired()
-        .is_some_and(|desired| desired.generation == completed_generation);
-    let projection_is_terminal_for_current_inputs = matches!(
-        runtime.pane_layout_projection(),
-        PaneLayoutProjection::Converged(ref converged)
-        if converged.generation == completed_generation
-    ) || matches!(
-        runtime.pane_layout_projection(),
-        PaneLayoutProjection::OperatorOwned(ref owned)
-        if owned.generation == completed_generation
-    ) || matches!(
-        runtime.pane_layout_projection(),
-        PaneLayoutProjection::RetryPending(ref pending)
-            if pending.generation == completed_generation
-    );
-    if !desired_is_current || !projection_is_terminal_for_current_inputs {
-        return false;
+        .map(|desired| desired.generation);
+    let projection = runtime.pane_layout_projection();
+    let completion =
+        pane_layout_attempt_completion(desired_generation, &projection, completed_generation);
+    let mut worker = state.lock();
+    if worker.is_superseded(completed_work_revision) {
+        return PaneLayoutAttemptCompletion::Superseded;
     }
-    state.lock().retire_if_current(completed_work_revision)
+    if completion == PaneLayoutAttemptCompletion::Retire
+        && worker.retire_if_current(completed_work_revision)
+    {
+        return PaneLayoutAttemptCompletion::Retire;
+    }
+    completion
+}
+
+fn pane_layout_effect_worker_wait_for_retry(
+    project_root: &std::path::Path,
+    state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
+    wake: &Condvar,
+    work_revision: u64,
+    generation: u64,
+    attempt: u64,
+) -> bool {
+    let retry_delay = pane_layout_projection_retry_delay(attempt);
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "pane_layout_projection_retry_scheduled generation={} attempt={} delay_ms={}",
+            generation,
+            attempt,
+            retry_delay.as_millis(),
+        ),
+    );
+    let mut worker = state.lock();
+    if worker.is_superseded(work_revision) {
+        return true;
+    }
+    wake.wait_for(&mut worker, retry_delay);
+    worker.is_superseded(work_revision)
 }
 
 pub(crate) fn handle_tmux_focus_state(
@@ -19090,6 +19177,64 @@ mod pane_layout_projection_dispatch_tests {
         assert!(receipt.required);
         assert!(!receipt.applied);
         assert_eq!(receipt.reason, "focus_superseded_by_newer_layout_state");
+    }
+
+    #[test]
+    fn retry_pending_layout_attempt_remains_owned_for_retry() {
+        let desired = PaneLayoutDesired {
+            generation: 7,
+            source_plane_version: None,
+            invocation: invocation("automatic", false),
+        };
+
+        assert_eq!(
+            pane_layout_attempt_completion(
+                Some(desired.generation),
+                &PaneLayoutProjection::RetryPending(desired.clone()),
+                desired.generation,
+            ),
+            PaneLayoutAttemptCompletion::RetryCurrent
+        );
+        assert_eq!(
+            pane_layout_attempt_completion(
+                Some(desired.generation),
+                &PaneLayoutProjection::Converged(desired.clone()),
+                desired.generation,
+            ),
+            PaneLayoutAttemptCompletion::Retire
+        );
+        assert_eq!(
+            pane_layout_attempt_completion(
+                Some(desired.generation + 1),
+                &PaneLayoutProjection::RetryPending(desired.clone()),
+                desired.generation,
+            ),
+            PaneLayoutAttemptCompletion::Superseded
+        );
+    }
+
+    #[test]
+    fn pane_layout_retry_backoff_is_bounded() {
+        assert_eq!(
+            pane_layout_projection_retry_delay(1),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            pane_layout_projection_retry_delay(2),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            pane_layout_projection_retry_delay(5),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            pane_layout_projection_retry_delay(6),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            pane_layout_projection_retry_delay(u64::MAX),
+            Duration::from_secs(5)
+        );
     }
 }
 

@@ -192,9 +192,13 @@ select the requested pane. Column observation alone must not mark that
 projection converged. Its typed effect receipt must also prove the final
 `select-pane`, and the latest-input-revision worker mutex fences that effect so
 a newer desired layout or actor binding either supersedes it before selection or
-deterministically follows it. A failed exact-input attempt parks in
-`retry_pending`; periodic tmux observation and retry must not run on the
-Project Controller IPC accept thread.
+deterministically follows it. A failed exact-input attempt publishes
+`retry_pending` while that same worker remains retained, waits on a bounded
+backoff that a newer desired-layout or actor-binding revision can interrupt,
+and retries the exact current generation. Convergence, terminal
+`operator_owned`, supersession, or controller teardown ends that ownership.
+Tmux observation and retry must not run on the Project Controller IPC accept
+thread or in a detached periodic timer.
 - Default focus defers stash promotion (`#jb-nav-3pane-promote-swap`): `agent-doc
 focus <FILE>` selects the resolved pane when it is already visible, but skips
   additive `join-pane` promotion when the pane is parked in a `stash` window.

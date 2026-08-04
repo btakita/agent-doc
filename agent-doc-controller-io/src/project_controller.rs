@@ -2429,7 +2429,9 @@ struct RetainedTransitionProjection {
     base_content: Arc<str>,
     target_content: Arc<str>,
     intent_id: String,
-    target_hash: String,
+    intent_expected_hash: String,
+    intent_target_hash: String,
+    projected_target_hash: String,
     delivery_version: u64,
     controller_generation: u64,
 }
@@ -2762,13 +2764,7 @@ impl RetainedWriteSettleSink {
         let Some(intent) = projection.document.pending_write.as_ref() else {
             return false;
         };
-        if intent.intent_id != transition.intent_id
-            || !intent
-                .target_hash
-                .eq_ignore_ascii_case(&transition.target_hash)
-            || intent.expected_content.as_deref() != Some(transition.base_content.as_ref())
-            || intent.target_content != transition.target_content.as_ref()
-        {
+        if !retained_transition_matches_intent(transition, intent) {
             return false;
         }
         let source = "retained_transition_projection_effect";
@@ -2782,9 +2778,10 @@ impl RetainedWriteSettleSink {
                 agent_doc_ops_log_io::log_op(
                     &self.project_root,
                     &format!(
-                        "retained_transition_projected document_hash={document_hash} intent_id={} target_hash={} delivery_version={} controller_generation={} applied={} targets={} source={source}",
+                        "retained_transition_projected document_hash={document_hash} intent_id={} intent_target_hash={} projected_target_hash={} delivery_version={} controller_generation={} applied={} targets={} source={source}",
                         transition.intent_id,
-                        transition.target_hash,
+                        transition.intent_target_hash,
+                        transition.projected_target_hash,
                         transition.delivery_version,
                         transition.controller_generation,
                         outcome.applied,
@@ -2798,9 +2795,10 @@ impl RetainedWriteSettleSink {
                 agent_doc_ops_log_io::log_op(
                     &self.project_root,
                     &format!(
-                        "retained_transition_projection_deferred document_hash={document_hash} intent_id={} target_hash={} delivery_version={} controller_generation={} source={source} error={error:#}",
+                        "retained_transition_projection_deferred document_hash={document_hash} intent_id={} intent_target_hash={} projected_target_hash={} delivery_version={} controller_generation={} source={source} error={error:#}",
                         transition.intent_id,
-                        transition.target_hash,
+                        transition.intent_target_hash,
+                        transition.projected_target_hash,
                         transition.delivery_version,
                         transition.controller_generation,
                     ),
@@ -3817,6 +3815,23 @@ impl ControllerDocumentGraphs {
     }
 }
 
+fn retained_transition_matches_intent(
+    transition: &RetainedTransitionProjection,
+    intent: &agent_doc_state_backbone::DocumentWriteIntentProjection,
+) -> bool {
+    intent.intent_id == transition.intent_id
+        && intent
+            .expected_hash
+            .eq_ignore_ascii_case(&transition.intent_expected_hash)
+        && intent
+            .target_hash
+            .eq_ignore_ascii_case(&transition.intent_target_hash)
+        && agent_doc_hash::content_hash(&intent.target_content)
+            .eq_ignore_ascii_case(&transition.intent_target_hash)
+        && agent_doc_hash::content_hash(transition.target_content.as_ref())
+            .eq_ignore_ascii_case(&transition.projected_target_hash)
+}
+
 fn retained_transition_state(
     projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
     delivery: Option<&RetainedDeliveryObservation>,
@@ -3894,11 +3909,19 @@ fn retained_transition_state(
             reason: RetainedTransitionConflict::MissingBase,
         };
     };
+    if !agent_doc_hash::content_hash(&intent.target_content)
+        .eq_ignore_ascii_case(&intent.target_hash)
+    {
+        return RetainedTransitionState::Conflict {
+            intent_id: intent.intent_id.clone(),
+            target_hash: intent.target_hash.clone(),
+            visible_hash: Some(delivery.content_hash.clone()),
+            delivery_version: Some(delivery.delivery_version),
+            reason: RetainedTransitionConflict::InvalidTargetHash,
+        };
+    }
     if delivery.content.as_ref() == base_content {
-        if intent.target_content == base_content
-            || !agent_doc_hash::content_hash(&intent.target_content)
-                .eq_ignore_ascii_case(&intent.target_hash)
-        {
+        if intent.target_content == base_content {
             return RetainedTransitionState::Conflict {
                 intent_id: intent.intent_id.clone(),
                 target_hash: intent.target_hash.clone(),
@@ -3912,19 +3935,54 @@ fn retained_transition_state(
             base_content: Arc::from(base_content),
             target_content: Arc::from(intent.target_content.as_str()),
             intent_id: intent.intent_id.clone(),
-            target_hash: intent.target_hash.clone(),
+            intent_expected_hash: intent.expected_hash.clone(),
+            intent_target_hash: intent.target_hash.clone(),
+            projected_target_hash: intent.target_hash.clone(),
             delivery_version: delivery.delivery_version,
             controller_generation,
         });
     }
 
-    RetainedTransitionState::Conflict {
-        intent_id: intent.intent_id.clone(),
-        target_hash: intent.target_hash.clone(),
-        visible_hash: Some(delivery.content_hash.clone()),
-        delivery_version: Some(delivery.delivery_version),
-        reason: RetainedTransitionConflict::DivergentVisibleProjection,
+    let Ok(mut rebased) =
+        agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+            base_content,
+            &intent.target_content,
+            delivery.content.as_ref(),
+        )
+    else {
+        return RetainedTransitionState::Conflict {
+            intent_id: intent.intent_id.clone(),
+            target_hash: intent.target_hash.clone(),
+            visible_hash: Some(delivery.content_hash.clone()),
+            delivery_version: Some(delivery.delivery_version),
+            reason: RetainedTransitionConflict::DivergentVisibleProjection,
+        };
+    };
+    rebased = agent_doc_merge::response_cell::deduplicate_response_cells(&rebased)
+        .ok()
+        .flatten()
+        .unwrap_or(rebased);
+    if agent_doc_element::element::structural_corruption_reason(&rebased).is_some() {
+        return RetainedTransitionState::Conflict {
+            intent_id: intent.intent_id.clone(),
+            target_hash: intent.target_hash.clone(),
+            visible_hash: Some(delivery.content_hash.clone()),
+            delivery_version: Some(delivery.delivery_version),
+            reason: RetainedTransitionConflict::DivergentVisibleProjection,
+        };
     }
+    let projected_target_hash = agent_doc_hash::content_hash(&rebased);
+    RetainedTransitionState::ApplyTarget(RetainedTransitionProjection {
+        file: delivery.file.clone(),
+        base_content: delivery.content.clone(),
+        target_content: Arc::from(rebased),
+        intent_id: intent.intent_id.clone(),
+        intent_expected_hash: intent.expected_hash.clone(),
+        intent_target_hash: intent.target_hash.clone(),
+        projected_target_hash,
+        delivery_version: delivery.delivery_version,
+        controller_generation,
+    })
 }
 
 fn derive_retained_resume_signal(
@@ -13146,6 +13204,84 @@ agent:queue\n\
         assert!(
             retained_transition_projection(Some(&projection), Some(&delivery), 1).is_none(),
             "structurally invalid targets remain fail-closed"
+        );
+    }
+
+    #[test]
+    fn retained_transition_rebases_target_over_converged_restart_editor_cut() {
+        let mut projection = retained_resume_projection("doc-retained-restart");
+        let base = "\
+# Queue
+
+### do [#sample]
+
+original operator request
+";
+        let target = "\
+# Queue
+
+### do [#sample]
+
+original operator request
+
+### Re: do [#sample]
+
+retained response body
+";
+        let editor_cut = "\
+# Queue
+
+### do [#sample]
+
+revised operator request
+";
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(base.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(base);
+        intent.target_content = target.to_string();
+        intent.target_hash = agent_doc_hash::content_hash(target);
+        let delivery = RetainedDeliveryObservation {
+            file: PathBuf::from("/work/session.md"),
+            content: Arc::from(editor_cut),
+            content_hash: agent_doc_hash::content_hash(editor_cut),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 3,
+        };
+
+        assert!(
+            retained_transition_projection(Some(&projection), Some(&delivery), 0).is_none(),
+            "a replacement controller cannot project before its effect sink owns the generation"
+        );
+        let transition =
+            retained_transition_projection(Some(&projection), Some(&delivery), 2).unwrap();
+
+        assert_eq!(transition.base_content.as_ref(), editor_cut);
+        assert!(
+            transition
+                .target_content
+                .contains("revised operator request")
+        );
+        assert!(transition.target_content.contains("retained response body"));
+        assert_eq!(transition.controller_generation, 2);
+
+        let original_intent = projection.document.pending_write.as_ref().unwrap();
+        assert!(retained_transition_matches_intent(
+            &transition,
+            original_intent
+        ));
+        let mut superseded = original_intent.clone();
+        superseded.intent_id = "newer-intent".to_string();
+        assert!(
+            !retained_transition_matches_intent(&transition, &superseded),
+            "a projected effect from the retired controller generation cannot resurrect a superseded intent"
+        );
+        superseded = original_intent.clone();
+        superseded.target_content.push_str("\nnewer response\n");
+        superseded.target_hash = agent_doc_hash::content_hash(&superseded.target_content);
+        assert!(
+            !retained_transition_matches_intent(&transition, &superseded),
+            "a newer durable target must fence the stale projected effect"
         );
     }
 

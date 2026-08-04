@@ -249,6 +249,27 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `exact splice burst publishes one transport update`() {
+        val node = FakeNode()
+        val transport = CapturingTransport(bootstrap = "Queue: ".toByteArray())
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:1", node, transport)
+        assertTrue(fwd.register())
+
+        assertTrue(
+            fwd.forwardLocalEdits(
+                listOf(
+                    PreparedLocalEditorEdit(7, 0, "Temp", "Queue: Temp"),
+                    PreparedLocalEditorEdit(11, 0, "or", "Queue: Tempor"),
+                    PreparedLocalEditorEdit(13, 0, "al", "Queue: Temporal"),
+                ),
+            ),
+        )
+
+        assertEquals("Queue: Temporal", fwd.replicaText())
+        assertEquals("one network update may contain several bounded native splices", 1, transport.sentUpdates.size)
+    }
+
+    @Test
     fun `new replica can be aligned to the live editor buffer before first delta`() {
         val node = FakeNode()
         val transport = CapturingTransport(bootstrap = "DISK".toByteArray())
@@ -503,18 +524,28 @@ class CrdtReplicaForwarderTest {
             isOperatorDocumentEventUtil(
                 nonOperatorMutation = false,
                 wholeTextReplaced = false,
+                documentUnsaved = true,
             ),
         )
         assertFalse(
             isOperatorDocumentEventUtil(
                 nonOperatorMutation = true,
                 wholeTextReplaced = false,
+                documentUnsaved = true,
             ),
         )
         assertFalse(
             isOperatorDocumentEventUtil(
                 nonOperatorMutation = false,
                 wholeTextReplaced = true,
+                documentUnsaved = true,
+            ),
+        )
+        assertFalse(
+            isOperatorDocumentEventUtil(
+                nonOperatorMutation = false,
+                wholeTextReplaced = false,
+                documentUnsaved = false,
             ),
         )
     }

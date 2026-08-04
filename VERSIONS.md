@@ -2,10 +2,49 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.131
+
+- **Retained editor delivery now reconciles across a newer converged editor cut
+  after controller restart.** The controller can semantically rebase the
+  retained response target over intervening operator edits when both cuts share
+  a stable document anchor, then applies it with the current editor generation
+  as its CAS base. Durable intent identity, original target hash, projected
+  target hash, and latest-effect checks fence stale or superseded work, while
+  unrelated replacement documents still fail closed. A completed response can
+  no longer leave the same prompt active merely because the editor advanced
+  before retained delivery resumed, and recovery does not duplicate the
+  response or resurrect discarded content.
+- **Codex routed-dispatch start proof now uses the same active-turn window as
+  admission.** Both paths classify the bottom eight pane lines through one
+  harness-owned observation. A stale `Working` line farther up scrollback can
+  no longer make the pre-dispatch baseline appear busy and mask the real
+  false→true start edge (`#jetbrainsrunroute`, `#jetbrainsrunroute-8x66`).
+- **JetBrains startup restoration now publishes the completed editor surface
+  when Markdown files finish opening.** IDEA can restore split containers and
+  seed their structural shape before restored files enter the selected-file
+  projection, without emitting another selection or container event. The
+  `fileOpened` adapter edge now re-observes that completed surface; the
+  controller-owned Lazily graph still exclusively derives and applies the tmux
+  effect. A cross-adapter contract test proves JetBrains and VS Code both bridge
+  visible-membership changes into `editor_surface_observe`, preserving plugin
+  parity.
+- **JetBrains no longer turns a later whole-buffer read into operator-authored
+  CRDT state.** Dirty incremental `DocumentEvent`s retain their exact
+  offset/old/new fragments, validate them against the actor-owned shadow, and
+  apply the bounded splice stream to the local replica before publishing one
+  batched update. Clean incremental cache reloads, whole-text replacements, and
+  remote/native projections are non-operator events that advance the projection
+  epoch and fence queued local splices. A stale range is retained for canonical
+  recovery instead of widening into a document replacement. JetBrains and VS
+  Code now advertise and test the shared `bounded_editor_splices_v1`
+  capability; regressions cover partial queue typing, cross-cell edits, Unicode
+  offsets, reload fencing, and the absence of whole-buffer reads from the
+  ordinary local-mutation path.
+
 ## 0.35.130
 
 - **Compaction now recovers the exact stranded duplicate response-heading
-  replay shape without weakening document integrity.** Response materialization
+replay shape without weakening document integrity.** Response materialization
   canonicalizes an empty `### Re:` shell when an earlier response with the same
   normalized topic already has a real body, even after later responses make
   the shell non-tail. Compact performs that same byte-preserving

@@ -4,11 +4,18 @@
 //! Rust core and editor plugins use the same tokens at the Lazily seam so the
 //! implementation cannot silently drift into a second live-buffer model.
 
-/// The editor supplies complete operator text through Lazily current state.
+/// The editor supplies a complete visible-value observation through Lazily
+/// current state; operator mutation provenance is carried separately.
 pub const OPERATOR_TEXT_AUTHORITY_CAPABILITY: &str = "operator_text_authority_v1";
 
 /// The editor reports Lazily delivery receipts for visible-write proof.
 pub const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY: &str = "lazily_transport_receipts_v1";
+
+/// The editor originates ordinary local mutations as bounded causal splices.
+///
+/// Full document values remain bootstrap/recovery observations and may not be
+/// promoted to operator mutations by diffing them against an adapter shadow.
+pub const BOUNDED_EDITOR_SPLICES_CAPABILITY: &str = "bounded_editor_splices_v1";
 
 /// The editor consumes the shared typed intent vocabulary over its PID-scoped
 /// endpoint. Adapters advertise this only after every intent they accept has the
@@ -77,12 +84,19 @@ mod tests {
         include_str!(
             "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt"
         ),
+        include_str!(
+            "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"
+        ),
+        include_str!(
+            "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"
+        ),
     ];
     const VSCODE_SOURCES: &[&str] = &[
         include_str!("../../editors/vscode/src/native.ts"),
         include_str!("../../editors/vscode/src/editorIntent.ts"),
         include_str!("../../editors/vscode/src/crossEditorHarness.ts"),
         include_str!("../../editors/vscode/src/extension.ts"),
+        include_str!("../../editors/vscode/src/crdtReplica.ts"),
     ];
     const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
 
@@ -131,11 +145,92 @@ mod tests {
     }
 
     #[test]
+    fn supported_surface_adapters_bridge_visible_membership_into_the_reactive_graph() {
+        let jetbrains_listener = JETBRAINS_SOURCES
+            .iter()
+            .find(|source| source.contains("class EditorTabSyncListener"))
+            .expect("JetBrains editor-surface source");
+        let vscode_extension = VSCODE_SOURCES
+            .iter()
+            .find(|source| source.contains("function requestSurfaceObservation"))
+            .expect("VS Code editor-surface source");
+
+        assert!(
+            jetbrains_listener
+                .contains("override fun fileOpened(source: FileEditorManager, file: VirtualFile)"),
+            "JetBrains must observe visible membership that completes after startup layout seeding",
+        );
+        assert!(
+            jetbrains_listener.contains("onEditorLayoutChanged(source.project)"),
+            "JetBrains file-open events must invalidate the shared editor-surface source",
+        );
+        assert!(
+            vscode_extension.contains("vscode.window.onDidChangeVisibleTextEditors"),
+            "VS Code must observe visible membership changes",
+        );
+        assert!(
+            JETBRAINS_SOURCES
+                .iter()
+                .any(|source| source.contains("editor_surface_observe"))
+                && VSCODE_SOURCES
+                    .iter()
+                    .any(|source| source.contains("editor_surface_observe")),
+            "supported adapters must feed the controller-owned editor-surface graph",
+        );
+    }
+
+    #[test]
+    fn bounded_editor_splice_peers_preserve_host_causality() {
+        let jetbrains_manager = JETBRAINS_SOURCES
+            .iter()
+            .find(|source| source.contains("class CrdtReplicaManager"))
+            .expect("JetBrains CRDT manager source");
+        let vscode_manager = VSCODE_SOURCES
+            .iter()
+            .find(|source| source.contains("class CrdtReplicaManager"))
+            .expect("VS Code CRDT manager source");
+        let vscode_extension = VSCODE_SOURCES
+            .iter()
+            .find(|source| source.contains("e.contentChanges.map"))
+            .expect("VS Code document-event source");
+
+        assert!(
+            jetbrains_manager.contains("offsetUtf16 = event.offset")
+                && jetbrains_manager.contains("oldFragment = oldFragment")
+                && jetbrains_manager.contains("newFragment = newFragment")
+                && jetbrains_manager
+                    .contains("prepareLocalEditorEditsUtil(beforeText, currentEdits)")
+                && jetbrains_manager.contains("isDocumentUnsaved(event.document)"),
+            "JetBrains must publish exact dirty DocumentEvent splices",
+        );
+        let jetbrains_forward = jetbrains_manager
+            .split_once("private fun forwardLocalEditsFromShadow(")
+            .expect("JetBrains local splice forwarder")
+            .1
+            .split_once("fun requestRemoteDrain(")
+            .expect("JetBrains local splice forwarder boundary")
+            .0;
+        assert!(
+            !jetbrains_forward.contains("tryReadDocumentText(document)")
+                && !jetbrains_forward.contains("coalescedLocalEditUtil(beforeText, editorText)"),
+            "JetBrains ordinary local mutation must not widen to a whole-buffer diff",
+        );
+        assert!(
+            vscode_extension.contains("rangeOffset: change.rangeOffset")
+                && vscode_extension.contains("rangeLength: change.rangeLength")
+                && vscode_manager.contains("applyReplicaTextChange(oldText, change)")
+                && vscode_manager.contains("advanceNonOperatorProjectionEpoch(filePath)"),
+            "VS Code must preserve bounded contentChanges and fence non-operator epochs",
+        );
+    }
+
+    #[test]
     fn plugin_feature_conformance_selects_only_supported_peers() {
         let rows = parity_rows();
         let known_features = [
             OPERATOR_TEXT_AUTHORITY_CAPABILITY,
             LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+            BOUNDED_EDITOR_SPLICES_CAPABILITY,
             TYPED_EDITOR_INTENTS_CAPABILITY,
             LOSSLESS_TREE_CRDT_CAPABILITY,
             PEER_REPLICA_PULL_CAPABILITY,

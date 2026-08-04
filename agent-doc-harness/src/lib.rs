@@ -939,6 +939,25 @@ impl HarnessConfig {
             })
     }
 
+    /// True when Codex's bottom active-turn window contains a live busy cue.
+    ///
+    /// Route admission and post-submit dispatch proof must share this exact
+    /// observation. A broader scrollback scan can treat a completed turn as
+    /// the baseline busy state and make a real idle -> busy edge unprovable.
+    pub fn codex_active_turn_is_busy(&self, output: &str) -> bool {
+        if self.binary != "codex" {
+            return false;
+        }
+        let recent = output
+            .lines()
+            .rev()
+            .take(8)
+            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
+            .map(|line| line.trim().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        codex_active_turn_busy(&recent)
+    }
+
     pub fn is_help_screen_output(&self, output: &str) -> bool {
         match self.binary.as_str() {
             "opencode" => is_opencode_help_screen(output),
@@ -1065,7 +1084,7 @@ impl HarnessConfig {
             return Some("queued draft in composer".to_string());
         }
 
-        if codex_active_turn_busy(&recent) {
+        if self.codex_active_turn_is_busy(output) {
             return Some("active codex turn".to_string());
         }
 

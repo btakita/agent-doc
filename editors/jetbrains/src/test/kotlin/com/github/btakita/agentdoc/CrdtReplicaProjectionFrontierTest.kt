@@ -512,7 +512,7 @@ class CrdtReplicaProjectionFrontierTest {
         val manager = Files.readString(managerPath)
         val localEffect =
             manager
-                .substringAfter("private fun forwardLocalDeltaFromShadow(")
+                .substringAfter("private fun forwardLocalEditsFromShadow(")
                 .substringBefore("fun requestRemoteDrain(")
         assertTrue(localEffect.contains("expectedCanonicalTextAtSwap = capturedBaseText"))
         assertTrue(localEffect.contains("expectedEditorTextAtSwap = visibleEditorText"))
@@ -520,7 +520,7 @@ class CrdtReplicaProjectionFrontierTest {
         assertTrue(localEffect.contains("shadows[filePath] = beforeText"))
         assertTrue(
             localEffect.indexOf("replacement.replicaText() != capturedBaseText") <
-                localEffect.indexOf("replacement.forwardLocalDelta("),
+                localEffect.indexOf("replacement.forwardLocalEdits(edits)"),
         )
     }
 

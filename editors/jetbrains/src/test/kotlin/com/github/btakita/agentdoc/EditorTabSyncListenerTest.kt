@@ -416,6 +416,28 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `markdown file open republishes the editor surface after the startup seed`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val fileOpenedMarker =
+            "override fun fileOpened(source: FileEditorManager, file: VirtualFile)"
+
+        assertTrue(source.contains(fileOpenedMarker))
+        val fileOpened =
+            source
+                .substringAfter(fileOpenedMarker)
+                .substringBefore("override fun fileClosed")
+        assertTrue(fileOpened.contains("if (!file.name.endsWith(\".md\")) return"))
+        assertTrue(fileOpened.contains("onEditorLayoutChanged(source.project)"))
+    }
+
+    @Test
     fun `focused and adjacent tabs lead the open document priority`() {
         assertEquals(
             listOf(

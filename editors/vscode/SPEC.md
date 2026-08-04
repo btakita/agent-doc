@@ -56,7 +56,11 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 
 ## External Disk Pending Parity
 
-- A whole-buffer editor notification is reduced to its causal text delta against the retained shadow; reconnect and recovery never publish the full visible buffer.
+- Ordinary dirty editor notifications publish the host's bounded
+  `contentChanges` under the captured projection epoch. A whole-buffer or clean
+  cache notification is a non-operator projection that fences older queued
+  deltas; reconnect and recovery never publish the full visible buffer as local
+  operator input.
 - Replica registration opens the controller bootstrap and projects it downstream. Dirty operator changes originate only from subsequent editor events; disk candidates are never component-merged or promoted while a controller-owned document remains attached.
 - This is the same FFI and authority lifecycle as JetBrains. VS Code must not implement a private disk reread, Git fallback, or extension-local pending-response slot.
 

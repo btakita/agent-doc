@@ -2822,29 +2822,7 @@ fn rebase_agent_candidate_over_editor_cut(
     agent_target: &str,
     editor_cut: &str,
 ) -> Result<String> {
-    let editor_reconciled = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
-        editor_cut,
-        merge_base,
-        agent_target,
-    )?
-    .unwrap_or_else(|| editor_cut.to_string());
-    let target_introduces_response =
-        !write_policy::buffer_presents_reference_response(agent_target, merge_base);
-    if target_introduces_response {
-        if write_policy::buffer_presents_reference_response(agent_target, &editor_reconciled) {
-            return Ok(editor_reconciled);
-        }
-        if let Some(recovered) = write_policy::live_prompt_drift_recovery_target(
-            agent_target,
-            &editor_reconciled,
-            write_policy::normalize_visible_recovery_compare,
-        ) {
-            return Ok(recovered);
-        }
-    }
-
-    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(merge_base).encode_state();
-    agent_doc_merge::crdt::merge_by_component(Some(&base_state), agent_target, &editor_reconciled)
+    write_policy::rebase_agent_candidate_over_editor_cut(merge_base, agent_target, editor_cut)
 }
 
 /// Remove the earlier of exactly two standalone boundary markers inside the

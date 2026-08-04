@@ -9,6 +9,7 @@
 # feature	core	jetbrains	vscode	zed
 operator_text_authority_v1	required	supported	supported	staged
 lazily_transport_receipts_v1	required	supported	supported	staged
+bounded_editor_splices_v1	optional	supported	supported	staged
 typed_editor_intents_v1	optional	staged	staged	staged
 lossless_tree_crdt_v1	optional	supported	staged	staged
 peer_replica_pull_v1	optional	supported	supported	staged

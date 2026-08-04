@@ -269,7 +269,7 @@ class TypingTrackerEdtBudgetTest {
         ).first { Files.exists(it) }
         val replica = Files.readString(replicaPath)
         val forwardBody = replica
-            .substringAfter("private fun forwardLocalDeltaFromShadow")
+            .substringAfter("private fun forwardLocalEditsFromShadow")
             .substringBefore("fun requestRemoteDrain")
 
         assertTrue(
@@ -394,8 +394,10 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("private fun scheduleRemoteEditorApply")
 
         assertTrue(
-            "CRDT documentChanged should debounce local CRDT forwarding without retaining every keystroke",
-            listenerBody.contains("scheduleLocalEditorFlush(filePath, event.document, projectionEpoch)"),
+            "CRDT documentChanged should retain the exact editor splice and debounce its CRDT forwarding",
+            listenerBody.contains("CapturedLocalEditorEdit(") &&
+                listenerBody.contains("offsetUtf16 = event.offset") &&
+                listenerBody.contains("scheduleLocalEditorFlush(filePath)"),
         )
         assertTrue(
             "CRDT documentChanged should defer full-buffer seeding to a background worker",
@@ -489,14 +491,15 @@ class TypingTrackerEdtBudgetTest {
             listenerBody.contains("isOperatorDocumentEvent(filePath, event)") &&
                 listenerBody.contains("non-operator-editor-event") &&
                 source.contains("wholeTextReplaced = event.isWholeTextReplaced") &&
+                source.contains("isDocumentUnsaved(event.document)") &&
                 source.contains("stale-operator-event-fenced"),
         )
-        val localDeltaBody = source.substringAfter("private fun forwardLocalDeltaFromShadow(")
+        val localDeltaBody = source.substringAfter("private fun forwardLocalEditsFromShadow(")
             .substringBefore("fun requestRemoteDrain(")
         assertTrue(
             "a stale local baseline must retain its typed delta and rebootstrap from exact controller canonical",
-            localDeltaBody.contains("tryReadDocumentText(document)") &&
-                localDeltaBody.contains("coalescedLocalEditUtil(beforeText, editorText)") &&
+            localDeltaBody.contains("prepareLocalEditorEditsUtil(beforeText, currentEdits)") &&
+                localDeltaBody.contains("forwarder.forwardLocalEdits(edits)") &&
                 localDeltaBody.contains("localReplicaBaselineDecisionUtil(replicaText, beforeText)") &&
                 localDeltaBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
                 localDeltaBody.contains("expectedCanonicalTextAtSwap = capturedBaseText") &&
@@ -506,7 +509,9 @@ class TypingTrackerEdtBudgetTest {
         assertFalse(
             "a stale local baseline must never schedule whole-editor adoption",
             localDeltaBody.contains("scheduleStaleBaselineRecovery") ||
-                localDeltaBody.contains("adoptExactEditorBaseline"),
+                localDeltaBody.contains("adoptExactEditorBaseline") ||
+                localDeltaBody.contains("tryReadDocumentText(document)") ||
+                localDeltaBody.contains("coalescedLocalEditUtil(beforeText, editorText)"),
         )
         val openReplicaBody = source.substringAfter("fun ensureOpenDocumentReplica(")
             .substringBefore("/**\n     * Publish the exact closing editor cut")
@@ -518,7 +523,8 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "the serialized local delta must install its exact resulting shadow in the forwarder projection",
-            localDeltaBody.contains("resultingText = edit.resultingText"),
+            localDeltaBody.contains("forwarder.forwardLocalEdits(edits)") &&
+                localDeltaBody.contains("shadows[filePath] = editorText"),
         )
         assertTrue(
             "forced refresh must register and atomically swap before retiring the cached client",

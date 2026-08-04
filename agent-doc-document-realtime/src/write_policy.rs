@@ -111,6 +111,82 @@ pub const fn decide_crdt_retry_admission(backoff_scheduled: bool) -> CrdtRetryAd
     }
 }
 
+/// Rebase one durable agent target over the currently converged editor cut.
+///
+/// This is the pure semantic owner shared by foreground reconnect recovery and
+/// controller-generation retained delivery. It preserves operator changes,
+/// reconciles superseded response targets, and refuses unsafe whole-document
+/// fallbacks through the CRDT component merge.
+pub fn rebase_agent_candidate_over_editor_cut(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+) -> Result<String> {
+    let editor_reconciled = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
+        editor_cut,
+        merge_base,
+        agent_target,
+    )?
+    .unwrap_or_else(|| editor_cut.to_string());
+    let target_introduces_response = !buffer_presents_reference_response(agent_target, merge_base);
+    if target_introduces_response {
+        if buffer_presents_reference_response(agent_target, &editor_reconciled) {
+            return Ok(editor_reconciled);
+        }
+        if let Some(recovered) = live_prompt_drift_recovery_target(
+            agent_target,
+            &editor_reconciled,
+            normalize_visible_recovery_compare,
+        ) {
+            return Ok(recovered);
+        }
+    }
+
+    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(merge_base).encode_state();
+    agent_doc_merge::crdt::merge_by_component(Some(&base_state), agent_target, &editor_reconciled)
+}
+
+/// Rebase a retained target only when the converged editor cut still carries a
+/// stable semantic anchor from the intent's original base.
+///
+/// A controller restart may expose a newer operator edit, but an unrelated or
+/// replacement document must never be treated as that edit and overwritten.
+/// Exact generic headings are intentionally not sufficient evidence; prompt
+/// headings, frontmatter fields, and ordinary retained content are.
+pub fn rebase_retained_target_over_editor_cut(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+) -> Result<String> {
+    let has_stable_anchor = merge_base
+        .lines()
+        .map(str::trim)
+        .filter(|line| retained_rebase_anchor_line(line))
+        .any(|line| editor_cut.lines().any(|candidate| candidate.trim() == line));
+    anyhow::ensure!(
+        has_stable_anchor,
+        "retained rebase rejected unrelated editor projection without a stable base anchor"
+    );
+    rebase_agent_candidate_over_editor_cut(merge_base, agent_target, editor_cut)
+}
+
+fn retained_rebase_anchor_line(line: &str) -> bool {
+    if line.len() < 8 || line.starts_with("<!-- agent:") {
+        return false;
+    }
+    !matches!(
+        line.to_ascii_lowercase().as_str(),
+        "# queue"
+            | "## queue"
+            | "# backlog"
+            | "## backlog"
+            | "# exchange"
+            | "## exchange"
+            | "# done"
+            | "## done"
+    )
+}
+
 pub use agent_doc_merge::document_replay::{ExactDocumentReplay, coalesce_exact_document_replay};
 
 /// Admission policy for editor patch transports under reliable document

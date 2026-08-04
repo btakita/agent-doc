@@ -162,8 +162,8 @@ fn codex_pane_dispatch_start_proof_facts<'a>(
     CodexPaneDispatchStartProofFacts {
         pre_dispatch_content,
         current_content,
-        pre_dispatch_has_busy_cue: harness.busy_proof_line(pre_dispatch_content).is_some(),
-        current_has_busy_cue: harness.busy_proof_line(current_content).is_some(),
+        pre_dispatch_has_busy_cue: harness.codex_active_turn_is_busy(pre_dispatch_content),
+        current_has_busy_cue: harness.codex_active_turn_is_busy(current_content),
     }
 }
 
@@ -298,6 +298,42 @@ mod tests {
         let facts = codex_pane_dispatch_start_proof_facts(&harness, before, active);
 
         assert!(!facts.pre_dispatch_has_busy_cue);
+        assert!(facts.current_has_busy_cue);
+        assert!(codex_pane_busy_transition_after_acceptance(facts));
+    }
+
+    #[test]
+    fn codex_pane_facts_ignore_stale_working_scrollback_outside_active_turn_window() {
+        let harness = HarnessConfig::codex();
+        let before = "\
+• Working (31s • esc to interrupt)
+• Previous turn completed.
+• Ran agent-doc session.md
+  └ agent-doc completed
+• Retained response was delivered.
+
+›
+
+gpt-5.6 · ~/work/sample-app · 40% left
+";
+        let active = "\
+• Working (31s • esc to interrupt)
+• Previous turn completed.
+• Ran agent-doc session.md
+  └ agent-doc completed
+• Retained response was delivered.
+
+› agent-doc session.md
+
+• I’m opening the session document.
+• Working (2s • esc to interrupt)
+";
+        let facts = codex_pane_dispatch_start_proof_facts(&harness, before, active);
+
+        assert!(
+            !facts.pre_dispatch_has_busy_cue,
+            "proof must use the same bottom active-turn window that admitted the idle pane"
+        );
         assert!(facts.current_has_busy_cue);
         assert!(codex_pane_busy_transition_after_acceptance(facts));
     }

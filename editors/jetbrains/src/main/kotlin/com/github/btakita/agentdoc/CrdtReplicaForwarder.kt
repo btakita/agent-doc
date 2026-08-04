@@ -225,6 +225,46 @@ class CrdtReplicaForwarder(
         logSlow("forwardLocalDelta", started, warnMs = 100, details = "update_bytes=$updateBytes")
     }
 
+    /**
+     * Apply an exact editor splice burst to the local replica and publish one
+     * incremental CRDT update. Each changed range remains structurally bounded;
+     * batching only amortizes the controller transport round trip.
+     */
+    internal fun forwardLocalEdits(edits: List<PreparedLocalEditorEdit>): Boolean {
+        if (!attached) return false
+        if (edits.isEmpty()) return true
+        val started = System.nanoTime()
+        for (edit in edits) {
+            val applyStarted = System.nanoTime()
+            if (
+                !node.applyLocal(
+                    clientId,
+                    edit.offsetCodePoints,
+                    edit.deleteCodePoints,
+                    edit.insert,
+                )
+            ) {
+                return false
+            }
+            knownReplicaText = edit.resultingText
+            logSlow(
+                "native.applyLocal",
+                applyStarted,
+                details =
+                    "offset=${edit.offsetCodePoints} delete_cp=${edit.deleteCodePoints} " +
+                        "insert_chars=${edit.insert.length}",
+            )
+        }
+        val updateBytes = publishIncremental("local-splice-batch")
+        logSlow(
+            "forwardLocalEdits",
+            started,
+            warnMs = 100,
+            details = "splices=${edits.size} update_bytes=$updateBytes",
+        )
+        return true
+    }
+
     /** Publish an already-fenced local editor delta against this replica. */
     fun ensureEditorText(editorText: String) {
         if (!attached) return

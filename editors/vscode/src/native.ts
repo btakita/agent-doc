@@ -218,9 +218,10 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
-export const EDITOR_PLUGIN_VERSION = '0.2.65';
+export const EDITOR_PLUGIN_VERSION = '0.2.66';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
+const BOUNDED_EDITOR_SPLICES_CAPABILITY = 'bounded_editor_splices_v1';
 // #ctrlkillreregister Tier 3: this extension calls agent_doc_peer_replicas_missing
 // about itself on activation and on controller-transport recovery, so the
 // controller's Tier 1 restart fan-out must stop pushing rebuild requests at it. The
@@ -232,6 +233,7 @@ const PEER_REPLICA_PULL_CAPABILITY = 'peer_replica_pull_v1';
 export const EDITOR_CAPABILITY_LIST = [
 OPERATOR_TEXT_AUTHORITY_CAPABILITY,
 LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+BOUNDED_EDITOR_SPLICES_CAPABILITY,
 PEER_REPLICA_PULL_CAPABILITY,
 ];
 const EDITOR_CAPABILITIES = EDITOR_CAPABILITY_LIST.join(',');

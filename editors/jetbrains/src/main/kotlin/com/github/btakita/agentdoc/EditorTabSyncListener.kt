@@ -600,8 +600,21 @@ private fun captureSurface(
                     preferredFile = null,
                     forceReconcile = false,
                     authority = ObservationAuthority.Layout,
-                ),
+            ),
         )
+    }
+
+    /**
+     * IDEA can restore editor containers before it finishes restoring their files. The delayed
+     * structural seed then observes the right split count with an incomplete selected-file set,
+     * and opening the restored files does not necessarily emit either `selectionChanged` or a new
+     * container event. Publish the completed surface from the file lifecycle edge so startup does
+     * not depend on an explicit Sync Tmux Layout action.
+     */
+    override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+        if (!file.name.endsWith(".md")) return
+        log("fileOpened: file=${file.name}")
+        onEditorLayoutChanged(source.project)
     }
 
     /**

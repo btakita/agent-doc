@@ -19,6 +19,14 @@ Rust binary.
   the target is not already open, the adapter rejects the intent.
 - Operator edits are monotonic. An agent intent may not resurrect text that the
   operator deleted from a newer editor generation.
+- Ordinary editor-origin mutations are the host event's bounded causal splices.
+  The adapter preserves splice boundaries through the CRDT/tree ingress and
+  never manufactures operator input by diffing a later whole-buffer read
+  against an adapter shadow. A complete buffer is admitted only as a typed
+  bootstrap, checkpoint, or explicit recovery observation.
+- A clean cache reload, whole-text replacement, remote projection, or native
+  generation handoff advances the non-operator epoch and fences older queued
+  splices even when the host reports the reload as an incremental range edit.
 - Missing capabilities, an incompatible ABI, an unknown intent, or ambiguous
   structure fails closed without mutating the buffer or disk.
 
@@ -49,6 +57,13 @@ Registration, current-value observation, remote CRDT delivery, and visible
 state projections use the reliable-sync Lazily plane. Endpoint discovery is
 PID-scoped so a stale listener from another editor process cannot receive a
 delivery.
+
+Editor adapters must bridge host events that change visible document membership
+into the controller-owned editor-surface source. A document-open event may
+advance the per-document Lazily/CRDT value before the host finishes restoring
+its split layout; the adapter must still publish the completed visible surface.
+This bridge reports observed editor state only. It never plans or executes a
+tmux mutation locally.
 
 The native library and plugin must advertise the exact required ABI and intent
 capabilities. Version skew is an explicit incompatible state; adapters do not

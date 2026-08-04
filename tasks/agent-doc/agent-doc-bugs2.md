@@ -207,6 +207,22 @@ Validated and resolved `#boundaryaccumverify` using both the live wedge recovere
 - The post-commit guard independently inspects committed `HEAD`, self-heals any count above one through a single collapse commit, re-verifies the result, and fails closed if collapse cannot produce exactly one marker.
 
 No source changes were needed. The current full `make check` was already green in this turn. Confidence is high; the old restart-and-reproduce checklist is now satisfied by the live recovery plus deterministic snapshot/commit coverage.
+
+### Re: busy Codex Run Agent Doc dispatch — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-a3ew]
+
+
+Validated and resolved `#r4gq` with the requested live evidence on the current implementation:
+
+- During this turn, JetBrains `Run Agent Doc` targeted `/src/haiven-dev/tasks/haiven-dev.md` while Codex pane `%4` was visibly busy (`Working ... esc to interrupt`). The Haiven ops log records `route_dispatch_start_queued_behind_active_turn` at `2026-08-03T16:06:07Z` for that exact pane and document.
+- The same log contains no `accepted_without_dispatch_start_proof` entry for `haiven-dev.md`; the rerun was accepted as queued behind the active turn instead of producing the historical false dispatch-start failure.
+- `short_circuit_dispatch_start_when_pane_busy` gives a busy pane only the short proof probe, then emits the queued outcome and diagnostic rather than paying the former double 10-second wait.
+- `queued_behind_active_turn_is_accepted_even_when_proof_required` proves that outcome remains accepted for Codex's proof-required path, and `busy_dispatch_start_outcome_short_circuits_queued_when_busy_without_probe_proof` pins the no-proof busy case directly.
+
+The owner pane subsequently drained and completed its Haiven work. No source changes were needed for this review; the current full `make check` was already green in this turn. Confidence is high and no operator escalation remains.
 <!-- agent:boundary:efab1ce2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -218,7 +234,7 @@ No source changes were needed. The current full `make check` was already green i
 - ~~do [#recommendedungatereview-zw66]~~
 - ~~do [#recommendedungatereview-e8jn]~~
 - ~~do [#recommendedungatereview-jcgv]~~
-- do [#recommendedungatereview-a3ew]
+- ~~do [#recommendedungatereview-a3ew]~~
 - do [#recommendedungatereview-jfxh]
 - do [#recommendedungatereview-w90z]
 - do [#recommendedungatereview-sskd]
@@ -239,7 +255,6 @@ No source changes were needed. The current full `make check` was already green i
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedungatereview-a3ew] [recommended] Ungate review item #r4gq — validate and move to done
 - [ ] [#recommendedungatereview-jfxh] [recommended] Ungate review item #zqv8 — validate and move to done
 - [ ] [#recommendedungatereview-w90z] [recommended] Ungate review item #compactindcellsverify — validate and move to done
 - [ ] [#recommendedungatereview-sskd] [recommended] Ungate review item #crdtpushdrainverify — validate and move to done
@@ -256,7 +271,6 @@ No source changes were needed. The current full `make check` was already green i
  
 <!-- agent:review -->
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
-- [/] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).
 - [/] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
 - [/] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [/] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.

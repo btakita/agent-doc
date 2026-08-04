@@ -1,5 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
+resume: 019fa782-f025-7a10-8a66-3296f1b2bbc7
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -52,11 +53,26 @@ Done. The homepage now has a responsive Google Reviews social-proof section imme
 - Postflight: staging and production both report no pending D1 migrations; the repository is clean and synchronized. No GitHub Actions workflows are configured in this repository.
 
 Confidence: high. Escalation: none.
+
+### Re: Remove Google Reviews border box — gpt-5
+
+> **Queue prompt:** Please remove the surrounding border box around the Google ratings ![img_4.png](img_4.png). deploy to staging
+
+Done. The large rounded border and tinted wrapper around the Google Reviews section are removed. The content now sits directly on the navy section background, while the inner white rating card remains intact for contrast. The updated layout is live on staging.
+
+- Changed `lib/ui--server--efs/home/index.ts`, `tests/home-copy.test.ts`, and `prds/equity-funding-source-lending-portal-prd.md`.
+- Verification: `bun test tests/home-copy.test.ts` passed; `make check` completed with 2,295 passing tests, 0 failures, and successful builds; desktop and mobile visual checks confirmed the borderless responsive layout.
+- Regression coverage asserts that the Google Reviews layout wrapper has neither border nor rounded classes.
+- Commit/push: `cbeecd8d fix(home): remove Google reviews outer border` is on `origin/main`.
+- Staging: HTTP 200 with the borderless layout live at https://equityfundingsource.brian-takita.workers.dev/; Worker version `ec32a83f-878e-4faa-b136-b8ea007aa86e`.
+- Postflight: staging reports no pending D1 migrations; the repository is clean and synchronized. No GitHub Actions `CI` workflow is configured in this repository.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Add the Google Reviews for Equity Funding Source to the staging + production site. Place in the home page in an appropriate place for social proof. https://www.google.com/search?q=Equity+Funding+Source&stick=H4sIAAAAAAAA_-NgU1I1qLAwSDZKNk9JNU8zMEhLTTK0Mqgws7AwNDYzSjExNUg2NLVIWcQq6lpYmllSqeBWmpeSmZeuEJxfWpScCgCpNvZ-QQAAAA&hl=en&mat=CT2gUovxbaZtElcBa0lj_-TpmTUq8otGeH49HaUiQeNxD8gJEjPAQqixOC-YVe3hGa7-R6wHSDG3IFfzjwFsrkVxdHIElEh6xeNNkkupP1U6tcrPkt9ISbEN11GdkS-HlHU&authuser=1~~ — auto-struck: answered this cycle (#ftstrike)
+- Please remove the surrounding border box around the Google ratings ![img_4.png](img_4.png). deploy to staging
 <!-- /agent:queue -->
 
 ## Backlog

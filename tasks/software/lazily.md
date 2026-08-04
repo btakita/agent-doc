@@ -325,6 +325,19 @@ Completed [#lzwireencodingrunner].
 - Full local `make check` passed in lazily-spec and all nine bindings. All ten task-scoped pushed CI workflows passed, including the complete Rust workflow.
 - Pushed the binding/spec commits and root gitlink commit `423e757a9a489d0104d5c4f435c351dc4b294c98` (`test: assert exact codec wire inputs`). Root `tmux-ci` passed. Root aggregate `check` was retried once and twice encountered the same unrelated LLVM `rust-lld` signal-7 bus error while linking different agent-doc test binaries; no lazily assertion or test failed.
 - Preserved all pre-existing unrelated working-tree changes.
+
+### Re: Response
+
+Completed [#lzgeneratorprovenance].
+
+- Moved `generator` from `assertions` to root-level provenance metadata in the NodeId exact-range, NodeKey null-leniency, and blob-backend discriminator generators and generated fixtures.
+- Documented the root-only provenance contract. `scripts/check-prose-keys.mjs` now requires a non-empty path naming an existing file and rejects `generator` at every nested location.
+- Removed all 27 per-fixture `generator` assertion excuses across Rust, Python, JavaScript, Go, C++, Dart, Kotlin, Zig, and C#. Go's root-key inventory recognizes `generator` only as corpus metadata; the spec guard prevents that exemption from hiding a nested assertion.
+- Mutation proof: adding `assertions.generator` to a scratch fixture made the canonical checker fail with ``assertions.generator` is provenance metadata, not an assertion; move it to the fixture root`; the unchanged corpus passes.
+- Full local `make check` passed in lazily-spec and all nine bindings. All ten exact-SHA task workflows are green, including Rust's full feature/conformance/loom/benchmark matrix.
+- Pushed commits: spec `de53659`; rs `e075669`; py `e8bb7f9`; js `1bc9046`; go `828957e`; cpp `8faad4f`; dart `57cc374`; kt `fff4639`; zig `d72cde5`; cs `26d220e`; superproject gitlinks `6c197226ad`.
+- Root `tmux-ci` passed. Root aggregate `check` was retried once and both hosted attempts hit the recurring unrelated LLVM `rust-lld` signal-7 bus error while linking different agent-doc test binaries; no lazily test failed.
+- Preserved all pre-existing unrelated working-tree changes.
 <!-- agent:boundary:d04a6333:lazily -->
 <!-- /agent:exchange -->
 

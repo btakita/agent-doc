@@ -1,6 +1,5 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: a6cd2cc7-b311-4090-b7de-fdbeb6a17520
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -38,10 +37,26 @@ complete
 Compacted content:
 - Archived 5 response topic(s): do [#recommendedprunestale]; do [#recommendeddeploybrowser]; do [#censible-env-committed-creds]; 2 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): #efs-prod-deploy-20d7a416; #efs-dev-vars-secret-history; do [#...
+
+### Re: Google Reviews social proof — gpt-5
+
+> **Queue prompt:** Add the Google Reviews for Equity Funding Source to the staging + production site. Place in the home page in an appropriate place for social proof. https://www.google.com/search?q=Equity+Funding+Source&stick=H4sIAAAAAAAA_-NgU1I1qLAwSDZKNk9JNU8zMEhLTTK0Mqgws7AwNDYzSjExNUg2NLVIWcQq6lpYmllSqeBWmpeSmZeuEJxfWpScCgCpNvZ-QQAAAA&hl=en&mat=CT2gUovxbaZtElcBa0lj_-TpmTUq8otGeH49HaUiQeNxD8gJEjPAQqixOC-YVe3hGa7-R6wHSDG3IFfzjwFsrkVxdHIElEh6xeNNkkupP1U6tcrPkt9ISbEN11GdkS-HlHU&authuser=1
+
+Done. The homepage now has a responsive Google Reviews social-proof section immediately after Funded Deals and before the rate estimator. It shows the verified 5.0 aggregate, provides accessible five-star labeling, and links directly to Equity Funding Source's Google Business Profile. Google's public listing did not expose review bodies, so no quotes were invented or republished.
+
+- Changed `lib/ui--server--efs/home/index.ts`, `tests/home-copy.test.ts`, and `prds/equity-funding-source-lending-portal-prd.md`.
+- Verification: focused homepage test passed; `make check` passed with 2,295 tests, 0 failures, and successful site and Worker builds; desktop and mobile render checks passed.
+- Commit/push: `5f6b2b64 feat(home): add Google Reviews social proof` is on `origin/main`.
+- Staging: HTTP 200 with the new section live at https://equityfundingsource.brian-takita.workers.dev/; Worker version `1487d759-e645-4eea-ae3c-d80f9173bfee`.
+- Production: HTTP 200 with the new section live on both https://equityfundingsource.com/ and https://www.equityfundingsource.com/; Worker version `c20e5e80-121d-4922-83e6-0c17c0c975ac`.
+- Postflight: staging and production both report no pending D1 migrations; the repository is clean and synchronized. No GitHub Actions workflows are configured in this repository.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Add the Google Reviews for Equity Funding Source to the staging + production site. Place in the home page in an appropriate place for social proof. https://www.google.com/search?q=Equity+Funding+Source&stick=H4sIAAAAAAAA_-NgU1I1qLAwSDZKNk9JNU8zMEhLTTK0Mqgws7AwNDYzSjExNUg2NLVIWcQq6lpYmllSqeBWmpeSmZeuEJxfWpScCgCpNvZ-QQAAAA&hl=en&mat=CT2gUovxbaZtElcBa0lj_-TpmTUq8otGeH49HaUiQeNxD8gJEjPAQqixOC-YVe3hGa7-R6wHSDG3IFfzjwFsrkVxdHIElEh6xeNNkkupP1U6tcrPkt9ISbEN11GdkS-HlHU&authuser=1
 <!-- /agent:queue -->
 
 ## Backlog

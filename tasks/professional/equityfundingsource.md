@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
 resume: a6cd2cc7-b311-4090-b7de-fdbeb6a17520
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -33,141 +33,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260803-012144.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260804-054402.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #efs-prod-deploy-20d7a416; #efs-dev-vars-secret-history; do [#efs-dev-vars-local-rotate]
-- Prior summary/context: prior compacted content: Archived 15 response topic(s): cycle check; denied applications showing in Available Deals; ...
-
-### Re: do [#recommendedprunestale] — opus-5
-
-The check found unique work, so this could not be a plain delete. `worktree-playful-strolling-wilkinson` held one commit that never landed — 8c6434ec, "search-first existing-lender picker; TMO id at lender creation" — and `git cherry main` confirmed the patch was not in `main` under any hash. I ported it, verified it, then pruned.
-
-**Why a straight cherry-pick would have been wrong.** The branch's backend half called `user__set_lender_account_`, which no longer exists: `#lender-account-retire` dropped `users.lender_account` in migration `0140_lender_account_to_vesting.sql` because a TMO account belongs to a **vesting**, not to the lender row. So the UI half was still novel, the backend half was written against a data model that has since been replaced.
-
-**What landed** — EFS `main` `cde6a247`, pushed to `origin`:
-
-- `lib/ui--browser--efs/portal/admin/deal_detail.tsx` — `ExistingLenderCombobox` replaces the full-list `<select>` in the Add Interested Lender modal. Search by name or email, Enter picks the top match, Escape closes, selected state collapses to a chip with a "Change" button. The create-new fields move under a "Not found — add a new lender" heading and gain a TMO lender account input plus the `TmoLosPortalLink`. Filtering is extracted as exported `lender_search_matches_` so it is testable.
-- `app/equityfundingsource/lib/admin/investor_management/index.ts` — `admin_deals_by_id_interests_POST_` accepts `lender_account`, and for a lender EFS just created attaches it via `lender_vesting_attach_account_` (idempotent, never overwrites) instead of the retired user-row setter. An existing lender still posts its id alone; its vestings stay managed from the interest card.
-- `tests/dial-lender-search.test.ts` — 9 tests. The source-contract guards read the **whole function body** rather than a fixed byte window, so a later comment cannot slide the guarded call out of the slice. One guard asserts `user__set_lender_account_` is absent, so the retired path cannot ride back in with this port.
-
-Mutation-checked: deleting the `lender_vesting_attach_account_` block turns the suite red (2 fail), restoring it turns it green. `make check` is `2294 pass / 0 fail`, up from 2285 — typecheck and worker build included.
-
-**The prune itself:** `git worktree remove` on `.claude/worktrees/playful-strolling-wilkinson`, local branch deleted, `origin` branch deleted. `git worktree list` now shows only `main`, `.claude/worktrees/` is empty. The stale tracked `.dev.vars.example` carrying the pre-`3a2bfe30` `ADMIN_GLOBAL_PASSWORD` went with it — dead since `#efs-dev-vars-local-rotate`, so cleanup, not exposure.
-
-Not deployed. EFS has no CI workflow, so a live deploy is the remaining gate for this change; queued as a backlog item rather than pushed to production unasked.
-
-### Re: do [#recommendeddeploybrowser] — opus-5
-
-> **Queue prompt:**
->
-> do [#recommendeddeploybrowser]
-
-
-Deployed to both environments and verified in a real browser. You approved the production deploy mid-cycle, so both went out.
-
-**Staging** — `equityfundingsource.brian-takita.workers.dev`, version `29dc8278`. **Production** — `equityfundingsource.com` + `www`, version `03a6be21`. The production D1 migrate step reported `No migrations to apply!`, as expected: this change adds no schema.
-
-**Bundle grep** (both environments serve the identical 2,153,308-byte `index.browser-LWKIMFQ3.js`): `Search by name or email`, `Search existing lenders`, `TMO lender account`, `No matching active lenders`, `Not found — add a new lender`, `Open TMO LOS` all present; the old `Create from lender info below` `<option>` is gone. Note the asset 404s for roughly a minute after each deploy while it propagates — that is lag, not a failed upload.
-
-**Staging, end-to-end through the real UI.** Opened Loan #60's Interested Lenders tab, created a lender through the modal's "not found" path with TMO account `L-DIALVERIFY`, and got "Lender marked interested". Then confirmed the backend half in staging D1:
-
-```
-lender_vestings.tmo_lender_account = L-DIALVERIFY
-vesting_name                       = Dial Verify
-user                               = btak.dev+dialverify@gmail.com, role=lender, status=active
-```
-
-The account landed on a **vesting**, not on the user row — the `#lender-account-retire` behavior the port was written for, now proven against a live D1 rather than only a source-contract test. That lender then made the search path testable: typing `dial` surfaced `Dial Verify · btak.dev+dialverify@gmail.com`, clicking it collapsed the field to the selected chip with a "Change" button and enabled Submit.
-
-**Production, read-only.** Opened a deal's Add Interested Lender modal on `equityfundingsource.com`. The dropdown showed the real active-lender list — Gallante LLC, Wendy O'Brien, Robert W. Clemmer, RSLF Corp, Tadashi Graves, Tanaz Alishahi, scrolling past the panel — which is exactly the list that had gotten slow to scan. Typing `clemmer` narrowed it to one row. No submit, no writes, no rows created in production.
-
-Both verification tabs were opened isolated via CDP `PUT /json/new` and closed afterward; your existing tabs were never navigated.
-
-Two things worth knowing. The staging lender `Dial Verify` / `L-DIALVERIFY` is left in place — it is legitimate staging test data, it makes the picker demonstrable there (staging had zero active lenders before), and deleting a user row risks the soft-delete trigger for no benefit. And creating it sent a real portal-invite email to `btak.dev+dialverify@gmail.com`.
-
-### Re: do [#censible-env-committed-creds] — opus-5
-
-Fixed the tracked-file half in censible-core and pushed. The rotation question is genuinely external, so it moved to the censible-core document rather than staying here — the item's own note said to work this from a censible-core session, and that is where the remainder belongs.
-
-**Root cause, which the item did not name.** `.gitignore` had `/.env` and `/.env.*` — root-anchored, so only the repo-root env files were ever ignored. `apps/esg-web/.env`, `apps/finegar-etl/.env` and `apps/root-web/.env` were never covered, which is how a real credential got committed in the first place. Fixing only the file would have left the mechanism in place.
-
-**Landed — censible-core `e3ce5aaf` + `d2eec547`, pushed to `origin/main`:**
-
-- `.gitignore` now matches `.env` / `.env.*` at any depth, with `!.env.sample` so the template stays tracked.
-- All three `apps/*/.env` untracked. They stay on disk with their current contents, so direnv's `dotenv` still loads them locally — only the index changed. `git ls-tree HEAD` now shows `.env.sample` as the sole remaining env file, and `git grep FACTSET_FTP_PASSWORD= HEAD` is empty.
-- `.env.sample`: `SESSION_KEY` emptied to match that file's own convention for secrets (`ADMIN_PASSWORD=`, `AWS_SECRET_ACCESS_KEY=` and a dozen others are already blank), and the password embedded in `FACTSET_PG_URL` replaced with `__PASSWORD__`.
-
-**Two corrections to the item's picture.** The `FACTSET_PG_URL` password was a second committed credential the item never mentioned — though it is `postgres://admin:…@localhost/censible-dashboard-development`, a local dev database, so low value. And the item's `SESSION_KEY` is 25 characters, not 26.
-
-**Swept the rest of the repo rather than trusting the original list.** No other tracked file embeds a credential. Two things that look alarming and are not: the `ftp://…:…@` in `apps/finegar-etl/src/factset/ftp_transfer.ts` is a template literal built from env accessors, not a hardcoded secret; and the four tracked `caddy/*-key.pem` private keys are **mkcert local development certificates** (issuer `O=mkcert development CA`, expired 2024), trusted only by the CA on the machine that made them.
-
-One process note worth recording: the first commit silently did not untrack anything. `git commit --only <paths>` rebuilds those paths from the **working tree**, and since the `.env` files still existed on disk it restored them to the index and undid the `git rm --cached`. `git status` came back clean, which reads like success. The untracking only landed on the second attempt, staging the deletions and committing the index directly.
-
-Not done, and not something this session can settle: the credential is still in git history, and whether the FactSet FTP account is even live — and therefore whether it needs rotating with FactSet — is an external question. Both are now tracked in `tasks/censible-core.md`. The private repo plus a dormant project is why history rewriting is a judgement call rather than an obvious yes.
-
-Exchange is long and preflight reports `session_accretion: warn`; the queue is active so I am noting it and continuing rather than pausing to compact.
-
-### Re: do [#censiblecorefollow] — opus-5
-
-> **Queue prompt:**
->
-> do [#censiblecorefollow]
-
-
-I have to correct myself first, because the premise this item inherited from me was wrong.
-
-**The tracked file was not carrying a secret.** `apps/finegar-etl/.env` held `"$(passage finegar/FACTSET_FTP_LOGIN)"` and `"$(passage finegar/FACTSET_FTP_PASSWORD)"` — shell substitutions that read from passage at load time. The "36-char login / 39-char password" in `#censible-env-committed-creds` was measuring the length of those *reference strings*, and my own redacted inventory made the same mistake: my placeholder detector recognised `${...}` but not `$(...)`, so a passage reference scored as VALUE-PRESENT. Commit `f839e701b` (2026-03-14, "Replace hardcoded FTP credentials with pass references") had already fixed this five months ago. So the censible-core commit body I wrote saying the file "carries a real FactSet FTP login and password" was false in the present tense.
-
-The `.gitignore` fix and the `.env.sample` postgres placeholder from last cycle stand on their own — the root-anchored rules really are why literals reached the index in 2022, and that really was a committed password.
-
-**The actual exposure is in history, and it is live.** Real literals — a 12-character login and an **8-character** password — sat in `apps/finegar-etl/.env` from `d19a6c0f` (2022-06-10) until `f839e701b` (2026-03-14). Five commits carry them.
-
-The decisive test: I SHA-256'd the historical literals and compared against what `passage finegar/FACTSET_FTP_*` returns today, without printing either.
-
-```
-FACTSET_FTP_LOGIN     history=12 chars, passage=12 chars -> IDENTICAL
-FACTSET_FTP_PASSWORD  history= 8 chars, passage= 8 chars -> IDENTICAL
-```
-
-**It has never been rotated.** The value sitting in four-year-old git history is byte-for-byte the credential the ETL would authenticate with right now. That converts the item's open question from "is this worth worrying about" into a concrete answer.
-
-**And the endpoint is live.** `FTS.Factset.com` resolves to `192.234.235.5` and port 21 answers with `220-Security Notice / You are about to access a secured resource. FactSet: File Transfer`. I read the banner only — I did not authenticate, since doing so would put a live credential on the wire against a third party to learn something the banner already implies.
-
-**Recommendation, in order.** Rotate with FactSet, then update `passage finegar/FACTSET_FTP_*`. Rotation is what actually closes this: it makes every historical copy worthless in one step, and it is the only step that helps if the repo was ever cloned. History rewriting is *optional cleanup afterwards*, not an alternative — it cannot un-disclose anything, it only tidies a private repo, and it invalidates every existing clone. An 8-character password is weak enough that rotating to something longer is worth doing on its own merits.
-
-What I cannot do from here is the rotation itself: it needs a FactSet account action. The item is gated on that rather than left open, and its text now carries the corrected facts so the next reader is not working from the wrong premise.
-
-### Re: do [#tmo-prod-schedule-artifact-confirm] — opus-5
-
-> **Queue prompt:**
->
-> do [#tmo-prod-schedule-artifact-confirm]
-
-
-Confirmed, with a control. Production `platform_settings` reports `tmo_backup_last_key = tmo-backups/2026-08-02/2026-08-02T17-15-48-000Z.json`, `tmo_backup_last_status = complete`, `tmo_backup_last_error` empty, interval still 24h.
-
-I counted the two post-deploy artifacts **and** the two before them, because a count with no baseline cannot distinguish "schedules started flowing" from "schedules were always there and nobody looked."
-
-```
-artifact      loans  w/sched   rows
-2026-07-30       30        0      0
-2026-07-31       31        0      0
-2026-08-01       31       14     43
-2026-08-02       31       14     43
-```
-
-**`tmo-backups/2026-08-01/2026-08-01T17-15-48-000Z.json` is the first schedule-bearing production artifact** — exactly the prediction. The two pre-deploy runs are flat zero across 61 loan records, so the jump is attributable to the 20d7a416 deploy and not to sampling.
-
-The estimate was close: 14 of 31 loans rather than "roughly 12", 43 rows. One shape difference worth noting against the sandbox figure of 34 rows over 26 loans — production is carrying about 3.1 rows per schedule-bearing loan versus sandbox's 1.3, and the distribution is tight (thirteen loans at 3 rows, one at 4). That is a real difference in the underlying data, not a defect, but it means sandbox row counts are not a proxy for production volume if anything downstream sizes off them.
-
-Both artifacts are byte-identical in these counts, which is expected: the 08-02 run re-pulled the same 31 loans a day later with no schedule churn.
-
-Handling: each artifact was written to a scratch file, counted programmatically, and deleted. No record contents entered this transcript or any durable file — the loan and borrower arrays carry production PII (names, DOB, email, phone, income).
-
-I have edited `#tmo-clone-apply` to name the confirmed source key. Its third precondition — "use a backup captured after 20d7a416, the recorded 2026-07-30 key carries no payment-schedule rows" — is now settled rather than pending. It stays gated, because its other two blockers are unchanged and genuinely operator-owned: creating `passage btak/equityfundingsource/anonymize_seed` (permanent once set), and an explicit go for the destructive sandbox-delete and staging wipe-and-load.
-
-On this cycle's admission: the contract arrived with its marker but an empty body again, and `plan` and `session-check` both failed with `editor is still attached ... missing_replica recovery exhausted and disk read authority is refused`. IntelliJ is live, so neither force-disk nor hand-aligning disk was permissible. `agent-doc admin reload-lib` cleared it — delivery reached 1 of 3 editor endpoints with 2 unavailable, the stale-peer signature that preflight's `stale_install` warning has been flagging on every cycle this session. After that, `session-check` returned ok and `plan` produced a normal contract, which is what this cycle ran from.
+- Archived 5 response topic(s): do [#recommendedprunestale]; do [#recommendeddeploybrowser]; do [#censible-env-committed-creds]; 2 more
+- Prior summary/context: prior compacted content: Archived 3 response topic(s): #efs-prod-deploy-20d7a416; #efs-dev-vars-secret-history; do [#...
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 

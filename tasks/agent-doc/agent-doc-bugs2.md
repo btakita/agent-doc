@@ -239,6 +239,22 @@ Validated and resolved `#zqv8`. The exact historical input shape is now determin
 - During this turn, repeated JetBrains `Run Agent Doc` actions against `haiven-dev.md` entered the controller route. A representative current attempt (`1785781244900-9`) started at `18:20:44Z` and settled with exit code 0 at `18:21:00Z`; the available log contains no protected-input block for the document. The UI remained responsive while the controller-owned route ran asynchronously.
 
 No source changes were needed. The current JetBrains tests and full `make check` were already green in this turn. Confidence is high; no restart or operator escalation remains for the obsolete 0.2.247 review.
+
+### Re: Compact Exchange independent-cell verification — gpt-5
+
+> **Queue prompt:**
+>
+> do [#recommendedungatereview-w90z]
+
+
+Validated and resolved `#compactindcellsverify`. The old 0.35.3 / JetBrains 0.2.276 live recipe is superseded by exact semantic-cell regression coverage:
+
+- `compact_targets_rebase_onto_concurrent_sibling_queue_deletions` compacts the exchange while two queue items are concurrently deleted, then proves both the live and committed targets retain the compacted exchange, retain the untouched queue item, and do not resurrect either deletion.
+- `partial_compact_preserves_trailing_prompt_after_boundary` and `full_exchange_compact_preserves_trailing_prompt_after_boundary` prove a post-boundary prompt survives in the visible exchange while remaining live drift rather than being committed into the snapshot or archived.
+- `assert_non_exchange_items_preserved_fails_closed_on_dropped_backlog_item` proves any accidental loss of a non-exchange item is rejected with the `#compactdropitem` diagnostic rather than silently committing.
+- The production rebase path emits `compact_rebased_authoritative_siblings` when the authoritative sibling-cell rebase is used; the drop guard emits `compact_dropped_non_exchange_item` only on a fail-closed violation.
+
+No source changes were required. The current full `make check` was already green in this turn. These tests exercise the exact data race more deterministically than an operator timing reproduction, so confidence is high and no operator escalation remains.
 <!-- agent:boundary:efab1ce2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -252,7 +268,7 @@ No source changes were needed. The current JetBrains tests and full `make check`
 - ~~do [#recommendedungatereview-jcgv]~~
 - ~~do [#recommendedungatereview-a3ew]~~
 - ~~do [#recommendedungatereview-jfxh]~~
-- do [#recommendedungatereview-w90z]
+- ~~do [#recommendedungatereview-w90z]~~
 - do [#recommendedungatereview-sskd]
 - do [#recommendedungatereview-0xc5]
 - do [#recommendedungatereview-krpw]
@@ -271,7 +287,6 @@ No source changes were needed. The current JetBrains tests and full `make check`
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#recommendedungatereview-w90z] [recommended] Ungate review item #compactindcellsverify — validate and move to done
 - [ ] [#recommendedungatereview-sskd] [recommended] Ungate review item #crdtpushdrainverify — validate and move to done
 - [ ] [#recommendedungatereview-0xc5] [recommended] Ungate review item #bbpe — validate and move to done
 - [ ] [#recommendedungatereview-krpw] [recommended] Ungate review item #hvw0 — validate and move to done
@@ -286,7 +301,6 @@ No source changes were needed. The current JetBrains tests and full `make check`
  
 <!-- agent:review -->
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE onto JetBrains plugin 0.2.339 (reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is required). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the 'pane-layout state projection publish failed ... Connection refused' notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.
-- [/] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [/] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
 - [/] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - [/] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)

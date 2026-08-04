@@ -1073,3 +1073,5 @@
 - 2026-08-03 [#recommendedungatereview-a3ew] [recommended] Ungate review item #r4gq — validate and move to done
 - 2026-08-03 [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
 - 2026-08-03 [#recommendedungatereview-jfxh] [recommended] Ungate review item #zqv8 — validate and move to done
+- 2026-08-03 [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
+- 2026-08-03 [#recommendedungatereview-w90z] [recommended] Ungate review item #compactindcellsverify — validate and move to done

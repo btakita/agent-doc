@@ -163,7 +163,32 @@ Rust now has a `CommandAdmitter` in front of the unchanged pure `CommandProjecti
 Added `tests/decorative_wire_fields.rs` plus `tests/fixtures/decorative_wire_fields.json`. The fixture mutates each decoded field and requires a distinct semantic decision, so decoding and then ignoring any one of them makes the test fail. I also recorded the newly published append-only outbox-journal fixture as explicitly uncovered by Rust because Rust's durable outbox is SQLite-backed and has no append-only journal decoder; this keeps the repository-wide coverage ledger truthful.
 
 Verification is green locally: focused decoded-wire tests, command conformance, all-feature library/test Clippy with warnings denied, the conformance coverage target, and the full `make check` (1,202 output lines, zero failures). Published Rust commit `57f9eef7663a5a9c75afca7c6817b411478b5766` and superproject pin `08fa3aaca526e1c7326851499b3a682bdc380a70`. GitHub CI started cleanly: formatting, Clippy, signaling, and Lean are green; the remaining Rust and superproject jobs are still in progress, recorded as asynchronous projection state rather than treated as an ACK gate.
-<!-- agent:boundary:7597abb3:lazily -->
+
+Rust now has a `CommandAdmitter` in front of the unchanged pure `CommandProjection`. Decoded command fields drive actual admission outcomes:
+
+- `dedupe` distinguishes command-ID replay, no cross-command dedupe, and idempotency-key dedupe.
+- `supersede` preempts an older non-terminal command sharing the key; the older command's `cancel_on_preempt` controls whether an explicit cancel is permitted.
+- `deadline_ms` rejects at the logical-clock deadline boundary.
+- `payload_type` must be qualified by the decoded namespace and command name.
+- `required_features` fails closed against the target's advertised feature set.
+- receipt `observer` must match the decoded command target before the receipt can fold into projection.
+- `CapabilityHandshake.session_id` was already made load-bearing by the preceding handshake change; the new decoded-wire fixture also pins mismatch rejection.
+
+Added `tests/decorative_wire_fields.rs` plus `tests/fixtures/decorative_wire_fields.json`. The fixture mutates each decoded field and requires a distinct semantic decision, so decoding and then ignoring any one of them makes the test fail. I also recorded the newly published append-only outbox-journal fixture as explicitly uncovered by Rust because Rust's durable outbox is SQLite-backed and has no append-only journal decoder; this keeps the repository-wide coverage ledger truthful.
+
+Verification is green locally: focused decoded-wire tests, command conformance, all-feature library/test Clippy with warnings denied, the conformance coverage target, and the full `make check` (1,202 output lines, zero failures). Published Rust commit `57f9eef7663a5a9c75afca7c6817b411478b5766` and superproject pin `08fa3aaca526e1c7326851499b3a682bdc380a70`. GitHub CI started cleanly: formatting, Clippy, signaling, and Lean are green; the remaining Rust and superproject jobs are still in progress, recorded as asynchronous projection state rather than treated as an ACK gate.
+### Re: `#lzdecorativewirefields` — gpt-5
+
+Implemented the decoded fields as behavior, not field-touch bookkeeping.
+
+❯ `dedupe` distinguishes command-ID replay, no cross-command dedupe, and idempotency-key dedupe.
+
+### Re: projected dedupe fragment — gpt-5
+
+This is not a new operator directive. It is a projected bullet from the already committed `#lzdecorativewirefields` response. The behavior is already implemented in Rust commit `57f9eef7663a5a9c75afca7c6817b411478b5766`, locally verified by the decoded-wire fixture and full `make check`, and pinned by superproject commit `08fa3aaca526e1c7326851499b3a682bdc380a70`.
+
+No repository paths changed, no new command was required, no escalation occurred, and no follow-up is created. Confidence is high because the fragment is byte-identical to the preceding assistant response rather than independent operator text.
+<!-- agent:boundary:d4431abd:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue

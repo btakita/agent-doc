@@ -45,11 +45,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
     private val latestSurfaceObservation = AtomicReference<PendingSurfaceObservation?>(null)
 
     /**
-     * Every project root this instance has observed. Controller projection membership is released
-     * on project close through `editor_surface_forget`; controller cursors fence late reload
-     * callbacks independently.
+     * One editor surface has one active controller root. When a cross-root split changes which
+     * root spans the whole surface, the old controller projection must be retired immediately;
+     * otherwise both controllers keep reconciling the same tmux window from incompatible retained
+     * layouts.
      */
-    private val observedRoots: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val surfaceRoots = SurfaceRootOwnership()
 
     /**
      * Debounce generation. Per-instance, so one project's tab churn cannot supersede another
@@ -94,34 +95,15 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
     internal enum class ObservationAuthority {
         Layout,
-        ComponentFocus,
         DocumentSelection,
-    }
-
-    internal object ObservationProjection {
-        fun shouldReplace(
-            currentAuthority: ObservationAuthority?,
-            currentFile: String?,
-            incomingAuthority: ObservationAuthority,
-            incomingFile: String?,
-        ): Boolean {
-            if (
-                currentAuthority == ObservationAuthority.DocumentSelection &&
-                incomingAuthority == ObservationAuthority.ComponentFocus
-            ) {
-                return currentFile == incomingFile
-            }
-            return true
-        }
     }
 
     /**
      * The pending slot protects editor-event ordering only until the EDT has captured a
      * self-consistent surface. Controller delivery can take seconds while it proves pane
-     * ownership and realizes a layout, so retaining a DocumentSelection in this slot during
-     * that I/O would incorrectly reject a newer ComponentFocus as a stale opposite-editor
-     * callback. Release before entering the delivery executor; restore only when the same
-     * generation failed and no newer observation has occupied the slot.
+     * ownership and realizes a layout, so the slot must not retain an already-captured selection
+     * while that I/O runs. Release before entering the delivery executor; restore only when the
+     * same generation failed and no newer observation has occupied the slot.
      */
     internal object ObservationDeliveryOwnership {
         fun <T : Any> releaseForDelivery(
@@ -133,6 +115,31 @@ class EditorTabSyncListener : FileEditorManagerListener {
             slot: AtomicReference<T?>,
             captured: T,
         ): Boolean = slot.compareAndSet(null, captured)
+    }
+
+    internal class SurfaceRootOwnership {
+        private val activeRoot = AtomicReference<String?>(null)
+        private val observedRoots: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+        fun recordAttempt(root: String) {
+            observedRoots.add(root)
+        }
+
+        fun markPublished(root: String): List<String> {
+            observedRoots.add(root)
+            activeRoot.set(root)
+            return observedRoots.filter { it != root }.sorted()
+        }
+
+        fun markForgotten(root: String): Boolean =
+            activeRoot.get() != root && observedRoots.remove(root)
+
+        fun drain(): List<String> {
+            activeRoot.set(null)
+            val roots = observedRoots.toList().sorted()
+            observedRoots.clear()
+            return roots
+        }
     }
 
     /**
@@ -333,24 +340,7 @@ private data class PendingSurfaceObservation(
     private fun requestObservation(
         observation: PendingSurfaceObservation,
     ) {
-        while (true) {
-            val current = latestSurfaceObservation.get()
-            if (
-                !ObservationProjection.shouldReplace(
-                    currentAuthority = current?.authority,
-                    currentFile = current?.preferredFile?.path,
-                    incomingAuthority = observation.authority,
-                    incomingFile = observation.preferredFile?.path,
-                )
-            ) {
-                log(
-                    "observe: retained ${current?.authority} file=${current?.preferredFile?.name} " +
-                        "over ${observation.authority} file=${observation.preferredFile?.name}",
-                )
-                return
-            }
-            if (latestSurfaceObservation.compareAndSet(current, observation)) break
-        }
+        latestSurfaceObservation.set(observation)
         val requested = generation.incrementAndGet()
         projectLatestSurfaceOnEditorThread(requested)
     }
@@ -420,7 +410,10 @@ private data class PendingSurfaceObservation(
                         log("socket delivery: superseded gen=$requestedGeneration")
                         return@execute
                     }
-                    observedRoots.add(pending.projectRoot)
+                    synchronized(lifecycleLock) {
+                        if (closed) return@execute
+                        surfaceRoots.recordAttempt(pending.projectRoot)
+                    }
                     val receipt =
                         CpRouteClient.observeEditorSurface(
                             projectRoot = pending.projectRoot,
@@ -438,6 +431,33 @@ private data class PendingSurfaceObservation(
                                 "${pending.relativePath}: ${receipt.output}",
                         )
                         return@execute
+                    }
+                    val obsoleteRoots =
+                        synchronized(lifecycleLock) {
+                            if (closed) {
+                                null
+                            } else {
+                                surfaceRoots.markPublished(pending.projectRoot)
+                            }
+                        }
+                    if (obsoleteRoots == null) {
+                        CpRouteClient.forgetEditorSurface(pending.projectRoot)
+                        surfaceRoots.markForgotten(pending.projectRoot)
+                        return@execute
+                    }
+                    for (obsoleteRoot in obsoleteRoots) {
+                        if (CpRouteClient.forgetEditorSurface(obsoleteRoot)) {
+                            surfaceRoots.markForgotten(obsoleteRoot)
+                            log(
+                                "observe: retired superseded surface root=$obsoleteRoot " +
+                                    "active=${pending.projectRoot}",
+                            )
+                        } else {
+                            log(
+                                "observe: superseded surface root retirement deferred root=" +
+                                    "$obsoleteRoot active=${pending.projectRoot}",
+                            )
+                        }
                     }
                     log("observe: published file=${pending.relativePath}")
                 }
@@ -633,14 +653,14 @@ private fun captureSurface(
     }
 
     private fun shutdown() {
-        synchronized(lifecycleLock) {
-            closed = true
-            focusGeneration.incrementAndGet()
-            focusDeliveryExecutor.shutdownNow()
-            surfaceDeliveryExecutor.shutdownNow()
-        }
-        val roots = observedRoots.toList()
-        observedRoots.clear()
+        val roots =
+            synchronized(lifecycleLock) {
+                closed = true
+                focusGeneration.incrementAndGet()
+                focusDeliveryExecutor.shutdownNow()
+                surfaceDeliveryExecutor.shutdownNow()
+                surfaceRoots.drain()
+            }
         latestSurfaceObservation.set(null)
         Thread(
                 {
@@ -698,14 +718,6 @@ private fun captureSurface(
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         requestImmediateFocus(project, file)
-        requestObservation(
-            PendingSurfaceObservation(
-                project = project,
-                preferredFile = file,
-                forceReconcile = false,
-                authority = ObservationAuthority.ComponentFocus,
-            ),
-        )
         log("focusGained: file=${file.name}")
     }
 

@@ -79,33 +79,9 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `transient opposite editor focus cannot replace a pending document selection`() {
-        assertFalse(
-            EditorTabSyncListener.ObservationProjection.shouldReplace(
-                currentAuthority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
-                currentFile = "/repo/left-next.md",
-                incomingAuthority = EditorTabSyncListener.ObservationAuthority.ComponentFocus,
-                incomingFile = "/repo/right.md",
-            ),
-        )
-    }
-
-    @Test
-    fun `a later component focus replaces a completed surface projection`() {
-        assertTrue(
-            EditorTabSyncListener.ObservationProjection.shouldReplace(
-                currentAuthority = null,
-                currentFile = null,
-                incomingAuthority = EditorTabSyncListener.ObservationAuthority.ComponentFocus,
-                incomingFile = "/repo/right.md",
-            ),
-        )
-    }
-
-    @Test
     fun `captured selection releases precedence while controller delivery is in flight`() {
         val captured = Any()
-        val newerFocus = Any()
+        val newerObservation = Any()
         val slot = AtomicReference<Any?>(captured)
 
         assertTrue(
@@ -114,14 +90,14 @@ class EditorTabSyncListenerTest {
                 captured,
             ),
         )
-        assertTrue(slot.compareAndSet(null, newerFocus))
+        assertTrue(slot.compareAndSet(null, newerObservation))
         assertFalse(
             EditorTabSyncListener.ObservationDeliveryOwnership.retainAfterFailure(
                 slot,
                 captured,
             ),
         )
-        assertEquals(newerFocus, slot.get())
+        assertEquals(newerObservation, slot.get())
     }
 
     @Test
@@ -145,14 +121,32 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `newer document selection replaces every older observation authority`() {
-        assertTrue(
-            EditorTabSyncListener.ObservationProjection.shouldReplace(
-                currentAuthority = EditorTabSyncListener.ObservationAuthority.ComponentFocus,
-                currentFile = "/repo/right.md",
-                incomingAuthority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
-                incomingFile = "/repo/left-next.md",
-            ),
+    fun `publishing through a new controller root retires the prior layout authority`() {
+        val ownership = EditorTabSyncListener.SurfaceRootOwnership()
+
+        ownership.recordAttempt("/repo/nested")
+        assertTrue(ownership.markPublished("/repo/nested").isEmpty())
+
+        ownership.recordAttempt("/repo")
+        assertEquals(listOf("/repo/nested"), ownership.markPublished("/repo"))
+        assertTrue(ownership.markForgotten("/repo/nested"))
+        assertTrue(ownership.markPublished("/repo").isEmpty())
+        assertEquals(listOf("/repo"), ownership.drain())
+    }
+
+    @Test
+    fun `failed superseded root retirement remains retryable`() {
+        val ownership = EditorTabSyncListener.SurfaceRootOwnership()
+
+        ownership.recordAttempt("/repo/nested")
+        ownership.markPublished("/repo/nested")
+        ownership.recordAttempt("/repo")
+
+        assertEquals(listOf("/repo/nested"), ownership.markPublished("/repo"))
+        assertEquals(
+            "an unacknowledged forget must remain eligible for the next delivery",
+            listOf("/repo/nested"),
+            ownership.markPublished("/repo"),
         )
     }
 
@@ -452,7 +446,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `document selection publishes layout and immediate document-root focus`() {
+    fun `document selection publishes layout while component focus stays selection-only`() {
         val source =
             Files.readString(
                 Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
@@ -480,7 +474,7 @@ class EditorTabSyncListenerTest {
                 .substringAfter("fun onEditorFocusGained(project: Project, file: VirtualFile)")
                 .substringBefore("fun onEditorLayoutChanged")
         assertTrue(focusGained.contains("requestImmediateFocus(project, file)"))
-        assertTrue(focusGained.contains("requestObservation("))
+        assertFalse(focusGained.contains("requestObservation("))
         assertFalse(focusGained.contains("delayMs"))
 
         val immediateFocus =
@@ -606,9 +600,35 @@ class EditorTabSyncListenerTest {
 
         assertTrue(reportBody.contains("CpRouteClient.observeEditorSurface("))
         assertTrue(reportBody.contains("surfaceDeliveryExecutor.execute"))
+        assertTrue(reportBody.contains("synchronized(lifecycleLock)"))
+        assertTrue(reportBody.contains("if (closed)"))
+        assertTrue(reportBody.contains("surfaceRoots.markPublished("))
+        assertTrue(reportBody.contains("CpRouteClient.forgetEditorSurface("))
+        assertTrue(reportBody.contains("surfaceRoots.markForgotten("))
         assertFalse(reportBody.contains("requestObservation("))
         assertFalse(reportBody.contains("NativeAdminControls.editorSurface"))
         assertFalse(reportBody.contains("editorSurfaceObserve("))
         assertFalse(reportBody.contains("syncHintFromReceipt("))
+    }
+
+    @Test
+    fun `component focus uses the selection-only lane`() {
+        val listenerPath =
+            listOf(
+                    Paths.get(
+                        "src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"
+                    ),
+                    Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"
+                    ),
+                )
+                .first { Files.exists(it) }
+        val focusBody =
+            Files.readString(listenerPath)
+                .substringAfter("fun onEditorFocusGained(project: Project, file: VirtualFile)")
+                .substringBefore("fun onEditorLayoutChanged(project: Project)")
+
+        assertTrue(focusBody.contains("requestImmediateFocus(project, file)"))
+        assertFalse(focusBody.contains("requestObservation("))
     }
 }

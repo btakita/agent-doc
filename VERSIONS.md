@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.137
+
+- **JetBrains editor surfaces retire superseded controller roots.** A mixed-root
+  split could publish the same editor surface through the workspace controller
+  and then a nested-project controller without forgetting the first retained
+  projection. Both controllers remained healthy but reconciled one tmux window
+  from incompatible layouts, repeatedly moving the other live pane into
+  `stash` and leaving it one line tall. The listener now keeps one active
+  controller-root subscription per editor surface, generation-fenced-forgets
+  older roots only after the replacement publish succeeds, and retries a
+  failed retirement on the next publication. Component-focus events now stay
+  on the targeted selection lane instead of republishing unchanged structural
+  layout. JetBrains plugin `0.2.346` carries the fix.
+
 ## 0.35.136
 
 - **Replay-repair settlement uses the same capture-scoped proof as

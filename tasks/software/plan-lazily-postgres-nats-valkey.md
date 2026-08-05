@@ -4,6 +4,13 @@
 **Created:** 2026-08-05
 **Session:** `tasks/software/lazily.md`
 
+**Related private plans:**
+
+- `plan-lazily-temporal-adapter.md` keeps Temporal History authoritative and
+  hosts Lazily as the deterministic reactive projection layer.
+- `plan-lazily-temporal-replacement.md` uses this Postgres/NATS/Valkey runtime
+  as an application-level Temporal replacement.
+
 ## Goal
 
 Extend Lazily from an in-process reactive state and scheduling library into a
@@ -59,6 +66,9 @@ be compiled into the core crate:
   implementations;
 - `lazily-nats-jetstream`: JetStream ingress, delivery leases, publisher,
   wakeups, and dead-letter integration;
+- `lazily-temporal`: deterministic Temporal workflow projection, Signals and
+  Updates ingress, workflow timers, Activities, child workflows, cancellation,
+  replay, and Continue-As-New integration;
 - `lazily-valkey`: optional caches, rate limiting, and disposable coordination.
 
 These can live as sibling packages in the Lazily repository initially, sharing
@@ -140,6 +150,57 @@ Keep employer-confidential examples, subjects, schemas, incidents, and code out
 of public Lazily repositories even when the underlying architectural pattern is
 public. This section is a project gate, not legal advice; the signed agreements
 and applicable state law control.
+
+## Authority modes
+
+Choose one durable transition authority for each owner. Do not stack both modes
+over the same workflow state.
+
+### Native Lazily durable host
+
+- Lazily owns the state/reducer protocol.
+- Postgres owns accepted state, events, inbox/outbox, timers, receipts, and
+  fences.
+- JetStream transports ingress and publications.
+- Valkey may accelerate reconstructible operations.
+
+### Temporal-hosted Lazily
+
+- Temporal workflow history owns durable workflow state and replay.
+- Lazily runs as the deterministic reactive decision layer inside a workflow
+  worker.
+- Temporal Signals and Updates become observed `Source` facts.
+- Distinct Lazily decisions schedule workflow timers, child workflows, or
+  Activities through an idempotent effect boundary.
+- Activity completions and workflow command history become observed receipts.
+- Continue-As-New supplies bounded-history compaction.
+- NATS ingress/egress runs through deterministic Signal/Update submission or
+  retryable Activities; broker calls never execute directly in replaying
+  workflow code.
+- Postgres remains available for application data and transactional outboxes,
+  but it does not duplicate Temporal workflow history or authorize the same
+  transition.
+- Valkey remains disposable acceleration outside deterministic workflow code.
+
+Self-hosted Temporal and Temporal Cloud use the same Lazily adapter semantics;
+deployment, credentials, namespace management, and server operations differ,
+not the ownership model.
+
+### Temporal adapter requirements
+
+- workflow-safe deterministic context with no ambient clock, randomness,
+  thread scheduling, network I/O, or filesystem I/O;
+- stable mapping from workflow history positions and external request ids to
+  Lazily observation/effect identities;
+- Signal and Update ordering, validation, deduplication, and rejection policy;
+- workflow timer and cancellation adapters;
+- Activity/child-workflow effect sinks with stable ids and explicit retry
+  ownership;
+- replay tests proving that the same history emits the same command sequence;
+- Continue-As-New projection and rehydration tests;
+- NATS bridge fixtures covering redelivery before and after Signal/Update
+  acceptance and Activity completion;
+- conformance tests that reject dual authority with the native Postgres host.
 
 ## Required Lazily capabilities
 

@@ -549,6 +549,11 @@ The plan stays planning-only until IP clearance. No Haiven code, contract, or re
 
 ### Re: Lazily feature gap for the FPE topology
 
+> **Queue prompt:**
+>
+> Please read /home/brian/work/btakita/agent-loop/src/haiven-dev/src/fpe-scale-spike/docs/fpe-service-topology.md. Create a plan for a Temporal-like features to support src/fpe-scale-spike/docs/fpe-service-topology.md & NATS integration. Note that I am under agreement with Haiven, so will need to clear IP first. But please create the plan anyways.
+
+
 Yes: **Postgres and NATS are the two primary integrations. Valkey is beneficial, but only as an optional disposable acceleration layer.**
 
 The current Lazily family already has much of the *pure semantic core*:
@@ -662,14 +667,48 @@ The smallest useful slice is:
 7. optional Valkey cache after correctness is demonstrated without it.
 
 That ordering gives the plan its Temporal-like durability first. Valkey improves latency and load later; it does not close a correctness gap.
+
+### Re: `#lazilystatetable` — typed settlement table without request/ACK
+
+Implemented and pushed the Agent Doc pilot. The retained-write reducer is now an eight-row finite semantic table inside the existing document-scoped Lazily graph.
+
+- **Invariant/policy owner:** `RetainedSettlementTable` owns the total settlement decision; the durable document projection still owns intent identity, ordering, hashes, and receipts. Storage hydrates observations but never authorizes a transition.
+- **Transition rows covered:** no intent; unobserved planes; authority/disk divergence; exact target; rebased payload materialized; superseded delta materialized; superseded later closeout stage; and converged content missing the payload. Coverage asserts all eight constructible rows and all eight decision/proof outcomes—there is no invalid catch-all row.
+- **Reactive topology:** document-scoped `Source` observations → `thread_safe_projected_state_table` input classifier → `Computed<SettlementDecision>` → downstream `Computed<SettlementVerdict>` hydration → existing idempotent effects/receipts. Raw hash churn that preserves the semantic row stops at the guarded projection while the public verdict still carries the current observed hash.
+- **Imperative calls removed/excluded:** no editor request, ACK wait, polling loop, sidecar runtime, or second authority was added. Transport/editor receipts remain observed facts; they are not transition gates.
+- **Edited surfaces:** only `agent-doc-state-backbone/src/retained_write.rs` changed in the runtime, preserving its public verdict and durable event schemas. The scoped plan was updated at `tasks/software/plan-lazily-state-tables.md`.
+- **Verification:** focused retained-write tests and the full Agent Doc `make check` passed locally. Agent Doc commit `a4c0c69b1` and the root plan/submodule pin commit `008895c9fc` are pushed. Remote Agent Doc CI run `30983459260` and root Agent Doc run `30983906168` are active; neither has reported a failure. The root-wide local gate separately encountered an unrelated existing `corky-core --lib` failure after the Agent Doc gate passed.
+- **Remaining work:** `[migration]` Phase 4 is semantic parity in `lazily-spec` and only the ports that are full reactive cores. `[operator verification]` inspect the two active CI runs when terminal; fix any task-related failure.
+
+### Re: Postgres, NATS, Valkey, project boundaries, and language rollout
+
+The durable-runtime plan is now in `tasks/software/plan-lazily-postgres-nats-valkey.md`.
+
+The recommended project shape is Lazily as the umbrella, not one dependency-heavy crate:
+
+- core and backend-neutral durability/conformance contracts live in Lazily;
+- sibling packages provide `lazily-postgres`, `lazily-nats-jetstream`, and optional `lazily-valkey` implementations;
+- a deployable worker/control plane and Haiven-specific workflow remain a separate consuming project.
+
+Do not duplicate all three adapters across every supported language. Rust should be the first full durable/distributed host; `lazily-spec` should own the crash, redelivery, fencing, and receipt corpus. Other ports claim capability tiers—core, client, durable host, distributed host, accelerated host—and gain native hosting only when a real deployment requires it and the implementation can pass the shared corpus. Thin NATS publishers/observers do not need to reproduce the Postgres/outbox/lease stack. Valkey remains optional, bypassable acceleration rather than authority.
+
+### Re: IP/public-knowledge gate
+
+> **Queue prompt:**
+>
+> do [#lazilystatetable]
+
+
+The generic “Lazily + Temporal + NATS” architecture is public knowledge. Lazily declares MIT, [Temporal Server is MIT](https://github.com/temporalio/temporal/blob/main/LICENSE), [NATS Server is Apache-2.0](https://github.com/nats-io/nats-server/blob/main/LICENSE), and [17 U.S.C. § 102(b)](https://uscode.house.gov/view.xhtml?edition=prelim&num=0&req=granuleid%3AUSC-prelim-title17-section102%28a%29%282%29) excludes ideas, systems, processes, and methods of operation from copyright.
+
+That does not settle contractual ownership of a particular implementation. The planned conversation should produce a written boundary identifying pre-existing Lazily as prior work, reserving generic adapters/conformance for the open-source project, assigning Haiven-specific workflows/schemas/configuration separately, and stating the rules for upstream contributions, employer time/equipment/accounts, and invention disclosure. The plan now records this as an explicit IP gate; signed agreements and applicable law control.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- Please read /home/brian/work/btakita/agent-loop/src/haiven-dev/src/fpe-scale-spike/docs/fpe-service-topology.md. Create a plan for a Temporal-like features to support src/fpe-scale-spike/docs/fpe-service-topology.md & NATS integration. Note that I am under agreement with Haiven, so will need to clear IP first. But please create the plan anyways.
-- do [#lazilystatetable]
+- ~~do [#lazilystatetable]~~
 - do [#reliablesyncrow]
 - do [#rootlevelconformance]
 - do [#lzfixturediscrim]
@@ -683,7 +722,6 @@ That ordering gives the plan its Temporal-like durability first. Valkey improves
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.
 - [ ] [#lzfixturediscrim] A fixture can be opened, have every key consumed, have every key asserted - and still be unfalsifiable, because its data cannot distinguish the claim it makes. Found in lazily-cs while closing #lzconsumednotasserted: reversing SignalingRoom's roster sort still PASSED, because the canonical anti_spoof_session.json transcript never produces a roster with more than one entry, so no ordering is observable and every emitted frame stays byte-identical. This is the fourth rung - fixture-opened, key-consumed, key-asserted, claim-discriminating - and no runner-side guard can reach it, because it is a property of the corpus data rather than of runner code. Only a mutation against the LIBRARY exposes it. Audit lazily-spec claim by claim: for each assertion key, mutate the behaviour it names and confirm at least one canonical fixture reddens; where none does, either strengthen the fixture data or record the claim as untested with a reason. lazily-cs worked its instance around locally by driving a three-peer room plus a vacuity guard that fails if the roster drops below two, but the corpus fix belongs upstream in lazily-spec so all nine bindings inherit it.

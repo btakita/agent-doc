@@ -212,6 +212,23 @@ Confirmed:
 - `same_idempotency_key` may collapse distinct commands sharing a non-empty key.
 
 No code changes were needed. Both focused tests passed, and the shipped Rust commit’s CI is green. The response was committed; next queue head is `#lzprotobufinterop`.
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#lzprotobufinterop]
+
+
+Implemented [#lzprotobufinterop] as an optional generated encoding of the canonical graph-boundary algebra—not a second graph runtime.
+
+The spec now owns a versioned `lazily.graph_boundary.v1` Protobuf family for capability handshakes, stable graph/source/cell identity, bounded UTF-8 `CellTextSplice` operations, source generations, causal epochs/sequences, source membership, derived projections, effect intents, delivery receipts, and explicit bootstrap/recovery/compaction snapshots. Canonical JSON remains the logical diagnostic/hash form, msgpack interop is unchanged, and fixture assertions remain JSON-Schema validated. The field ledger reserves evolution ranges and requires both peers to advertise `protobuf-graph-boundary-v1`; Protobuf byte identity is explicitly not a conformance claim.
+
+Landed reproducible generation and native logical reducers in Rust, Kotlin, and TypeScript. All three replay the same six canonical traces proving partial typing retains one cell, cross-cell edits stay bounded, clean cache reloads fence stale queued splices, remote projection plus native reload does not republish a whole buffer, duplicate/gap ordering is deterministic, and bootstrap snapshots remain distinct from ordinary mutation. This also applies the operator correction from the live session: projection is derived convergence state; delivery receipts are protocol data, not an editor request/ACK gate.
+
+Python, Go, C++, Dart, Zig, and C# now record the capability-gated parity gap explicitly rather than silently claiming coverage. The TypeScript package includes generated runtime/types in `npm pack`, preserves the existing package surface, and reports zero audit vulnerabilities.
+
+Verification: lazily-spec, Kotlin, TypeScript, Python, Go, C++, Dart, Zig, and C# full `make check` gates passed. Rust passed its complete test/benchmark/conformance run; fixture coverage reported 137/143 canonical fixtures opened, all 143 opened scenarios replayed, and all 30 assertion blocks bound. Its final CI-reach audit initially exposed the new optional target as missing from CI; the workflow now fetches the canonical schema before all-feature compilation and invokes the Protobuf trace target explicitly, and the reachability guard passes with all 48 gates reached. Component commits were pushed as spec `5241f4d`, Rust `b88d68d`, Kotlin `d811a83`, TypeScript `a32f69f`, Python `1a27663`, Go `5decc44`, C++ `9c8c612`, Dart `e8a8644`, Zig `c68c5a1`, and C# `88715eb`; root pin `503e533c88` is pushed. Spec, TypeScript, Python, Go, Dart, and C# CI are green; Rust, Kotlin, C++, and Zig CI were still running at closeout and are asynchronous evidence, not acknowledgements required for projection or session advancement.
 <!-- agent:boundary:d4431abd:lazily -->
 <!-- /agent:exchange -->
 
@@ -221,7 +238,7 @@ No code changes were needed. Both focused tests passed, and the shipped Rust com
 - ~~do [#lzwireencodingrunner]~~
 - ~~do [#lzoutboxjournalop]~~
 - ~~do [#lzdecorativewirefields]~~
-- do [#lzprotobufinterop]
+- ~~do [#lzprotobufinterop]~~
 - 📌 do [#lzassertionblockschema]
 - 📌 do [#lzdependencyavailability]
 - 📌 do [#lzcpptranscribedrunners]
@@ -237,7 +254,6 @@ No code changes were needed. Both focused tests passed, and the shipped Rust com
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzprotobufinterop] Implement optional Protobuf interoperability as a generated encoding of Lazily's canonical graph-boundary algebra, not as a second graph runtime. Define versioned typed envelopes for stable cell identity, bounded CellTextSplice operations, causal epochs/sequences, source membership, projections, effect intents and receipts; keep full snapshots restricted to bootstrap/recovery. Land reproducible Rust/Kotlin/TypeScript generation first, then require shared conformance traces proving partial typing stays one cell, cross-cell edits stay bounded, clean cache reloads fence queued operator splices, remote/native reload does not republish a whole buffer, and all three runtimes derive identical logical projections. Preserve canonical JSON diagnostics/msgpack interop, compare logical hashes rather than protobuf bytes, keep JSON Schema for fixture assertion validation, and roll remaining bindings through capability negotiation and the parity ledger. Plan: tasks/software/plan-lazily-protobuf-interop.md
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

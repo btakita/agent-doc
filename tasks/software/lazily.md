@@ -242,14 +242,21 @@ Verification: lazily-spec, Kotlin, TypeScript, Python, Go, C++, Dart, Zig, and C
 Implemented [#lzprotobufinterop] as an optional generated encoding of the canonical graph-boundary algebra—not a second graph runtime.
 
 
-### Re: Response
-
-The four apparent steering directives are the assistant-authored completion paragraphs from the immediately preceding committed [#lzprotobufinterop] closeout, projected back through the editor as if they were new operator input. They introduce no new requirement: (1) restates the landed schema, (2) restates the three pilot bindings and reactive-projection correction, (3) restates the capability-gated parity ledger, and (4) restates verification and commit evidence. No further implementation is warranted from those synthetic directives. The underlying defect is exactly the one raised by the operator: assistant projection must be classified reactively from document provenance/state, not turned into a request that waits for or manufactures an editor acknowledgement.
 
 ### Re: Response
 
 The four apparent steering directives are the assistant-authored completion paragraphs from the immediately preceding committed [#lzprotobufinterop] closeout, projected back through the editor as if they were new operator input. They introduce no new requirement: (1) restates the landed schema, (2) restates the three pilot bindings and reactive-projection correction, (3) restates the capability-gated parity ledger, and (4) restates verification and commit evidence. No further implementation is warranted from those synthetic directives. The underlying defect is exactly the one raised by the operator: assistant projection must be classified reactively from document provenance/state, not turned into a request that waits for or manufactures an editor acknowledgement.
-<!-- agent:boundary:6b9b2103:lazily -->
+
+### Re: Response
+
+Implemented [#lzassertionblockschema] upstream in lazily-spec.
+
+Added a checked-in Draft 2020-12 `schemas/assertion-blocks.json` plus a deterministic generator. It inventories all three canonical claim spellings—`assertions`, `expect`, and `expected`—and routes them by fixture-relative path plus normalized JSON pointer. The current 649 assertion objects collapse into 142 live routes spanning every fixture area, including collections, ingress, materialization, reactive-graph, temporal, and root-level fixtures that have no whole-fixture schema. Each route rejects unknown keys with `additionalProperties: false`, requires keys common to that route, and validates nested scalar/array/object value shapes.
+
+The guard is bidirectional: every corpus block must resolve and validate, and every checked-in route must still be exercised by the corpus. Mutation tests prove rejection of an unknown assertion key in every area, a missing required key, a wrong value type, and an unknown fixture/pointer route. `make check` now runs generator drift detection before the schema suite, so fixture changes require an explicit visible schema update. Documentation distinguishes this authoring/schema guard from binding-side consumed/asserted ledgers and from Protobuf's intentionally tolerant unknown-field behavior.
+
+Verification is green: 269 pytest tests, Lean build, coverage sync and coverage-claim checks, 130 vendored fixture copies, async-v2 naming, all 152 scenario identities, prose-key validation, and assertion-ordering self-test. Spec commit `4ab05d6` and root pin `30e082eec3` are pushed; lazily-spec CI run `30967864591` completed successfully. The separate [#lzwqfixtureconfig] item still owns adding `visibility_timeout` and `max_deliveries` to the work-queue fixture inputs; once those fields exist, this schema machinery will make their fixture shapes fail closed rather than leaving runner constants out of band.
+<!-- agent:boundary:a36b3233:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue

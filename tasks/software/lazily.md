@@ -841,6 +841,45 @@ The implementation is complete and already published by umbrella commit `ab9c9ff
 - Escalation: none for this item. The umbrella-only Agent Doc failures were unrelated `ENOSPC` failures while `/tmp` was full; task-owned subrepo checks passed, and unrelated `/tmp` data was left untouched.
 
 The staged deletion `tasks/professional/octavian-gabriel-stan.md` remains only in the root `agent-loop` repo. User-owned instruction/runbook edits remain only in individual Lazily subrepos and were excluded from the task commits.
+
+### Re: `#lzfixturediscrim` — codex
+
+> **Queue prompt:**
+>
+> do [#lzfixturediscrim]
+
+
+Fixture discriminability is now a fail-closed fourth conformance rung instead of an informal mutation anecdote.
+
+Changed paths in `lazily-spec`:
+
+- `conformance/signaling/anti_spoof_session.json` now has a third peer. Its third welcome carries the two-element roster `[1, 2]`, so reversing the real roster comparator produces `[2, 1]` and fails the canonical replay. The peer ids deliberately avoid imposing an incidental ordering on peer-joined broadcasts.
+- `scripts/check-fixture-discriminability.mjs` inventories every normalized `assertions` / `expect` / `expected` route. Exact-value routes are counted directly; boolean routes containing both outcomes have corpus controls; every remaining single-valued boolean route must have an exact ledger identity.
+- `audits/fixture-discriminability.json` is fail-closed: missing and stale identities fail. A claim is either `mutation-killed`, with binding, source mutation, command, observed failure, and an executable fixture witness, or honestly `untested` with a reason.
+- `Makefile` runs the guard in `make check`, and `docs/conformance.md` defines the rung and contribution workflow.
+
+The current audit reports 608 exact-value routes, 23 boolean routes with both outcomes, 3 killed library mutants, and 64 explicitly unproven predicates. Those 64 are not reported as passes; I added `#lzdiscriminabilityburn` to convert them claim by claim with real library mutations.
+
+Mutation proof against `lazily-js`:
+
+- reversing `SignalingRoom.roster` from ascending to descending fails canonical `anti_spoof_session.json` at `conn=c`: actual `[2, 1]`, expected `[1, 2]`;
+- removing the joining-peer filter fails the self-exclusion claim;
+- stamping forwarded `from` with the target instead of the registered sender fails with actual `2`, expected `1`.
+
+The guard itself was mutation-checked: deleting one ledger identity fails that exact missing route, and weakening the third roster back to a singleton fails the executable `signaling-roster-order` witness. All temporary source and corpus mutants were restored.
+
+Verification:
+
+- `make check` passes in `lazily-spec`.
+- `make check` passes in all nine bindings: Rust, Python, Kotlin, JavaScript, Dart, Zig, Go, C++, and C#.
+- Lazily-spec CI is green.
+- The umbrella `tmux-ci` job is green. Its broader Agent Doc `make check` job failed twice because LLVM's linker crashed with signal 7 (`Bus error`) while linking two different Agent Doc test targets; no test assertion failed. Changing Agent Doc CI resource/link policy is outside this Lazily item.
+
+Published commits: lazily-spec `1c7f840e90bd80c4f791dcd4c722f0675e569ca8`; umbrella origin/main `d4135e0be9`.
+
+Confidence is high for the new guard and the three signaling claims: both real source mutants and guard mutations redden at the intended seam. The remaining 64 claims are explicitly low-confidence/unproven until the new burn-down item converts them.
+
+Repository hygiene is preserved: the staged deletion `tasks/professional/octavian-gabriel-stan.md` remains staged only in the root `agent-loop` repo, and user-owned instruction/runbook edits remain excluded from every task commit.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
@@ -848,7 +887,7 @@ The staged deletion `tasks/professional/octavian-gabriel-stan.md` remains only i
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#rootlevelconformance]~~
-- do [#lzfixturediscrim]
+- ~~do [#lzfixturediscrim]~~
 - do [#lzrung2gaps]
 - do [#lzstructfieldreads]
 - do [#lzassertwithseam]
@@ -859,7 +898,6 @@ The staged deletion `tasks/professional/octavian-gabriel-stan.md` remains only i
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzfixturediscrim] A fixture can be opened, have every key consumed, have every key asserted - and still be unfalsifiable, because its data cannot distinguish the claim it makes. Found in lazily-cs while closing #lzconsumednotasserted: reversing SignalingRoom's roster sort still PASSED, because the canonical anti_spoof_session.json transcript never produces a roster with more than one entry, so no ordering is observable and every emitted frame stays byte-identical. This is the fourth rung - fixture-opened, key-consumed, key-asserted, claim-discriminating - and no runner-side guard can reach it, because it is a property of the corpus data rather than of runner code. Only a mutation against the LIBRARY exposes it. Audit lazily-spec claim by claim: for each assertion key, mutate the behaviour it names and confirm at least one canonical fixture reddens; where none does, either strengthen the fixture data or record the claim as untested with a reason. lazily-cs worked its instance around locally by driving a three-peer room plus a vacuity guard that fails if the roster drops below two, but the corpus fix belongs upstream in lazily-spec so all nine bindings inherit it.
 - [ ] [#lzrung2gaps] Conformance runners still outside the unconsumed-key guard entirely, all surfaced while closing #lzconsumednotasserted. lazily-cpp: nine fixture-replaying runners (command, distributed, lossless_tree, receipts, seqcrdt, statechart, stdlib, topic, reactive_graph) carry hand-rolled unknown-key guards instead of the shared AssertionKeys tracker, so they get neither rung 2 nor rung 3, and test_command_conformance.cpp has no unknown-key guard over its expect block at all. lazily-cs: StateChartConformanceTests has no FixtureAssertions tracker because its steps mix op inputs with assertions. Same class in lazily-kt, where bringing MaterializationConformanceTest under the tracker exposed two keys no runner had ever read - default_mode, and observe in deferral_not_deallocation.json. Convert each to the shared tracker so both rungs apply, and mutation-check every conversion rather than trusting the green that follows it.
 - [ ] [#lzstructfieldreads] Typed bindings that decode a fixture block into a struct have a blind spot no map-based key tracker can see: an unused local will not compile, but an unused FIELD is silent, so the key counts as consumed at decode time and is then discarded. Found in lazily-go while closing #lzconsumednotasserted, where open_handles and schema_version were both decoded and never read - one of them stayed hidden precisely because its field name collided with a real method. The fix there is TestConformanceStructFieldsAreRead, a go/ast scan of the package's own test sources with a both-directions excuse allowlist. lazily-go is covered. Check whether lazily-rs (serde structs), lazily-cs, lazily-cpp and lazily-zig decode any fixture block into a typed struct rather than reading it through their key tracker, and port the equivalent scan wherever they do.
 - [ ] [#lzassertwithseam] The non-equality escape hatch added under #lzconsumednotasserted marks a key asserted BEFORE it runs the caller's check, so a closure that ignores its argument marks the key without proving anything. Flagged by lazily-rs about assert_key_with, and the same seam exists in every binding's equivalent - it is the one place in the new guard held by discipline rather than by the type system, which is exactly the shape of defect this whole ladder exists to remove. Tighten it so the fixture value must actually be consumed: hand the closure a wrapper that records its own read and mark the key asserted only if that read happened, or narrow the API to a fixed set of comparison combinators. Mutation-check by writing a closure that ignores its argument and confirming the guard reddens.
@@ -867,6 +905,7 @@ The staged deletion `tasks/professional/octavian-gabriel-stan.md` remains only i
 - [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 - [ ] [#lzcoveragelayout] Restructure the coverage.json feature-table layout for a growing language axis per tasks/software/plan-lazily-coverage-table-layout.md. Measured: the feature column is 68% of row width at mean and 84% at max (feature text mean 86 / max 203 chars vs ~40 for all nine marks combined), so a 10th language adds ~4 chars to a row already 130-250 wide — the language axis is NOT the problem. Reject transposing (64 columns) and reject splitting by language: sync-coverage.mjs injects the same full matrix into all 12 targets, and per-language tables would destroy the cross-binding parity view that check-conformance-coverage.sh exists to protect. Phase 1 (land BEFORE the GDScript column, independent of the rest): add id + short label per row and move the 86-203 char normative prose to footnotes or into cell-model.md/protocol.md, taking the table from ~250 to ~60 chars wide so the layout scales past 15 languages. Phase 2 with it: split the '— absent OR not applicable' mark, since GDScript's parked thread-safe family is a different fact from unwritten work. Phases 3-4 (follow-up): author a family field — 54 distinct prefixes across 64 rows means families CANNOT be inferred from the current text — then a family x language roll-up with a stated roll-up rule. Layout and mark-value changes stay separate commits; sync-coverage.mjs --check stays the gate.
+- [ ] [#lzdiscriminabilityburn] Burn down the 64 single-valued boolean claims currently recorded as `untested` in lazily-spec/audits/fixture-discriminability.json. Convert each entry only after mutating real library source in at least one binding and confirming a canonical fixture replay reddens; an independent unit test does not count. Strengthen corpus data where a mutant survives, keep a claim explicitly untested with a specific reason where no executable proof exists, and extend check-fixture-discriminability.mjs with an executable witness before changing status to mutation-killed.
 <!-- /agent:backlog -->
 
 ## Review

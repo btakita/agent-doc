@@ -359,6 +359,28 @@ Pushed commits:
 - root pins `5c424cbd09` — `chore: update reactive egress pins`
 
 Unrelated dirty `AGENTS.md` and generated navigation-runbook changes in the owner checkouts were preserved and not committed.
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> 📌 do [#lzqueuefamilyflavors]
+
+
+You were right about the editor ACK: closeout is a binary-owned retained intent, while the editor is only a reactive projection of committed session state. Completion must not depend on an editor request/ACK round trip. The earlier CAS race validated that design: the binary retained the closeout, and session-check later observed it committed without resubmitting the response payload.
+
+Completed `#lzqueuefamilyflavors` without reimplementing the already-landed bindings:
+
+- Verified JS, Zig, and C# against their own 3×3 queue-family ledgers and canonical corpus replay, including direct green runs for JS and C# and the full Zig test suite.
+- Flipped the six thread-safe/async Queue, Topic, and WorkQueue rows for JS, Zig, and C# in `lazily-spec/coverage.json`.
+- Regenerated all 12 README/document coverage tables; `lazily-spec make check` (including `sync-coverage.mjs --check` and coverage-claims validation) is green.
+- Replaced Zig's brittle absolute compliance claim with generated-matrix authority plus explicit 3×3 ledger/replay evidence.
+- Added explicit `KNOWN_UNCOVERED` entries for the four preceding Rust-only egress fixtures in bindings that do not ship egress, fixing strict manifest gates without claiming false replay coverage.
+- Ran every affected repository's required `make check`; all are green. The root check's 8,633-test main suite passed, with only four unrelated parallel OAuth port-collision failures in `corky-core`; the same crate suite passed serially (67/67).
+- Pushed synchronized commits in all 11 affected Lazily repositories and superproject pin commit `48cb6776ca6f8488627cf910f7d6c9d3b3617db8`.
+- One-time CI snapshot: spec, Python, Kotlin, JS, Dart, Zig, Go, C++, and C# succeeded; Rust and agent-loop were in progress; lazily-formal has no Actions run.
+
+Unrelated pre-existing `AGENTS.md`, runbook, and nested-worktree changes were preserved and never staged.
 <!-- agent:boundary:9c3b5fc4:lazily -->
 <!-- /agent:exchange -->
 
@@ -374,7 +396,7 @@ Unrelated dirty `AGENTS.md` and generated navigation-runbook changes in the owne
 - ~~📌 do [#lzcpptranscribedrunners]~~
 - ~~📌 do [#lzreactdtsgate]~~
 - ~~📌 do [#lzegress]~~
-- 📌 do [#lzqueuefamilyflavors]
+- ~~📌 do [#lzqueuefamilyflavors]~~
 - 📌 do [#lzwqfixtureconfig]
 - 📌 do [#lzingressadapters]
 - 📌 do [#kny1]
@@ -391,7 +413,6 @@ Unrelated dirty `AGENTS.md` and generated navigation-runbook changes in the owne
 - [ ] [#lzrung2gaps] Conformance runners still outside the unconsumed-key guard entirely, all surfaced while closing #lzconsumednotasserted. lazily-cpp: nine fixture-replaying runners (command, distributed, lossless_tree, receipts, seqcrdt, statechart, stdlib, topic, reactive_graph) carry hand-rolled unknown-key guards instead of the shared AssertionKeys tracker, so they get neither rung 2 nor rung 3, and test_command_conformance.cpp has no unknown-key guard over its expect block at all. lazily-cs: StateChartConformanceTests has no FixtureAssertions tracker because its steps mix op inputs with assertions. Same class in lazily-kt, where bringing MaterializationConformanceTest under the tracker exposed two keys no runner had ever read - default_mode, and observe in deferral_not_deallocation.json. Convert each to the shared tracker so both rungs apply, and mutation-check every conversion rather than trusting the green that follows it.
 - [ ] [#lzstructfieldreads] Typed bindings that decode a fixture block into a struct have a blind spot no map-based key tracker can see: an unused local will not compile, but an unused FIELD is silent, so the key counts as consumed at decode time and is then discarded. Found in lazily-go while closing #lzconsumednotasserted, where open_handles and schema_version were both decoded and never read - one of them stayed hidden precisely because its field name collided with a real method. The fix there is TestConformanceStructFieldsAreRead, a go/ast scan of the package's own test sources with a both-directions excuse allowlist. lazily-go is covered. Check whether lazily-rs (serde structs), lazily-cs, lazily-cpp and lazily-zig decode any fixture block into a typed struct rather than reading it through their key tracker, and port the equivalent scan wherever they do.
 - [ ] [#lzassertwithseam] The non-equality escape hatch added under #lzconsumednotasserted marks a key asserted BEFORE it runs the caller's check, so a closure that ignores its argument marks the key without proving anything. Flagged by lazily-rs about assert_key_with, and the same seam exists in every binding's equivalent - it is the one place in the new guard held by discipline rather than by the type system, which is exactly the shape of defect this whole ladder exists to remove. Tighten it so the fixture value must actually be consumed: hand the closure a wrapper that records its own read and mark the key asserted only if that read happened, or narrow the API to a fixed set of comparison combinators. Mutation-check by writing a closure that ignores its argument and confirming the guard reddens.
-- [ ] [#lzqueuefamilyflavors] Ship the thread-safe and async queue-family flavors in lazily-js, lazily-zig and lazily-cs - the 18 cells that coverage.json rows 17/18/20/21/23/24 show absent. IMPLEMENTATION HAS LANDED IN ALL THREE BINDINGS: lazily-js 67a0013, lazily-cs f056dd8, lazily-zig c103070 (the last one mutation-checked with 15 defects across the shared core and all six new shells, green on 0.15.2 787/791, 0.16.0 849/849 and master 849/849, CI 30523011815 green). Do NOT re-implement. What REMAINS is the ledger and the plumbing: flip rows 17/18/20/21/23/24 for the JS, Zig and C# columns in lazily-spec/coverage.json, regenerate the twelve README/doc coverage tables via sync-coverage.mjs (--check is the gate), fix lazily-zig README line ~92 which claims every spec row is shipped for the Zig column while the generated table still shows those six as absent, and bump the superproject gitlinks for lazily-js, lazily-cs and lazily-zig. Verify each mark against that binding's own 3x3 ledger and replayed corpus before flipping it, not against the commit message.
 - [ ] [#lzwqfixtureconfig] Put the WorkQueueCell lease configuration into the canonical workqueue_*.json fixtures' initial block: visibility_timeout and max_deliveries are absent, so every binding hardcodes them out of band (10, and max_deliveries 3 for competing_delivery vs 2 for lease_deadletter) and a new binding has to read lazily-go's runner to discover them. Add the fields to the fixture and the schema, then update the nine bindings' runners to read them, so a fixture change cannot silently mean something different in each binding.
 - [ ] [#lzingressadapters] Extend the shipped IngressCell family with boundary-ingress adapters learned from the agent-doc 0.35.100 build; do not create a second ingress primitive. Phase 1: specify an event-channel-first adapter contract for sync, thread-safe, and async sources, with RPC/poll adapters allowed only at external non-reactive boundaries and all ingress updating Sources. Phase 2: provide atomic snapshot-plus-event bootstrap with monotonic cursors, gap detection/cold replay, generation fencing and hot resubscription so controller or producer replacement cannot strand a graph on an old stream. Phase 3: derive readiness, authority, freshness, membership, delivery convergence and template-style validation in Computeds (extract every reactive read into the computed); keep subscription lifecycle, I/O, acknowledgements, retry and commits in Effects. Include keyed SourceMap membership and one-shot durable delivery receipts so temporarily reaching zero subscribers is not mistaken for convergence. Phase 4: map agent-doc onto the adapters as the reference integration, then add spec, formal model, cross-binding conformance fixtures and mutation probes for restart during bootstrap, stale-generation events, cursor gaps, zero-member delivery, duplicate acknowledgements, backpressure and no-torn-observation. Reuse #designimplementtransport semantics and coordinate with #lzegress rather than duplicating either core.
 - [ ] [#kny1] Please help me setup trusted publishing with npm.

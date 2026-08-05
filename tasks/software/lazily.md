@@ -950,6 +950,58 @@ Proof:
 - verification: all targeted Rust tests passed after mutation restoration; Rust `make check` passed; umbrella `make check` passed with exit 0 and zero failures; GitHub Actions CI run `30995061162` completed successfully, including Loom, conformance coverage, assertion ordering, and CI reachability; `git diff --cached --name-only` shows only the preserved user-owned Octavian deletion; `lazily-rs` retains only the pre-existing local `AGENTS.md` and `runbooks/code-navigation.md` edits outside the published commit.
 - confidence: high.
 - escalation: none.
+
+### Re: `#lzassertwithseam` — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzassertwithseam]
+
+
+Implemented and shipped the cross-language custom-assertion consumption gate.
+
+The seam is now closed in all nine maintained bindings:
+
+- `assertKeyWith`-style helpers record a key as asserted only after the caller check returns successfully; thrown/rejected checks leave the key read but unasserted.
+- A new shared source guard, `lazily-spec/scripts/check-assert-with-consumption.py`, parses each binding's callback form and rejects an omitted, anonymous, unresolved, or syntactically ignored fixture-value parameter. Comments and string literals do not count as reads; unsupported shapes fail closed.
+- The guard is invoked through the existing `check-assertion-ordering.py` entrypoint, so every binding's existing Make/CI reachability gate runs it without adding an optional parallel target.
+- Its self-test mutation-checks accepted and ignored callbacks for C++, C#, Dart, Go, JavaScript, Kotlin, Python, Rust, and Zig. Before the fixes, the same guard reddened on real ignored callbacks in C#, Dart, Go, Python, and Zig; after the fixes, all nine scans pass.
+- Python now distinguishes predicates from extraction with `assert_key_into`: predicate return values remain verdicts, while explicit projections return data for a caller-side comparison. A regression proves a rejected predicate leaves the ledger read-but-unasserted.
+- Real vacuous sites were tightened: C# null authority/retry checks now inspect the fixture kind; Dart validates the fixture identity; Go validates the prose declaration shape; Zig validates the backend vocabulary; Python raw-return sites use explicit guarded projections.
+- The canonical rule is documented in `lazily-spec/docs/conformance.md` under `#lzassertwithseam`.
+
+Changed paths:
+
+- `lazily-spec`: `docs/conformance.md`, `scripts/check-assertion-ordering.py`, new `scripts/check-assert-with-consumption.py`
+- `lazily-cpp`: `tests/test_assertion_keys.hpp`
+- `lazily-cs`: `tests/Lazily.Tests/FixtureAssertions.cs`, `IngressFamilyConformanceTests.cs`
+- `lazily-dart`: `test/conformance_assertions.dart`, `dependency_availability_conformance_test.dart`
+- `lazily-go`: `conformance_strict_json_test.go`
+- `lazily-js`: `test/support/assert-key.js`
+- `lazily-kt`: `src/test/kotlin/io/github/lazily/AssertionKeys.kt`
+- `lazily-py`: `tests/conformance_assert.py` plus six affected conformance/test files
+- `lazily-rs`: `tests/common/expect.rs`
+- `lazily-zig`: `src/lazily/conformance_json.zig`
+- umbrella: the ten Lazily submodule pins
+
+Commits pushed:
+
+- spec `b0df9dc`; cpp `6d4750a`; cs `9b340f0`; dart `94c9415`; go `fa6f395`; js `e32e84c`; kt `b92c2f6`; py `c287359`; rs `2e5e9ef`; zig `2e22f1f`
+- umbrella pin `08072f22c`
+
+Commands and verification:
+
+- `python3 scripts/check-assert-with-consumption.py --self-test`
+- `python3 scripts/check-assertion-ordering.py --self-test`
+- `python3 scripts/check-assertion-ordering.py --binding <binding> --root ../lazily-<binding>` for all nine bindings
+- `make check` in `lazily-spec` and every maintained binding
+- root `make check` (including 8,651 Agent Doc tests, formal checks, and the Corky workspace)
+- `git diff --check` in every changed repository
+- pushed-commit CI is green for `lazily-spec` and all nine binding repositories
+
+Confidence: high. The source mutation controls, real pre-fix findings, runtime failure regression, full local gates, and all binding CI runs agree.
+
+Escalation: umbrella Agent Doc CI run `30998499137` failed twice because `lld` crashed with `SIGBUS` while linking two different unrelated Agent Doc test libraries. The exact root `make check` passed locally, the umbrella tmux job passed, and every Lazily repository CI run is green. This is a repeatable CI runner/linker-resource issue, not a Lazily conformance failure; it should be handled separately in the Agent Doc CI/toolchain lane. The pre-existing staged deletion `tasks/professional/octavian-gabriel-stan.md` and all unrelated local instruction edits were preserved and not included.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
@@ -960,7 +1012,7 @@ Proof:
 - ~~do [#lzfixturediscrim]~~
 - ~~do [#lzrung2gaps]~~
 - ~~do [#lzstructfieldreads]~~
-- do [#lzassertwithseam]
+- ~~do [#lzassertwithseam]~~
 - 📌 do [#kny1]
 - 📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
 - do [#lzdiscriminabilityburn]
@@ -969,7 +1021,6 @@ Proof:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzassertwithseam] The non-equality escape hatch added under #lzconsumednotasserted marks a key asserted BEFORE it runs the caller's check, so a closure that ignores its argument marks the key without proving anything. Flagged by lazily-rs about assert_key_with, and the same seam exists in every binding's equivalent - it is the one place in the new guard held by discipline rather than by the type system, which is exactly the shape of defect this whole ladder exists to remove. Tighten it so the fixture value must actually be consumed: hand the closure a wrapper that records its own read and mark the key asserted only if that read happened, or narrow the API to a fixed set of comparison combinators. Mutation-check by writing a closure that ignores its argument and confirming the guard reddens.
 - [ ] [#kny1] Please help me setup trusted publishing with npm.
 - [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.

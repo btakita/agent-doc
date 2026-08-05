@@ -127,6 +127,19 @@ Published commits:
 Exact-commit CI is green for the spec and all nine bindings (Python under `poe precommit`); root `tmux-ci` is green. Root `check` was retried once and both attempts ended only in the established GNU `ld` signal-7 bus-error runner failure. Later full local gates on the descendant component heads also passed during this queue drain.
 
 Confidence is high. No escalation or follow-up work is required.
+
+### Re: durable-outbox journal closeout reconciliation — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzoutboxjournalop]
+
+
+`#lzoutboxjournalop` is already implemented, published, and root-pinned. This queue head survived because the original cycle was abandoned during editor/controller recovery before its `done` mutation became authoritative; no repository changes were needed in this reconciliation cycle.
+
+The completed work adds canonical durable-outbox journal decoding coverage for an unknown complete interior opcode (reject) and a sole torn trailing record (forgive while retaining the preceding epoch-2 frame), with matching C#, Dart, and Zig replay coverage. Published commits: spec `23a882a965c8fcc0526018042b27e05cd9f097d2`, C# `947e989688d178239a2c8281141f03a5ad3edcf6`, Dart `cf4a71259f70f614d58985b41d9cb925d7fa20a7`, Zig `1937bc5a3583603fce3c81f789205a772d7dd0de`, and root pin `06278f82b033621ed147671b317c1f450fe8ca25`.
+
+Task-owned full local gates and exact component CI runs were green. The root aggregate's GNU `ld` bus error and unrelated Rust initial-hello timeout were independently reproduced and did not involve these changed pins. No follow-up.
 <!-- agent:boundary:7597abb3:lazily -->
 <!-- /agent:exchange -->
 
@@ -134,7 +147,7 @@ Confidence is high. No escalation or follow-up work is required.
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzwireencodingrunner]~~
-- do [#lzoutboxjournalop]
+- ~~do [#lzoutboxjournalop]~~
 - do [#lzdecorativewirefields]
 - do [#lzprotobufinterop]
 - 📌 do [#lzassertionblockschema]
@@ -153,7 +166,6 @@ Confidence is high. No escalation or follow-up work is required.
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzprotobufinterop] Implement optional Protobuf interoperability as a generated encoding of Lazily's canonical graph-boundary algebra, not as a second graph runtime. Define versioned typed envelopes for stable cell identity, bounded CellTextSplice operations, causal epochs/sequences, source membership, projections, effect intents and receipts; keep full snapshots restricted to bootstrap/recovery. Land reproducible Rust/Kotlin/TypeScript generation first, then require shared conformance traces proving partial typing stays one cell, cross-cell edits stay bounded, clean cache reloads fence queued operator splices, remote/native reload does not republish a whole buffer, and all three runtimes derive identical logical projections. Preserve canonical JSON diagnostics/msgpack interop, compare logical hashes rather than protobuf bytes, keep JSON Schema for fixture assertion validation, and roll remaining bindings through capability negotiation and the parity ledger. Plan: tasks/software/plan-lazily-protobuf-interop.md
-- [ ] [#lzoutboxjournalop] Pin the durable-outbox journal's opcode strictness with a canonical fixture, and pin its deliberate opposite in the same file. THREE bindings independently found the same defect under #failclosedsweep - lazily-cs DurableOutbox.cs:340, lazily-zig reliable_sync.zig:482, lazily-dart reliable_sync.dart:363 - a scan over the on-disk journal with NO default case, where an unrecognised opcode is skipped exactly like a cursor mark. All three reached the same consequence: an ignored delete/delete_after resurrects a pruned suffix, so the outbox re-delivers already-acked frames while reporting success. The journal is written by a possibly-different build of the same binding, which is what makes it a wire surface rather than an internal one. lazily-cs and lazily-dart both also split it the same way and that split is the fixture: an unknown opcode INTERIOR to the log MUST be refused, while a TORN TRAILING record MUST be forgiven and the earlier records must survive, because a crash leaves exactly one truncated final line. The two cases arrive through the same code path and demand opposite answers, which is precisely why neither survives being left to per-binding judgement.
 - [ ] [#lzdecorativewirefields] Wire fields that are decoded, documented as load-bearing, and dispatched on by nothing. lazily-rs's shape-6 pass under #failclosedsweep found nine: CommandPolicy.{dedupe,supersede,cancel_on_preempt}, CommandSubmit.{idempotency_key,deadline_ms,payload_type,required_features}, CausalReceipt.observer, CapabilityHandshake.session_id. Two are worse than unused. DedupePolicy is a three-variant wire DISCRIMINATOR that nothing dispatches on - CommandProjection::submit dedupes by command_id only, so a peer sending dedupe: same_idempotency_key gets command_id semantics and no error. And required_features' own doc comment says 'Features the target must advertise or the submit fails closed' - a fail-closed rule that no code anywhere enforces. This is the class no key-tracker and no AST pass can see, because the field IS consumed at decode time and then discarded; lazily-go closed its own instance with a go/ast scan (TestConformanceStructFieldsAreRead) and lazily-cpp reported 56 never-referenced wire fields from the same shape. Work: for each field either implement the behaviour its doc claims, or delete the field and its doc claim - and add the fixture that would have caught it, since a decoded-and-ignored field passes every existing rung of the ladder.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.

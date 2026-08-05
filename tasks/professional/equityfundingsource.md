@@ -129,7 +129,7 @@ Confidence: high. Escalation: the review body must come from the EFS Business Pr
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Can you use the actual review text on the website?
+- ~~Can you use the actual review text on the website?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

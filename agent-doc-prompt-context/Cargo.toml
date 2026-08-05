@@ -17,7 +17,7 @@ agent-doc-element = { path = "../agent-doc-element", version = "0.35.137" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.137" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.137" }
 agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.137" }
-lazily = "0.53.0"
+lazily = "0.56.0"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

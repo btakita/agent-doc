@@ -319,7 +319,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 libc = "0.2"
-lazily = { version = "0.53.0", features = ["ipc", "durable-sqlite"] }
+lazily = { version = "0.56.0", features = ["ipc", "durable-sqlite"] }
 tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustls"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 

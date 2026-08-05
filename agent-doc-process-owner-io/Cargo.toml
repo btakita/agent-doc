@@ -13,4 +13,4 @@ name = "agent_doc_process_owner_io"
 [dependencies]
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.137" }
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.137" }
-lazily = "0.53.0"
+lazily = "0.56.0"

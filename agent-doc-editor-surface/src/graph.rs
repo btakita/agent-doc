@@ -21,7 +21,8 @@
 
 use agent_doc_state_scope::ProcessScope;
 use lazily::{
-    Computed, Effect, Source, ThreadSafeContext, ThreadSafeSourceMap, ThreadSafeStateMachine,
+    Computed, DependencyAvailability, Effect, ThreadSafeContext, ThreadSafeDependencyMap,
+    ThreadSafeStateMachine,
 };
 
 use crate::{
@@ -107,10 +108,7 @@ pub struct EditorSurfaceState {
     layout_matches: Computed<Option<bool>>,
     /// Controller-owned input, independently materialized for every open
     /// document by the native adapter.
-    document_authorities: ThreadSafeSourceMap<String, DocumentAuthority>,
-    /// A new map key is not yet a dependency of a Computed. This epoch makes
-    /// authority-map membership reactive as well as each existing value.
-    document_authority_membership: Source<u64>,
+    document_authorities: ThreadSafeDependencyMap<String, DocumentAuthority>,
     /// Selected document × its controller-owned authority.
     current_document_authority: Computed<CurrentDocumentAuthority>,
     machine: ThreadSafeStateMachine<SurfaceFold, SurfaceObservation>,
@@ -144,8 +142,7 @@ impl EditorSurfaceState {
         let ctx = scope.ctx().clone();
         let editor = ctx.source(EditorSurface::default());
         let tmux = ctx.source(None::<TmuxLayout>);
-        let document_authorities = ThreadSafeSourceMap::new(&ctx);
-        let document_authority_membership = ctx.source(0_u64);
+        let document_authorities = ThreadSafeDependencyMap::new(&ctx);
         let layout_matches = ctx.computed(move |c| {
             let surface = c.get(&editor);
             let tmux = c.get(&tmux);
@@ -155,12 +152,14 @@ impl EditorSurfaceState {
             let authorities = document_authorities.clone();
             ctx.computed(move |c| {
                 let document = c.get(&editor).focused.trim().to_string();
-                let _membership = c.get(&document_authority_membership);
                 if document.is_empty() {
                     return CurrentDocumentAuthority::default();
                 }
                 CurrentDocumentAuthority {
-                    authority: authorities.observe(c, &document),
+                    authority: match authorities.observe_dependency(c, document.clone()) {
+                        DependencyAvailability::Unavailable => None,
+                        DependencyAvailability::Available(authority) => Some(authority),
+                    },
                     document: Some(document),
                 }
             })
@@ -174,7 +173,6 @@ impl EditorSurfaceState {
             tmux,
             layout_matches,
             document_authorities,
-            document_authority_membership,
             current_document_authority,
             machine,
             intent,
@@ -232,20 +230,13 @@ impl EditorSurfaceState {
     pub fn observe_document_authority(&self, authority: DocumentAuthority) {
         let document = authority.document.clone();
         if self
-            .document_authorities
-            .observe(&self.ctx, &document)
+            .document_authority(&document)
             .is_some_and(|current| current.revision > authority.revision)
         {
             return;
         }
-        let newly_present = !self.document_authorities.is_present(&document);
         self.document_authorities
-            .set(&self.ctx, document, authority);
-        if newly_present {
-            let epoch = self.ctx.get(&self.document_authority_membership);
-            self.ctx
-                .set(&self.document_authority_membership, epoch.wrapping_add(1));
-        }
+            .publish(&self.ctx, document, authority);
     }
 
     /// Controller authority for a specific document, if its native worker has
@@ -253,6 +244,10 @@ impl EditorSurfaceState {
     pub fn document_authority(&self, document: &str) -> Option<DocumentAuthority> {
         self.document_authorities
             .observe(&self.ctx, &document.to_string())
+            .and_then(|availability| match availability {
+                DependencyAvailability::Unavailable => None,
+                DependencyAvailability::Available(authority) => Some(authority),
+            })
     }
 
     /// The selected editor document joined with its independently supplied
@@ -367,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn current_authority_reacts_to_focus_and_each_document_source() {
+    fn focused_document_before_first_authority_publish_reacts_without_membership_epoch() {
         let state = EditorSurfaceState::new();
         state.observe(surface("/a.md", &[&["/a.md"], &["/b.md"]]));
 

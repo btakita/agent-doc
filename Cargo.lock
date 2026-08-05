@@ -153,7 +153,7 @@ dependencies = [
  "filetime",
  "indexmap",
  "instruction-files",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "libc",
  "libloading",
  "module-harness",
@@ -465,7 +465,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-write-converge-io",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "parking_lot",
  "serde_json",
  "tempfile",
@@ -551,7 +551,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "interprocess",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "libc",
  "parking_lot",
  "rusqlite",
@@ -583,7 +583,7 @@ dependencies = [
  "agent-doc-sqlite",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "parking_lot",
  "serde",
  "serde_json",
@@ -611,7 +611,7 @@ dependencies = [
  "agent-doc-supervisor-io",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -688,7 +688,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "parking_lot",
  "serde",
  "sha2 0.11.0",
@@ -733,7 +733,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-write-converge-io",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "parking_lot",
  "serde_json",
  "tempfile",
@@ -765,7 +765,7 @@ version = "0.35.137"
 dependencies = [
  "agent-doc-state-scope",
  "agent-doc-turn",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
 ]
 
@@ -777,7 +777,7 @@ dependencies = [
  "agent-doc-editor-surface",
  "agent-doc-state-scope",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
  "serde_json",
 ]
@@ -889,7 +889,7 @@ version = "0.35.137"
 dependencies = [
  "agent-doc-element",
  "agent-doc-state-scope",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
 ]
 
@@ -1234,7 +1234,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-hash",
  "agent-doc-markdown-ast",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
  "serde_json",
 ]
@@ -1280,7 +1280,7 @@ dependencies = [
  "agent-doc-state-scope",
  "anyhow",
  "base64 0.22.1",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "parking_lot",
  "rmp-serde",
  "serde",
@@ -1349,7 +1349,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "parking_lot",
  "serde",
  "serde_json",
@@ -1528,7 +1528,7 @@ version = "0.35.137"
 dependencies = [
  "agent-doc-controller",
  "agent-doc-state-scope",
- "lazily 0.53.0",
+ "lazily 0.56.0",
 ]
 
 [[package]]
@@ -1581,7 +1581,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-session-accretion",
  "agent-doc-state-scope",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
  "serde_json",
 ]
@@ -1703,7 +1703,7 @@ dependencies = [
  "agent-doc-merge",
  "anyhow",
  "base64 0.22.1",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "libc",
  "parking_lot",
  "serde",
@@ -1921,7 +1921,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "parking_lot",
  "tempfile",
  "tmux-router",
@@ -2104,7 +2104,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-workflow",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde_json",
  "tempfile",
  "tmux-router",
@@ -2296,7 +2296,7 @@ version = "0.35.137"
 dependencies = [
  "agent-doc-state-scope",
  "agent-doc-turn",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
  "serde_json",
 ]
@@ -2323,7 +2323,7 @@ dependencies = [
 name = "agent-doc-state-scope"
 version = "0.35.137"
 dependencies = [
- "lazily 0.53.0",
+ "lazily 0.56.0",
 ]
 
 [[package]]
@@ -2335,7 +2335,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "interprocess",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -2405,7 +2405,7 @@ dependencies = [
  "agent-doc-queue",
  "agent-doc-state-scope",
  "agent-doc-tmux-commands",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
  "serde_json",
 ]
@@ -2433,7 +2433,7 @@ dependencies = [
  "anyhow",
  "indexmap",
  "interprocess",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "libc",
  "parking_lot",
  "portable-pty",
@@ -2532,7 +2532,7 @@ dependencies = [
  "agent-doc-workflow-io",
  "anyhow",
  "fs2",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "libc",
  "parking_lot",
  "serde",
@@ -2617,7 +2617,7 @@ name = "agent-doc-tmux"
 version = "0.35.137"
 dependencies = [
  "agent-doc-state-scope",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "serde",
  "tempfile",
 ]
@@ -2642,7 +2642,7 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "anyhow",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "tmux-router",
 ]
 
@@ -2665,7 +2665,7 @@ dependencies = [
  "agent-doc-queue",
  "agent-doc-state-scope",
  "agent-doc-template",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "proptest",
  "regex",
  "serde",
@@ -2849,7 +2849,7 @@ dependencies = [
  "agent-doc-workflow",
  "anyhow",
  "fs2",
- "lazily 0.53.0",
+ "lazily 0.56.0",
  "parking_lot",
  "serde_json",
  "tempfile",
@@ -3611,6 +3611,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
+name = "either"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4154,6 +4160,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4213,13 +4228,15 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.53.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9fb9acd0967455564a64a9faa02aa8e4433ca0a8e3ce825ea8eefb1995802e3"
+checksum = "95c3a171bc702fac8ca28e93f4ae1bd39a2e2726dfe9da8049537c85d40b9d93"
 dependencies = [
  "arc-swap",
  "lazily-macros",
  "parking_lot",
+ "prost-build",
+ "protoc-bin-vendored",
  "rmp-serde",
  "rusqlite",
  "serde",
@@ -4408,6 +4425,12 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "multimap"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "new_debug_unreachable"
@@ -4731,6 +4754,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prettyplease"
+version = "0.2.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4757,6 +4790,121 @@ dependencies = [
  "tempfile",
  "unarray",
 ]
+
+[[package]]
+name = "prost"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-build"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
+dependencies = [
+ "heck",
+ "itertools",
+ "log",
+ "multimap",
+ "petgraph",
+ "prettyplease",
+ "prost",
+ "prost-types",
+ "regex",
+ "syn 2.0.118",
+ "tempfile",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
+dependencies = [
+ "prost",
+]
+
+[[package]]
+name = "protoc-bin-vendored"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1c381df33c98266b5f08186583660090a4ffa0889e76c7e9a5e175f645a67fa"
+dependencies = [
+ "protoc-bin-vendored-linux-aarch_64",
+ "protoc-bin-vendored-linux-ppcle_64",
+ "protoc-bin-vendored-linux-s390_64",
+ "protoc-bin-vendored-linux-x86_32",
+ "protoc-bin-vendored-linux-x86_64",
+ "protoc-bin-vendored-macos-aarch_64",
+ "protoc-bin-vendored-macos-x86_64",
+ "protoc-bin-vendored-win32",
+]
+
+[[package]]
+name = "protoc-bin-vendored-linux-aarch_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c350df4d49b5b9e3ca79f7e646fde2377b199e13cfa87320308397e1f37e1a4c"
+
+[[package]]
+name = "protoc-bin-vendored-linux-ppcle_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a55a63e6c7244f19b5c6393f025017eb5d793fd5467823a099740a7a4222440c"
+
+[[package]]
+name = "protoc-bin-vendored-linux-s390_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dba5565db4288e935d5330a07c264a4ee8e4a5b4a4e6f4e83fad824cc32f3b0"
+
+[[package]]
+name = "protoc-bin-vendored-linux-x86_32"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8854774b24ee28b7868cd71dccaae8e02a2365e67a4a87a6cd11ee6cdbdf9cf5"
+
+[[package]]
+name = "protoc-bin-vendored-linux-x86_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b38b07546580df720fa464ce124c4b03630a6fb83e05c336fea2a241df7e5d78"
+
+[[package]]
+name = "protoc-bin-vendored-macos-aarch_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89278a9926ce312e51f1d999fee8825d324d603213344a9a706daa009f1d8092"
+
+[[package]]
+name = "protoc-bin-vendored-macos-x86_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81745feda7ccfb9471d7a4de888f0652e806d5795b61480605d4943176299756"
+
+[[package]]
+name = "protoc-bin-vendored-win32"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95067976aca6421a523e491fce939a3e65249bac4b977adee0ee9771568e8aa3"
 
 [[package]]
 name = "pulldown-cmark"

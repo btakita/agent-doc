@@ -3037,6 +3037,36 @@ pub fn normalize_recoverable_response_replay_duplication_for_file(
     content: &str,
     source: &str,
 ) -> Result<Option<String>> {
+    for checkpoint in agent_doc_cycle_state_io::load_recent_captured_response_checkpoints(file, 4)?
+    {
+        let Some(baseline) = checkpoint.baseline_content.as_deref() else {
+            continue;
+        };
+        let materialization =
+            agent_doc_template::response_materialization::response_materialization_probe_from_response(
+                &checkpoint.response_body,
+            );
+        if let Some(recovered) =
+            agent_doc_merge::response_cell::deduplicate_captured_response_replays(
+                content,
+                baseline,
+                &materialization,
+            )?
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_captured_response_replay_candidate_prepared file={} cycle_id={} capture_id={} observed_hash={} target_hash={} strategy=capture_baseline_scoped",
+                    file.display(),
+                    checkpoint.cycle_id,
+                    checkpoint.capture_id,
+                    agent_doc_hash::content_hash(content),
+                    agent_doc_hash::content_hash(&recovered),
+                ),
+            );
+            return Ok(Some(recovered));
+        }
+    }
     if let Some(pending) = pending_document_write(file)
         && let Some(expected) = pending.expected_content.as_deref()
         && agent_doc_hash::content_hash(expected) == pending.expected_hash

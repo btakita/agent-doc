@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-write-command-io"
-version = "0.35.133"
+version = "0.35.134"
 edition = "2024"
 description = "Write command request types for agent-doc"
 license = "MIT"
@@ -11,5 +11,5 @@ publish = false
 name = "agent_doc_write_command_io"
 
 [dependencies]
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.133" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.134" }
 serde = { version = "1", features = ["derive"] }

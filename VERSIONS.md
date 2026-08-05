@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.134
+
+- **Captured closeout recovery now collapses partial same-topic response
+  replays exactly once.** A rejected editor receipt followed by compatibility
+  patchback could leave one bloated response cell, one partial replay cell, and
+  one exact captured cell. Their body-aware ids differed, so generic duplicate
+  removal preserved all three and session-check could commit a structurally
+  valid but repeated response. Recovery now joins the durable capture with its
+  baseline, retains one exact captured cell only when every competing
+  same-topic line is proven to come from that capture, and fails closed on any
+  novel/operator line or topic already present in the baseline.
+
 ## 0.35.133
 
 - **Foreground editor routes now converge their exact visible tmux layout

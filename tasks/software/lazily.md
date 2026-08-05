@@ -801,6 +801,34 @@ The smaller Dart item was already repaired in the current branch: `distributed/c
 The umbrella `make check` was attempted twice. Its task-owned subrepo checks are green, but unrelated Agent Doc integration tests failed while `/tmp` was at 100%: first a temp-file write, then an explicit `ENOSPC` in `native_reload_handoff`. The first exact failing test passed immediately in isolation. I did not delete unrelated `/tmp` data. The new umbrella Agent Doc workflow is in progress.
 
 All repository commits were pushed and pinned by umbrella commit `ab9c9ff773`. The unrelated staged deletion `tasks/professional/octavian-gabriel-stan.md` remains staged in the root `agent-loop` repository. The local instruction/runbook edits remain confined to the individual Lazily subrepos and excluded from every task commit.
+
+### Re: `#rootlevelconformance` — codex
+
+Root-level IPC fixtures are now first-class coverage evidence rather than an unaudited exception.
+
+The policy guard classifies the eight legacy root paths—`arena_blob.json`, `snapshot_*.json`, and `delta_*.json`—as the explicit `ipc` area. Both area-scoped binding guards now declare that area:
+
+- Kotlin maps its already-replayed root fixtures from the opaque `(root)` pseudo-area to `ipc`, with unknown future root files deliberately receiving no credit.
+- C++ now replays all seven canonical Snapshot/Delta fixtures from their actual JSON bytes through the real JSON codec, asserts every fixture assertion key, round-trips the decoded `IpcMessage`, and records the paths in the runtime manifest.
+
+`coverage.json` now cites all seven Snapshot/Delta fixtures plus `distributed/crdt_sync_frames.json` for the IPC-wire row. The Shared-memory blob row cites `arena_blob.json`. That exposed the honest capability boundary: JavaScript, Dart, and C++ remain able to carry shared-blob wire references but do not replay the concrete canonical arena-host layout, so those three marks are now `~`, not `✅`. C++ lists `arena_blob.json` in `KNOWN_UNCOVERED` with the reason that its in-process arena does not implement the canonical mapped 40-byte LZSH header.
+
+The central guard passes with all nine binding ledgers loaded: 84 shipped claims checked, 15 partial claims explicitly qualified, across 11 fixture-bearing rows.
+
+Two mutation checks prove the new area is load-bearing:
+
+- deleting only `snapshot_minimal.json` from the C++ runtime manifest fails that exact canonical fixture;
+- deleting all root IPC entries from Kotlin fails both per-fixture accounting and “area `ipc` is required, but the suite opened no fixture in it.”
+
+Changing C++'s shared-memory mark back to `✅` also fails specifically because `arena_blob.json` is uncovered.
+
+The smaller Dart item was already repaired in the current branch: `distributed/crdt_sync_frames.json` has its own explanation—frontier omission is valid in the fixture, while Dart's decoder currently rejects the omitted frontier—so I preserved it rather than manufacturing another edit.
+
+`make check` passed in the spec, C++, Kotlin, all other nine binding/documentation repositories, and `lazily-formal`. The substantive spec/C++/Kotlin CI runs and completed binding CI runs are green; Rust remains in progress. `lazily-formal` has no GitHub workflow.
+
+The umbrella `make check` was attempted twice. Its task-owned subrepo checks are green, but unrelated Agent Doc integration tests failed while `/tmp` was at 100%: first a temp-file write, then an explicit `ENOSPC` in `native_reload_handoff`. The first exact failing test passed immediately in isolation. I did not delete unrelated `/tmp` data. The new umbrella Agent Doc workflow is in progress.
+
+All repository commits were pushed and pinned by umbrella commit `ab9c9ff773`. The unrelated staged deletion `tasks/professional/octavian-gabriel-stan.md` remains staged in the root `agent-loop` repository. Local instruction/runbook edits remain confined to the individual Lazily subrepos and were excluded from every task commit.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 

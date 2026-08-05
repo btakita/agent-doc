@@ -286,7 +286,16 @@ Implemented and shipped:
 - Pushed all binding/spec/formal commits and the superproject pins while preserving unrelated dirty and staged operator state.
 
 Verification is green: every affected binding passed its full local `make check`; lazily-rs passed its complete benchmark, conformance-ledger, and formal gates; Agent Doc passed the focused pre-publication regression, fast install, full `make check`, `make tmux-ci`, and the one-time release-profile `make install-full`. The installed binary reports `agent-doc 0.35.138`.
-<!-- agent:boundary:53237fd8:lazily -->
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> 📌 do [#lzdependencyavailability]
+
+
+`#lzdependencyavailability` is complete and is being moved to done. The implementation, nine-binding conformance, lazily 0.56.0 publication, Agent Doc 0.35.138 release, full verification, and repository pin updates were all completed in the preceding closeout; this continuation only settles the queue/backlog state.
+<!-- agent:boundary:9b87f0ca:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -297,7 +306,7 @@ Verification is green: every affected binding passed its full local `make check`
 - ~~do [#lzdecorativewirefields]~~
 - ~~do [#lzprotobufinterop]~~
 - ~~📌 do [#lzassertionblockschema]~~
-- 📌 do [#lzdependencyavailability]
+- ~~📌 do [#lzdependencyavailability]~~
 - 📌 do [#lzcpptranscribedrunners]
 - 📌 do [#lzreactdtsgate]
 - 📌 do [#lzegress]
@@ -328,7 +337,6 @@ Verification is green: every affected binding passed its full local `make check`
 - [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 - [ ] [#lzcoveragelayout] Restructure the coverage.json feature-table layout for a growing language axis per tasks/software/plan-lazily-coverage-table-layout.md. Measured: the feature column is 68% of row width at mean and 84% at max (feature text mean 86 / max 203 chars vs ~40 for all nine marks combined), so a 10th language adds ~4 chars to a row already 130-250 wide — the language axis is NOT the problem. Reject transposing (64 columns) and reject splitting by language: sync-coverage.mjs injects the same full matrix into all 12 targets, and per-language tables would destroy the cross-binding parity view that check-conformance-coverage.sh exists to protect. Phase 1 (land BEFORE the GDScript column, independent of the rest): add id + short label per row and move the 86-203 char normative prose to footnotes or into cell-model.md/protocol.md, taking the table from ~250 to ~60 chars wide so the layout scales past 15 languages. Phase 2 with it: split the '— absent OR not applicable' mark, since GDScript's parked thread-safe family is a different fact from unwritten work. Phases 3-4 (follow-up): author a family field — 54 distinct prefixes across 64 rows means families CANNOT be inferred from the current text — then a family x language roll-up with a stated roll-up rule. Layout and mark-value changes stay separate commits; sync-coverage.mjs --check stays the gate.
-- [ ] [#lzdependencyavailability] Implement tasks/software/plan-lazily-dependency-reactive-availability.md: model every late-bound dependency as a stable per-key reactive with explicit unavailable/available state so Computeds subscribe before first publication; cover single-threaded, thread-safe, async, and binding parity, then remove Agent Doc compatibility workarounds.
 <!-- /agent:backlog -->
 
 ## Review

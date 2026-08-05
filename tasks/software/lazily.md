@@ -916,6 +916,40 @@ Verification:
 - scoped staged diffs passed `git diff --cached --check`
 - confidence: high
 - escalation: none
+
+### Re: `lzstructfieldreads` — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzstructfieldreads]
+
+
+Completed the typed-fixture field-read audit. Rust was the binding with the blind spot and now has a source-level guard; C#, C++, and Zig do not currently decode fixture assertion blocks into typed DTOs in a way that needs this port.
+
+Rust now has `tests/fixture_struct_fields.rs`, a `syn` AST guard that discovers fields on test structs deriving `Deserialize`, records actual member reads (including reads inside macro token streams), and enforces a two-direction, reason-bearing excuse map. Every typed fixture struct is also strict with `#[serde(deny_unknown_fields)]`. Previously discarded signaling metadata is modeled and validated where semantic, while prose-only fields and the unsupported server-routing `to` field have explicit narrow excuses. The arena fixture now verifies `protocol_version`.
+
+The audit found no equivalent port target elsewhere:
+
+- C#: typed `JsonSerializer.Deserialize` calls are library/wire/state decoding, not fixture assertion DTOs.
+- C++: the rateshape `Fixture` struct does not carry decoded expectation fields; expectations remain live `AssertionKeys` reads.
+- Zig: conformance fixtures are traversed as `json.Value`; the typed parse found is the library wire `CapabilityHandshake`, not a fixture DTO.
+
+Mutation evidence is direct: temporarily adding an unread `FrameCase.struct_field_mutant` made `cargo test --test fixture_struct_fields` fail with the expected unread-field diagnostic; the mutation was then fully restored and the identifier is absent.
+
+Commits published:
+
+- `lazily-rs`: `1f6e0419fee336a691bc0d0b711e222b19703b9f` (`test: reject unread fixture struct fields`)
+- clean umbrella remote pin: `9c4cc5ee9eafb209a50a33eb416990ca74a568c6` (`chore: pin fixture struct field guard`)
+
+During the first umbrella-pin attempt, the command remained in the owning root and created local-only `9d8ac49eab`, which included the already-staged deletion of `tasks/professional/octavian-gabriel-stan.md`; its push was rejected before any remote change. Corrective local commit `4afabc2db2` restored that file, after which the deletion was re-established as the sole staged path. The clean pin was then created from the temporary worktree and pushed as `9c4cc5ee9e`; the unrelated deletion never reached the remote.
+
+Proof:
+
+- changed_paths: `src/lazily-rs/Cargo.toml`, `src/lazily-rs/Cargo.lock`, `src/lazily-rs/tests/fixture_struct_fields.rs`, `src/lazily-rs/tests/conformance.rs`, `src/lazily-rs/tests/signaling_negative_conformance.rs`, and the umbrella `src/lazily-rs` gitlink.
+- commands: `cargo test --test fixture_struct_fields`; `cargo test --test signaling_negative_conformance --features signaling-client`; `cargo test --test conformance --features ipc`; Rust `make check`; root `tsift --envelope digest-runner --kind test --path . --shell-command 'make check'`; `gh run watch 30995061162 --interval 10 --exit-status`; repository status, staged-path, worktree, and remote-ref checks.
+- verification: all targeted Rust tests passed after mutation restoration; Rust `make check` passed; umbrella `make check` passed with exit 0 and zero failures; GitHub Actions CI run `30995061162` completed successfully, including Loom, conformance coverage, assertion ordering, and CI reachability; `git diff --cached --name-only` shows only the preserved user-owned Octavian deletion; `lazily-rs` retains only the pre-existing local `AGENTS.md` and `runbooks/code-navigation.md` edits outside the published commit.
+- confidence: high.
+- escalation: none.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
@@ -925,7 +959,7 @@ Verification:
 - ~~do [#rootlevelconformance]~~
 - ~~do [#lzfixturediscrim]~~
 - ~~do [#lzrung2gaps]~~
-- do [#lzstructfieldreads]
+- ~~do [#lzstructfieldreads]~~
 - do [#lzassertwithseam]
 - 📌 do [#kny1]
 - 📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
@@ -935,7 +969,6 @@ Verification:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstructfieldreads] Typed bindings that decode a fixture block into a struct have a blind spot no map-based key tracker can see: an unused local will not compile, but an unused FIELD is silent, so the key counts as consumed at decode time and is then discarded. Found in lazily-go while closing #lzconsumednotasserted, where open_handles and schema_version were both decoded and never read - one of them stayed hidden precisely because its field name collided with a real method. The fix there is TestConformanceStructFieldsAreRead, a go/ast scan of the package's own test sources with a both-directions excuse allowlist. lazily-go is covered. Check whether lazily-rs (serde structs), lazily-cs, lazily-cpp and lazily-zig decode any fixture block into a typed struct rather than reading it through their key tracker, and port the equivalent scan wherever they do.
 - [ ] [#lzassertwithseam] The non-equality escape hatch added under #lzconsumednotasserted marks a key asserted BEFORE it runs the caller's check, so a closure that ignores its argument marks the key without proving anything. Flagged by lazily-rs about assert_key_with, and the same seam exists in every binding's equivalent - it is the one place in the new guard held by discipline rather than by the type system, which is exactly the shape of defect this whole ladder exists to remove. Tighten it so the fixture value must actually be consumed: hand the closure a wrapper that records its own read and mark the key asserted only if that read happened, or narrow the API to a fixed set of comparison combinators. Mutation-check by writing a closure that ignores its argument and confirming the guard reddens.
 - [ ] [#kny1] Please help me setup trusted publishing with npm.
 - [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.

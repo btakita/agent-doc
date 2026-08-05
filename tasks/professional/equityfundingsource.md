@@ -114,7 +114,7 @@ Confidence: high. Escalation: none.
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- staging deploy
+- ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

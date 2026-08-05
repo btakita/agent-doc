@@ -323,7 +323,43 @@ Completed `#lzreactdtsgate`.
 - Mutation probe 2: changed the include to match no declarations; the local source count became zero and the CI assertion exited nonzero (the compiler also rejected the empty program).
 - Restored both mutations and verified full `make check`: formatting, syntax, declaration typecheck, all 18 tests, and CI reachability passed; reachability reports `typecheck` as covered.
 - Pushed lazily-react `61c9b1b` and superproject pin `e9697a4464`. The lazily-react CI run was observed once at the pushed SHA and was queued.
-<!-- agent:boundary:9b87f0ca:lazily -->
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> 📌 do [#lzegress]
+
+
+We should not have been waiting on an editor ACK. That was an architectural leak from treating editor synchronization as request/response. The correct model is binary-owned retained intent with the editor as a reactive projection: submit the closeout intent once, let projection convergence happen independently, and recover from the retained intent if the editor races. No editor ACK is part of delivery authority.
+
+Completed `#lzegress` with the same rule in the egress design:
+
+- Added a pure Rust `EgressCore<T>` owning monotone sequence assignment, pending/unacknowledged delivery state, the cumulative ACK watermark, bounded retry/backoff, and the send-side producer-generation fence.
+- Added sync, thread-safe, and async shells exposing `pending`, `inflight`, `acked_through`, and `retry` as independent Computeds.
+- Each transport attachment owns exactly one Effect. It observes both `pending` and `inflight`; when a cumulative ACK reopens a bounded send window, `inflight` invalidation reactively re-runs that same Effect. There is no projection request/ACK handshake.
+- Reconnect advances the generation, retains sequence and ACK progress, requeues unacknowledged records in order, and makes the old attachment inert at the core fence.
+- Kept conflation/backpressure and durability as composition boundaries: `RelayCell`/`Outbox`, `SpillStore`, and `DurableOutbox` remain the adapters rather than being reimplemented inside the Effect.
+- Added four canonical egress fixtures covering ordered cumulative ACK, in-flight window reopening, retry exhaustion, and generation fencing. All fixture steps and positive/negative invalidations replay against all three Rust shells.
+- Added the Lean egress model and proofs for monotone sequence allocation, monotone ACK progress, stale-generation state preservation, reconnect fence advancement with ACK preservation, and bounded retry attempts/backoff.
+- Added explicit `make check` and GitHub CI reach for the three-flavor egress runner.
+
+Verification:
+
+- `lazily-spec make check`: green (270 tests plus schema/formal/coverage guards).
+- `lazily-formal make check`: green (53 Lean jobs).
+- `lazily-rs make check`: green, including clippy/all-features, Loom, all conformance suites, formal builds, benchmarks, coverage, assertion ordering, and CI reach.
+- CI observed once after push: lazily-spec succeeded; lazily-rs and root Agent Doc workflows were in progress without failure; lazily-formal has no Actions runs configured.
+
+Pushed commits:
+
+- lazily-spec `9883f5f` — `feat: specify reactive egress`
+- lazily-formal `8e6917a` — `feat: model reactive egress`
+- lazily-rs `550d18a` — `feat: add reactive egress family`
+- root pins `5c424cbd09` — `chore: update reactive egress pins`
+
+Unrelated dirty `AGENTS.md` and generated navigation-runbook changes in the owner checkouts were preserved and not committed.
+<!-- agent:boundary:9c3b5fc4:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -336,8 +372,8 @@ Completed `#lzreactdtsgate`.
 - ~~📌 do [#lzassertionblockschema]~~
 - ~~📌 do [#lzdependencyavailability]~~
 - ~~📌 do [#lzcpptranscribedrunners]~~
-- 🚧 📌 do [#lzreactdtsgate]
-- 📌 do [#lzegress]
+- ~~📌 do [#lzreactdtsgate]~~
+- ~~📌 do [#lzegress]~~
 - 📌 do [#lzqueuefamilyflavors]
 - 📌 do [#lzwqfixtureconfig]
 - 📌 do [#lzingressadapters]
@@ -357,7 +393,6 @@ Completed `#lzreactdtsgate`.
 - [ ] [#lzassertwithseam] The non-equality escape hatch added under #lzconsumednotasserted marks a key asserted BEFORE it runs the caller's check, so a closure that ignores its argument marks the key without proving anything. Flagged by lazily-rs about assert_key_with, and the same seam exists in every binding's equivalent - it is the one place in the new guard held by discipline rather than by the type system, which is exactly the shape of defect this whole ladder exists to remove. Tighten it so the fixture value must actually be consumed: hand the closure a wrapper that records its own read and mark the key asserted only if that read happened, or narrow the API to a fixed set of comparison combinators. Mutation-check by writing a closure that ignores its argument and confirming the guard reddens.
 - [ ] [#lzqueuefamilyflavors] Ship the thread-safe and async queue-family flavors in lazily-js, lazily-zig and lazily-cs - the 18 cells that coverage.json rows 17/18/20/21/23/24 show absent. IMPLEMENTATION HAS LANDED IN ALL THREE BINDINGS: lazily-js 67a0013, lazily-cs f056dd8, lazily-zig c103070 (the last one mutation-checked with 15 defects across the shared core and all six new shells, green on 0.15.2 787/791, 0.16.0 849/849 and master 849/849, CI 30523011815 green). Do NOT re-implement. What REMAINS is the ledger and the plumbing: flip rows 17/18/20/21/23/24 for the JS, Zig and C# columns in lazily-spec/coverage.json, regenerate the twelve README/doc coverage tables via sync-coverage.mjs (--check is the gate), fix lazily-zig README line ~92 which claims every spec row is shipped for the Zig column while the generated table still shows those six as absent, and bump the superproject gitlinks for lazily-js, lazily-cs and lazily-zig. Verify each mark against that binding's own 3x3 ledger and replayed corpus before flipping it, not against the commit message.
 - [ ] [#lzwqfixtureconfig] Put the WorkQueueCell lease configuration into the canonical workqueue_*.json fixtures' initial block: visibility_timeout and max_deliveries are absent, so every binding hardcodes them out of band (10, and max_deliveries 3 for competing_delivery vs 2 for lease_deadletter) and a new binding has to read lazily-go's runner to discover them. Add the fields to the fixture and the schema, then update the nine bindings' runners to read them, so a fixture change cannot silently mean something different in each binding.
-- [ ] [#lzegress] Design and implement the egress family as the mirror of ingress (#designimplementtransport): an EgressCore owning sequence assignment, the unacked window, the ack watermark, and retry budget, with sync + thread-safe + async shells exposing pending/inflight/acked_through/retry as Computeds and ONE Effect per attached transport as the sink attachment. An Effect alone cannot be the family — it has no delivery state — so the Effect attaches, the core decides. Reuse Outbox/RelayCell for conflation+backpressure and SpillStore/DurableOutbox for durability rather than reimplementing them; add a generation fence on the SEND side so a reconnected producer cannot replay under a stale incarnation. Spec + formal + conformance corpus alongside, as ingress did.
 - [ ] [#lzingressadapters] Extend the shipped IngressCell family with boundary-ingress adapters learned from the agent-doc 0.35.100 build; do not create a second ingress primitive. Phase 1: specify an event-channel-first adapter contract for sync, thread-safe, and async sources, with RPC/poll adapters allowed only at external non-reactive boundaries and all ingress updating Sources. Phase 2: provide atomic snapshot-plus-event bootstrap with monotonic cursors, gap detection/cold replay, generation fencing and hot resubscription so controller or producer replacement cannot strand a graph on an old stream. Phase 3: derive readiness, authority, freshness, membership, delivery convergence and template-style validation in Computeds (extract every reactive read into the computed); keep subscription lifecycle, I/O, acknowledgements, retry and commits in Effects. Include keyed SourceMap membership and one-shot durable delivery receipts so temporarily reaching zero subscribers is not mistaken for convergence. Phase 4: map agent-doc onto the adapters as the reference integration, then add spec, formal model, cross-binding conformance fixtures and mutation probes for restart during bootstrap, stale-generation events, cursor gaps, zero-member delivery, duplicate acknowledgements, backpressure and no-torn-observation. Reuse #designimplementtransport semantics and coordinate with #lzegress rather than duplicating either core.
 - [ ] [#kny1] Please help me setup trusted publishing with npm.
 - [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.

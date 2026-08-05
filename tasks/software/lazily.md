@@ -188,6 +188,19 @@ Implemented the decoded fields as behavior, not field-touch bookkeeping.
 This is not a new operator directive. It is a projected bullet from the already committed `#lzdecorativewirefields` response. The behavior is already implemented in Rust commit `57f9eef7663a5a9c75afca7c6817b411478b5766`, locally verified by the decoded-wire fixture and full `make check`, and pinned by superproject commit `08fa3aaca526e1c7326851499b3a682bdc380a70`.
 
 No repository paths changed, no new command was required, no escalation occurred, and no follow-up is created. Confidence is high because the fragment is byte-identical to the preceding assistant response rather than independent operator text.
+
+### Re: dedupe semantics — gpt-5
+
+Correct. The boundary is command identity versus optional cross-command policy:
+
+- A repeated `command_id` is always an idempotent replay. Admission returns `Deduplicate` for that same command before consulting `policy.dedupe`, so the original projection entry is preserved.
+- `none` records a submit with a new command ID even when its idempotency key matches an earlier command.
+- `same_command_id` likewise performs no cross-command collapse: a new command ID is a new command. The same-ID replay case is already handled by the unconditional identity check.
+- `same_idempotency_key` is the only policy that may collapse distinct command IDs. It requires a non-empty key and resolves the new submit to the command that already owns that key; `supersede` can instead replace a non-terminal owner under the separately defined preemption rules.
+
+This is already shipped in lazily-rs commit `57f9eef7663a5a9c75afca7c6817b411478b5766` and pinned by superproject commit `08fa3aaca526e1c7326851499b3a682bdc380a70`; this turn required no repository changes. I re-ran the two focused executable witnesses: `command::tests::duplicate_submit_is_idempotent` and `decoded_wire_fields_drive_command_admission`; both passed. The latter covers fresh-ID record behavior for `none` and `same_command_id`, plus distinct-ID collapse for `same_idempotency_key`.
+
+The latest lazily-rs CI for the shipped commit is green (`30965052363`). Existing unrelated Protobuf work and other dirty files were preserved. No escalation or follow-up work is created.
 <!-- agent:boundary:d4431abd:lazily -->
 <!-- /agent:exchange -->
 

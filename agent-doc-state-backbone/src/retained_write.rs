@@ -37,7 +37,7 @@
 //! reported as an outstanding write, which is what would turn a transport blip
 //! into a permanent refusal to open a cycle.
 
-use lazily::{Computed, Source, ThreadSafeContext};
+use lazily::{Computed, Source, StateTable, ThreadSafeContext, thread_safe_projected_state_table};
 use serde::{Deserialize, Serialize};
 
 use crate::{CloseoutStage, DocumentScope, DocumentWriteDeferredReason, DocumentWriteSource};
@@ -365,57 +365,170 @@ pub fn added_lines_materialized_in(added: &[&str], content: &str) -> bool {
 ///
 /// Kept separate from the cells so it is unit-testable with fixed inputs, and
 /// so the reactive wiring has nothing in it but wiring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettlementInput {
+    NoRetainedIntent,
+    Retained(ObservationState),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObservationState {
+    Unobserved,
+    AuthorityDiskDiverged,
+    Converged(ConvergenceEvidence),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConvergenceEvidence {
+    ExactTarget,
+    RebasedPayloadMaterialized,
+    SupersededDeltaMaterialized,
+    SupersededByLaterCloseoutStage,
+    PayloadAbsent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettlementDecision {
+    NoRetainedIntent,
+    Unobserved,
+    Satisfied(SatisfiedProof),
+    Unsettled(UnsettledCause),
+}
+
+struct RetainedSettlementTable;
+
+impl StateTable for RetainedSettlementTable {
+    type Input = SettlementInput;
+    type Decision = SettlementDecision;
+
+    fn decide(input: &Self::Input) -> Self::Decision {
+        match input {
+            SettlementInput::NoRetainedIntent => SettlementDecision::NoRetainedIntent,
+            SettlementInput::Retained(ObservationState::Unobserved) => {
+                SettlementDecision::Unobserved
+            }
+            SettlementInput::Retained(ObservationState::AuthorityDiskDiverged) => {
+                SettlementDecision::Unsettled(UnsettledCause::AuthorityDiskDiverged)
+            }
+            SettlementInput::Retained(ObservationState::Converged(
+                ConvergenceEvidence::ExactTarget,
+            )) => SettlementDecision::Satisfied(SatisfiedProof::ExactTarget),
+            SettlementInput::Retained(ObservationState::Converged(
+                ConvergenceEvidence::RebasedPayloadMaterialized,
+            )) => SettlementDecision::Satisfied(SatisfiedProof::RebasedPayloadMaterialized),
+            SettlementInput::Retained(ObservationState::Converged(
+                ConvergenceEvidence::SupersededDeltaMaterialized,
+            )) => SettlementDecision::Satisfied(SatisfiedProof::SupersededDeltaMaterialized),
+            SettlementInput::Retained(ObservationState::Converged(
+                ConvergenceEvidence::SupersededByLaterCloseoutStage,
+            )) => SettlementDecision::Satisfied(SatisfiedProof::SupersededByLaterCloseoutStage),
+            SettlementInput::Retained(ObservationState::Converged(
+                ConvergenceEvidence::PayloadAbsent,
+            )) => SettlementDecision::Unsettled(UnsettledCause::PayloadAbsentFromConvergedContent),
+        }
+    }
+}
+
+#[cfg(test)]
+impl lazily::FiniteState for SettlementInput {
+    fn all() -> Vec<Self> {
+        use ConvergenceEvidence::{
+            ExactTarget, PayloadAbsent, RebasedPayloadMaterialized, SupersededByLaterCloseoutStage,
+            SupersededDeltaMaterialized,
+        };
+
+        vec![
+            Self::NoRetainedIntent,
+            Self::Retained(ObservationState::Unobserved),
+            Self::Retained(ObservationState::AuthorityDiskDiverged),
+            Self::Retained(ObservationState::Converged(ExactTarget)),
+            Self::Retained(ObservationState::Converged(RebasedPayloadMaterialized)),
+            Self::Retained(ObservationState::Converged(SupersededDeltaMaterialized)),
+            Self::Retained(ObservationState::Converged(SupersededByLaterCloseoutStage)),
+            Self::Retained(ObservationState::Converged(PayloadAbsent)),
+        ]
+    }
+}
+
+fn settlement_input(
+    pending: Option<&RetainedIntentFacts>,
+    authority: Option<&ContentObservation>,
+    disk: Option<&ContentObservation>,
+) -> SettlementInput {
+    let Some(pending) = pending else {
+        return SettlementInput::NoRetainedIntent;
+    };
+    let (Some(authority), Some(disk)) = (authority, disk) else {
+        return SettlementInput::Retained(ObservationState::Unobserved);
+    };
+    if authority.content_hash != disk.content_hash {
+        return SettlementInput::Retained(ObservationState::AuthorityDiskDiverged);
+    }
+
+    // Evidence priority is part of the transition table's input projection.
+    // The stage proof is deliberately weakest: it proves that a successor
+    // landed, while the preceding rows prove that this intent's own content did.
+    let evidence = if authority.content_hash == pending.target_hash {
+        ConvergenceEvidence::ExactTarget
+    } else if pending.carries_response_payload && authority.payload_materialized {
+        ConvergenceEvidence::RebasedPayloadMaterialized
+    } else if pending.carries_content_delta && authority.intent_delta_materialized {
+        ConvergenceEvidence::SupersededDeltaMaterialized
+    } else if pending.superseding_stage.is_some() {
+        ConvergenceEvidence::SupersededByLaterCloseoutStage
+    } else {
+        ConvergenceEvidence::PayloadAbsent
+    };
+    SettlementInput::Retained(ObservationState::Converged(evidence))
+}
+
+fn materialize_settlement_verdict(
+    decision: SettlementDecision,
+    pending: Option<&RetainedIntentFacts>,
+    authority: Option<&ContentObservation>,
+) -> SettlementVerdict {
+    let Some(pending) = pending else {
+        debug_assert_eq!(decision, SettlementDecision::NoRetainedIntent);
+        return SettlementVerdict::NoRetainedIntent;
+    };
+
+    match decision {
+        SettlementDecision::NoRetainedIntent => {
+            debug_assert!(false, "retained decision lost its pending intent");
+            SettlementVerdict::NoRetainedIntent
+        }
+        SettlementDecision::Unobserved => SettlementVerdict::Unobserved {
+            intent_id: pending.intent_id.clone(),
+        },
+        SettlementDecision::Satisfied(proof) => {
+            let Some(authority) = authority else {
+                debug_assert!(false, "satisfied decision lost its authority observation");
+                return SettlementVerdict::Unobserved {
+                    intent_id: pending.intent_id.clone(),
+                };
+            };
+            SettlementVerdict::Satisfied {
+                intent_id: pending.intent_id.clone(),
+                retained_target_hash: pending.target_hash.clone(),
+                settled_hash: authority.content_hash.clone(),
+                proof,
+                intent_source: pending.source.clone(),
+            }
+        }
+        SettlementDecision::Unsettled(cause) => SettlementVerdict::Unsettled {
+            intent_id: pending.intent_id.clone(),
+            cause,
+        },
+    }
+}
+
 pub fn settlement_verdict(
     pending: Option<&RetainedIntentFacts>,
     authority: Option<&ContentObservation>,
     disk: Option<&ContentObservation>,
 ) -> SettlementVerdict {
-    let Some(pending) = pending else {
-        return SettlementVerdict::NoRetainedIntent;
-    };
-    let (Some(authority), Some(disk)) = (authority, disk) else {
-        return SettlementVerdict::Unobserved {
-            intent_id: pending.intent_id.clone(),
-        };
-    };
-    if authority.content_hash != disk.content_hash {
-        return SettlementVerdict::Unsettled {
-            intent_id: pending.intent_id.clone(),
-            cause: UnsettledCause::AuthorityDiskDiverged,
-        };
-    }
-    // Planes agree. Either the agreed content *is* the stamped target, or a
-    // concurrent operator edit rebased it and only the payload can prove the
-    // intent landed.
-    let proof = if authority.content_hash == pending.target_hash {
-        Some(SatisfiedProof::ExactTarget)
-    } else if pending.carries_response_payload && authority.payload_materialized {
-        Some(SatisfiedProof::RebasedPayloadMaterialized)
-    } else if pending.carries_content_delta && authority.intent_delta_materialized {
-        Some(SatisfiedProof::SupersededDeltaMaterialized)
-    } else if pending.superseding_stage.is_some() {
-        // Ordered last on purpose: it is the weakest of the four, proving the
-        // intent's *successor* landed rather than the intent's own content. It
-        // only fires once the content-bearing proofs have declined, and only
-        // when the projection has established both that the superseding write is
-        // newer and that it belongs to a later stage of the same closeout.
-        Some(SatisfiedProof::SupersededByLaterCloseoutStage)
-    } else {
-        None
-    };
-    match proof {
-        Some(proof) => SettlementVerdict::Satisfied {
-            intent_id: pending.intent_id.clone(),
-            retained_target_hash: pending.target_hash.clone(),
-            settled_hash: authority.content_hash.clone(),
-            proof,
-            intent_source: pending.source.clone(),
-        },
-        None => SettlementVerdict::Unsettled {
-            intent_id: pending.intent_id.clone(),
-            cause: UnsettledCause::PayloadAbsentFromConvergedContent,
-        },
-    }
+    let decision = RetainedSettlementTable::decide(&settlement_input(pending, authority, disk));
+    materialize_settlement_verdict(decision, pending, authority)
 }
 
 /// Document-scoped cells holding retained-write settlement.
@@ -451,12 +564,20 @@ impl RetainedWriteSettlement {
         let pending = ctx.source(None::<RetainedIntentFacts>);
         let authority = ctx.source(None::<ContentObservation>);
         let disk = ctx.source(None::<ContentObservation>);
-        let verdict = {
-            ctx.computed(move |ctx| {
-                settlement_verdict(
+        let decision =
+            thread_safe_projected_state_table::<RetainedSettlementTable, _>(&ctx, move |ctx| {
+                settlement_input(
                     ctx.get(&pending).as_ref(),
                     ctx.get(&authority).as_ref(),
                     ctx.get(&disk).as_ref(),
+                )
+            });
+        let verdict = {
+            ctx.computed(move |ctx| {
+                materialize_settlement_verdict(
+                    ctx.get(&decision),
+                    ctx.get(&pending).as_ref(),
+                    ctx.get(&authority).as_ref(),
                 )
             })
         };
@@ -532,6 +653,60 @@ mod tests {
             payload_materialized,
             intent_delta_materialized: false,
         }
+    }
+
+    #[test]
+    fn typed_table_covers_every_constructible_settlement_row() {
+        let coverage = lazily::table_coverage::<RetainedSettlementTable>();
+        assert_eq!(
+            coverage.len(),
+            8,
+            "the row set is the finite semantic sum, not a Cartesian product padded with impossible states",
+        );
+        coverage.assert_decisions_exactly(&[
+            SettlementDecision::NoRetainedIntent,
+            SettlementDecision::Unobserved,
+            SettlementDecision::Unsettled(UnsettledCause::AuthorityDiskDiverged),
+            SettlementDecision::Satisfied(SatisfiedProof::ExactTarget),
+            SettlementDecision::Satisfied(SatisfiedProof::RebasedPayloadMaterialized),
+            SettlementDecision::Satisfied(SatisfiedProof::SupersededDeltaMaterialized),
+            SettlementDecision::Satisfied(SatisfiedProof::SupersededByLaterCloseoutStage),
+            SettlementDecision::Unsettled(UnsettledCause::PayloadAbsentFromConvergedContent),
+        ]);
+        coverage.assert_every_row("decided without a fall-through state", |_, _| true);
+    }
+
+    #[test]
+    fn raw_payload_changes_are_hydrated_after_the_semantic_table() {
+        let pending = intent("stamped", true);
+        let first = observed("rebased-one", true);
+        let second = observed("rebased-two", true);
+
+        let first_input = settlement_input(Some(&pending), Some(&first), Some(&first));
+        let second_input = settlement_input(Some(&pending), Some(&second), Some(&second));
+        assert_eq!(
+            first_input, second_input,
+            "hash churn that preserves the semantic row must stop at the guarded projection",
+        );
+        assert_eq!(
+            RetainedSettlementTable::decide(&first_input),
+            RetainedSettlementTable::decide(&second_input),
+        );
+
+        let first_verdict = materialize_settlement_verdict(
+            RetainedSettlementTable::decide(&first_input),
+            Some(&pending),
+            Some(&first),
+        );
+        let second_verdict = materialize_settlement_verdict(
+            RetainedSettlementTable::decide(&second_input),
+            Some(&pending),
+            Some(&second),
+        );
+        assert_ne!(
+            first_verdict, second_verdict,
+            "the public verdict still carries the current observed hash even when the table decision is stable",
+        );
     }
 
     #[test]

@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.143
+
+- **Completed free-text work can now be acknowledged without resuming a paused
+queue.** `agent-doc queue consume <FILE> --ack-text <TEXT>` requires an exact
+match against the leading free-text row, refuses id-backed or ambiguous nodes,
+adds the durable queue-prompt echo to the retained response, and converges the
+strike through editor authority while preserving `queue: stop`. This closes the
+provenance gap created when an operator finishes a stopped queue head through
+direct Codex-console steering.
+
 ## 0.35.142
 
 - **Controller-launch tests no longer treat a 500 ms process-start deadline as

@@ -12,6 +12,9 @@
 //! - `agent-doc queue consume <FILE> --ack-id <id>` — explicit acknowledgement
 //!   (#freshqueueauth) for an id-backed correction head while leaving the open
 //!   backlog item unresolved.
+//! - `agent-doc queue consume <FILE> --ack-text <text>` — exact acknowledgement
+//!   for a free-text head completed through direct harness steering while the
+//!   queue remained paused.
 
 use anyhow::{Result, bail};
 use std::path::Path;
@@ -57,6 +60,11 @@ pub trait QueueCommandEffects {
     ) -> Result<Option<QueueCommandConsumeOutcome>>;
     fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
     fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
+    fn acknowledge_paused_free_text_queue_head(
+        &self,
+        file: &Path,
+        expected_head: &str,
+    ) -> Result<Option<QueueCommandConsumeOutcome>>;
     fn prune_noise_queue_heads(&self, file: &Path) -> Result<usize>;
     fn converge_captured_answered_free_text_projection(&self, _file: &Path) -> Result<usize> {
         Ok(0)
@@ -202,6 +210,27 @@ pub fn acknowledge_open_id(
             file.display(),
             normalized
         );
+    }
+    Ok(())
+}
+
+pub fn acknowledge_paused_free_text(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    expected_head: &str,
+) -> Result<()> {
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    match effects.acknowledge_paused_free_text_queue_head(file, expected_head)? {
+        Some(outcome) => println!(
+            "{}: acknowledged exact paused free-text queue head (remaining: {}); \
+             queue stays paused (#paused-free-text-ack).",
+            file.display(),
+            outcome.remaining
+        ),
+        None => println!(
+            "{}: no paused free-text queue head to acknowledge.",
+            file.display()
+        ),
     }
     Ok(())
 }
@@ -381,6 +410,27 @@ mod tests {
 
         fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
             Ok(true)
+        }
+
+        fn acknowledge_paused_free_text_queue_head(
+            &self,
+            file: &Path,
+            expected_head: &str,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            let mut content = std::fs::read_to_string(file)?;
+            let needle = format!("- {}", expected_head.trim());
+            if !content.lines().any(|line| line == needle) {
+                bail!("exact queue head mismatch");
+            }
+            let replacement = format!("- ~~{}~~", expected_head.trim());
+            content = content.replacen(&needle, &replacement, 1);
+            std::fs::write(file, content)?;
+            Ok(Some(QueueCommandConsumeOutcome {
+                consumed_text: expected_head.trim().to_string(),
+                consumed_count: 1,
+                remaining: 0,
+                drained: true,
+            }))
         }
 
         fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {

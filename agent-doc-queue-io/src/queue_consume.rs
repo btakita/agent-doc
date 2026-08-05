@@ -201,6 +201,127 @@ pub fn consume_queue_prompt_if_head_matches_with_outcome(
     )
 }
 
+/// Explicitly acknowledge exactly one paused free-text queue head.
+///
+/// This is the recovery path for a response completed through direct harness
+/// steering while `queue_active` remained false. The exact head text is the
+/// operator proof: it must match the first unstruck queue row after priority
+/// markers are removed. The mutation preserves the paused frontmatter state,
+/// adds the normal queue-prompt provenance echo to the captured response, and
+/// converges through the editor authority.
+pub fn acknowledge_paused_free_text_queue_head_with_outcome(
+    file: &Path,
+    expected_head: &str,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    let content = effects.current_document_content(file, "queue_consume_ack_text")?;
+    let (fm, _) = frontmatter::parse(&content)?;
+    if fm.queue_active == Some(true) {
+        anyhow::bail!(
+            "{}: --ack-text is only valid while the queue is paused. Use the normal \
+             response closeout/consume path for an active queue.",
+            file.display()
+        );
+    }
+
+    let components = element::parse(&content)?;
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(None);
+    };
+    let entries = agent_doc_queue::document_queue::parse(queue.content(&content))
+        .context("queue consume --ack-text: failed to parse document queue")?;
+    let Some(observed_head) =
+        agent_doc_queue::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone())
+    else {
+        return Ok(None);
+    };
+
+    if !queue_prompt_text_is_free_text(&content, &observed_head) {
+        anyhow::bail!(
+            "{}: --ack-text matched a non-free-text queue head. Use --ack-id/--id or \
+             the normal id-backed closeout path.",
+            file.display()
+        );
+    }
+
+    let expected = strip_priority_markers(expected_head);
+    let observed = strip_priority_markers(&observed_head);
+    if expected.trim() != observed.trim() {
+        anyhow::bail!(
+            "{}: --ack-text does not exactly match the paused queue head; no change \
+             was applied. expected={:?} observed={:?}",
+            file.display(),
+            expected.trim(),
+            observed.trim()
+        );
+    }
+
+    let node_keys = queue_prompt_node_keys_for_count(&content, 1)?;
+    if !node_keys.ast_backed || node_keys.keys.len() != 1 {
+        anyhow::bail!(
+            "{}: refusing --ack-text because the paused queue head is not uniquely \
+             addressable as a markdown node (#qconsumenostrike).",
+            file.display()
+        );
+    }
+
+    let completed_entries =
+        agent_doc_queue::document_queue::mark_first_n_prompts_completed(&entries, 1);
+    let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
+    let mut target = consume_queue_nodes_by_key(&content, &node_keys.keys)?;
+    let response_first_line = projected_capture_response_body(file)
+        .and_then(|body| first_nonempty_line(&body).map(str::to_string));
+    target = embed_consumed_prompt_in_response(
+        &target,
+        std::slice::from_ref(&observed_head),
+        response_first_line.as_deref(),
+    );
+
+    let plan = QueueConsumptionPlan {
+        consumed_text: observed_head.clone(),
+        consumed_texts: vec![observed_head.clone()],
+        node_ops: queue_consume_node_ops(&node_keys.keys),
+        remaining,
+        drained: remaining == 0,
+        auto: agent_doc_queue::document_queue::has_auto_attr(&queue.attrs),
+        new_document: target.clone(),
+        // A paused exact acknowledgement is a recovery projection. Re-baseline
+        // the snapshot to the editor-authoritative result instead of allowing a
+        // stale pre-steering snapshot to veto the acknowledged head.
+        new_snapshot: target.clone(),
+        save_snapshot: true,
+    };
+
+    record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
+    effects
+        .converge_document_or_disk(file, &target, &content, "queue_consume_ack_text")
+        .context("queue consume --ack-text: failed to converge document")?;
+    save_snapshot_recovery_only(file, &target, "queue consume --ack-text writeback");
+    record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_consume_exact_text_ack file={} head_hash={} remaining={} \
+             queue_active_preserved=false proof=operator_exact_head",
+            file.display(),
+            agent_doc_hash::content_hash(observed.trim()),
+            remaining
+        ),
+    );
+
+    Ok(Some(QueueConsumptionOutcome {
+        consumed_text: observed_head,
+        consumed_count: 1,
+        node_ops: plan.node_ops,
+        remaining,
+        drained: remaining == 0,
+        auto: plan.auto,
+    }))
+}
+
 fn consume_queue_prompts_with_options(
     file: &Path,
     done_ids: &[String],
@@ -1612,6 +1733,88 @@ mod core_tests {
         .unwrap();
 
         assert!(outcome.is_none());
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn exact_text_ack_strikes_paused_head_and_preserves_pause() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: Missing pictures restored\n\n",
+            "The storefront pictures are restored.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- The pictures are not currently on the mrh website. Please fix. Please diagnose what happened.\n",
+            "- keep this queued\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let outcome = super::acknowledge_paused_free_text_queue_head_with_outcome(
+            &doc,
+            "The pictures are not currently on the mrh website. Please fix. Please diagnose what happened.",
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("exact paused head should be acknowledged");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.remaining, 1);
+        assert!(updated.contains("queue_active: false"), "{updated}");
+        assert!(
+            updated.contains(
+                "- ~~The pictures are not currently on the mrh website. Please fix. Please diagnose what happened.~~"
+            ),
+            "{updated}"
+        );
+        assert!(updated.contains("- keep this queued"), "{updated}");
+        assert!(
+            updated.contains(
+                "> **Queue prompt:**\n>\n> The pictures are not currently on the mrh website. Please fix. Please diagnose what happened."
+            ),
+            "{updated}"
+        );
+    }
+
+    #[test]
+    fn exact_text_ack_mismatch_preserves_paused_queue() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- original operator intent\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+
+        let error = super::acknowledge_paused_free_text_queue_head_with_outcome(
+            &doc,
+            "different operator intent",
+            &TEST_EFFECTS,
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("does not exactly match"),
+            "{error}"
+        );
         assert_eq!(fs::read_to_string(&doc).unwrap(), content);
     }
 

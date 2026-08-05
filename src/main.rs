@@ -1274,6 +1274,19 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         )
     }
 
+    fn acknowledge_paused_free_text_queue_head(
+        &self,
+        file: &Path,
+        expected_head: &str,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_outcome(
+            file,
+            expected_head,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
+        .map(|outcome| outcome.map(queue_command_consume_outcome))
+    }
+
     fn prune_noise_queue_heads(&self, file: &Path) -> anyhow::Result<usize> {
         agent_doc_queue_io::queue_consume::prune_noise_queue_heads(
             file,
@@ -3653,21 +3666,43 @@ enum QueueAction {
         count: usize,
         /// Bypass editor convergence and write directly to disk. Only valid for
         /// free-text consume; id-backed heads still use their guarded commands.
-        #[arg(long, conflicts_with = "id", conflicts_with = "ack_id")]
+        #[arg(
+            long,
+            conflicts_with = "id",
+            conflicts_with = "ack_id",
+            conflicts_with = "ack_text"
+        )]
         force_disk: bool,
         /// Escape hatch (#orphanqhead): strike the orphaned id-backed head
         /// `[#id]` whose backing backlog item was already reaped (`--done`
         /// reports "already resolved") or is gone, leaving the phantom head
         /// undrainable by the normal `--done` / free-text consume paths. Refuses
         /// when the id still names an OPEN backlog item (use `--done` instead).
-        #[arg(long, conflicts_with = "count")]
+        #[arg(long, conflicts_with = "count", conflicts_with = "ack_text")]
         id: Option<String>,
         /// Explicit acknowledgement (#freshqueueauth): strike an exact id-backed
         /// correction head while preserving the still-open backlog item. Do not
         /// use for runnable work; leave live `do [#id]` heads queued until done,
         /// gated, or intentionally acknowledged as a correction.
-        #[arg(long, conflicts_with = "count", conflicts_with = "id")]
+        #[arg(
+            long,
+            conflicts_with = "count",
+            conflicts_with = "id",
+            conflicts_with = "ack_text"
+        )]
         ack_id: Option<String>,
+        /// Exact acknowledgement for a free-text head completed through direct
+        /// harness steering while the queue stayed paused. The text must match
+        /// the leading queue row exactly; queue activation is not changed.
+        #[arg(
+            long,
+            value_name = "TEXT",
+            conflicts_with = "count",
+            conflicts_with = "id",
+            conflicts_with = "ack_id",
+            conflicts_with = "force_disk"
+        )]
+        ack_text: Option<String>,
     },
     /// Strike every non-drainable NOISE queue head at any position (#goqstall2):
     /// pasted console output, agent-response fragments, and bare observations that
@@ -5972,12 +6007,19 @@ fn try_main() -> anyhow::Result<()> {
                 force_disk,
                 id,
                 ack_id,
+                ack_text,
             } => {
                 let queue_effects = CliQueueCommandEffects;
                 if let Some(id) = id {
                     agent_doc_queue_io::queue_cmd::consume_orphan_id(&queue_effects, &file, &id)
                 } else if let Some(id) = ack_id {
                     agent_doc_queue_io::queue_cmd::acknowledge_open_id(&queue_effects, &file, &id)
+                } else if let Some(text) = ack_text {
+                    agent_doc_queue_io::queue_cmd::acknowledge_paused_free_text(
+                        &queue_effects,
+                        &file,
+                        &text,
+                    )
                 } else {
                     agent_doc_queue_io::queue_cmd::consume_with_options(
                         &queue_effects,

@@ -469,7 +469,84 @@ npm trust github @lazily-hub/lazily-js \
 ```
 
 Then verify with `npm trust list @lazily-hub/lazily-js`. This matches npm’s current [trusted-publishing workflow requirements](https://docs.npmjs.com/trusted-publishers/) and [`npm trust github` CLI](https://docs.npmjs.com/cli/v11/commands/npm-trust/).
-<!-- agent:boundary:b082c10a:lazily -->
+
+### Re: Response
+
+First, npm trusted publishing is now genuinely fixed. The existing npm record targeted stale `publish.yml`; I revoked only that record, created the correct `release.yml` trust, and verified npm now reports:
+
+- type: GitHub
+- repository: `lazily-hub/lazily-js`
+- workflow: `release.yml`
+- permission: publish
+
+For the Haiven request: I read the topology document and reviewed its existing “HAVN-596 delivery plan and Temporal replacement” and “Proposed FPE process topology” sections. The plan is already present in that private document and is technically sound, so I did not duplicate it or modify any Haiven repository before IP clearance.
+
+## Architecture decision
+
+Do not build a general Temporal clone, and do not make NATS the workflow database.
+
+- **PostgreSQL is authoritative** for review/escalation state, versions, commands, timers, attempts, leases, terminal errors, idempotency, and transactional outbox state.
+- **JetStream is a bounded delivery/wake-up boundary** for backend→FPE signals, independently scaled ready/resume work, compact audit/archive handoff when warranted, and dead-letter visibility.
+- **Application code owns a small explicit state machine** for the durable continuations that actually need Temporal-like behavior.
+- **The common moderation path is not a workflow.** It remains typed in-process calls inside the shared Python FPE and commits one compact decision.
+- Preserve the measured topology: one shared GPU/model owner per accelerator with one adaptive micro-batcher, rather than fragmenting traffic across per-stage services.
+
+This preserves the required subset of Temporal’s guarantees—durable resume, timers, bounded retries, idempotency, operator-visible failure, and safe rolling deployment—without reproducing Temporal’s per-message event-history machinery. Temporal’s own documentation describes event history as the source of truth used for deterministic replay; the replacement deliberately uses explicit persisted state instead of emulating that history model: [Temporal workflows](https://docs.temporal.io/workflows). JetStream remains at-least-once, so application-level deduplication and commit-before-ack are mandatory: [NATS consumers](https://docs.nats.io/nats-concepts/jetstream/consumers).
+
+## Delivery plan
+
+1. **IP and contract gate**
+   - Keep this plan and all derived code private to the Haiven workspace.
+   - Obtain written clearance on foreground/background IP, permitted reuse, and publication before implementation or extraction into any public Lazily repository.
+   - Freeze a short ADR covering ownership, subjects, at-least-once semantics, retention, security classification, and synchronous-versus-asynchronous product behavior.
+
+2. **Ship HAVN-596 independently**
+   - Release a typed, versioned `SignalEnvelope` from `haiven-contracts`.
+   - Add a backend `EventPublisher` port plus JetStream implementation.
+   - Use a backend transactional outbox so the domain write and publish intent commit together.
+   - Publish with a stable message/idempotency ID, wait for replicated publish acknowledgement, preserve trace identity, retry with bounded exponential backoff+jitter, and expose terminal failures without logging sensitive payloads.
+   - Acceptance: schema mapping, subject validation, publish acknowledgement, NATS outage/recovery, redelivery, and operator pending/failed metrics. The FPE consumer is explicitly outside HAVN-596 acceptance.
+
+3. **Introduce an executor seam inside the FPE**
+   - Keep Temporal and add a PostgreSQL application executor behind a feature flag.
+   - Persist immutable `executor_version`/ownership so a signal cannot advance through both implementations.
+   - Define pure transition handlers separately from persistence and side effects.
+
+4. **Collapse the common path**
+   - On JetStream delivery: validate and deduplicate, load context, run engines/aggregation/fusion/policy as typed calls, commit the compact decision and optional review state, then acknowledge.
+   - Remove per-message workflow runs, activity histories, and internal ready/decision event round trips from this path.
+
+5. **Implement the Temporal-like subset for durable continuations**
+   - Persist `state`, `state_version`, unique `command_id`, `due_at`, `next_attempt_at`, attempt count, lease owner/expiry/generation, last error, terminal reason/timestamps, and any compact outbox event.
+   - Claim due work with `FOR UPDATE SKIP LOCKED`; fence final writes by state version plus lease generation.
+   - Recover expired leases, apply per-transition timeout/retry/backoff policy, and move exhausted or permanent failures to an operator-visible terminal/dead-letter state.
+   - Review resolution commits state plus resume-outbox intent atomically.
+
+6. **Use NATS only at real failure boundaries**
+   - Durable pull consumers for horizontally scaled realtime/batch lanes; explicit per-message acknowledgement only after the corresponding PostgreSQL transaction commits.
+   - Stable `Nats-Msg-Id` plus database deduplication; JetStream’s deduplication window is an optimization, not the permanent idempotency ledger.
+   - Separate realtime and batch durable consumers, concurrency/resource quotas, and backpressure so replay cannot starve live moderation.
+   - Keep in-process engine/policy calls off NATS.
+
+7. **Deploy role-specific processes from one codebase**
+   - `fpe-api`: inline/status/review/operator APIs.
+   - `fpe-worker-realtime`: signal intake and latency-critical durable work.
+   - `fpe-worker-batch`: replay/backfill/bulk re-evaluation.
+   - `fpe-maintenance`: due retries, lease reclamation, reconciliation, and outbox recovery.
+   - optional `fpe-model`: GPU lifecycle owner and adaptive batcher, never a durability authority.
+
+8. **Shadow and cut over safely**
+   - Shadow only pure planning/transition logic; never double side effects.
+   - Compare decisions, transitions, pause/resume, timers, retry outcomes, and error classification against the current Temporal corpus.
+   - Route new work by ownership cohort. Let existing Temporal workflows drain; do not live-convert paused histories without a separately proven mapper.
+   - Retain an emergency flag for new work during the rollback window, then remove Temporal server, database, worker, SDK, and configuration only after the old cohort reaches zero.
+
+9. **Fault and scale gates**
+   - Inject duplicate/out-of-order delivery, crash before/after every commit/ack boundary, stale lease completion, competing replicas, retry exhaustion, poison contracts, review pause/resume, outbox redelivery, NATS outage, and regional recovery.
+   - Measure decision latency, publish-ack latency, backlog age, lease contention, duplicate suppression, retry/terminal-error rate, hot rows/bytes per open review, common-path rows per message, and archive lag.
+
+The plan stays planning-only until IP clearance. No Haiven code, contract, or repository state was changed in this cycle.
+<!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue

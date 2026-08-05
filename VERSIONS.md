@@ -9,10 +9,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   patchback could leave one bloated response cell, one partial replay cell, and
   one exact captured cell. Their body-aware ids differed, so generic duplicate
   removal preserved all three and session-check could commit a structurally
-  valid but repeated response. Recovery now joins the durable capture with its
-  baseline, retains one exact captured cell only when every competing
-  same-topic line is proven to come from that capture, and fails closed on any
-  novel/operator line or a non-identical same-topic baseline response.
+valid but repeated response. Recovery now joins the durable capture with its
+baseline, reconstructs a distinct earlier response from one exact/prefixed
+baseline node, retains one exact captured cell only when every competing
+same-topic line is proven to come from those two sources, and fails closed on
+any novel/operator line or ambiguous baseline provenance.
 
 - **Automatic editor layout projection now preserves live operator-owned
   panes.** The foreground route convergence introduced in `0.35.133` still

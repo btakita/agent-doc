@@ -225,6 +225,23 @@ fn take_protocol_boundaries(
     (retained, boundaries)
 }
 
+fn content_lines_without_protocol_boundaries(lines: &[String]) -> Vec<String> {
+    let mut fence = MarkdownFence::default();
+    lines
+        .iter()
+        .filter(|line| !fence.is_protocol_boundary(line))
+        .cloned()
+        .collect()
+}
+
+fn replay_provenance_lines(lines: &[String]) -> Vec<String> {
+    content_lines_without_protocol_boundaries(lines)
+        .into_iter()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
 /// Remove repeated response nodes with the same body-aware identity.
 ///
 /// Response cells are idempotent: replaying the same heading and body is a
@@ -290,14 +307,17 @@ pub fn deduplicate_response_cells(doc: &str) -> anyhow::Result<Option<String>> {
 /// deduplication cannot remove those fragments because their body-aware node
 /// ids differ. This recovery is deliberately capture- and baseline-scoped:
 ///
-/// - a response topic already present in the capture baseline is touched only
-///   when its one baseline node exactly matches the captured response;
+/// - a response topic already present in the capture baseline is either an
+///   exact captured response or is independently reconstructed from one
+///   exact/prefixed baseline node;
 /// - one exact (or exact-prefix) captured node must be present;
-/// - every same-topic candidate line must come from the captured materialization;
+/// - every same-topic candidate line must come from the captured materialization
+///   or the independently retained baseline node;
 /// - any novel line fails closed for that topic.
 ///
-/// Those proofs let recovery retain one exact captured response while
-/// preserving every prompt, unrelated response, and the newest boundary.
+/// Those proofs let recovery retain one exact captured response, preserve a
+/// distinct earlier same-topic response, and keep every prompt, unrelated
+/// response, and the newest boundary.
 pub fn deduplicate_captured_response_replays(
     doc: &str,
     baseline: &str,
@@ -324,7 +344,7 @@ pub fn deduplicate_captured_response_replays(
         })
         .unwrap_or_default();
 
-    let allowed_lines = captured_materialization
+    let captured_allowed_lines = captured_materialization
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !boundary_line(line))
@@ -357,10 +377,7 @@ pub fn deduplicate_captured_response_replays(
             .iter()
             .filter(|node| node.kind == captured.kind)
             .collect::<Vec<_>>();
-        if !baseline_candidates.is_empty()
-            && (baseline_candidates.len() != 1
-                || baseline_candidates[0].node_id() != captured.node_id())
-        {
+        if baseline_candidates.len() > 1 {
             continue;
         }
         // Several headings with the same key in one captured response are
@@ -380,27 +397,62 @@ pub fn deduplicate_captured_response_replays(
             .enumerate()
             .filter(|(_, node)| node.kind == captured.kind)
             .collect::<Vec<_>>();
-        if candidates.len() < 2
-            || candidates.iter().any(|(_, node)| {
-                node.lines
-                    .iter()
-                    .map(|line| line.trim())
-                    .filter(|line| !line.is_empty() && !boundary_line(line))
-                    .any(|line| !allowed_lines.contains(line))
-            })
-        {
+        if candidates.len() < 2 {
+            continue;
+        }
+
+        let distinct_baseline = baseline_candidates
+            .first()
+            .filter(|baseline| baseline.node_id() != captured.node_id())
+            .copied();
+        let baseline_index = if let Some(baseline) = distinct_baseline {
+            let baseline_provenance = replay_provenance_lines(&baseline.lines);
+            if baseline_provenance.is_empty() {
+                continue;
+            }
+            let baseline_matches = candidates
+                .iter()
+                .filter(|(_, node)| {
+                    replay_provenance_lines(&node.lines).starts_with(&baseline_provenance)
+                })
+                .map(|(index, _)| *index)
+                .collect::<Vec<_>>();
+            if baseline_matches.len() != 1 {
+                continue;
+            }
+            Some(baseline_matches[0])
+        } else {
+            None
+        };
+        let mut allowed_lines = captured_allowed_lines.clone();
+        if let Some(baseline) = distinct_baseline {
+            allowed_lines.extend(
+                replay_provenance_lines(&baseline.lines)
+                    .into_iter()
+                    .collect::<HashSet<_>>(),
+            );
+        }
+        if candidates.iter().any(|(_, node)| {
+            node.lines
+                .iter()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty() && !boundary_line(line))
+                .any(|line| !allowed_lines.contains(line))
+        }) {
             continue;
         }
 
         let canonical_index = candidates
             .iter()
             .rev()
+            .filter(|(index, _)| Some(*index) != baseline_index)
             .find(|(_, node)| node.node_id() == captured.node_id())
             .map(|(index, _)| *index)
             .or_else(|| {
                 candidates
                     .iter()
                     .rev()
+                    .filter(|(index, _)| Some(*index) != baseline_index)
                     .find(|(_, node)| node.lines.starts_with(&captured.lines))
                     .map(|(index, _)| *index)
             });
@@ -408,13 +460,24 @@ pub fn deduplicate_captured_response_replays(
             continue;
         };
 
-        let mut next = Vec::with_capacity(nodes.len() - candidates.len() + 1);
+        let baseline_lines = distinct_baseline
+            .map(|baseline| content_lines_without_protocol_boundaries(&baseline.lines));
+        let mut next = Vec::with_capacity(nodes.len());
         for (index, mut node) in nodes.into_iter().enumerate() {
             if node.kind != captured.kind {
                 next.push(node);
                 continue;
             }
-            if index == canonical_index {
+            if Some(index) == baseline_index {
+                let baseline_lines = baseline_lines
+                    .as_ref()
+                    .expect("a retained baseline index has baseline content");
+                if node.lines != *baseline_lines {
+                    node.lines = baseline_lines.clone();
+                    removed = true;
+                }
+                next.push(node);
+            } else if index == canonical_index {
                 if node.lines != captured.lines {
                     node.lines = captured.lines.clone();
                     removed = true;
@@ -913,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn captured_response_replay_repair_skips_topics_present_in_baseline() {
+    fn captured_response_replay_repair_preserves_distinct_baseline_response() {
         let captured = "### Re: recurring topic — gpt-5\n\nNew body.\n";
         let baseline = DOC.replace(
             "<!-- agent:boundary:abc -->",
@@ -931,11 +994,70 @@ mod tests {
             ),
         );
 
+        let normalized = deduplicate_captured_response_replays(&duplicated, &baseline, captured)
+            .unwrap()
+            .expect("the earlier turn should survive while captured replays collapse");
+
         assert_eq!(
-            deduplicate_captured_response_replays(&duplicated, &baseline, captured).unwrap(),
-            None,
-            "a baseline topic may represent several intentional turns"
+            normalized
+                .matches("### Re: recurring topic — gpt-5")
+                .count(),
+            2
         );
+        assert_eq!(normalized.matches("Earlier body.").count(), 1);
+        assert_eq!(normalized.matches("New body.").count(), 1);
+        assert_eq!(normalized.matches("agent:boundary:").count(), 1);
+        assert!(normalized.contains("agent:boundary:latest"));
+    }
+
+    #[test]
+    fn captured_response_replay_repair_recovers_bloated_baseline_prefix() {
+        let captured = concat!(
+            "### Re: recurring topic — gpt-5\n\n",
+            "Shared opening.\n\n",
+            "Updated wording.\n\n",
+            "Captured close.\n",
+        );
+        let baseline = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "### Re: recurring topic — gpt-5\n\n",
+                "Shared opening.\n\n",
+                "Earlier wording.\n\n",
+                "Captured close.\n",
+                "<!-- agent:boundary:abc -->",
+            ),
+        );
+        let duplicated = baseline.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "\nShared opening.\n\n",
+                "Updated wording.\n\n",
+                "### Re: recurring topic — gpt-5\n\n",
+                "Shared opening.\n\n",
+                "### Re: recurring topic — gpt-5\n\n",
+                "Shared opening.\n\n",
+                "Updated wording.\n\n",
+                "Captured close.\n",
+                "<!-- agent:boundary:latest -->",
+            ),
+        );
+
+        let normalized = deduplicate_captured_response_replays(&duplicated, &baseline, captured)
+            .unwrap()
+            .expect("the baseline prefix and captured response prove the replay");
+
+        assert_eq!(
+            normalized
+                .matches("### Re: recurring topic — gpt-5")
+                .count(),
+            2
+        );
+        assert_eq!(normalized.matches("Earlier wording.").count(), 1);
+        assert_eq!(normalized.matches("Updated wording.").count(), 1);
+        assert_eq!(normalized.matches("Captured close.").count(), 2);
+        assert_eq!(normalized.matches("agent:boundary:").count(), 1);
+        assert!(normalized.contains("agent:boundary:latest"));
     }
 
     #[test]

@@ -140,6 +140,29 @@ Confidence is high. No escalation or follow-up work is required.
 The completed work adds canonical durable-outbox journal decoding coverage for an unknown complete interior opcode (reject) and a sole torn trailing record (forgive while retaining the preceding epoch-2 frame), with matching C#, Dart, and Zig replay coverage. Published commits: spec `23a882a965c8fcc0526018042b27e05cd9f097d2`, C# `947e989688d178239a2c8281141f03a5ad3edcf6`, Dart `cf4a71259f70f614d58985b41d9cb925d7fa20a7`, Zig `1937bc5a3583603fce3c81f789205a772d7dd0de`, and root pin `06278f82b033621ed147671b317c1f450fe8ca25`.
 
 Task-owned full local gates and exact component CI runs were green. The root aggregate's GNU `ld` bus error and unrelated Rust initial-hello timeout were independently reproduced and did not involve these changed pins. No follow-up.
+
+### Re: `#lzdecorativewirefields` — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzdecorativewirefields]
+
+
+Implemented the decoded fields as behavior, not field-touch bookkeeping.
+
+Rust now has a `CommandAdmitter` in front of the unchanged pure `CommandProjection`. Decoded command fields drive actual admission outcomes:
+
+- `dedupe` distinguishes command-ID replay, no cross-command dedupe, and idempotency-key dedupe.
+- `supersede` preempts an older non-terminal command sharing the key; the older command's `cancel_on_preempt` controls whether an explicit cancel is permitted.
+- `deadline_ms` rejects at the logical-clock deadline boundary.
+- `payload_type` must be qualified by the decoded namespace and command name.
+- `required_features` fails closed against the target's advertised feature set.
+- receipt `observer` must match the decoded command target before the receipt can fold into projection.
+- `CapabilityHandshake.session_id` was already made load-bearing by the preceding handshake change; the new decoded-wire fixture also pins mismatch rejection.
+
+Added `tests/decorative_wire_fields.rs` plus `tests/fixtures/decorative_wire_fields.json`. The fixture mutates each decoded field and requires a distinct semantic decision, so decoding and then ignoring any one of them makes the test fail. I also recorded the newly published append-only outbox-journal fixture as explicitly uncovered by Rust because Rust's durable outbox is SQLite-backed and has no append-only journal decoder; this keeps the repository-wide coverage ledger truthful.
+
+Verification is green locally: focused decoded-wire tests, command conformance, all-feature library/test Clippy with warnings denied, the conformance coverage target, and the full `make check` (1,202 output lines, zero failures). Published Rust commit `57f9eef7663a5a9c75afca7c6817b411478b5766` and superproject pin `08fa3aaca526e1c7326851499b3a682bdc380a70`. GitHub CI started cleanly: formatting, Clippy, signaling, and Lean are green; the remaining Rust and superproject jobs are still in progress, recorded as asynchronous projection state rather than treated as an ACK gate.
 <!-- agent:boundary:7597abb3:lazily -->
 <!-- /agent:exchange -->
 
@@ -148,7 +171,7 @@ Task-owned full local gates and exact component CI runs were green. The root agg
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzwireencodingrunner]~~
 - ~~do [#lzoutboxjournalop]~~
-- do [#lzdecorativewirefields]
+- ~~do [#lzdecorativewirefields]~~
 - do [#lzprotobufinterop]
 - 📌 do [#lzassertionblockschema]
 - 📌 do [#lzdependencyavailability]
@@ -166,7 +189,6 @@ Task-owned full local gates and exact component CI runs were green. The root agg
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzprotobufinterop] Implement optional Protobuf interoperability as a generated encoding of Lazily's canonical graph-boundary algebra, not as a second graph runtime. Define versioned typed envelopes for stable cell identity, bounded CellTextSplice operations, causal epochs/sequences, source membership, projections, effect intents and receipts; keep full snapshots restricted to bootstrap/recovery. Land reproducible Rust/Kotlin/TypeScript generation first, then require shared conformance traces proving partial typing stays one cell, cross-cell edits stay bounded, clean cache reloads fence queued operator splices, remote/native reload does not republish a whole buffer, and all three runtimes derive identical logical projections. Preserve canonical JSON diagnostics/msgpack interop, compare logical hashes rather than protobuf bytes, keep JSON Schema for fixture assertion validation, and roll remaining bindings through capability negotiation and the parity ledger. Plan: tasks/software/plan-lazily-protobuf-interop.md
-- [ ] [#lzdecorativewirefields] Wire fields that are decoded, documented as load-bearing, and dispatched on by nothing. lazily-rs's shape-6 pass under #failclosedsweep found nine: CommandPolicy.{dedupe,supersede,cancel_on_preempt}, CommandSubmit.{idempotency_key,deadline_ms,payload_type,required_features}, CausalReceipt.observer, CapabilityHandshake.session_id. Two are worse than unused. DedupePolicy is a three-variant wire DISCRIMINATOR that nothing dispatches on - CommandProjection::submit dedupes by command_id only, so a peer sending dedupe: same_idempotency_key gets command_id semantics and no error. And required_features' own doc comment says 'Features the target must advertise or the submit fails closed' - a fail-closed rule that no code anywhere enforces. This is the class no key-tracker and no AST pass can see, because the field IS consumed at decode time and then discarded; lazily-go closed its own instance with a go/ast scan (TestConformanceStructFieldsAreRead) and lazily-cpp reported 56 never-referenced wire fields from the same shape. Work: for each field either implement the behaviour its doc claims, or delete the field and its doc claim - and add the fixture that would have caught it, since a decoded-and-ignored field passes every existing rung of the ladder.
 - [ ] [#lazilystatetable] Evaluate and pilot typed Lazily state tables as pure Computeds over enum product states; preserve exhaustive transition coverage without a second runtime, sidecar, or imperative ACK path. Plan: tasks/software/plan-lazily-state-tables.md
 - [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.

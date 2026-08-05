@@ -1162,6 +1162,50 @@ Proof:
 - Verification: this response carries the exact labeled queue-prompt echo required to consume an untagged free-text head.
 - Confidence: high.
 - Escalation: none.
+
+### Re: lzdiscriminabilityburn — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzdiscriminabilityburn]
+
+
+Completed the discriminability burn-down.
+
+The audit now reports **56 library mutants killed and 11 explicitly untested**, versus the original 3 killed / 64 untested. Every newly killed entry has a real `lazily-js` or `lazily-cs` source mutation, a canonical fixture replay command and failure, and an executable checker witness. The 11 survivors now carry claim-specific limitations; the checker rejects the former generic boilerplate.
+
+Two surviving mutants exposed weak corpus data, so I strengthened the fixtures instead of waiving them:
+
+- `coalesce_bounds_outbox.json` now leaves epochs 3 and 4 after ACK, making FIFO order non-vacuous; a newest-first `DurableOutbox.ReplayFrom` mutant now fails `dequeue_is_fifo_front` directly.
+- `liveness_orset_lww.json` now opens `docA` through two live processes; removing `LivenessRegistry.LiveDocuments` deduplication now emits `[docA, docA, docB]` and fails the canonical replay. Python's conformance assertion was updated to check that strengthened semantics.
+
+Changed paths:
+
+- `src/lazily-spec/audits/fixture-discriminability.json`
+- `src/lazily-spec/scripts/check-fixture-discriminability.mjs`
+- `src/lazily-spec/conformance/reliable-sync/{coalesce_bounds_outbox,liveness_orset_lww}.json`
+- synchronized `liveness_orset_lww.json` mirrors in lazily-py, lazily-dart, lazily-go, and lazily-zig
+- `src/lazily-py/tests/test_reliable_sync.py`
+
+Verification:
+
+- `node scripts/check-fixture-discriminability.mjs` → `608 exact-value route(s), 23 boolean route(s) with both outcomes, 56 library mutant(s) killed, 11 explicitly untested; OK`
+- `make check` passed in lazily-spec and all nine bindings: Rust, Python, JavaScript, Kotlin, C++, C#, Dart, Go, and Zig.
+- The isolated umbrella `make check` passed. An earlier overlapping invocation caused fixed-port Corky tests to collide; the clean isolated rerun was green.
+- Pushed subrepo CI is green for lazily-spec, lazily-py (`poe precommit`), lazily-dart, lazily-go, and lazily-zig.
+
+Commits pushed:
+
+- lazily-spec `60742b7`
+- lazily-py `d8168b9`
+- lazily-dart `2b10c8a`
+- lazily-go `265efd6`
+- lazily-zig `9ce7fa1`
+- umbrella gitlinks on `origin/main` `7112846dc`
+
+Confidence: high. The remaining 11 entries are not silent gaps: four are codec declarations with no derived runtime oracle, and seven are lease-eviction claims whose current canonical runner does not execute the named library behavior.
+
+Escalation: the umbrella repo has no workflow named `CI`. Its latest `Lazily network suite` is an older scheduled nightly failure (`30986503079`) from before these commits, timing out in the nine-way network scenario; pushes do not trigger a replacement. This does not block the locally green umbrella gate or the five green pushed subrepo workflows.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
@@ -1175,7 +1219,7 @@ Proof:
 - ~~do [#lzassertwithseam]~~
 - ~~📌 do [#kny1]~~
 - ~~📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.~~
-- do [#lzdiscriminabilityburn]
+- ~~do [#lzdiscriminabilityburn]~~
 - do [#lzr3adapter]
 <!-- /agent:queue -->
 
@@ -1185,7 +1229,6 @@ Proof:
 - [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 - [ ] [#lzcoveragelayout] Restructure the coverage.json feature-table layout for a growing language axis per tasks/software/plan-lazily-coverage-table-layout.md. Measured: the feature column is 68% of row width at mean and 84% at max (feature text mean 86 / max 203 chars vs ~40 for all nine marks combined), so a 10th language adds ~4 chars to a row already 130-250 wide — the language axis is NOT the problem. Reject transposing (64 columns) and reject splitting by language: sync-coverage.mjs injects the same full matrix into all 12 targets, and per-language tables would destroy the cross-binding parity view that check-conformance-coverage.sh exists to protect. Phase 1 (land BEFORE the GDScript column, independent of the rest): add id + short label per row and move the 86-203 char normative prose to footnotes or into cell-model.md/protocol.md, taking the table from ~250 to ~60 chars wide so the layout scales past 15 languages. Phase 2 with it: split the '— absent OR not applicable' mark, since GDScript's parked thread-safe family is a different fact from unwritten work. Phases 3-4 (follow-up): author a family field — 54 distinct prefixes across 64 rows means families CANNOT be inferred from the current text — then a family x language roll-up with a stated roll-up rule. Layout and mark-value changes stay separate commits; sync-coverage.mjs --check stays the gate.
-- [ ] [#lzdiscriminabilityburn] Burn down the 64 single-valued boolean claims currently recorded as `untested` in lazily-spec/audits/fixture-discriminability.json. Convert each entry only after mutating real library source in at least one binding and confirming a canonical fixture replay reddens; an independent unit test does not count. Strengthen corpus data where a mutant survives, keep a claim explicitly untested with a specific reason where no executable proof exists, and extend check-fixture-discriminability.mjs with an executable witness before changing status to mutation-killed.
 - [ ] [#lzr3adapter] Add an optional `Lazily.R3` NuGet project inside the lazily-cs repository, leaving the core `Lazily` assembly dependency-free. Implement Lazily-to-R3 state projection with one owned Effect per cold subscription plus an explicitly shared bridge, and R3-to-Lazily stream-to-state binding with separate same-thread Context and ThreadSafeContext ingress policies. Make error, completion, disposal, reentrancy, duplicate suppression, and Batch coalescing semantics explicit; do not claim lossless event-stream adaptation because a Lazily batch may collapse intermediate values. Test initial emission, distinct updates, dynamic dependencies, unsubscribe edge cleanup, recoverable R3 errors, terminal completion, cross-thread ingress, and reentrant writes. Add a permanent BenchmarkDotNet project covering native Lazily, native R3, and both bridge directions; profile the observed Lazily 488 B/update allocation before setting performance budgets. Target net10.0 initially because R3's wider target matrix does not widen lazily-cs automatically.
 <!-- /agent:backlog -->
 

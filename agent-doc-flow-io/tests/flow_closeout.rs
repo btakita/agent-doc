@@ -444,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_required_closeout_blocks_until_live_replica_delivery_is_acked() {
+    fn complete_required_closeout_does_not_wait_for_reactive_projection_receipt() {
         use agent_doc_merge::crdt_sync::ReplicaState;
 
         let base = concat!(
@@ -473,19 +473,22 @@ mod tests {
             .unwrap()
             .expect("replica A update should relay");
 
-        let err = complete_required_closeout_with_local_crdt_barrier(&doc).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("CRDT relay convergence is still pending"),
-            "closeout must wait for target ACK before commit: {err}"
+            agent_doc_crdt_relay_io::commit_barrier_for_file(&doc),
+            "the inbound editor update is already part of the canonical consistent cut"
         );
+        let _committed = complete_required_closeout_with_local_crdt_barrier(&doc).expect(
+            "binary-owned closeout intent must not wait for an outbound projection receipt",
+        );
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 
         let head = agent_doc_git_io::revision::show_head(&doc)
             .unwrap()
             .unwrap();
         assert!(
             !head.contains("typed before closeout"),
-            "pending replica delivery must not be materialized in HEAD before ACK:\n{head}"
+            "a pending editor projection is still downstream of the durable closeout intent:\n{head}"
         );
     }
 

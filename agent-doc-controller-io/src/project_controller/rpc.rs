@@ -6738,7 +6738,9 @@ fn handle_crdt_commit_barrier_rpc(
 /// projection (`#lzdurablesink`). This runs inside the controller process, so it
 /// MUST NOT replay `state.db`, nor round-trip a read back through the controller
 /// socket: while the controller is live it is the single authority. The relay
-/// barrier below is a separate editor→canonical flush, not a state read.
+/// barrier below establishes only the inbound editor→canonical cut. Outbound
+/// editor delivery is folded independently as a receipt Source and derived by
+/// [`decide_controller_commit_projection`].
 fn commit_barrier_for_closeout(runtime: &ControllerRuntime, canonical: &Path) -> Result<bool> {
     let document_hash = agent_doc_hash::document_id_for_path(canonical);
     let durable_response_cell = runtime
@@ -6776,11 +6778,13 @@ pub enum ControllerCommitProjectionDecision {
 
 /// Decide whether Git may observe the live editor projection.
 ///
-/// CRDT delivery convergence and disk persistence are separate facts. Git only
-/// sees disk, so a converged relay value that differs byte-for-byte from disk
-/// must first cross the editor's native save boundary. Queue-only mutations are
-/// intentionally significant here even though closeout normalization excludes
-/// them from semantic response comparisons.
+/// CRDT delivery convergence and disk persistence are separate reactive facts.
+/// An editor ACK is only an inbound receipt event; this pure projection derives
+/// whether the native-save/commit Effect may run. Git only sees disk, so a
+/// converged relay value that differs byte-for-byte from disk must first cross
+/// the editor's native save boundary. Queue-only mutations are intentionally
+/// significant here even though closeout normalization excludes them from
+/// semantic response comparisons.
 pub fn decide_controller_commit_projection(
     barrier_ready: bool,
     current: &agent_doc_crdt_relay_io::CurrentText,
@@ -28320,7 +28324,7 @@ mod tests {
         assert_eq!(
             decide_controller_commit_projection(true, &pending, None),
             ControllerCommitProjectionDecision::AwaitConvergence,
-            "native save cannot substitute for an unconverged relay cut"
+            "the commit Effect waits on the reactive receipt projection without making ACK transition authority"
         );
     }
 

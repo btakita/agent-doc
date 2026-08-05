@@ -2778,9 +2778,10 @@ pub fn checkpoint_durable_projection_for_file(
 /// - [`CrdtAuthority::MultiReplica`] (**EditorAttached**): drives the per-document
 ///   hub's commit barrier and returns its consistent-cut result.
 ///
-/// Under editor authority, unresolved delivery is a failed commit barrier. A
-/// closeout may retry once the editor buffer reaches disk, but it must not mark a
-/// turn committed from stale disk while a live editor has newer text.
+/// Under editor authority this barrier establishes the inbound editor→canonical
+/// cut only. Outbound delivery is a reactive receipt projection consumed by the
+/// controller's commit Effect; it is not request/ACK authority for this
+/// transition.
 pub fn commit_barrier_for_file(file: &Path) -> bool {
     let file_str = file.display().to_string();
     let authority = authority_for_file(&file_str);
@@ -2792,19 +2793,19 @@ pub fn commit_barrier_for_file(file: &Path) -> bool {
 /// [`CrdtAuthority`] (e.g. from a backbone projection) should use this to avoid a
 /// second authority hydration/read.
 pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthority) -> bool {
-    commit_barrier_for_file_with_authority_and_delivery(file, authority, true)
+    commit_barrier_for_file_with_authority_and_delivery(file, authority, false)
 }
 
 /// Commit barrier for a semantic response cell whose CRDT projection and
 /// `ResponseCellAdded` fact are already durable in the realtime backbone.
 ///
-/// Durability does not make a stale visible editor safe. The response cell must
-/// reach the same outbound delivery frontier as every other attached write
-/// before closeout can commit it.
+/// The durable intent is already authoritative. Editor delivery remains an
+/// asynchronously folded receipt Source and is derived by the controller before
+/// its native-save/commit Effect runs; the barrier does not wait for an ACK.
 pub fn commit_barrier_for_durable_response_cell(file: &Path) -> bool {
     let file_str = file.display().to_string();
     let authority = authority_for_file(&file_str);
-    commit_barrier_for_file_with_authority_and_delivery(file, authority, true)
+    commit_barrier_for_file_with_authority_and_delivery(file, authority, false)
 }
 
 fn commit_barrier_for_file_with_authority_and_delivery(
@@ -3878,7 +3879,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_response_cell_waits_for_outbound_editor_ack() {
+    fn durable_response_cell_barrier_does_not_wait_for_outbound_projection_receipt() {
         let (_dir, doc) = temp_doc("durable-response-cell.md");
         std::fs::write(
             &doc,
@@ -3903,12 +3904,12 @@ mod tests {
         assert!(first.content.contains(response));
 
         assert!(
-            !commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
-            "generic writes still require outbound editor acknowledgement"
+            commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
+            "the barrier owns only the inbound editor-to-canonical cut"
         );
         assert!(
-            !commit_barrier_for_durable_response_cell(&doc),
-            "a durable response cell still requires visible editor acknowledgement"
+            commit_barrier_for_durable_response_cell(&doc),
+            "durable intent must not make an outbound editor receipt transition authority"
         );
 
         let pull = pull_replica_updates_for_file(&doc, identity)
@@ -3924,7 +3925,7 @@ mod tests {
         }
         assert!(
             commit_barrier_for_durable_response_cell(&doc),
-            "the response cell may commit after the visible editor ACK frontier converges"
+            "folding the receipt remains idempotent and does not change barrier authority"
         );
 
         assert!(

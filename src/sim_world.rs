@@ -12849,7 +12849,7 @@ mod crdt_relay_sim {
     }
 
     #[test]
-    fn response_cell_closeout_materializes_only_after_visible_ack() {
+    fn response_cell_intent_precedes_reactive_projection_receipt() {
         let baseline = "# Session\n\noperator prompt\n";
         let response = "# Session\n\noperator prompt\n\n### Re: prompt — gpt-5\n\nDone.\n";
         let mut world = RelaySimWorld::new(1);
@@ -12861,6 +12861,11 @@ mod crdt_relay_sim {
             .hub
             .apply_canonical_replace(baseline, response)
             .expect("semantic response-cell projection");
+        assert_eq!(
+            world.hub.canonical_text(),
+            response,
+            "the binary-owned intent is durable before any editor receipt"
+        );
         assert!(!world.hub.delivery_converged());
         assert_eq!(disk_projection, baseline);
 

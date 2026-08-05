@@ -125,7 +125,43 @@ Please paste the review text and reviewer display name, or provide a Google Busi
 - Repository commands/tests: none required because no source files changed.
 
 Confidence: high. Escalation: the review body must come from the EFS Business Profile or another operator-provided authoritative copy.
-<!-- agent:boundary:6e1653fa:equityfundingsource -->
+
+Confidence: high. Escalation: none.
+### Re: Google review excerpts — gpt-5
+
+Done. The homepage Google Reviews section now shows one concise, attributable sentence from each supplied review:
+
+- Tim Hayden: “Frankly the staff and leadership at Equity Funding saved my home from foreclosure.”
+- California Hard Money Direct: “My experience with equity funding is that they are reliable.”
+- Alfredo Arteaga: “Their professionalism, responsiveness, and consistent communication have been outstanding every time.”
+
+The excerpts appear as three aligned cards on desktop and a single-column stack on mobile. The 5.0 aggregate, five-star accessibility label, and direct Google Reviews link remain unchanged; no unsupported per-review rating was added.
+
+- Changed paths: `lib/ui--server--efs/home/index.ts`, `tests/home-copy.test.ts`, and `prds/equity-funding-source-lending-portal-prd.md`.
+- Verification: focused homepage coverage passed; `make check` passed with 2,295 tests, 0 failures, and successful site and Worker builds; local desktop and mobile render checks passed.
+- Commit/push: `aad08786 feat(home): add Google review excerpts` is on `origin/main`.
+- Repository state: clean and synchronized. This repository has no GitHub Actions workflow named `CI`.
+- Deployment: not requested this cycle.
+The homepage update is complete and pushed as `aad08786`.
+
+- Three attributed Google review excerpts added.
+- Desktop and mobile layouts verified.
+- 2,295 tests passed; site and Worker builds succeeded.
+- No deployment performed.
+
+The `agent-doc` response is retained but not yet committed because the connected editor has not saved its canonical version to disk. Save or close the document editor; the controller should resume automatically. Then rerun the same `agent-doc` command to confirm closeout.
+
+### Re: Response
+
+Deployed commit `aad08786` to both environments.
+
+- Staging: version `a659a0b6-a034-4cee-8921-8a1aacc0eed9`
+- Production: version `c193f5c3-8566-48d2-92d3-0546672ca334`
+- All three domains return HTTP 200.
+- All three review excerpts are live.
+- No pending D1 migrations.
+- Repository remains clean and synchronized.
+<!-- agent:boundary:b0c9230c:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

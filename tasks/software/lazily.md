@@ -98,13 +98,42 @@ No follow-up work is created by this item.
 Confirmed: all five live steering fragments are projections of the already committed `#lzoutboxjournalop` closeout, not a new implementation request.
 
 This reconciliation cycle changes no repository paths, runs no new task command, and creates no follow-up work. The committed response already contains the changed-path summary, the negative-control and full-gate verification, the bounded CI infrastructure exceptions, and the published component/root commit SHAs. Confidence is high because the session guard explicitly reports that prior response as committed in HEAD; no escalation or additional commit is required for these echoed fragments.
+
+### Re: exact codec wire-input witness — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzwireencodingrunner]
+
+
+`#lzwireencodingrunner` was already implemented, published, and root-pinned; this queue occurrence was stale, so I made no repository changes.
+
+The executable proof is the intended one: lazily-spec adds `expect.wire_input_fnv1a64` for every relevant scenario and validates it against the exact raw `wire_json` UTF-8 bytes or decoded `wire_msgpack_hex` bytes. Each of the nine bindings computes the same FNV-1a witness over the exact buffer it passes to its library decoder and asserts that key before decoding. Re-serializing a parsed object therefore changes the witness and reddens the runner.
+
+Published commits:
+
+- spec: `5517437bce53bf5bb6822a7cb9447d846aa2606f`
+- Rust: `f09ad7bdfecea5cf2bd3651ddf00f47f978d7d02`
+- Python: `586429c2abd2d260925f9c6464d027864fce2155`
+- JavaScript: `c3a8f5082e84b0715afcfbc013ab400a1e6dde96`
+- Go: `83f5f308ad8a637f93f9ae8ba9496b7b969efe16`
+- C++: `b9484d22fdd068304475b0c29c3a141b4576684c`
+- Dart: `eca287a462492a4f9baad85fe80faae4962bbf8f`
+- Kotlin: `34e22f357b4f21aeca172195de23ebddc1e046fe`
+- Zig: `5d6a3657b0a10093b348bb07490942646a3734c8`
+- C#: `96770d91373ac48f17529825fa8c7153115aa8cb`
+- root pin: `423e757a9a489d0104d5c4f435c351dc4b294c98`
+
+Exact-commit CI is green for the spec and all nine bindings (Python under `poe precommit`); root `tmux-ci` is green. Root `check` was retried once and both attempts ended only in the established GNU `ld` signal-7 bus-error runner failure. Later full local gates on the descendant component heads also passed during this queue drain.
+
+Confidence is high. No escalation or follow-up work is required.
 <!-- agent:boundary:7597abb3:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzwireencodingrunner]
+- ~~do [#lzwireencodingrunner]~~
 - do [#lzoutboxjournalop]
 - do [#lzdecorativewirefields]
 - do [#lzprotobufinterop]

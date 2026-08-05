@@ -29,15 +29,6 @@ Compacted content:
 - Archived 14 response topic(s): do [#lzblobbackendstrict]; do [#lzprosekeyconvention]; do [#lznullformblind]; 11 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): do [#failcloseddispatch]; do [#nevergotsystematic]; do [#failc...
 
-### Re: authoritative statechart kinds and closed references — gpt-5
-
-Implemented and published `#lzstatechartkindauthority` across the canonical spec and all nine bindings.
-
-- The declarative contract now closes `kind` to `atomic`, `compound`, `parallel`, `history`, or `final`. An explicit kind is authoritative, must agree with its structural markers, and malformed contradictions are rejected rather than silently re-inferred.
-- Chart-level `initial`, state `parent`/`initial`/history `default`, and every transition target must resolve to a declared state before execution. Unknown lookups no longer fall back to phantom atomic states.
-- Structural fields are strict: `parallel` and transition `internal` must be booleans; `history`, `parent`, `initial`, and history `default` must be strings when present.
-- Added canonical `conformance/statechart/malformed_rejected.json` with 12 named cases spanning unknown/contradictory kinds, all requested type errors, and all requested undeclared-id references. Every Rust, Python, JavaScript, Go, C++, Dart, Kotlin, Zig, and C# runner rejects every case.
-
 Negative control: I temporarily changed the `unknown_kind` case into a valid atomic chart and ran the focused corpus test in all nine bindings. All nine failed on `unknown_kind`, including C++ and Zig's vendored mirror; after restoring and re-syncing the fixture, all nine focused runners passed. This proves the shared invalid-definition corpus is load-bearing.
 
 Published commits:
@@ -61,14 +52,59 @@ Verification:
 - Root run `30882697583`: `tmux-ci` is green. The `check` job failed twice only at the linker with the known `collect2: fatal error: ld terminated with signal 7 [Bus error]`; the single allowed failed-job retry produced the identical infrastructure-only signature. There were no source, compile, or test-assertion failures.
 
 Unrelated dirty AGENTS/runbook/worktree changes in the shared repositories were preserved and excluded from every commit.
-<!-- agent:boundary:09511004:lazily -->
+### Re: authoritative statechart kinds and closed references — gpt-5
+
+Implemented and published `#lzstatechartkindauthority` across the canonical spec and all nine bindings.
+
+- The declarative contract now closes `kind` to `atomic`, `compound`, `parallel`, `history`, or `final`. An explicit kind is authoritative, must agree with its structural markers, and malformed contradictions are rejected rather than silently re-inferred.
+- Chart-level `initial`, state `parent`/`initial`/history `default`, and every transition target must resolve to a declared state before execution. Unknown lookups no longer fall back to phantom atomic states.
+- Structural fields are strict: `parallel` and transition `internal` must be booleans; `history`, `parent`, `initial`, and history `default` must be strings when present.
+- Added canonical `conformance/statechart/malformed_rejected.json` with 12 named cases spanning unknown/contradictory kinds, all requested type errors, and all requested undeclared-id references. Every Rust, Python, JavaScript, Go, C++, Dart, Kotlin, Zig, and C# runner rejects every case.
+
+### Re: canonical durable-outbox journal decoding — gpt-5
+
+Implemented and published `#lzoutboxjournalop`.
+
+The spec now defines `OutboxJournalDecode` in `conformance/reliable-sync/outbox_journal_decode.json` with the deliberate same-file opposites:
+
+- an unknown complete interior opcode is rejected;
+- a sole torn trailing record is forgiven while earlier complete records still determine retained epochs and frames.
+
+The durable-outbox prose now makes that boundary normative, the reliable-sync fixture registry includes the new model, and the schema-conformance gate recognizes it.
+
+C#, Dart, and Zig now replay the canonical corpus through their native file-journal encoders and scanners. Zig also vendors and manifest-checks the byte-identical fixture mirror. I temporarily changed the unknown opcode to the known `cursor` opcode; all three canonical runners failed on the expected-reject assertion, then passed again after restoring `future_delete`. This proves the new tests discriminate the opcode boundary rather than merely opening the fixture.
+
+Published commits:
+
+- lazily-spec: `23a882a965c8fcc0526018042b27e05cd9f097d2`
+- lazily-cs: `947e989688d178239a2c8281141f03a5ad3edcf6`
+- lazily-dart: `cf4a71259f70f614d58985b41d9cb925d7fa20a7`
+- lazily-zig: `1937bc5a3583603fce3c81f789205a772d7dd0de`
+- root gitlink pin: `06278f82b033621ed147671b317c1f450fe8ca25`
+
+Verification:
+
+- full `make check` passed in lazily-spec, lazily-cs, lazily-dart, and lazily-zig;
+- exact-commit component CI passed for all four repositories;
+- root `tmux-ci` passed;
+- root `check` failed on both the original run and its single retry only because GNU `ld` terminated with signal 7 (Bus error), matching the established runner-infrastructure signature;
+- the root network workflow and its single retry both timed out before an unchanged lazily-rs peer flushed its initial `hello`; the uploaded reports identify `peer_timeout`, `culprit: lazily-rs`, seed 17, with no changed Rust gitlink;
+- the local root aggregate reached unrelated dirty-worktree corky OAuth loopback tests racing on port 1455; their isolated sequential test group passed. Task-owned full gates remained green.
+
+No follow-up work is created by this item.
+
+### Re: durable-outbox closeout reconciliation — gpt-5
+
+Confirmed: all five live steering fragments are projections of the already committed `#lzoutboxjournalop` closeout, not a new implementation request.
+
+This reconciliation cycle changes no repository paths, runs no new task command, and creates no follow-up work. The committed response already contains the changed-path summary, the negative-control and full-gate verification, the bounded CI infrastructure exceptions, and the published component/root commit SHAs. Confidence is high because the session guard explicitly reports that prior response as committed in HEAD; no escalation or additional commit is required for these echoed fragments.
+<!-- agent:boundary:7597abb3:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - do [#lzwireencodingrunner]
-- ~~do [#lzstatechartkindauthority]~~
 - do [#lzoutboxjournalop]
 - do [#lzdecorativewirefields]
 - do [#lzprotobufinterop]

@@ -972,7 +972,7 @@ fn atomic_write_rebased_through_authority_inner(
                         let reason = if detail.contains("editor_attached_model_missing") {
                             DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
                         } else {
-                            DocumentWriteDeferredReason::CrdtDeliveryAckPending
+                            DocumentWriteDeferredReason::EditorProjectionPending
                         };
                         let intent_id = ensure_deferred_document_write_intent(
                             path,
@@ -995,7 +995,7 @@ fn atomic_write_rebased_through_authority_inner(
 
             if !relay_write.delivery_converged {
                 return Err(await_editor_replica_no_disk_write(format!(
-                    "serialized_atomic_write: binary-owned write for {} remains retained after the foreground editor ACK deadline (content_hash={}); the same intent will resume through session-check/supervisor recovery. Do not recapture or rerun finalize/write --commit, and do not force disk",
+                    "serialized_atomic_write: binary-owned write for {} remains retained while the editor projection converges (content_hash={}); the same intent resumes when the controller derives settlement and closeout continuation from the live projection. Do not recapture or rerun finalize/write --commit, and do not force disk",
                     path.display(),
                     relay_write.content_hash,
                 )));
@@ -1021,7 +1021,7 @@ fn atomic_write_rebased_through_authority_inner(
                             projection_base,
                             &text,
                             "serialized_atomic_write_editor_save_pending",
-                            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                            DocumentWriteDeferredReason::EditorProjectionPending,
                         )?;
                         return Err(await_editor_replica_no_disk_write(format!(
                             "serialized_atomic_write: editor acknowledged the canonical target for {} (content_hash={}) but its native save has not projected that exact editor version to disk; retained intent {} will resume without a behind-the-editor disk write",
@@ -1735,7 +1735,7 @@ pub fn settle_retained_non_capture_projection_through_authority(
         pending.reason,
         DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
             | DocumentWriteDeferredReason::EditorDeliveryWorkerStale
-            | DocumentWriteDeferredReason::CrdtDeliveryAckPending
+            | DocumentWriteDeferredReason::EditorProjectionPending
     );
     // Delivery-stage reasons describe where projection paused, not whether a
     // response target must be replayed byte-for-byte. Socket delivery may land
@@ -1977,7 +1977,7 @@ fn retire_superseded_compact_projection_intents(
             intent.source.is_post_commit_reposition() || intent.source.is_serialized_atomic_write();
         let eligible_reason = matches!(
             intent.reason,
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending
+            DocumentWriteDeferredReason::EditorProjectionPending
                 | DocumentWriteDeferredReason::ExtendPendingEditorReconnectTarget
         );
         let target_hash_exact = intent
@@ -2236,7 +2236,7 @@ fn settle_atomic_repair_projection(
             expected_current,
             content,
             source,
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )?;
         agent_doc_ops_log_io::log_op(
             path,
@@ -2771,7 +2771,7 @@ pub fn apply_canonical_replace_if_attached(
                             &relay_text,
                             &effective_target,
                             source,
-                            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                            DocumentWriteDeferredReason::EditorProjectionPending,
                         )?;
 
                         match apply_cp_write_through_relay_authority(
@@ -9038,7 +9038,7 @@ mod tests {
             baseline,
             &target,
             "acknowledged_operator_cut_seed",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         std::fs::write(&file, &operator_cut)
@@ -9229,7 +9229,7 @@ mod tests {
             baseline,
             target,
             "repair_retained_projection_test",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
 
@@ -9505,7 +9505,7 @@ mod tests {
             baseline,
             stale_target,
             "stale_response_intent_test",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         ensure_deferred_document_write_intent(
@@ -9513,7 +9513,7 @@ mod tests {
             latest_target,
             latest_target,
             "latest_response_intent_test",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
 
@@ -9571,7 +9571,7 @@ mod tests {
             response_target,
             &queue_consumed_target,
             "queue_consume_boundary_reconnect_test",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
 
@@ -9615,7 +9615,7 @@ mod tests {
             base,
             &first_target,
             "deferred_boundary_composition_first",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         ensure_deferred_document_write_intent(
@@ -9623,7 +9623,7 @@ mod tests {
             base,
             &newest_target,
             "deferred_boundary_composition_newest",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
 
@@ -9670,7 +9670,7 @@ mod tests {
             base,
             &response_target,
             "retained_queue_replay_first",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         ensure_deferred_document_write_intent(
@@ -9678,7 +9678,7 @@ mod tests {
             base,
             &live_editor,
             "retained_queue_replay_merge",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
 
@@ -9697,7 +9697,7 @@ mod tests {
             base,
             &live_editor,
             "retained_queue_replay_retry",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         let retry = pending_document_write(&file).expect("retry target retained");
@@ -9745,7 +9745,7 @@ mod tests {
             base,
             &first_target,
             "patchretryidem_first_attempt",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         ensure_deferred_document_write_intent(
@@ -9753,7 +9753,7 @@ mod tests {
             base,
             &raced_retry,
             "patchretryidem_second_attempt",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
 
@@ -9778,7 +9778,7 @@ mod tests {
             base,
             &raced_retry,
             "patchretryidem_third_attempt",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         let retried = pending_document_write(&file).expect("idempotent retry retained");
@@ -9821,7 +9821,7 @@ mod tests {
             base,
             &committed_cut,
             "post_commit_refinement_seed",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         refine_deferred_document_write_target(
@@ -9886,7 +9886,7 @@ mod tests {
                     target_hash: agent_doc_hash::content_hash(target),
                     target_content: target.to_string(),
                     source: agent_doc_state_backbone::DocumentWriteSource::from("test"),
-                    reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                    reason: DocumentWriteDeferredReason::EditorProjectionPending,
                 },
             );
             agent_doc_controller_io::project_controller::append_state_event_for_test(
@@ -9937,7 +9937,7 @@ mod tests {
             base,
             &complete,
             "serialized_atomic_write",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
 
@@ -9998,7 +9998,7 @@ mod tests {
                     reason: if source == "editor_reconnect" {
                         DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
                     } else {
-                        DocumentWriteDeferredReason::CrdtDeliveryAckPending
+                        DocumentWriteDeferredReason::EditorProjectionPending
                     },
                 },
             );
@@ -10283,7 +10283,7 @@ mod tests {
             &captured_current,
             editor_base,
             "superseded_capture_stale_lineage_test",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         retain_deferred_document_write_target(
@@ -10291,7 +10291,7 @@ mod tests {
             editor_base,
             &captured_current,
             "superseded_capture_current_lineage_test",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         std::fs::write(&file, editor_base).expect("simulate disk trailing Lazily authority");
@@ -10584,7 +10584,7 @@ mod tests {
             &invalid,
             &valid,
             "retained_capture_terminal_debris_projection_test",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .expect("the valid retained target should remain durable");
         std::fs::write(&file, &valid).expect("simulate disk already holding the valid projection");
@@ -10655,7 +10655,7 @@ mod tests {
                 target_hash: agent_doc_hash::content_hash(&invalid),
                 target_content: invalid.clone(),
                 source: agent_doc_state_backbone::DocumentWriteSource::SerializedAtomicWrite,
-                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
             },
         );
         agent_doc_controller_io::project_controller::append_state_event_for_test(
@@ -10984,7 +10984,7 @@ mod tests {
             editor_base,
             &retained_target,
             "serialized_atomic_write",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         assert!(pending_document_write(&file).is_some());
@@ -11038,7 +11038,7 @@ mod tests {
             editor_base,
             &retained_target,
             "serialized_atomic_write",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         agent_doc_crdt_relay_io::with_hub(&file, |hub| {
@@ -11182,7 +11182,7 @@ mod tests {
                 "intent-stale-composite",
                 stale_composite.as_str(),
                 "serialized_atomic_write",
-                DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                DocumentWriteDeferredReason::EditorProjectionPending,
             ),
         ] {
             let event = agent_doc_state_backbone::StateEvent::new(
@@ -11251,7 +11251,7 @@ mod tests {
                 target_hash: agent_doc_hash::content_hash(&stale),
                 target_content: stale,
                 source: agent_doc_state_backbone::DocumentWriteSource::from("queue_mutation"),
-                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
             },
         );
         agent_doc_controller_io::project_controller::append_state_event_for_test(
@@ -11522,7 +11522,7 @@ mod tests {
             editor_base,
             &response_target,
             "ack_pending_semantic_response_test",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         agent_doc_crdt_relay_io::with_hub(&file, |hub| {
@@ -11655,7 +11655,7 @@ mod tests {
             baseline,
             response,
             "independent_agent_response",
-            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         retain_external_disk_candidate(&file, baseline, disk_one, "external_one").unwrap();

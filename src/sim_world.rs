@@ -560,7 +560,7 @@ mod retained_write_generation_model {
                             target_hash: target.to_string(),
                             target_content: format!("content-{target}"),
                             source: DocumentWriteSource::PendingWrite,
-                            reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                            reason: DocumentWriteDeferredReason::EditorProjectionPending,
                         });
                 }
                 Action::ReplaceController => {

@@ -2,6 +2,46 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.139
+
+- **JetBrains restart restoration no longer contracts a two-pane surface into
+  `stash`.** IntelliJ now settles structural and file-open edges across bounded
+  later EDT turns, refuses to publish while any restored editor window is
+  empty, derives visibility from restored windows instead of a lagging
+  aggregate, and compares absolute selected/layout paths. A fresh plugin JVM
+  recovers candidate controller roots from open markdown files and
+  generation-fenced-retires every older `jetbrains-pid` projection at
+  incompatible roots before replacement publication. Other editor families
+  remain independent, and delayed old-JVM retirement cannot stop the
+  replacement.
+
+- **JetBrains tab navigation and i3 workspace return now have explicit reactive
+  boundaries.** Selection callbacks only capture the event file and schedule
+  projection. The next EDT pass snapshots immutable IDE state; project-root
+  discovery, filesystem walks, patch-watch registration, JSON construction,
+  controller delivery, and tmux work run on the serialized background lane.
+  Returning through an application-activation edge republishes the
+  bounded-settled surface, repairing a terminal tool window reconstructed while
+  hidden without a manual **Sync Tmux Pane** action. JetBrains plugin `0.2.348`
+  carries both fixes.
+
+- **Completed free-text queue residue can recover from an unambiguous historical
+  response heading.** The normal proof remains a verbatim
+  `> **Queue prompt:**` echo. When an older answer omitted it, preflight may
+  strike the committed head only if a `### Re:` topic repeats the same long
+  underscore-delimited code identifier. Prose mentions, filenames, short or
+  different identifiers, and explicitly deferred responses remain
+  insufficient.
+
+- **Retained editor delivery no longer races its own closeout wake.** Exact
+  visible content first settles the durable write; a distinct Lazily
+  `SettledCloseoutReady` projection then derives the captured-finalize
+  continuation from the open cycle, latest converged write, and live editor
+  content. This removes the one-shot wake that could fire before settlement and
+  strand a cycle at `write_applied`. New ledgers record
+  `editor_projection_pending`; the legacy `crdt_delivery_ack_pending` token is
+  decode-only and migrates to the reactive reason.
+
 ## 0.35.138
 
 - **Editor authority is now an exact-key reactive projection, not a

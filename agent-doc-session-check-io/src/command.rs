@@ -2002,14 +2002,14 @@ fn retained_pending_write_message(
         .unwrap_or_default();
 
     // `#retainednoeditor`: "resumes automatically after editor/controller delivery
-    // converges" is only true while an editor replica can still ACK. When the
+    // converges" is only true while an editor replica can still project. When the
     // editor is GONE (IDE closed or restarted), there is nothing to converge
     // with, and "retry only `agent-doc session-check`" becomes an instruction
     // that can never succeed — the operator retries forever against a precondition
     // that will not arrive on its own.
     //
     // Two independent sessions hit exactly this on 2026-07-18: retained
-    // `crdt_delivery_ack_pending` with zero live editor replicas, escalating
+    // `editor_projection_pending` with zero live editor replicas, escalating
     // through session-check retries, `admin recycle`, and `repair-projection`
     // before stopping. The capture is genuinely durable and force-disk is
     // genuinely wrong, so the fix is not to weaken the guard — it is to name the
@@ -3440,7 +3440,7 @@ mod terminal_convergence_tests {
         let message = retained_pending_write_message(
             file,
             "intent-1",
-            "crdt_delivery_ack_pending",
+            "editor_projection_pending",
             "write_stream",
             "new",
             None,

@@ -13773,7 +13773,7 @@ fn run_closeout_owner_claim(
                 .captured_finalize_wakes
                 .lock()
                 .get(&document_hash)
-                .filter(|wake| wake.reason == super::RETAINED_DELIVERY_REACTIVE_REASON)
+                .filter(|wake| wake.reason == super::RETAINED_SETTLED_DELIVERY_REACTIVE_REASON)
                 .map(
                     |wake| CloseoutOwnerClaimAuthorization::RetainedContinuation {
                         cycle_id: wake.cycle_id.clone(),
@@ -23099,7 +23099,7 @@ mod tests {
                 target_content: "# Session\n\n### Re: done\n".to_string(),
                 source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
                 reason:
-                    agent_doc_state_backbone::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                    agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
             },
         );
         let request = ControllerRequest {
@@ -23918,7 +23918,7 @@ mod tests {
             &cycle.cycle_id,
             "capture-1",
             "response-1",
-            super::RETAINED_DELIVERY_REACTIVE_REASON,
+            super::RETAINED_SETTLED_DELIVERY_REACTIVE_REASON,
         ));
         assert!(matches!(
             run_closeout_owner_claim(

@@ -2382,19 +2382,16 @@ struct RetainedDeliveryActivation {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RetainedResumeAction {
-    ResumeExactDelivery,
-    ResumeRebasedDelivery,
+    ResumeSettledDelivery,
     ReconcileMaterializedCapture,
 }
 
-const RETAINED_DELIVERY_REACTIVE_REASON: &str = "retained_delivery_reactive";
-const RETAINED_REBASED_DELIVERY_REACTIVE_REASON: &str = "retained_rebased_delivery_reactive";
+const RETAINED_SETTLED_DELIVERY_REACTIVE_REASON: &str = "retained_settled_delivery_reactive";
 
 impl RetainedResumeAction {
     fn reason(self) -> &'static str {
         match self {
-            Self::ResumeExactDelivery => RETAINED_DELIVERY_REACTIVE_REASON,
-            Self::ResumeRebasedDelivery => RETAINED_REBASED_DELIVERY_REACTIVE_REASON,
+            Self::ResumeSettledDelivery => RETAINED_SETTLED_DELIVERY_REACTIVE_REASON,
             Self::ReconcileMaterializedCapture => {
                 "retained_materialized_capture_reconcile_reactive"
             }
@@ -2457,8 +2454,8 @@ enum RetainedTransitionState {
         target_hash: String,
         delivery_version: u64,
         controller_generation: u64,
-        resume: Option<RetainedResumeSignal>,
     },
+    SettledCloseoutReady(RetainedResumeSignal),
     ReconcileMaterializedCapture(RetainedResumeSignal),
     Conflict {
         intent_id: String,
@@ -2486,10 +2483,9 @@ impl RetainedTransitionState {
             Self::ApplyTarget(transition) => {
                 Some(RetainedTransitionEffect::ApplyTarget(transition.clone()))
             }
-            Self::TargetVisible {
-                resume: Some(signal),
-                ..
-            } => Some(RetainedTransitionEffect::ResumeCloseout(signal.clone())),
+            Self::SettledCloseoutReady(signal) => {
+                Some(RetainedTransitionEffect::ResumeCloseout(signal.clone()))
+            }
             Self::ReconcileMaterializedCapture(signal) => Some(
                 RetainedTransitionEffect::SettleMaterializedCapture(signal.clone()),
             ),
@@ -2498,18 +2494,16 @@ impl RetainedTransitionState {
             | Self::AwaitingController { .. }
             | Self::AwaitingLiveEditor { .. }
             | Self::AwaitingConvergence { .. }
-            | Self::TargetVisible { resume: None, .. }
+            | Self::TargetVisible { .. }
             | Self::Conflict { .. } => None,
         }
     }
 
     fn resume_signal(&self) -> Option<RetainedResumeSignal> {
         match self {
-            Self::TargetVisible {
-                resume: Some(signal),
-                ..
+            Self::SettledCloseoutReady(signal) | Self::ReconcileMaterializedCapture(signal) => {
+                Some(signal.clone())
             }
-            | Self::ReconcileMaterializedCapture(signal) => Some(signal.clone()),
             _ => None,
         }
     }
@@ -3832,7 +3826,9 @@ fn retained_transition_state(
         return RetainedTransitionState::NoProjection;
     };
     let Some(intent) = projection.document.pending_write.as_ref() else {
-        return RetainedTransitionState::Idle;
+        return derive_settled_closeout_resume_signal(projection, delivery, controller_generation)
+            .map(RetainedTransitionState::SettledCloseoutReady)
+            .unwrap_or(RetainedTransitionState::Idle);
     };
     if controller_generation == 0 {
         return RetainedTransitionState::AwaitingController {
@@ -3868,7 +3864,6 @@ fn retained_transition_state(
         };
     }
 
-    let resume = derive_retained_resume_signal(projection, delivery, controller_generation);
     if delivery
         .content_hash
         .eq_ignore_ascii_case(&intent.target_hash)
@@ -3878,7 +3873,6 @@ fn retained_transition_state(
             target_hash: intent.target_hash.clone(),
             delivery_version: delivery.delivery_version,
             controller_generation,
-            resume,
         };
     }
     if let Some(
@@ -3886,7 +3880,7 @@ fn retained_transition_state(
             action: RetainedResumeAction::ReconcileMaterializedCapture,
             ..
         },
-    ) = resume
+    ) = derive_pending_retained_resume_signal(projection, delivery, controller_generation)
     {
         return RetainedTransitionState::ReconcileMaterializedCapture(signal);
     }
@@ -3973,12 +3967,6 @@ fn retained_transition_state(
             target_hash: projected_target_hash,
             delivery_version: delivery.delivery_version,
             controller_generation,
-            resume: retained_resume_signal_for_action(
-                projection,
-                delivery,
-                controller_generation,
-                RetainedResumeAction::ResumeRebasedDelivery,
-            ),
         };
     }
     RetainedTransitionState::ApplyTarget(RetainedTransitionProjection {
@@ -3994,7 +3982,7 @@ fn retained_transition_state(
     })
 }
 
-fn derive_retained_resume_signal(
+fn derive_pending_retained_resume_signal(
     projection: &agent_doc_state_backbone::DocumentStateProjection,
     delivery: &RetainedDeliveryObservation,
     controller_generation: u64,
@@ -4004,18 +3992,13 @@ fn derive_retained_resume_signal(
         .continuation
         .as_ref()
         .or(projection.closeout.captured_response.as_ref())?;
-    let action = if delivery
-        .content_hash
-        .eq_ignore_ascii_case(&intent.target_hash)
-    {
-        RetainedResumeAction::ResumeExactDelivery
-    } else if intent.source == agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition
+    let action = if intent.source
+        == agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition
         && agent_doc_element::element::structural_corruption_reason(&delivery.content).is_none()
         && agent_doc_turn::response_replay::response_materialized_in_content(
             &capture.response_body,
             delivery.content.as_ref(),
-        )
-    {
+        ) {
         // A post-commit reposition carries layout cleanup, not a missing
         // response body. If a newer converged projection already contains the
         // durable response, the reactive settlement Effect can retire the
@@ -4026,6 +4009,50 @@ fn derive_retained_resume_signal(
         return None;
     };
     retained_resume_signal_for_action(projection, delivery, controller_generation, action)
+}
+
+fn derive_settled_closeout_resume_signal(
+    projection: &agent_doc_state_backbone::DocumentStateProjection,
+    delivery: Option<&RetainedDeliveryObservation>,
+    controller_generation: u64,
+) -> Option<RetainedResumeSignal> {
+    if controller_generation == 0 {
+        return None;
+    }
+    let delivery = delivery?;
+    if delivery.live_editors == 0
+        || !delivery.delivery_converged
+        || agent_doc_element::element::structural_corruption_reason(&delivery.content).is_some()
+    {
+        return None;
+    }
+    let phase = projection.closeout.phase?;
+    if !phase.is_open() {
+        return None;
+    }
+    let capture = projection.closeout.captured_response.as_ref()?;
+    if projection.closeout.cycle_id.as_deref() != Some(capture.cycle_id.as_str())
+        || !agent_doc_turn::response_replay::response_materialized_in_content(
+            &capture.response_body,
+            delivery.content.as_ref(),
+        )
+    {
+        return None;
+    }
+    let converged = projection.document.latest_converged_write.as_ref()?;
+    if converged.source == agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition {
+        return None;
+    }
+    Some(RetainedResumeSignal {
+        action: RetainedResumeAction::ResumeSettledDelivery,
+        intent_id: converged.intent_id.clone(),
+        target_hash: converged.target_hash.clone(),
+        cycle_id: capture.cycle_id.clone(),
+        capture_id: capture.capture_id.clone(),
+        response_sha256: capture.response_sha256.clone(),
+        delivery_version: delivery.delivery_version,
+        controller_generation,
+    })
 }
 
 fn retained_resume_signal_for_action(
@@ -4096,6 +4123,29 @@ fn retained_resume_signal_matches_projection(
     signal: &RetainedResumeSignal,
     projection: &agent_doc_state_backbone::DocumentStateProjection,
 ) -> bool {
+    if signal.action == RetainedResumeAction::ResumeSettledDelivery {
+        let Some(converged) = projection.document.latest_converged_write.as_ref() else {
+            return false;
+        };
+        return projection.document.pending_write.is_none()
+            && projection
+                .closeout
+                .phase
+                .is_some_and(|phase| phase.is_open())
+            && converged.intent_id == signal.intent_id
+            && converged
+                .target_hash
+                .eq_ignore_ascii_case(&signal.target_hash)
+            && projection
+                .closeout
+                .captured_response
+                .as_ref()
+                .is_some_and(|capture| {
+                    capture.cycle_id == signal.cycle_id
+                        && capture.capture_id == signal.capture_id
+                        && capture.response_sha256 == signal.response_sha256
+                });
+    }
     let Some(intent) = projection.document.pending_write.as_ref() else {
         return false;
     };
@@ -12519,7 +12569,7 @@ agent:queue\n\
                 target_content: format!("content-for-{target_hash}"),
                 source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
                 reason:
-                    agent_doc_state_backbone::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                    agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
             },
         )
     }
@@ -12989,6 +13039,7 @@ agent:queue\n\
             RetainedTransitionState::AwaitingConvergence { .. } => "awaiting_convergence",
             RetainedTransitionState::ApplyTarget(_) => "apply_target",
             RetainedTransitionState::TargetVisible { .. } => "target_visible",
+            RetainedTransitionState::SettledCloseoutReady(_) => "settled_closeout_ready",
             RetainedTransitionState::ReconcileMaterializedCapture(_) => {
                 "reconcile_materialized_capture"
             }
@@ -13079,6 +13130,16 @@ agent:queue\n\
             intent.target_content = "# Queue\n-->\n".to_string();
             intent.target_hash = agent_doc_hash::content_hash(&intent.target_content);
         }
+        let mut settled_closeout = transition.clone();
+        settled_closeout.apply_fact(
+            &agent_doc_state_backbone::StateFact::DocumentWriteConverged {
+                document_hash: settled_closeout.document_hash.clone(),
+                intent_id: "intent-1".to_string(),
+                target_hash: agent_doc_hash::content_hash(target),
+                source: "controller_retained_write_settlement_effect".to_string(),
+                intent_source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
+            },
+        );
 
         let cases = vec![
             ("no projection", None, None, 1, "no_projection", "none"),
@@ -13136,7 +13197,7 @@ agent:queue\n\
                 Some(delivery(target, 1, true)),
                 1,
                 "target_visible",
-                "resume_closeout",
+                "none",
             ),
             (
                 "target visible after the current cycle capture was recycled",
@@ -13144,7 +13205,7 @@ agent:queue\n\
                 Some(delivery(target, 1, true)),
                 1,
                 "target_visible",
-                "resume_closeout",
+                "none",
             ),
             (
                 "legacy target visible without any retained continuation",
@@ -13153,6 +13214,14 @@ agent:queue\n\
                 1,
                 "target_visible",
                 "none",
+            ),
+            (
+                "settled target with an open captured closeout",
+                Some(settled_closeout),
+                Some(delivery("response body\n", 1, true)),
+                1,
+                "settled_closeout_ready",
+                "resume_closeout",
             ),
             (
                 "newer projection materializes retained response",
@@ -13214,10 +13283,10 @@ agent:queue\n\
 
     #[test]
     fn retained_resume_is_a_typed_computed_delivery_gate() {
-        let projection = retained_resume_projection("doc-retained-resume");
+        let mut projection = retained_resume_projection("doc-retained-resume");
         let exact = RetainedDeliveryObservation {
             file: PathBuf::from("/work/task.md"),
-            content: Arc::from("target"),
+            content: Arc::from("target\nresponse body\n"),
             content_hash: "target".to_string(),
             live_editors: 1,
             delivery_converged: true,
@@ -13264,8 +13333,21 @@ agent:queue\n\
             .is_none()
         );
 
+        assert!(
+            retained_resume_signal(Some(&projection), Some(&exact), 1).is_none(),
+            "visible delivery alone cannot wake closeout before durable settlement"
+        );
+        projection.apply_fact(
+            &agent_doc_state_backbone::StateFact::DocumentWriteConverged {
+                document_hash: projection.document_hash.clone(),
+                intent_id: "intent-1".to_string(),
+                target_hash: "target".to_string(),
+                source: "controller_retained_write_settlement_effect".to_string(),
+                intent_source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
+            },
+        );
         let signal = retained_resume_signal(Some(&projection), Some(&exact), 1).unwrap();
-        assert_eq!(signal.action, RetainedResumeAction::ResumeExactDelivery);
+        assert_eq!(signal.action, RetainedResumeAction::ResumeSettledDelivery);
         assert_eq!(signal.intent_id, "intent-1");
         assert_eq!(signal.target_hash, "target");
         assert_eq!(signal.cycle_id, "cycle-1");
@@ -13278,21 +13360,8 @@ agent:queue\n\
         recycled.closeout.cycle_id = Some("cycle-2".into());
         recycled.closeout.captured_response = None;
         assert!(
-            retained_resume_signal_matches_projection(&signal, &recycled),
-            "the effect fence must follow the retained transition continuation, not current-cycle state",
-        );
-        recycled
-            .document
-            .pending_write
-            .as_mut()
-            .unwrap()
-            .continuation
-            .as_mut()
-            .unwrap()
-            .capture_id = "different-capture".into();
-        assert!(
             !retained_resume_signal_matches_projection(&signal, &recycled),
-            "a genuinely different retained continuation must remain fenced",
+            "post-settlement continuation must remain pinned to the open captured cycle",
         );
     }
 
@@ -13492,9 +13561,8 @@ revised operator request
 
         let state = retained_transition_state(Some(&projection), Some(&visible), 2);
         assert_eq!(retained_transition_state_tag(&state), "target_visible");
-        assert_eq!(retained_transition_effect_tag(&state), "resume_closeout");
-        let signal = state.resume_signal().unwrap();
-        assert_eq!(signal.action, RetainedResumeAction::ResumeRebasedDelivery);
+        assert_eq!(retained_transition_effect_tag(&state), "none");
+        assert!(state.resume_signal().is_none());
         assert_eq!(
             state.transition_projection(),
             None,
@@ -13717,7 +13785,7 @@ revised operator request
     fn retained_resume_reacts_when_delivery_arrives_after_the_intent() {
         let dir = tempfile::TempDir::new().unwrap();
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
-        let (_file, document_hash) = retained_test_document(&dir);
+        let (file, document_hash) = retained_test_document(&dir);
         capture_response(&runtime, dir.path(), &document_hash);
         defer_document_write(
             &runtime,
@@ -13737,7 +13805,7 @@ revised operator request
             &document_hash,
             Some(RetainedDeliveryObservation {
                 file: PathBuf::from("/work/task.md"),
-                content: Arc::from("target"),
+                content: Arc::from("target\nresponse body\n"),
                 content_hash: "target".to_string(),
                 live_editors: 1,
                 delivery_converged: true,
@@ -13745,9 +13813,22 @@ revised operator request
             }),
         );
 
+        assert!(
+            !runtime
+                .captured_finalize_wakes
+                .lock()
+                .contains_key(&document_hash),
+            "delivery projection cannot wake closeout before the retained intent settles"
+        );
+        runtime.document_retained_write_observe_authority(
+            &document_hash,
+            &file,
+            observation("target"),
+        );
+        runtime.document_retained_write_observe_disk(&document_hash, &file, observation("target"));
         let wakes = runtime.captured_finalize_wakes.lock();
         let wake = wakes.get(&document_hash).unwrap();
-        assert_eq!(wake.reason, "retained_delivery_reactive");
+        assert_eq!(wake.reason, "retained_settled_delivery_reactive");
         assert_eq!(wake.capture_id, "capture-1");
     }
 
@@ -13842,13 +13923,13 @@ revised operator request
     fn retained_resume_reacts_when_the_intent_arrives_after_delivery() {
         let dir = tempfile::TempDir::new().unwrap();
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
-        let (_file, document_hash) = retained_test_document(&dir);
+        let (file, document_hash) = retained_test_document(&dir);
         capture_response(&runtime, dir.path(), &document_hash);
         runtime.document_retained_write_observe_delivery(
             &document_hash,
             Some(RetainedDeliveryObservation {
                 file: PathBuf::from("/work/task.md"),
-                content: Arc::from("target"),
+                content: Arc::from("target\nresponse body\n"),
                 content_hash: "target".to_string(),
                 live_editors: 1,
                 delivery_converged: true,
@@ -13870,13 +13951,26 @@ revised operator request
             "target",
         );
 
+        assert!(
+            !runtime
+                .captured_finalize_wakes
+                .lock()
+                .contains_key(&document_hash),
+            "intent admission cannot turn an earlier delivery observation into an acknowledgement"
+        );
+        runtime.document_retained_write_observe_authority(
+            &document_hash,
+            &file,
+            observation("target"),
+        );
+        runtime.document_retained_write_observe_disk(&document_hash, &file, observation("target"));
         assert_eq!(
             runtime
                 .captured_finalize_wakes
                 .lock()
                 .get(&document_hash)
                 .map(|wake| wake.reason.as_str()),
-            Some("retained_delivery_reactive")
+            Some("retained_settled_delivery_reactive")
         );
     }
 
@@ -13892,6 +13986,18 @@ revised operator request
                 "intent-before-controller-activation",
                 "target",
             ),
+            document_authority_event(
+                &document_hash,
+                agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+                1,
+                "target",
+            ),
+            document_authority_event(
+                &document_hash,
+                agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+                2,
+                "target",
+            ),
         ] {
             append_state_event(dir.path(), &event).unwrap();
         }
@@ -13904,7 +14010,7 @@ revised operator request
             &document_hash,
             Some(RetainedDeliveryObservation {
                 file: PathBuf::from("/work/task.md"),
-                content: Arc::from("target"),
+                content: Arc::from("target\nresponse body\n"),
                 content_hash: "target".to_string(),
                 live_editors: 1,
                 delivery_converged: true,
@@ -13928,8 +14034,8 @@ revised operator request
                 .lock()
                 .get(&document_hash)
                 .map(|wake| wake.reason.as_str()),
-            Some("retained_delivery_reactive"),
-            "controller activation must apply the already-eligible Computed without another ACK"
+            Some("retained_settled_delivery_reactive"),
+            "controller activation must derive settlement and closeout continuation from current projections"
         );
     }
 

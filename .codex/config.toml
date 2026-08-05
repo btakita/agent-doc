@@ -6,7 +6,7 @@ args = [
     "mcp",
     "serve",
     "--project-root",
-    "/tmp/agent-doc-v035138-listener-singleton",
+    "/tmp/agent-doc-v035139-final",
 ]
 command = "agent-doc"
 default_tools_approval_mode = "approve"

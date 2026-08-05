@@ -518,7 +518,7 @@ mod tests {
         RetainedIntentFacts {
             intent_id: "intent-1".to_string(),
             target_hash: target_hash.to_string(),
-            reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            reason: DocumentWriteDeferredReason::EditorProjectionPending,
             source: DocumentWriteSource::PendingWrite,
             superseding_stage: None,
             carries_response_payload,
@@ -1018,7 +1018,7 @@ mod suppression_guard {
         settlement.observe_pending(Some(RetainedIntentFacts {
             intent_id: "intent-1".to_string(),
             target_hash: "stamped".to_string(),
-            reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            reason: DocumentWriteDeferredReason::EditorProjectionPending,
             source: DocumentWriteSource::PendingWrite,
             superseding_stage: None,
             carries_response_payload: true,
@@ -1034,7 +1034,7 @@ mod suppression_guard {
         suppressed.observe_pending(Some(RetainedIntentFacts {
             intent_id: "intent-1".to_string(),
             target_hash: "stamped".to_string(),
-            reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            reason: DocumentWriteDeferredReason::EditorProjectionPending,
             source: DocumentWriteSource::PendingWrite,
             superseding_stage: None,
             carries_response_payload: true,

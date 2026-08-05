@@ -63,7 +63,9 @@ pub enum StateDomain {
 pub enum DocumentWriteDeferredReason {
     EditorOwnerWithoutRegisteredReplica,
     EditorDeliveryWorkerStale,
-    CrdtDeliveryAckPending,
+    /// Canonical content is retained while the live editor/disk projection
+    /// graph derives exact convergence.
+    EditorProjectionPending,
     MergeUnsavedEditorCutWithDeferredTarget,
     RetainEditorReconnectLineageBeforeDiskProjection,
     PendingUserDecisionExternalDiskVsEditor,
@@ -76,7 +78,7 @@ impl DocumentWriteDeferredReason {
         match self {
             Self::EditorOwnerWithoutRegisteredReplica => "editor_owner_without_registered_replica",
             Self::EditorDeliveryWorkerStale => "editor_delivery_worker_stale",
-            Self::CrdtDeliveryAckPending => "crdt_delivery_ack_pending",
+            Self::EditorProjectionPending => "editor_projection_pending",
             Self::MergeUnsavedEditorCutWithDeferredTarget => {
                 "merge_unsaved_editor_cut_with_deferred_target"
             }
@@ -97,7 +99,12 @@ impl From<&str> for DocumentWriteDeferredReason {
         match value {
             "editor_owner_without_registered_replica" => Self::EditorOwnerWithoutRegisteredReplica,
             "editor_delivery_worker_stale" => Self::EditorDeliveryWorkerStale,
-            "crdt_delivery_ack_pending" => Self::CrdtDeliveryAckPending,
+            // Decode the pre-reactive request/ack name for durable ledgers
+            // written before v0.35.139. New events always emit the projection
+            // name above.
+            "crdt_delivery_ack_pending" | "editor_projection_pending" => {
+                Self::EditorProjectionPending
+            }
             "merge_unsaved_editor_cut_with_deferred_target" => {
                 Self::MergeUnsavedEditorCutWithDeferredTarget
             }
@@ -5818,6 +5825,20 @@ mod tests {
     }
 
     #[test]
+    fn legacy_crdt_ack_reason_decodes_to_the_lazy_editor_projection_reason() {
+        let migrated = DocumentWriteDeferredReason::from("crdt_delivery_ack_pending");
+        assert_eq!(
+            migrated,
+            DocumentWriteDeferredReason::EditorProjectionPending
+        );
+        assert_eq!(migrated.token(), "editor_projection_pending");
+        assert_eq!(
+            DocumentWriteDeferredReason::from("editor_projection_pending"),
+            migrated
+        );
+    }
+
+    #[test]
     fn an_owner_from_a_closed_turn_is_superseded_without_waiting_for_its_lease() {
         // #closeoutterminalreactive: the turn advanced, so the old settlement is
         // moot the instant the new turn opens. Waiting out its lease is waiting
@@ -7912,7 +7933,7 @@ mod tests {
                 target_hash: "response-target".into(),
                 target_content: "response".into(),
                 source: DocumentWriteSource::PendingWrite,
-                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
             },
         ));
 
@@ -8058,7 +8079,7 @@ mod tests {
                 target_hash: "target-retained".into(),
                 target_content: target,
                 source: "finalize".into(),
-                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
             },
         ));
 
@@ -8269,7 +8290,7 @@ mod tests {
                 target_hash: "target-terminal-retained".into(),
                 target_content: target,
                 source: "finalize".into(),
-                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
             },
         ));
         ledger.append(state_event(
@@ -8413,7 +8434,7 @@ mod tests {
                     target_hash: target.into(),
                     target_content: format!("composed {target}"),
                     source: "finalize".into(),
-                    reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                    reason: DocumentWriteDeferredReason::EditorProjectionPending,
                 },
             ));
         }
@@ -8476,7 +8497,7 @@ mod tests {
                 target_hash: "agent-target".into(),
                 target_content: "agent response".into(),
                 source: "finalize".into(),
-                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
             },
         ));
         ledger.append(state_event(

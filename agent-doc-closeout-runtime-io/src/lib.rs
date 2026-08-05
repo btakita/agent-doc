@@ -1402,7 +1402,7 @@ mod tests {
             base,
             target,
             "false_stale_exact_target_test",
-            agent_doc_document_realtime_io::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
         assert!(
@@ -1512,7 +1512,7 @@ mod tests {
             base,
             target,
             "committed_capture_effect_sink_test",
-            agent_doc_document_realtime_io::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorProjectionPending,
         )
         .unwrap();
 

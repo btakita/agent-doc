@@ -57,6 +57,20 @@ Live recovery proof: `haiven-dev.md` retained its existing owner pane and Codex 
 The fixes are released and installed as agent-doc `0.35.142`; JetBrains plugin `0.2.349` is active in the running IDE with one registration PID for both the root and Haiven documents. Root and Haiven controllers are stable on `0.35.142`, fresh against the installed inode, with no stale duplicate PIDs. Public commit: `1ff1a4734`; root gitlink commit: `04faeb8155`.
 
 Verification is fully green: local `make check` (8,651 Rust tests plus simulator, JetBrains, version-sync, Lean, and TLA), GitHub CI `31024772526`, Release `31024778362`, and PyPI `31024778919` all succeeded. The unrelated staged deletion of `tasks/professional/octavian-gabriel-stan.md` was preserved.
+
+### Re: Response
+
+Fixed and recovered.
+
+The completed monsterrodholders queue item is now struck, and its retained response includes the exact `Queue prompt` provenance. The remaining six queue items were preserved and `queue: stop` remains in effect.
+
+The underlying stopped-queue/direct-steering gap shipped in agent-doc 0.35.143 as `agent-doc queue consume <FILE> --ack-text <TEXT>`. It exact-matches only the leading paused free-text item, refuses ambiguity or active queues, records normal consumption proof, and never consumes the next item.
+
+I also fixed the restart-lineage failure exposed during recovery. Restart Agent previously decoded its explicit `agent:<mode>` intent and discarded that distinction before the old child exited, so the next iteration re-read `agent:` but retained a stale in-memory Codex thread instead of the newly persisted `resume:` ID. Agent-doc 0.35.144 now carries that intent through the boundary; a same-harness continue restart validates current frontmatter `resume:` and may replace the stale lineage. Ordinary crashes and controller recycles remain pinned to their already observed thread.
+
+The original monsterrodholders Codex conversation is restored and idle in tmux pane `%915`, window `@895`, at 35% context. The actor is ready, the supervisor is healthy, and `session doctor` reports no issues. The installed binary and skills report agent-doc 0.35.144. The healthy restored pane was not force-restarted.
+
+Verification passed: 8,654 repository tests, release projection checks, and all formal model checks. Public commits `72919a602` (paused direct-steering acknowledgement) and `d359fb5ca` (explicit resume refresh) are pushed; tags `v0.35.143` and `v0.35.144` are published. The 0.35.144 CI, Release, and PyPI workflows were still in progress at the final check; the preceding 0.35.143 workflows completed successfully.
 <!-- agent:boundary:2463ea63:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue

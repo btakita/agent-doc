@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 019fa782-f025-7a10-8a66-3296f1b2bbc7
+resume: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -110,11 +110,26 @@ Done. The direct Google Reviews CTA is deployed to the EFS staging site.
 - Repository state: `main` is clean and synchronized with `origin/main`.
 
 Confidence: high. Escalation: none.
+
+### Re: Actual Google review text — gpt-5
+
+> **Queue prompt:** Can you use the actual review text on the website?
+
+Yes, but I need a verifiable copy of the written review first. I checked the [official Equity Funding Source Google Maps listing](https://www.google.com/maps/place/Equity+Funding+Source,+652+Andalusia+Ave,+Los+Angeles,+CA+90065/@34.0945796,-118.2175058,3304a,13.1y/data=!4m2!3m1!1s0x80c2c7de7f00feb1:0x6881362d450c158d?hl=en): it currently exposes the 5.0 rating, business identity, and address, but no reviewer name or written review body. I therefore did not invent a quote or present a non-Google recommendation as a Google review.
+
+Please paste the review text and reviewer display name, or provide a Google Business Profile screenshot/export. Once supplied, I can add a concise attributed excerpt to the existing social-proof section and retain the direct Google link.
+
+- Changed paths: none.
+- Checks performed: inspected Google’s public place-detail response and rendered listing for review text and attribution.
+- Verification: the public listing shows 5.0 stars but no attributable written review content.
+- Repository commands/tests: none required because no source files changed.
+
+Confidence: high. Escalation: the review body must come from the EFS Business Profile or another operator-provided authoritative copy.
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)
+- Can you use the actual review text on the website?
 <!-- /agent:queue -->
 
 ## Backlog

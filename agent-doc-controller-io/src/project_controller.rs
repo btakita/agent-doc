@@ -65,8 +65,14 @@ const CONTROLLER_BOOTSTRAP_SCOPE: &str = "project";
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
 #[cfg(not(any(test, feature = "test-support")))]
 const LAUNCH_CONNECT_WAIT: Duration = Duration::from_secs(45);
+/// Detached controller startup in test builds still crosses a process boundary.
+///
+/// 500ms made controller publication a runner-speed assertion: the full CI suite
+/// starts many temporary project controllers concurrently, and a healthy child
+/// can be descheduled beyond that window. Match the test RPC deadline so loaded
+/// runners remain bounded without deciding semantic correctness.
 #[cfg(any(test, feature = "test-support"))]
-const LAUNCH_CONNECT_WAIT: Duration = Duration::from_millis(500);
+const LAUNCH_CONNECT_WAIT: Duration = Duration::from_secs(2);
 const HANDOFF_CONNECT_WAIT: Duration = Duration::from_secs(30);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
 /// How long a contended launch waits for the current bootstrap claimant to
@@ -76,7 +82,7 @@ const CONNECT_POLL: Duration = Duration::from_millis(50);
 #[cfg(not(any(test, feature = "test-support")))]
 const LAUNCH_CLAIM_WAIT: Duration = Duration::from_secs(50);
 #[cfg(any(test, feature = "test-support"))]
-const LAUNCH_CLAIM_WAIT: Duration = Duration::from_secs(1);
+const LAUNCH_CLAIM_WAIT: Duration = Duration::from_secs(3);
 const LAUNCH_CLAIM_POLL: Duration = Duration::from_millis(50);
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);

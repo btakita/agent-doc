@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-prompt-context-io"
-version = "0.35.141"
+version = "0.35.142"
 edition = "2024"
 description = "Prompt-context assembly adapters for agent-doc"
 license = "MIT"
@@ -11,10 +11,10 @@ publish = false
 name = "agent_doc_prompt_context_io"
 
 [dependencies]
-agent-doc-dynamic-context-io = { path = "../agent-doc-dynamic-context-io", version = "0.35.141" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.141" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.141" }
-agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.35.141" }
-agent-doc-response-toc-io = { path = "../agent-doc-response-toc-io", version = "0.35.141" }
-agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.141" }
-agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.141" }
+agent-doc-dynamic-context-io = { path = "../agent-doc-dynamic-context-io", version = "0.35.142" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.142" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.142" }
+agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.35.142" }
+agent-doc-response-toc-io = { path = "../agent-doc-response-toc-io", version = "0.35.142" }
+agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.142" }
+agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.142" }

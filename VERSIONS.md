@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.142
+
+- **Controller-launch tests no longer treat a 500 ms process-start deadline as
+semantic correctness.** Test builds now retain a bounded two-second publication
+window and a three-second launch-claim window, matching the existing test RPC
+budget. A healthy temporary controller descheduled by the full parallel CI suite
+can publish normally without turning runner load into a flaky delivery failure.
+
 ## 0.35.141
 
 - **Inter-item queue continuation now observes retained delivery settlement

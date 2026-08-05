@@ -1002,6 +1002,70 @@ Commands and verification:
 Confidence: high. The source mutation controls, real pre-fix findings, runtime failure regression, full local gates, and all binding CI runs agree.
 
 Escalation: umbrella Agent Doc CI run `30998499137` failed twice because `lld` crashed with `SIGBUS` while linking two different unrelated Agent Doc test libraries. The exact root `make check` passed locally, the umbrella tmux job passed, and every Lazily repository CI run is green. This is a repeatable CI runner/linker-resource issue, not a Lazily conformance failure; it should be handled separately in the Agent Doc CI/toolchain lane. The pre-existing staged deletion `tasks/professional/octavian-gabriel-stan.md` and all unrelated local instruction edits were preserved and not included.
+
+### Re: npm trusted publishing (`#kny1`) — gpt-5
+
+The `E409` is not a failure to create trust from scratch; it means `@lazily-hub/lazily-js` already has npm's one permitted trusted-publisher record. npm will not overwrite that record. Inspect it first, and only revoke/recreate it if its fields are wrong.
+
+Run:
+
+```sh
+npm trust list @lazily-hub/lazily-js --json
+```
+
+This requires a fresh 2FA/browser authentication. I ran the read-only command here and npm returned `EOTP`, so I could not inspect the record without your browser approval. Rerun it and complete the prompt. The existing record is correct if it names:
+
+- provider: GitHub Actions
+- repository: `lazily-hub/lazily-js`
+- workflow file: `release.yml` (filename only)
+- allowed action: `npm publish`
+- environment: absent, unless the release job is later assigned a matching GitHub environment
+
+If those fields match, **do nothing**: trusted publishing is already configured, and the earlier `npm trust github ...` command was redundant. Each npm package supports only one trust relationship, which is why a second create returns a conflict. [npm trust CLI documentation](https://docs.npmjs.com/cli/v11/commands/npm-trust/)
+
+If the fields are wrong, copy the `id` from the list output, then replace the record:
+
+```sh
+npm trust revoke @lazily-hub/lazily-js --id '<trust-id>'
+
+npm trust github @lazily-hub/lazily-js \
+  --repo lazily-hub/lazily-js \
+  --file release.yml \
+  --allow-publish \
+  --yes
+
+npm trust list @lazily-hub/lazily-js --json
+```
+
+The npm website is an equally good and safer visual route: open the package, then **Settings → Trusted publishing**, edit the existing record if possible, or delete and recreate it there. npm documents both editing and removal from that settings section. [Trusted publishing management](https://docs.npmjs.com/trusted-publishers/#managing-trusted-publisher-configurations)
+
+The repository side is already correctly prepared:
+
+- `.github/workflows/release.yml` is the exact configured filename.
+- The job uses a GitHub-hosted `ubuntu-latest` runner.
+- `permissions` includes `id-token: write` and `contents: read`.
+- `actions/setup-node@v6` selects Node 24 and the npm registry.
+- `package.json` names `@lazily-hub/lazily-js` and its repository URL matches `lazily-hub/lazily-js`.
+- No `NPM_TOKEN` is supplied to the publish step.
+
+Those are npm's required OIDC conditions. The local toolchain is Node `v26.4.0` / npm `12.0.1`, so it supports the `npm trust` commands; the release workflow's Node 24 satisfies trusted-publish requirements. [npm GitHub Actions setup requirements](https://docs.npmjs.com/trusted-publishers/#github-actions-configuration)
+
+To validate end to end, publish the next genuinely new version from its matching `v*` tag. A dispatch or rerun of version `0.31.0` is not an OIDC proof because that version already exists and the workflow intentionally treats it as an idempotent no-op. Do not create a throwaway release merely to test auth; let the next real release exercise the trust record.
+
+After one new-version publish succeeds via OIDC, harden the package under **Settings → Publishing access** by requiring 2FA and disallowing traditional tokens, then revoke any obsolete automation publish token. npm recommends doing that only after trusted publishing has been verified. [npm trusted-publisher security guidance](https://docs.npmjs.com/trusted-publishers/#recommended-restrict-token-access-when-using-trusted-publishers)
+
+Changed paths: none.
+
+Commands/verification:
+
+- inspected `.github/workflows/release.yml` and `package.json`
+- confirmed Node `v26.4.0` and npm `12.0.1`
+- inspected the Release workflow history
+- attempted `npm trust list @lazily-hub/lazily-js --json`; npm correctly stopped at the operator-owned 2FA boundary with `EOTP`
+
+Confidence: high on the recovery procedure and repository configuration; the existing npm-side record's exact fields remain unverified until you complete the 2FA-backed list command.
+
+Escalation: operator browser/2FA approval is required to read, edit, or revoke the npm trust record. Do not revoke it before seeing the list output.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 

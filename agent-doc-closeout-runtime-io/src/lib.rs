@@ -430,6 +430,11 @@ pub fn session_check_effects() -> RuntimeSessionCheckEffects {
 }
 
 impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffects {
+    fn settle_response_replay_canonicalization(&self, file: &Path) -> Result<()> {
+        agent_doc_commit_io::commit_proven_response_replay_canonicalization(file)?;
+        Ok(())
+    }
+
     fn closeout_recovery_hint(&self, file: &Path) -> String {
         closeout_recovery_hint(file)
     }

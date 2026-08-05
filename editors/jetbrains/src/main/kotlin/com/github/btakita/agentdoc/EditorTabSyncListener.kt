@@ -9,8 +9,11 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.wm.WindowManager
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -31,9 +34,10 @@ import java.util.concurrent.atomic.AtomicReference
  * generation guard so a burst reports only its final state. Capture is projected by the next EDT
  * event; socket delivery remains off the EDT, so neither side waits on the other.
  *
- * Focus and layout are both projections of the same selected-document Source. There is no direct
- * focus command lane for an older selection to occupy: the controller receives ordered facts,
- * fences retired plugin generations, and derives the consequence.
+ * Focus has a separate micro-coalesced command lane because a visible editor surface may span
+ * documents owned by different project controllers. The focused file resolves its own controller
+ * root and submits one generation-fenced `focus_document_pane` intent; the surface observation
+ * remains the authority for layout reconciliation.
  *
  * Registered from [PluginLifecycleListener] via [install] so it survives hot-reload.
  */
@@ -52,14 +56,23 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * project's pending observation.
      */
     private val generation = AtomicLong(0)
+    private val focusGeneration = AtomicLong(0)
+    private val lifecycleLock = Any()
+
+    @Volatile
+    private var closed = false
 
     private val surfaceDeliveryExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "agent-doc-editor-surface-delivery").apply { isDaemon = true }
+    }
+    private val focusDeliveryExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "agent-doc-editor-focus-delivery").apply { isDaemon = true }
     }
 
     companion object {
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
         private val GSON = com.google.gson.Gson()
+        private const val FOCUS_COALESCE_MS = 12L
 
         private val instances = ConcurrentHashMap<Project, EditorTabSyncListener>()
 
@@ -70,6 +83,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
         fun disposeProject(project: Project) {
             instances.remove(project)?.shutdown()
         }
+
+        internal fun shouldDispatchFocus(
+            requestedGeneration: Long,
+            currentGeneration: Long,
+            projectWindowActive: Boolean,
+        ): Boolean =
+            requestedGeneration == currentGeneration && projectWindowActive
     }
 
     internal enum class ObservationAuthority {
@@ -539,12 +559,86 @@ private fun captureSurface(
                         editorLayout = absoluteEditorLayout,
                         forceReconcile = forceReconcile,
                     )
-                ),
+            ),
         )
     }
 
+    private fun requestImmediateFocus(project: Project, file: VirtualFile) {
+        val requestedGeneration = focusGeneration.incrementAndGet()
+        synchronized(lifecycleLock) {
+            if (closed) return
+            try {
+                focusDeliveryExecutor.schedule(
+                    focus@{
+                        if (
+                            project.isDisposed ||
+                                !shouldDispatchFocus(
+                                    requestedGeneration = requestedGeneration,
+                                    currentGeneration = focusGeneration.get(),
+                                    projectWindowActive =
+                                        WindowManager.getInstance().getFrame(project)?.isActive ==
+                                            true,
+                                )
+                        ) {
+                            log("focus: superseded, inactive, or disposed gen=$requestedGeneration")
+                            return@focus
+                        }
+
+                        // The focused document, not the spanning editor surface, owns the
+                        // controller root for this immediate handoff. This is what lets a
+                        // superproject document and submodule document share one visible tmux
+                        // window without routing both focus intents through one controller.
+                        val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
+                        if (
+                            project.isDisposed ||
+                                !shouldDispatchFocus(
+                                    requestedGeneration = requestedGeneration,
+                                    currentGeneration = focusGeneration.get(),
+                                    projectWindowActive =
+                                        WindowManager.getInstance().getFrame(project)?.isActive ==
+                                            true,
+                                )
+                        ) {
+                            log(
+                                "focus: superseded, inactive, or disposed after root resolution " +
+                                    "gen=$requestedGeneration",
+                            )
+                            return@focus
+                        }
+
+                        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
+                        val receipt =
+                            CpRouteClient.submitFocusDocumentPane(
+                                projectRoot = projectRoot,
+                                documentPath = file.path,
+                            )
+                        if (receipt.exitCode != 0) {
+                            LOG.warn(
+                                "[focus] focus_document_pane unavailable for ${file.path}: " +
+                                    receipt.output,
+                            )
+                        } else {
+                            log("focus: file=${file.path} receipt=${receipt.output}")
+                        }
+                    },
+                    FOCUS_COALESCE_MS,
+                    TimeUnit.MILLISECONDS,
+                )
+            } catch (rejected: RejectedExecutionException) {
+                if (!closed) {
+                    LOG.warn("[focus] focus delivery rejected while listener is active", rejected)
+                }
+            }
+        }
+    }
+
     private fun shutdown() {
-        surfaceDeliveryExecutor.shutdownNow()
+        synchronized(lifecycleLock) {
+            closed = true
+            focusGeneration.incrementAndGet()
+            focusDeliveryExecutor.shutdownNow()
+            surfaceDeliveryExecutor.shutdownNow()
+        }
         val roots = observedRoots.toList()
         observedRoots.clear()
         latestSurfaceObservation.set(null)
@@ -567,6 +661,7 @@ private fun captureSurface(
         if (!file.name.endsWith(".md")) return
 
         val project = event.manager.project
+        requestImmediateFocus(project, file)
         val manager = FileEditorManager.getInstance(project)
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
         log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
@@ -582,9 +677,8 @@ private fun captureSurface(
             previousFile = event.oldFile,
             forceReconcile = false,
             authority = ObservationAuthority.DocumentSelection,
-        ),
+            ),
         )
-        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
     }
 
     /**
@@ -603,6 +697,7 @@ private fun captureSurface(
      */
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
+        requestImmediateFocus(project, file)
         requestObservation(
             PendingSurfaceObservation(
                 project = project,
@@ -611,7 +706,6 @@ private fun captureSurface(
                 authority = ObservationAuthority.ComponentFocus,
             ),
         )
-        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
         log("focusGained: file=${file.name}")
     }
 

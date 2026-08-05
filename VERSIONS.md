@@ -2,6 +2,31 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.135
+
+- **Session-check now commits the exact replay repair it owns.** A recovery
+  pass could losslessly canonicalize a proven same-topic response replay and
+  then report `OK` while its read-only wrapper suppressed the corresponding git
+  settlement. The repaired document therefore remained dirty and a later
+  `agent-doc commit` had no cycle boundary to finish. Session-check now proves
+  that normalizing the `HEAD` document yields the exact current authority and
+  disk bytes, commits only the session document through a private-index
+  compare-and-swap transaction, checkpoints the committed baseline, and
+  re-proves authority/disk/`HEAD` convergence before reporting `OK`. A process
+  restart between repair and commit resumes from the same proof, while
+  unrelated staged and working-tree changes remain untouched.
+
+- **JetBrains immediate pane focus is separate from mixed-root layout
+  observation again.** A refactor removed the plugin's
+  `focus_document_pane` submission and relied exclusively on one editor-surface
+  observation. Because that observation must choose one controller root for
+  the complete visible layout, a split containing a superproject session and a
+  submodule session could leave automatic pane focus on the previous document.
+  Selection and component-focus events now use a lifecycle-safe,
+  generation-fenced micro-coalescing lane that resolves the focused file's own
+  controller root and submits the existing project-scoped latest-wins focus
+  command. Layout observation remains independent and never chooses a pane.
+
 ## 0.35.134
 
 - **Captured closeout recovery now collapses partial same-topic response

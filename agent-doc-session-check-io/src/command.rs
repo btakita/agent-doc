@@ -33,7 +33,10 @@
 //! - Narrow self-heal: when that drift is already committed in `HEAD` and the
 //!   current working tree matches `HEAD` modulo transient boundary / `(HEAD)`
 //!   markers, `session-check` repairs the stale snapshot instead of reporting
-//!   a fresh interruption forever.
+//!   a fresh interruption forever. When it applies a proven lossless
+//!   response-replay canonicalization, it must also commit those exact bytes
+//!   through a private index before reporting `OK`; a process restart between
+//!   repair and commit resumes that same exact-only settlement from `HEAD`.
 //! - Exit 0 when the current cycle state is committed, when state/log files
 //!   are missing, or when the fallback `ops.log` event is terminal and no
 //!   likely bypassed patchback is present.
@@ -48,7 +51,9 @@
 //! - May also clear a persisted startup-miss marker when the marker is proven
 //!   stale because a later registered session start has already superseded it.
 //! - Otherwise mutates only the snapshot in the narrow committed-historical-drift
-//!   repair case above.
+//!   repair case above, or the exact session document and its checkpoint while
+//!   settling a proven response-replay canonicalization. Unrelated index and
+//!   working-tree content is never included.
 //! - Called by supervisors / watchdogs (and directly from skill) to
 //!   detect the "started but never wrote" invariant violation flagged
 //!   as bug #a011.
@@ -73,7 +78,7 @@ use agent_doc_turn::op_log::{
     OpsLogEvent, PREFLIGHT_START_EVENT, event_name, is_write_completed_commit_missing_event,
 };
 use agent_doc_workflow::session_check::{BlockedCloseoutMessage, GuardResult};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use lazily::{Computed, Source};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -296,15 +301,23 @@ pub trait SessionCheckEffects {
         true
     }
     /// Whether this caller may apply the one lossless integrity
-    /// canonicalization that removes a proven empty duplicate response shell.
+    /// canonicalization that removes a proven same-topic response replay.
     ///
     /// Operator-facing session-check remains status-only for every ambiguous
     /// or lifecycle-changing repair. This exception is a CAS replacement of a
-    /// redundant protocol heading whose earlier same-topic response already
-    /// owns the body; it is required so the integrity gate cannot block the
-    /// exact interrupted-closeout recovery it recognizes.
+    /// redundant protocol response whose retained capture and baseline prove
+    /// the canonical body; it is required so the integrity gate cannot block
+    /// the exact interrupted-closeout recovery it recognizes.
     fn allows_response_replay_canonicalization(&self) -> bool {
         self.allows_recovery()
+    }
+    /// Close the binary-owned git/snapshot boundary for the exact lossless
+    /// response-replay canonicalization applied by this session-check pass.
+    ///
+    /// The default fails closed: only the production runtime (and explicit
+    /// test effects) may own this narrow settlement.
+    fn settle_response_replay_canonicalization(&self, _file: &Path) -> Result<()> {
+        anyhow::bail!("response-replay canonicalization settlement is unavailable")
     }
     fn closeout_recovery_hint(&self, file: &Path) -> String;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
@@ -676,6 +689,10 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
         true
     }
 
+    fn settle_response_replay_canonicalization(&self, file: &Path) -> Result<()> {
+        self.inner.settle_response_replay_canonicalization(file)
+    }
+
     fn closeout_recovery_hint(&self, file: &Path) -> String {
         self.inner.closeout_recovery_hint(file)
     }
@@ -761,8 +778,10 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
 /// Operator-facing session check. It may read live authority, write
 /// diagnostics/metadata logs, request one editor-owned native save for a
 /// retained `write_applied` closeout, and resume that exact already-captured
-/// cycle after the save is proven exact. It cannot replace, repair, replay, or
-/// commit unrelated document content.
+/// cycle after the save is proven exact. It may also apply and commit the one
+/// lossless response-replay canonicalization proven from `HEAD`, authority,
+/// and disk. It cannot replace, repair, replay, or commit unrelated document
+/// content.
 pub fn run_read_only_with_options(
     file: &Path,
     codex_final_gate: bool,
@@ -1066,6 +1085,14 @@ fn run_with_options_inner(
     })? {
         crate::invalidate_current_document_pass(file);
     }
+    // The lossless replay canonicalization is itself a binary-owned document
+    // mutation. A terminal session-check may not report `OK` until the same
+    // exact bytes cross the git/snapshot boundary. Re-prove from HEAD as well
+    // as remembering this pass so a process restart between write and commit
+    // remains recoverable.
+    let replay_canonicalization_requires_settlement = effects
+        .allows_response_replay_canonicalization()
+        && (replay_healed || response_replay_canonicalization_pending_commit(file)?);
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
     // markers. Never gates closeout — emitted regardless of the check outcome.
@@ -1078,6 +1105,17 @@ fn run_with_options_inner(
     }
     match report.status {
         SessionCheckStatus::Ok(message) => {
+            if replay_canonicalization_requires_settlement {
+                effects
+                    .settle_response_replay_canonicalization(file)
+                    .with_context(|| {
+                        format!(
+                            "[session-check] INTERRUPTED: response-replay canonicalization for {} reached the document but not its binary-owned commit boundary",
+                            file.display()
+                        )
+                    })?;
+                crate::invalidate_current_document_pass(file);
+            }
             println!("{}", message);
             // `#wd40` / `#staleloop-recycle-restart`: a stale route-owned supervisor
             // that can never reach its own recycle boundary during a continuously
@@ -1755,6 +1793,26 @@ fn self_heal_response_replay_duplication(
         ),
     );
     Ok(true)
+}
+
+fn response_replay_canonicalization_pending_commit(file: &Path) -> Result<bool> {
+    let current = crate::resolve_current_document_content(
+        file,
+        "session_check_response_replay_commit_proof_current",
+    )?;
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(false);
+    };
+    if head == current {
+        return Ok(false);
+    }
+    let normalized =
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+            file,
+            &head,
+            "session_check_response_replay_commit_proof_head",
+        )?;
+    Ok(normalized.as_deref() == Some(current.as_str()))
 }
 
 fn validate_integrity_after_captured_resume(
@@ -3277,6 +3335,74 @@ mod terminal_convergence_tests {
         assert!(healed.contains("Intervening response."));
         assert!(healed.contains("Latest response."));
         agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
+    }
+
+    #[test]
+    fn session_check_recovers_replay_commit_boundary_after_process_restart() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "### Re: retained topic — gpt-5\n\nRetained response.\n\n",
+            "### Re: intervening topic — gpt-5\n\nIntervening response.\n\n",
+            "### Re: retained topic — gpt-5\n\n",
+            "### Re: latest topic — gpt-5\n\nLatest response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let repaired =
+            agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(
+                duplicated,
+            )
+            .unwrap();
+        std::fs::write(&file, duplicated).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        let initial_commit = Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "replayed closeout", "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(initial_commit.status.success());
+        std::fs::write(&file, &repaired).unwrap();
+
+        assert!(
+            response_replay_canonicalization_pending_commit(&file).unwrap(),
+            "a restarted session-check must recover the write-without-commit boundary from HEAD"
+        );
+
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        let repaired_commit = Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "repair replay", "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(repaired_commit.status.success());
+        assert!(!response_replay_canonicalization_pending_commit(&file).unwrap());
     }
 
     #[test]

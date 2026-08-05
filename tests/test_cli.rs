@@ -25648,9 +25648,12 @@ fn test_agent_doc_commit_io_marks_capture_committed_from_resolved_current_conten
     let initial_current_idx = commit_source
         .find("commit_current_document_content(file, \"commit_initial_current\")")
         .expect("commit should resolve initial current document content");
-    let stage_commit_idx = commit_source
-        .find("match stage_and_commit_exact_paths_once(")
-        .expect("commit should run a git stage/commit transaction");
+    let stage_commit_idx = initial_current_idx
+        + commit_source[initial_current_idx..]
+            .find("match stage_and_commit_exact_paths_once(")
+            .expect(
+                "normal commit should run a git stage/commit transaction after authority resolve",
+            );
     assert!(
         initial_current_idx < stage_commit_idx,
         "commit must resolve controller/current-document content before entering the git stage/commit transaction"

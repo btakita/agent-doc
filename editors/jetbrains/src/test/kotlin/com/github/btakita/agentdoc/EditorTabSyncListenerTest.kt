@@ -12,10 +12,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The plugin no longer plans (`#jbsurfaceswap`) — focus-vs-sync, dedup, and the retry ladder are
- * the reactive graph's, exercised by `agent-doc-editor-surface`. What is left here is the
- * observation: the editor has to enqueue the surface it actually sees without waiting for
- * controller probes or tmux consequences.
+ * The plugin does not plan layout (`#jbsurfaceswap`) — dedup and reconciliation are the reactive
+ * graph's, exercised by `agent-doc-editor-surface`. The editor reports the surface it actually
+ * sees and separately submits the focused document to that document's own controller so
+ * cross-project splits get an immediate pane handoff.
  */
 class EditorTabSyncListenerTest {
     private val gson = Gson()
@@ -34,6 +34,31 @@ class EditorTabSyncListenerTest {
                 forceReconcile = forceReconcile,
             )
         )
+
+    @Test
+    fun `focus dispatch is generation fenced and requires the active project window`() {
+        assertTrue(
+            EditorTabSyncListener.shouldDispatchFocus(
+                requestedGeneration = 7,
+                currentGeneration = 7,
+                projectWindowActive = true,
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.shouldDispatchFocus(
+                requestedGeneration = 6,
+                currentGeneration = 7,
+                projectWindowActive = true,
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.shouldDispatchFocus(
+                requestedGeneration = 7,
+                currentGeneration = 7,
+                projectWindowActive = false,
+            ),
+        )
+    }
 
     @Test
     fun `selection event file wins over stale selected editor file`() {
@@ -427,7 +452,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `document selection publishes one latest-wins surface observation`() {
+    fun `document selection publishes layout and immediate document-root focus`() {
         val source =
             Files.readString(
                 Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
@@ -441,7 +466,7 @@ class EditorTabSyncListenerTest {
                 .substringAfter("override fun selectionChanged(event: FileEditorManagerEvent)")
                 .substringBefore("fun onEditorFocusGained")
         assertTrue(selection.contains("requestObservation("))
-        assertFalse(selection.contains("requestImmediateFocus"))
+        assertTrue(selection.contains("requestImmediateFocus(project, file)"))
         assertFalse(selection.contains("CpRouteClient"))
         assertTrue(selection.contains("forceReconcile = false"))
         assertTrue(selection.contains("previousFile = event.oldFile"))
@@ -454,8 +479,17 @@ class EditorTabSyncListenerTest {
             source
                 .substringAfter("fun onEditorFocusGained(project: Project, file: VirtualFile)")
                 .substringBefore("fun onEditorLayoutChanged")
+        assertTrue(focusGained.contains("requestImmediateFocus(project, file)"))
         assertTrue(focusGained.contains("requestObservation("))
         assertFalse(focusGained.contains("delayMs"))
+
+        val immediateFocus =
+            source
+                .substringAfter("private fun requestImmediateFocus(project: Project, file: VirtualFile)")
+                .substringBefore("private fun shutdown()")
+        assertTrue(immediateFocus.contains("TerminalUtil.resolveProject(project, file)"))
+        assertTrue(immediateFocus.contains("CpRouteClient.submitFocusDocumentPane("))
+        assertTrue(immediateFocus.contains("TmuxPaneFocusSync.recordEditorFocusIntent("))
     }
 
     @Test

@@ -5433,49 +5433,49 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn clear_falls_back_to_supervisor_inject_when_authoritative_pane_is_not_on_default_tmux() {
         let dir = tempfile::tempdir().unwrap();
+        let session_id = format!(
+            "session-clear-{}",
+            dir.path()
+                .file_name()
+                .expect("tempdir should have a basename")
+                .to_string_lossy()
+        );
         let iso = tmux_router::IsolatedTmux::new("session-clear-direct-pane");
         let pane = iso.new_session("test", dir.path()).unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(
             &doc,
-            "---\nagent_doc_session: session-clear\nagent: codex\n---\n",
+            format!("---\nagent_doc_session: {session_id}\nagent: codex\n---\n"),
         )
         .unwrap();
         let captured = Arc::new(Mutex::new(Vec::<String>::new()));
         let captured_for_ipc = captured.clone();
-        let sock =
-            agent_doc_supervisor_io::ipc::SupervisorIpc::start(dir.path(), "session-clear", {
-                move |method| match method {
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        captured_for_ipc.lock().push(bytes);
-                        IpcResponse::ok_empty()
-                    }
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": true,
-                        "state": "healthy",
-                        "actor_state": "ready",
-                        "restart_count": 0,
-                    })),
-                    _ => IpcResponse::ok_empty(),
+        let sock = agent_doc_supervisor_io::ipc::SupervisorIpc::start(dir.path(), &session_id, {
+            move |method| match method {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    captured_for_ipc.lock().push(bytes);
+                    IpcResponse::ok_empty()
                 }
-            })
-            .unwrap();
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "actor_state": "ready",
+                    "restart_count": 0,
+                })),
+                _ => IpcResponse::ok_empty(),
+            }
+        })
+        .unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let pane_window = iso.pane_window(&pane).unwrap();
         agent_doc_session_registry_io::registration::register(
-            "session-clear",
+            &session_id,
             &pane,
             &doc.to_string_lossy(),
         )
         .unwrap();
-        agent_doc_session_actor_io::record_session_start(
-            &doc,
-            "session-clear",
-            &pane,
-            &pane_window,
-            1,
-        )
-        .unwrap();
+        agent_doc_session_actor_io::record_session_start(&doc, &session_id, &pane, &pane_window, 1)
+            .unwrap();
         clear(&doc).unwrap();
         let latest = agent_doc_codex_hook_io::load_latest_prompt_for_file(&doc)
             .unwrap()

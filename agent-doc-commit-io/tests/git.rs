@@ -2,7 +2,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use agent_doc_commit_io::{commit, commit_with_authoritative_compaction};
+use agent_doc_commit_io::{
+    commit, commit_proven_response_replay_canonicalization, commit_with_authoritative_compaction,
+};
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
 
 #[cfg(test)]
@@ -617,6 +619,92 @@ Duplicate replay should stay live.
             String::from_utf8_lossy(&foreign_index.stdout),
             "foreign staged work\n"
         );
+    }
+
+    #[test]
+    fn replay_canonicalization_commit_is_exact_idempotent_and_preserves_unrelated_staging() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "### Re: retained topic — gpt-5\n\nRetained response.\n\n",
+            "### Re: intervening topic — gpt-5\n\nIntervening response.\n\n",
+            "### Re: retained topic — gpt-5\n\n",
+            "### Re: latest topic — gpt-5\n\nLatest response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let repaired =
+            agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(
+                duplicated,
+            )
+            .expect("fixture must be a losslessly repairable replay");
+        th::commit_file(root, "session.md", duplicated, "add replayed session");
+        th::commit_file(root, "foreign.txt", "foreign baseline\n", "add foreign");
+
+        fs::write(root.join("foreign.txt"), "foreign staged work\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "--", "foreign.txt"])
+            .output()
+            .unwrap();
+        let doc = root.join("session.md");
+        fs::write(&doc, &repaired).unwrap();
+
+        assert!(
+            commit_proven_response_replay_canonicalization(&doc)
+                .expect("proven replay repair should commit")
+        );
+
+        let session_head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&session_head.stdout), repaired);
+        let foreign_head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:foreign.txt"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&foreign_head.stdout),
+            "foreign baseline\n"
+        );
+        let foreign_index = Command::new("git")
+            .current_dir(root)
+            .args(["show", ":foreign.txt"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&foreign_index.stdout),
+            "foreign staged work\n"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
+            Some(repaired.as_str())
+        );
+
+        let commit_count_before = Command::new("git")
+            .current_dir(root)
+            .args(["rev-list", "--count", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(
+            !commit_proven_response_replay_canonicalization(&doc)
+                .expect("retry should settle without another commit")
+        );
+        let commit_count_after = Command::new("git")
+            .current_dir(root)
+            .args(["rev-list", "--count", "HEAD"])
+            .output()
+            .unwrap();
+        assert_eq!(commit_count_before.stdout, commit_count_after.stdout);
     }
 
     #[test]

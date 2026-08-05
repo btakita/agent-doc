@@ -758,6 +758,168 @@ pub fn commit_for_authority(file: &Path, force_disk: bool) -> Result<bool> {
     Ok(commit_with_outcome_for_authority(file, force_disk)?.did_commit)
 }
 
+/// Close the git boundary for a response-replay canonicalization that
+/// `session-check` already proved and projected through document authority.
+///
+/// This path is intentionally narrower than the normal cycle commit:
+/// - `HEAD` must normalize through the lossless replay repair to the exact
+///   current authority/disk bytes;
+/// - the private-index transaction commits only the session document and
+///   preserves every unrelated staged entry;
+/// - authority, disk, and `HEAD` are re-proven before the repaired baseline is
+///   checkpointed.
+///
+/// Returns `true` when this call advanced `HEAD`, or `false` when a retry found
+/// the exact repair already committed and only had to settle metadata.
+pub fn commit_proven_response_replay_canonicalization(file: &Path) -> Result<bool> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        commit_proven_response_replay_canonicalization_scoped(file)
+    })
+}
+
+fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<bool> {
+    let authority =
+        commit_current_document_content(file, "commit_response_replay_canonicalization_authority")
+            .with_context(|| {
+                format!(
+                    "failed to resolve response-replay repair authority for {}",
+                    file.display()
+                )
+            })?;
+    let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+        file,
+        "commit_response_replay_canonicalization_disk",
+    )?;
+    anyhow::ensure!(
+        authority == disk,
+        "refusing response-replay repair commit for {}: canonical authority and disk diverge",
+        file.display()
+    );
+
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        anyhow::bail!(
+            "refusing response-replay repair commit for {}: HEAD has no session document baseline",
+            file.display()
+        );
+    };
+    let (super_root, resolved) = resolve_to_git_root(file)?;
+    let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+    let msg = agent_doc_commit_message_for_file(file, &chrono_timestamp());
+
+    if head == authority {
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &authority,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        if in_submodule {
+            update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "response_replay_canonicalization_commit_settled file={} did_commit=false proof=head_exact",
+                file.display()
+            ),
+        );
+        return Ok(false);
+    }
+
+    let normalized_head =
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(&head);
+    anyhow::ensure!(
+        normalized_head.as_deref() == Some(authority.as_str()),
+        "refusing response-replay repair commit for {}: current bytes are not the exact lossless canonicalization of HEAD",
+        file.display()
+    );
+    let commit_surface =
+        agent_doc_git_io::transaction::normalize_session_document_content(&authority);
+    anyhow::ensure!(
+        commit_surface == authority,
+        "refusing response-replay repair commit for {}: current bytes still contain transient commit artifacts",
+        file.display()
+    );
+
+    let mut attempts = 0u32;
+    let commit_output = loop {
+        match stage_and_commit_exact_paths_once(&git_root, &resolved, Some(&authority), &[], &msg) {
+            Ok(output) => break output,
+            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) if attempts < 3 => {
+                attempts += 1;
+                eprintln!(
+                    "[commit] response-replay repair index.lock contention during {} (retry {}/3): {}",
+                    phase, attempts, detail
+                );
+                std::thread::sleep(commit_retry_backoff(attempts));
+            }
+            Err(CommitTransactionError::RetryableHeadMoved { detail }) if attempts < 3 => {
+                attempts += 1;
+                eprintln!(
+                    "[commit] HEAD moved during response-replay repair (retry {}/3): {}",
+                    attempts, detail
+                );
+                std::thread::sleep(commit_retry_backoff(attempts));
+            }
+            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
+                anyhow::bail!(
+                    "git {phase} failed after response-replay repair index.lock retries: {detail}"
+                );
+            }
+            Err(CommitTransactionError::RetryableHeadMoved { detail }) => {
+                anyhow::bail!(
+                    "response-replay repair commit failed after HEAD compare-and-swap retries: {detail}"
+                );
+            }
+            Err(CommitTransactionError::IgnoredPath { path }) => {
+                anyhow::bail!(
+                    "refusing response-replay repair commit for ignored untracked path {path}"
+                );
+            }
+            Err(CommitTransactionError::Fatal(error)) => return Err(error),
+        }
+    };
+    anyhow::ensure!(
+        commit_output.status.success(),
+        "response-replay repair update-ref did not report success for {}",
+        file.display()
+    );
+
+    agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+    let post_authority = commit_current_document_content(
+        file,
+        "commit_response_replay_canonicalization_post_authority",
+    )?;
+    let post_disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+        file,
+        "commit_response_replay_canonicalization_post_disk",
+    )?;
+    let post_head = agent_doc_git_io::revision::show_head(file)?;
+    anyhow::ensure!(
+        post_authority == authority
+            && post_disk == authority
+            && post_head.as_deref() == Some(authority.as_str()),
+        "response-replay repair commit for {} did not retain exact authority/disk/HEAD convergence",
+        file.display()
+    );
+
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &authority,
+        agent_doc_ops_log_io::log_op,
+    )?;
+    if in_submodule {
+        update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "response_replay_canonicalization_commit_settled file={} did_commit=true proof=head_normalizes_to_current",
+            file.display()
+        ),
+    );
+    Ok(true)
+}
+
 pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         commit_with_outcome_scoped(file)

@@ -112,6 +112,14 @@ fn git_path_is_ignored_untracked(
     git_path_is_ignored(git_root, rel_path)
 }
 
+/// Produce the exact document surface selected by private-index commit
+/// transactions.
+pub fn normalize_session_document_content(content: &str) -> String {
+    strip_guard_markers(&strip_head_markers(&canonicalize_answered_prompt_prefixes(
+        content,
+    )))
+}
+
 fn staged_blob_for_commit(
     git_root: &Path,
     resolved: &Path,
@@ -125,9 +133,7 @@ fn staged_blob_for_commit(
     }
 
     let staged_content = if let Some(snap) = snapshot_content {
-        strip_guard_markers(&strip_head_markers(&canonicalize_answered_prompt_prefixes(
-            snap,
-        )))
+        normalize_session_document_content(snap)
     } else {
         std::fs::read_to_string(resolved).map_err(|err| {
             CommitTransactionError::Fatal(anyhow::anyhow!(

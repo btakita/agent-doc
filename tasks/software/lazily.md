@@ -702,6 +702,41 @@ Do not duplicate all three adapters across every supported language. Rust should
 The generic “Lazily + Temporal + NATS” architecture is public knowledge. Lazily declares MIT, [Temporal Server is MIT](https://github.com/temporalio/temporal/blob/main/LICENSE), [NATS Server is Apache-2.0](https://github.com/nats-io/nats-server/blob/main/LICENSE), and [17 U.S.C. § 102(b)](https://uscode.house.gov/view.xhtml?edition=prelim&num=0&req=granuleid%3AUSC-prelim-title17-section102%28a%29%282%29) excludes ideas, systems, processes, and methods of operation from copyright.
 
 That does not settle contractual ownership of a particular implementation. The planned conversation should produce a written boundary identifying pre-existing Lazily as prior work, reserving generic adapters/conformance for the open-source project, assigning Haiven-specific workflows/schemas/configuration separately, and stating the rules for upstream contributions, employer time/equipment/accounts, and invention disclosure. The plan now records this as an explicit IP gate; signed agreements and applicable law control.
+
+### Re: `#reliablesyncrow` — codex
+
+I downgraded the Reliable sync family from `✅` to `~` for all nine bindings and made the two known-uncovered fixtures explicit in the policy ledger:
+
+- `reliable-sync/coalesce_bounds_outbox.json`
+- `reliable-sync/liveness_lease_eviction.json`
+
+That is the truthful capability claim: none of the nine binding runners currently replay both fixtures. `scripts/sync-coverage.mjs` regenerated the spec and sibling README tables from `lazily-spec/coverage.json`.
+
+The coverage guard passed with all nine ledgers loaded. I also mutation-tested the claim: temporarily changing Rust back to `✅` caused `check-coverage-claims.mjs --require-all` to fail specifically because both reliable-sync fixtures were absent from the Rust replay manifest; restoring `~` made the guard pass.
+
+`make check` passed in `lazily-spec`, all nine binding repositories, `lazily-formal`, and the `agent-loop` umbrella repository. The spec and binding commits were pushed to their `main` branches. Their remote checks are green except Rust, which remains in progress; `lazily-formal` has no GitHub workflow configured.
+
+The umbrella pins and plans were published as `5549eec541`. Its current Agent Doc workflow is in progress. The preceding umbrella failure was an infrastructure linker bus error (`collect2` terminated by signal 7), not a coverage or plan assertion failure; the umbrella check passed twice locally.
+
+### Re: Temporal adapter and replacement plans — codex
+
+> **Queue prompt:**
+>
+> do [#reliablesyncrow]
+
+
+Yes: if Temporal remains self-hosted, Lazily should have a Temporal adapter when Lazily is intended to supply the deterministic projection/decision layer inside Workflows. In that mode Temporal History is the sole durable workflow authority. Workflow start, Signals, Updates, timers, Activity/child results, and cancellation become Lazily Source observations; Lazily reactively projects typed decisions; those decisions map to Temporal timers, Activities, child Workflows, Continue-As-New, or completion. NATS and databases stay behind Activities or Signal/Update bridges—there is no dual Postgres authority and no transport ACK authorizing a state transition.
+
+The alternative is an application-level Temporal replacement: Lazily owns the typed durable execution model, Postgres is the sole authority, NATS JetStream supplies leased transport, and Valkey remains optional disposable acceleration. This is a much larger product commitment because it must own history/replay, effects and receipts, timers, retries, Signals/Updates/Queries equivalents, children, cancellation, versioning, visibility, schedules, operator controls, backup/restore, and migration without dual authority.
+
+Both plans now live in the private `agent-loop` repository as requested:
+
+- `tasks/software/plan-lazily-temporal-adapter.md`
+- `tasks/software/plan-lazily-temporal-replacement.md`
+
+The existing `tasks/software/plan-lazily-postgres-nats-valkey.md` cross-links both. The plans keep reusable adapters under the Lazily umbrella, reserve deployable/product-specific services for a separate repository, recommend the adapter by default, and gate public implementation on the ownership/IP conversation.
+
+The unrelated staged deletion `tasks/professional/octavian-gabriel-stan.md` remains staged, and the local instruction/runbook edits remain uncommitted and excluded.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
@@ -709,7 +744,7 @@ That does not settle contractual ownership of a particular implementation. The p
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lazilystatetable]~~
-- do [#reliablesyncrow]
+- ~~do [#reliablesyncrow]~~
 - do [#rootlevelconformance]
 - do [#lzfixturediscrim]
 - do [#lzrung2gaps]
@@ -722,7 +757,6 @@ That does not settle contractual ownership of a particular implementation. The p
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#reliablesyncrow] The Reliable sync row in coverage.json reads shipped in ALL NINE bindings while reliable-sync/coalesce_bounds_outbox.json and reliable-sync/liveness_lease_eviction.json are in ALL NINE KNOWN_UNCOVERED lists. The row claims resync coordinator plus at-least-once durable outbox plus OR-set/LWW liveness, and the two canonical fixtures for the liveness clause are replayed nowhere. I left the row uncited under coveragejsonscores rather than flag every column at once, because the resolution is a family-wide decision and not a JSON annotation. Work: pick one - implement the two replays in all nine bindings and then cite the row, or downgrade the row to partial everywhere and cite it so the guard holds the weaker claim. Either way it must end with fixtures on the row, because an uncited wire-bearing row is exactly the blind spot this guard was built to close.
 - [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.
 - [ ] [#lzfixturediscrim] A fixture can be opened, have every key consumed, have every key asserted - and still be unfalsifiable, because its data cannot distinguish the claim it makes. Found in lazily-cs while closing #lzconsumednotasserted: reversing SignalingRoom's roster sort still PASSED, because the canonical anti_spoof_session.json transcript never produces a roster with more than one entry, so no ordering is observable and every emitted frame stays byte-identical. This is the fourth rung - fixture-opened, key-consumed, key-asserted, claim-discriminating - and no runner-side guard can reach it, because it is a property of the corpus data rather than of runner code. Only a mutation against the LIBRARY exposes it. Audit lazily-spec claim by claim: for each assertion key, mutate the behaviour it names and confirm at least one canonical fixture reddens; where none does, either strengthen the fixture data or record the claim as untested with a reason. lazily-cs worked its instance around locally by driving a three-peer room plus a vacuity guard that fails if the roster drops below two, but the corpus fix belongs upstream in lazily-spec so all nine bindings inherit it.
 - [ ] [#lzrung2gaps] Conformance runners still outside the unconsumed-key guard entirely, all surfaced while closing #lzconsumednotasserted. lazily-cpp: nine fixture-replaying runners (command, distributed, lossless_tree, receipts, seqcrdt, statechart, stdlib, topic, reactive_graph) carry hand-rolled unknown-key guards instead of the shared AssertionKeys tracker, so they get neither rung 2 nor rung 3, and test_command_conformance.cpp has no unknown-key guard over its expect block at all. lazily-cs: StateChartConformanceTests has no FixtureAssertions tracker because its steps mix op inputs with assertions. Same class in lazily-kt, where bringing MaterializationConformanceTest under the tracker exposed two keys no runner had ever read - default_mode, and observe in deferral_not_deallocation.json. Convert each to the shared tracker so both rungs apply, and mutation-check every conversion rather than trusting the green that follows it.

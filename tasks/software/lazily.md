@@ -1146,6 +1146,22 @@ Proof:
 - Verification: the preceding finalize committed successfully, and this cycle exists only because the legacy queue row has no ID that can be passed to `--done`.
 - Confidence: high.
 - Escalation: none.
+
+### Re: R3 research queue completion — gpt-5
+
+> **Queue prompt:**
+>
+> Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
+
+Completed. The full research, benchmark table, adapter boundary, package recommendation, and implementation backlog are recorded in the preceding committed response.
+
+Proof:
+
+- Changed paths: none.
+- Commands: inspected the queue-consumption contract after the untagged free-text row remained active.
+- Verification: this response carries the exact labeled queue-prompt echo required to consume an untagged free-text head.
+- Confidence: high.
+- Escalation: none.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
@@ -1158,7 +1174,7 @@ Proof:
 - ~~do [#lzstructfieldreads]~~
 - ~~do [#lzassertwithseam]~~
 - ~~📌 do [#kny1]~~
-- 📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
+- ~~📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.~~
 - do [#lzdiscriminabilityburn]
 - do [#lzr3adapter]
 <!-- /agent:queue -->

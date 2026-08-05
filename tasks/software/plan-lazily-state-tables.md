@@ -1,10 +1,10 @@
 # Plan: Typed state tables as Lazily Computeds
 
-**Status:** Phases 1-2 landed in `lazily-rs`; Phase 3 (Agent Doc migration) open
+**Status:** Phases 1-3 landed; Phase 4 (cross-language parity) open
 **Created:** 2026-08-01
 **Session:** `tasks/software/lazily.md`
 **Related:** `tasks/software/plan-lazily-state-machine-mirroring.md`
-**Implementation:** `lazily-rs/src/state_table.rs`, `lazily-rs/tests/state_table_pilot.rs`
+**Implementation:** `lazily-rs/src/state_table.rs`, `lazily-rs/tests/state_table_pilot.rs`, `agent-doc/agent-doc-state-backbone/src/retained_write.rs`
 
 ## Problem
 
@@ -124,11 +124,24 @@ Every coverage assertion fails on an empty row set rather than sweeping nothing
 (`assert_at_least`, `#lzvacuousrun`), and `assert_at_least(0)` is rejected
 outright — a floor that cannot fail is not a floor.
 
-### Phase 3 — pilot migration
+### Phase 3 — pilot migration — DONE
 
-- Migrate the retained-transition reducer without changing its event schema.
-- Preserve pinned continuation identity across checkpoint, abandonment, and supervisor recycling.
-- Prove terminal materialized transitions settle without supervisor replay.
+The Agent Doc settlement reducer now classifies its observations into an
+eight-row finite semantic sum, derives an exhaustive `SettlementDecision`
+through `thread_safe_projected_state_table`, and hydrates the existing public
+`SettlementVerdict` in a downstream `Computed`.
+
+- The retained-transition event schema and public verdict API are unchanged.
+- Pinned continuation identity remains owned by the existing durable projection
+  across checkpoint, abandonment, and supervisor recycling.
+- Exact, rebased-payload, superseded-delta, and later-closeout-stage evidence
+  each settle through explicit typed rows without supervisor replay.
+- Authority/disk divergence and payload absence remain distinct unsettled rows;
+  missing observations remain a non-authorizing `Unobserved` row.
+- Raw hash churn that does not change the semantic row stops at the guarded
+  projection, while the hydrated verdict still carries the current hash.
+- Effects and durable receipts remain outside the table. No editor request,
+  acknowledgement gate, sidecar runtime, or second authority was introduced.
 
 ### Phase 4 — parity
 
@@ -156,5 +169,5 @@ outright — a floor that cannot fail is not a floor.
 - [x] Arrival-order, restart, and effect-frontier tests pass.
 - [x] The public API documents the distinction between state machine and state table (`src/state_table.rs` module docs); the pilot names projection, visible classification, frontier, and retained transition.
 - [x] `make check` passes in `lazily-rs`.
-- [ ] `make check` passes in the pilot consumer — pending Phase 3.
+- [x] `make check` passes in the Agent Doc pilot consumer.
 - [ ] Cross-language parity is based on semantic capability, including Zed projection parity, rather than identical implementation shape — pending Phase 4.

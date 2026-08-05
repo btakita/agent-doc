@@ -135,6 +135,35 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `a fresh plugin process retires controller roots discovered from open documents`() {
+        val ownership = EditorTabSyncListener.SurfaceRootOwnership()
+
+        ownership.recordAttempts(listOf("/repo", "/repo/nested"))
+
+        assertEquals(
+            listOf("/repo/nested"),
+            ownership.rootsToRetireBeforePublishing("/repo"),
+        )
+        assertTrue(ownership.markForgotten("/repo/nested"))
+        assertTrue(ownership.markPublished("/repo").isEmpty())
+        assertEquals(listOf("/repo"), ownership.drain())
+    }
+
+    @Test
+    fun `prior process roots are retired before replacement publication can block on layout`() {
+        val ownership = EditorTabSyncListener.SurfaceRootOwnership()
+
+        ownership.recordAttempts(listOf("/repo", "/repo/nested"))
+
+        assertEquals(
+            listOf("/repo/nested"),
+            ownership.rootsToRetireBeforePublishing("/repo"),
+        )
+        assertTrue(ownership.markForgotten("/repo/nested"))
+        assertTrue(ownership.rootsToRetireBeforePublishing("/repo").isEmpty())
+    }
+
+    @Test
     fun `failed superseded root retirement remains retryable`() {
         val ownership = EditorTabSyncListener.SurfaceRootOwnership()
 
@@ -173,6 +202,38 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `surface projection waits until every restored editor window selects a file`() {
+        assertFalse(
+            EditorTabSyncListener.SurfaceReport.restoredEditorWindowsReady(
+                listOf("/repo/right.md", null),
+            ),
+        )
+        assertTrue(
+            EditorTabSyncListener.SurfaceReport.restoredEditorWindowsReady(
+                listOf("/repo/right.md", "/repo/left.md"),
+            ),
+        )
+    }
+
+    @Test
+    fun `restored window selections remain authoritative while selected-files aggregate lags`() {
+        val laggingSelectedFiles = listOf("/repo/nested/right.md")
+        val restoredWindowFiles =
+            listOf(
+                "/repo/tasks/agent-doc/left.md",
+                "/repo/nested/right.md",
+            )
+
+        assertEquals(1, laggingSelectedFiles.size)
+        assertEquals(
+            restoredWindowFiles,
+            EditorTabSyncListener.SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
+                restoredWindowFiles,
+            ),
+        )
+    }
+
+    @Test
     fun `stale selected-files projection is reread on later EDT turns`() {
         assertTrue(
             EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(
@@ -186,9 +247,16 @@ class EditorTabSyncListenerTest {
                 remainingPasses = 0,
             ),
         )
-        assertFalse(
+        assertTrue(
             EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(
                 authority = EditorTabSyncListener.ObservationAuthority.Layout,
+                remainingPasses =
+                    EditorTabSyncListener.SelectionProjectionSettling.MAX_REPROJECTION_PASSES,
+            ),
+        )
+        assertTrue(
+            EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(
+                authority = EditorTabSyncListener.ObservationAuthority.FileOpened,
                 remainingPasses =
                     EditorTabSyncListener.SelectionProjectionSettling.MAX_REPROJECTION_PASSES,
             ),
@@ -461,6 +529,8 @@ class EditorTabSyncListenerTest {
                 .substringBefore("fun onEditorFocusGained")
         assertTrue(selection.contains("requestObservation("))
         assertTrue(selection.contains("requestImmediateFocus(project, file)"))
+        assertFalse(selection.contains("manager.selectedFiles"))
+        assertFalse(selection.contains("collectVisibleMarkdownFiles"))
         assertFalse(selection.contains("CpRouteClient"))
         assertTrue(selection.contains("forceReconcile = false"))
         assertTrue(selection.contains("previousFile = event.oldFile"))
@@ -487,6 +557,49 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `editor snapshot leaves project root and controller work off the EDT`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val capture =
+            source
+                .substringAfter("private fun captureSurface(")
+                .substringBefore("private fun resolveSurface(")
+        val resolution =
+            source
+                .substringAfter("private fun resolveSurface(")
+                .substringBefore("private fun requestImmediateFocus(")
+
+        assertFalse(capture.contains("TerminalUtil.resolveProject("))
+        assertFalse(capture.contains("nearestAgentDocProjectRoot"))
+        assertTrue(resolution.contains("TerminalUtil.resolveProject("))
+        assertTrue(resolution.contains("nearestAgentDocProjectRoot"))
+        assertTrue(source.contains("surfaceDeliveryExecutor.execute"))
+        assertTrue(source.contains("resolveSurface(captured)"))
+    }
+
+    @Test
+    fun `IDE activation republishes and settles the visible editor surface`() {
+        assertTrue(
+            EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(
+                EditorTabSyncListener.ObservationAuthority.IdeActivation,
+                remainingPasses = 1,
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(
+                EditorTabSyncListener.ObservationAuthority.IdeActivation,
+                remainingPasses = 0,
+            ),
+        )
+    }
+
+    @Test
     fun `markdown file open republishes the editor surface after the startup seed`() {
         val source =
             Files.readString(
@@ -505,7 +618,9 @@ class EditorTabSyncListenerTest {
                 .substringAfter(fileOpenedMarker)
                 .substringBefore("override fun fileClosed")
         assertTrue(fileOpened.contains("if (!file.name.endsWith(\".md\")) return"))
-        assertTrue(fileOpened.contains("onEditorLayoutChanged(source.project)"))
+        assertTrue(fileOpened.contains("preferredFile = file"))
+        assertTrue(fileOpened.contains("authority = ObservationAuthority.FileOpened"))
+        assertFalse(fileOpened.contains("onEditorLayoutChanged(source.project)"))
     }
 
     @Test
@@ -602,6 +717,7 @@ class EditorTabSyncListenerTest {
         assertTrue(reportBody.contains("surfaceDeliveryExecutor.execute"))
         assertTrue(reportBody.contains("synchronized(lifecycleLock)"))
         assertTrue(reportBody.contains("if (closed)"))
+        assertTrue(reportBody.contains("surfaceRoots.recordAttempts("))
         assertTrue(reportBody.contains("surfaceRoots.markPublished("))
         assertTrue(reportBody.contains("CpRouteClient.forgetEditorSurface("))
         assertTrue(reportBody.contains("surfaceRoots.markForgotten("))

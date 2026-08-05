@@ -1,5 +1,7 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.application.ApplicationActivationListener
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
@@ -8,6 +10,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManagerListener
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.wm.IdeFrame
 
 /**
  * Disposes per-project resources when a project closes.
@@ -51,8 +54,24 @@ class PluginLifecycleListener : ProjectManagerListener {
             .subscribe(
                 FileEditorManagerListener.FILE_EDITOR_MANAGER,
                 editorTabSync,
-            )
+        )
         editorTabSync.onEditorLayoutChanged(project)
+        // An i3 workspace switch can recreate or resize the embedded terminal surface without
+        // changing editor selection/layout. Republish the settled editor surface when this IDE
+        // frame becomes active so the normal controller projection repairs tmux automatically.
+        ApplicationManager.getApplication()
+            .messageBus
+            .connect(project)
+            .subscribe(
+                ApplicationActivationListener.TOPIC,
+                object : ApplicationActivationListener {
+                    override fun applicationActivated(ideFrame: IdeFrame) {
+                        if (ideFrame.project === project) {
+                            editorTabSync.onIdeActivated(project)
+                        }
+                    }
+                },
+            )
         // Drive tmux pane focus on split-editor focus changes (#panefocussplit):
         // selectionChanged does not fire for focus movement between existing
         // splits, so this reuses editorTabSync's reconcile from focus events.

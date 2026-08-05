@@ -161,8 +161,9 @@ mod tests {
             "JetBrains must observe visible membership that completes after startup layout seeding",
         );
         assert!(
-            jetbrains_listener.contains("onEditorLayoutChanged(source.project)"),
-            "JetBrains file-open events must invalidate the shared editor-surface source",
+            jetbrains_listener.contains("authority = ObservationAuthority.FileOpened")
+                && jetbrains_listener.contains("preferredFile = file"),
+            "JetBrains file-open events must retain the opened file in the shared surface source",
         );
         assert!(
             vscode_extension.contains("vscode.window.onDidChangeVisibleTextEditors"),

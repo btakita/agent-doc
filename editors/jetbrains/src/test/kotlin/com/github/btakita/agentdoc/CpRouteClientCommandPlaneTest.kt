@@ -49,6 +49,24 @@ class CpRouteClientCommandPlaneTest {
     }
 
     @Test
+    fun `editor surface retirement supersedes earlier JetBrains process generations`() {
+        val request =
+            CpRouteClient.editorSurfaceForgetRequest(
+                clientId = "jetbrains-pid:84",
+                generation = 101,
+                retireClientFamily = true,
+            )
+
+        assertEquals("editor_surface_forget", request.get("command").asString)
+        assertEquals(101L, request.get("generation").asLong)
+        assertEquals("jetbrains-pid:84", request.get("caller").asString)
+        assertEquals(
+            "editor_surface_client_family_retired",
+            request.get("reason").asString,
+        )
+    }
+
+    @Test
     fun `document path transition is an ordered controller observation`() {
         val request =
             CpRouteClient.documentPathTransitionRequest(

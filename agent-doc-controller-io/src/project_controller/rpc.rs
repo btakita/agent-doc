@@ -105,6 +105,11 @@ pub(super) struct ControllerEditorSurfaceGraph {
     run_intent: ControllerEditorSurfaceIntentRunner,
 }
 
+fn editor_surface_client_family(client_id: &str) -> Option<&str> {
+    let (family, process_id) = client_id.split_once("-pid:")?;
+    (!family.is_empty() && !process_id.is_empty()).then_some(family)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentPathTransitionObservation {
     pub transition_id: String,
@@ -336,6 +341,27 @@ impl ControllerEditorSurfaceGraph {
         current.state.stop(&current.consequence);
         current.retired = true;
         true
+    }
+
+    fn forget_client_family(&self, project_root: &Path, client_id: &str, generation: u64) -> usize {
+        let Some(client_family) = editor_surface_client_family(client_id) else {
+            return usize::from(self.forget(project_root, client_id, generation));
+        };
+        let mut roots = self.roots.lock();
+        let mut forgotten = 0;
+        for ((root, retained_client_id), current) in roots.iter_mut() {
+            if root != project_root
+                || current.retired
+                || current.generation > generation
+                || editor_surface_client_family(retained_client_id) != Some(client_family)
+            {
+                continue;
+            }
+            current.state.stop(&current.consequence);
+            current.retired = true;
+            forgotten += 1;
+        }
+        forgotten
     }
 
     fn active_observation_generations(&self, project_root: &Path) -> Vec<(String, u64, u64)> {
@@ -16982,15 +17008,29 @@ fn handle_editor_surface_forget(
     runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
+    let retire_client_family =
+        request.reason.as_deref() == Some("editor_surface_client_family_retired");
     let client_id = request_string(&request.caller, "caller")?;
     let generation = request
         .generation
         .context("editor_surface_forget requires generation")?;
-    let forgotten =
-        runtime
-            .editor_surface_graph
-            .forget(&bootstrap.project_root, &client_id, generation);
-    Ok(serde_json::json!({ "forgotten": forgotten }))
+    let forgotten_clients = if retire_client_family {
+        runtime.editor_surface_graph.forget_client_family(
+            &bootstrap.project_root,
+            &client_id,
+            generation,
+        )
+    } else {
+        usize::from(runtime.editor_surface_graph.forget(
+            &bootstrap.project_root,
+            &client_id,
+            generation,
+        ))
+    };
+    Ok(serde_json::json!({
+        "forgotten": forgotten_clients > 0,
+        "forgotten_clients": forgotten_clients,
+    }))
 }
 
 fn handle_document_path_transition_observe(
@@ -21209,6 +21249,64 @@ mod tests {
         let (next_accepted, _) = graph.observe(&scope, root, next_generation, None);
         assert!(next_accepted);
         assert_eq!(effects.lock().len(), 3);
+    }
+
+    #[test]
+    fn controller_editor_surface_graph_retires_older_processes_in_one_client_family() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let effects = Arc::new(Mutex::new(Vec::<SurfaceIntent>::new()));
+        let recorded = Arc::clone(&effects);
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(move |_, intent| {
+            recorded.lock().push(intent.clone());
+            Ok("recorded".to_string())
+        }));
+        let root = Path::new("/project");
+        let observe = |client_id: &str, generation, sequence, file: &str| {
+            graph.observe(
+                &scope,
+                root,
+                EditorSurfaceObservation {
+                    client_id: client_id.to_string(),
+                    generation,
+                    sequence,
+                    surface: test_editor_surface(file),
+                },
+                None,
+            )
+        };
+
+        assert!(observe("jetbrains-pid:41", 100, 1, "/project/old.md").0);
+        assert!(observe("vscode-pid:51", 10, 1, "/project/vscode.md").0);
+        assert_eq!(
+            graph.forget_client_family(root, "jetbrains-pid:42", 101),
+            1,
+            "a replacement JVM must retire the retained projection from its predecessor",
+        );
+        assert_eq!(
+            graph.active_observation_generations(root),
+            vec![("vscode-pid:51".to_string(), 10, 1)],
+            "another editor family remains an independent observation authority",
+        );
+
+        let (late_accepted, _) = observe("jetbrains-pid:41", 100, u64::MAX, "/project/late-old.md");
+        assert!(
+            !late_accepted,
+            "the retired JVM cannot regain tmux authority"
+        );
+
+        assert!(observe("jetbrains-pid:42", 101, 1, "/project/new.md").0);
+        assert_eq!(
+            graph.forget_client_family(root, "jetbrains-pid:41", 100),
+            0,
+            "a delayed retirement from the old JVM must be fenced by generation",
+        );
+        assert_eq!(
+            graph.active_observation_generations(root),
+            vec![
+                ("jetbrains-pid:42".to_string(), 101, 1),
+                ("vscode-pid:51".to_string(), 10, 1),
+            ],
+        );
     }
 
     #[test]

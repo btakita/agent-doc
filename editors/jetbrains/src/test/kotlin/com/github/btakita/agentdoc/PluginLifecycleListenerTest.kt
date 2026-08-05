@@ -56,4 +56,20 @@ class PluginLifecycleListenerTest {
         assertTrue(pluginXml.contains("<idea-plugin require-restart=\"true\">"))
         assertFalse(pluginXml.contains("<idea-plugin require-restart=\"false\">"))
     }
+
+    @Test
+    fun `IDE activation republishes the settled editor surface`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt",
+                    ),
+            )
+
+        assertTrue(source.contains("ApplicationActivationListener.TOPIC"))
+        assertTrue(source.contains("override fun applicationActivated(ideFrame: IdeFrame)"))
+        assertTrue(source.contains("editorTabSync.onIdeActivated(project)"))
+    }
 }

@@ -1,0 +1,12 @@
+[features]
+hooks = true
+
+[mcp_servers.agent-doc]
+args = [
+    "mcp",
+    "serve",
+    "--project-root",
+    "/tmp/agent-doc-v035138-listener-singleton",
+]
+command = "agent-doc"
+default_tools_approval_mode = "approve"

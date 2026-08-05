@@ -504,6 +504,58 @@ pub fn free_text_head_match_prose(head_text: &str) -> String {
     prose
 }
 
+/// True when a `### Re:` topic repeats a distinctive code identifier from the
+/// free-text head.
+///
+/// The ordinary free-text completion proof is the verbatim `> **Queue prompt:**`
+/// echo. Historical sessions can predate that echo (or be closed by a harness
+/// that omitted it), while still carrying an unambiguous response heading such
+/// as ``### Re: Why `_load_identity_age_consent_embedded_runtime` was deleted``.
+/// Limit this recovery path to long underscore-delimited identifiers: ordinary
+/// prose, filenames, short symbols, and an identifier mentioned only in the
+/// response body remain insufficient completion proof.
+fn response_heading_targets_distinctive_identifier(response_body: &str, head_text: &str) -> bool {
+    fn distinctive_identifiers(text: &str) -> Vec<String> {
+        text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+            .filter(|token| {
+                token.len() >= 24
+                    && token.bytes().filter(|byte| *byte == b'_').count() >= 2
+                    && token.bytes().any(|byte| byte.is_ascii_alphabetic())
+            })
+            .map(str::to_ascii_lowercase)
+            .collect()
+    }
+
+    let head_identifiers = distinctive_identifiers(head_text);
+    if head_identifiers.is_empty() {
+        return false;
+    }
+    let blocks: Vec<&str> = response_body.split("\n\n").collect();
+    blocks.iter().enumerate().any(|(index, block)| {
+        let targets_identifier = block
+            .lines()
+            .filter_map(response_heading_topic)
+            .any(|topic| {
+                let topic_identifiers = distinctive_identifiers(topic);
+                head_identifiers
+                    .iter()
+                    .any(|identifier| topic_identifiers.contains(identifier))
+            });
+        if !targets_identifier {
+            return false;
+        }
+        let mut scope = String::from(*block);
+        if let Some(next) = blocks.get(index + 1) {
+            scope.push(' ');
+            scope.push_str(next);
+        }
+        let scope = scope.to_ascii_lowercase();
+        !FREE_TEXT_HEAD_DEFERRAL_MARKERS
+            .iter()
+            .any(|marker| scope.contains(marker))
+    })
+}
+
 /// True when the committed `response_body` answers the free-text queue head
 /// `head_text`: the head's normalized **prose prefix** (text before any fenced
 /// code block -- see [`free_text_head_match_prose`]) appears inside the response's
@@ -516,6 +568,9 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
     // shortcode word would otherwise survive normalization and break the match.
     let head_clean = strip_priority_markers(head_text);
     if response_explicit_queue_prompt_echoes_head(response_body, &head_clean) {
+        return true;
+    }
+    if response_heading_targets_distinctive_identifier(response_body, &head_clean) {
         return true;
     }
     // `#ftstrike-fence`: match on the prose prefix, not the full node text -- a head
@@ -571,7 +626,9 @@ pub fn response_defers_free_text_head(response_body: &str, head_text: &str) -> b
     }
     let blocks: Vec<&str> = response_body.split("\n\n").collect();
     for (index, block) in blocks.iter().enumerate() {
-        if !normalize_for_answer_match(block).contains(&head_norm) {
+        if !normalize_for_answer_match(block).contains(&head_norm)
+            && !response_heading_targets_distinctive_identifier(block, &head_clean)
+        {
             continue;
         }
         let mut scope = String::from(*block);
@@ -893,6 +950,44 @@ mod tests {
             prose_only,
             "My free-text queue items are not immediately struck as if they are addressed."
         ));
+    }
+
+    #[test]
+    fn free_text_head_answered_by_distinctive_identifier_response_heading() {
+        let head = concat!(
+            "Please help me understand why you deleted ",
+            "_load_identity_age_consent_embedded_runtime in ",
+            "https://github.com/haiven-dev/fpe/pull/12/changes#diff-example. ",
+            "Was this due to \"remove the duplicate identity embedded-runtime implementation\"?"
+        );
+        let response = concat!(
+            "### Re: Why `_load_identity_age_consent_embedded_runtime` was deleted in FPE PR #12\n\n",
+            "The later duplicate helper shadowed the canonical implementation.\n"
+        );
+        assert!(free_text_head_answered_by_response(response, head));
+
+        let prose_only = concat!(
+            "### Re: another queue item\n\n",
+            "I noticed _load_identity_age_consent_embedded_runtime, but did not address it.\n"
+        );
+        assert!(!free_text_head_answered_by_response(prose_only, head));
+
+        let different_identifier =
+            "### Re: `_load_identity_age_consent_external_runtime`\n\nCompleted.\n";
+        assert!(!free_text_head_answered_by_response(
+            different_identifier,
+            head
+        ));
+    }
+
+    #[test]
+    fn distinctive_identifier_heading_respects_explicit_deferral() {
+        let head = "Please explain why _load_identity_age_consent_embedded_runtime was removed.";
+        let response = concat!(
+            "### Re: `_load_identity_age_consent_embedded_runtime`\n\n",
+            "This remains queued and will be handled next.\n"
+        );
+        assert!(!free_text_head_answered_by_response(response, head));
     }
 
     #[test]

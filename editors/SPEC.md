@@ -30,6 +30,10 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 4. Tab-to-Pane Sync (Automatic)
 
 - **Selection/layout coherence:** A selection event must not publish a surface while the selected-files view has advanced to the new document but the split-layout view still names the prior document. Adapters may reread that external editor projection on bounded later event-loop turns; after the budget, they may apply only the exact old→new event edge to each stale projection independently. Missing prior-file evidence remains fail-closed.
+- **Restored-window coherence:** An adapter must not publish a contracted startup
+  surface while the editor already exposes multiple restored windows but any
+  window still has no selected file. File-open and structural edges retain the
+  newest projection intent across bounded later event-loop turns.
 
 Automatic tab-to-pane sync is **reported, not planned** (`#jbsurfaceswap` / `#jbpluginlazilyeffects`). A plugin publishes an ordered fact to an already-running Project Controller; the controller's process-scoped reactive graph derives the intent and its local `Effect` owns the tmux consequence.
 
@@ -46,7 +50,7 @@ Automatic tab-to-pane sync is **reported, not planned** (`#jbsurfaceswap` / `#jb
   must not wait for editor-content authority, and the parent must not resume,
   provision, or durably register the foreign document.
 - **Debounce:** 100ms, plus a generation guard, on an event loop or scheduler keyed by editor events — never hot polling, spinlocks, or thread-per-delay retry loops. This is the only coalescing a plugin owns: it exists so an event storm reports its final state, not so identical states are suppressed. Report off the UI thread; controller effects never run in the extension host.
-- **Project close:** call `agent_doc_editor_surface_forget(project_root)` for every root the plugin observed. The controller also fences observations by client/generation/sequence, so a late callback from a retired native mapping cannot regain effect authority.
+- **Project close and restart:** call `agent_doc_editor_surface_forget(project_root)` for every root the plugin observed. A fresh adapter process must also derive candidate controller roots from its open-document surface and retire non-authoritative retained roots before its replacement publish can block on reconciliation. Process-scoped clients request retirement for their own editor family; the controller stops every older-or-equal family generation at that root while preserving other editor families. The generation fence prevents a delayed callback from an older process from retiring or regaining authority over its replacement.
 - **Feedback:** a derived `sync` projection may show the concise inline layout hint; `focus` and `idle` show nothing. The full projection stays in the plugin log for diagnosis.
 - **Manual `Sync Tmux Layout`** (§ 3) remains a direct controller submit and keeps its own preserved-layout warning; it is an explicit operator action, not an observation.
 

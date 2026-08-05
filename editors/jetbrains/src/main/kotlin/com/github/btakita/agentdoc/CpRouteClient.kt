@@ -190,11 +190,11 @@ internal object CpRouteClient {
     fun forgetEditorSurface(projectRoot: String): Boolean {
         val socket = cpcSocket(projectRoot)
         val request =
-            JsonObject().also {
-                it.addProperty("command", "editor_surface_forget")
-                it.addProperty("generation", editorSurfaceGeneration)
-                it.addProperty("caller", editorSurfaceClientId)
-        }
+            editorSurfaceForgetRequest(
+                clientId = editorSurfaceClientId,
+                generation = editorSurfaceGeneration,
+                retireClientFamily = true,
+            )
         return try {
             sendRequestDataToSocket(socket, request).get("forgotten")?.asBoolean ?: false
         } catch (e: Exception) {
@@ -401,6 +401,25 @@ internal object CpRouteClient {
             it.addProperty("diagnostic_payload", observation.toString())
         }
     }
+
+    internal fun editorSurfaceForgetRequest(
+        clientId: String,
+        generation: Long,
+        retireClientFamily: Boolean,
+    ): JsonObject =
+        JsonObject().also {
+            it.addProperty("command", "editor_surface_forget")
+            it.addProperty("generation", generation)
+            it.addProperty("caller", clientId)
+            it.addProperty(
+                "reason",
+                if (retireClientFamily) {
+                    "editor_surface_client_family_retired"
+                } else {
+                    "editor_surface_client_retired"
+                },
+            )
+        }
 
     internal fun documentPathTransitionRequest(
         transitionId: String,

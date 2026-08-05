@@ -93,10 +93,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
             requestedGeneration == currentGeneration && projectWindowActive
     }
 
-    internal enum class ObservationAuthority {
-        Layout,
-        DocumentSelection,
-    }
+internal enum class ObservationAuthority {
+    Layout,
+    DocumentSelection,
+    FileOpened,
+    IdeActivation,
+}
 
     /**
      * The pending slot protects editor-event ordering only until the EDT has captured a
@@ -125,6 +127,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
             observedRoots.add(root)
         }
 
+        fun recordAttempts(roots: Collection<String>) {
+            observedRoots.addAll(roots)
+        }
+
+        fun rootsToRetireBeforePublishing(root: String): List<String> =
+            observedRoots.filter { it != root }.sorted()
+
         fun markPublished(root: String): List<String> {
             observedRoots.add(root)
             activeRoot.set(root)
@@ -143,13 +152,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
     }
 
     /**
-     * `selectionChanged` may be delivered before IDEA updates `selectedFiles` and
- * the split-window model. Keep the selected-document fact authoritative and
- * re-read the editor projection on a bounded number of later EDT turns. This is
- * event settling, not a timer/retry ladder: every pass yields the EDT, the
- * generation guard cancels stale work, and exhaustion applies the authoritative
- * old-to-new selection edge when IDEA's projection still contains the old file.
- */
+     * IDEA may emit selection, structural-layout, and file-open edges before `selectedFiles`
+     * and every restored split window agree. Re-read the editor projection on a bounded
+     * number of later EDT turns. This is event settling, not a timer/retry ladder: every
+     * pass yields the EDT, the generation guard cancels stale work, and only exhausted
+     * document selection applies an authoritative old-to-new edge.
+     */
 internal object SelectionProjectionSettling {
     const val MAX_REPROJECTION_PASSES = 3
 
@@ -162,7 +170,12 @@ internal object SelectionProjectionSettling {
         authority: ObservationAuthority,
         remainingPasses: Int,
     ): Boolean =
-        authority == ObservationAuthority.DocumentSelection && remainingPasses > 0
+        when (authority) {
+            ObservationAuthority.Layout,
+            ObservationAuthority.DocumentSelection,
+            ObservationAuthority.FileOpened,
+            ObservationAuthority.IdeActivation -> remainingPasses > 0
+        }
 
     fun reconcileEventEdge(
         preferredFile: String?,
@@ -225,11 +238,27 @@ private data class PendingSurfaceObservation(
     val authority: ObservationAuthority,
 )
 
-    private data class PendingSurface(
-        val projectRoot: String,
-        val relativePath: String,
-        val surfaceJson: String,
-    )
+private data class PendingSurface(
+    val projectRoot: String,
+    val relativePath: String,
+    val surfaceJson: String,
+    val knownControllerRoots: List<String>,
+)
+
+/**
+ * Immutable editor-only snapshot captured on the EDT. Project-root discovery, filesystem walks,
+ * patch-watch registration, JSON construction, and controller delivery all happen later on the
+ * serialized background lane.
+ */
+private data class CapturedSurface(
+    val project: Project,
+    val projectBasePath: String?,
+    val focusedFile: VirtualFile,
+    val visibleMdFiles: List<String>,
+    val openMdFiles: List<String>,
+    val editorLayout: EditorLayout?,
+    val forceReconcile: Boolean,
+)
 
     internal object SurfaceReport {
         enum class ProjectionReadiness {
@@ -253,6 +282,17 @@ private data class PendingSurfaceObservation(
             } else {
                 ProjectionReadiness.Current
             }
+
+        fun restoredEditorWindowsReady(selectedWindowFiles: List<String?>): Boolean =
+            selectedWindowFiles.isNotEmpty() && selectedWindowFiles.all { it != null }
+
+        fun visibleMarkdownFilesFromRestoredWindows(
+            selectedWindowFiles: List<String?>,
+        ): List<String> =
+            selectedWindowFiles
+                .filterNotNull()
+                .filter { it.endsWith(".md") }
+                .distinct()
 
         fun resolveActiveFilePath(
             preferredActiveFile: String?,
@@ -363,7 +403,7 @@ private data class PendingSurfaceObservation(
                     return@invokeLater
                 }
                 val observation = latestSurfaceObservation.get() ?: return@invokeLater
-                val pending =
+            val captured =
                 captureSurface(
                     project = observation.project,
                     preferredFile = observation.preferredFile,
@@ -405,14 +445,43 @@ private data class PendingSurfaceObservation(
                     log("socket delivery: observation superseded before enqueue gen=$requestedGeneration")
                     return@invokeLater
                 }
-                surfaceDeliveryExecutor.execute {
-                    if (generation.get() != requestedGeneration) {
-                        log("socket delivery: superseded gen=$requestedGeneration")
+            surfaceDeliveryExecutor.execute {
+                if (generation.get() != requestedGeneration) {
+                    log("socket delivery: superseded gen=$requestedGeneration")
+                    return@execute
+                }
+                val pending =
+                    try {
+                        resolveSurface(captured)
+                    } catch (e: Exception) {
+                        LOG.warn("[layout-sync] background surface resolution failed: ${e.message}")
                         return@execute
                     }
-                    synchronized(lifecycleLock) {
+                synchronized(lifecycleLock) {
                         if (closed) return@execute
-                        surfaceRoots.recordAttempt(pending.projectRoot)
+                        surfaceRoots.recordAttempts(pending.knownControllerRoots)
+                    }
+                    val rootsToRetire =
+                        synchronized(lifecycleLock) {
+                            if (closed) {
+                                emptyList()
+                            } else {
+                                surfaceRoots.rootsToRetireBeforePublishing(pending.projectRoot)
+                            }
+                        }
+                    for (obsoleteRoot in rootsToRetire) {
+                        if (CpRouteClient.forgetEditorSurface(obsoleteRoot)) {
+                            surfaceRoots.markForgotten(obsoleteRoot)
+                            log(
+                                "observe: retired superseded surface root before publish " +
+                                    "root=$obsoleteRoot active=${pending.projectRoot}",
+                            )
+                        } else {
+                            log(
+                                "observe: pre-publish surface root retirement deferred root=" +
+                                    "$obsoleteRoot active=${pending.projectRoot}",
+                            )
+                        }
                     }
                     val receipt =
                         CpRouteClient.observeEditorSurface(
@@ -467,33 +536,50 @@ private data class PendingSurfaceObservation(
         }
     }
 
-private fun captureSurface(
-    project: Project,
-    preferredFile: VirtualFile? = null,
-    previousFile: VirtualFile? = null,
-    forceReconcile: Boolean = false,
-    reconcileStaleSelection: Boolean = false,
-): PendingSurface? {
-    val manager = FileEditorManager.getInstance(project)
-    val rawVisibleMdFiles =
-        SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
-    val rawEditorLayout = LayoutDetector.detectEditorLayout(project)
-    val settledProjection =
-        if (reconcileStaleSelection) {
-            SelectionProjectionSettling.reconcileEventEdge(
-                preferredFile = preferredFile?.path,
-                previousFile = previousFile?.path,
-                visibleMdFiles = rawVisibleMdFiles,
-                editorLayout = rawEditorLayout,
+    private fun captureSurface(
+        project: Project,
+        preferredFile: VirtualFile? = null,
+        previousFile: VirtualFile? = null,
+        forceReconcile: Boolean = false,
+        reconcileStaleSelection: Boolean = false,
+    ): CapturedSurface? {
+        val manager = FileEditorManager.getInstance(project)
+        val managerEx = FileEditorManagerEx.getInstanceEx(project)
+        val selectedWindowFiles = managerEx.windows.map { it.selectedFile }
+        if (
+            !SurfaceReport.restoredEditorWindowsReady(
+                selectedWindowFiles.map { it?.path },
             )
-        } else {
-            SelectionProjectionSettling.SettledProjection(
-                visibleMdFiles = rawVisibleMdFiles,
-                editorLayout = rawEditorLayout,
-            )
+        ) {
+            return null
         }
-    val visibleMdFiles = settledProjection.visibleMdFiles
-    if (visibleMdFiles.isEmpty()) return null
+        val rawVisibleMdFiles =
+            SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
+                selectedWindowFiles.map { it?.path },
+            )
+        val rawEditorLayout =
+            project.basePath?.let { basePath ->
+                SyncLayoutAction.absolutizeEditorLayout(
+                    basePath,
+                    LayoutDetector.detectEditorLayout(project),
+                )
+            } ?: LayoutDetector.detectEditorLayout(project)
+        val settledProjection =
+            if (reconcileStaleSelection) {
+                SelectionProjectionSettling.reconcileEventEdge(
+                    preferredFile = preferredFile?.path,
+                    previousFile = previousFile?.path,
+                    visibleMdFiles = rawVisibleMdFiles,
+                    editorLayout = rawEditorLayout,
+                )
+            } else {
+                SelectionProjectionSettling.SettledProjection(
+                    visibleMdFiles = rawVisibleMdFiles,
+                    editorLayout = rawEditorLayout,
+                )
+            }
+        val visibleMdFiles = settledProjection.visibleMdFiles
+        if (visibleMdFiles.isEmpty()) return null
         val openMarkdownFiles = manager.openFiles.filter { it.name.endsWith(".md") }
         val preferredMarkdownFile = preferredFile?.takeIf { candidate ->
             candidate.isValid &&
@@ -529,7 +615,6 @@ private fun captureSurface(
                 )
                 .filterNotNull()
                 .firstOrNull { it.path == activeFilePath } ?: return null
-        val managerEx = FileEditorManagerEx.getInstanceEx(project)
         val focusedWindowTabs =
             managerEx.windows
                 .firstOrNull { it.selectedFile?.path == activeFilePath }
@@ -549,37 +634,56 @@ private fun captureSurface(
                 openMdFiles = openMarkdownFiles.map { it.path },
             )
 
-        val (focusedProjectRoot, focusedRelativePath) = TerminalUtil.resolveProject(project, file)
+        return CapturedSurface(
+            project = project,
+            projectBasePath = project.basePath,
+            focusedFile = file,
+            visibleMdFiles = visibleMdFiles,
+            openMdFiles = openMdFiles,
+            editorLayout = settledProjection.editorLayout,
+            forceReconcile = forceReconcile,
+        )
+    }
+
+    private fun resolveSurface(captured: CapturedSurface): PendingSurface {
+        val (focusedProjectRoot, focusedRelativePath) =
+            TerminalUtil.resolveProject(captured.project, captured.focusedFile)
         // One root keys the surface graph, and it has to be the one that spans
         // the whole visible layout — a surface is the layout, not one document.
         val surfaceProjectRoot =
             SyncLayoutAction.chooseSyncProjectRoot(
-                project.basePath,
+                captured.projectBasePath,
                 focusedProjectRoot,
-                visibleMdFiles,
+                captured.visibleMdFiles,
             )
+        val knownControllerRoots =
+            (
+                captured.openMdFiles.mapNotNull(TerminalUtil::nearestAgentDocProjectRoot) +
+                    surfaceProjectRoot
+            ).distinct()
         val absoluteEditorLayout =
             SyncLayoutAction.absolutizeEditorLayout(
                 surfaceProjectRoot,
                 SyncLayoutAction.normalizeEditorLayout(
-                project.basePath,
-                surfaceProjectRoot,
-                settledProjection.editorLayout,
-            ),
-        )
+                    captured.projectBasePath,
+                    surfaceProjectRoot,
+                    captured.editorLayout,
+                ),
+            )
         return PendingSurface(
             projectRoot = surfaceProjectRoot,
             relativePath = focusedRelativePath,
             surfaceJson =
                 GSON.toJson(
                     SurfaceReport.buildSurface(
-                        focusedFile = file.path,
-                        visibleMdFiles = visibleMdFiles,
-                        openMdFiles = openMdFiles,
+                        focusedFile = captured.focusedFile.path,
+                        visibleMdFiles = captured.visibleMdFiles,
+                        openMdFiles = captured.openMdFiles,
                         editorLayout = absoluteEditorLayout,
-                        forceReconcile = forceReconcile,
-                    )
-            ),
+                        forceReconcile = captured.forceReconcile,
+                    ),
+                ),
+            knownControllerRoots = knownControllerRoots,
         )
     }
 
@@ -682,10 +786,7 @@ private fun captureSurface(
 
         val project = event.manager.project
         requestImmediateFocus(project, file)
-        val manager = FileEditorManager.getInstance(project)
-        val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
-        log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
-        if (visibleMdFiles.isEmpty()) return
+        log("selectionChanged: newFile=${file.name}; projection queued")
 
         // Focus owns targeted session recovery. Re-forcing a full surface
         // reconcile on every tab switch made ordinary focus navigation contend
@@ -697,6 +798,23 @@ private fun captureSurface(
             previousFile = event.oldFile,
             forceReconcile = false,
             authority = ObservationAuthority.DocumentSelection,
+            ),
+        )
+    }
+
+    /**
+     * Re-publish the settled visible surface when IDEA becomes active. i3 workspace changes do not
+     * necessarily emit a selection, file-open, or layout event, even though the terminal tool
+     * window may have been rebuilt while the IDE was hidden.
+     */
+    fun onIdeActivated(project: Project) {
+        log("ideActivated: settled surface projection queued")
+        requestObservation(
+            PendingSurfaceObservation(
+                project = project,
+                preferredFile = null,
+                forceReconcile = false,
+                authority = ObservationAuthority.IdeActivation,
             ),
         )
     }
@@ -754,7 +872,14 @@ private fun captureSurface(
     override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         log("fileOpened: file=${file.name}")
-        onEditorLayoutChanged(source.project)
+        requestObservation(
+            PendingSurfaceObservation(
+                project = source.project,
+                preferredFile = file,
+                forceReconcile = false,
+                authority = ObservationAuthority.FileOpened,
+            ),
+        )
     }
 
     /**

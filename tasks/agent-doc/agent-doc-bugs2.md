@@ -27,7 +27,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-complete
+completed
 <!-- /agent:status -->
 
 ## Exchange
@@ -600,7 +600,21 @@ Public agent-doc commits are:
 Verification passed: focused controller regressions, the complete serial controller suite, focused JetBrains tests, the complete JetBrains test suite, `cargo fmt`, `git diff --check`, public-repository private-name hygiene, and full `make check` (`tart-959411f907`). The installed binary reports `agent-doc 0.35.133`; the matching JetBrains 0.2.343 package is installed in all four detected IDE installations. The native/controller repair is active now. A normal JetBrains restart is still required to load the new Kotlin plugin package and activate the EDT/disposal/rename changes in the running IDE process.
 
 No force-disk path, response recapture, process kill, positional pane relabel, or manual session-document patch was used.
-<!-- agent:boundary:4a44ddf0:agent-doc-bugs2 -->
+
+### Re: Response
+
+Fixed, released, installed, and restored.
+
+- The tmux window is back to two full-height side-by-side panes: this Agent Doc pane `%25` is active at `60x51`, and the Haiven pane `%20` remains visible at `59x51`. Both have `zoom=0` and `mode=0`; no stash window was selected.
+- There is one supervisor for each document, not competing duplicates. The current document supervisor accepted restart receipt `282` and will replace itself at this turn boundary without interrupting the live Codex session.
+- Agent Doc `v0.35.135` fixed the independent editor-focus delivery lane, preserved the intended tmux layout, hardened the JetBrains highlighter lifecycle against executor shutdown races, and changed added-row highlighting to a neutral background treatment.
+- Agent Doc `v0.35.136` fixed the remaining closeout wedge by making replay repair and commit use the same capture-scoped canonicalization proof. The live document then settled and committed normally.
+- IntelliJ 2026.1 was restarted successfully. Its startup log confirms Agent Doc plugin `0.2.345` loaded, with no new `VisualHighlighterManager`, `RejectedExecutionException`, or focus-delivery error in the fresh startup segment.
+- The installed CLI and all harness skill copies are now `0.35.136`.
+- Public release commit: `238105d74` (`v0.35.136`). Parent gitlink commit: `929832d056`. Previous live document recovery commit: `6b2f74d483`.
+- Full `make check`, tmux CI, targeted regressions, and JetBrains plugin tests passed. GitHub Book and Pages runs passed; CI, Release, and PyPI were in progress at the one-time post-push observation.
+- The staged Octavian deletion and the concurrent Lazily 0.55 working changes were preserved and were not included in the Agent Doc release.
+<!-- agent:boundary:2463ea63:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 

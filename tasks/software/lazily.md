@@ -546,6 +546,122 @@ This preserves the required subset of Temporal’s guarantees—durable resume, 
    - Measure decision latency, publish-ack latency, backlog age, lease contention, duplicate suppression, retry/terminal-error rate, hot rows/bytes per open review, common-path rows per message, and archive lag.
 
 The plan stays planning-only until IP clearance. No Haiven code, contract, or repository state was changed in this cycle.
+
+### Re: Lazily feature gap for the FPE topology
+
+Yes: **Postgres and NATS are the two primary integrations. Valkey is beneficial, but only as an optional disposable acceleration layer.**
+
+The current Lazily family already has much of the *pure semantic core*:
+
+- flat state machines and Harel state charts;
+- local `WorkQueueCell` claim/ack/nack/redelivery/DLQ behavior;
+- `LeaseCell` with a monotonically increasing fence;
+- retry, timeout, timer, interval, and cron cells;
+- transport-agnostic `IngressCell` envelopes with generation, sequence, freshness, dedupe, and reorder handling;
+- JSON/msgpack wire codecs, command-plane messages, causal receipts, health/readiness, and reliable-sync protocols;
+- an `OutboxStore` seam for reliable state-frame replication.
+
+What it does **not** yet have is the durable external-authority layer required to replace Temporal. The local cells model the right decisions, but their state disappears with the process. Also, reliable-sync's current `OutboxStore` is ordered frame/cursor storage; it cannot atomically commit a domain state transition and an event in the same Postgres transaction.
+
+### Required features, in priority order
+
+| Priority | Lazily feature | Why the plan needs it |
+|---|---|---|
+| P0 | IP/provenance gate | Keep the design generic and do not copy Haiven schemas, names, thresholds, or code into public Lazily repositories until contractual clearance. |
+| P1 | Durable state-table/reducer protocol | Atomically load a versioned state, apply a pure transition, compare-and-swap the revision, record the command/attempt, and emit effects. This is the durable counterpart to the existing in-memory state machines. |
+| P1 | Postgres durable-runtime adapter | Tables and operations for state, commands, attempts, timers, idempotency/effect receipts, leases, terminal outcomes, and transactional outbox events. It needs `FOR UPDATE SKIP LOCKED`, unique constraints, and fencing-generation checks. |
+| P1 | Transactional unit of work | Commit domain mutation + effect receipt + outbox append in one database transaction. A standalone `PostgresOutboxStore` is insufficient unless it participates in the caller's transaction. |
+| P1 | NATS JetStream adapter family | Durable publish, pull consumption, explicit ack/nak/progress/term, message metadata, replay, and declarative stream/consumer configuration. |
+| P1 | Async broker runner | Bounded fetch/concurrency, backpressure, graceful drain, reconnect, cancellation, and the rule “ack only after the Postgres commit.” The current nonblocking synchronous transport seams do not own this lifecycle. |
+| P2 | Durable scheduler/timer store | `schedule`, `cancel`, `claim_due`, `reschedule`, and recovery of abandoned timers. Existing timer/retry cells compute policy; they do not persist future work. |
+| P2 | Durable work/lease store | Stable item IDs, claim tokens, monotonically increasing fences, renew/release, expired-lease reclamation, attempt history, and DLQ transitions. This should back a reactive projection rather than putting database I/O inside a cell. |
+| P2 | Operational projections | Reactive queue depth, oldest-ready age, lease age, retry backlog, outbox lag, consumer lag, redelivery count, DLQ count, and stale-fence rejection, with OpenTelemetry correlation. |
+| P2 | Executor/cutover seam | A common executor interface for `temporal | native | shadow`, pinned executor versions, shadow-result comparison, cohort routing, draining, and rollback. |
+| P3 | Valkey cache/coordination adapters | Optional cache, duplicate-fill suppression, rate limiting, and ephemeral coordination. Never authoritative for workflow correctness in this design. |
+
+### NATS: implement a family, not one generic adapter
+
+There are several useful Lazily-to-NATS seams:
+
+1. **`JetStreamPublisher` / command sink**  
+   Encode a versioned envelope, publish with a stable `Nats-Msg-Id`, await the JetStream publish acknowledgement, and expose retryable versus terminal failures.
+
+2. **`JetStreamPullConsumer` / leased delivery source**  
+   Fetch bounded batches and expose delivery metadata plus `ack`, `nak(delay)`, `progress`, and `term`. Pull consumers are the right default for horizontally scaled workers.
+
+3. **`NatsIngressAdapter`**  
+   Decode the application envelope into Lazily's existing `IngressEnvelope`; broker metadata supplies sequence/redelivery information, while application headers supply generation, correlation, contract version, tenant, and trace context.
+
+4. **`PostgresOutboxToNatsRunner`**  
+   Claim unpublished outbox rows with `SKIP LOCKED`, publish using the outbox event ID as `Nats-Msg-Id`, then mark published only after the broker acknowledgement.
+
+5. **Declarative topology and diagnostics**  
+   Idempotently ensure streams/consumers and validate subjects, retention, replicas, `AckExplicit`, `AckWait`/`BackOff`, `MaxDeliver`, and `MaxAckPending`. Emit consumer-lag and max-delivery advisories.
+
+JetStream should **not** be implemented merely as the current synchronous `QueueStorage`. That interface has `try_push`/`try_pop` and destructive pop semantics, but a broker delivery remains pending until it is acknowledged and can be redelivered to another worker. Lazily needs an async `LeasedDeliverySource<T>` (or equivalent) protocol that preserves the delivery token and ack lifecycle. The existing `WorkQueueCell` semantics can then serve as the conformance model.
+
+For this topology, NATS is also **not the workflow-state authority**. The safe consumer choreography is:
+
+```text
+JetStream delivery
+  -> begin Postgres transaction
+  -> dedupe command
+  -> claim/advance state using revision + fencing checks
+  -> record attempt/effect receipt/outbox events
+  -> commit
+  -> ACK JetStream
+```
+
+A crash before commit causes harmless redelivery. A crash after commit but before ACK is handled by the idempotency key. NATS documents JetStream as at-least-once and provides explicit acknowledgements, pull consumers, redelivery controls, and `Nats-Msg-Id` deduplication; those mechanisms complement, rather than replace, database idempotency ([JetStream](https://docs.nats.io/nats-concepts/jetstream), [consumer details](https://docs.nats.io/using-nats/developer/develop_jetstream/consumers), [model deep dive](https://docs.nats.io/using-nats/developer/develop_jetstream/model_deep_dive)).
+
+### Valkey: useful, but deliberately secondary
+
+A Valkey adapter would be valuable for:
+
+- versioned context/policy/model-result caches with TTL and namespace isolation;
+- request coalescing or duplicate-fill suppression using an owner token and compare-and-delete;
+- disposable reactive projections for dashboards;
+- distributed rate-limit, bulkhead, or short-lived semaphore state;
+- optional ephemeral presence/readiness hints.
+
+I would define narrow protocols such as `CacheStore`, `SingleFlightStore`, and possibly `RateLimitStore`, with a `Valkey*` implementation. Cache misses and complete Valkey loss must degrade to Postgres/object storage and recomputation.
+
+I would **not** use Valkey for:
+
+- workflow or review state;
+- the transactional outbox;
+- effect receipts/idempotency authority;
+- durable timers/retries;
+- the sole lease/fencing authority;
+- a second durable event stream alongside JetStream.
+
+Valkey Streams do provide consumer groups and pending-entry acknowledgements ([Streams](https://valkey.io/topics/streams-intro/), [XACK](https://valkey.io/commands/xack/)), but using them here would duplicate JetStream's job and create two recovery models. If a Valkey coordination adapter is added later, every grant should carry a monotonically increasing fencing token that the Postgres write path validates; expiry alone is not sufficient to prevent a paused former holder from writing stale results.
+
+### Recommended package shape
+
+Keep optional infrastructure dependencies out of Lazily's pure core:
+
+- `lazily-spec`: generic durable-state, leased-delivery, transactional-effect, and scheduler contracts plus failure/replay fixtures;
+- `lazily-py`: protocol surfaces and reference runners;
+- `lazily-postgres`: Postgres stores and transaction coordinator;
+- `lazily-nats`: JetStream publisher, consumer, ingress adapter, topology validation, and outbox dispatcher;
+- `lazily-valkey`: cache/single-flight/rate-limit adapters only.
+
+For the FPE use case, implement **Python first** behind generic conformance fixtures. Cross-language ports can follow when another binding has a real deployment consumer; the infrastructure adapters should not become mandatory core conformance for all nine languages.
+
+### Minimal vertical slice
+
+The smallest useful slice is:
+
+1. IP clearance and a generic durable-runtime spec;
+2. Postgres state transition + idempotency receipt + transactional outbox in one transaction;
+3. JetStream outbox publisher and pull consumer;
+4. consumer DB-commit-before-ACK runner with crash-point tests;
+5. due-work/expired-lease maintenance runner;
+6. metrics and a shadow executor;
+7. optional Valkey cache after correctness is demonstrated without it.
+
+That ordering gives the plan its Temporal-like durability first. Valkey improves latency and load later; it does not close a correctness gap.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 

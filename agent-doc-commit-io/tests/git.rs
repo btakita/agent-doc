@@ -708,6 +708,78 @@ Duplicate replay should stay live.
     }
 
     #[test]
+    fn replay_canonicalization_commit_uses_capture_scoped_head_proof() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:abc -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let captured = concat!(
+            "Recovered the retained shell.\n\n",
+            "### Re: viewport repair — gpt-5\n\n",
+            "Restored the owned pane.\n\n",
+            "- Expected focus is `%27`.\n",
+            "- Active focus is `%27`.\n",
+        );
+        let duplicated = baseline.replace(
+            "<!-- agent:boundary:abc -->",
+            &format!(
+                concat!(
+                    "{captured}\n",
+                    "Recovered the retained shell.\n\n",
+                    "- Expected focus is `%27`.\n",
+                    "- Active focus is `%27`.\n\n",
+                    "### Re: viewport repair — gpt-5\n\n",
+                    "Restored the owned pane.\n",
+                    "Recovered the retained shell.\n\n",
+                    "{captured}",
+                    "<!-- agent:boundary:latest -->",
+                ),
+                captured = captured,
+            ),
+        );
+        th::commit_file(root, "session.md", &duplicated, "add captured replay");
+        let doc = root.join("session.md");
+        agent_doc_capture_io::capture_response_with_current_content_and_intent(
+            &doc, captured, baseline, None,
+        )
+        .unwrap();
+        let repaired =
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+            &doc,
+            &duplicated,
+            "test_commit_capture_scoped_head_proof",
+        )
+        .unwrap()
+        .expect("capture-scoped evidence must prove the replay repair");
+        assert_ne!(
+            agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(
+                &duplicated
+            )
+            .as_deref(),
+            Some(repaired.as_str()),
+            "the fixture must require file-scoped capture evidence"
+        );
+        fs::write(&doc, &repaired).unwrap();
+
+        assert!(
+            commit_proven_response_replay_canonicalization(&doc)
+                .expect("capture-scoped replay repair should commit")
+        );
+        let session_head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&session_head.stdout), repaired);
+    }
+
+    #[test]
     fn reposition_boundary_to_end_basic() {
         let content = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc123 -->\nUser prompt.\n<!-- /agent:exchange -->\n";
         let result = agent_doc_template::reposition_boundary_to_end(content);

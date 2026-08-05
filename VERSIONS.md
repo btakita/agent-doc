@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.136
+
+- **Replay-repair settlement uses the same capture-scoped proof as
+  session-check.** Version 0.35.135 detected and wrote lossless replay
+  canonicalization with the document's durable response capture and baseline,
+  but its git boundary re-ran only the context-free normalizer against `HEAD`.
+  A fragmented captured-response replay could therefore reach exact editor and
+  disk convergence, then be refused before commit. The commit transaction now
+  re-proves `HEAD` through the same file-aware checkpoint path. A regression
+  fixture confirms that a repair requiring capture evidence commits exactly
+  while the context-free proof remains insufficient.
+
 ## 0.35.135
 
 - **Session-check now commits the exact replay repair it owns.** A recovery

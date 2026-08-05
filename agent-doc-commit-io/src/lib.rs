@@ -826,7 +826,11 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
     }
 
     let normalized_head =
-        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(&head);
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+            file,
+            &head,
+            "commit_response_replay_canonicalization_head",
+        )?;
     anyhow::ensure!(
         normalized_head.as_deref() == Some(authority.as_str()),
         "refusing response-replay repair commit for {}: current bytes are not the exact lossless canonicalization of HEAD",

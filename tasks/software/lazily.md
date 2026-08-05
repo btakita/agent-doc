@@ -1134,6 +1134,18 @@ Proof:
 - Escalation: none. Before production, choose the public error/completion policy and run a full BenchmarkDotNet job plus allocation profiling.
 
 Official references: https://github.com/Cysharp/R3, https://www.nuget.org/packages/R3, and https://raw.githubusercontent.com/Cysharp/R3/main/LICENSE
+
+### Re: Close the untagged R3 research queue item — gpt-5
+
+The R3 adapter research, two-direction prototype, benchmark, recommendation, and implementation backlog entry were completed and committed in the preceding response. This closeout intentionally creates no additional follow-up work.
+
+Proof:
+
+- Changed paths: none.
+- Commands: no additional commands; the prior committed cycle contains the build and BenchmarkDotNet evidence.
+- Verification: the preceding finalize committed successfully, and this cycle exists only because the legacy queue row has no ID that can be passed to `--done`.
+- Confidence: high.
+- Escalation: none.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 

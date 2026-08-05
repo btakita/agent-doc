@@ -1085,6 +1085,55 @@ Proof:
 - Escalation: complete npm browser/2FA authentication, inspect the existing publisher with `npm trust list`, and revoke/recreate only if the record is wrong. Validate OIDC with the next genuinely new version tag rather than an existing-version no-op run.
 
 Official references: https://docs.npmjs.com/trusted-publishers/ and https://docs.npmjs.com/cli/v11/commands/npm-trust/
+
+### Re: R3 adapter fit and lazily-cs benchmark — gpt-5
+
+Yes—Lazily can have a useful R3 adapter, but it should be an optional C# package named `Lazily.R3`, not part of the core `Lazily` assembly and not replicated across the other language bindings. R3 is specifically a .NET event-stream library; its natural home is a separate project inside the lazily-cs repository so compatibility tests and releases stay beside the C# binding without forcing an R3 dependency on every Lazily user. A separate repository is unnecessary until the adapter develops its own release cadence or maintainers.
+
+R3 and Lazily overlap at the application boundary but solve different problems:
+
+- R3 is a push/event pipeline: `Observable<T>`, operators, subjects, `ReactiveProperty<T>`, subscriptions, time/frame providers, and explicit completion/error messages.
+- Lazily is a demand-driven dependency graph: mutable `Source<T>`, memoized/dynamically tracked `Computed<T>`, equality-guarded propagation, batches, and `Effect` as the only push sink.
+- Therefore the bridge is a state projection, not an isomorphism. It must not promise to preserve every event: several Lazily writes inside one batch can become one effect emission, while R3 normally emits each event. Likewise, adapting R3 into a Lazily source retains current state, not stream history.
+
+Recommended API and semantics:
+
+1. Lazily to R3: `ToObservable<T>(ITrackable<T>, Context)` creates an `Effect` when subscribed, immediately emits the current value, emits subsequent changed values, maps compute failures to R3's recoverable `OnErrorResume`, and disposes the effect when the R3 subscription is disposed. Offer cold/per-subscriber and explicitly shared variants; do not hide whether one or many Lazily effects are installed.
+2. R3 to Lazily: bind an `Observable<T>` to an existing `Source<T>` or return a bridge object containing the source and subscription. Require an initial value because a general R3 observable has no current value. Represent R3 error/completion separately—callbacks or status sources—rather than silently discarding them or pretending a scalar Lazily source has terminal stream state.
+3. Threading: the plain `Context` overload is same-thread only. A distinct `ThreadSafeContext` overload must route ingress through `ThreadSafeContext.Set`; asynchronous publishers must never mutate the plain graph implicitly.
+4. Lifetime/reentrancy: subscription disposal must remove the Lazily effect and its edges; bridge disposal must unsubscribe R3. Test synchronous callback reentrancy explicitly because both systems publish synchronously.
+5. Keep R3 operators outside the adapter. Users should compose R3 before writing final state into Lazily, or convert Lazily state once and then compose R3. Reimplementing R3 operators in Lazily would duplicate a mature library and blur the boundary.
+
+#### Measured benchmark
+
+I built a disposable BenchmarkDotNet 0.15.8 harness against lazily-cs commit `9b340f0a1d23412be6e4eed55be67bcb9cd8270c` and R3 1.3.1. Every case performs the same stateful path—integer source, `+1` derived value, synchronous sink—with 1,000 distinct writes per invocation. BenchmarkDotNet normalized the results per write.
+
+Environment: AMD Ryzen 9 9950X3D, CachyOS Linux, .NET SDK 10.0.110/runtime 10.0.10, x64 RyuJIT, Concurrent Workstation GC, ShortRun with three warmups and three measured iterations.
+
+| Case | Mean/write | Allocation/write | Relative to R3 |
+|---|---:|---:|---:|
+| R3 `ReactiveProperty -> Select -> Subscribe` | 3.850 ns | 0 B | 1.00x |
+| Lazily `Source -> Computed -> Effect` | 124.010 ns | 488 B | 32.21x |
+| Lazily -> R3 prototype | 126.204 ns | 488 B | 32.78x |
+| R3 -> Lazily prototype | 125.985 ns | 488 B | 32.73x |
+
+The narrow hot-path result strongly favors R3: about 32x lower latency and no per-update allocation. The good adapter result is that Lazily-to-R3 added only 2.194 ns (1.8%) over native Lazily and R3-to-Lazily added 1.975 ns (1.6%); neither added allocation beyond Lazily's baseline. The 488 B/update is therefore a Lazily kernel cost in this path, not a bridge cost. Source inspection identifies per-propagation collection creation such as the invalidation frontier list and dependency snapshots as plausible contributors, but allocation-site attribution still needs a profiler before changing code.
+
+This benchmark does not establish that R3 is globally “better.” It deliberately forces every Lazily write through an effect, neutralizing Lazily's demand-driven advantage, and it does not measure dynamic dependency switching, guarded downstream suppression, multi-source batch coalescing, graph introspection, or the broader distributed/state families. The result says: use R3 for very high-rate in-process event pipelines and UI/event ecosystems; use Lazily for derived state and its richer dependency/state model; use the adapter at the boundary.
+
+R3's own documentation also explicitly scopes it to in-memory messaging and directs backpressure to `IAsyncEnumerable`/Channels and distributed processing elsewhere. Consequently, this adapter complements rather than replaces NATS, Temporal, Postgres, or Valkey integration.
+
+I recorded the implementation work as backlog item `#lzr3adapter`.
+
+Proof:
+
+- Changed paths: no tracked repository files; the prototype and BenchmarkDotNet artifacts live under `/tmp/lazily-r3-bench.GmanAL/`. The existing unrelated root and lazily-cs instruction edits remain untouched.
+- Commands: inspected lazily-cs public graph APIs and R3's official repository/NuGet metadata; built the temporary project with `dotnet build -c Release`; ran `dotnet run -c Release --no-build` to completion.
+- Verification: all four benchmark cases built and executed successfully; BenchmarkDotNet reported no benchmark failures. Repository status confirmed no task-owned tracked changes.
+- Confidence: high that the adapter is mechanically and semantically viable; high in the reported machine-local results; medium in generalizing a three-iteration ShortRun beyond this exact hot path.
+- Escalation: none. Before production, choose the public error/completion policy and run a full BenchmarkDotNet job plus allocation profiling.
+
+Official references: https://github.com/Cysharp/R3, https://www.nuget.org/packages/R3, and https://raw.githubusercontent.com/Cysharp/R3/main/LICENSE
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
@@ -1099,6 +1148,7 @@ Official references: https://docs.npmjs.com/trusted-publishers/ and https://docs
 - ~~📌 do [#kny1]~~
 - 📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
 - do [#lzdiscriminabilityburn]
+- do [#lzr3adapter]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -1108,6 +1158,7 @@ Official references: https://docs.npmjs.com/trusted-publishers/ and https://docs
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 - [ ] [#lzcoveragelayout] Restructure the coverage.json feature-table layout for a growing language axis per tasks/software/plan-lazily-coverage-table-layout.md. Measured: the feature column is 68% of row width at mean and 84% at max (feature text mean 86 / max 203 chars vs ~40 for all nine marks combined), so a 10th language adds ~4 chars to a row already 130-250 wide — the language axis is NOT the problem. Reject transposing (64 columns) and reject splitting by language: sync-coverage.mjs injects the same full matrix into all 12 targets, and per-language tables would destroy the cross-binding parity view that check-conformance-coverage.sh exists to protect. Phase 1 (land BEFORE the GDScript column, independent of the rest): add id + short label per row and move the 86-203 char normative prose to footnotes or into cell-model.md/protocol.md, taking the table from ~250 to ~60 chars wide so the layout scales past 15 languages. Phase 2 with it: split the '— absent OR not applicable' mark, since GDScript's parked thread-safe family is a different fact from unwritten work. Phases 3-4 (follow-up): author a family field — 54 distinct prefixes across 64 rows means families CANNOT be inferred from the current text — then a family x language roll-up with a stated roll-up rule. Layout and mark-value changes stay separate commits; sync-coverage.mjs --check stays the gate.
 - [ ] [#lzdiscriminabilityburn] Burn down the 64 single-valued boolean claims currently recorded as `untested` in lazily-spec/audits/fixture-discriminability.json. Convert each entry only after mutating real library source in at least one binding and confirming a canonical fixture replay reddens; an independent unit test does not count. Strengthen corpus data where a mutant survives, keep a claim explicitly untested with a specific reason where no executable proof exists, and extend check-fixture-discriminability.mjs with an executable witness before changing status to mutation-killed.
+- [ ] [#lzr3adapter] Add an optional `Lazily.R3` NuGet project inside the lazily-cs repository, leaving the core `Lazily` assembly dependency-free. Implement Lazily-to-R3 state projection with one owned Effect per cold subscription plus an explicitly shared bridge, and R3-to-Lazily stream-to-state binding with separate same-thread Context and ThreadSafeContext ingress policies. Make error, completion, disposal, reentrancy, duplicate suppression, and Batch coalescing semantics explicit; do not claim lossless event-stream adaptation because a Lazily batch may collapse intermediate values. Test initial emission, distinct updates, dynamic dependencies, unsubscribe edge cleanup, recoverable R3 errors, terminal completion, cross-thread ingress, and reentrant writes. Add a permanent BenchmarkDotNet project covering native Lazily, native R3, and both bridge directions; profile the observed Lazily 488 B/update allocation before setting performance budgets. Target net10.0 initially because R3's wider target matrix does not widen lazily-cs automatically.
 <!-- /agent:backlog -->
 
 ## Review

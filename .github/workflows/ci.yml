@@ -36,6 +36,9 @@ jobs:
       - name: Check out lazily-rs path dependency
         run: git clone --depth 1 https://github.com/btakita/lazily-rs ../lazily-rs
 
+      - name: Check out lazily-spec schema dependency
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec ../lazily-spec
+
       - name: Check out lazily-kt composite dependency
         run: git clone --depth 1 https://github.com/lazily-hub/lazily-kt ../lazily-kt
 

@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.138
+
+- **Editor authority is now an exact-key reactive projection, not a
+  request/acknowledgment handshake.** Focusing a document materializes one
+  stable dependency source whose initial value is `Unavailable`; the editor's
+  first and subsequent authority publications update that source directly to
+  `Available(authority)`. The focused-document computation therefore acquires
+  its dependency before any publication exists and reruns only when that exact
+  document changes. The compatibility membership epoch and its imperative bump
+  are removed. The Agent Doc workspace is unified on lazily `0.56.0`, whose
+  sync, thread-safe, and async dependency maps share this contract and preserve
+  source identity across unpublish/republish cycles.
+
 ## 0.35.137
 
 - **JetBrains editor surfaces retire superseded controller roots.** A mixed-root

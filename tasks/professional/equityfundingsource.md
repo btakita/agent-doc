@@ -82,11 +82,25 @@ Done. The borderless Google Reviews layout from commit `cbeecd8d` is deployed to
 - Postflight: production reports no pending D1 migrations; `main` is clean and synchronized with `origin/main`.
 
 Confidence: high. Escalation: none.
+
+### Re: Direct Google reviews CTA — gpt-5
+
+> **Queue prompt:** Can we add a key phrase or sentence with a link to the direct Google reviews in the home page?
+
+Done. The homepage Google Reviews card now uses the descriptive linked sentence “Read why clients rate us 5 stars on Google,” pointing to the verified Equity Funding Source Google Business Profile in a new tab.
+
+- Changed `lib/ui--server--efs/home/index.ts`, `tests/home-copy.test.ts`, and `prds/equity-funding-source-lending-portal-prd.md`.
+- Verification: the focused homepage test passed; `make check` passed with 2,295 tests, 0 failures, and successful site and Worker builds. The Google Business Profile target returned HTTP 200.
+- Commit/push: `83d57451 feat(home): strengthen Google reviews CTA` is on `origin/main`; the EFS subrepo is clean and synchronized.
+- CI: this repository has no GitHub Actions workflow named `CI`.
+- Deployment: not requested in this cycle.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~deploy to production~~ — auto-struck: answered this cycle (#ftstrike)
+- Can we add a key phrase or sentence with a link to the direct Google reviews in the home page? 
 <!-- /agent:queue -->
 
 ## Backlog

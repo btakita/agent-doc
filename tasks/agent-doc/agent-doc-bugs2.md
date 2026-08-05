@@ -40,6 +40,23 @@ completed
 Compacted content:
 - Archived 30 response topic(s): #pcc2 and the haiven-dev closeout wedge; #pcc3; do [#pcc4]; 27 more
 - Prior summary/context: prior compacted content: Archived 15 response topic(s): #realtimesalient; tmux auto-sync latency; haiven Compact Exch...
+
+### Re: Agent Doc recovery and root-cause fixes — gpt-5.6
+
+Agent Doc is recovered without restarting or replacing either Codex conversation.
+
+- The active tmux window is `@10`, 240×52, with two full-height panes: the root Agent Doc pane is 120×51 on the left and `haiven-dev.md` is 119×51 on the right. The one-line panes are retired panes in the inactive `stash` window `@13`; they are no longer projected into the active view. Fleet diagnostics report no competing supervisor, duplicate controller, or orphaned pane binding.
+- Editor focus and layout are retained Lazily state. JetBrains publishes a latest-wins focus-only surface to the focused document's controller; it no longer sends a competing imperative focus command or creates a reverse-focus lease without an exact selection receipt. Application activation republishes the settled surface, so returning from another i3 workspace does not require **Sync Tmux Pane**.
+- `crdt_delivery_ack_pending` / `editor_projection_pending` settlement is now a retained reactive receipt, not an imperative retry/ack loop. The controller clears an intent only when intent identity and target match and the receipt hash equals both editor authority and disk.
+- Queue continuation now observes retained delivery settlement rather than requiring whole-document equality with Git `HEAD`. This removes the recursive-owner refusal and allows the next queue head to run; completed free-text heads are consumed/struck through the controller projection.
+- The JetBrains visual highlighter now fences refresh scheduling with its lifecycle lock and ignores a rejected schedule after disposal, eliminating the reported `RejectedExecutionException`. Component bodies use the editor foreground with a neutral theme-derived background instead of an intrusive green row fill.
+- Slow editor navigation and workspace restoration were moved off the EDT and bounded across later projection turns; stale generations cannot reclaim focus or contract the current surface into `stash`.
+
+Live recovery proof: `haiven-dev.md` retained its existing owner pane and Codex history, committed the S3 Standard-IA/Glacier response, consumed that queue head, then executed and committed the self-hosted Temporal response. Its queue is now empty, and the same owner pane remains healthy while doing later work.
+
+The fixes are released and installed as agent-doc `0.35.142`; JetBrains plugin `0.2.349` is active in the running IDE with one registration PID for both the root and Haiven documents. Root and Haiven controllers are stable on `0.35.142`, fresh against the installed inode, with no stale duplicate PIDs. Public commit: `1ff1a4734`; root gitlink commit: `04faeb8155`.
+
+Verification is fully green: local `make check` (8,651 Rust tests plus simulator, JetBrains, version-sync, Lean, and TLA), GitHub CI `31024772526`, Release `31024778362`, and PyPI `31024778919` all succeeded. The unrelated staged deletion of `tasks/professional/octavian-gabriel-stan.md` was preserved.
 <!-- agent:boundary:2463ea63:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue

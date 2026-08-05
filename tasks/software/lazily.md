@@ -268,7 +268,25 @@ Verification is green: 269 pytest tests, Lean build, coverage sync and coverage-
 ### Re: Response
 
 [#lzassertionblockschema] is already implemented, verified, pushed, and reported in the immediately preceding committed cycle (`4ab05d6`, root pin `30e082eec3`, CI green). The retained editor-delivery recovery committed the response but failed to project the accompanying queue completion, leaving the same head live. This cycle applies only the missing `done` mutation; there is no duplicate implementation work or new follow-up.
-<!-- agent:boundary:8b51abd5:lazily -->
+
+### Re: Response
+
+You were right: waiting on an editor ACK was the wrong model. It existed because the old keyed lookup had no node for a missing document key, so an observer could not record an edge before the first editor publication. The compatibility membership epoch then acted as an imperative wake-up signal, which made a reactive projection behave like request + ACK coordination.
+
+That workaround is removed. An exact-key observation now materializes one stable source immediately in `Unavailable`; the editor publishes directly into the same source as `Available(authority)`. The focused-document computation therefore owns its dependency before any publication exists, ignores unrelated document publications, and reruns on direct `Unavailable -> Available(value)` / unpublish / republish transitions without a membership epoch.
+
+Implemented and shipped:
+
+- Added the canonical exact-key dependency-availability contract and fixture to lazily-spec.
+- Added sync, thread-safe, and async dependency maps plus direct fixture replay and stable/concurrent identity checks across Rust, Python, JavaScript, Go, C++, Dart, Kotlin, Zig, and C#.
+- Migrated Agent Doc editor authority projection to `ThreadSafeDependencyMap<DocumentKey, DocumentAuthority>` and removed the compatibility membership bump.
+- Unified the full Agent Doc workspace on lazily 0.56.0, avoiding duplicate incompatible Lazily graph types.
+- Published and tagged lazily 0.56.0 on crates.io.
+- Released, installed, pushed, and tagged Agent Doc 0.35.138; its Release and PyPI workflows were observed in progress.
+- Pushed all binding/spec/formal commits and the superproject pins while preserving unrelated dirty and staged operator state.
+
+Verification is green: every affected binding passed its full local `make check`; lazily-rs passed its complete benchmark, conformance-ledger, and formal gates; Agent Doc passed the focused pre-publication regression, fast install, full `make check`, `make tmux-ci`, and the one-time release-profile `make install-full`. The installed binary reports `agent-doc 0.35.138`.
+<!-- agent:boundary:53237fd8:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue

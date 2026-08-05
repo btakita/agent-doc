@@ -1,5 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 019fabf0-9af0-7f73-a25c-6a43fd6470c5
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -516,6 +517,11 @@ Release/deployment:
 
 No state migration is required. Restarting an IDE host will activate its matching repackaged plugin generation, but the controller-side retry fix is installed and active now. No additional backlog follow-up is needed because the reproduced failure class is covered at the state transition, timing, specification, full-suite, release, and live-controller activation boundaries.
 
+No new document prompt or drainable queue work is present. The document remains complete and its queue is explicitly stopped.
+
+Planning reported that `#jetbrainsrunroute-tgp5`, `#jetbrainsrunroute-1ypa`, and `#jetbrainsrunroute-8x66` may already be semantically resolved by completed item `#jetbrainsrunroute-77k5`. I left those backlog entries unchanged because this cycle did not request backlog cleanup.
+
+Changed paths: this session document only through binary-owned closeout. Commands: connected admit, read, plan, and finalize. Verification: the current queue is empty/stopped and the plan exposed no execution handoff or repo action. Confidence: high. Escalation: none.
 ### Re: session state — gpt-5.6
 
 No new document prompt or drainable queue work is present. The document remains complete and its queue is explicitly stopped.
@@ -523,7 +529,43 @@ No new document prompt or drainable queue work is present. The document remains 
 Planning reported that `#jetbrainsrunroute-tgp5`, `#jetbrainsrunroute-1ypa`, and `#jetbrainsrunroute-8x66` may already be semantically resolved by completed item `#jetbrainsrunroute-77k5`. I left those backlog entries unchanged because this cycle did not request backlog cleanup.
 
 Changed paths: this session document only through binary-owned closeout. Commands: connected admit, read, plan, and finalize. Verification: the current queue is empty/stopped and the plan exposed no execution handoff or repo action. Confidence: high. Escalation: none.
-<!-- agent:boundary:52f9ac8b:agent-doc-bugs2 -->
+
+### Re: Run Agent Doc projection retry, missing pane, and viewport — gpt-5.6-sol
+
+Recovered the live sessions and fixed the contributing Agent Doc defects.
+
+The Octavian candidate actor is healthy in pane `%27`. Its invalid cross-repository actor alias was generation-fenced and safely reaped without disturbing the valid `%22` owner. The candidate review completed and committed as Haiven subrepo commit `450d5a6` and parent commit `cf405d153d`. Recommendation: proceed with a targeted technical interview, but the submitted evidence is below the senior-backend correctness bar; backend work is the strongest signal, FPE experience is plausible, and SDK depth remains unproven.
+
+The tmux viewport is repaired now. A live regression after installing the fix reproduced the bad state exactly: `%27` was physically back in the stash at `240x1`, `%20` was active, and the controller still had the prior desired layout. Replaying the identical exact editor-layout request no longer reused stale `Converged`. It observed the physical mismatch, restored the owned `%25`/`%27` panes in the editor window, returned unrelated `%20` to stash, and focused `%27` with `reason=observed_convergence`. I then left `%27` selected, cleared, and zoomed. Tmux reports `240x51`; the pane PTY independently reports `51 240`.
+
+Four controller/layout causes were fixed:
+
+- Foreground editor routing can no longer wait on an impossible projection. Desired focus is normalized against the requested surface, exact-layout waits observe the requested pane assignments, and a unique empty placeholder is a valid focus target during provisioning.
+- A controller that did not have its own configured tmux session now derives the shared session from generation-fenced effect/actor assignments. This prevents the observation side from checking an empty or unrelated session while the effect side is changing the real one.
+- Exact-visible reconciliation now consumes the controller-proven actor bindings instead of positionally relabeling whatever panes happen to be present. That is what prevents the live `%20` Haiven actor from being mistaken for the Octavian actor.
+- Repeated identical foreground syncs now create a fresh physical observation edge before awaiting convergence. The projection includes `expected_focus_pane` and the actually active pane, with typed `focus_pane_not_found`, `missing_active_pane`, and `focus_pane_mismatch` states. A cached structural success therefore cannot hide later focus, stash, or viewport drift.
+
+The final live projection proves the new invariant directly: expected panes `[%25, %27]`, actual panes `[%25, %27]`, expected focus `%27`, active pane `%27`.
+
+The JetBrains failures in the supplied stack/log were separate but contributing lifecycle defects and are fixed in the same release:
+
+- `PatchWatcher` no longer calls the native projection API from IntelliJ's event-dispatch thread. The EDT closure captures only immutable post-apply content; the socket/file worker publishes that content before recording the apply receipt or ACK.
+- `VisualHighlighterManager` fences every scheduled callback with an idempotent disposed state and safely rejects work after plugin unload, eliminating the repeated `RejectedExecutionException` from a terminated executor.
+- Rename/move reconciliation now selects the narrowest controller root that owns both the old and new paths. A nested controller can no longer retain an impossible cross-subproject transition for hundreds of retries.
+
+The strict template rejection did not mutate either document: the first response omitted the required exchange wrapper, so the guard correctly failed closed. The successful closeout used the explicit `<!-- patch:exchange -->` and `<!-- /patch:exchange -->` contract rather than weakening that integrity check.
+
+Public agent-doc commits are:
+
+- `a1adb43cb` — converge foreground editor routes
+- `ccadba902` — observe unconfigured shared tmux sessions
+- `ebc6dbd41` — bind exact editor layouts to owned panes
+- `f2dd5ab5b` — reobserve foreground pane viewports and fix the JetBrains lifecycle paths
+
+Verification passed: focused controller regressions, the complete serial controller suite, focused JetBrains tests, the complete JetBrains test suite, `cargo fmt`, `git diff --check`, public-repository private-name hygiene, and full `make check` (`tart-959411f907`). The installed binary reports `agent-doc 0.35.133`; the matching JetBrains 0.2.343 package is installed in all four detected IDE installations. The native/controller repair is active now. A normal JetBrains restart is still required to load the new Kotlin plugin package and activate the EDT/disposal/rename changes in the running IDE process.
+
+No force-disk path, response recapture, process kill, positional pane relabel, or manual session-document patch was used.
+<!-- agent:boundary:8c4155ac:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 

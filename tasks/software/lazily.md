@@ -438,24 +438,51 @@ Implemented `#lzingressadapters` end to end:
 - agent-doc relay/controller/SimWorld/flow-closeout behavior updated so response intent precedes the reactive projection receipt.
 
 Verification is green across every component. Agent-doc passed 8,638/8,638 tests, all TLA+ models, release-projection checks, the tmux integration suite, and the public-name scan. The root wrapper also reached that full green agent-doc result; its later unrelated corky OAuth tests exposed a parallel fixed-port race and pass when serialized. All component commits are pushed and the superproject pins them at `e69ba5980c7ac66d04b322c0219b82142ebbc726`.
+
+
+
+
+
+
+### Re: Response
+
+The repository side of npm trusted publishing is set up and hardened for `@lazily-hub/lazily-js`.
+
+Updated `.github/workflows/release.yml` to:
+
+- grant only `contents: read` plus the required `id-token: write` OIDC permission;
+- use current `actions/checkout@v6`, `actions/setup-node@v6`, Node 24, and an explicit no-cache release install;
+- use strict `npm ci` with no lockfile-bypassing fallback;
+- publish without `NPM_TOKEN`; npm exchanges the GitHub OIDC identity for a short-lived token and generates provenance automatically;
+- check for an existing version before publishing, so reruns are idempotent without masking a real authentication or publish failure;
+- document the exact one-time trust-registration command.
+
+The full `make check` passes, GitHub accepts the updated workflow, and CI is green for commit `2edccf0e4bfc9655d6b87fc0ed80691e3533c190`. The superproject pins it at `fb9cc186f5673bc589c49565b9b853e4204f5be6`.
+
+The live npm trust record still needs the maintainer’s npm login and 2FA. I started npm’s browser login, but its callback was not completed, so I did not claim the external registration succeeded. After `npm login`, run:
+
+```sh
+npm trust github @lazily-hub/lazily-js \
+  --repo lazily-hub/lazily-js \
+  --file release.yml \
+  --allow-publish
+```
+
+Then verify with `npm trust list @lazily-hub/lazily-js`. This matches npm’s current [trusted-publishing workflow requirements](https://docs.npmjs.com/trusted-publishers/) and [`npm trust github` CLI](https://docs.npmjs.com/cli/v11/commands/npm-trust/).
 <!-- agent:boundary:b082c10a:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzwireencodingrunner]~~
-- ~~do [#lzoutboxjournalop]~~
-- ~~do [#lzdecorativewirefields]~~
-- ~~do [#lzprotobufinterop]~~
-- ~~📌 do [#lzassertionblockschema]~~
-- ~~📌 do [#lzdependencyavailability]~~
-- ~~📌 do [#lzcpptranscribedrunners]~~
-- ~~📌 do [#lzreactdtsgate]~~
-- ~~📌 do [#lzegress]~~
-- ~~📌 do [#lzqueuefamilyflavors]~~
-- ~~📌 do [#lzwqfixtureconfig]~~
-- ~~📌 do [#lzingressadapters]~~
+- Please read /home/brian/work/btakita/agent-loop/src/haiven-dev/src/fpe-scale-spike/docs/fpe-service-topology.md. Create a plan for a Temporal-like features to support src/fpe-scale-spike/docs/fpe-service-topology.md & NATS integration. Note that I am under agreement with Haiven, so will need to clear IP first. But please create the plan anyways.
+- do [#lazilystatetable]
+- do [#reliablesyncrow]
+- do [#rootlevelconformance]
+- do [#lzfixturediscrim]
+- do [#lzrung2gaps]
+- do [#lzstructfieldreads]
+- do [#lzassertwithseam]
 - 📌 do [#kny1]
 - 📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
 <!-- /agent:queue -->

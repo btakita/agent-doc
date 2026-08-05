@@ -15,7 +15,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-complete
+completed
 <!-- /agent:status -->
 
 ## Exchange
@@ -829,13 +829,25 @@ The smaller Dart item was already repaired in the current branch: `distributed/c
 The umbrella `make check` was attempted twice. Its task-owned subrepo checks are green, but unrelated Agent Doc integration tests failed while `/tmp` was at 100%: first a temp-file write, then an explicit `ENOSPC` in `native_reload_handoff`. The first exact failing test passed immediately in isolation. I did not delete unrelated `/tmp` data. The new umbrella Agent Doc workflow is in progress.
 
 All repository commits were pushed and pinned by umbrella commit `ab9c9ff773`. The unrelated staged deletion `tasks/professional/octavian-gabriel-stan.md` remains staged in the root `agent-loop` repository. Local instruction/runbook edits remain confined to the individual Lazily subrepos and were excluded from every task commit.
+
+### Re: `#rootlevelconformance` closeout proof
+
+The implementation is complete and already published by umbrella commit `ab9c9ff773`.
+
+- Changed paths: `lazily-spec/scripts/check-coverage-claims.mjs` and `coverage.json`; C++ IPC replay/CMake/coverage-guard files; Kotlin's coverage guard; synchronized generated coverage READMEs across the binding and formal repositories.
+- Commands: `make check` passed in `lazily-spec`, all nine language bindings, and `lazily-formal`; targeted guard mutations proved missing C++ and Kotlin root fixtures fail; changing C++ shared-memory coverage back to `✅` fails on `arena_blob.json`.
+- Verification: root `arena_blob.json`, `snapshot_*.json`, and `delta_*.json` now map to the explicit `ipc` area; C++ replays the seven Snapshot/Delta fixtures; Kotlin's existing root replays receive IPC credit; unknown future root fixtures receive none; coverage claims report 84 shipped marks checked with 15 honest partial marks.
+- Confidence: high. The area and per-fixture mutations demonstrate that the new accounting is load-bearing rather than cosmetic.
+- Escalation: none for this item. The umbrella-only Agent Doc failures were unrelated `ENOSPC` failures while `/tmp` was full; task-owned subrepo checks passed, and unrelated `/tmp` data was left untouched.
+
+The staged deletion `tasks/professional/octavian-gabriel-stan.md` remains only in the root `agent-loop` repo. User-owned instruction/runbook edits remain only in individual Lazily subrepos and were excluded from the task commits.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#rootlevelconformance]
+- ~~do [#rootlevelconformance]~~
 - do [#lzfixturediscrim]
 - do [#lzrung2gaps]
 - do [#lzstructfieldreads]
@@ -847,7 +859,6 @@ All repository commits were pushed and pinned by umbrella commit `ab9c9ff773`. T
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rootlevelconformance] Root-level conformance fixtures cannot be audited by the coverage-claim guard. arena_blob.json, snapshot_*.json and delta_*.json carry no area, and the two area-scoped guards (lazily-cpp, lazily-kt) restrict their audit to REQUIRED_AREAS, so a root-level fixture is neither replayed nor listed in KNOWN_UNCOVERED there - the ledger simply cannot express it. lazily-cpp says so in a comment: root-level (8) snapshot/delta/arena_blob IPC wire fixtures, test_ipc.cpp hand-builds the equivalent structures. That leaves the Shared-memory blob path row and the Snapshot/Delta half of the IPC wire row unbacked, and I cited only area-qualified fixtures rather than let the guard return a confident wrong answer. Work: give the root corpus a real area in both area-scoped guards (or move those fixtures into an ipc/ area upstream), then cite the two rows. Second, smaller item in the same ledger family: lazily-dart lists distributed/crdt_sync_frames.json in KNOWN_UNCOVERED with no reason of its own - it sits under the comment belonging to the msgpack entry above it - in a ledger that requires a stated reason per entry.
 - [ ] [#lzfixturediscrim] A fixture can be opened, have every key consumed, have every key asserted - and still be unfalsifiable, because its data cannot distinguish the claim it makes. Found in lazily-cs while closing #lzconsumednotasserted: reversing SignalingRoom's roster sort still PASSED, because the canonical anti_spoof_session.json transcript never produces a roster with more than one entry, so no ordering is observable and every emitted frame stays byte-identical. This is the fourth rung - fixture-opened, key-consumed, key-asserted, claim-discriminating - and no runner-side guard can reach it, because it is a property of the corpus data rather than of runner code. Only a mutation against the LIBRARY exposes it. Audit lazily-spec claim by claim: for each assertion key, mutate the behaviour it names and confirm at least one canonical fixture reddens; where none does, either strengthen the fixture data or record the claim as untested with a reason. lazily-cs worked its instance around locally by driving a three-peer room plus a vacuity guard that fails if the roster drops below two, but the corpus fix belongs upstream in lazily-spec so all nine bindings inherit it.
 - [ ] [#lzrung2gaps] Conformance runners still outside the unconsumed-key guard entirely, all surfaced while closing #lzconsumednotasserted. lazily-cpp: nine fixture-replaying runners (command, distributed, lossless_tree, receipts, seqcrdt, statechart, stdlib, topic, reactive_graph) carry hand-rolled unknown-key guards instead of the shared AssertionKeys tracker, so they get neither rung 2 nor rung 3, and test_command_conformance.cpp has no unknown-key guard over its expect block at all. lazily-cs: StateChartConformanceTests has no FixtureAssertions tracker because its steps mix op inputs with assertions. Same class in lazily-kt, where bringing MaterializationConformanceTest under the tracker exposed two keys no runner had ever read - default_mode, and observe in deferral_not_deallocation.json. Convert each to the shared tracker so both rungs apply, and mutation-check every conversion rather than trusting the green that follows it.
 - [ ] [#lzstructfieldreads] Typed bindings that decode a fixture block into a struct have a blind spot no map-based key tracker can see: an unused local will not compile, but an unused FIELD is silent, so the key counts as consumed at decode time and is then discarded. Found in lazily-go while closing #lzconsumednotasserted, where open_handles and schema_version were both decoded and never read - one of them stayed hidden precisely because its field name collided with a real method. The fix there is TestConformanceStructFieldsAreRead, a go/ast scan of the package's own test sources with a both-directions excuse allowlist. lazily-go is covered. Check whether lazily-rs (serde structs), lazily-cs, lazily-cpp and lazily-zig decode any fixture block into a typed struct rather than reading it through their key tracker, and port the equivalent scan wherever they do.

@@ -201,6 +201,17 @@ Correct. The boundary is command identity versus optional cross-command policy:
 This is already shipped in lazily-rs commit `57f9eef7663a5a9c75afca7c6817b411478b5766` and pinned by superproject commit `08fa3aaca526e1c7326851499b3a682bdc380a70`; this turn required no repository changes. I re-ran the two focused executable witnesses: `command::tests::duplicate_submit_is_idempotent` and `decoded_wire_fields_drive_command_admission`; both passed. The latter covers fresh-ID record behavior for `none` and `same_command_id`, plus distinct-ID collapse for `same_idempotency_key`.
 
 The latest lazily-rs CI for the shipped commit is green (`30965052363`). Existing unrelated Protobuf work and other dirty files were preserved. No escalation or follow-up work is created.
+
+
+### Re: dedupe semantics — gpt-5
+
+Confirmed:
+
+- Repeated `command_id` is always an idempotent replay.
+- `none` and `same_command_id` never collapse distinct command IDs.
+- `same_idempotency_key` may collapse distinct commands sharing a non-empty key.
+
+No code changes were needed. Both focused tests passed, and the shipped Rust commit’s CI is green. The response was committed; next queue head is `#lzprotobufinterop`.
 <!-- agent:boundary:d4431abd:lazily -->
 <!-- /agent:exchange -->
 

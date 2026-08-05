@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.144
+
+- **Restart Agent now honors a newly persisted exact conversation binding.**
+  The `agent:<mode>` intent remains attached to the pending restart until the
+  old child exits. A same-harness continue restart validates current
+  frontmatter `resume:` and may replace the supervisor's stale in-memory
+  lineage; crash recovery and plain controller recycle remain pinned to the
+  already observed thread.
+
 ## 0.35.143
 
 - **Completed free-text work can now be acknowledged without resuming a paused

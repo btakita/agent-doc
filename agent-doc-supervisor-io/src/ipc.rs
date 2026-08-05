@@ -263,7 +263,7 @@ pub enum SupervisorInjectDeliveryOutcome {
 
 const RESTART_AGENT_MODE_PREFIX: &str = "agent:";
 
-fn decode_restart_intent(mode: String) -> (String, bool) {
+pub fn decode_restart_intent(mode: String) -> (String, bool) {
     match mode.strip_prefix(RESTART_AGENT_MODE_PREFIX) {
         Some(mode) => (mode.to_string(), true),
         None => (mode, false),
@@ -295,7 +295,16 @@ where
     }
     let waiting_input = state.actor_waiting_input();
     state.transition_actor_busy("supervisor", "ipc_restart_requested");
-    state.set_restart_mode(mode);
+    // Preserve the explicit Restart Agent intent through the child-exit
+    // boundary. The supervisor loop needs it after the current child is gone
+    // so it can re-resolve both `agent:` and the document's exact `resume:`
+    // binding. Normalizing this to plain `continue` here made that boundary
+    // indistinguishable from crash recovery.
+    state.set_restart_mode(if restart_agent {
+        format!("{RESTART_AGENT_MODE_PREFIX}{mode}")
+    } else {
+        mode
+    });
     state.set_restart_requested(true);
     // A controller-only recycle may preserve the live harness child across an
     // in-place re-exec. An explicit Restart Agent intent may not: it exists to
@@ -1001,7 +1010,7 @@ mod tests {
         assert!(state.restart_requested.load(Ordering::Relaxed));
         assert!(!state.restart_reexec.load(Ordering::Relaxed));
         assert!(state.child_killed.load(Ordering::Relaxed));
-        assert_eq!(*state.restart_mode.lock().unwrap(), "continue");
+        assert_eq!(*state.restart_mode.lock().unwrap(), "agent:continue");
     }
 
     #[test]

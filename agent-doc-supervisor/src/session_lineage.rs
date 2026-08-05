@@ -24,6 +24,23 @@ impl HarnessSessionLineage {
         self.active_id.as_deref()
     }
 
+    /// Replace the active lineage from an explicit operator Restart Agent.
+    ///
+    /// Ordinary child crashes and controller recycles must never call this:
+    /// their lagging document projection cannot supersede a conversation that
+    /// the running supervisor already observed. Restart Agent is different —
+    /// it is the operator boundary that deliberately re-resolves current
+    /// frontmatter, including a newly persisted exact `resume:` binding.
+    pub fn replace_from_operator_restart(&mut self, id: String) -> bool {
+        let id = id.trim();
+        if id.is_empty() || self.active_id.as_deref() == Some(id) {
+            return false;
+        }
+        self.active_id = Some(id.to_string());
+        self.initial_observed_id = None;
+        true
+    }
+
     /// Observe the durable hook/controller projection at a lifecycle edge.
     ///
     /// Returns true only when a fresh child has published a new exact id.
@@ -79,5 +96,16 @@ mod tests {
         assert!(lineage.clear_proven_missing("orchard-thread"));
         assert!(!lineage.observe_projected_id(Some("orchard-thread")));
         assert!(lineage.observe_projected_id(Some("replacement-thread")));
+    }
+
+    #[test]
+    fn explicit_operator_restart_can_replace_stable_lineage() {
+        let mut lineage =
+            HarnessSessionLineage::new(Some("stale-thread".into()), Some("older-thread".into()));
+        assert!(lineage.replace_from_operator_restart("restored-thread".into()));
+        assert_eq!(lineage.active_id(), Some("restored-thread"));
+        assert!(!lineage.replace_from_operator_restart("restored-thread".into()));
+        assert!(!lineage.replace_from_operator_restart("   ".into()));
+        assert_eq!(lineage.active_id(), Some("restored-thread"));
     }
 }

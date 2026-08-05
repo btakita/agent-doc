@@ -115,8 +115,12 @@ prefix verbatim:
   request to a recycle; a controller that rejects it fails the operator's action
   outright with `unsupported supervisor replacement mode `agent:continue``.
 - `agent_doc_supervisor_io::ipc::decode_restart_intent` decodes it, and a
-  Restart Agent never takes the stale-binary in-place `execve` path — that path
-  preserves the very child the operator asked to replace.
+Restart Agent never takes the stale-binary in-place `execve` path — that path
+preserves the very child the operator asked to replace. The decoded intent
+remains attached to the pending restart until the old child exits. On a
+same-harness continue restart, it authorizes the new iteration to validate and
+adopt the current document's exact `resume:` binding. Crash restarts and plain
+controller recycles never refresh lineage from frontmatter.
 - On the cold-start path a Restart Agent authorizes `RestartLiveHarness` even in
   continue mode. The foreign-pane guard is unchanged: only a pane running *this
   document's* harness is replaceable.

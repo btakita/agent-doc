@@ -868,6 +868,10 @@ pub fn run_with_reap_policy_and_resume(
     // (continue) restart never re-adopts a now-dead fd.
     let mut first_run = true;
     let mut auto_trigger_next_launch = false;
+    // Set only by an explicit `Restart Agent` IPC request. A normal crash or
+    // controller recycle must keep the supervisor's already-observed lineage
+    // authoritative even if editor/frontmatter projection lags.
+    let mut refresh_resume_from_frontmatter = false;
 
     // `#midturn-recycle-resume` Phase B — actively resume a turn that was genuinely
     // INTERRUPTED across the recycle. Phase A makes a mid-cycle `execve` impossible
@@ -1081,6 +1085,69 @@ pub fn run_with_reap_policy_and_resume(
                         // the operator's `agent:` edit is exactly what is in
                         // question.
                         Ok(restart_spec) => {
+                            if refresh_resume_from_frontmatter
+                                && !first_run
+                                && let Some(id) = restart_fm
+                                    .resume
+                                    .as_deref()
+                                    .map(str::trim)
+                                    .filter(|id| !id.is_empty())
+                            {
+                                let requested =
+                                    Some(agent_doc_harness::ResumeRequest::Id(id.to_string()));
+                                let claimed = resolve_resume_claim_for_start(&canonical, requested);
+                                let validated = claimed.and_then(|request| {
+                                    let agent_doc_harness::ResumeRequest::Id(id) = request else {
+                                        return None;
+                                    };
+                                    let transcript_missing =
+                                        std::env::var_os("HOME").is_some_and(|home| {
+                                            let cwd = project_root.to_string_lossy().to_string();
+                                            let dir = agent_doc_harness::session_transcript_dir(
+                                                &harness.session_transcript_layout,
+                                                &PathBuf::from(home),
+                                                &cwd,
+                                            );
+                                            agent_doc_harness::resume_id_transcript_exists(
+                                                dir.as_deref(),
+                                                &id,
+                                            ) == Some(false)
+                                        });
+                                    (!transcript_missing).then_some(id)
+                                });
+                                match validated {
+                                    Some(id) => {
+                                        let changed = session_lineage
+                                            .replace_from_operator_restart(id.clone());
+                                        log_event(
+                                            &mut session_log,
+                                            &format!(
+                                                "agent_restart_resume_refresh id={id} changed={changed} source=current_frontmatter"
+                                            ),
+                                        );
+                                        agent_doc_ops_log_io::log_op(
+                                            file,
+                                            &format!(
+                                                "agent_restart_resume_refresh file={} id={id} changed={changed} source=current_frontmatter",
+                                                file.display()
+                                            ),
+                                        );
+                                    }
+                                    None => {
+                                        log_event(
+                                            &mut session_log,
+                                            "agent_restart_resume_refresh_rejected reason=claim_conflict_or_transcript_missing note=keeping_running_lineage",
+                                        );
+                                        agent_doc_ops_log_io::log_op(
+                                            file,
+                                            &format!(
+                                                "agent_restart_resume_refresh_rejected file={} reason=claim_conflict_or_transcript_missing note=keeping_running_lineage",
+                                                file.display()
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
                             agent_doc_ops_log_io::log_op(
                                 file,
                                 &format!(
@@ -1131,6 +1198,7 @@ pub fn run_with_reap_policy_and_resume(
                     );
                 }
             }
+            refresh_resume_from_frontmatter = false;
         }
         // Build args for this iteration from the document's exact conversation
         // lineage. The hook/controller projection is observed once at this child
@@ -1654,8 +1722,11 @@ pub fn run_with_reap_policy_and_resume(
                 }
             }
             PostChildExitAction::AutoRestart => {
-                let mode = shared.restart_mode.lock().clone();
+                let encoded_mode = shared.restart_mode.lock().clone();
+                let (mode, restart_agent) =
+                    agent_doc_supervisor_io::ipc::decode_restart_intent(encoded_mode);
                 first_run = mode == "fresh";
+                refresh_resume_from_frontmatter = restart_agent && !first_run;
                 if first_run {
                     session_lineage.begin_fresh(
                         latest_codex_session_projection(&canonical, &harness)

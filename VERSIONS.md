@@ -15,8 +15,17 @@ baseline node, retains one exact captured cell only when every competing
 same-topic line is proven to come from those two sources, and fails closed on
 any novel/operator line or ambiguous baseline provenance.
 
+- **A repair that races a late editor registration now settles or remains
+  resumable.** If a document is detached at the write boundary and JetBrains
+  registers immediately after the repair reaches disk, Agent Doc gives the
+  exact pre-repair editor authority a bounded convergence window. A prompt
+  acknowledgment completes normally; a slower acknowledgment retains the
+  original compare-and-swap lineage for `session-check` instead of reporting
+  the already-applied repair as a terminal failure. A different/newer editor
+  cut still fails closed.
+
 - **Automatic editor layout projection now preserves live operator-owned
-  panes.** The foreground route convergence introduced in `0.35.133` still
+panes.** The foreground route convergence introduced in `0.35.133` still
   reshapes exact-visible layouts when the operator explicitly runs Agent Doc,
   but a background JetBrains surface refresh first observes the physical tmux
   window and settles as terminal `operator_owned` when it contains another live

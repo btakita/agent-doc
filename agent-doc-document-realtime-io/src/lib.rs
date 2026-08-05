@@ -160,6 +160,10 @@ const CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS: u64 = 1_800;
 const CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS: u64 = 8_000;
 const _: () =
     assert!(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS > CRDT_PROJECTION_FALLBACK_BACKOFF_MAX_MS);
+#[cfg(test)]
+const ATOMIC_REPAIR_LATE_EDITOR_SETTLE_TIMEOUT_MS: u64 = 100;
+#[cfg(not(test))]
+const ATOMIC_REPAIR_LATE_EDITOR_SETTLE_TIMEOUT_MS: u64 = 10_000;
 #[derive(Debug)]
 pub struct AwaitEditorReplicaNoDiskWrite(String);
 
@@ -2107,12 +2111,86 @@ pub fn atomic_repair_write_if_current_through_authority(
     atomic_write_if_current_through_authority(path, content, expected_current, source)?;
     let canonical = try_resolve_current_document_content(path, source)?;
     let disk = resolve_disk_current_document_content(path, source)?;
-    settle_atomic_repair_projection(path, content, source, canonical, disk)
+    let (canonical, disk) = await_late_editor_repair_projection(
+        path,
+        content,
+        expected_current,
+        source,
+        canonical,
+        disk,
+    )?;
+    settle_atomic_repair_projection(path, content, expected_current, source, canonical, disk)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AtomicRepairProjectionState {
+    Converged,
+    LateEditorAttachment,
+    Diverged,
+}
+
+fn classify_atomic_repair_projection(
+    content: &str,
+    expected_current: &str,
+    canonical: &str,
+    disk: &str,
+) -> AtomicRepairProjectionState {
+    if canonical == content && disk == content {
+        AtomicRepairProjectionState::Converged
+    } else if canonical == expected_current && disk == content {
+        AtomicRepairProjectionState::LateEditorAttachment
+    } else {
+        AtomicRepairProjectionState::Diverged
+    }
+}
+
+fn await_late_editor_repair_projection(
+    path: &Path,
+    content: &str,
+    expected_current: &str,
+    source: &str,
+    mut canonical: String,
+    mut disk: String,
+) -> Result<(String, String)> {
+    if classify_atomic_repair_projection(content, expected_current, &canonical, &disk)
+        != AtomicRepairProjectionState::LateEditorAttachment
+    {
+        return Ok((canonical, disk));
+    }
+
+    let started = std::time::Instant::now();
+    let timeout = std::time::Duration::from_millis(ATOMIC_REPAIR_LATE_EDITOR_SETTLE_TIMEOUT_MS);
+    let mut backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+    while started.elapsed() < timeout {
+        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+        canonical = try_resolve_current_document_content(path, source)?;
+        disk = resolve_disk_current_document_content(path, source)?;
+        match classify_atomic_repair_projection(content, expected_current, &canonical, &disk) {
+            AtomicRepairProjectionState::Converged => {
+                agent_doc_ops_log_io::log_op(
+                    path,
+                    &format!(
+                        "repair_projection_late_editor_settled file={} source={} target_hash={} wait_ms={} recovery=observed_convergence",
+                        path.display(),
+                        source,
+                        agent_doc_hash::content_hash(content),
+                        started.elapsed().as_millis(),
+                    ),
+                );
+                return Ok((canonical, disk));
+            }
+            AtomicRepairProjectionState::LateEditorAttachment => {}
+            AtomicRepairProjectionState::Diverged => return Ok((canonical, disk)),
+        }
+        backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, false);
+    }
+    Ok((canonical, disk))
 }
 
 fn settle_atomic_repair_projection(
     path: &Path,
     content: &str,
+    expected_current: &str,
     source: &str,
     canonical: String,
     disk: String,
@@ -2147,6 +2225,34 @@ fn settle_atomic_repair_projection(
             target_hash,
             agent_doc_hash::content_hash(&canonical),
             agent_doc_hash::content_hash(&disk),
+        )));
+    }
+
+    if classify_atomic_repair_projection(content, expected_current, &canonical, &disk)
+        == AtomicRepairProjectionState::LateEditorAttachment
+    {
+        let intent_id = ensure_deferred_document_write_intent(
+            path,
+            expected_current,
+            content,
+            source,
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )?;
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "repair_projection_late_editor_retained file={} source={} intent_id={} target_hash={} canonical_hash={} disk_hash={} recovery=await_editor_replica_no_disk_write_then_session_check",
+                path.display(),
+                source,
+                intent_id,
+                target_hash,
+                agent_doc_hash::content_hash(&canonical),
+                agent_doc_hash::content_hash(&disk),
+            ),
+        );
+        return Err(await_editor_replica_no_disk_write(format!(
+            "{source}: repair target for {} reached disk while the document was detached, then the editor registered with the exact pre-repair authority (intent_id={intent_id}, target_hash={target_hash}); the original compare-and-swap lineage is retained for reactive editor delivery. Run only agent-doc session-check for the existing binary-owned repair; do not resubmit, force disk, or recycle the controller; {RETAINED_FOR_RETRY_MARKER}",
+            path.display(),
         )));
     }
 
@@ -7065,6 +7171,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn atomic_repair_projection_classifies_late_editor_attachment() {
+        assert_eq!(
+            classify_atomic_repair_projection("target", "before", "target", "target"),
+            AtomicRepairProjectionState::Converged,
+        );
+        assert_eq!(
+            classify_atomic_repair_projection("target", "before", "before", "target"),
+            AtomicRepairProjectionState::LateEditorAttachment,
+        );
+        assert_eq!(
+            classify_atomic_repair_projection("target", "before", "operator edit", "target"),
+            AtomicRepairProjectionState::Diverged,
+            "a newer editor cut must never be treated as the late pre-repair authority",
+        );
+        assert_eq!(
+            classify_atomic_repair_projection("target", "before", "before", "before"),
+            AtomicRepairProjectionState::Diverged,
+            "the grace path requires proof that the repair already reached disk",
+        );
+    }
+
+    #[test]
     fn retained_write_cycle_boundaries_own_closed_set_source_flags() {
         let cases = [
             (
@@ -9108,6 +9236,7 @@ mod tests {
         let err = settle_atomic_repair_projection(
             &file,
             target,
+            baseline,
             "repair_retained_projection_test",
             baseline.to_string(),
             baseline.to_string(),
@@ -9135,6 +9264,36 @@ mod tests {
             log.contains("recovery=controller_reactive_projection operator_action=none"),
             "{log}",
         );
+    }
+
+    #[test]
+    fn late_editor_attachment_retains_original_repair_lineage() {
+        let baseline = "# Session\n\n### Re: topic — gpt-5\n\nAnswer.\n\nReplay.\n";
+        let target = "# Session\n\n### Re: topic — gpt-5\n\nAnswer.\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        std::fs::write(&file, target).unwrap();
+
+        let err = settle_atomic_repair_projection(
+            &file,
+            target,
+            baseline,
+            "late_editor_repair_test",
+            baseline.to_string(),
+            target.to_string(),
+        )
+        .unwrap_err();
+
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "the late registration race must be a resumable projection deferral: {err:#}",
+        );
+        let message = format!("{err:#}");
+        assert!(message.contains(RETAINED_FOR_RETRY_MARKER), "{message}");
+        let pending = pending_document_write(&file).expect("repair lineage must remain durable");
+        assert_eq!(pending.expected_content.as_deref(), Some(baseline));
+        assert_eq!(pending.target_content, target);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
     }
 
     #[test]

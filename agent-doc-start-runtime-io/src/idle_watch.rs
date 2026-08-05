@@ -361,7 +361,10 @@ fn gather_convergence_facts(
     timeout_ms: u64,
 ) -> agent_doc_document_realtime::convergence_gate::ConvergenceFacts {
     let committed = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
-        Ok(Some(state)) => matches!(state.phase, agent_doc_turn::CyclePhase::Committed),
+        Ok(Some(state)) => matches!(
+            state.phase,
+            agent_doc_turn::CyclePhase::Committed | agent_doc_turn::CyclePhase::Abandoned
+        ),
         _ => true,
     };
     let elapsed_ms = deferring_since
@@ -375,6 +378,15 @@ fn gather_convergence_facts(
         elapsed_ms,
         timeout_ms,
     }
+}
+
+/// Accepted-only delivery is not dispatch proof. A queue continuation starts
+/// only when the controller projects a new concrete cycle identity.
+fn queue_dispatch_cycle_advanced(
+    baseline_cycle_id: Option<&str>,
+    current_cycle_id: Option<&str>,
+) -> bool {
+    current_cycle_id.is_some() && current_cycle_id != baseline_cycle_id
 }
 
 /// Outcome of the idle-watch document-transition check.
@@ -1091,6 +1103,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 );
             }
             let mut last_dispatched: Option<String> = None;
+            let queue_continuation_triggers =
+                agent_doc_supervisor::idle_watch::QueueContinuationTriggers::new();
             let mut last_context_reset_head: Option<String> = None;
             let mut last_context_clear_at: Option<u64> = None;
             let mut context_reset_in_flight = false;
@@ -1747,15 +1761,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 };
                 // The head and its delivery-transition state come out of ONE
                 // authority read (`#recycletransitionwedge`).
-                let (active_head, active_transition) = match active_head_observation {
-                    QueueHeadObservation::Observed { head, transition } => (head, transition),
-                    QueueHeadObservation::AuthorityUnavailable => {
+            let (active_head, active_transition) = match active_head_observation {
+                QueueHeadObservation::Observed { head, transition } => (head, transition),
+                QueueHeadObservation::AuthorityUnavailable => {
                         queue_state_observed = false;
                         last_quiescent_maintenance = None;
-                        continue;
-                    }
-                };
-                if active_head.is_none() {
+                    continue;
+                }
+            };
+            queue_continuation_triggers.observe_head(
+                active_head.as_deref().map(agent_doc_hash::content_hash),
+            );
+            if active_head.is_none() {
                     context_reset_in_flight = false;
                     last_context_reset_head = None;
                 }
@@ -3827,9 +3844,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     current_transition_pending,
                     active_head: active_head.as_deref(),
                     last_dispatched: last_dispatched.as_deref(),
-                }) {
-                    IdleQueueDrainDecision::Dispatch => {
-                        // `#qstallguard` Layer B/C interaction: the supervisor idle-watch
+            }) {
+                IdleQueueDrainDecision::Dispatch => {
+                    if !queue_continuation_triggers.ready() {
+                        continue;
+                    }
+                    // `#qstallguard` Layer B/C interaction: the supervisor idle-watch
                         // is itself continuing the drain (whether the queue is paused —
                         // the Layer C single-owner failsafe — or normal go-mode). That is
                         // NOT an in-session stall, so clear any continuation-pending
@@ -3958,10 +3978,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     continue;
                                 }
                             }
-                        }
-                        let head = active_head.expect("dispatch implies an active head");
-                        let trigger_command = harness.trigger_command(&file);
-                        let drain_payload = idle_queue_drain_payload(&head, trigger_command);
+                    }
+                    let head = active_head.expect("dispatch implies an active head");
+                    let continuation_prompt =
+                        agent_doc_supervisor::idle_watch::owned_pane_queue_continuation_prompt(
+                            &path, &head,
+                        );
+                    let drain_payload = idle_queue_drain_payload(&head, continuation_prompt);
                         let payload_kind = idle_queue_drain_payload_kind(&head);
                         let slash_command = idle_queue_head_slash_command(&head);
                     // `#qflood2` / `#30p6`: classify the pending payload and
@@ -4139,8 +4162,60 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             ),
                         );
                     }
+                    let dispatch_admission_baseline =
+                        if slash_command.is_none() && shared.inject_pane.is_some() {
+                            agent_doc_controller_io::project_controller::current_turn_admission_projection_for_file(
+                                &path,
+                            )
+                            .ok()
+                            .map(|projection| {
+                                projection.map(|projection| projection.cycle_id)
+                            })
+                        } else {
+                            None
+                        };
+                    queue_continuation_triggers.begin_dispatch_effect();
                     match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload, &harness) {
-                            AutoTriggerOutcome::Sent => {
+                        AutoTriggerOutcome::Sent => {
+                            let current_dispatch_admission =
+                                agent_doc_controller_io::project_controller::current_turn_admission_projection_for_file(
+                                    &path,
+                                )
+                                .ok();
+                            let dispatch_start_proven =
+                                slash_command.is_some()
+                                    || shared.inject_pane.is_none()
+                                    || dispatch_admission_baseline
+                                        .as_ref()
+                                        .zip(current_dispatch_admission.as_ref())
+                                        .is_some_and(|(baseline, current)| {
+                                            queue_dispatch_cycle_advanced(
+                                                baseline.as_deref(),
+                                                current
+                                                    .as_ref()
+                                                    .map(|projection| {
+                                                        projection.cycle_id.as_str()
+                                                    }),
+                                            )
+                                    });
+                            if !dispatch_start_proven {
+                                queue_continuation_triggers.observe_effect_failed();
+                                agent_doc_ops_log_io::log_op(
+                                    &path,
+                                    &format!(
+                                        "idle_queue_dispatch_not_consumed file={} harness={} reason=dispatch_start_unproven head_sha256={} payload_sha256={}",
+                                        path.display(),
+                                        harness.binary,
+                                        agent_doc_hash::content_hash(&head),
+                                        agent_doc_hash::content_hash(&drain_payload),
+                                    ),
+                                );
+                                continue;
+                            }
+                            // Consume the Lazily state edge at dispatch-start
+                            // proof, never merely because text was written to
+                            // tmux or an accepted-only receipt was returned.
+                            queue_continuation_triggers.observe_dispatch_started();
                                 if paused_failsafe_active {
                                     log_event(
                                         &mut session_log,
@@ -4237,9 +4312,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     );
                                 }
                             }
-                            AutoTriggerOutcome::Cancelled => return,
-                            outcome => {
-                                // Do NOT record the head: a failed inject must be
+                        AutoTriggerOutcome::Cancelled => return,
+                        outcome => {
+                            queue_continuation_triggers.observe_effect_failed();
+                            // Do NOT record the head: a failed inject must be
                                 // retried on the next idle tick, not suppressed.
                                 log_event(
                                     &mut session_log,
@@ -5186,5 +5262,50 @@ mod tests {
             facts.committed,
             "stale open JSON must not make the convergence gate wait after lazily commit"
         );
+    }
+
+    #[test]
+    fn convergence_facts_treat_abandoned_recovery_as_a_terminal_queue_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n")).unwrap();
+        agent_doc_cycle_state_io::mark_abandoned(
+            &doc,
+            "force_recovery_replaced",
+            Some("body\n"),
+            Some("body\n"),
+        )
+        .unwrap();
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "codex",
+            None,
+            None,
+            Some("%25".to_string()),
+        );
+        let facts = gather_convergence_facts(&doc, &shared, None, CONVERGENCE_GATE_TIMEOUT_MS);
+        assert!(
+            facts.committed,
+            "an abandoned recovery is terminal and must not wedge a later queue head"
+        );
+    }
+
+    #[test]
+    fn accepted_only_queue_delivery_does_not_prove_dispatch_start() {
+        assert!(!queue_dispatch_cycle_advanced(None, None));
+        assert!(!queue_dispatch_cycle_advanced(
+            Some("cycle-a"),
+            Some("cycle-a")
+        ));
+        assert!(!queue_dispatch_cycle_advanced(Some("cycle-a"), None));
+        assert!(queue_dispatch_cycle_advanced(None, Some("cycle-a")));
+        assert!(queue_dispatch_cycle_advanced(
+            Some("cycle-a"),
+            Some("cycle-b")
+        ));
     }
 }

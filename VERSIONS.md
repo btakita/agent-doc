@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.140
+
+- **Owned-pane queue continuation is now derived state, not recursive command
+  injection.** A process-scoped Lazily graph observes queue-head identity,
+  document-state epochs, effect-retry epochs, and dispatch admission separately.
+  It emits a continuation prompt for the existing pane instead of
+  `agent-doc <file>`, and consumes the head edge only after the controller
+  projects a new cycle identity; accepted-only delivery stays retryable.
+
+- **A replaced recovery cannot permanently block the next queue head.**
+  `abandoned` and `committed` are both terminal inter-item cycle boundaries once
+  editor, IPC, and actor convergence hold. This removes the
+  `convergence_gate_timeout unmet=committed` wedge that previously fed the
+  recursive owner-pane refusal.
+
 ## 0.35.139
 
 - **JetBrains restart restoration no longer contracts a two-pane surface into

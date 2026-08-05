@@ -9812,11 +9812,11 @@ fn test_agent_doc_queue_owns_idle_drain_policy() {
     }
     assert!(
         start.contains("use agent_doc_queue::idle_drain::{")
-            && idle_watch.contains("harness.trigger_command(&file)")
-            && idle_watch.contains("idle_queue_drain_payload(&head, trigger_command)")
+            && idle_watch.contains("owned_pane_queue_continuation_prompt(")
+            && idle_watch.contains("idle_queue_drain_payload(&head, continuation_prompt)")
             && idle_watch.contains("idle_queue_drain_payload_kind(&head)")
             && idle_watch.contains("idle_queue_head_slash_command(&head)"),
-        "start adapters should render trigger text and call focused queue idle-drain policy directly"
+        "start adapters should render state-derived continuation text and call focused queue idle-drain policy directly"
     );
 }
 

@@ -521,6 +521,16 @@ distinct from the one-shot restart auto-trigger:
 - `SkipAlreadyDispatched` dedups a head that is still present after a dispatch
 (cycle not yet consumed, or the dispatch failed to drain), so a stuck head
 cannot hot-loop the watch every idle tick.
+- Ordinary heads are Lazily state edges, not recursive CLI commands. The
+process-scoped graph derives one continuation effect from the head identity,
+tracks document-state and failed-effect retry epochs separately, and consumes
+the edge only after the controller projects a new cycle identity. The
+owner-pane payload names the active head and explicitly continues the existing
+session; it never renders `agent-doc <file>`.
+- A prior `abandoned` recovery cycle is a terminal inter-item boundary, like
+`committed`, once the remaining editor/IPC/actor convergence proofs hold. It
+must not strand a later operator-authored head behind an impossible
+`committed` proof.
 - Before tmux delivery, the watcher derives payload recognition and
 dispatch-ready state from one live pane capture. A missing capture defers
 without writing or recording the head; a non-ready composer that does not hold

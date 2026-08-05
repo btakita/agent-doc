@@ -100,7 +100,7 @@ impl From<&str> for DocumentWriteDeferredReason {
             "editor_owner_without_registered_replica" => Self::EditorOwnerWithoutRegisteredReplica,
             "editor_delivery_worker_stale" => Self::EditorDeliveryWorkerStale,
             // Decode the pre-reactive request/ack name for durable ledgers
-            // written before v0.35.139. New events always emit the projection
+            // written before v0.35.140. New events always emit the projection
             // name above.
             "crdt_delivery_ack_pending" | "editor_projection_pending" => {
                 Self::EditorProjectionPending

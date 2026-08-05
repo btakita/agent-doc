@@ -142,6 +142,122 @@ impl CapturedFinalizeResumeTriggers {
     }
 }
 
+/// Lazily-owned state for one queue-continuation edge.
+///
+/// A queue head is state, not a command to recursively invoke `agent-doc`.
+/// The supervisor observes the head identity, derives whether an effect is due,
+/// and consumes that edge only after the harness proves dispatch admission.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct QueueContinuationProjection {
+    head_key: Option<String>,
+    state_epoch: u64,
+    consumed_state_epoch: u64,
+    effect_retry_epoch: u64,
+    consumed_effect_retry_epoch: u64,
+    dispatch_effect_in_flight: bool,
+}
+
+impl QueueContinuationProjection {
+    fn ready(&self) -> bool {
+        self.head_key.is_some()
+            && !self.dispatch_effect_in_flight
+            && (self.state_epoch > self.consumed_state_epoch
+                || self.effect_retry_epoch > self.consumed_effect_retry_epoch)
+    }
+}
+
+/// Process-scoped Lazily graph for an owned pane's queue continuation.
+///
+/// Document/head observations and failed-effect retries are intentionally
+/// separate source edges. Merely writing text into a pane does not consume the
+/// document edge; a proven dispatch start does.
+pub struct QueueContinuationTriggers {
+    scope: LocalProcessScope,
+    projection: Source<QueueContinuationProjection>,
+    ready: Computed<bool>,
+}
+
+impl Default for QueueContinuationTriggers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl QueueContinuationTriggers {
+    pub fn new() -> Self {
+        let scope = LocalProcessScope::new();
+        let projection = scope.ctx().source(QueueContinuationProjection::default());
+        let projection_for_ready = projection;
+        let ready = scope
+            .ctx()
+            .computed(move |ctx| ctx.get(&projection_for_ready).ready());
+        Self {
+            scope,
+            projection,
+            ready,
+        }
+    }
+
+    /// Observe the current queue-head identity. Clearing and later re-adding the
+    /// same text creates a new state edge because the intervening `None` is
+    /// itself observed.
+    pub fn observe_head(&self, head_key: Option<String>) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        if projection.head_key == head_key {
+            return;
+        }
+        projection.head_key = head_key;
+        projection.state_epoch = projection.state_epoch.saturating_add(1);
+        projection.dispatch_effect_in_flight = false;
+        if projection.head_key.is_none() {
+            projection.consumed_state_epoch = projection.state_epoch;
+            projection.consumed_effect_retry_epoch = projection.effect_retry_epoch;
+        }
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
+    /// Mark the tmux/PTY delivery effect as started without claiming that the
+    /// harness accepted it.
+    pub fn begin_dispatch_effect(&self) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.dispatch_effect_in_flight = true;
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
+    /// Consume the current state edge only after dispatch-start proof.
+    pub fn observe_dispatch_started(&self) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.dispatch_effect_in_flight = false;
+        projection.consumed_state_epoch = projection.state_epoch;
+        projection.consumed_effect_retry_epoch = projection.effect_retry_epoch;
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
+    /// A failed boundary effect rearms independently of document state.
+    pub fn observe_effect_failed(&self) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.dispatch_effect_in_flight = false;
+        projection.effect_retry_epoch = projection.effect_retry_epoch.saturating_add(1);
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
+    pub fn ready(&self) -> bool {
+        self.scope.ctx().get(&self.ready)
+    }
+}
+
+/// Render the state-derived continuation delivered to an already-owned pane.
+///
+/// This is deliberately not `agent-doc <file>`: that imperative entrypoint
+/// would recurse into the session that already owns the document.
+pub fn owned_pane_queue_continuation_prompt(file: &Path, active_head: &str) -> String {
+    format!(
+        "Agent Doc queue state advanced for `{}`. Continue this existing owner-pane session; do not invoke `agent-doc` recursively.\n\nExecute the current active queue head:\n\n{}\n\nPersist and finalize this cycle through the connected Agent Doc tools.",
+        file.display(),
+        active_head.trim(),
+    )
+}
+
 /// Exponential retry capped at one attempt per 30 seconds. Transient editor or
 /// controller recovery can therefore complete unattended without recreating the
 /// high-frequency finalize/backpressure loop it is intended to heal.
@@ -315,6 +431,56 @@ mod tests {
             triggers.ready(),
             "effect failure backoff is an explicit, separate trigger"
         );
+    }
+
+    #[test]
+    fn queue_continuation_is_a_state_edge_consumed_only_by_dispatch_start() {
+        let triggers = QueueContinuationTriggers::new();
+        triggers.observe_head(Some("head:a".to_string()));
+        assert!(triggers.ready());
+
+        triggers.begin_dispatch_effect();
+        assert!(!triggers.ready(), "one delivery effect owns the edge");
+
+        triggers.observe_effect_failed();
+        assert!(triggers.ready(), "effect failure is a separate retry edge");
+
+        triggers.begin_dispatch_effect();
+        triggers.observe_dispatch_started();
+        assert!(!triggers.ready(), "dispatch-start proof consumes the edge");
+        triggers.observe_head(Some("head:a".to_string()));
+        assert!(!triggers.ready(), "polling identical state must stay quiet");
+    }
+
+    #[test]
+    fn queue_continuation_rearms_for_a_new_or_reenqueued_head() {
+        let triggers = QueueContinuationTriggers::new();
+        triggers.observe_head(Some("head:a".to_string()));
+        triggers.begin_dispatch_effect();
+        triggers.observe_dispatch_started();
+
+        triggers.observe_head(Some("head:b".to_string()));
+        assert!(triggers.ready(), "a new head is a new state edge");
+        triggers.begin_dispatch_effect();
+        triggers.observe_dispatch_started();
+
+        triggers.observe_head(None);
+        assert!(!triggers.ready());
+        triggers.observe_head(Some("head:b".to_string()));
+        assert!(triggers.ready(), "clear then re-enqueue must rearm");
+    }
+
+    #[test]
+    fn owner_pane_continuation_is_state_derived_not_recursive_cli() {
+        let prompt = owned_pane_queue_continuation_prompt(
+            Path::new("tasks/sampleorders.md"),
+            "Update sample-service-topology.md.",
+        );
+
+        assert!(prompt.contains("queue state advanced"));
+        assert!(prompt.contains("Update sample-service-topology.md."));
+        assert!(prompt.contains("do not invoke `agent-doc` recursively"));
+        assert!(!prompt.contains("agent-doc tasks/sampleorders.md"));
     }
 
     #[test]

@@ -381,7 +381,33 @@ Completed `#lzqueuefamilyflavors` without reimplementing the already-landed bind
 - One-time CI snapshot: spec, Python, Kotlin, JS, Dart, Zig, Go, C++, and C# succeeded; Rust and agent-loop were in progress; lazily-formal has no Actions run.
 
 Unrelated pre-existing `AGENTS.md`, runbook, and nested-worktree changes were preserved and never staged.
-<!-- agent:boundary:9c3b5fc4:lazily -->
+
+Unrelated pre-existing `AGENTS.md`, runbook, and nested-worktree changes were preserved and never staged.
+### Re: Response
+
+Completed `#lzwqfixtureconfig`.
+
+- Moved `visibility_timeout` and `max_deliveries` from a top-level `config` object into each canonical WorkQueueCell fixture's `initial` block.
+- Tightened the lazily-spec schema guard: both fields are required with positive bounds in `initial`, and a top-level WorkQueueCell `config` is rejected.
+- Updated every canonical replay path in Rust, Python, Kotlin, JavaScript, Dart, Zig, Go, C++, and C# to construct the queue from `initial.visibility_timeout` and `initial.max_deliveries`. This includes the dedicated replayers as well as the 3×3 family runners; filename switches and literal lease values are gone from fixture runners.
+- Preserved assertion-key accounting in Go by routing the initial pending/in-flight/dead-letter emptiness checks through its tracked assertion seam.
+- Targeted schema and replay suites pass. `make check` is green in lazily-spec and all nine bindings, including Rust mutation checks and Python's full assertion-inventory gate.
+- Pushed commits: spec `3bf4deb`, Rust `83b4ebc`, Python `73248c4`, Kotlin `380112f`, JS `9c845a9`, Dart `f25234b`, Zig `75d504a`, Go `6271da1`, C++ `1345e19`, C# `b3dd009`; superproject pins are published in `eb592c3efd64fe780355fc487c0ff40613183b2c`.
+- One-time CI snapshot has no completed failures: spec, Python, and JS succeeded; Rust, Kotlin, Dart, Zig, Go, C++, C#, and agent-loop were still in progress.
+### Re: Response
+
+Completed `#lzwqfixtureconfig`.
+
+- Moved `visibility_timeout` and `max_deliveries` from a top-level `config` object into each canonical WorkQueueCell fixture's `initial` block.
+- Tightened the lazily-spec schema guard: both fields are required with positive bounds in `initial`, and a top-level WorkQueueCell `config` is rejected.
+- Updated every canonical replay path in Rust, Python, Kotlin, JavaScript, Dart, Zig, Go, C++, and C# to construct the queue from `initial.visibility_timeout` and `initial.max_deliveries`. This includes the dedicated replayers as well as the 3×3 family runners; filename switches and literal lease values are gone from fixture runners.
+- Preserved assertion-key accounting in Go by routing the initial pending/in-flight/dead-letter emptiness checks through its tracked assertion seam.
+- Targeted schema and replay suites pass. `make check` is green in lazily-spec and all nine bindings, including Rust mutation checks and Python's full assertion-inventory gate.
+- Pushed commits: spec `3bf4deb`, Rust `83b4ebc`, Python `73248c4`, Kotlin `380112f`, JS `9c845a9`, Dart `f25234b`, Zig `75d504a`, Go `6271da1`, C++ `1345e19`, C# `b3dd009`; superproject pins are published in `eb592c3efd64fe780355fc487c0ff40613183b2c`.
+- One-time CI snapshot has no completed failures: spec, Python, and JS succeeded; Rust, Kotlin, Dart, Zig, Go, C++, C#, and agent-loop were still in progress.
+
+Unrelated pre-existing `AGENTS.md`, runbook, and nested-worktree changes were preserved and never staged.
+<!-- agent:boundary:9f541016:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue

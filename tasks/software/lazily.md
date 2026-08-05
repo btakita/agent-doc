@@ -1066,6 +1066,25 @@ Commands/verification:
 Confidence: high on the recovery procedure and repository configuration; the existing npm-side record's exact fields remain unverified until you complete the 2FA-backed list command.
 
 Escalation: operator browser/2FA approval is required to read, edit, or revoke the npm trust record. Do not revoke it before seeing the list output.
+
+### Re: Close `#kny1` after trusted-publishing setup review — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 do [#kny1]
+
+
+The trusted-publishing guidance from the preceding response stands. The repository workflow already satisfies npm's OIDC requirements; the remaining operation is operator-owned npm authentication to inspect the existing trust record, and only revoke/recreate it if its repository, workflow filename, or publish permission is incorrect.
+
+Proof:
+
+- Changed paths: none.
+- Commands: `npm trust list @lazily-hub/lazily-js --json` was attempted and reached npm's browser/2FA authentication boundary; repository workflow and package metadata were inspected read-only.
+- Verification: `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-latest`, `permissions.id-token: write`, Node 24, and `npm publish --access public`; package/repository identifiers match `@lazily-hub/lazily-js` and `lazily-hub/lazily-js`.
+- Confidence: high.
+- Escalation: complete npm browser/2FA authentication, inspect the existing publisher with `npm trust list`, and revoke/recreate only if the record is wrong. Validate OIDC with the next genuinely new version tag rather than an existing-version no-op run.
+
+Official references: https://docs.npmjs.com/trusted-publishers/ and https://docs.npmjs.com/cli/v11/commands/npm-trust/
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
@@ -1077,7 +1096,7 @@ Escalation: operator browser/2FA approval is required to read, edit, or revoke t
 - ~~do [#lzrung2gaps]~~
 - ~~do [#lzstructfieldreads]~~
 - ~~do [#lzassertwithseam]~~
-- 📌 do [#kny1]
+- ~~📌 do [#kny1]~~
 - 📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
 - do [#lzdiscriminabilityburn]
 <!-- /agent:queue -->
@@ -1085,7 +1104,6 @@ Escalation: operator browser/2FA approval is required to read, edit, or revoke t
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#kny1] Please help me setup trusted publishing with npm.
 - [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 - [ ] [#lzcoveragelayout] Restructure the coverage.json feature-table layout for a growing language axis per tasks/software/plan-lazily-coverage-table-layout.md. Measured: the feature column is 68% of row width at mean and 84% at max (feature text mean 86 / max 203 chars vs ~40 for all nine marks combined), so a 10th language adds ~4 chars to a row already 130-250 wide — the language axis is NOT the problem. Reject transposing (64 columns) and reject splitting by language: sync-coverage.mjs injects the same full matrix into all 12 targets, and per-language tables would destroy the cross-binding parity view that check-conformance-coverage.sh exists to protect. Phase 1 (land BEFORE the GDScript column, independent of the rest): add id + short label per row and move the 86-203 char normative prose to footnotes or into cell-model.md/protocol.md, taking the table from ~250 to ~60 chars wide so the layout scales past 15 languages. Phase 2 with it: split the '— absent OR not applicable' mark, since GDScript's parked thread-safe family is a different fact from unwritten work. Phases 3-4 (follow-up): author a family field — 54 distinct prefixes across 64 rows means families CANNOT be inferred from the current text — then a family x language roll-up with a stated roll-up rule. Layout and mark-value changes stay separate commits; sync-coverage.mjs --check stays the gate.

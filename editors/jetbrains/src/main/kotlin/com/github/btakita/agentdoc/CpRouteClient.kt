@@ -150,6 +150,9 @@ internal object CpRouteClient {
     private val editorSurfaceClientId = "jetbrains-pid:${ProcessHandle.current().pid()}"
     private val editorSurfaceGeneration = System.nanoTime().coerceAtLeast(1L)
     private val editorSurfaceSequence = java.util.concurrent.atomic.AtomicLong(0)
+    private val editorFocusClientId = "jetbrains-focus-pid:${ProcessHandle.current().pid()}"
+    private val editorFocusGeneration = System.nanoTime().coerceAtLeast(1L)
+    private val editorFocusSequence = java.util.concurrent.atomic.AtomicLong(0)
 
     /**
      * Publish one ordered editor fact directly to the already-running Project Controller.
@@ -161,14 +164,50 @@ internal object CpRouteClient {
     fun observeEditorSurface(
         projectRoot: String,
         surfaceJson: String,
+    ): CpEditorRouteResult =
+        observeEditorSurfaceWithClient(
+            projectRoot = projectRoot,
+            surfaceJson = surfaceJson,
+            clientId = editorSurfaceClientId,
+            generation = editorSurfaceGeneration,
+            sequence = editorSurfaceSequence.incrementAndGet(),
+            logLabel = "layout-sync",
+        )
+
+    /**
+     * Publish the selected-document source to that document's own controller.
+     *
+     * This is a retained editor-surface observation, not a command submission. The controller's
+     * Lazily graph derives the selection Effect and returns its exact receipt.
+     */
+    fun observeEditorFocus(
+        projectRoot: String,
+        surfaceJson: String,
+    ): CpEditorRouteResult =
+        observeEditorSurfaceWithClient(
+            projectRoot = projectRoot,
+            surfaceJson = surfaceJson,
+            clientId = editorFocusClientId,
+            generation = editorFocusGeneration,
+            sequence = editorFocusSequence.incrementAndGet(),
+            logLabel = "focus-projection",
+        )
+
+    private fun observeEditorSurfaceWithClient(
+        projectRoot: String,
+        surfaceJson: String,
+        clientId: String,
+        generation: Long,
+        sequence: Long,
+        logLabel: String,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         val request =
             editorSurfaceObserveRequest(
                 surfaceJson = surfaceJson,
-                clientId = editorSurfaceClientId,
-                generation = editorSurfaceGeneration,
-                sequence = editorSurfaceSequence.incrementAndGet(),
+                clientId = clientId,
+                generation = generation,
+                sequence = sequence,
             )
         return try {
             val receipt = sendRequestDataToSocket(socket, request)
@@ -178,7 +217,7 @@ internal object CpRouteClient {
             )
         } catch (e: Exception) {
             log.debug(
-                "[layout-sync] editor_surface_observe unavailable via ${socket.path}: ${e.message}",
+                "[$logLabel] editor_surface_observe unavailable via ${socket.path}: ${e.message}",
             )
             CpEditorRouteResult(
                 exitCode = 1,
@@ -188,11 +227,31 @@ internal object CpRouteClient {
     }
 
     fun forgetEditorSurface(projectRoot: String): Boolean {
+        return forgetEditorSurfaceClient(
+            projectRoot = projectRoot,
+            clientId = editorSurfaceClientId,
+            generation = editorSurfaceGeneration,
+        )
+    }
+
+    fun forgetEditorFocus(projectRoot: String): Boolean {
+        return forgetEditorSurfaceClient(
+            projectRoot = projectRoot,
+            clientId = editorFocusClientId,
+            generation = editorFocusGeneration,
+        )
+    }
+
+    private fun forgetEditorSurfaceClient(
+        projectRoot: String,
+        clientId: String,
+        generation: Long,
+    ): Boolean {
         val socket = cpcSocket(projectRoot)
         val request =
             editorSurfaceForgetRequest(
-                clientId = editorSurfaceClientId,
-                generation = editorSurfaceGeneration,
+                clientId = clientId,
+                generation = generation,
                 retireClientFamily = true,
             )
         return try {

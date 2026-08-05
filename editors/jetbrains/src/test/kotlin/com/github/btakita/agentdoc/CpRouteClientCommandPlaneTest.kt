@@ -27,7 +27,7 @@ class CpRouteClientCommandPlaneTest {
     fun `editor surface observation is an ordered fact for the existing controller`() {
         val request =
             CpRouteClient.editorSurfaceObserveRequest(
-                surfaceJson = """{"focused":"/proj/plan.md","visible":["/proj/plan.md"],"open":["/proj/plan.md"],"columns":[],"force_reconcile":false}""",
+                surfaceJson = """{"focused":"/proj/plan.md","visible":["/proj/plan.md"],"open":["/proj/plan.md"],"columns":[],"force_reconcile":true,"focus_only":true}""",
                 clientId = "jetbrains-pid:42",
                 generation = 100,
                 sequence = 7,
@@ -46,6 +46,7 @@ class CpRouteClientCommandPlaneTest {
             "/proj/plan.md",
             observation.getAsJsonObject("surface").get("focused").asString,
         )
+        assertTrue(observation.getAsJsonObject("surface").get("focus_only").asBoolean)
     }
 
     @Test

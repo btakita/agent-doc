@@ -2068,6 +2068,13 @@ struct ControllerDocumentGraphs {
         String,
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     >,
+    /// A causally fenced settlement receipt observed by a short-lived caller.
+    /// This is retained ingress, not a settle command; [`Self::verdict`]
+    /// validates it against the durable pending intent and both content planes.
+    settlement_receipt: lazily::ThreadSafeSourceMap<
+        String,
+        Option<agent_doc_state_backbone::retained_write::SettlementVerdict>,
+    >,
     /// External CRDT/editor delivery ingress. Replica RPCs project their
     /// post-event relay state into this Source; retained closeout wake
     /// eligibility is derived from it beside the durable document projection.
@@ -2926,6 +2933,7 @@ impl ControllerDocumentGraphs {
             pending: lazily::ThreadSafeComputedMap::new(&ctx),
             authority: lazily::ThreadSafeSourceMap::new(&ctx),
             disk: lazily::ThreadSafeSourceMap::new(&ctx),
+            settlement_receipt: lazily::ThreadSafeSourceMap::new(&ctx),
             retained_delivery: lazily::ThreadSafeSourceMap::new(&ctx),
             settle_generation: lazily::ThreadSafeSourceMap::new(&ctx),
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
@@ -3025,6 +3033,8 @@ impl ControllerDocumentGraphs {
             self.authority
                 .set(ctx, document_hash.to_string(), authority);
             self.disk.set(ctx, document_hash.to_string(), disk);
+            self.settlement_receipt
+                .set(ctx, document_hash.to_string(), None);
             self.settle_generation
                 .set(ctx, document_hash.to_string(), settle_generation);
             self.closeout_cycle_id
@@ -3119,6 +3129,7 @@ impl ControllerDocumentGraphs {
         _file: &Path,
         authority: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
         disk: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+        settlement_receipt: Option<agent_doc_state_backbone::retained_write::SettlementVerdict>,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         // One batch: the two planes are one observation, and a settle effect that
         // ran between them would be judging a fresh authority against a stale disk.
@@ -3126,6 +3137,8 @@ impl ControllerDocumentGraphs {
             self.authority
                 .set(ctx, document_hash.to_string(), authority);
             self.disk.set(ctx, document_hash.to_string(), disk);
+            self.settlement_receipt
+                .set(ctx, document_hash.to_string(), settlement_receipt);
         });
 
         self.current_verdict(document_hash)
@@ -3192,16 +3205,18 @@ impl ControllerDocumentGraphs {
         let pending = self.pending.clone();
         let authority_map = self.authority.clone();
         let disk_map = self.disk.clone();
+        let settlement_receipt_map = self.settlement_receipt.clone();
         let settle_generation = self.settle_generation.clone();
         let verdict = self.verdict.get_or_insert_with(
             &self.ctx,
             document_hash.to_string(),
             move |ctx, key| {
                 let _generation = settle_generation.observe(ctx, key).unwrap_or_default();
-                agent_doc_state_backbone::retained_write::settlement_verdict(
+                agent_doc_state_backbone::retained_write::settlement_verdict_with_receipt(
                     pending.observe(ctx, key).flatten().as_ref(),
                     authority_map.observe(ctx, key).flatten().as_ref(),
                     disk_map.observe(ctx, key).flatten().as_ref(),
+                    settlement_receipt_map.observe(ctx, key).flatten().as_ref(),
                 )
             },
         );
@@ -4565,6 +4580,7 @@ impl ControllerRuntime {
     /// invoked a `settle_*` companion. The returned verdict is the one derived
     /// from the caller's observations; the clear it triggers is recorded in
     /// `ops.log`.
+    #[cfg(test)]
     pub(crate) fn document_retained_write_verdict(
         &self,
         document_hash: &str,
@@ -4573,7 +4589,19 @@ impl ControllerRuntime {
         disk: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         self.document_graphs
-            .verdict(document_hash, file, authority, disk)
+            .verdict(document_hash, file, authority, disk, None)
+    }
+
+    pub(crate) fn document_retained_write_verdict_with_receipt(
+        &self,
+        document_hash: &str,
+        file: &Path,
+        authority: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+        disk: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+        settlement_receipt: Option<agent_doc_state_backbone::retained_write::SettlementVerdict>,
+    ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
+        self.document_graphs
+            .verdict(document_hash, file, authority, disk, settlement_receipt)
     }
 
     pub(crate) fn document_retained_write_observe_authority(
@@ -12759,6 +12787,42 @@ agent:queue\n\
                     if intent_id == "intent-1"
             )),
             "the clear must be durable, not just an in-memory projection edit"
+        );
+    }
+
+    #[test]
+    fn observed_semantic_receipt_settles_through_the_controller_effect() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        defer_document_write(&runtime, dir.path(), &document_hash, "intent-1", "target");
+        let receipt = agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied {
+            intent_id: "intent-1".to_string(),
+            retained_target_hash: "target".to_string(),
+            settled_hash: "rebased-cut".to_string(),
+            proof:
+                agent_doc_state_backbone::retained_write::SatisfiedProof::RebasedPayloadMaterialized,
+            intent_source:
+                agent_doc_state_backbone::write_source::DocumentWriteSource::PendingWrite,
+        };
+
+        let verdict = runtime.document_retained_write_verdict_with_receipt(
+            &document_hash,
+            &file,
+            Some(observation("rebased-cut")),
+            Some(observation("rebased-cut")),
+            Some(receipt.clone()),
+        );
+
+        assert_eq!(
+            verdict,
+            agent_doc_state_backbone::retained_write::SettlementVerdict::NoRetainedIntent,
+            "the subscribed effect may clear synchronously before the query returns",
+        );
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash),
+            None,
+            "the identity-fenced receipt must drive the subscribed settlement effect",
         );
     }
 

@@ -1763,14 +1763,20 @@ pub struct RetainedWriteObservations {
     pub authority_intent_delta_materialized: bool,
     #[serde(default)]
     pub disk_intent_delta_materialized: bool,
+    /// Caller-derived semantic settlement evidence. The controller joins this
+    /// into its retained graph only after validating the exact intent, target,
+    /// and authority+disk cut.
+    #[serde(default)]
+    pub settlement_receipt: Option<agent_doc_state_backbone::retained_write::SettlementVerdict>,
 }
 
 impl RetainedWriteObservations {
-    fn into_planes(
+    fn into_parts(
         self,
     ) -> (
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+        Option<agent_doc_state_backbone::retained_write::SettlementVerdict>,
     ) {
         let plane =
             |hash: Option<String>, payload_materialized: bool, intent_delta_materialized: bool| {
@@ -1782,18 +1788,17 @@ impl RetainedWriteObservations {
                     }
                 })
             };
-        (
-            plane(
-                self.authority_hash,
-                self.authority_payload_materialized,
-                self.authority_intent_delta_materialized,
-            ),
-            plane(
-                self.disk_hash,
-                self.disk_payload_materialized,
-                self.disk_intent_delta_materialized,
-            ),
-        )
+        let authority = plane(
+            self.authority_hash,
+            self.authority_payload_materialized,
+            self.authority_intent_delta_materialized,
+        );
+        let disk = plane(
+            self.disk_hash,
+            self.disk_payload_materialized,
+            self.disk_intent_delta_materialized,
+        );
+        (authority, disk, self.settlement_receipt)
     }
 }
 
@@ -1814,8 +1819,14 @@ pub(crate) fn handle_retained_write_settlement(
         .as_deref()
         .and_then(|payload| serde_json::from_str::<RetainedWriteObservations>(payload).ok())
         .unwrap_or_default();
-    let (authority, disk) = observations.into_planes();
-    Ok(runtime.document_retained_write_verdict(&document_hash, &file, authority, disk))
+    let (authority, disk, settlement_receipt) = observations.into_parts();
+    Ok(runtime.document_retained_write_verdict_with_receipt(
+        &document_hash,
+        &file,
+        authority,
+        disk,
+        settlement_receipt,
+    ))
 }
 
 /// Ask the controller for the document's retained-write settlement verdict.
@@ -21087,6 +21098,7 @@ mod tests {
                 files: vec![focused.to_string()],
             }],
             force_reconcile: true,
+            focus_only: false,
         }
     }
 

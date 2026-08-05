@@ -324,28 +324,29 @@ fn idle_watch_revision_observation(
     }
 }
 
-/// `#fbwire` Phase 2 — is the session document's current visible text converged
-/// to `HEAD`? This mirrors the `git::emit_postcommit_worktree_check`
-/// `match=...` proof but reads through the realtime document boundary first, so
-/// an unsaved editor buffer ahead of disk participates in the gate. A non-git
-/// document or an unreadable `HEAD`/current document must NEVER wedge the drain,
-/// so those degenerate cases report `true` (converged) and the gate falls
-/// through to dispatch; the fail-closed blocked boundary is reserved for
-/// genuine editor wedges, not missing git state.
-fn editor_buffer_converged_to_head(file: &std::path::Path) -> bool {
-    let head_doc = match agent_doc_git_io::revision::show_head(file) {
-        Ok(Some(doc)) => doc,
-        _ => return true,
-    };
-    let working = match agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "idle_watch_editor_converged_to_head",
-    ) {
-        Ok(doc) => doc,
-        Err(_) => return true,
-    };
-    agent_doc_document::transient_markers::normalize_for_replay_hash(&head_doc)
-        == agent_doc_document::transient_markers::normalize_for_replay_hash(&working)
+/// `#fbwire` Phase 2 — has the retained editor-delivery projection from the
+/// completed queue item settled?
+///
+/// This deliberately does **not** compare the current document with Git
+/// `HEAD`. The operator is allowed to append the next queue item, change queue
+/// control, or otherwise advance the live editor immediately after closeout;
+/// those facts are input for the next cycle, not evidence that the previous
+/// response failed delivery. Only an actually-unsettled retained write blocks
+/// the boundary. `Unobserved` remains fail-open here, matching the preflight
+/// new-cycle policy so a transport blip cannot wedge the drain.
+fn retained_editor_delivery_converged(file: &std::path::Path) -> bool {
+    retained_settlement_allows_queue_boundary(
+        &agent_doc_document_realtime_io::retained_write_settlement(
+            file,
+            "idle_watch_queue_boundary",
+        ),
+    )
+}
+
+fn retained_settlement_allows_queue_boundary(
+    verdict: &agent_doc_state_backbone::retained_write::SettlementVerdict,
+) -> bool {
+    !verdict.blocks_new_cycle()
 }
 
 /// `#fbwire` Phase 2 — gather the four [`agent_doc_document_realtime::convergence_gate::ConvergenceFacts`]
@@ -372,7 +373,7 @@ fn gather_convergence_facts(
         .unwrap_or(0);
     agent_doc_document_realtime::convergence_gate::ConvergenceFacts {
         committed,
-        editor_converged: editor_buffer_converged_to_head(file),
+        editor_converged: retained_editor_delivery_converged(file),
         inflight: agent_doc_ipc_io::inflight_connection_handlers(),
         actor_idle: !actor_state_is_busy_or_starting(shared),
         elapsed_ms,
@@ -3884,9 +3885,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // boundary between queue items. Even though the pure drain
                         // decision says Dispatch (prompt visible, no active turn, lease
                         // owned), do NOT inject item N+1's trigger until item N proves a
-                        // quiescent close — cycle committed AND the editor buffer
-                        // converged to HEAD AND this doc's IPC inflight drained to 0 AND
-                        // the actor idle. This caps inflight at ~1 and removes the
+                        // quiescent close — cycle committed AND the retained editor
+                        // delivery settled AND this doc's IPC inflight drained to 0
+                        // AND the actor idle. This caps inflight at ~1 and removes the
                         // concurrent-writer windows that produced the `content_ours` /
                         // `postcommit_worktree_check match=false` / `inflight=5
                         // send_failed` drift family. Composes with (does not replace) the
@@ -5013,20 +5014,18 @@ mod tests {
     }
 
     #[test]
-    fn editor_buffer_converged_to_head_defaults_true_for_non_git_doc() {
-        // A document outside any git repo must never wedge the drain: `show_head`
-        // fails to resolve a git root, so convergence reports `true` and the gate
-        // falls through to dispatch (editorless CLI sessions live here).
+    fn queue_boundary_defaults_converged_without_a_retained_delivery() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("task.md");
         std::fs::write(&doc, "hello\n").unwrap();
-        assert!(editor_buffer_converged_to_head(&doc));
+        assert!(retained_editor_delivery_converged(&doc));
     }
 
     #[test]
-    fn editor_buffer_converged_to_head_tracks_disk_vs_head() {
-        // In a real repo the fact is the `#pcwc` postcommit ground truth: disk ==
-        // HEAD ⇒ converged; an uncommitted disk edit ⇒ not converged.
+    fn operator_queue_state_ahead_of_head_does_not_block_the_next_cycle() {
+        // The next queue edit is intentionally ahead of HEAD. With no retained
+        // delivery intent, that is new operator state rather than a closeout
+        // failure and must not wedge the drain.
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path();
         for args in [
@@ -5052,57 +5051,27 @@ mod tests {
             .args(["commit", "-m", "c", "--no-verify"])
             .output()
             .unwrap();
-        // Disk == HEAD → converged.
-        assert!(editor_buffer_converged_to_head(&doc));
-        // Diverge the working tree → not converged (a wedge candidate).
-        std::fs::write(&doc, "committed body\nuncommitted editor drift\n").unwrap();
-        assert!(!editor_buffer_converged_to_head(&doc));
+        std::fs::write(
+            &doc,
+            "committed body\n## Queue\n\nHow about self-hosting Temporal?\n",
+        )
+        .unwrap();
+        assert!(retained_editor_delivery_converged(&doc));
     }
 
     #[test]
-    fn editor_buffer_converged_to_head_uses_live_current_document() {
-        // Disk still equals HEAD, but the editor-visible buffer is ahead. The
-        // convergence gate must see the current document authority, not only the
-        // detached disk replica.
-        let dir = tempfile::tempdir().unwrap();
-        let repo = dir.path();
-        std::fs::create_dir_all(repo.join(".agent-doc")).unwrap();
-        for args in [
-            vec!["init"],
-            vec!["config", "user.email", "t@t.com"],
-            vec!["config", "user.name", "T"],
-        ] {
-            std::process::Command::new("git")
-                .current_dir(repo)
-                .args(&args)
-                .output()
-                .unwrap();
-        }
-        let doc = repo.join("task.md");
-        let committed = "committed body\n";
-        std::fs::write(&doc, committed).unwrap();
-        std::process::Command::new("git")
-            .current_dir(repo)
-            .args(["add", "--", "task.md"])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .current_dir(repo)
-            .args(["commit", "-m", "c", "--no-verify"])
-            .output()
-            .unwrap();
-        assert!(editor_buffer_converged_to_head(&doc));
+    fn genuinely_unsettled_retained_delivery_still_blocks_the_queue_boundary() {
+        use agent_doc_state_backbone::retained_write::{SettlementVerdict, UnsettledCause};
 
-        agent_doc_test_support::publish_editor_text_via_crdt_relay(
-            &doc,
-            "idle-watch-test-editor",
-            "committed body\nunsaved editor queue head\n",
-        );
-
-        assert!(
-            !editor_buffer_converged_to_head(&doc),
-            "unsaved editor-current content must block HEAD convergence even while disk still equals HEAD"
-        );
+        assert!(!retained_settlement_allows_queue_boundary(
+            &SettlementVerdict::Unsettled {
+                intent_id: "intent-1".to_string(),
+                cause: UnsettledCause::AuthorityDiskDiverged,
+            },
+        ));
+        assert!(retained_settlement_allows_queue_boundary(
+            &SettlementVerdict::NoRetainedIntent,
+        ));
     }
 
     #[test]

@@ -117,9 +117,11 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 Provision-only startup may split only beside a pane already visible in the
 `agent-doc` window; a durable registration in `stash` is ownership evidence,
 never a geometry anchor.
-- The JetBrains low-latency selection lane uses typed `observe_only` rather
-than `resume_latest`: it may select an already-visible pane but never performs
-recovery or pane creation. The editor surface graph owns that structural work.
+- The JetBrains low-latency selection lane publishes a retained `focus_only`
+editor-surface Source to the selected document's own controller. The controller
+graph derives typed `observe_only` focus rather than `resume_latest`: it may
+select an already-visible pane but never performs recovery or pane creation.
+The spanning editor surface graph owns that structural work.
 Its `active_window_guard` registers a project-scoped fence at async admission;
 supersession and the command deadline are checked again while holding that
 fence across the final `select-pane` effect. A worker that was accepted earlier
@@ -176,18 +178,20 @@ selected document. A bare-shell remnant or a pane reused by another document
 must fail closed; focus never mutates the actor or registry to make the proof
 pass.
 - Editor-to-tmux focus and tmux-to-editor recall must not feed back into each
-  other. A fresh editor selection owns a bounded intent lease while the
-  project-scoped latest-wins command is pending: the reverse poll ignores the
-  previous pane, consumes the lease when tmux reaches the intended document,
-  and lets tmux regain authority only after the lease expires.
+  other. A fresh editor selection acquires a bounded handoff lease only after
+  the retained focus projection's exact effect receipt proves `select-pane`;
+  accepted state, `missing_actor_record`, and suppressed focus acquire no lease.
+  The reverse poll ignores the previous pane while that proven lease is live,
+  consumes it when tmux reaches the intended document, and lets tmux regain
+  authority only after the lease expires.
 - The command-plane `tmux_focus_state` read projection must recover the active
 route-owned document from exact process-tree ownership when the active pane's
 actor row is missing. The recovered path must resolve inside that controller's
 project root; a foreign-root owner remains unbound for that controller.
-- Editor selection focus is a single latest-wins intent per project. All tab
-targets share one focus idempotency key with supersession enabled, so a burst of
-selection events coalesces to the newest document instead of replaying older
-pane selections after it.
+- Editor selection focus is a single latest-wins retained source per project.
+All tab targets share one focus generation, so a burst of selection events
+coalesces to the newest document instead of replaying older pane selections
+after it.
 - A surface change that replaces a visible document and changes focus is one
 retained pane-layout projection with two consequences: reconcile columns, then
 select the requested pane. Column observation alone must not mark that

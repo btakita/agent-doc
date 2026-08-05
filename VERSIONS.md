@@ -2,6 +2,31 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.141
+
+- **Inter-item queue continuation now observes retained delivery settlement
+  instead of whole-document equality with Git `HEAD`.** A newly added queue
+  prompt or queue-control edit is next-cycle operator state, so it no longer
+  wedges the supervisor at `convergence_gate unmet=editor_converged`.
+  Genuinely unsettled retained writes still block the boundary.
+
+- **JetBrains tab focus is now a retained, focus-only editor surface rather
+  than a competing imperative command.** The selected document publishes to
+  its own controller under a distinct latest-wins source; the controller
+  derives pane selection without inferring layout changes. Reverse-focus
+  suppression begins only after an exact successful selection receipt, so a
+  missing actor cannot hold a stale 90-second lease or pull the editor toward
+`stash`. JetBrains plugin `0.2.349` carries the adapter change.
+
+- **A rebased CRDT delivery now settles through a retained reactive receipt.**
+A short-lived caller publishes its semantic `Satisfied` observation into a
+controller-owned Source; the controller's Computed joins it only if the intent
+identity and retained target match and the receipt hash equals both live editor
+authority and disk. The subscribed settlement effect then performs the durable
+clear. Response canonicalization can no longer leave the controller stuck at
+`PayloadAbsentFromConvergedContent` after the current document already proves
+the response.
+
 ## 0.35.140
 
 - **Owned-pane queue continuation is now derived state, not recursive command

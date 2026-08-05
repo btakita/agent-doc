@@ -83,6 +83,11 @@ pub struct EditorSurface {
     /// observation shortcut.
     #[serde(default)]
     pub force_reconcile: bool,
+    /// This observation belongs to the selected document's controller and owns
+    /// only pane selection. It must never infer a structural layout sync from
+    /// its intentionally narrow one-document payload.
+    #[serde(default)]
+    pub focus_only: bool,
 }
 
 /// Ordered editor fact sent to the Project Controller.
@@ -353,10 +358,25 @@ impl SurfaceTracking {
             return (self.clone(), SurfaceIntent::Idle);
         }
 
+        let same_focus = self.focused_document.as_deref() == Some(surface.focused.as_str());
+        if surface.focus_only {
+            if !surface.force_reconcile && same_focus {
+                return (self.clone(), SurfaceIntent::Idle);
+            }
+            return (
+                Self {
+                    reconciled_signature: self.reconciled_signature.clone(),
+                    focused_document: Some(surface.focused.clone()),
+                },
+                SurfaceIntent::Focus {
+                    document: surface.focused.clone(),
+                },
+            );
+        }
+
         let drifted = layout_matches == Some(false);
         let signature = surface.visible_signature();
         let same_layout = self.reconciled_signature.as_deref() == Some(signature.as_str());
-        let same_focus = self.focused_document.as_deref() == Some(surface.focused.as_str());
 
         // Nothing observable changed and tmux is not known to have drifted.
         if !surface.force_reconcile && !drifted && same_layout && same_focus {
@@ -422,6 +442,7 @@ mod tests {
             visible,
             columns,
             force_reconcile: false,
+            focus_only: false,
         }
     }
 
@@ -472,6 +493,33 @@ mod tests {
                 document: "/b.md".to_string()
             },
             "layout reconciliation never moves the active pane, so a doc switch must focus"
+        );
+    }
+
+    #[test]
+    fn focus_only_observation_never_derives_a_layout_sync() {
+        let focused = EditorSurface {
+            focused: "/submodule/task.md".to_string(),
+            visible: vec!["/submodule/task.md".to_string()],
+            open: vec!["/submodule/task.md".to_string()],
+            force_reconcile: true,
+            focus_only: true,
+            ..EditorSurface::default()
+        };
+        let (tracking, intent) = SurfaceTracking::default().advance(&focused, Some(false));
+        assert_eq!(
+            intent,
+            SurfaceIntent::Focus {
+                document: "/submodule/task.md".to_string(),
+            },
+        );
+        assert_eq!(
+            tracking.focused_document.as_deref(),
+            Some("/submodule/task.md")
+        );
+        assert_eq!(
+            tracking.reconciled_signature, None,
+            "selection-only state must not claim a layout was reconciled"
         );
     }
 

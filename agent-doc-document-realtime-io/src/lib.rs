@@ -7002,6 +7002,33 @@ pub fn recover_retained_document_write_before_new_cycle(
 /// subscribe in (`observe_retained_write_settlement` mints a fresh
 /// `DocumentScope` per call, so an `Effect` there would be this same projection
 /// wearing a costume), so it applies the clear directly and says so.
+/// Join the controller's reactive settlement receipt with this caller's
+/// durable observation.
+///
+/// The controller may settle an intent as a side effect of reading its
+/// `Computed<SettlementVerdict>`. In that case the RPC response is the receipt
+/// for the exact intent and converged content cut even when this short-lived
+/// caller cannot reconstruct semantic payload evidence from the already
+/// rebased document. Accept only that causally closed shape: same intent, and
+/// the receipt's settled hash must equal both observed planes.
+fn controller_settlement_receipt_matches(
+    local: &SettlementVerdict,
+    controller: &SettlementVerdict,
+    observations: &agent_doc_controller_io::project_controller::RetainedWriteObservations,
+) -> bool {
+    let SettlementVerdict::Satisfied {
+        intent_id,
+        settled_hash,
+        ..
+    } = controller
+    else {
+        return false;
+    };
+    local.intent_id() == Some(intent_id.as_str())
+        && observations.authority_hash.as_deref() == Some(settled_hash.as_str())
+        && observations.disk_hash.as_deref() == Some(settled_hash.as_str())
+}
+
 pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict {
     let settlement = observe_retained_write_settlement(file, source);
     let local_verdict = settlement.verdict();
@@ -7024,6 +7051,9 @@ pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict
             .as_ref()
             .is_some_and(|plane| plane.intent_delta_materialized),
         disk_hash: disk.map(|plane| plane.content_hash),
+        settlement_receipt: local_verdict
+            .should_clear_intent()
+            .then(|| local_verdict.clone()),
     };
     match agent_doc_controller_io::project_controller::retained_write_settlement(
         &project_root,
@@ -7031,17 +7061,35 @@ pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict
         &observations,
     ) {
         Ok(verdict) if verdict != local_verdict => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "retained_write_settlement_controller_projection_lag file={} source={} controller_intent_id={} durable_intent_id={} action=use_durable_observation",
-                    file.display(),
-                    source,
-                    verdict.intent_id().unwrap_or("none"),
-                    local_verdict.intent_id().unwrap_or("none"),
-                ),
-            );
-            local_verdict
+            if controller_settlement_receipt_matches(&local_verdict, &verdict, &observations) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "retained_write_settlement_controller_receipt file={} source={} intent_id={} settled_hash={} action=use_reactive_settlement",
+                        file.display(),
+                        source,
+                        verdict.intent_id().unwrap_or("none"),
+                        observations.authority_hash.as_deref().unwrap_or("none"),
+                    ),
+                );
+                verdict
+            } else {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "retained_write_settlement_controller_projection_lag file={} source={} controller_intent_id={} durable_intent_id={} authority_hash={} disk_hash={} controller_verdict={:?} durable_verdict={:?} action=use_durable_observation",
+                        file.display(),
+                        source,
+                        verdict.intent_id().unwrap_or("none"),
+                        local_verdict.intent_id().unwrap_or("none"),
+                        observations.authority_hash.as_deref().unwrap_or("none"),
+                        observations.disk_hash.as_deref().unwrap_or("none"),
+                        verdict,
+                        local_verdict,
+                    ),
+                );
+                local_verdict
+            }
         }
         Ok(verdict) => verdict,
         Err(e) => {
@@ -7169,6 +7217,62 @@ pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn satisfied_settlement(intent_id: &str, settled_hash: &str) -> SettlementVerdict {
+        SettlementVerdict::Satisfied {
+            intent_id: intent_id.to_string(),
+            retained_target_hash: "retained-target".to_string(),
+            settled_hash: settled_hash.to_string(),
+            proof:
+                agent_doc_state_backbone::retained_write::SatisfiedProof::RebasedPayloadMaterialized,
+            intent_source:
+                agent_doc_state_backbone::write_source::DocumentWriteSource::PendingWrite,
+        }
+    }
+
+    #[test]
+    fn reactive_settlement_receipt_joins_same_intent_on_exact_durable_cut() {
+        let local = SettlementVerdict::Unsettled {
+            intent_id: "intent-1".to_string(),
+            cause: agent_doc_state_backbone::retained_write::UnsettledCause::PayloadAbsentFromConvergedContent,
+        };
+        let controller = satisfied_settlement("intent-1", "settled-cut");
+        let observations = agent_doc_controller_io::project_controller::RetainedWriteObservations {
+            authority_hash: Some("settled-cut".to_string()),
+            disk_hash: Some("settled-cut".to_string()),
+            ..Default::default()
+        };
+
+        assert!(controller_settlement_receipt_matches(
+            &local,
+            &controller,
+            &observations,
+        ));
+    }
+
+    #[test]
+    fn reactive_settlement_receipt_rejects_other_intent_or_content_cut() {
+        let local = SettlementVerdict::Unsettled {
+            intent_id: "intent-1".to_string(),
+            cause: agent_doc_state_backbone::retained_write::UnsettledCause::PayloadAbsentFromConvergedContent,
+        };
+        let observations = agent_doc_controller_io::project_controller::RetainedWriteObservations {
+            authority_hash: Some("settled-cut".to_string()),
+            disk_hash: Some("settled-cut".to_string()),
+            ..Default::default()
+        };
+
+        assert!(!controller_settlement_receipt_matches(
+            &local,
+            &satisfied_settlement("intent-2", "settled-cut"),
+            &observations,
+        ));
+        assert!(!controller_settlement_receipt_matches(
+            &local,
+            &satisfied_settlement("intent-1", "other-cut"),
+            &observations,
+        ));
+    }
 
     #[test]
     fn atomic_repair_projection_classifies_late_editor_attachment() {

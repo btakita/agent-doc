@@ -18533,7 +18533,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     for required in [
         "start_runtime_restart_frontmatter",
-        "idle_watch_editor_converged_to_head",
+        "idle_watch_queue_boundary",
         "idle_watch_active_queue_head",
         "idle_watch_forced_context_reset_reason",
     ] {

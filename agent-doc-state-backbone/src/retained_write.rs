@@ -531,6 +531,49 @@ pub fn settlement_verdict(
     materialize_settlement_verdict(decision, pending, authority)
 }
 
+/// Join a caller-observed settlement receipt into the controller's retained
+/// graph.
+///
+/// A short-lived process can retain semantic response material that the
+/// reconstructed controller projection does not (for example after a CRDT
+/// rebase changed the whole-document target hash). The receipt is evidence,
+/// not a command: it may refine the derived verdict only when the pending
+/// intent identity, retained target, and both converged content planes close
+/// the same causal cut.
+pub fn settlement_verdict_with_receipt(
+    pending: Option<&RetainedIntentFacts>,
+    authority: Option<&ContentObservation>,
+    disk: Option<&ContentObservation>,
+    receipt: Option<&SettlementVerdict>,
+) -> SettlementVerdict {
+    let derived = settlement_verdict(pending, authority, disk);
+    let (
+        Some(pending),
+        Some(authority),
+        Some(disk),
+        Some(
+            receipt @ SettlementVerdict::Satisfied {
+                intent_id,
+                retained_target_hash,
+                settled_hash,
+                ..
+            },
+        ),
+    ) = (pending, authority, disk, receipt)
+    else {
+        return derived;
+    };
+    if intent_id == &pending.intent_id
+        && retained_target_hash == &pending.target_hash
+        && settled_hash == &authority.content_hash
+        && settled_hash == &disk.content_hash
+    {
+        receipt.clone()
+    } else {
+        derived
+    }
+}
+
 /// Document-scoped cells holding retained-write settlement.
 ///
 /// The observations are [`Source`]s and the verdict is a [`Computed`] over them, so every consumer that reads `verdict()`
@@ -653,6 +696,81 @@ mod tests {
             payload_materialized,
             intent_delta_materialized: false,
         }
+    }
+
+    fn satisfied_receipt(
+        intent_id: &str,
+        target_hash: &str,
+        settled_hash: &str,
+    ) -> SettlementVerdict {
+        SettlementVerdict::Satisfied {
+            intent_id: intent_id.to_string(),
+            retained_target_hash: target_hash.to_string(),
+            settled_hash: settled_hash.to_string(),
+            proof: SatisfiedProof::RebasedPayloadMaterialized,
+            intent_source: DocumentWriteSource::PendingWrite,
+        }
+    }
+
+    #[test]
+    fn reactive_receipt_refines_reconstructed_controller_verdict() {
+        let pending = intent("target", false);
+        let authority = observed("rebased-cut", false);
+        let disk = observed("rebased-cut", false);
+        let receipt = satisfied_receipt("intent-1", "target", "rebased-cut");
+
+        assert!(matches!(
+            settlement_verdict(Some(&pending), Some(&authority), Some(&disk)),
+            SettlementVerdict::Unsettled {
+                cause: UnsettledCause::PayloadAbsentFromConvergedContent,
+                ..
+            }
+        ));
+        assert_eq!(
+            settlement_verdict_with_receipt(
+                Some(&pending),
+                Some(&authority),
+                Some(&disk),
+                Some(&receipt),
+            ),
+            receipt,
+        );
+    }
+
+    #[test]
+    fn reactive_receipt_is_fenced_by_intent_target_and_both_planes() {
+        let pending = intent("target", false);
+        let authority = observed("rebased-cut", false);
+        let disk = observed("rebased-cut", false);
+        let derived = settlement_verdict(Some(&pending), Some(&authority), Some(&disk));
+
+        for receipt in [
+            satisfied_receipt("other-intent", "target", "rebased-cut"),
+            satisfied_receipt("intent-1", "other-target", "rebased-cut"),
+            satisfied_receipt("intent-1", "target", "other-cut"),
+        ] {
+            assert_eq!(
+                settlement_verdict_with_receipt(
+                    Some(&pending),
+                    Some(&authority),
+                    Some(&disk),
+                    Some(&receipt),
+                ),
+                derived,
+            );
+        }
+        assert_eq!(
+            settlement_verdict_with_receipt(
+                Some(&pending),
+                Some(&authority),
+                Some(&observed("other-disk", false)),
+                Some(&satisfied_receipt("intent-1", "target", "rebased-cut")),
+            ),
+            SettlementVerdict::Unsettled {
+                intent_id: "intent-1".to_string(),
+                cause: UnsettledCause::AuthorityDiskDiverged,
+            },
+        );
     }
 
     #[test]

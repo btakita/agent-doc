@@ -384,6 +384,7 @@ mod tests {
             visible,
             columns,
             force_reconcile: false,
+            focus_only: false,
         }
     }
 

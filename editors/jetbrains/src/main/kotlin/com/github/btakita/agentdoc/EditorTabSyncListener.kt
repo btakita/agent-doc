@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.google.gson.JsonParser
 import com.google.gson.annotations.SerializedName
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
@@ -34,10 +35,10 @@ import java.util.concurrent.atomic.AtomicReference
  * generation guard so a burst reports only its final state. Capture is projected by the next EDT
  * event; socket delivery remains off the EDT, so neither side waits on the other.
  *
- * Focus has a separate micro-coalesced command lane because a visible editor surface may span
+ * Focus has a separate micro-coalesced state lane because a visible editor surface may span
  * documents owned by different project controllers. The focused file resolves its own controller
- * root and submits one generation-fenced `focus_document_pane` intent; the surface observation
- * remains the authority for layout reconciliation.
+ * root and publishes one generation-fenced, focus-only surface Source; that controller's Lazily
+ * graph derives pane selection while the spanning surface remains the authority for layout.
  *
  * Registered from [PluginLifecycleListener] via [install] so it survives hot-reload.
  */
@@ -57,7 +58,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * project's pending observation.
      */
     private val generation = AtomicLong(0)
-    private val focusGeneration = AtomicLong(0)
+private val focusProjectionGeneration = AtomicLong(0)
     private val lifecycleLock = Any()
 
     @Volatile
@@ -66,8 +67,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
     private val surfaceDeliveryExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "agent-doc-editor-surface-delivery").apply { isDaemon = true }
     }
-    private val focusDeliveryExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "agent-doc-editor-focus-delivery").apply { isDaemon = true }
+private val focusProjectionExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+    Thread(runnable, "agent-doc-editor-focus-projection").apply { isDaemon = true }
     }
 
     companion object {
@@ -85,12 +86,37 @@ class EditorTabSyncListener : FileEditorManagerListener {
             instances.remove(project)?.shutdown()
         }
 
-        internal fun shouldDispatchFocus(
-            requestedGeneration: Long,
-            currentGeneration: Long,
-            projectWindowActive: Boolean,
+    internal fun shouldPublishFocusProjection(
+        requestedGeneration: Long,
+        currentGeneration: Long,
+        projectWindowActive: Boolean,
         ): Boolean =
-            requestedGeneration == currentGeneration && projectWindowActive
+        requestedGeneration == currentGeneration && projectWindowActive
+
+    /**
+     * Exact effect receipt for the retained focus-only surface. Admission is not success: install
+     * the reverse-focus handoff lease only after the controller proves `select-pane`.
+     */
+    internal fun focusProjectionApplied(receiptJson: String): Boolean {
+        return try {
+            val receipt = JsonParser.parseString(receiptJson).asJsonObject
+            val outcome =
+                receipt.get("outcome")
+                    ?.takeUnless { it.isJsonNull }
+                    ?.asString
+                    ?.let(JsonParser::parseString)
+                    ?.asJsonObject
+                    ?: return false
+            val data =
+                outcome.get("data")
+                    ?.takeIf { it.isJsonObject }
+                    ?.asJsonObject
+                    ?: outcome
+            data.get("focused")?.asBoolean == true
+        } catch (_: Exception) {
+            false
+        }
+    }
     }
 
 internal enum class ObservationAuthority {
@@ -228,6 +254,7 @@ internal object SelectionProjectionSettling {
         val open: List<String>,
         val columns: List<SurfaceColumnPayload>,
         @SerializedName("force_reconcile") val forceReconcile: Boolean,
+        @SerializedName("focus_only") val focusOnly: Boolean,
     )
 
 private data class PendingSurfaceObservation(
@@ -370,6 +397,24 @@ private data class CapturedSurface(
                         ?.filter { it.files.isNotEmpty() }
                         .orEmpty(),
                 forceReconcile = forceReconcile,
+                focusOnly = false,
+            )
+
+        /**
+         * Selected-document state published to that document's own controller.
+         *
+         * This is intentionally a separate retained source from the spanning layout surface:
+         * cross-root editor splits need the subproject controller to own pane selection, but the
+         * narrow payload must never be mistaken for a one-column layout replacement.
+         */
+        fun buildFocusProjection(focusedFile: String): EditorSurfacePayload =
+            EditorSurfacePayload(
+                focused = focusedFile,
+                visible = listOf(focusedFile),
+                open = listOf(focusedFile),
+                columns = emptyList(),
+                forceReconcile = true,
+                focusOnly = true,
             )
     }
 
@@ -469,8 +514,10 @@ private data class CapturedSurface(
                                 surfaceRoots.rootsToRetireBeforePublishing(pending.projectRoot)
                             }
                         }
-                    for (obsoleteRoot in rootsToRetire) {
-                        if (CpRouteClient.forgetEditorSurface(obsoleteRoot)) {
+            for (obsoleteRoot in rootsToRetire) {
+                val surfaceForgotten = CpRouteClient.forgetEditorSurface(obsoleteRoot)
+                CpRouteClient.forgetEditorFocus(obsoleteRoot)
+                if (surfaceForgotten) {
                             surfaceRoots.markForgotten(obsoleteRoot)
                             log(
                                 "observe: retired superseded surface root before publish " +
@@ -509,13 +556,16 @@ private data class CapturedSurface(
                                 surfaceRoots.markPublished(pending.projectRoot)
                             }
                         }
-                    if (obsoleteRoots == null) {
-                        CpRouteClient.forgetEditorSurface(pending.projectRoot)
-                        surfaceRoots.markForgotten(pending.projectRoot)
-                        return@execute
-                    }
-                    for (obsoleteRoot in obsoleteRoots) {
-                        if (CpRouteClient.forgetEditorSurface(obsoleteRoot)) {
+            if (obsoleteRoots == null) {
+                CpRouteClient.forgetEditorSurface(pending.projectRoot)
+                CpRouteClient.forgetEditorFocus(pending.projectRoot)
+                surfaceRoots.markForgotten(pending.projectRoot)
+                return@execute
+            }
+            for (obsoleteRoot in obsoleteRoots) {
+                val surfaceForgotten = CpRouteClient.forgetEditorSurface(obsoleteRoot)
+                CpRouteClient.forgetEditorFocus(obsoleteRoot)
+                if (surfaceForgotten) {
                             surfaceRoots.markForgotten(obsoleteRoot)
                             log(
                                 "observe: retired superseded surface root=$obsoleteRoot " +
@@ -687,24 +737,27 @@ private data class CapturedSurface(
         )
     }
 
-    private fun requestImmediateFocus(project: Project, file: VirtualFile) {
-        val requestedGeneration = focusGeneration.incrementAndGet()
+    private fun requestFocusProjection(project: Project, file: VirtualFile) {
+        val requestedGeneration = focusProjectionGeneration.incrementAndGet()
         synchronized(lifecycleLock) {
             if (closed) return
             try {
-                focusDeliveryExecutor.schedule(
+                focusProjectionExecutor.schedule(
                     focus@{
                         if (
                             project.isDisposed ||
-                                !shouldDispatchFocus(
+                                !shouldPublishFocusProjection(
                                     requestedGeneration = requestedGeneration,
-                                    currentGeneration = focusGeneration.get(),
+                                    currentGeneration = focusProjectionGeneration.get(),
                                     projectWindowActive =
                                         WindowManager.getInstance().getFrame(project)?.isActive ==
                                             true,
                                 )
                         ) {
-                            log("focus: superseded, inactive, or disposed gen=$requestedGeneration")
+                            log(
+                                "focus projection: superseded, inactive, or disposed " +
+                                    "gen=$requestedGeneration",
+                            )
                             return@focus
                         }
 
@@ -715,34 +768,44 @@ private data class CapturedSurface(
                         val (projectRoot, _) = TerminalUtil.resolveProject(project, file)
                         if (
                             project.isDisposed ||
-                                !shouldDispatchFocus(
+                                !shouldPublishFocusProjection(
                                     requestedGeneration = requestedGeneration,
-                                    currentGeneration = focusGeneration.get(),
+                                    currentGeneration = focusProjectionGeneration.get(),
                                     projectWindowActive =
                                         WindowManager.getInstance().getFrame(project)?.isActive ==
                                             true,
                                 )
                         ) {
                             log(
-                                "focus: superseded, inactive, or disposed after root resolution " +
-                                    "gen=$requestedGeneration",
+                                "focus projection: superseded, inactive, or disposed after " +
+                                    "root resolution gen=$requestedGeneration",
                             )
                             return@focus
                         }
 
-                        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
+                        val surfaceJson =
+                            GSON.toJson(SurfaceReport.buildFocusProjection(file.path))
                         val receipt =
-                            CpRouteClient.submitFocusDocumentPane(
+                            CpRouteClient.observeEditorFocus(
                                 projectRoot = projectRoot,
-                                documentPath = file.path,
+                                surfaceJson = surfaceJson,
                             )
                         if (receipt.exitCode != 0) {
                             LOG.warn(
-                                "[focus] focus_document_pane unavailable for ${file.path}: " +
+                                "[focus] retained focus projection unavailable for ${file.path}: " +
                                     receipt.output,
                             )
+                        } else if (focusProjectionApplied(receipt.output)) {
+                            // Reverse tmux→editor mirroring is suppressed only after the
+                            // controller proves that this exact retained projection selected
+                            // the pane. A missing actor must not install a 90-second stale lease.
+                            TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
+                            log("focus projection: applied file=${file.path}")
                         } else {
-                            log("focus: file=${file.path} receipt=${receipt.output}")
+                            log(
+                                "focus projection: retained without pane selection " +
+                                    "file=${file.path} receipt=${receipt.output}",
+                            )
                         }
                     },
                     FOCUS_COALESCE_MS,
@@ -750,7 +813,10 @@ private data class CapturedSurface(
                 )
             } catch (rejected: RejectedExecutionException) {
                 if (!closed) {
-                    LOG.warn("[focus] focus delivery rejected while listener is active", rejected)
+                    LOG.warn(
+                        "[focus] focus projection rejected while listener is active",
+                        rejected,
+                    )
                 }
             }
         }
@@ -760,8 +826,8 @@ private data class CapturedSurface(
         val roots =
             synchronized(lifecycleLock) {
                 closed = true
-                focusGeneration.incrementAndGet()
-                focusDeliveryExecutor.shutdownNow()
+                focusProjectionGeneration.incrementAndGet()
+                focusProjectionExecutor.shutdownNow()
                 surfaceDeliveryExecutor.shutdownNow()
                 surfaceRoots.drain()
             }
@@ -770,6 +836,7 @@ private data class CapturedSurface(
                 {
                     for (root in roots) {
                         CpRouteClient.forgetEditorSurface(root)
+                        CpRouteClient.forgetEditorFocus(root)
                     }
                 },
                 "agent-doc-editor-surface-forget",
@@ -785,7 +852,7 @@ private data class CapturedSurface(
         if (!file.name.endsWith(".md")) return
 
         val project = event.manager.project
-        requestImmediateFocus(project, file)
+        requestFocusProjection(project, file)
         log("selectionChanged: newFile=${file.name}; projection queued")
 
         // Focus owns targeted session recovery. Re-forcing a full surface
@@ -835,7 +902,7 @@ private data class CapturedSurface(
      */
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
-        requestImmediateFocus(project, file)
+        requestFocusProjection(project, file)
         log("focusGained: file=${file.name}")
     }
 

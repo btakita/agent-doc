@@ -14,8 +14,8 @@ import org.junit.Test
 /**
  * The plugin does not plan layout (`#jbsurfaceswap`) — dedup and reconciliation are the reactive
  * graph's, exercised by `agent-doc-editor-surface`. The editor reports the surface it actually
- * sees and separately submits the focused document to that document's own controller so
- * cross-project splits get an immediate pane handoff.
+ * sees and separately publishes focused-document state to that document's own controller so
+ * cross-project splits get a derived pane handoff.
  */
 class EditorTabSyncListenerTest {
     private val gson = Gson()
@@ -36,26 +36,45 @@ class EditorTabSyncListenerTest {
         )
 
     @Test
-    fun `focus dispatch is generation fenced and requires the active project window`() {
+    fun `focus projection is generation fenced and requires the active project window`() {
         assertTrue(
-            EditorTabSyncListener.shouldDispatchFocus(
+            EditorTabSyncListener.shouldPublishFocusProjection(
                 requestedGeneration = 7,
                 currentGeneration = 7,
                 projectWindowActive = true,
             ),
         )
         assertFalse(
-            EditorTabSyncListener.shouldDispatchFocus(
+            EditorTabSyncListener.shouldPublishFocusProjection(
                 requestedGeneration = 6,
                 currentGeneration = 7,
                 projectWindowActive = true,
             ),
         )
         assertFalse(
-            EditorTabSyncListener.shouldDispatchFocus(
+            EditorTabSyncListener.shouldPublishFocusProjection(
                 requestedGeneration = 7,
                 currentGeneration = 7,
                 projectWindowActive = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `focus projection installs a handoff lease only after exact pane selection`() {
+        assertTrue(
+            EditorTabSyncListener.focusProjectionApplied(
+                """{"idle":false,"outcome":"{\"focused\":true,\"reason\":\"focused\"}","error":null}""",
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.focusProjectionApplied(
+                """{"idle":false,"outcome":null,"error":"missing_actor_record"}""",
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.focusProjectionApplied(
+                """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"missing_actor_record\"}"}""",
             ),
         )
     }
@@ -76,6 +95,26 @@ class EditorTabSyncListenerTest {
             )
 
         assertEquals("/repo/tasks/agent-doc/agent-doc-bugs2.md", activeFile)
+    }
+
+    @Test
+    fun `focused document projection is explicitly selection only`() {
+        val projection =
+            JsonParser.parseString(
+                gson.toJson(
+                EditorTabSyncListener.SurfaceReport.buildFocusProjection(
+                    "/repo/src/sample-app/tasks/sample-app.md",
+                ),
+            ),
+        ).asJsonObject
+
+        assertEquals(
+            "/repo/src/sample-app/tasks/sample-app.md",
+            projection.get("focused").asString,
+        )
+        assertTrue(projection.get("focus_only").asBoolean)
+        assertTrue(projection.get("force_reconcile").asBoolean)
+        assertEquals(0, projection.getAsJsonArray("columns").size())
     }
 
     @Test
@@ -514,7 +553,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `document selection publishes layout while component focus stays selection-only`() {
+    fun `document selection publishes layout and retained focus state`() {
         val source =
             Files.readString(
                 Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
@@ -528,7 +567,7 @@ class EditorTabSyncListenerTest {
                 .substringAfter("override fun selectionChanged(event: FileEditorManagerEvent)")
                 .substringBefore("fun onEditorFocusGained")
         assertTrue(selection.contains("requestObservation("))
-        assertTrue(selection.contains("requestImmediateFocus(project, file)"))
+        assertTrue(selection.contains("requestFocusProjection(project, file)"))
         assertFalse(selection.contains("manager.selectedFiles"))
         assertFalse(selection.contains("collectVisibleMarkdownFiles"))
         assertFalse(selection.contains("CpRouteClient"))
@@ -543,17 +582,21 @@ class EditorTabSyncListenerTest {
             source
                 .substringAfter("fun onEditorFocusGained(project: Project, file: VirtualFile)")
                 .substringBefore("fun onEditorLayoutChanged")
-        assertTrue(focusGained.contains("requestImmediateFocus(project, file)"))
+        assertTrue(focusGained.contains("requestFocusProjection(project, file)"))
         assertFalse(focusGained.contains("requestObservation("))
         assertFalse(focusGained.contains("delayMs"))
 
-        val immediateFocus =
+        val focusProjection =
             source
-                .substringAfter("private fun requestImmediateFocus(project: Project, file: VirtualFile)")
+                .substringAfter("private fun requestFocusProjection(project: Project, file: VirtualFile)")
                 .substringBefore("private fun shutdown()")
-        assertTrue(immediateFocus.contains("TerminalUtil.resolveProject(project, file)"))
-        assertTrue(immediateFocus.contains("CpRouteClient.submitFocusDocumentPane("))
-        assertTrue(immediateFocus.contains("TmuxPaneFocusSync.recordEditorFocusIntent("))
+        assertTrue(focusProjection.contains("TerminalUtil.resolveProject(project, file)"))
+        assertTrue(focusProjection.contains("CpRouteClient.observeEditorFocus("))
+        assertFalse(focusProjection.contains("submitFocusDocumentPane("))
+        assertTrue(
+            focusProjection.indexOf("focusProjectionApplied(receipt.output)") <
+                focusProjection.indexOf("TmuxPaneFocusSync.recordEditorFocusIntent("),
+        )
     }
 
     @Test
@@ -573,7 +616,7 @@ class EditorTabSyncListenerTest {
         val resolution =
             source
                 .substringAfter("private fun resolveSurface(")
-                .substringBefore("private fun requestImmediateFocus(")
+                .substringBefore("private fun requestFocusProjection(")
 
         assertFalse(capture.contains("TerminalUtil.resolveProject("))
         assertFalse(capture.contains("nearestAgentDocProjectRoot"))
@@ -728,7 +771,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `component focus uses the selection-only lane`() {
+    fun `component focus publishes selection-only state`() {
         val listenerPath =
             listOf(
                     Paths.get(
@@ -744,7 +787,7 @@ class EditorTabSyncListenerTest {
                 .substringAfter("fun onEditorFocusGained(project: Project, file: VirtualFile)")
                 .substringBefore("fun onEditorLayoutChanged(project: Project)")
 
-        assertTrue(focusBody.contains("requestImmediateFocus(project, file)"))
+        assertTrue(focusBody.contains("requestFocusProjection(project, file)"))
         assertFalse(focusBody.contains("requestObservation("))
     }
 }

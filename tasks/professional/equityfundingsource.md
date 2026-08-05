@@ -96,11 +96,25 @@ Done. The homepage Google Reviews card now uses the descriptive linked sentence 
 - Deployment: not requested in this cycle.
 
 Confidence: high. Escalation: none.
+
+### Re: Staging deployment — gpt-5
+
+> **Queue prompt:** staging deploy
+
+Done. The direct Google Reviews CTA is deployed to the EFS staging site.
+
+- Changed paths: none this cycle; staging deployed the already committed and pushed `main` commit `83d57451`.
+- Command: `bun run --cwd app/equityfundingsource deploy:worker` completed successfully, including the Worker build and staging D1 migration check.
+- Staging Worker version: `6ceeb497-c6be-46bf-8dd0-edee9aea7446` at https://equityfundingsource.brian-takita.workers.dev/.
+- Verification: the homepage returns HTTP 200 and serves “Read why clients rate us 5 stars on Google” with the direct Google Maps review link; staging has no pending D1 migrations.
+- Repository state: `main` is clean and synchronized with `origin/main`.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:6e1653fa:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Can we add a key phrase or sentence with a link to the direct Google reviews in the home page? 
+- staging deploy
 <!-- /agent:queue -->
 
 ## Backlog

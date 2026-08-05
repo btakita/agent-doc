@@ -880,6 +880,42 @@ Published commits: lazily-spec `1c7f840e90bd80c4f791dcd4c722f0675e569ca8`; umbre
 Confidence is high for the new guard and the three signaling claims: both real source mutants and guard mutations redden at the intended seam. The remaining 64 claims are explicitly low-confidence/unproven until the new burn-down item converts them.
 
 Repository hygiene is preserved: the staged deletion `tasks/professional/octavian-gabriel-stan.md` remains staged only in the root `agent-loop` repo, and user-owned instruction/runbook edits remain excluded from every task commit.
+
+### Re: `lzrung2gaps` — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzrung2gaps]
+
+
+Completed the rung-2/rung-3 conformance audit and closed every surviving gap.
+
+C++ now routes the command, distributed, lossless-tree, seqcrdt, statechart, stdlib, topic, and reactive-graph expectation blocks through the shared `AssertionKeys` tracker. Object-valued expectations descend into child trackers, statechart operation inputs are explicitly distinguished from assertions, and reactive-graph's older private JSON model projects assertion blocks structurally into the shared tracker without replacing its replay parser. Receipts was already on `AssertionKeys` at current HEAD and needed no edit.
+
+The conversion exposed two real assertion holes, which are now executable checks: topic subscribe steps mint and prime the reader probe before the operation so `invalidates` measures a real set-to-unset transition, and command ignored-frame assertions prove the reducer projection stayed unchanged instead of assuming every ignored frame reports a stale-generation status. The newly discriminating three-peer signaling fixture also exposed unsorted C++ welcome rosters; the library now sorts that roster before emission.
+
+C# StateChart now wraps every mixed step in `FixtureAssertions`, explicitly excuses only `event` / `guards` as replay inputs, routes `accepted`, `active`, optional `actions`, and each nested `matches` entry through fixture-valued assertions, then calls `Verify()`. Kotlin materialization was already conformant at current HEAD: `default_mode` has a falsifiable explicit excuse, all `observe` entries descend through child trackers, and the full suite remains green.
+
+Mutation proof was fail-closed: one planted assertion key in each of the eight converted C++ runner shapes produced the shared unconsumed-key diagnostic; the same planted StateChart step key failed C# at `FixtureAssertions.Verify`. All temporary corpus mutations were restored exactly.
+
+Published commits:
+
+- lazily-cpp `951d8a6f0e` — `test: close conformance assertion-key gaps`
+- lazily-cs `78507cc681` — `test: track statechart fixture assertions`
+- umbrella `a889541596` — `chore: pin conformance assertion tracking` (published from clean `origin/main`)
+- local umbrella pin `76720c0551`; the unrelated staged deletion remains staged and no instruction/runbook edits were included.
+
+Verification:
+
+- lazily-cpp `make check`: PASS
+- lazily-cs `make check`: PASS
+- lazily-kt `make check`: PASS
+- agent-loop umbrella `make check`: PASS
+- latest lazily-cpp CI run `30993749715`: PASS
+- latest lazily-cs CI run `30993750916`: PASS
+- scoped staged diffs passed `git diff --cached --check`
+- confidence: high
+- escalation: none
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
@@ -888,17 +924,17 @@ Repository hygiene is preserved: the staged deletion `tasks/professional/octavia
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#rootlevelconformance]~~
 - ~~do [#lzfixturediscrim]~~
-- do [#lzrung2gaps]
+- ~~do [#lzrung2gaps]~~
 - do [#lzstructfieldreads]
 - do [#lzassertwithseam]
 - 📌 do [#kny1]
 - 📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.
+- do [#lzdiscriminabilityburn]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzrung2gaps] Conformance runners still outside the unconsumed-key guard entirely, all surfaced while closing #lzconsumednotasserted. lazily-cpp: nine fixture-replaying runners (command, distributed, lossless_tree, receipts, seqcrdt, statechart, stdlib, topic, reactive_graph) carry hand-rolled unknown-key guards instead of the shared AssertionKeys tracker, so they get neither rung 2 nor rung 3, and test_command_conformance.cpp has no unknown-key guard over its expect block at all. lazily-cs: StateChartConformanceTests has no FixtureAssertions tracker because its steps mix op inputs with assertions. Same class in lazily-kt, where bringing MaterializationConformanceTest under the tracker exposed two keys no runner had ever read - default_mode, and observe in deferral_not_deallocation.json. Convert each to the shared tracker so both rungs apply, and mutation-check every conversion rather than trusting the green that follows it.
 - [ ] [#lzstructfieldreads] Typed bindings that decode a fixture block into a struct have a blind spot no map-based key tracker can see: an unused local will not compile, but an unused FIELD is silent, so the key counts as consumed at decode time and is then discarded. Found in lazily-go while closing #lzconsumednotasserted, where open_handles and schema_version were both decoded and never read - one of them stayed hidden precisely because its field name collided with a real method. The fix there is TestConformanceStructFieldsAreRead, a go/ast scan of the package's own test sources with a both-directions excuse allowlist. lazily-go is covered. Check whether lazily-rs (serde structs), lazily-cs, lazily-cpp and lazily-zig decode any fixture block into a typed struct rather than reading it through their key tracker, and port the equivalent scan wherever they do.
 - [ ] [#lzassertwithseam] The non-equality escape hatch added under #lzconsumednotasserted marks a key asserted BEFORE it runs the caller's check, so a closure that ignores its argument marks the key without proving anything. Flagged by lazily-rs about assert_key_with, and the same seam exists in every binding's equivalent - it is the one place in the new guard held by discipline rather than by the type system, which is exactly the shape of defect this whole ladder exists to remove. Tighten it so the fixture value must actually be consumed: hand the closure a wrapper that records its own read and mark the key asserted only if that read happened, or narrow the API to a fixed set of comparison combinators. Mutation-check by writing a closure that ignores its argument and confirming the guard reddens.
 - [ ] [#kny1] Please help me setup trusted publishing with npm.

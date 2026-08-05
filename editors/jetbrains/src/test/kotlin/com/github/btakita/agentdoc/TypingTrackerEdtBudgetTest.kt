@@ -367,6 +367,8 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "late visual refresh callbacks must become inert after plugin generation disposal",
             visualHighlighter.contains("private val disposed = AtomicBoolean(false)") &&
+                visualHighlighter.contains("private val refreshLifecycleLock = Any()") &&
+                visualHighlighter.contains("synchronized(refreshLifecycleLock)") &&
                 visualHighlighter.contains("catch (_: RejectedExecutionException)") &&
                 visualHighlighter.contains("if (!disposed.compareAndSet(false, true)) return"),
         )

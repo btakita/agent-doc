@@ -55,6 +55,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
     }
     private val pendingRefreshes = ConcurrentHashMap<Document, ScheduledFuture<*>>()
     private val disposed = AtomicBoolean(false)
+    private val refreshLifecycleLock = Any()
 
     init {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(object : DocumentListener {
@@ -111,30 +112,33 @@ class VisualHighlighterManager private constructor(private val project: Project)
     }
 
     private fun scheduleRefresh(document: Document) {
-        if (disposed.get() || project.isDisposed || refreshExecutor.isShutdown || !isMarkdown(document)) return
-        pendingRefreshes.remove(document)?.cancel(false)
-        lateinit var future: ScheduledFuture<*>
-        try {
-            future = refreshExecutor.schedule({
-                try {
-                    if (disposed.get() || project.isDisposed) return@schedule
-                    val snapshot = collectVisualTokens(document)
-                    if (snapshot != null) {
-                        ApplicationManager.getApplication().invokeLater {
-                            if (disposed.get() || project.isDisposed) return@invokeLater
-                            applyVisualTokens(document, snapshot)
+        if (!isMarkdown(document)) return
+        synchronized(refreshLifecycleLock) {
+            if (disposed.get() || project.isDisposed || refreshExecutor.isShutdown) return
+            pendingRefreshes.remove(document)?.cancel(false)
+            lateinit var future: ScheduledFuture<*>
+            try {
+                future = refreshExecutor.schedule({
+                    try {
+                        if (disposed.get() || project.isDisposed) return@schedule
+                        val snapshot = collectVisualTokens(document)
+                        if (snapshot != null) {
+                            ApplicationManager.getApplication().invokeLater {
+                                if (disposed.get() || project.isDisposed) return@invokeLater
+                                applyVisualTokens(document, snapshot)
+                            }
                         }
+                    } finally {
+                        pendingRefreshes.remove(document, future)
                     }
-                } finally {
-                    pendingRefreshes.remove(document, future)
-                }
-            }, 120, TimeUnit.MILLISECONDS)
-        } catch (_: RejectedExecutionException) {
-            // A queued editor/VFS callback may race plugin unload. Disposal is
-            // terminal for this manager; the replacement generation owns refreshes.
-            return
+                }, 120, TimeUnit.MILLISECONDS)
+            } catch (_: RejectedExecutionException) {
+                // Defense in depth for an executor implementation that rejects
+                // despite the lifecycle lock. The replacement generation owns refreshes.
+                return
+            }
+            pendingRefreshes[document] = future
         }
-        pendingRefreshes[document] = future
     }
 
     private fun refreshAll() {
@@ -250,10 +254,9 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
         return when (kind) {
             "component_body" -> baseAttrs(null).apply {
-                val accent = editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.METADATA)?.foregroundColor
                 backgroundColor = MarkdownStyleSettings.backgroundFor(
                     kind,
-                    mutedBackground(editor, accent),
+                    editor.colorsScheme.defaultBackground,
                 )
                 fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.PLAIN)
             }
@@ -341,9 +344,11 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
     override fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
-        pendingRefreshes.values.forEach { it.cancel(false) }
-        pendingRefreshes.clear()
-        refreshExecutor.shutdownNow()
+        synchronized(refreshLifecycleLock) {
+            pendingRefreshes.values.forEach { it.cancel(false) }
+            pendingRefreshes.clear()
+            refreshExecutor.shutdownNow()
+        }
         EditorFactory.getInstance().allEditors
             .filter { it.project == project }
             .forEach { clearEditor(it) }

@@ -438,7 +438,7 @@ One.
     }
 
     @Test
-    fun `component body inherits editor foreground`() {
+    fun `component body inherits editor foreground and neutral background`() {
         val visualHighlighterPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/VisualHighlighterManager.kt"),
@@ -449,7 +449,8 @@ One.
             .substringBefore("\"scratch_comment_body\"")
 
         assertTrue(componentBodyBranch.contains("baseAttrs(null).apply"))
-        assertTrue(componentBodyBranch.contains("mutedBackground(editor, accent)"))
+        assertTrue(componentBodyBranch.contains("editor.colorsScheme.defaultBackground"))
+        assertFalse(componentBodyBranch.contains("mutedBackground"))
         assertFalse(componentBodyBranch.contains("foregroundColor ="))
         assertFalse(componentBodyBranch.contains("DefaultLanguageHighlighterColors.METADATA)?.foregroundColor,"))
     }

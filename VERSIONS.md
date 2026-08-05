@@ -12,7 +12,23 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   valid but repeated response. Recovery now joins the durable capture with its
   baseline, retains one exact captured cell only when every competing
   same-topic line is proven to come from that capture, and fails closed on any
-  novel/operator line or topic already present in the baseline.
+  novel/operator line or a non-identical same-topic baseline response.
+
+- **Automatic editor layout projection now preserves live operator-owned
+  panes.** The foreground route convergence introduced in `0.35.133` still
+  reshapes exact-visible layouts when the operator explicitly runs Agent Doc,
+  but a background JetBrains surface refresh first observes the physical tmux
+  window and settles as terminal `operator_owned` when it contains another live
+  actor. It no longer repeatedly swaps the active Agent Doc pane into `stash`
+  or collapses that pane to a one-line placeholder.
+
+- **JetBrains visual refresh disposal is race-free and component rows use a
+  neutral default background.** Refresh scheduling and executor shutdown now
+  share one lifecycle lock, eliminating the check-then-shutdown gap behind
+  `RejectedExecutionException`; the rejection catch remains as defense in
+  depth. Component bodies inherit the editor background unless explicitly
+  overridden, avoiding the poorly composed theme-green row wash. JetBrains
+  plugin `0.2.344` carries the fix.
 
 ## 0.35.133
 

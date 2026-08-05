@@ -428,6 +428,7 @@ pub(crate) enum PaneLayoutProjection {
     NeedsEffect(PaneLayoutDesired),
     Applying(PaneLayoutDesired),
     RetryPending(PaneLayoutDesired),
+    OperatorOwned(PaneLayoutDesired),
     Converged(PaneLayoutDesired),
 }
 
@@ -491,6 +492,14 @@ fn derive_pane_layout_projection(
     });
     let focus_converged = desired.invocation.focus.is_none()
         || (receipt_is_current && (!receipt.focus_required || receipt.focus_applied));
+    if desired.invocation.caller_kind == "automatic"
+        && observation_is_current
+        && observed
+            .as_ref()
+            .is_some_and(|observed| !observed.report.operator_owned_documents.is_empty())
+    {
+        return PaneLayoutProjection::OperatorOwned(desired);
+    }
     if focus_converged
         && observation_is_current
         && observed
@@ -883,6 +892,7 @@ impl ControllerPaneLayoutGraph {
             PaneLayoutProjection::NeedsEffect(_) => ControllerPaneLayoutPhase::NeedsEffect,
             PaneLayoutProjection::Applying(_) => ControllerPaneLayoutPhase::Applying,
             PaneLayoutProjection::RetryPending(_) => ControllerPaneLayoutPhase::RetryPending,
+            PaneLayoutProjection::OperatorOwned(_) => ControllerPaneLayoutPhase::OperatorOwned,
             PaneLayoutProjection::Converged(_) => ControllerPaneLayoutPhase::Converged,
         };
         let observation = self
@@ -1018,7 +1028,8 @@ impl ControllerPaneLayoutGraph {
         loop {
             let projection = self.projection();
             let terminal = match &projection {
-                PaneLayoutProjection::Converged(desired) => desired.generation == generation,
+                PaneLayoutProjection::OperatorOwned(desired)
+                | PaneLayoutProjection::Converged(desired) => desired.generation == generation,
                 PaneLayoutProjection::NeedsEffect(desired)
                 | PaneLayoutProjection::Applying(desired)
                 | PaneLayoutProjection::RetryPending(desired) => desired.generation != generation,
@@ -7356,7 +7367,7 @@ mod tests {
                 ],
                 expected_panes: vec!["%77".to_string(), "%95".to_string()],
                 panes: vec!["%77".to_string(), "%72".to_string(), "%95".to_string()],
-                operator_owned_documents: vec![dispatched_document],
+                operator_owned_documents: vec![dispatched_document.clone()],
                 session_name: Some("agent-doc".to_string()),
                 window_id: Some("@1".to_string()),
                 window_name: Some("agent-doc".to_string()),
@@ -7372,7 +7383,7 @@ mod tests {
                 Some(dispatch_race),
                 PaneLayoutEffectReceipt {
                     generation: 7,
-                    actor_bindings: dispatch_actor_bindings,
+                    actor_bindings: dispatch_actor_bindings.clone(),
                     attempt: 41,
                     phase: PaneLayoutEffectPhase::RetryPending,
                     reason: "pane_count_mismatch".to_string(),
@@ -7383,6 +7394,50 @@ mod tests {
             ),
             PaneLayoutProjection::RetryPending(desired.clone()),
             "an active dispatched pane outside the surface stays retryable until sync stashes it",
+        );
+        let mut automatic_desired = desired.clone();
+        automatic_desired.invocation.caller_kind = "automatic".to_string();
+        let automatic_dispatch_race = PaneLayoutObservation {
+            generation: automatic_desired.generation,
+            actor_bindings: dispatch_actor_bindings.clone(),
+            report: ControllerTmuxLayoutSyncStateReport {
+                synced: false,
+                reason: "pane_count_mismatch".to_string(),
+                expected_documents: automatic_desired.invocation.columns.clone(),
+                actual_documents: vec![
+                    automatic_desired.invocation.columns[0].clone(),
+                    dispatched_document.clone(),
+                    automatic_desired.invocation.columns[1].clone(),
+                ],
+                expected_panes: vec!["%77".to_string(), "%95".to_string()],
+                panes: vec!["%77".to_string(), "%72".to_string(), "%95".to_string()],
+                operator_owned_documents: vec![dispatched_document.clone()],
+                session_name: Some("agent-doc".to_string()),
+                window_id: Some("@1".to_string()),
+                window_name: Some("agent-doc".to_string()),
+                focus: automatic_desired.invocation.focus.clone(),
+                expected_focus_pane: None,
+                active_pane: Some("%72".to_string()),
+            },
+        };
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(automatic_desired.clone()),
+                dispatch_actor_bindings.clone(),
+                Some(automatic_dispatch_race),
+                PaneLayoutEffectReceipt {
+                    generation: automatic_desired.generation,
+                    actor_bindings: dispatch_actor_bindings.clone(),
+                    attempt: 1,
+                    phase: PaneLayoutEffectPhase::RetryPending,
+                    reason: "pane_count_mismatch".to_string(),
+                    file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: false,
+                },
+            ),
+            PaneLayoutProjection::OperatorOwned(automatic_desired),
+            "background editor projection must preserve a live pane outside its surface",
         );
         let missing_surface_pane = PaneLayoutObservation {
             generation: 7,

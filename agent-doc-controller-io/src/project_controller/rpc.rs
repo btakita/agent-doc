@@ -17971,8 +17971,9 @@ fn pane_layout_effect_worker(
         }
         let already_terminal = matches!(
             runtime.pane_layout_projection(),
-            PaneLayoutProjection::Converged(ref converged)
-            if converged.generation == desired.generation
+            PaneLayoutProjection::OperatorOwned(ref terminal)
+                | PaneLayoutProjection::Converged(ref terminal)
+                if terminal.generation == desired.generation
         );
         if already_terminal {
             if pane_layout_effect_worker_complete(
@@ -18002,6 +18003,58 @@ fn pane_layout_effect_worker(
             }
         };
         let actor_bindings = runtime.pane_layout_actor_bindings();
+        if desired.invocation.caller_kind == "automatic" {
+            let observation_invocation = pane_layout_state_invocation(&desired);
+            if let Ok(report) = tmux_layout_sync_state_for_invocation_with_effect_assignment(
+                &bootstrap,
+                &runtime,
+                &observation_invocation,
+                &[],
+            ) && !report.operator_owned_documents.is_empty()
+            {
+                if state.lock().is_superseded(work_revision) {
+                    attempt = 0;
+                    continue;
+                }
+                let operator_owned_documents = report.operator_owned_documents.clone();
+                runtime.record_pane_layout_observation(PaneLayoutObservation {
+                    generation: desired.generation,
+                    actor_bindings: actor_bindings.clone(),
+                    report,
+                });
+                runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
+                    generation: desired.generation,
+                    actor_bindings: actor_bindings.clone(),
+                    attempt,
+                    phase: PaneLayoutEffectPhase::Converged,
+                    reason: "operator_owned_layout".to_string(),
+                    file_panes: Vec::new(),
+                    focus_required: false,
+                    focus_applied: false,
+                });
+                publish_pane_layout_status(&runtime);
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "pane_layout_projection generation={} attempt={} phase=operator_owned operator_owned_documents={:?}",
+                        desired.generation, attempt, operator_owned_documents,
+                    ),
+                );
+                match pane_layout_effect_worker_complete(
+                    &runtime,
+                    &state,
+                    work_revision,
+                    desired.generation,
+                ) {
+                    PaneLayoutAttemptCompletion::Retire => return,
+                    PaneLayoutAttemptCompletion::RetryCurrent
+                    | PaneLayoutAttemptCompletion::Superseded => {
+                        attempt = 0;
+                        continue;
+                    }
+                }
+            }
+        }
         let mut guarded_invocation = desired.invocation.clone();
         guarded_invocation.actor_bindings = actor_bindings.clone();
         let focus_suppressed = suppress_inactive_automatic_layout_focus(
@@ -18347,7 +18400,9 @@ fn pane_layout_attempt_completion(
         return PaneLayoutAttemptCompletion::Superseded;
     }
     match projection {
-        PaneLayoutProjection::Converged(desired) if desired.generation == completed_generation => {
+        PaneLayoutProjection::OperatorOwned(desired) | PaneLayoutProjection::Converged(desired)
+            if desired.generation == completed_generation =>
+        {
             PaneLayoutAttemptCompletion::Retire
         }
         PaneLayoutProjection::RetryPending(desired)
@@ -19241,6 +19296,11 @@ pub(crate) fn handle_sync_tmux_layout(
             {
                 (true, "observed_convergence".to_string())
             }
+            PaneLayoutProjection::OperatorOwned(current)
+                if current.generation == desired.generation =>
+            {
+                (false, "operator_owned_layout".to_string())
+            }
             PaneLayoutProjection::NeedsEffect(current)
             | PaneLayoutProjection::Applying(current)
             | PaneLayoutProjection::RetryPending(current)
@@ -19414,6 +19474,14 @@ mod pane_layout_projection_dispatch_tests {
             pane_layout_attempt_completion(
                 Some(desired.generation),
                 &PaneLayoutProjection::Converged(desired.clone()),
+                desired.generation,
+            ),
+            PaneLayoutAttemptCompletion::Retire
+        );
+        assert_eq!(
+            pane_layout_attempt_completion(
+                Some(desired.generation),
+                &PaneLayoutProjection::OperatorOwned(desired.clone()),
                 desired.generation,
             ),
             PaneLayoutAttemptCompletion::Retire

@@ -17018,13 +17018,42 @@ fn handle_editor_surface_observe(
         None,
     );
     if accepted {
-        // A `Sync` intent publishes the desired layout IN-PROCESS (no socket
-        // round-trip) so the background worker reconciles while the editor
-        // request returns immediately. The eager intent effect is a no-op for
-        // `Sync` in production (see the runtime constructor closure).
-        if let SurfaceIntent::Sync { columns, document } = &receipt.intent {
-            let invocation = automatic_editor_surface_sync_invocation(columns, document);
-            let _ = publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None);
+        // `#tmuxautosyncreactive`: both non-idle intents are handled IN-PROCESS
+        // so the editor socket request never round-trips through the controller
+        // command socket. The eager intent effect is a no-op for both in
+        // production (see the runtime constructor closure).
+        match &receipt.intent {
+            SurfaceIntent::Sync { columns, document } => {
+                let invocation = automatic_editor_surface_sync_invocation(columns, document);
+                let _ = publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None);
+            }
+            // A tab switch within the same layout resolves + `select-pane`s the
+            // target pane directly — a single tmux command, no socket round-trip.
+            SurfaceIntent::Focus { document } => {
+                let focus_request = ControllerRequest {
+                    command: "focus_document_pane".to_string(),
+                    file: Some(PathBuf::from(document)),
+                    session_id: None,
+                    pane_id: None,
+                    window_id: None,
+                    generation: None,
+                    state: None,
+                    caller: None,
+                    reason: None,
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: None,
+                };
+                let _ = handle_focus_document_pane_with_policy(
+                    bootstrap,
+                    Some(runtime),
+                    focus_request,
+                    MissingFocusPanePolicy::ResumeLatest,
+                    None,
+                );
+            }
+            SurfaceIntent::Idle => {}
         }
         let projection = EditorSurfaceProjection {
             client_id: projection_identity.0.clone(),

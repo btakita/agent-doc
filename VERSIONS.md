@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.148
+
+- **Editor tab-switch focus no longer round-trips through the controller command
+  socket (`#tmuxautosyncreactive`).** 0.35.147 deferred the `Sync` intent, but the
+  `Focus` intent (a tab switch within the same layout — the most common operation)
+  still called `focus_document_pane`, which round-tripped through the command
+  socket on every focus change. The production intent runner now defers `Focus`
+  too, and `handle_editor_surface_observe` resolves + `select-pane`s the target
+  pane **in-process** via `handle_focus_document_pane_with_policy` — a single tmux
+  command with no socket round-trip, so the editor request returns in milliseconds.
+
 ## 0.35.147
 
 - **Editor surface observation no longer blocks the editor socket request on a

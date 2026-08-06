@@ -4269,8 +4269,9 @@ impl ControllerRuntime {
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let editor_surface_graph = rpc::ControllerEditorSurfaceGraph::new(Arc::new(
             |project_root, intent| match intent {
-                agent_doc_editor_surface::SurfaceIntent::Sync { .. } => {
-                    Ok("deferred_to_pane_layout_worker".to_string())
+                agent_doc_editor_surface::SurfaceIntent::Sync { .. }
+                | agent_doc_editor_surface::SurfaceIntent::Focus { .. } => {
+                    Ok("deferred_in_process".to_string())
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             },
@@ -11750,8 +11751,9 @@ agent:queue\n\
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let editor_surface_graph = rpc::ControllerEditorSurfaceGraph::new(Arc::new(
             |project_root, intent| match intent {
-                agent_doc_editor_surface::SurfaceIntent::Sync { .. } => {
-                    Ok("deferred_to_pane_layout_worker".to_string())
+                agent_doc_editor_surface::SurfaceIntent::Sync { .. }
+                | agent_doc_editor_surface::SurfaceIntent::Focus { .. } => {
+                    Ok("deferred_in_process".to_string())
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             },

@@ -2,6 +2,10 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.155
+
+- **Guard replica updates that structurally corrupt the canonical (`#replica-structure-guard`).** A connected editor pushing a stale or truncated buffer could tombstone a component close marker (e.g. `<!-- /agent:done -->`), leaving the canonical with an unclosed component that every downstream parse (`exchange list`, `preflight`, `session-check`, `reset`) then refused — a fail-closed wedge with no in-band recovery while disk and `HEAD` stayed correct. `relay_replica_update_for_file` now captures the pre-update canonical, and when a merged editor update introduces a component *parse* failure (unclosed / mismatched / unmatched marker — the unrecoverable class), it restores the canonical to its clean pre-update text via `apply_canonical_replace` (which fans the restoration out to every live member, including the corrupting editor) and forces the corrupting editor to re-project. Duplicate boundaries and duplicate singletons are deliberately excluded so the existing normalization and response-cell repair paths keep working. New regression `relay_update_that_corrupts_canonical_structure_is_restored`; the preflight boundary-dedup test stays green.
+
 ## 0.35.154
 
 - **Strengthen the session-hijack guard for copied documents.** The existing

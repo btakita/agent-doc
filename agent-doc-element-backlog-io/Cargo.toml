@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-backlog-io"
-version = "0.35.154"
+version = "0.35.155"
 edition = "2024"
 description = "Backlog, icebox, review, and done-archive I/O adapters for agent-doc"
 license = "MIT"
@@ -11,18 +11,18 @@ publish = false
 name = "agent_doc_element_backlog_io"
 
 [dependencies]
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.154" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.154" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.154" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.154" }
-agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.35.154" }
-agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.35.154" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.154" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.154" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.154" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.154" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.154" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.154" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.155" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.155" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.155" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.155" }
+agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.35.155" }
+agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.35.155" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.155" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.155" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.155" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.155" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.155" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.155" }
 anyhow = "1"
 
 [dev-dependencies]

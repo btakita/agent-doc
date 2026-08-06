@@ -1976,7 +1976,7 @@ pub fn relay_replica_update_for_file(
     // Reattach the live member but quarantine that unproven update. The normal
     // controller-to-editor canonical projection repairs the consumer; the stale
     // editor baseline is never adopted as whole-document authority.
-    let (packet, reattached, canonical_projection_pending) =
+    let (packet, reattached, canonical_projection_pending, corruption_restored) =
         with_hub_seeded_from_file(file, |hub| -> Result<_> {
             let registered = hub.is_registered(client_id);
             let decision = decide_cold_start_replica_update(
@@ -1984,9 +1984,15 @@ pub fn relay_replica_update_for_file(
                 hub.controller_projection_established(),
                 hub.awaits_canonical_projection(client_id),
             );
-            match decision {
+            // #replica-structure-guard: capture the clean pre-update canonical so a
+            // connected editor pushing a stale/truncated buffer (one whose merged
+            // result would structurally corrupt the canonical — e.g. tombstoning a
+            // component close marker) can be rejected and the canonical restored
+            // before the corruption ever becomes authoritative.
+            let before_text = hub.canonical_text();
+            let (packet, reattached, canonical_projection_pending) = match decision {
                 ColdStartReplicaUpdateDecision::Relay => {
-                    Ok((Some(hub.relay_update(client_id, update)?), false, false))
+                    (Some(hub.relay_update(client_id, update)?), false, false)
                 }
                 ColdStartReplicaUpdateDecision::ReprojectCanonical => {
                     if !registered {
@@ -1994,10 +2000,53 @@ pub fn relay_replica_update_for_file(
                     }
                     hub.establish_controller_projection();
                     hub.ensure_canonical_projection_receipt(client_id)?;
-                    Ok((None, !registered, true))
+                    (None, !registered, true)
+                }
+            };
+            let mut corruption_restored = None;
+            if packet.is_some() {
+                let after_text = hub.canonical_text();
+                // Narrow to component *parse* failures (unclosed / mismatched /
+                // unmatched markers) — the structural break a stale or truncated
+                // editor buffer introduces and that no later normalization can
+                // repair. Duplicate boundaries and duplicate singletons are
+                // deliberately excluded: those have dedicated repair paths
+                // (preflight boundary dedup, response-cell singleton repair) and
+                // can be a legitimate transient canonical state during closeout.
+                let introduced_parse_failure = matches!(
+                    agent_doc_element::element::structural_corruption_reason(&after_text),
+                    Some(reason) if reason.starts_with("parse_error:")
+                ) && agent_doc_element::element::structural_corruption_reason(&before_text)
+                    .is_none();
+                if introduced_parse_failure
+                    && let Some(reason) =
+                        agent_doc_element::element::structural_corruption_reason(&after_text)
+                {
+                    // The merged update structurally corrupted the canonical.
+                    // Restore it to the clean pre-update text. `apply_canonical_replace`
+                    // generates proper CRDT ops and fans the restoration out to every
+                    // live member (including the corrupting editor), so hub-side
+                    // mirrors re-converge to the clean canonical. The corrupting
+                    // editor is also forced to re-project so a still-stale editor
+                    // buffer cannot immediately re-push the same corruption.
+                    hub.apply_canonical_replace(&after_text, &before_text)?;
+                    hub.require_canonical_projection(client_id);
+                    corruption_restored = Some(reason);
                 }
             }
+            Ok((packet, reattached, canonical_projection_pending, corruption_restored))
         })??;
+    if let Some(reason) = corruption_restored {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_update_corruption_rejected file={} authority=multi_replica client_id={} reason={} recovery=canonical_restored_and_member_reprojected",
+                file.display(),
+                client_id,
+                reason,
+            ),
+        );
+    }
     // An editor update proves the doc is open → keep the reactive open-docs authority
     // truthful (also re-seeds it after a recycle-driven phantom-heal reattach).
     mark_editor_open_docs_open(file);
@@ -4994,6 +5043,89 @@ mod tests {
             .expect("missing-replica CP write should recover from Lazily and apply");
         assert!(result.applied);
         with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), next)).unwrap();
+    }
+
+    /// `#replica-structure-guard`: a connected editor that pushes a stale/truncated
+    /// buffer whose merged result would structurally corrupt the canonical (here,
+    /// tombstoning the `<!-- /agent:done -->` close marker so `agent:done` is left
+    /// unclosed) must not be able to make that corruption authoritative. The guard
+    /// restores the canonical to its clean pre-update text and forces the corrupting
+    /// editor to re-project. Regression for the 2026-08-06 agent-doc-bugs2.md wedge
+    /// where a JetBrains replica_update left the canonical missing its close marker.
+    #[test]
+    fn relay_update_that_corrupts_canonical_structure_is_restored() {
+        let (_dir, doc) = temp_doc("replica-structure-guard.md");
+        let body = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- completed work archived in tasks/x.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, body).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap().join(".agent-doc/logs")).unwrap();
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = "intellij:stale-truncated-buffer";
+        let (client_id, bootstrap) =
+            register_replica_for_file_with_liveness(&doc, identity, |_| true)
+                .unwrap()
+                .expect("editor replica should attach");
+        // The canonical is structurally clean before the corrupting push.
+        with_hub(&doc, |hub| {
+            assert!(agent_doc_element::element::structural_corruption_reason(
+                &hub.canonical_text()
+            )
+            .is_none());
+        })
+        .unwrap();
+
+        // The editor's replica mirrors the clean canonical. Simulate a stale /
+        // truncated editor buffer by tombstoning the close marker, then diffing
+        // out the corrupting delta exactly as a real plugin would.
+        let editor =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let frontier = editor.state_vector();
+        let close = "<!-- /agent:done -->";
+        let byte_off = editor.text().find(close).unwrap();
+        let char_off = editor.text()[..byte_off].chars().count() as u32;
+        let char_len = close.chars().count() as u32;
+        editor.apply_local_edit(char_off, char_len, "");
+        assert!(agent_doc_element::element::structural_corruption_reason(&editor.text()).is_some());
+        let corrupting_delta = editor.diff(&frontier).unwrap();
+
+        relay_replica_update_for_file(&doc, identity, &corrupting_delta)
+            .unwrap()
+            .expect("corrupting relay update is handled, not a transport error");
+
+        // The canonical must be restored to its clean pre-update state: the close
+        // marker survived and the document is not structurally corrupt.
+        with_hub(&doc, |hub| {
+            let canonical = hub.canonical_text();
+            assert!(
+                canonical.contains("<!-- /agent:done -->"),
+                "canonical close marker must survive a corrupting replica update:\n{canonical}"
+            );
+            assert!(
+                agent_doc_element::element::structural_corruption_reason(&canonical).is_none(),
+                "canonical must remain structurally clean:\n{canonical}"
+            );
+            assert!(
+                hub.awaits_canonical_projection(client_id),
+                "the corrupting editor must be forced to re-project the clean canonical"
+            );
+        })
+        .unwrap();
+
+        // The rejection is audited.
+        let ops_log =
+            std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("crdt_replica_update_corruption_rejected"),
+            "ops.log must audit the rejected corruption:\n{ops_log}"
+        );
     }
 
     #[test]

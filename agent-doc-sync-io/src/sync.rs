@@ -2147,7 +2147,7 @@ fn run_with_options_internal_at_root(
     // N identical full scans (19 in a measured focus sync). The scope shares one
     // snapshot; tmux-router's pane-mutating methods invalidate it themselves.
     let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
-    // `#ledgerscope`: the dominant hot-path cost. `load_startup_miss` (and
+    // `#ledgerscope`: the dominant hot-path cost.  `load_startup_miss` (and
     // `take_superseded_startup_miss`, which calls it again) loads the ENTIRE
     // `state.db` event ledger and JSON-replays every event just to project one
     // document out of it — per document. Measured here: 995ms of a 1024ms
@@ -2155,6 +2155,19 @@ fn run_with_options_internal_at_root(
     // input per project, so this scope loads it once and lets every projection
     // derive from that; `append_event` invalidates it.
     let _state_ledger = agent_doc_supervisor_io::begin_state_ledger_scope();
+    // `#syncownerreactive` / `#stategraphjoin`: the per-document ownership loop
+    // resolves each candidate pane with `process_tree_contains_pid` /
+    // `process_tree_owner_document_other_than` (sync.rs ~4881/4963/5020/5155),
+    // which without a scope re-walks `/proc` for every pane, every caller, every
+    // pass — the exact "re-observe on every question" shape `owner_graph` exists
+    // to stop. Opening the scope here routes those reads through the reactive
+    // `owner_graph`: each pane root PID is observed once and its derived owner
+    // cells are reused for the rest of the run. Moving/selecting a tmux pane
+    // does not change its process tree, so the `LocalReadScope` observation
+    // stays valid across the run's tmux mutations; a genuinely new pane is a new
+    // root PID and is observed on first request. Nested with the local scope
+    // opened by the unmanaged-harness check below (ref-counted, not replaced).
+    let _process_observation = agent_doc_process_owner_io::begin_process_observation_scope();
     let _lock_guard = lock_guard;
 
     // Check for new build and clear stale caches

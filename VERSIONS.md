@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.145
+
+- **Passive tmux sync now routes per-pane process-tree ownership reads through
+  the reactive `owner_graph`.** The `sync --no-autostart` run opened tmux,
+  pane-snapshot, and state-ledger observation scopes but not the
+  `ProcessObservationScope`, so every candidate pane in the per-document
+  ownership loop (`process_tree_contains_pid` /
+  `process_tree_owner_document_other_than`) re-walked `/proc` from scratch — the
+  exact "re-observe on every question" shape `owner_graph` (`#syncownerreactive`)
+  exists to stop. Opening the scope batches those reads: each pane root PID is
+  observed once and its derived owner cells are reused for the rest of the run.
+  Moving or selecting a tmux pane does not change its process tree, so the
+  `LocalReadScope` observation stays valid across the run's tmux mutations; a
+  genuinely new pane is a new root PID and is observed on first request. Part of
+  the tmux auto-sync latency investigation (`#tmux-autosync-reactive`).
+
 ## 0.35.144
 
 - **Restart Agent now honors a newly persisted exact conversation binding.**

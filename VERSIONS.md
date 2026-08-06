@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.152
+
+- **Also decouple the OperatorOwned projection lane + SimWorld regression tests
+  (`#layoutconvergencelane`).** 0.35.151 fixed the Converged path but the
+  OperatorOwned path still required `observation_is_current` (actor_bindings
+  identity match), so operator-owned layouts still oscillated at ~1Hz under CRDT
+  storms. Both Converged and OperatorOwned now derive from generation + survey
+  alone. Three deterministic regression tests guard the invariant:
+  `layout_convergence_lane_survives_actor_store_storm` (20 actor-store mutations
+  must not invalidate a converged layout),
+  `operator_owned_lane_survives_actor_store_storm`, and
+  `a_new_desired_generation_re_derives_to_needs_effect` (a genuine layout change
+  still re-syncs).
+
 ## 0.35.151
 
 - **Break the reactive coupling that trapped the pane-layout worker in a ~1Hz

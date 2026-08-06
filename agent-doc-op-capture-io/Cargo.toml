@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-op-capture-io"
-version = "0.35.151"
+version = "0.35.152"
 edition = "2024"
 description = "Durable editor operation capture state for agent-doc"
 license = "MIT"
@@ -16,15 +16,15 @@ name = "agent_doc_op_capture_io"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.151" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.151" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.151" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.151" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.151" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.151" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.151" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.151" }
-agent-doc-state-wire = { path = "../agent-doc-state-wire", version = "0.35.151" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.152" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.152" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.152" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.152" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.152" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.152" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.152" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.152" }
+agent-doc-state-wire = { path = "../agent-doc-state-wire", version = "0.35.152" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

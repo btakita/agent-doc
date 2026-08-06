@@ -482,7 +482,7 @@ pub struct ControllerPaneLayoutStateProjection {
     pub attempt: u64,
 }
 
-fn derive_pane_layout_projection(
+pub(crate) fn derive_pane_layout_projection(
     desired: Option<PaneLayoutDesired>,
     actor_bindings: Vec<ControllerTmuxActorBinding>,
     observed: Option<PaneLayoutObservation>,
@@ -496,24 +496,24 @@ fn derive_pane_layout_projection(
     let observation_is_current = observed.as_ref().is_some_and(|observed| {
         observed.generation == desired.generation && observed.actor_bindings == actor_bindings
     });
-    // `#layoutconvergencelane`: convergence is a physical-layout fact (the tmux
-    // panes are in the right arrangement for this desired generation), NOT a
-    // session-identity fact. Derive it from generation + survey-synced alone so
-    // actor-store mutations (CRDT replica storms, session heartbeats) cannot
-    // invalidate a converged layout and trap the worker in a ~1Hz re-sync loop.
-    // A genuine layout change arrives as a NEW desired generation.
+    let _ = observation_is_current;
+    // `#layoutconvergencelane`: convergence and operator-owned are physical-
+    // layout facts (the tmux panes are in the right arrangement for this desired
+    // generation), NOT session-identity facts. Derive them from generation +
+    // survey alone so actor-store mutations (CRDT replica storms, session
+    // heartbeats, unrelated document events) cannot invalidate a settled layout
+    // and trap the worker in a ~1Hz re-sync loop. A genuine layout change
+    // arrives as a NEW desired generation, which naturally re-derives.
     let layout_settled = observed
         .as_ref()
         .is_some_and(|observed| observed.generation == desired.generation && observed.report.synced);
+    let operator_owned_settled = observed.as_ref().is_some_and(|observed| {
+        observed.generation == desired.generation && !observed.report.operator_owned_documents.is_empty()
+    });
     let focus_settled = desired.invocation.focus.is_none()
         || (receipt.generation == desired.generation
             && (!receipt.focus_required || receipt.focus_applied));
-    if desired.invocation.caller_kind == "automatic"
-        && observation_is_current
-        && observed
-            .as_ref()
-            .is_some_and(|observed| !observed.report.operator_owned_documents.is_empty())
-    {
+    if desired.invocation.caller_kind == "automatic" && operator_owned_settled {
         return PaneLayoutProjection::OperatorOwned(desired);
     }
     if focus_settled && layout_settled {
@@ -14269,5 +14269,175 @@ revised operator request
         );
         assert!(projected.contains("queue: start"));
         assert!(projected.contains("- do [#production-deploy]"));
+    }
+
+    /// `#layoutconvergencelane`: helpers for the convergence-lane independence
+    /// model. The layout-convergence lane must be independent of the CRDT/session
+    /// actor-store lane — actor-store mutations must not invalidate a settled
+    /// layout. This reproduces the ~1Hz re-sync loop (10–20 repeated convergence
+    /// attempts per editor switch) that the old `observation_is_current`
+    /// (actor_bindings identity match) caused.
+    fn lane_desired(generation: u64) -> PaneLayoutDesired {
+        PaneLayoutDesired {
+            generation,
+            invocation: ControllerTmuxLayoutSyncInvocation {
+                columns: vec!["/p/a.md".to_string(), "/p/b.md".to_string()],
+                window: None,
+                focus: Some("/p/a.md".to_string()),
+                no_autostart: false,
+                exact_visible: true,
+                caller_kind: "automatic".to_string(),
+                actor_bindings: Vec::new(),
+            },
+            source_plane_version: None,
+        }
+    }
+
+    fn lane_binding(doc: &str, generation: u64) -> ControllerTmuxActorBinding {
+        ControllerTmuxActorBinding {
+            document_path: doc.to_string(),
+            session_id: format!("s-{generation}"),
+            pane_id: "%1".to_string(),
+            generation,
+        }
+    }
+
+    fn lane_synced_observation(
+        generation: u64,
+        bindings: &[ControllerTmuxActorBinding],
+    ) -> PaneLayoutObservation {
+        PaneLayoutObservation {
+            generation,
+            actor_bindings: bindings.to_vec(),
+            report: ControllerTmuxLayoutSyncStateReport {
+                synced: true,
+                reason: "test".to_string(),
+                expected_documents: vec!["/p/a.md".to_string()],
+                actual_documents: vec!["/p/a.md".to_string()],
+                expected_panes: Vec::new(),
+                panes: vec!["%1".to_string()],
+                operator_owned_documents: Vec::new(),
+                session_name: None,
+                window_id: None,
+                window_name: None,
+                focus: None,
+                expected_focus_pane: None,
+                active_pane: None,
+            },
+        }
+    }
+
+    fn lane_converged_receipt(
+        generation: u64,
+        bindings: &[ControllerTmuxActorBinding],
+    ) -> PaneLayoutEffectReceipt {
+        PaneLayoutEffectReceipt {
+            generation,
+            actor_bindings: bindings.to_vec(),
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::Converged,
+            reason: "test".to_string(),
+            file_panes: Vec::new(),
+            focus_required: false,
+            focus_applied: false,
+        }
+    }
+
+    #[test]
+    fn layout_convergence_lane_survives_actor_store_storm() {
+        let desired = lane_desired(10);
+        let bindings = vec![lane_binding("/p/a.md", 1), lane_binding("/p/b.md", 1)];
+        let observation = lane_synced_observation(10, &bindings);
+        let receipt = lane_converged_receipt(10, &bindings);
+
+        assert!(matches!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                bindings.clone(),
+                Some(observation.clone()),
+                receipt.clone(),
+            ),
+            PaneLayoutProjection::Converged(_)
+        ));
+
+        // 20 actor-store mutations (CRDT replica storm). Each changes the live
+        // actor_bindings identity. The projection MUST stay Converged.
+        for storm in 2..=21u64 {
+            let mutated: Vec<_> = bindings
+                .iter()
+                .map(|b| ControllerTmuxActorBinding {
+                    session_id: format!("s-{storm}"),
+                    generation: storm,
+                    ..b.clone()
+                })
+                .collect();
+            let proj = derive_pane_layout_projection(
+                Some(desired.clone()),
+                mutated,
+                Some(observation.clone()),
+                receipt.clone(),
+            );
+            assert!(
+                matches!(proj, PaneLayoutProjection::Converged(_)),
+                "actor-store mutation #{storm} must not invalidate a converged layout (got {proj:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn a_new_desired_generation_re_derives_to_needs_effect() {
+        let bindings = vec![lane_binding("/p/a.md", 1)];
+        let observation = lane_synced_observation(10, &bindings);
+        let receipt = lane_converged_receipt(10, &bindings);
+        let new_desired = lane_desired(11);
+
+        let proj = derive_pane_layout_projection(
+            Some(new_desired),
+            bindings,
+            Some(observation),
+            receipt,
+        );
+        assert!(
+            matches!(proj, PaneLayoutProjection::NeedsEffect(_)),
+            "a new desired generation must re-derive, not stay Converged (got {proj:?})"
+        );
+    }
+
+    #[test]
+    fn operator_owned_lane_survives_actor_store_storm() {
+        let desired = lane_desired(10);
+        let bindings = vec![lane_binding("/p/a.md", 1)];
+        let mut observation = lane_synced_observation(10, &bindings);
+        observation.report.synced = false;
+        observation.report.operator_owned_documents = vec!["/p/a.md".to_string()];
+
+        assert!(matches!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                bindings.clone(),
+                Some(observation.clone()),
+                lane_converged_receipt(10, &bindings),
+            ),
+            PaneLayoutProjection::OperatorOwned(_)
+        ));
+
+        let mutated: Vec<_> = bindings
+            .iter()
+            .map(|b| ControllerTmuxActorBinding {
+                session_id: "s-storm".to_string(),
+                generation: 99,
+                ..b.clone()
+            })
+            .collect();
+        let proj = derive_pane_layout_projection(
+            Some(desired),
+            mutated,
+            Some(observation),
+            lane_converged_receipt(10, &bindings),
+        );
+        assert!(
+            matches!(proj, PaneLayoutProjection::OperatorOwned(_)),
+            "actor-store mutations must not invalidate operator-owned (got {proj:?})"
+        );
     }
 }

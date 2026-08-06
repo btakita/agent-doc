@@ -1,7 +1,7 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 resume: 019fabf0-9af0-7f73-a25c-6a43fd6470c5
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -35,47 +35,20 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260805-043712.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260806-032502.md`*
 
 Compacted content:
-- Archived 30 response topic(s): #pcc2 and the haiven-dev closeout wedge; #pcc3; do [#pcc4]; 27 more
-- Prior summary/context: prior compacted content: Archived 15 response topic(s): #realtimesalient; tmux auto-sync latency; haiven Compact Exch...
-
-### Re: Agent Doc recovery and root-cause fixes — gpt-5.6
-
-Agent Doc is recovered without restarting or replacing either Codex conversation.
-
-- The active tmux window is `@10`, 240×52, with two full-height panes: the root Agent Doc pane is 120×51 on the left and `haiven-dev.md` is 119×51 on the right. The one-line panes are retired panes in the inactive `stash` window `@13`; they are no longer projected into the active view. Fleet diagnostics report no competing supervisor, duplicate controller, or orphaned pane binding.
-- Editor focus and layout are retained Lazily state. JetBrains publishes a latest-wins focus-only surface to the focused document's controller; it no longer sends a competing imperative focus command or creates a reverse-focus lease without an exact selection receipt. Application activation republishes the settled surface, so returning from another i3 workspace does not require **Sync Tmux Pane**.
-- `crdt_delivery_ack_pending` / `editor_projection_pending` settlement is now a retained reactive receipt, not an imperative retry/ack loop. The controller clears an intent only when intent identity and target match and the receipt hash equals both editor authority and disk.
-- Queue continuation now observes retained delivery settlement rather than requiring whole-document equality with Git `HEAD`. This removes the recursive-owner refusal and allows the next queue head to run; completed free-text heads are consumed/struck through the controller projection.
-- The JetBrains visual highlighter now fences refresh scheduling with its lifecycle lock and ignores a rejected schedule after disposal, eliminating the reported `RejectedExecutionException`. Component bodies use the editor foreground with a neutral theme-derived background instead of an intrusive green row fill.
-- Slow editor navigation and workspace restoration were moved off the EDT and bounded across later projection turns; stale generations cannot reclaim focus or contract the current surface into `stash`.
-
-Live recovery proof: `haiven-dev.md` retained its existing owner pane and Codex history, committed the S3 Standard-IA/Glacier response, consumed that queue head, then executed and committed the self-hosted Temporal response. Its queue is now empty, and the same owner pane remains healthy while doing later work.
-
-The fixes are released and installed as agent-doc `0.35.142`; JetBrains plugin `0.2.349` is active in the running IDE with one registration PID for both the root and Haiven documents. Root and Haiven controllers are stable on `0.35.142`, fresh against the installed inode, with no stale duplicate PIDs. Public commit: `1ff1a4734`; root gitlink commit: `04faeb8155`.
-
-Verification is fully green: local `make check` (8,651 Rust tests plus simulator, JetBrains, version-sync, Lean, and TLA), GitHub CI `31024772526`, Release `31024778362`, and PyPI `31024778919` all succeeded. The unrelated staged deletion of `tasks/professional/octavian-gabriel-stan.md` was preserved.
-
-### Re: Response
-
-Fixed and recovered.
-
-The completed monsterrodholders queue item is now struck, and its retained response includes the exact `Queue prompt` provenance. The remaining six queue items were preserved and `queue: stop` remains in effect.
-
-The underlying stopped-queue/direct-steering gap shipped in agent-doc 0.35.143 as `agent-doc queue consume <FILE> --ack-text <TEXT>`. It exact-matches only the leading paused free-text item, refuses ambiguity or active queues, records normal consumption proof, and never consumes the next item.
-
-I also fixed the restart-lineage failure exposed during recovery. Restart Agent previously decoded its explicit `agent:<mode>` intent and discarded that distinction before the old child exited, so the next iteration re-read `agent:` but retained a stale in-memory Codex thread instead of the newly persisted `resume:` ID. Agent-doc 0.35.144 now carries that intent through the boundary; a same-harness continue restart validates current frontmatter `resume:` and may replace the stale lineage. Ordinary crashes and controller recycles remain pinned to their already observed thread.
-
-The original monsterrodholders Codex conversation is restored and idle in tmux pane `%915`, window `@895`, at 35% context. The actor is ready, the supervisor is healthy, and `session doctor` reports no issues. The installed binary and skills report agent-doc 0.35.144. The healthy restored pane was not force-restarted.
-
-Verification passed: 8,654 repository tests, release projection checks, and all formal model checks. Public commits `72919a602` (paused direct-steering acknowledgement) and `d359fb5ca` (explicit resume refresh) are pushed; tags `v0.35.143` and `v0.35.144` are published. The 0.35.144 CI, Release, and PyPI workflows were still in progress at the final check; the preceding 0.35.143 workflows completed successfully.
+- Archived 2 response topic(s): Agent Doc recovery and root-cause fixes; Response
+- Prior summary/context: prior compacted content: Archived 30 response topic(s): #pcc2 and the haiven-dev closeout wedge; #pcc3; do [#pcc4]; 2...
 <!-- agent:boundary:2463ea63:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- 🚧 do [#jetbrainsrunroute-tgp5]
+- do [#jetbrainsrunroute-1ypa]
+- do [#jetbrainsrunroute-8x66]
+- There is a significant delay with tmux auto-sync when switching editor agent-doc documents. Please optimize all bottlenecks and fix any wedges.
 <!-- /agent:queue -->
 
 ## Notes
@@ -86,7 +59,7 @@ Verification passed: 8,654 repository tests, release projection checks, and all 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jetbrainsrunroute-tgp5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785826444942-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
+- [ ] 🚧 [#jetbrainsrunroute-tgp5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785826444942-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
 - [ ] [#jetbrainsrunroute-1ypa] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_pr((oof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785823625376-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
 - [ ] [#jetbrainsrunroute-8x66] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785819598771-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
 <!-- /agent:backlog -->

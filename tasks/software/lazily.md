@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -1206,21 +1206,50 @@ Commits pushed:
 Confidence: high. The remaining 11 entries are not silent gaps: four are codec declarations with no derived runtime oracle, and seven are lease-eviction claims whose current canonical runner does not execute the named library behavior.
 
 Escalation: the umbrella repo has no workflow named `CI`. Its latest `Lazily network suite` is an older scheduled nightly failure (`30986503079`) from before these commits, timing out in the nine-way network scenario; pushes do not trigger a replacement. This does not block the locally green umbrella gate or the five green pushed subrepo workflows.
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#lzr3adapter]
+
+
+Implemented `[#lzr3adapter]` as the optional net10-only `Lazily.R3` project in lazily-cs while leaving core `Lazily` dependency-free.
+
+Delivered:
+
+- Lazily → R3 cold state projection: one owned Lazily `Effect` per R3 subscription, immediate initial value, distinct suppression, dynamic dependency tracking, batching semantics, recoverable `OnErrorResume`, and disposal-backed dependency-edge cleanup.
+- Explicit shared projection: one owned `Effect` feeding a replay-one R3 subject, with terminal successful completion on bridge disposal.
+- R3 → Lazily state bindings for both same-thread `Context` and lock-serialized `ThreadSafeContext`; foreign-thread plain-context writes are rejected as recoverable R3 errors, while thread-safe ingress accepts them.
+- Explicit terminal completion/result, recoverable error, duplicate, disposal, reentrant-write, and state-not-lossless-events semantics.
+- Seven focused adapter tests covering initial/distinct/dynamic/batch updates, cold-versus-shared ownership, unsubscribe edge cleanup, recoverable projection errors, reentrant writes, duplicate suppression, terminal completion, binding disposal, cross-thread acceptance, and cross-thread rejection/recovery.
+- Permanent BenchmarkDotNet coverage for native Lazily, native R3, Lazily→R3, and R3→Lazily. The checked short run observed 336 B/update for native Lazily and both bridge directions and 0 B/update for native R3; documentation retains the earlier 488 B/update observation and treats both as profiling observations, not budgets.
+- NuGet package layout verification, README/package documentation, solution/build targets, CI package coverage, and release packing/publishing for both `Lazily` and `Lazily.R3`.
+
+Changed paths include `src/Lazily.R3/`, `tests/Lazily.R3.Tests/`, `benchmarks/Lazily.R3.Benchmarks/`, `docs/r3-adapter.md`, `scripts/check-r3-package.sh`, `Lazily.slnx`, `Makefile`, `README.md`, `.gitignore`, and the CI/release workflows.
+
+Verification:
+
+- `dotnet test tests/Lazily.R3.Tests/Lazily.R3.Tests.csproj -c Release` — pass.
+- `dotnet build -c Release --nologo -warnaserror` — pass.
+- `./scripts/check-r3-package.sh` — pass; net10 assembly, Lazily/R3 dependencies, and README verified.
+- BenchmarkDotNet short run — all four benchmarks executed successfully.
+- Workflow YAML parse — pass.
+- `make check` — pass: formatting, build, 291 core tests + 7 adapter tests, conformance coverage, both package checks, FFI, interop, assertion ordering, and CI reachability.
+- GitHub CI run `31068529601` for lazily-cs commit `14ef53c` — pass, including test and format jobs.
+
+Published commits:
+
+- lazily-cs: `14ef53cf1a62ca3fe2b8ca5df63a93d582e56974` (`feat: add optional R3 state adapters`).
+- agent-loop remote umbrella pin: `c18048e89d` (`feat: pin lazily-cs R3 adapter`), created from current remote `main` in an isolated temporary worktree so the heavily diverged local root branch and staged unrelated deletion were not included.
+
+The pre-existing lazily-cs `AGENTS.md` modification and untracked `runbooks/` content remain untouched and outside the commit. Confidence: high. Escalation: none.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#rootlevelconformance]~~
-- ~~do [#lzfixturediscrim]~~
-- ~~do [#lzrung2gaps]~~
-- ~~do [#lzstructfieldreads]~~
-- ~~do [#lzassertwithseam]~~
-- ~~📌 do [#kny1]~~
-- ~~📌 Research https://github.com/Cysharp/R3 and if lazily can have an adapter. Benchmark lazily-cs vs R3.~~
-- ~~do [#lzdiscriminabilityburn]~~
-- do [#lzr3adapter]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -1229,7 +1258,6 @@ Escalation: the umbrella repo has no workflow named `CI`. Its latest `Lazily net
 - [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 - [ ] [#lzcoveragelayout] Restructure the coverage.json feature-table layout for a growing language axis per tasks/software/plan-lazily-coverage-table-layout.md. Measured: the feature column is 68% of row width at mean and 84% at max (feature text mean 86 / max 203 chars vs ~40 for all nine marks combined), so a 10th language adds ~4 chars to a row already 130-250 wide — the language axis is NOT the problem. Reject transposing (64 columns) and reject splitting by language: sync-coverage.mjs injects the same full matrix into all 12 targets, and per-language tables would destroy the cross-binding parity view that check-conformance-coverage.sh exists to protect. Phase 1 (land BEFORE the GDScript column, independent of the rest): add id + short label per row and move the 86-203 char normative prose to footnotes or into cell-model.md/protocol.md, taking the table from ~250 to ~60 chars wide so the layout scales past 15 languages. Phase 2 with it: split the '— absent OR not applicable' mark, since GDScript's parked thread-safe family is a different fact from unwritten work. Phases 3-4 (follow-up): author a family field — 54 distinct prefixes across 64 rows means families CANNOT be inferred from the current text — then a family x language roll-up with a stated roll-up rule. Layout and mark-value changes stay separate commits; sync-coverage.mjs --check stays the gate.
-- [ ] [#lzr3adapter] Add an optional `Lazily.R3` NuGet project inside the lazily-cs repository, leaving the core `Lazily` assembly dependency-free. Implement Lazily-to-R3 state projection with one owned Effect per cold subscription plus an explicitly shared bridge, and R3-to-Lazily stream-to-state binding with separate same-thread Context and ThreadSafeContext ingress policies. Make error, completion, disposal, reentrancy, duplicate suppression, and Batch coalescing semantics explicit; do not claim lossless event-stream adaptation because a Lazily batch may collapse intermediate values. Test initial emission, distinct updates, dynamic dependencies, unsubscribe edge cleanup, recoverable R3 errors, terminal completion, cross-thread ingress, and reentrant writes. Add a permanent BenchmarkDotNet project covering native Lazily, native R3, and both bridge directions; profile the observed Lazily 488 B/update allocation before setting performance budgets. Target net10.0 initially because R3's wider target matrix does not widen lazily-cs automatically.
 <!-- /agent:backlog -->
 
 ## Review

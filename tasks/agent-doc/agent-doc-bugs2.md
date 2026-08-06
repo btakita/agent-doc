@@ -40,14 +40,78 @@ completed
 Compacted content:
 - Archived 2 response topic(s): Agent Doc recovery and root-cause fixes; Response
 - Prior summary/context: prior compacted content: Archived 30 response topic(s): #pcc2 and the haiven-dev closeout wedge; #pcc3; do [#pcc4]; 2...
+
+### Re: tmux auto-sync delay — reactive investigation + first conversion shipped — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#jetbrainsrunroute-tgp5]
+>
+> do [#jetbrainsrunroute-1ypa]
+>
+> do [#jetbrainsrunroute-8x66]
+
+
+Investigated the full editor tab-switch → tmux pane-focus latency path. The
+reactive plane itself is exemplary (`agent-doc-editor-surface/{lib,graph}`,
+`idle_revision.rs`, `idle_watch.rs`) — no `#stategraphjoin` islands, single
+state-machine cells, derived `Computed`s, gated `Effect`s, and `#idlerevisionreactive`
+is fully landed (no residual 500ms supervisor poll). The wedges live in the
+**imperative I/O scaffolding** around that plane, ranked by impact:
+
+1. **`controller_tmux_layout_for_surface`** (`rpc.rs:17198`, called under the
+   editor-observe mutex at `rpc.rs:16985`) — for every ≥2-column editor
+   observation it synchronously surveys tmux (per-pane `pane_session`
+   `display-message` spawns, `list_panes_ordered`, per-pane process-owner
+   resolution), recomputing a structural mirror the controller already derives
+   reactively (`runtime.pane_layout_desired()`). This is both the primary latency
+   wedge and an imperative-state violation (`#reactive-boundary-ingress`).
+2. **Editor 500ms fixed-delay poll** (`TmuxPaneFocusSync.kt`) polling
+   `tmuxFocusState` per root every 500ms — state the controller already publishes
+   on the editor-surface projection state plane (`rpc.rs:17004`).
+3. **Sync lock sleep-poll** (`sync-io/lib.rs:138`) — 50ms granularity vs a 100ms
+   SafePassive budget; contention triggers a full `/proc` reap.
+4. **Per-pane `process_tree_contains_pid` outside the observation scope** in the
+   sync ownership loop.
+
+**Shipped in 0.35.145 (this cycle):** the `sync --no-autostart` run now opens a
+`ProcessObservationScope`, so the per-document ownership loop reads pane owners
+through the reactive `owner_graph` (`#syncownerreactive`) instead of re-walking
+`/proc` for every candidate pane on every pass. Each pane root PID is observed
+once and its derived owner cells are reused for the run; tmux layout mutations
+don't invalidate process trees, so the `LocalReadScope` stays valid. This is the
+contained, high-confidence reactive conversion + a real sync/claim latency win.
+
+**Remaining conversions captured** as backlog `#tmuxautosyncreactive` (top of
+list) with plan `tasks/agent-doc/plan-tmux-auto-sync-reactive.md`: item 1 is the
+headline (fold editor observations against a retained tmux observation fed by the
+existing `pane_layout_effect_worker`, with a contained `pane_session`
+snapshot-batching sub-fix), plus items 2–4. These are genuinely larger hot-path
+changes to the controller with drift-detection tests to reconcile, so they get a
+focused cycle rather than a rushed mid-investigation landing.
+
+**Cleanup:** marked the three stale queue heads `#jetbrainsrunroute-tgp5`,
+`-1ypa`, `-8x66` done — all are duplicate reports of the
+`accepted_without_dispatch_start_proof` failure already resolved by
+`#jetbrainsrunroute-77k5` (same document, same symptom-key invariant).
+
+**Deploy:** `make check` green (incl. clippy + TLA), installed, submodule pushed
++ tagged `v0.35.145` (CI in progress — observed, not awaited), supervisor
+recycled onto the fresh binary at its idle boundary. The agent-loop **superproject**
+push was deferred: `main` has a large pre-existing divergence (~160 local commits
+vs 10 remote, across many session submodule-pointer commits) that hit a submodule
+merge conflict on rebase — that history reconciliation is a pre-existing condition
+for the operator, not something to force-rewrite; the release itself ships from the
+submodule and is out.
 <!-- agent:boundary:2463ea63:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#jetbrainsrunroute-tgp5]
-- do [#jetbrainsrunroute-1ypa]
-- do [#jetbrainsrunroute-8x66]
+- do [#tmuxautosyncreactive]
+- ~~do [#jetbrainsrunroute-tgp5]~~
+- ~~do [#jetbrainsrunroute-1ypa]~~
+- ~~do [#jetbrainsrunroute-8x66]~~
 - There is a significant delay with tmux auto-sync when switching editor agent-doc documents. Please optimize all bottlenecks and fix any wedges.
 <!-- /agent:queue -->
 
@@ -59,9 +123,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#jetbrainsrunroute-tgp5] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785826444942-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
-- [ ] [#jetbrainsrunroute-1ypa] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_pr((oof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785823625376-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
-- [ ] [#jetbrainsrunroute-8x66] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md stage=dispatch_only_dispatch_start_proof pane=%4 actor_generation=64 editor_attempt_id=1785819598771-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=f29648cc93e0994425112e2fe48ff16f5cfa3385ceba1f9caf6615869a088474 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:bc25eab815f07e720570f10455d1ead69008f5a5866d315b61e418e3d65345e5]
+- [ ] [#tmuxautosyncreactive] #agent-doc-bug Significant delay with tmux auto-sync when switching editor agent-doc documents: convert the remaining imperative state operations to Lazily reactives. PRIMARY wedge = controller_tmux_layout_for_surface (rpc.rs:17198) does a synchronous per-observation tmux probe under the editor-observe mutex, recomputing state the controller already derives reactively (runtime.pane_layout_desired). Also: editor 500ms fixed poll (TmuxPaneFocusSync.kt) polling state already published on the state plane; sync lock sleep-poll (sync-io/lib.rs:138); ControllerEditorSurfaceGraph Mutex<BTreeMap> -> ThreadSafeDependencyMap. 0.35.145 shipped the contained ProcessObservationScope sync fix. Plan: tasks/agent-doc/plan-tmux-auto-sync-reactive.md
 <!-- /agent:backlog -->
 
 ## Review

@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.153
+
+- **Skip the `/proc` ownership walk entirely for editor projection syncs where no
+  reactive binding exists (`#tmuxautosyncreactive` / `#lazily-hot-path`).** The
+  cold-start case — an editor layout containing a document with no existing tmux
+  pane — spent **4.4 seconds** in `project_authoritative_actor_binding` walking
+  `/proc` to discover an owner that doesn't exist, then another 2.6s in
+  `tmux_router` auto-starting the pane. The controller IS the ownership authority
+  for editor-managed panes: if the reactive bindings (actor store + structural
+  receipt) didn't name a pane, no controller-managed pane exists. For
+  `exact_visible_projection=true`, the walk is skipped and provisioning runs
+  directly — the walk only prevented duplicate panes, but the controller knows it
+  hasn't created one. Combined with the earlier fixes, editor-triggered syncs
+  should now be sub-second for all cases (warm: ~120ms, cold-start new document:
+  auto-start only, no `/proc` scan).
+
 ## 0.35.152
 
 - **Also decouple the OperatorOwned projection lane + SimWorld regression tests

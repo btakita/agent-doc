@@ -2866,14 +2866,30 @@ fn run_with_options_internal_at_root(
                     .insert(file_path.to_path_buf());
             }
 
-            let authoritative_actor_pane = project_authoritative_actor_binding(
-                tmux,
-                file_path,
-                &session_id,
-                hot_latency_focus,
-                auto_start_mode,
-                &proof_cache,
-            );
+            let authoritative_actor_pane = if exact_visible_projection && !is_cross_root {
+                // `#tmuxautosyncreactive` / `#lazily-hot-path`: the editor
+                // projection is the controller's domain. The reactive bindings
+                // (actor store + structural receipt) already named every pane
+                // the controller created; if none matched, no controller-
+                // managed pane exists. Skip the exhaustive `/proc` ownership
+                // walk (measured at ~4.4s for a single cold-start file) and go
+                // straight to provisioning. The walk only prevents duplicate
+                // panes — but the controller knows it hasn't created one.
+                sync_log(&format!(
+                    "exact_visible_ownership_walk_skipped file={} reason=no_reactive_binding",
+                    file_path.display(),
+                ));
+                None
+            } else {
+                project_authoritative_actor_binding(
+                    tmux,
+                    file_path,
+                    &session_id,
+                    hot_latency_focus,
+                    auto_start_mode,
+                    &proof_cache,
+                )
+            };
             sa += seg_mark.elapsed();
             seg_mark = Instant::now();
             let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);

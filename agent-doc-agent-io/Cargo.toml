@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-agent-io"
-version = "0.35.150"
+version = "0.35.151"
 edition = "2024"
 description = "Agent backend process adapters for agent-doc"
 license = "MIT"
@@ -16,11 +16,11 @@ name = "agent_doc_agent_io"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-config = { path = "../agent-doc-config", version = "0.35.150" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.150" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.150" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.150" }
-agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35.150" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.35.151" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.151" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.151" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.151" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35.151" }
 anyhow = "1"
 libc = "0.2"
 serde_json = "1"

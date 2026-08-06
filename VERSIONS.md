@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.151
+
+- **Break the reactive coupling that trapped the pane-layout worker in a ~1Hz
+  re-sync loop (`#layoutconvergencelane`).** The Converged projection required
+  the stored observation's `actor_bindings` to match the live Computed bindings
+  derived from the actor store. CRDT replica storms, session heartbeats, and
+  unrelated document events mutate the actor store, which invalidated the
+  Converged projection back to NeedsEffect, re-triggering the worker — producing
+  10–20 repeated convergence attempts (the ~20s latency). The convergence
+  determination now derives from **generation + survey-synced alone** (a
+  physical-layout fact), not from actor-identity (`session_id`, `generation`
+  fields). Actor-store mutations can no longer invalidate a converged layout; a
+  genuine layout change arrives as a new desired generation, which naturally
+  re-derives. This is the "different reactive lanes" decoupling: the layout-
+  convergence lane is independent of the CRDT/session lane.
+
 ## 0.35.150
 
 - **Enrich the ownership fast path with structural file→pane mappings so ALL

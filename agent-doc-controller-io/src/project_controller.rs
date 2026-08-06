@@ -496,8 +496,18 @@ fn derive_pane_layout_projection(
     let observation_is_current = observed.as_ref().is_some_and(|observed| {
         observed.generation == desired.generation && observed.actor_bindings == actor_bindings
     });
-    let focus_converged = desired.invocation.focus.is_none()
-        || (receipt_is_current && (!receipt.focus_required || receipt.focus_applied));
+    // `#layoutconvergencelane`: convergence is a physical-layout fact (the tmux
+    // panes are in the right arrangement for this desired generation), NOT a
+    // session-identity fact. Derive it from generation + survey-synced alone so
+    // actor-store mutations (CRDT replica storms, session heartbeats) cannot
+    // invalidate a converged layout and trap the worker in a ~1Hz re-sync loop.
+    // A genuine layout change arrives as a NEW desired generation.
+    let layout_settled = observed
+        .as_ref()
+        .is_some_and(|observed| observed.generation == desired.generation && observed.report.synced);
+    let focus_settled = desired.invocation.focus.is_none()
+        || (receipt.generation == desired.generation
+            && (!receipt.focus_required || receipt.focus_applied));
     if desired.invocation.caller_kind == "automatic"
         && observation_is_current
         && observed
@@ -506,12 +516,7 @@ fn derive_pane_layout_projection(
     {
         return PaneLayoutProjection::OperatorOwned(desired);
     }
-    if focus_converged
-        && observation_is_current
-        && observed
-            .as_ref()
-            .is_some_and(|observed| observed.report.synced)
-    {
+    if focus_settled && layout_settled {
         return PaneLayoutProjection::Converged(desired);
     }
     if receipt_is_current {

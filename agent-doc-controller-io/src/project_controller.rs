@@ -4267,8 +4267,14 @@ impl ControllerRuntime {
             actor_graph.live_bindings_handle(),
         );
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
-        let editor_surface_graph =
-            rpc::ControllerEditorSurfaceGraph::new(Arc::new(rpc::run_controller_editor_intent));
+        let editor_surface_graph = rpc::ControllerEditorSurfaceGraph::new(Arc::new(
+            |project_root, intent| match intent {
+                agent_doc_editor_surface::SurfaceIntent::Sync { .. } => {
+                    Ok("deferred_to_pane_layout_worker".to_string())
+                }
+                _ => rpc::run_controller_editor_intent(project_root, intent),
+            },
+        ));
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         for (document_hash, projection) in &memory.state_projection.documents {
@@ -11742,8 +11748,14 @@ agent:queue\n\
             actor_graph.live_bindings_handle(),
         );
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
-        let editor_surface_graph =
-            rpc::ControllerEditorSurfaceGraph::new(Arc::new(rpc::run_controller_editor_intent));
+        let editor_surface_graph = rpc::ControllerEditorSurfaceGraph::new(Arc::new(
+            |project_root, intent| match intent {
+                agent_doc_editor_surface::SurfaceIntent::Sync { .. } => {
+                    Ok("deferred_to_pane_layout_worker".to_string())
+                }
+                _ => rpc::run_controller_editor_intent(project_root, intent),
+            },
+        ));
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         ControllerRuntime {

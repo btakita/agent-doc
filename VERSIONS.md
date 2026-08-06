@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.147
+
+- **Editor surface observation no longer blocks the editor socket request on a
+  synchronous tmux structural sync (`#tmuxautosyncreactive`).** The eager
+  `SurfaceIntent::Sync` consequence used to call `sync_tmux_layout`, which
+  round-tripped through the controller command socket — so every multi-column
+  editor observation waited for the full structural reconcile (up to the 35s
+  command timeout) before the request returned. The production intent runner now
+  defers `Sync` (returns immediately), and `handle_editor_surface_observe`
+  publishes the desired layout **in-process** via `publish_pane_layout_desired`,
+  scheduling the existing background `pane_layout_effect_worker` with no socket
+  round-trip. The worker converges in the background and publishes the actual
+  `TmuxLayout` back to every active editor client through the new
+  `ControllerEditorSurfaceGraph::observe_tmux_for_project`, so each surface
+  graph re-folds against its own editor surface and settles to `Idle` without the
+  editor request waiting. `handle_editor_surface_observe` also folds against the
+  retained tmux observation (no per-observation survey) — cold start derives
+  `Sync`, which schedules the worker. The headline latency wedge from
+  `#tmux-autosync-reactive` is resolved; `Focus` stays synchronous (single
+  select-pane).
+
 ## 0.35.146
 
 - **Controller tmux layout survey now batches per-pane session-name probes through

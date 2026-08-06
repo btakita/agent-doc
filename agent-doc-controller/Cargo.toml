@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-controller"
-version = "0.35.146"
+version = "0.35.147"
 edition = "2024"
 description = "Project controller model and CAS vocabulary for agent-doc"
 license = "MIT"
@@ -16,14 +16,14 @@ test = false
 bench = false
 
 [dependencies]
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.146" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.146" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.146" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.146" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.146" }
-agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.146" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.146" }
-agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.146" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.147" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.147" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.147" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.147" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.147" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.147" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.147" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.147" }
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -27,7 +27,7 @@ use agent_doc_controller::supervisor_replacement::{
 use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_document_realtime::watch_authority::{DiskChangeSignal, WatchAction, WatchDelivery};
 use agent_doc_editor_surface::{
-    EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
+    EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
     SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
@@ -327,6 +327,24 @@ impl ControllerEditorSurfaceGraph {
                 error,
             },
         )
+    }
+
+    /// Publish the controller's actual tmux observation to every active editor
+    /// client for a project (`#tmuxautosyncreactive`).
+    ///
+    /// The background `pane_layout_effect_worker` calls this after it converges
+    /// a structural effect so the surface graph's retained `tmux` `Source`
+    /// refreshes without the editor socket request waiting for the survey. Each
+    /// client's `EditorSurfaceState::observe_tmux` re-folds against its own
+    /// editor surface, so a matching layout settles to `Idle` and a drifted one
+    /// re-derives `Sync` — the decision lives in the graph, not the caller.
+    pub(super) fn observe_tmux_for_project(&self, project_root: &Path, tmux: Option<TmuxLayout>) {
+        let roots = self.roots.lock();
+        for ((root, _client_id), entry) in roots.iter() {
+            if root == project_root && !entry.retired {
+                entry.state.observe_tmux(tmux.clone());
+            }
+        }
     }
 
     fn forget(&self, project_root: &Path, client_id: &str, generation: u64) -> bool {
@@ -16982,19 +17000,32 @@ fn handle_editor_surface_observe(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let observation: EditorSurfaceObservation =
         serde_json::from_str(&payload_json).context("parse editor surface observation")?;
-    let tmux = controller_tmux_layout_for_surface(bootstrap, runtime, &observation.surface);
     let projection_identity = (
         observation.client_id.clone(),
         observation.generation,
         observation.sequence,
     );
+    // `#tmuxautosyncreactive`: fold against the RETAINED tmux observation rather
+    // than probing synchronously. The background `pane_layout_effect_worker`
+    // refreshes it via `observe_tmux_for_project` after each structural
+    // converge, so the editor socket request never blocks on a tmux survey.
+    // Cold start (no retained observation) derives `Sync`, which schedules the
+    // worker through the in-process publish below.
     let (accepted, receipt) = runtime.editor_surface_graph.observe(
         &runtime._scope,
         &bootstrap.project_root,
         observation,
-        tmux,
+        None,
     );
     if accepted {
+        // A `Sync` intent publishes the desired layout IN-PROCESS (no socket
+        // round-trip) so the background worker reconciles while the editor
+        // request returns immediately. The eager intent effect is a no-op for
+        // `Sync` in production (see the runtime constructor closure).
+        if let SurfaceIntent::Sync { columns, document } = &receipt.intent {
+            let invocation = automatic_editor_surface_sync_invocation(columns, document);
+            let _ = publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None);
+        }
         let projection = EditorSurfaceProjection {
             client_id: projection_identity.0.clone(),
             generation: projection_identity.1,
@@ -17195,35 +17226,47 @@ pub fn editor_surface_projection_channel(client_id: &str) -> String {
     )
 }
 
-fn controller_tmux_layout_for_surface(
-    bootstrap: &ControllerBootstrap,
-    runtime: &ControllerRuntime,
-    surface: &EditorSurface,
+/// Derive the actual `TmuxLayout` the background worker should publish back to
+/// the editor surface graph after a structural converge
+/// (`#tmuxautosyncreactive`).
+///
+/// When the layout is synced, tmux's column structure mirrors the desired
+/// columns the editor requested — so the published signature matches and the
+/// surface graph settles to `Idle`. When it is not synced, the per-pane
+/// `actual_documents` are published as single-file columns so the graph
+/// re-derives `Sync` honestly rather than masking drift.
+fn tmux_layout_from_sync_report(
+    report: &ControllerTmuxLayoutSyncStateReport,
+    desired: &PaneLayoutDesired,
 ) -> Option<TmuxLayout> {
-    if surface.columns.len() < 2 {
-        return None;
-    }
-    let invocation = ControllerTmuxLayoutSyncStateInvocation {
-        columns: surface
+    if report.synced {
+        let columns = desired
+            .invocation
             .columns
             .iter()
-            .map(|column| column.files.join(","))
-            .collect(),
-        window: None,
-        focus: Some(surface.focused.clone()),
-    };
-    let report = tmux_layout_sync_state_for_invocation(bootstrap, runtime, &invocation).ok()?;
-    if report.synced {
-        return Some(TmuxLayout {
-            columns: surface.columns.clone(),
-        });
+            .map(|joined| SurfaceColumn {
+                files: joined
+                    .split(',')
+                    .map(str::to_string)
+                    .filter(|file| !file.is_empty())
+                    .collect(),
+            })
+            .filter(|column| !column.files.is_empty())
+            .collect::<Vec<_>>();
+        if columns.is_empty() {
+            return None;
+        }
+        return Some(TmuxLayout { columns });
+    }
+    if report.actual_documents.is_empty() {
+        return None;
     }
     Some(TmuxLayout {
         columns: report
             .actual_documents
-            .into_iter()
+            .iter()
             .map(|document| SurfaceColumn {
-                files: vec![document],
+                files: vec![document.clone()],
             })
             .collect(),
     })
@@ -18079,6 +18122,7 @@ fn pane_layout_effect_worker(
                     continue;
                 }
                 let operator_owned_documents = report.operator_owned_documents.clone();
+                let surface_tmux = tmux_layout_from_sync_report(&report, &desired);
                 runtime.record_pane_layout_observation(PaneLayoutObservation {
                     generation: desired.generation,
                     actor_bindings: actor_bindings.clone(),
@@ -18095,6 +18139,11 @@ fn pane_layout_effect_worker(
                     focus_applied: false,
                 });
                 publish_pane_layout_status(&runtime);
+                if let Some(layout) = surface_tmux {
+                    runtime
+                        .editor_surface_graph
+                        .observe_tmux_for_project(&bootstrap.project_root, Some(layout));
+                }
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
@@ -18196,6 +18245,7 @@ fn pane_layout_effect_worker(
                 let logged_panes = report.panes.clone();
                 let logged_expected_focus_pane = report.expected_focus_pane.clone();
                 let logged_active_pane = report.active_pane.clone();
+                let surface_tmux = tmux_layout_from_sync_report(&report, &desired);
                 runtime.record_pane_layout_observation(PaneLayoutObservation {
                     generation: desired.generation,
                     actor_bindings: actor_bindings.clone(),
@@ -18212,6 +18262,11 @@ fn pane_layout_effect_worker(
                     focus_applied: focus_receipt.applied,
                 });
                 publish_pane_layout_status(&runtime);
+                if let Some(layout) = surface_tmux {
+                    runtime
+                        .editor_surface_graph
+                        .observe_tmux_for_project(&bootstrap.project_root, Some(layout));
+                }
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
@@ -18376,6 +18431,11 @@ fn pane_layout_effect_worker(
                 effect_file_panes.clone(),
             );
         }
+        let surface_tmux = if synced {
+            tmux_layout_from_sync_report(&report, &desired)
+        } else {
+            None
+        };
         runtime.record_pane_layout_observation(PaneLayoutObservation {
             generation: desired.generation,
             actor_bindings: actor_bindings.clone(),
@@ -18400,6 +18460,11 @@ fn pane_layout_effect_worker(
             focus_applied: focus_receipt.applied,
         });
         publish_pane_layout_status(&runtime);
+        if let Some(layout) = surface_tmux {
+            runtime
+                .editor_surface_graph
+                .observe_tmux_for_project(&bootstrap.project_root, Some(layout));
+        }
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
@@ -21096,8 +21161,8 @@ mod tests {
         ControllerRuntime::new_arc(bootstrap.clone()).unwrap()
     }
 
-    fn test_editor_surface(focused: &str) -> EditorSurface {
-        EditorSurface {
+    fn test_editor_surface(focused: &str) -> agent_doc_editor_surface::EditorSurface {
+        agent_doc_editor_surface::EditorSurface {
             focused: focused.to_string(),
             visible: vec![focused.to_string()],
             open: vec![focused.to_string()],
@@ -21106,6 +21171,96 @@ mod tests {
             }],
             force_reconcile: true,
             focus_only: false,
+        }
+    }
+
+    /// `#tmuxautosyncreactive`: the background worker publishes the actual tmux
+    /// layout to every active editor client for a project via
+    /// `observe_tmux_for_project`, so each surface graph re-folds against its
+    /// own editor surface without the editor socket request waiting for a survey.
+    /// This asserts a matching published layout settles every active root to
+    /// `layout_matches == Some(true)` and a foreign project is left untouched.
+    #[test]
+    fn observe_tmux_for_project_settles_every_active_client_from_retained_layout() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(|_, _| Ok("test".to_string())));
+        let root = Path::new("/project");
+        let foreign_root = Path::new("/other");
+
+        let columns = vec![
+            SurfaceColumn { files: vec!["/project/a.md".to_string()] },
+            SurfaceColumn { files: vec!["/project/b.md".to_string()] },
+        ];
+        let surface = agent_doc_editor_surface::EditorSurface {
+            focused: "/project/a.md".to_string(),
+            visible: vec!["/project/a.md".to_string(), "/project/b.md".to_string()],
+            open: vec!["/project/a.md".to_string(), "/project/b.md".to_string()],
+            columns: columns.clone(),
+            force_reconcile: false,
+            focus_only: false,
+        };
+        for client in ["idea:1", "idea:2"] {
+            let (accepted, _) = graph.observe(
+                &scope,
+                root,
+                EditorSurfaceObservation {
+                    client_id: client.to_string(),
+                    generation: 1,
+                    sequence: 1,
+                    surface: surface.clone(),
+                },
+                None,
+            );
+            assert!(accepted);
+        }
+        // A foreign-project client must be untouched by the project publish.
+        let (foreign_accepted, _) = graph.observe(
+            &scope,
+            foreign_root,
+            EditorSurfaceObservation {
+                client_id: "idea:9".to_string(),
+                generation: 1,
+                sequence: 1,
+                surface: surface.clone(),
+            },
+            None,
+        );
+        assert!(foreign_accepted);
+
+        // Before the worker publishes, no client has a retained tmux observation.
+        {
+            let roots = graph.roots.lock();
+            for ((r, _), entry) in roots.iter() {
+                if r == root {
+                    assert_eq!(
+                        entry.state.layout_matches(),
+                        None,
+                        "no retained tmux observation before the worker publishes"
+                    );
+                }
+            }
+        }
+
+        // The worker publishes the matching actual layout for the project.
+        graph.observe_tmux_for_project(root, Some(TmuxLayout { columns }));
+
+        // Every active client for the project now derives a match; the foreign
+        // project is still without a retained observation.
+        let roots = graph.roots.lock();
+        for ((r, _), entry) in roots.iter() {
+            if r == root {
+                assert_eq!(
+                    entry.state.layout_matches(),
+                    Some(true),
+                    "retained layout must match the editor surface after the worker publish"
+                );
+            } else {
+                assert_eq!(
+                    entry.state.layout_matches(),
+                    None,
+                    "a foreign project must not receive another project's layout"
+                );
+            }
         }
     }
 

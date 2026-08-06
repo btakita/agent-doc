@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.146
+
+- **Controller tmux layout survey now batches per-pane session-name probes through
+  the shared pane-snapshot scope (`#panesessionsnapshot`).** The drift-detection
+  survey in `controller_tmux_layout_for_surface`
+  (`agent-doc-controller-io/.../rpc.rs`) opened no observation scope, so every
+  candidate pane in `pane_layout_observation_session` issued its own
+  `tmux display-message -p #{session_name}` spawn — N subprocesses (~20ms each)
+  serialized under the editor-observation mutex on every multi-column editor
+  observation. The pane-snapshot format is now enriched to
+  `#{pane_id}\t#{pane_dead}\t#{session_name}`, and `Tmux::pane_session`
+  (`tmux-router`) reads the session from the shared `list-panes -a` listing when a
+  scope is open, collapsing those N spawns to one listing shared with the
+  liveness probes that already run in the same pass. The controller survey opens
+  a `begin_pane_snapshot_scope()` for its read-only drift pass. Part of the tmux
+  auto-sync latency investigation (`#tmux-autosync-reactive`); the headline
+  retained-observation decoupling remains a separately-scoped phase.
+
 ## 0.35.145
 
 - **Passive tmux sync now routes per-pane process-tree ownership reads through

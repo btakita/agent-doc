@@ -17271,6 +17271,13 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
         ));
     }
 
+    // `#panesessionsnapshot`: open an observation scope so the per-pane
+    // `pane_session` probes (via `pane_layout_observation_session` below) and
+    // every liveness read in this drift survey share ONE `list-panes -a`
+    // listing instead of one `display-message` spawn per candidate pane. This
+    // is a read-only survey, so no pane mutation invalidates the snapshot
+    // mid-pass. The scope is thread-local and dropped at the function return.
+    let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
     let tmux = tmux_router::Tmux::default_server();
     let Some(configured_session) = pane_layout_observation_session(
         configured_tmux_session_for_project(&bootstrap.project_root),

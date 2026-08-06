@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -151,12 +151,43 @@ with this finding.
 (the eager→deferred consequence decoupling). Items 2–4 (editor 500ms poll →
 state-plane subscription; blocking flock; `ThreadSafeDependencyMap`) remain
 independently shippable per the plan.
+
+### Re: do [#tmuxautosyncreactive] — headline wedge resolved: editor Sync decoupled from synchronous socket round-trip — glm-5.2
+
+The operator was right that the 0.35.146 sub-fix alone wasn't enough. The real
+headline wedge: the `SurfaceIntent::Sync` consequence is **eager** — it called
+`sync_tmux_layout`, which round-tripped through the controller command socket on
+every multi-column editor observation, so the editor request waited for the full
+structural reconcile before returning.
+
+**Shipped as 0.35.147** — the eager→deferred reactive conversion:
+
+1. The production intent runner defers `Sync` (returns immediately; no socket
+   round-trip). `Focus` stays synchronous (single select-pane).
+2. `handle_editor_surface_observe` publishes the desired layout **in-process** via
+   `publish_pane_layout_desired`, scheduling the background
+   `pane_layout_effect_worker` with no socket round-trip.
+3. The per-observation synchronous survey is removed — the handler folds against
+   the retained tmux observation. Cold start derives `Sync`, scheduling the worker.
+4. The worker publishes the actual `TmuxLayout` back to every active editor client
+   through the new `ControllerEditorSurfaceGraph::observe_tmux_for_project`, so
+   each surface graph re-folds against its own editor surface and settles to
+   `Idle` once converged.
+
+Verified: `make check` green (clippy + 339 tests + sim-medium + TLA), new
+`observe_tmux_for_project` integration test, installed, pushed + tagged
+`v0.35.147`, supervisor recycled. CI in progress (observed, not awaited).
+
+The headline latency wedge is resolved: switching editor agent-doc documents no
+longer blocks on a synchronous tmux structural sync. Remaining plan items 2–4
+(editor 500ms poll → state-plane subscription; sync-lock sleep-poll → blocking
+flock; `Mutex<BTreeMap>` → `ThreadSafeDependencyMap`) are independently-shippable
+optimizations in `tasks/agent-doc/plan-tmux-auto-sync-reactive.md`.
 <!-- agent:boundary:2463ea63:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#tmuxautosyncreactive]
 <!-- /agent:queue -->
 
 ## Notes
@@ -167,7 +198,6 @@ independently shippable per the plan.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#tmuxautosyncreactive] #agent-doc-bug Significant delay with tmux auto-sync when switching editor agent-doc documents: convert the remaining imperative state operations to Lazily reactives. PRIMARY wedge = controller_tmux_layout_for_surface (rpc.rs:17198) does a synchronous per-observation tmux probe under the editor-observe mutex, recomputing state the controller already derives reactively (runtime.pane_layout_desired). Also: editor 500ms fixed poll (TmuxPaneFocusSync.kt) polling state already published on the state plane; sync lock sleep-poll (sync-io/lib.rs:138); ControllerEditorSurfaceGraph Mutex<BTreeMap> -> ThreadSafeDependencyMap. 0.35.145 shipped the contained ProcessObservationScope sync fix. Plan: tasks/agent-doc/plan-tmux-auto-sync-reactive.md
 <!-- /agent:backlog -->
 
 ## Review

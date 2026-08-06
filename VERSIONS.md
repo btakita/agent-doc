@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.150
+
+- **Enrich the ownership fast path with structural file→pane mappings so ALL
+  visible files skip the `/proc` walk, not just those with active session actors
+  (`#tmuxautosyncreactive`).** Diagnostic evidence (`reactive_actor_bindings
+  count=1`) showed the fast path hit for only 1 of 2 layout files — the second
+  (no active agent-doc session) fell through to a ~300ms `/proc` walk per file,
+  dominating the 615ms `ownership_per_file_loop`. The worker now enriches the
+  invocation's actor bindings with the previous sync's structural receipt
+  (`last_structural_file_panes`), which already proved the file→pane assignment
+  for every visible file. Combined with 0.35.149's stash-purge skip, the
+  editor-triggered sync should drop from ~1.5s to a few hundred milliseconds.
+
 ## 0.35.149
 
 - **Skip the expensive stash-pane purge for editor-triggered syncs and add an

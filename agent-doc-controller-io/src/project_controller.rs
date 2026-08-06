@@ -994,6 +994,20 @@ impl ControllerPaneLayoutGraph {
             .unwrap_or_default()
     }
 
+    /// The file→pane mapping from the last structural assignment, regardless of
+    /// generation (`#tmuxautosyncreactive`). Files without active agent-doc
+    /// sessions miss the actor-store fast path and fall through to a per-file
+    /// `/proc` walk (~300ms each). The previous sync's structural receipt
+    /// already knows their pane, so the worker enriches the invocation bindings
+    /// with this mapping to make the ownership fast path hit for every visible
+    /// file — not just those with live session actors.
+    fn last_structural_file_panes(&self) -> Vec<(String, String)> {
+        self.ctx
+            .get(&self.structural_receipt)
+            .map(|receipt| receipt.file_panes)
+            .unwrap_or_default()
+    }
+
     fn reusable_structural_receipt(
         &self,
         desired: &PaneLayoutDesired,
@@ -4480,6 +4494,10 @@ impl ControllerRuntime {
 
     fn pane_layout_actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
         self.pane_layout_graph.actor_bindings()
+    }
+
+    fn pane_layout_structural_file_panes(&self) -> Vec<(String, String)> {
+        self.pane_layout_graph.last_structural_file_panes()
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]

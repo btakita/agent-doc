@@ -18137,6 +18137,28 @@ fn pane_layout_effect_worker(
             }
         };
         let actor_bindings = runtime.pane_layout_actor_bindings();
+        // `#tmuxautosyncreactive`: enrich with structural file→pane mappings so
+        // files WITHOUT active session actors (but with known panes from the
+        // previous sync) hit the ownership fast path instead of walking `/proc`
+        // (~300ms each). The previous sync's structural receipt already proved
+        // these pane assignments; reusing them makes the fast path cover every
+        // visible file, not just those with live session actors.
+        let actor_bindings = {
+            let mut enriched = actor_bindings;
+            let binding_files: std::collections::HashSet<String> =
+                enriched.iter().map(|b| b.document_path.clone()).collect();
+            for (file, pane) in runtime.pane_layout_structural_file_panes() {
+                if !binding_files.contains(&file) && !pane.is_empty() {
+                    enriched.push(ControllerTmuxActorBinding {
+                        document_path: file,
+                        session_id: String::new(),
+                        pane_id: pane,
+                        generation: desired.generation,
+                    });
+                }
+            }
+            enriched
+        };
         if desired.invocation.caller_kind == "automatic" {
             let observation_invocation = pane_layout_state_invocation(&desired);
             if let Ok(report) = tmux_layout_sync_state_for_invocation_with_effect_assignment(

@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.154
+
+- **Strengthen the session-hijack guard for copied documents.** The existing
+  `resolve_resume_claim` guard detected when another document's `resume:` field
+  claimed the same conversation ID, but only checked `resume` (not
+  `agent_doc_session`) and only read from disk. A copied document carrying
+  `agent_doc_session` without `resume`, or whose source document had unsaved
+  editor changes, could bypass the guard. `resume_id_owner` now checks BOTH
+  `resume` and `agent_doc_session` fields, and resolves through the realtime
+  authority (editor buffer) before falling back to disk — so a copy cannot
+  hijack the original document's session regardless of which frontmatter field
+  carries the ID.
+
 ## 0.35.153
 
 - **Skip the `/proc` ownership walk entirely for editor projection syncs where no

@@ -157,10 +157,17 @@ fn degrade_resume_if_transcript_missing(
 }
 
 /// The other document that already records this conversation id, if any.
+///
+/// Checks BOTH `resume` and `agent_doc_session` frontmatter fields: a copied
+/// document may carry one without the other, and the controller uses
+/// `agent_doc_session` for session association independently of the `resume`
+/// flag that drives harness CLI resumption. Also resolves through the realtime
+/// authority when the disk read is unavailable (editor buffer is authoritative).
 fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest) -> Option<String> {
     let agent_doc_harness::ResumeRequest::Id(id) = request else {
         return None;
     };
+    let id = id.trim();
     let project_root = agent_doc_project_root_io::project_root_containing(canonical)?;
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).ok()?;
     let mut stmt = conn
@@ -176,13 +183,31 @@ fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest)
         if other == me {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(&other) else {
+        // Prefer realtime content (editor buffer is authoritative for open
+        // documents); fall back to disk for closed ones.
+        let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            Path::new(&other),
+            "resume_id_owner",
+        )
+        .or_else(|_| std::fs::read_to_string(&other))
+        .ok();
+        let Some(content) = content else {
             continue;
         };
         let Ok((other_fm, _)) = frontmatter::parse(&content) else {
             continue;
         };
-        if other_fm.resume.as_deref().map(str::trim) == Some(id.as_str()) {
+        let claims_id = other_fm
+            .resume
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|resume_id| resume_id == id)
+            || other_fm
+                .session
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|session_id| session_id == id);
+        if claims_id {
             return Some(other);
         }
     }

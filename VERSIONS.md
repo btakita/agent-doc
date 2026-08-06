@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.149
+
+- **Skip the expensive stash-pane purge for editor-triggered syncs and add an
+  actor-binding diagnostic (`#tmuxautosyncreactive`).** The worker's structural
+  sync still runs the full prune (497ms, dominated by `prune_stash_panes`'s
+  per-pane kill-pane spawns at ~20ms each). When `exact_visible_projection` is
+  true the desired pane set is already known from the editor projection, so the
+  stash purge is housekeeping — defer it to the periodic cleanup. Adds a
+  `reactive_actor_bindings count=…` sync-log line so the next iteration can
+  attribute the remaining 620ms ownership loop to empty bindings (actor-store
+  miss) vs. stale panes, since the fast path (`exact_visible_actor_projection_reused`)
+  is not currently hitting.
+
 ## 0.35.148
 
 - **Editor tab-switch focus no longer round-trips through the controller command

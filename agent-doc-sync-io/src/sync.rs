@@ -2466,13 +2466,27 @@ fn run_with_options_internal_at_root(
     }
 
     let prune_start = Instant::now();
-    let prune_cleanup_mode = safe_passive_prune_cleanup_mode_at_root(
+    let mut prune_cleanup_mode = safe_passive_prune_cleanup_mode_at_root(
         auto_start_mode,
         col_args,
         window,
         focus,
         &layout_state_root,
     );
+    // `#tmuxautosyncreactive`: an exact-visible editor projection already knows
+    // the desired pane set — the stash-pane purge is housekeeping (removing
+    // idle shells), not layout convergence, and its per-pane kill-pane spawns
+    // (~20ms each) dominate the prune. Defer it to the periodic housekeeping
+    // pass so the editor-triggered sync is faster.
+    if exact_visible_projection
+        && !matches!(
+            prune_cleanup_mode,
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
+        )
+    {
+        prune_cleanup_mode = agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup;
+        sync_log("exact_visible_prune_cleanup_skipped reason=editor_projection_known_layout");
+    }
     if matches!(
         prune_cleanup_mode,
         agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
@@ -2526,6 +2540,15 @@ fn run_with_options_internal_at_root(
         .iter()
         .map(|binding| (PathBuf::from(&binding.document_path), binding))
         .collect();
+    // `#tmuxautosyncreactive` diagnostic: the ownership fast path
+    // (`exact_visible_actor_projection_reused`) only hits when bindings are
+    // populated for the desired files. Log the count so a slow ownership loop
+    // is attributable to empty bindings (actor store miss) vs. stale panes.
+    sync_log(&format!(
+        "reactive_actor_bindings count={} exact_visible_projection={}",
+        reactive_actor_bindings.len(),
+        exact_visible_projection,
+    ));
     let mut pre_resolved_panes: HashMap<PathBuf, String> = HashMap::new();
 
     let resolve_file = |path: &Path| -> Option<FileResolution> {

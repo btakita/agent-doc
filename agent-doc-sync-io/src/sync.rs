@@ -2915,6 +2915,64 @@ fn run_with_options_internal_at_root(
                     file_path.display(),
                 ));
                 None
+            } else if exact_visible_projection && is_cross_root {
+                // `#tmuxautosyncreactive` / `#lazily-hot-path`: a cross-root
+                // file's pane is owned by its nested controller's reactive actor
+                // store. Ask that controller for the binding instead of the
+                // exhaustive `/proc` ownership walk. The editor tab-switch path
+                // runs with `auto_start_mode=Full` (`skip_autostart_diagnostics`
+                // is false), so the earlier `skip_autostart_diagnostics &&
+                // is_cross_root` reactive branch does not fire, and the walk
+                // below measured 670ms-1.3s per cross-root file on this path.
+                // The owning controller's binding is the authority; a missing or
+                // dead binding falls through to the registry fallback below,
+                // same as a failed walk.
+                let owner_root = agent_doc_project_root_io::project_root_containing(file_path);
+                let observed = match owner_root {
+                    Some(owner_root) => crate::runtime_effects()?
+                        .resolve_cross_root_document_pane(&owner_root, file_path),
+                    None => Ok(None),
+                };
+                match observed {
+                    Ok(Some(binding)) if tmux.pane_alive(&binding.pane_id) => {
+                        sync_log(&format!(
+                            "exact_visible_cross_root_actor_projection_reused file={} pane={} generation={}",
+                            file_path.display(),
+                            binding.pane_id,
+                            binding.generation,
+                        ));
+                        Some(binding.pane_id)
+                    }
+                    Ok(Some(binding)) => {
+                        sync_log(&format!(
+                            "exact_visible_cross_root_actor_projection_dead file={} pane={} generation={}",
+                            file_path.display(),
+                            binding.pane_id,
+                            binding.generation,
+                        ));
+                        None
+                    }
+                    Ok(None) => {
+                        sync_log(&format!(
+                            "exact_visible_cross_root_actor_projection_missing file={}",
+                            file_path.display(),
+                        ));
+                        None
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[sync] warning: owning-controller actor projection unavailable for {}: {}",
+                            file_path.display(),
+                            error,
+                        );
+                        sync_log(&format!(
+                            "exact_visible_cross_root_actor_projection_failed file={} error={}",
+                            file_path.display(),
+                            error,
+                        ));
+                        None
+                    }
+                }
             } else {
                 project_authoritative_actor_binding(
                     tmux,
@@ -5792,6 +5850,97 @@ mod tests {
             iso.list_panes_ordered(&decoy_window).unwrap(),
             vec![decoy_pane],
             "a different same-named window must not replace the explicit target"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn exact_visible_cross_root_full_mode_resolves_via_owning_controller() {
+        // The editor tab-switch path runs `AutoStartMode::Full` with
+        // `exact_visible_projection=true` (`skip_autostart_diagnostics` is
+        // false), so the cross-root reactive branch at the top of the per-file
+        // loop does not fire. The cross-root child pane must still resolve
+        // through the owning controller's reactive binding
+        // (`resolve_cross_root_document_pane`) instead of the exhaustive
+        // `/proc` ownership walk, which measured 670ms-1.3s per cross-root file
+        // on this path.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let child_root = root.join("src/haiven-dev");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(child_root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(child_root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = child_root.join("tasks/haiven-dev.md");
+        std::fs::write(
+            &root_doc,
+            "---\nagent_doc_session: root-session\n---\n\n# Root\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\n---\n\n# Child\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-cross-root-full");
+        let root_pane = iso.new_session("test", &root).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let root_window = iso.pane_window(&root_pane).unwrap();
+        let child_pane = iso.new_window("test", &child_root).unwrap();
+        let child_window = iso.pane_window(&child_pane).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &child_window, "stash"])
+            .unwrap();
+
+        sessions::register_full_with_cwd_in(
+            &child_root,
+            "child-session",
+            &child_pane,
+            &child_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &child_pane).unwrap(),
+            &child_window,
+            &child_root.to_string_lossy(),
+        )
+        .unwrap();
+
+        let root_binding =
+            agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                document_path: root_doc.to_string_lossy().to_string(),
+                session_id: "root-session".to_string(),
+                pane_id: root_pane.clone(),
+                generation: 7,
+            };
+        let columns = vec![
+            root_doc.to_string_lossy().to_string(),
+            child_doc.to_string_lossy().to_string(),
+        ];
+        let _cwd = ScopedCurrentDir::set(&root);
+
+        run_with_options_internal_at_root(
+            &root,
+            &columns,
+            Some(&root_window),
+            Some(root_doc.to_string_lossy().as_ref()),
+            AutoStartMode::Full,
+            true,
+            false,
+            &[root_binding],
+            &iso,
+        )
+        .unwrap();
+
+        assert_eq!(
+            iso.list_panes_ordered(&root_window).unwrap(),
+            vec![root_pane, child_pane],
+            "the cross-root child pane must resolve through the owning controller and move into the agent-doc window without the /proc ownership walk",
         );
     }
 

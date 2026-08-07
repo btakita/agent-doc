@@ -127,6 +127,14 @@ fn save(doc: &Path, state: &LoadedQueueTombstones) {
     }
 }
 
+/// Load the persisted operator-delete tombstone set (lowercased ids) without
+/// reconciling. Callers that need the authoritative deletion set at a point in
+/// the cycle after the reconcile already ran use this; it returns an empty set
+/// when the ledger is absent or unreadable.
+pub fn current_tombstones(doc: &Path) -> HashSet<String> {
+    load(doc).tombstones
+}
+
 /// Reconcile the tombstone set against this cycle's queue evidence and return the
 /// active set the mirror must skip.
 ///

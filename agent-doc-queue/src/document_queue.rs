@@ -2636,6 +2636,7 @@ fn strongest_pin_text<'a>(texts: &[&'a str]) -> &'a str {
 pub fn converge_queue_via_lifecycle(
     entries: &[QueueEntry],
     snapshot_entries: &[QueueEntry],
+    deleted_directive_ids: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
     use agent_doc_element_queue::{QueueItemEvent, QueueItemMachine, QueueItemState};
 
@@ -2834,7 +2835,26 @@ pub fn converge_queue_via_lifecycle(
             // live `do [#id]` directive twin: intentional "run it twice" must be
             // operator-committed, not conjured by a CRDT re-emit
             // (`#qdedup-directive-twin`).
-            authored.get(&key).copied().unwrap_or(0).max(1)
+            //
+            // `#qdelauth`: an operator-deleted directive id (recorded in the
+            // durable `operator_delete_tombstones` ledger) is authoritative — its
+            // lawful multiplicity is zero, so a stale/divergent editor buffer that
+            // re-pushes the deleted `do [#id]` cannot resurrect it through this
+            // `min 1` floor. A genuinely-new id (not in the ledger) still gets the
+            // `min 1` allowance so a freshly-authored prompt survives until it is
+            // committed into the snapshot. The ledger self-clears on a legitimate
+            // re-add+commit, so an operator who changes their mind and re-commits
+            // the id is not blocked.
+            let deleted_directive = matches!(
+                identity,
+                agent_doc_element_queue::QueueItemIdentity::Id(id)
+                    if deleted_directive_ids.contains(id)
+            );
+            if deleted_directive {
+                0
+            } else {
+                authored.get(&key).copied().unwrap_or(0).max(1)
+            }
         };
         let seen = kept_count.entry(key.clone()).or_insert(0);
 
@@ -5846,7 +5866,8 @@ mod tests {
     /// Apply convergence, returning the converged entries (or the input unchanged
     /// when the queue is already at its lawful fixpoint).
     fn converge(entries: &[QueueEntry], snapshot: &[QueueEntry]) -> Vec<QueueEntry> {
-        converge_queue_via_lifecycle(entries, snapshot).unwrap_or_else(|| entries.to_vec())
+        converge_queue_via_lifecycle(entries, snapshot, &Default::default())
+            .unwrap_or_else(|| entries.to_vec())
     }
 
     /// `#qdedupsync` / `#pushpinaccum`: a pinned `do [#id]` accumulated alongside
@@ -5875,6 +5896,29 @@ mod tests {
         );
     }
 
+    /// `#qdelauth`: an operator-deleted directive id (recorded in the
+    /// `operator_delete_tombstones` ledger) is authoritative — convergence drops
+    /// a re-pushed `do [#id]` for it, overriding the `min 1` floor that would
+    /// otherwise keep one resurrected copy. A genuinely-new id not in the ledger
+    /// still survives. Regression for the haiven-dev.md queue revert where a stale
+    /// editor buffer re-pushed a deleted `do [#fpedurabilityharness]`.
+    #[test]
+    fn converge_suppresses_tombstoned_directive_resurrection() {
+        let entries = vec![p("do [#deleted]"), p("do [#brandnew]")];
+        let deleted: std::collections::HashSet<String> =
+            ["deleted".to_string()].into_iter().collect();
+        let out = converge_queue_via_lifecycle(&entries, &[], &deleted)
+            .unwrap_or_else(|| entries.to_vec());
+        assert!(
+            !out.contains(&p("do [#deleted]")),
+            "a tombstoned (operator-deleted) directive must not survive convergence: {out:?}"
+        );
+        assert!(
+            out.contains(&p("do [#brandnew]")),
+            "a genuinely-new id not in the ledger must survive: {out:?}"
+        );
+    }
+
     /// `#queue-dedup-destroys-intentional-duplicates`: a genuinely twice-authored
     /// `do [#id]` directive (the snapshot committed both copies) is intentional
     /// "run it twice" and keeps its count — same rule as double-authored free text.
@@ -5883,7 +5927,7 @@ mod tests {
         let snapshot = vec![p("do [#deploy]"), p("do [#deploy]")];
         let entries = vec![p("do [#deploy]"), p("do [#deploy]")];
         assert!(
-            converge_queue_via_lifecycle(&entries, &snapshot).is_none(),
+            converge_queue_via_lifecycle(&entries, &snapshot, &Default::default()).is_none(),
             "operator-authored (snapshot count 2) directive twins must be left untouched"
         );
     }
@@ -5935,7 +5979,7 @@ mod tests {
         let snapshot = vec![p("run the smoke test"), p("run the smoke test")];
         let entries = snapshot.clone();
         assert!(
-            converge_queue_via_lifecycle(&entries, &snapshot).is_none(),
+            converge_queue_via_lifecycle(&entries, &snapshot, &Default::default()).is_none(),
             "double-authored free-text must survive at its authored multiplicity"
         );
     }
@@ -5961,7 +6005,7 @@ mod tests {
             "a duplicated struck head must self-heal even from a baseline that carries both: {out:?}"
         );
         assert!(
-            converge_queue_via_lifecycle(&out, &snapshot).is_none(),
+            converge_queue_via_lifecycle(&out, &snapshot, &Default::default()).is_none(),
             "struck collapse must be idempotent"
         );
     }
@@ -5982,7 +6026,7 @@ mod tests {
     fn converge_keeps_live_and_struck_pair() {
         let entries = vec![p("ship the release"), c("ship the release")];
         assert!(
-            converge_queue_via_lifecycle(&entries, &[]).is_none(),
+            converge_queue_via_lifecycle(&entries, &[], &Default::default()).is_none(),
             "a live + struck pair of the same text is not a duplicate"
         );
     }
@@ -6104,7 +6148,7 @@ mod tests {
             "replay duplicates collapse while editor-deleted queue identities remain deleted"
         );
         assert!(
-            converge_queue_via_lifecycle(&out, &snapshot).is_none(),
+            converge_queue_via_lifecycle(&out, &snapshot, &Default::default()).is_none(),
             "the repaired queue must be a fixpoint"
         );
     }
@@ -6150,7 +6194,7 @@ mod tests {
         for (entries, snapshot) in cases {
             let once = converge(&entries, &snapshot);
             assert!(
-                converge_queue_via_lifecycle(&once, &snapshot).is_none(),
+                converge_queue_via_lifecycle(&once, &snapshot, &Default::default()).is_none(),
                 "convergence must be a fixpoint:\n{entries:?}\n--- once ---\n{once:?}"
             );
         }
@@ -6196,12 +6240,12 @@ mod tests {
 
             // No snapshot → every free-text/bare identity collapses to one; only
             // intentional identical directive twins survive.
-            let once = converge_queue_via_lifecycle(&entries, &[]);
+            let once = converge_queue_via_lifecycle(&entries, &[], &Default::default());
             let converged = once.clone().unwrap_or_else(|| entries.clone());
 
             // FIXPOINT: a second convergence over the output is a no-op.
             prop_assert!(
-                converge_queue_via_lifecycle(&converged, &[]).is_none(),
+                converge_queue_via_lifecycle(&converged, &[], &Default::default()).is_none(),
                 "convergence is not a fixpoint:\n{entries:?}\n--- converged ---\n{converged:?}"
             );
 
@@ -6221,7 +6265,7 @@ mod tests {
                 for _ in 0..3 {
                     stormed.push(QueueEntry::Prompt(first.clone()));
                 }
-                let restormed = converge_queue_via_lifecycle(&stormed, &converged)
+                let restormed = converge_queue_via_lifecycle(&stormed, &converged, &Default::default())
                     .unwrap_or(stormed);
                 let count_in = |v: &[QueueEntry], t: &str| {
                     v.iter()

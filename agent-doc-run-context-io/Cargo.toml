@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-run-context-io"
-version = "0.35.155"
+version = "0.35.156"
 edition = "2024"
 description = "Lazily-backed run and actor context IO cache for agent-doc"
 license = "MIT"
@@ -16,23 +16,23 @@ name = "agent_doc_run_context_io"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-config = { path = "../agent-doc-config", version = "0.35.155" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.155" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.155" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.155" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.155" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.155" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.155" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.155" }
-agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.155" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.155" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.155" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.155" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.155" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.35.156" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.156" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.156" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.156" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.156" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.156" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.156" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.156" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.156" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.156" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.156" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.156" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.156" }
 anyhow = "1"
 lazily = "0.56.0"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 
 [dev-dependencies]
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.155" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.156" }
 tempfile = "3"

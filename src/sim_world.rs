@@ -9008,14 +9008,16 @@ fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_p
     // would re-run it each cycle; converging to a fixpoint models that).
     let mut converged = stormed.clone();
     let mut passes = 0;
-    while let Some(next) = queue::converge_queue_via_lifecycle(&converged, &snapshot) {
+    while let Some(next) =
+        queue::converge_queue_via_lifecycle(&converged, &snapshot, &Default::default())
+    {
         converged = next;
         passes += 1;
         assert!(passes < 10, "convergence must reach a fixpoint quickly");
     }
     // Idempotent: one more pass is a guaranteed no-op.
     assert!(
-        queue::converge_queue_via_lifecycle(&converged, &snapshot).is_none(),
+        queue::converge_queue_via_lifecycle(&converged, &snapshot, &Default::default()).is_none(),
         "converged queue must be a fixpoint:\n{converged:?}"
     );
 

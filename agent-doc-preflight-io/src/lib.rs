@@ -3357,6 +3357,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     if let Some(converged_entries) = agent_doc_queue::document_queue::converge_queue_via_lifecycle(
         &activation.entries_after,
         &snapshot_queue_entries,
+        &agent_doc_queue_io::queue_tombstone::current_tombstones(file),
     ) {
         let dropped = activation
             .entries_after

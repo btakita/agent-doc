@@ -2499,6 +2499,12 @@ fn run_with_options_internal_at_root(
     ) {
         sync_log("safe_passive_prune_cleanup_skipped reason=unchanged_recent_layout");
     }
+    // `#tmuxautosyncreactive` diagnostic: the `prune` phase wall (~300ms) does
+    // not appear in any `prune_*` sub-phase (they sum to ~1ms), so split the
+    // window to localize it. `prune_pre` is mode-resolve + sync_log; the rest is
+    // the timed call itself (`prune_with_tmux_wall`).
+    let prune_pre_elapsed = prune_start.elapsed();
+    let prune_with_tmux_start = Instant::now();
     let prune_timings = match resync::prune_with_tmux_timed_in_mode(tmux, prune_cleanup_mode) {
         Ok((_removed, timings)) => timings,
         Err(err) => {
@@ -2507,6 +2513,7 @@ fn run_with_options_internal_at_root(
             Vec::new()
         }
     }; // Clean stale entries before layout calculation
+    let prune_with_tmux_wall = prune_with_tmux_start.elapsed();
     for timing in prune_timings {
         log_sync_latency(
             hot_latency_focus,
@@ -2516,6 +2523,20 @@ fn run_with_options_internal_at_root(
             auto_start_mode,
         );
     }
+    log_sync_latency(
+        hot_latency_focus,
+        "prune_pre",
+        prune_pre_elapsed,
+        SYNC_PRUNE_BUDGET,
+        auto_start_mode,
+    );
+    log_sync_latency(
+        hot_latency_focus,
+        "prune_with_tmux_wall",
+        prune_with_tmux_wall,
+        SYNC_PRUNE_BUDGET,
+        auto_start_mode,
+    );
     log_sync_latency(
         hot_latency_focus,
         "prune",

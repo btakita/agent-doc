@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-preflight-io"
-version = "0.35.157"
+version = "0.35.158"
 edition = "2024"
 description = "Preflight maintenance I/O adapters for agent-doc"
 license = "MIT"
@@ -11,50 +11,50 @@ publish = false
 name = "agent_doc_preflight_io"
 
 [dependencies]
-agent-doc-config = { path = "../agent-doc-config", version = "0.35.157" }
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.157" }
-agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.157" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.157" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.157" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.157" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.157" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.157" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.157" }
-agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.35.157" }
-agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.35.157" }
-agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.157" }
-agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.35.157" }
-agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.35.157" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.157" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.157" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.157" }
-agent-doc-gc-io = { path = "../agent-doc-gc-io", version = "0.35.157" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.157" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.157" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.157" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.157" }
-agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.157" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.157" }
-agent-doc-memory = { path = "../agent-doc-memory", version = "0.35.157" }
-agent-doc-memory-io = { path = "../agent-doc-memory-io", version = "0.35.157" }
-agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.157" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.157" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.157" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.157" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.157" }
-agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.157" }
-agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.157" }
-agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.157" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.157" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.157" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.157" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.157" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.157" }
-agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.35.157" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.157" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.157" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.157" }
-agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.157" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.35.158" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.158" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.158" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.158" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.158" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.158" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.158" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.158" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.158" }
+agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.35.158" }
+agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.35.158" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.158" }
+agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.35.158" }
+agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.35.158" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.158" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.158" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.158" }
+agent-doc-gc-io = { path = "../agent-doc-gc-io", version = "0.35.158" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.158" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.158" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.158" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.158" }
+agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.158" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.158" }
+agent-doc-memory = { path = "../agent-doc-memory", version = "0.35.158" }
+agent-doc-memory-io = { path = "../agent-doc-memory-io", version = "0.35.158" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.158" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.158" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.158" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.158" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.158" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.158" }
+agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.158" }
+agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.158" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.158" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.158" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.158" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.158" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.158" }
+agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.35.158" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.158" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.158" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.158" }
+agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.158" }
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
@@ -64,6 +64,6 @@ tracing = "0.1"
 ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.157", features = ["test-support"] }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.157" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.158", features = ["test-support"] }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.158" }
 tempfile = "3"

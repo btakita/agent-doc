@@ -1742,7 +1742,7 @@ pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState>
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        handle_tmux_focus_state(&bootstrap)
+        handle_tmux_focus_state(&bootstrap, None)
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -12156,7 +12156,10 @@ pub(crate) fn handle_request_locked(
             controller_envelope(handle_session_status(&bootstrap_snapshot, request))
         }
         "inspect_actor" => controller_envelope(handle_inspect_actor(&bootstrap_snapshot, request)),
-        "tmux_focus_state" => controller_envelope(handle_tmux_focus_state(&bootstrap_snapshot)),
+        "tmux_focus_state" => controller_envelope(handle_tmux_focus_state(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+        )),
         "tmux_layout_sync_state" => controller_envelope(handle_tmux_layout_sync_state(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -18739,6 +18742,7 @@ fn pane_layout_effect_worker_wait_for_retry(
 
 pub(crate) fn handle_tmux_focus_state(
     bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
 ) -> Result<ControllerTmuxFocusState> {
     let Some(session_name) = configured_tmux_session_for_project(&bootstrap.project_root) else {
         return Ok(inactive_tmux_focus_state(
@@ -18778,18 +18782,20 @@ pub(crate) fn handle_tmux_focus_state(
             None,
         ));
     };
-    let conn = open_state_db(&bootstrap.project_root)?;
-    let record = load_actor_store_from_db(&conn)?
-        .values()
-        .find(|record| {
-            record.pane_id == pane_id_value
-                && !matches!(
-                    record.state,
-                    agent_doc_controller::actor::ActorState::Blocked
-                        | agent_doc_controller::actor::ActorState::Closed
-                )
-        })
-        .cloned();
+    // `#tmuxautosyncreactive` / `#lazily-hot-path`: the controller runtime owns
+    // actor bindings reactively; the SQLite store is a durable sink, not the
+    // hot-path authority. The JetBrains reverse-mirror polls this RPC every
+    // 500ms, so consult the in-memory reactive actor store when a runtime is
+    // available instead of reopening SQLite on every poll. Cold start (no
+    // runtime) still hydrates from SQLite.
+    let store = match runtime {
+        Some(runtime) => runtime.actor_store_snapshot(),
+        None => {
+            let conn = open_state_db(&bootstrap.project_root)?;
+            load_actor_store_from_db(&conn)?
+        }
+    };
+    let record = actor_record_for_active_pane(&store, &pane_id_value).cloned();
     let process_owner_document = record
         .is_none()
         .then(|| active_pane_process_owner_document(&tmux, &pane_id_value, &bootstrap.project_root))
@@ -18814,6 +18820,24 @@ pub(crate) fn handle_tmux_focus_state(
         document_id,
         record,
     })
+}
+
+/// Find the live (non-blocked, non-closed) actor record whose pane matches the
+/// active tmux pane. Pure so the reactive (runtime) and durable (SQLite) reads
+/// share one lookup rule — the `#lazily-hot-path` invariant that the authority
+/// is the same regardless of which surface serves it.
+fn actor_record_for_active_pane<'a>(
+    store: &'a ControllerActorStore,
+    pane_id: &str,
+) -> Option<&'a agent_doc_controller::actor::ActorRecord> {
+    store
+        .values()
+        .find(|record| record.pane_id == pane_id
+            && !matches!(
+                record.state,
+                agent_doc_controller::actor::ActorState::Blocked
+                    | agent_doc_controller::actor::ActorState::Closed
+            ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23050,6 +23074,57 @@ mod tests {
             ),
             Some("configured".to_string()),
         );
+    }
+
+    #[test]
+    fn actor_record_for_active_pane_finds_live_match_and_skips_terminal_states() {
+        use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
+        use std::collections::BTreeMap;
+
+        fn transition() -> ActorLastTransition {
+            ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "test".to_string(),
+                timestamp: 0,
+                prior_generation: 0,
+                new_generation: 1,
+            }
+        }
+        fn record(document_id: &str, pane_id: &str, state: ActorState) -> ActorRecord {
+            ActorRecord {
+                document_id: document_id.to_string(),
+                session_id: "s".to_string(),
+                generation: 1,
+                pane_id: pane_id.to_string(),
+                window_id: "@1".to_string(),
+                harness: "claude".to_string(),
+                state,
+                last_transition: transition(),
+            }
+        }
+
+        let mut store: BTreeMap<String, ActorRecord> = BTreeMap::new();
+        store.insert("a".to_string(), record("tasks/a.md", "%11", ActorState::Ready));
+        store.insert(
+            "b".to_string(),
+            record("tasks/b.md", "%22", ActorState::Blocked),
+        );
+        store.insert(
+            "c".to_string(),
+            record("tasks/c.md", "%33", ActorState::Closed),
+        );
+
+        // Live match is returned.
+        let hit = actor_record_for_active_pane(&store, "%11").unwrap();
+        assert_eq!(hit.document_id, "tasks/a.md");
+
+        // Terminal-state panes never own the active focus.
+        assert!(actor_record_for_active_pane(&store, "%22").is_none());
+        assert!(actor_record_for_active_pane(&store, "%33").is_none());
+
+        // Unknown pane resolves to None so the caller falls back to the
+        // process-owner (/proc) probe.
+        assert!(actor_record_for_active_pane(&store, "%99").is_none());
     }
 
     #[test]

@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -45,7 +45,7 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#opencodeharnessswitch]
+- 🚧 The tmux pane auto-sync is still slow. Please continue optimizing the performance of the tmux pane auto-sync. Convert imperative logic to reactive state. Also, fix any CRDT storms and/or feedback cycles in the reactive state.
 <!-- /agent:queue -->
 
 ## Notes

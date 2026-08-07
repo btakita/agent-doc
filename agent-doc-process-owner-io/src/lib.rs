@@ -20,9 +20,50 @@ pub use owner_graph::{
 use agent_doc_controller::command_line::agent_doc_cmdline_is_owner;
 use owner_graph::with_tree_observation;
 use proc_table::{TreeProcess, tree_cmdlines};
+use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Thread-local cancellation scope for the controller's structural sync effect
+// (`#tmuxautosyncreactive`).
+//
+// The pane-layout worker sets `(own_generation, latest_generation_handle)`
+// before it calls the structural sync effect; the effect body polls
+// [`structural_effect_superseded`] at phase boundaries and bails early when a
+// newer layout superseded this generation, instead of running the full sync.
+// The standalone `agent-doc sync` CLI never sets this, so it is unaffected.
+thread_local! {
+    static STRUCTURAL_EFFECT_CANCEL: RefCell<Option<(u64, Arc<AtomicU64>)>> =
+        const { RefCell::new(None) };
+}
+
+/// Bind the active structural effect to its own generation and a handle to the
+/// controller's latest published generation. Returns the previous binding so a
+/// caller can restore it (nesting is not expected in production).
+pub fn set_structural_effect_generation(
+    own_generation: u64,
+    latest_generation: Arc<AtomicU64>,
+) -> Option<(u64, Arc<AtomicU64>)> {
+    STRUCTURAL_EFFECT_CANCEL.with(|c| c.borrow_mut().replace((own_generation, latest_generation)))
+}
+
+/// Clear the active structural-effect binding.
+pub fn clear_structural_effect_generation() -> Option<(u64, Arc<AtomicU64>)> {
+    STRUCTURAL_EFFECT_CANCEL.with(|c| c.borrow_mut().take())
+}
+
+/// True when the active structural effect's generation has been superseded by a
+/// newer published layout. Always false when no binding is set (standalone CLI).
+pub fn structural_effect_superseded() -> bool {
+    STRUCTURAL_EFFECT_CANCEL.with(|c| {
+        c.borrow()
+            .as_ref()
+            .is_some_and(|(own, latest)| latest.load(Ordering::SeqCst) != *own)
+    })
+}
 
 pub fn child_pids(parent_pid: &str) -> Vec<String> {
     proc_table::observe_proc_children()

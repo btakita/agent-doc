@@ -17339,6 +17339,16 @@ impl Drop for PaneLayoutSurveyTimingGuard {
     }
 }
 
+/// Clears the active structural-effect cancellation binding on drop, so every
+/// exit from the worker's effect region (including `continue`) restores the
+/// thread-local. See [`set_structural_effect_generation`].
+struct StructuralEffectCancelGuard;
+impl Drop for StructuralEffectCancelGuard {
+    fn drop(&mut self) {
+        agent_doc_process_owner_io::clear_structural_effect_generation();
+    }
+}
+
 fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -18399,6 +18409,11 @@ fn pane_layout_effect_worker(
             attempt = 0;
             continue;
         }
+        agent_doc_process_owner_io::set_structural_effect_generation(
+            desired.generation,
+            runtime.pane_layout_graph.published_generation_handle(),
+        );
+        let _effect_cancel_guard = StructuralEffectCancelGuard;
         let effect_result = match runtime_effects() {
             Ok(effects) => effects.sync_tmux_layout(&bootstrap.project_root, guarded_invocation),
             Err(error) => Err(error),

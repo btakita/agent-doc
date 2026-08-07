@@ -743,6 +743,10 @@ struct ControllerPaneLayoutGraph {
     effect: Mutex<Option<lazily::Effect>>,
     sink: Arc<OnceLock<Arc<dyn PaneLayoutProjectionSink>>>,
     next_generation: AtomicU64,
+    /// The latest generation published by `set_desired`. The structural-effect
+    /// worker binds its own generation against this so the sync body can bail
+    /// early when a newer layout supersedes the one it is applying.
+    published_generation: Arc<AtomicU64>,
     waiters: Condvar,
     wait_lock: Mutex<()>,
 }
@@ -824,6 +828,7 @@ impl ControllerPaneLayoutGraph {
             effect: Mutex::new(Some(effect)),
             sink,
             next_generation: AtomicU64::new(2),
+            published_generation: Arc::new(AtomicU64::new(1)),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
         }
@@ -863,6 +868,9 @@ impl ControllerPaneLayoutGraph {
             return current;
         }
         let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
+        // Publish the new generation so an in-flight structural effect for an
+        // older generation can detect supersession and bail early.
+        self.published_generation.store(generation, Ordering::SeqCst);
         let desired = PaneLayoutDesired {
             generation,
             source_plane_version,
@@ -889,6 +897,12 @@ impl ControllerPaneLayoutGraph {
 
     fn desired(&self) -> Option<PaneLayoutDesired> {
         self.ctx.get(&self.desired)
+    }
+
+    /// Handle to the latest published generation, so an in-flight structural
+    /// effect can poll for supersession.
+    pub(crate) fn published_generation_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.published_generation)
     }
 
     fn projection(&self) -> PaneLayoutProjection {

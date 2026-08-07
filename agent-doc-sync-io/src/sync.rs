@@ -2167,6 +2167,15 @@ fn run_with_options_internal_at_root(
     let _process_observation = agent_doc_process_owner_io::begin_process_observation_scope();
     let _lock_guard = lock_guard;
 
+    // `#tmuxautosyncreactive`: if a newer layout superseded this generation
+    // while we waited for the lock or opened scopes, bail before any sync body
+    // work — the worker reloops to the newest generation instead of applying a
+    // stale one. No-op for the standalone CLI (no binding set).
+    if agent_doc_process_owner_io::structural_effect_superseded() {
+        sync_log("structural_effect_cancelled_superseded phase=after_sync_lock");
+        return Ok(());
+    }
+
     // Check for new build and clear stale caches
     {
         match agent_doc_controller_io::project_controller::close_stale_starting_actors_for_caller(
@@ -2514,6 +2523,13 @@ fn run_with_options_internal_at_root(
         SYNC_PRUNE_BUDGET,
         auto_start_mode,
     );
+
+    // Bail before the ownership loop + tmux-router reconciliation if a newer
+    // layout superseded this generation during the prune.
+    if agent_doc_process_owner_io::structural_effect_superseded() {
+        sync_log("structural_effect_cancelled_superseded phase=after_prune");
+        return Ok(());
+    }
 
     if let Some(w) = window {
         let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();

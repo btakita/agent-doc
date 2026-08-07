@@ -56,6 +56,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dc0c] tmux pane auto-sync did not open agent-doc-bugs2.md tmux pane. Running Sync Tmux Layout did sync the tmux pane.
 - [ ] [#opencodeharnessswitch] #agent-doc-bug Switching a document from codex to opencode and restarting: session did not become dispatch-ready in 30s (no_prompt) for opencode. The dispatch-ready chain (startup_ready::auto_start_dispatch_ready_block -> pane_ready_prompt_candidate -> project_pane_composer_at_cursor) has OpenCode-specific handling but the bare prompt check (is_dispatch_ready_prompt_line: matches '>' | '>') may miss OpenCode's full-screen Bubbletea TUI idle state. Needs fresh reproduction with pane capture evidence to pinpoint whether the TUI initialization exceeds 30s or the composer projection returns Absent/Busy instead of ReadyEmpty. Reported on monsterrodholders.md (boost-client).
 <!-- /agent:backlog -->
 

@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -40,12 +40,32 @@ completed
 Compacted content:
 - Archived 3 response topic(s): tmux auto-sync delay; do [#tmuxautosyncreactive]; do [#tmuxautosyncreactive]
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): Agent Doc recovery and root-cause fixes; Response
+
+### Re: tmux auto-sync reactive conversion — glm-5.2
+
+> **Queue prompt:**
+>
+> do [#dc0c]
+
+
+> **Queue prompt:** The tmux pane auto-sync is still slow. Please continue optimizing the performance of the tmux pane auto-sync. Convert imperative logic to reactive state. Also, fix any CRDT storms and/or feedback cycles in the reactive state.
+
+**Evidence-driven triage.** The `/tmp/agent-doc-sync.log` phase meter shows the headline editor tab-switch wedge is already resolved by the `#tmuxautosyncreactive` work shipped through 0.35.157: `handle_editor_surface_observe` (`rpc.rs:17059`) now folds against the **retained** tmux observation and resolves `Sync`/`Focus` in-process — the editor socket no longer blocks on a tmux survey or a structural sync (plan item 1 main, DONE). The sync lock is uncontended (0 ms), and the editor-visible path skips the `/proc` ownership walk via the reactive actor-binding fast path. The remaining per-phase cost (`ownership_per_file_loop` ~1.2 s) belongs to **full CLI syncs** (`exact_visible_projection=false`), not the editor tab-switch path, and shortcutting it there would regress the `#bare-foreign-session-guard` / cross-repo owner proofs.
+
+**Shipped this cycle (0.35.158).** The one remaining steady-state reactive violation on the editor hot path: `handle_tmux_focus_state` reopened `state.db` and loaded the full actor store on **every 500 ms** JetBrains reverse-mirror poll (`#lazily-hot-path`: SQLite is a durable sink, not transition authority). The RPC is now routed through the runtime like its siblings and reads `ControllerRuntime::actor_store_snapshot()` (the in-memory reactive store); cold start still hydrates from SQLite. The live pane→record lookup is unified in a pure `actor_record_for_active_pane` helper (new unit test). Verified: `make check` green, `make install` done, pushed.
+
+**On "CRDT storms / feedback cycles".** The sync path does not write to CRDTs (closeout owns that), and the `editor → surface graph → worker → tmux → surface graph → editor` loop is already guarded by identical-invocation dedup (`set_desired`), stale/duplicate observation rejection (`ControllerEditorSurfaceGraph::observe`), single-worker coalescing (`LatestProjectionWorkerState`), and generation supersession. The 500 ms poll was the last contributor feeding that loop; this cycle removes its SQLite read.
+
+**Item 2 re-framed.** The original plan suggested replacing the JB 500 ms poll with an editor-surface state-plane subscription. That projection carries the editor→tmux `intent`, **not** the tmux-active document, so it cannot drive the reverse mirror — and tmux exposes no push event for arbitrary pane-focus changes, so the active-pane probe must stay. The achievable reactive conversion is the one landed above (serve the poll from the reactive store). Plan updated (`plan-tmux-auto-sync-reactive.md`) with a note explaining why a pure-subscription replacement is out of reach until a tmux focus-change hook exists.
+
+**Closed `#dc0c`** as a duplicate of the shipped `#jb-tsift-pane-sync` (semantic match 0.883) — same "navigation did not surface the pane; manual Sync Tmux Layout did" class, already fixed.
+
+**Remaining (low priority).** Item 4 (`ControllerEditorSurfaceGraph` `Mutex<BTreeMap>` → `ThreadSafeDependencyMap`) is now low-value since item 1 main moved the consequence off the editor-observe path, so the mutex is no longer held across expensive work. Left in the plan, deprioritized.
 <!-- agent:boundary:2463ea63:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 The tmux pane auto-sync is still slow. Please continue optimizing the performance of the tmux pane auto-sync. Convert imperative logic to reactive state. Also, fix any CRDT storms and/or feedback cycles in the reactive state.
 <!-- /agent:queue -->
 
 ## Notes
@@ -56,7 +76,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dc0c] tmux pane auto-sync did not open agent-doc-bugs2.md tmux pane. Running Sync Tmux Layout did sync the tmux pane.
 - [ ] [#opencodeharnessswitch] #agent-doc-bug Switching a document from codex to opencode and restarting: session did not become dispatch-ready in 30s (no_prompt) for opencode. The dispatch-ready chain (startup_ready::auto_start_dispatch_ready_block -> pane_ready_prompt_candidate -> project_pane_composer_at_cursor) has OpenCode-specific handling but the bare prompt check (is_dispatch_ready_prompt_line: matches '>' | '>') may miss OpenCode's full-screen Bubbletea TUI idle state. Needs fresh reproduction with pane capture evidence to pinpoint whether the TUI initialization exceeds 30s or the composer projection returns Absent/Busy instead of ReadyEmpty. Reported on monsterrodholders.md (boost-client).
 <!-- /agent:backlog -->
 

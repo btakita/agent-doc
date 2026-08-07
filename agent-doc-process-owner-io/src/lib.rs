@@ -67,7 +67,8 @@ pub fn structural_effect_superseded() -> bool {
 
 pub fn child_pids(parent_pid: &str) -> Vec<String> {
     proc_table::observe_proc_children()
-        .remove(parent_pid.trim())
+        .get(parent_pid.trim())
+        .cloned()
         .unwrap_or_default()
 }
 

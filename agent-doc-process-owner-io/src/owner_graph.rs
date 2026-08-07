@@ -39,6 +39,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use agent_doc_controller::command_line::{
     agent_doc_owner_document_from_cmdline, cmdline_owns_other_document,
@@ -48,7 +49,8 @@ use agent_doc_state_scope::LocalReadScope;
 use lazily::{Computed, Source, SourceMap};
 
 use crate::proc_table::{
-    ProcChildren, TreeProcess, observe_proc_children, observe_process_tree, tree_cmdlines,
+    ProcChildren, TreeProcess, observe_proc_children, observe_proc_children_fresh,
+    observe_process_tree, tree_cmdlines,
 };
 
 /// A pane's observed process tree, shared by every derived cell that reads it.
@@ -61,11 +63,12 @@ struct ProcessObservationState {
     /// Pane root pid -> observed process tree. `Source`, because a process tree is
     /// observed from outside the graph.
     trees: SourceMap<String, TreeObservation>,
-    /// The shared `/proc` parent→children map for this scope. The first root
-    /// pid sighting computes it once and every later sighting reuses it, so the
-    /// cold first pass over `P` panes costs ONE `/proc` walk instead of `P`.
+    /// The shared `/proc` parent→children map for this scope, computed once on
+    /// first use and reused for every subsequent root pid. Drawn from the
+    /// process-wide TTL cache (`observe_proc_children`) so consecutive syncs
+    /// share one cold walk instead of each re-scanning the whole process table.
     /// `refresh()` replaces it with a fresh snapshot.
-    children: Option<Rc<ProcChildren>>,
+    children: Option<Arc<ProcChildren>>,
     /// (root pid, claimed document) -> the *other* document this pane owns, if any.
     other_document: HashMap<(String, String), Computed<Option<String>>>,
     /// Root pid -> the document this pane's first agent-doc owner process binds.
@@ -98,9 +101,9 @@ impl ProcessObservationState {
     /// first use and reused for every subsequent root pid. Mirrors what
     /// [`Self::refresh`] already does for re-observation, so the cold first pass
     /// over many panes is one walk, not one per pane.
-    fn children_handle(&mut self) -> Rc<ProcChildren> {
+    fn children_handle(&mut self) -> Arc<ProcChildren> {
         self.children
-            .get_or_insert_with(|| Rc::new(observe_proc_children()))
+            .get_or_insert_with(observe_proc_children)
             .clone()
     }
 
@@ -186,10 +189,11 @@ impl ProcessObservationState {
         if roots.is_empty() {
             return;
         }
-        let children = Rc::new(observe_proc_children());
-        // Replace the cached snapshot so any root added after this refresh
-        // observes from the same fresh map instead of the pre-refresh one.
-        self.children = Some(Rc::clone(&children));
+        // Force a fresh `/proc` walk (this is the tmux-mutation invalidation
+        // edge) and publish it to the process-wide cache so later callers in the
+        // TTL window reuse it; reuse the same `Arc` for every root in scope.
+        let children = observe_proc_children_fresh();
+        self.children = Some(Arc::clone(&children));
         for root in roots {
             self.observations += 1;
             let observed: TreeObservation = Rc::new(observe_process_tree(&children, &root));

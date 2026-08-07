@@ -14,6 +14,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// One process in a pane's tree, in traversal order (the pane root is first).
 ///
@@ -28,13 +30,56 @@ pub struct TreeProcess {
 /// Parent pid -> child pids, observed in a single `/proc` walk.
 pub type ProcChildren = HashMap<String, Vec<String>>;
 
+/// Process-wide TTL cache for the `/proc` parent→children map
+/// (`#tmuxautosyncreactive`). A full `/proc` scan is the dominant ownership-proof
+/// cost, and the process table is effectively stable over a couple of seconds, so
+/// consecutive syncs (and the drift survey) share one walk instead of each paying
+/// a cold ~hundreds-of-ms scan of the whole table. `refresh_process_observations`
+/// (the tmux-mutation invalidation edge) forces a fresh walk via
+/// [`observe_proc_children_fresh`] and updates this cache.
+const PROC_CHILDREN_CACHE_TTL: Duration = Duration::from_millis(2000);
+static PROC_CHILDREN_CACHE: Mutex<Option<(Instant, Arc<ProcChildren>)>> = Mutex::new(None);
+
+/// Observe `/proc` parent→children, reusing a recent process-wide observation so
+/// the cold walk is paid once per TTL window, not once per sync.
+pub fn observe_proc_children() -> Arc<ProcChildren> {
+    let now = Instant::now();
+    if let Ok(cache) = PROC_CHILDREN_CACHE.lock()
+        && let Some((observed_at, children)) = cache.as_ref()
+        && now.duration_since(*observed_at) < PROC_CHILDREN_CACHE_TTL
+    {
+        return Arc::clone(children);
+    }
+    let children = observe_proc_children_uncached();
+    if let Ok(mut cache) = PROC_CHILDREN_CACHE.lock() {
+        *cache = Some((now, Arc::new(children)));
+    }
+    if let Ok(cache) = PROC_CHILDREN_CACHE.lock()
+        && let Some((_, children)) = cache.as_ref()
+    {
+        return Arc::clone(children);
+    }
+    Arc::new(observe_proc_children_uncached())
+}
+
+/// Force a fresh `/proc` walk (the invalidation edge after a tmux mutation) and
+/// publish it to the cache so later callers in the TTL window reuse it.
+pub fn observe_proc_children_fresh() -> Arc<ProcChildren> {
+    let now = Instant::now();
+    let children = Arc::new(observe_proc_children_uncached());
+    if let Ok(mut cache) = PROC_CHILDREN_CACHE.lock() {
+        *cache = Some((now, Arc::clone(&children)));
+    }
+    children
+}
+
 /// Walk `/proc` once and record the parent -> children edges.
 ///
 /// Returns an empty map when `/proc` is unavailable (non-Linux). Callers that
 /// traverse from a root still see the root itself, which preserves the previous
 /// behavior on those platforms: the tree collapses to `[root]` and the command
 /// line comes from the `ps` fallback in [`crate::process_command`].
-pub fn observe_proc_children() -> ProcChildren {
+fn observe_proc_children_uncached() -> ProcChildren {
     let mut children: ProcChildren = HashMap::new();
     let Ok(entries) = fs::read_dir("/proc") else {
         return children;

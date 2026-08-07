@@ -36,15 +36,16 @@ use crate::restart_handoff::wait_for_busy_restart_handoff;
 use crate::startup_ready::{pane_composer_draft, wait_for_agent_ready_outcome};
 use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
-    BusyPaneAutoFixOutcome, DispatchOnlyBlockerRecoveryHintFacts,
-    DispatchOnlyReadyProbeResolutionFacts, DispatchOnlyReopenDelivery, DispatchOnlyRouteCycleStamp,
+    AuthoritativeActorDispatchIntent, BusyPaneAutoFixOutcome, DirectPaneSubmitPolicy,
+    DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyReadyProbeResolutionFacts,
+    DispatchOnlyReopenDelivery, DispatchOnlyRouteCycleStamp,
     DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneDraftMessageFacts,
     DispatchOnlyStartingPaneNotReadyMessageFacts, RoutedReopenGuardReason, StartingPaneBlocker,
-    dispatch_only_blocked_guard_reason, dispatch_only_blocker_recovery_hint,
-    dispatch_only_effective_ready_probe_required, dispatch_only_route_superseded_by_new_cycle,
-    dispatch_only_should_print_unproven_progress, dispatch_only_starting_pane_actor_settled,
-    dispatch_only_starting_pane_draft_message, dispatch_only_starting_pane_not_ready_message,
-    prompt_ready_barrier_failed_event,
+    classify_direct_pane_submit_policy, dispatch_only_blocked_guard_reason,
+    dispatch_only_blocker_recovery_hint, dispatch_only_effective_ready_probe_required,
+    dispatch_only_route_superseded_by_new_cycle, dispatch_only_should_print_unproven_progress,
+    dispatch_only_starting_pane_actor_settled, dispatch_only_starting_pane_draft_message,
+    dispatch_only_starting_pane_not_ready_message, prompt_ready_barrier_failed_event,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
@@ -147,12 +148,6 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
 /// be dropped before submit. Fail closed (don't type) and let the caller retry
 /// once the recycle settles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DispatchOnlyActiveTurnPolicy {
-    QueueOrRefuse,
-    SubmitPlainTrigger,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DispatchOnlyBlockerAction {
     SubmitPlainTrigger,
     QueuePrompt(&'static str),
@@ -160,12 +155,12 @@ enum DispatchOnlyBlockerAction {
 }
 
 fn classify_dispatch_only_blocker(
-    policy: DispatchOnlyActiveTurnPolicy,
+    intent: AuthoritativeActorDispatchIntent,
     harness_binary: &str,
     blocker_reason: &str,
     has_queue_prompt: bool,
 ) -> DispatchOnlyBlockerAction {
-    if policy == DispatchOnlyActiveTurnPolicy::SubmitPlainTrigger
+    if intent == AuthoritativeActorDispatchIntent::PlainTrigger
         && agent_doc_queue::route_dispatch::dispatch_active_turn_accepts_plain_trigger(
             harness_binary,
             blocker_reason,
@@ -188,7 +183,7 @@ fn classify_dispatch_only_blocker(
 pub struct DispatchOnlySendReopenOptions<'a> {
     pub delivery: DispatchOnlyReopenDelivery,
     pub queue_prompt_text: Option<&'a str>,
-    pub active_turn_policy: DispatchOnlyActiveTurnPolicy,
+    pub intent: AuthoritativeActorDispatchIntent,
     pub effects: DispatchOnlyRouteEffects,
 }
 
@@ -500,7 +495,7 @@ pub fn dispatch_only_send_reopen(
             ),
         );
         match classify_dispatch_only_blocker(
-            options.active_turn_policy,
+            options.intent,
             &harness.binary,
             &reason,
             options.queue_prompt_text.is_some(),
@@ -596,6 +591,10 @@ pub fn dispatch_only_send_reopen(
 
     drop(pre_dispatch_route_guard.take());
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+    let direct_pane_submit_policy = classify_direct_pane_submit_policy(options.intent);
+    let await_start_proof = direct_pane_submit_policy
+        == DirectPaneSubmitPolicy::ObserveHarnessAcceptance
+        && dispatch_only_dispatch_start_proof_required(file, harness);
     let dispatch_start = match delivery {
         DispatchOnlyReopenDelivery::SupervisorIpcOnce => dispatch_via_supervisor_ipc_with_mode(
             tmux,
@@ -606,7 +605,7 @@ pub fn dispatch_only_send_reopen(
             harness,
             SupervisorIpcDispatchOptions {
                 effects: options.effects.route_dispatch_effects,
-                await_start_proof: dispatch_only_dispatch_start_proof_required(file, harness),
+                await_start_proof,
                 print_unproven_progress: dispatch_only_should_print_unproven_progress(),
             },
         )?,
@@ -618,31 +617,34 @@ pub fn dispatch_only_send_reopen(
             harness,
             DirectPaneDispatchOptions {
                 effects: options.effects.route_dispatch_effects,
-                await_start_proof: dispatch_only_dispatch_start_proof_required(file, harness),
+                await_start_proof,
                 print_unproven_progress: dispatch_only_should_print_unproven_progress(),
+                submit_policy: direct_pane_submit_policy,
             },
         )?,
     };
-    require_dispatch_only_dispatch_start_proof(
-        file,
-        &dispatch_pane,
-        harness,
-        delivery,
-        dispatch_start,
-        |DispatchOnlyBugReportFacts { elapsed, proof }| {
-            (options.effects.file_route_dispatch_bug_report)(RouteDispatchBugReportFacts {
-                file,
-                pane: &dispatch_pane,
-                harness,
-                phase: "dispatch_only_dispatch_start_proof",
-                issue: "accepted_without_dispatch_start_proof",
-                result: "accepted_without_dispatch_start_proof",
-                elapsed,
-                proof: Some(proof),
-                diagnostic_path: None,
-            });
-        },
-    )?;
+    if direct_pane_submit_policy == DirectPaneSubmitPolicy::ObserveHarnessAcceptance {
+        require_dispatch_only_dispatch_start_proof(
+            file,
+            &dispatch_pane,
+            harness,
+            delivery,
+            dispatch_start,
+            |DispatchOnlyBugReportFacts { elapsed, proof }| {
+                (options.effects.file_route_dispatch_bug_report)(RouteDispatchBugReportFacts {
+                    file,
+                    pane: &dispatch_pane,
+                    harness,
+                    phase: "dispatch_only_dispatch_start_proof",
+                    issue: "accepted_without_dispatch_start_proof",
+                    result: "accepted_without_dispatch_start_proof",
+                    elapsed,
+                    proof: Some(proof),
+                    diagnostic_path: None,
+                });
+            },
+        )?;
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &dispatch_only_sent_log_message_for(
@@ -742,7 +744,7 @@ pub fn dispatch_only_reopen_existing_pane(
             DispatchOnlySendReopenOptions {
                 delivery,
                 queue_prompt_text,
-                active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
                 effects,
             },
         );
@@ -772,7 +774,7 @@ pub fn dispatch_only_reopen_existing_pane(
             DispatchOnlySendReopenOptions {
                 delivery,
                 queue_prompt_text,
-                active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
                 effects,
             },
         );
@@ -795,7 +797,7 @@ pub fn dispatch_only_reopen_existing_pane(
             DispatchOnlySendReopenOptions {
                 delivery,
                 queue_prompt_text,
-                active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
                 effects,
             },
         ),
@@ -1123,7 +1125,7 @@ mod tests {
     fn blocker_policy_submits_only_plain_triggers_to_actual_active_turns() {
         assert_eq!(
             classify_dispatch_only_blocker(
-                DispatchOnlyActiveTurnPolicy::SubmitPlainTrigger,
+                AuthoritativeActorDispatchIntent::PlainTrigger,
                 "codex",
                 "active codex turn",
                 false,
@@ -1132,7 +1134,7 @@ mod tests {
         );
         assert_eq!(
             classify_dispatch_only_blocker(
-                DispatchOnlyActiveTurnPolicy::SubmitPlainTrigger,
+                AuthoritativeActorDispatchIntent::PlainTrigger,
                 "claude",
                 "claude artifact picker open",
                 false,
@@ -1145,7 +1147,7 @@ mod tests {
     fn blocker_policy_preserves_prompt_aware_queue_or_refuse_behavior() {
         assert_eq!(
             classify_dispatch_only_blocker(
-                DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+                AuthoritativeActorDispatchIntent::PromptAware,
                 "codex",
                 "active codex turn",
                 true,
@@ -1154,7 +1156,7 @@ mod tests {
         );
         assert_eq!(
             classify_dispatch_only_blocker(
-                DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+                AuthoritativeActorDispatchIntent::PromptAware,
                 "codex",
                 "active codex turn",
                 false,

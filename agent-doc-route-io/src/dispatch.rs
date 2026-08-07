@@ -8,7 +8,8 @@ use crate::direct_pane_dispatch::{
     CommandDispatchResult, CommandDispatchStatus, RouteSubmitObservationLogFacts,
     log_dispatch_inject, log_route_latency, log_route_submit_observation,
     poll_direct_pane_acceptance, preserve_route_pane_snapshot, print_route_pane_snapshot_hint,
-    send_command_unchecked, send_direct_pane_enter_resubmit_until_stable,
+    send_command_once_unchecked, send_command_unchecked,
+    send_direct_pane_enter_resubmit_until_stable,
     try_late_direct_pane_enter_resubmit_after_unproven_dispatch,
 };
 use crate::dispatch_start::{
@@ -16,8 +17,8 @@ use crate::dispatch_start::{
 };
 use crate::supervisor_runtime::supervisor_socket_path;
 use agent_doc_controller::dispatch::{
-    DirectPaneDispatchStartProofFacts, RouteSubmitObservation, RoutedDispatchStartProof,
-    RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
+    DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy, RouteSubmitObservation,
+    RoutedDispatchStartProof, RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
     direct_pane_should_await_dispatch_start_proof, direct_pane_submit_acceptance_budget,
     direct_pane_submit_outcome, dispatch_start_busy_probe_timeout,
     dispatch_start_early_resubmit_probe_timeout, routed_dispatch_start_timeout_for_binary,
@@ -450,6 +451,16 @@ pub fn send_command_checked(
     send_command_unchecked(tmux, pane, file_path, harness)
 }
 
+pub fn send_command_once_checked(
+    tmux: &Tmux,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<String> {
+    dispatch_registry::ensure_dispatch_target_matches_file(pane, file_path)?;
+    send_command_once_unchecked(tmux, pane, file_path, harness)
+}
+
 pub fn dispatch_existing_managed_reopen(
     tmux: &Tmux,
     file: &Path,
@@ -480,6 +491,7 @@ pub fn dispatch_routed_reopen(
             effects,
             await_start_proof: true,
             print_unproven_progress: true,
+            submit_policy: DirectPaneSubmitPolicy::ObserveHarnessAcceptance,
         },
     )
 }
@@ -493,13 +505,38 @@ pub fn dispatch_routed_reopen_with_mode(
     options: DirectPaneDispatchOptions,
 ) -> Result<RoutedDispatchStartProof> {
     let effects = options.effects;
-    let tracker =
-        build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
     let _route_submit_guard = agent_doc_controller_io::project_controller::begin_route_submit(
         file,
         pane,
         &harness.binary,
     )?;
+    if options.submit_policy == DirectPaneSubmitPolicy::PassThroughSingleSubmit {
+        let submit_start = Instant::now();
+        send_command_once_checked(tmux, pane, file_path, harness)?;
+        let elapsed = submit_start.elapsed();
+        log_route_latency(
+            file,
+            "direct_pane_submit",
+            elapsed,
+            direct_pane_submit_acceptance_budget(),
+            pane,
+            harness,
+            "pass_through_single_submit",
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_direct_pane_plain_trigger_pass_through file={} pane={} harness={} outcome=single_text_enter_submit elapsed_ms={}",
+                file.display(),
+                pane,
+                harness.binary,
+                elapsed.as_millis(),
+            ),
+        );
+        return Ok(RoutedDispatchStartProof::TransportSubmittedOnly);
+    }
+    let tracker =
+        build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
     let submit_result = send_command_checked(tmux, pane, file_path, harness)?;
     let Some(tracker) = tracker else {
         log_route_latency(
@@ -790,4 +827,5 @@ pub struct DirectPaneDispatchOptions {
     pub effects: RouteDispatchEffects,
     pub await_start_proof: bool,
     pub print_unproven_progress: bool,
+    pub submit_policy: DirectPaneSubmitPolicy,
 }

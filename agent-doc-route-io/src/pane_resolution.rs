@@ -23,8 +23,8 @@ use crate::busy_pane::{
 };
 use crate::dispatch::{RouteDispatchEffects, dispatch_existing_managed_reopen};
 use crate::dispatch_only::{
-    DispatchOnlyActiveTurnPolicy, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
-    dispatch_only_reopen_existing_pane, dispatch_only_send_reopen,
+    DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions, dispatch_only_reopen_existing_pane,
+    dispatch_only_send_reopen,
 };
 use crate::dispatch_recovery::{
     StartingPaneRecoveryWaitOptions, resolve_fresh_dispatch_target_after_ready_wait,
@@ -1568,7 +1568,7 @@ pub fn recover_dispatch_only_authoritative_waiting_input(
         DispatchOnlySendReopenOptions {
             delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
             queue_prompt_text: None,
-            active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+            intent: agent_doc_controller::dispatch::AuthoritativeActorDispatchIntent::PromptAware,
             effects,
         },
     )

@@ -721,6 +721,44 @@ pub enum AuthoritativeActorDispatchIntent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectPaneSubmitPolicy {
+    ObserveHarnessAcceptance,
+    PassThroughSingleSubmit,
+}
+
+pub const fn classify_direct_pane_submit_policy(
+    intent: AuthoritativeActorDispatchIntent,
+) -> DirectPaneSubmitPolicy {
+    match intent {
+        AuthoritativeActorDispatchIntent::PromptAware => {
+            DirectPaneSubmitPolicy::ObserveHarnessAcceptance
+        }
+        AuthoritativeActorDispatchIntent::PlainTrigger => {
+            DirectPaneSubmitPolicy::PassThroughSingleSubmit
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteCloseoutDrainPolicy {
+    DrainBeforeDispatch,
+    PassThroughPlainTrigger,
+}
+
+pub const fn classify_route_closeout_drain_policy(
+    mode: ReopenMode,
+    intent: AuthoritativeActorDispatchIntent,
+) -> RouteCloseoutDrainPolicy {
+    if matches!(mode, ReopenMode::DispatchOnly)
+        && matches!(intent, AuthoritativeActorDispatchIntent::PlainTrigger)
+    {
+        RouteCloseoutDrainPolicy::PassThroughPlainTrigger
+    } else {
+        RouteCloseoutDrainPolicy::DrainBeforeDispatch
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthoritativeActorDispatchActionFacts {
     pub mode: ReopenMode,
     pub actor_state: ActorDispatchState,
@@ -2326,6 +2364,10 @@ pub fn dispatch_only_should_probe_active_turn_cue(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutedDispatchStartProof {
+    /// The tmux text-plus-submit operation succeeded. No pane capture or
+    /// harness state was observed; this is the terminal success boundary for
+    /// explicit plain-trigger steering only.
+    TransportSubmittedOnly,
     CommandAcceptedOnly,
     DispatchStartUnproven,
     /// The routed trigger was accepted into a pane that is mid-turn, so it is
@@ -2344,6 +2386,7 @@ pub enum RoutedDispatchStartProof {
 impl RoutedDispatchStartProof {
     pub const fn dispatch_stage_label(self) -> &'static str {
         match self {
+            Self::TransportSubmittedOnly => "transport_submitted",
             Self::CommandAcceptedOnly => "accepted",
             Self::DispatchStartUnproven => "accepted_without_dispatch_start_proof",
             Self::AcceptedQueuedBehindActiveTurn => "queued_behind_active_turn",
@@ -2355,6 +2398,7 @@ impl RoutedDispatchStartProof {
 
     pub const fn proof_scope_label(self) -> &'static str {
         match self {
+            Self::TransportSubmittedOnly => "transport_only",
             Self::CommandAcceptedOnly
             | Self::DispatchStartUnproven
             | Self::AcceptedQueuedBehindActiveTurn => "accepted_only",
@@ -2366,6 +2410,9 @@ impl RoutedDispatchStartProof {
 
     pub const fn proof_scope_description(self) -> &'static str {
         match self {
+            Self::TransportSubmittedOnly => {
+                "transport-only; one tmux text-plus-submit operation succeeded"
+            }
             Self::CommandAcceptedOnly => {
                 "accepted-only; no harness dispatch-start proof was available"
             }
@@ -2381,6 +2428,7 @@ impl RoutedDispatchStartProof {
 
     pub const fn startup_miss_label(self) -> &'static str {
         match self {
+            Self::TransportSubmittedOnly => "transport-submission",
             Self::CommandAcceptedOnly => "acceptance",
             Self::DispatchStartUnproven => "accepted-without-dispatch-proof",
             Self::AcceptedQueuedBehindActiveTurn => "queued-behind-active-turn",
@@ -2523,7 +2571,11 @@ pub fn decide_dispatch_start_proof(
     dispatch_start_proof_required: bool,
 ) -> DispatchStartProofDecision {
     if proof == RoutedDispatchStartProof::DispatchStartUnproven
-        || proof == RoutedDispatchStartProof::CommandAcceptedOnly && dispatch_start_proof_required
+        || matches!(
+            proof,
+            RoutedDispatchStartProof::TransportSubmittedOnly
+                | RoutedDispatchStartProof::CommandAcceptedOnly
+        ) && dispatch_start_proof_required
     {
         DispatchStartProofDecision::FailClosedAcceptedOnly
     } else {
@@ -2818,6 +2870,7 @@ pub fn direct_pane_can_enter_existing_draft(facts: DirectPaneExistingDraftSubmit
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RouteCloseoutDrainOutcome {
     NoOpenCycle,
+    PlainTriggerPassThrough,
     Recovered(String),
     Blocked(String),
 }
@@ -2826,18 +2879,12 @@ pub enum RouteCloseoutDrainOutcome {
 pub struct CloseoutBlockDispatchFacts {
     pub recovery_queues_prompt_for_after_closeout: bool,
     pub active_queue_head: Option<String>,
-    /// A plain Run Agent Doc trigger carries no new prompt body. When the
-    /// authoritative actor already owns an unresolved closeout, accepting that
-    /// trigger means coalescing it behind the owner rather than failing a
-    /// second route that has no additional work to preserve.
-    pub plain_trigger_without_prompt: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CloseoutBlockDispatchDecision {
     EnqueuePromptForAfterCloseout,
     WaitForActiveQueueHead { head: String },
-    CoalescePlainTriggerBehindCloseoutOwner,
     FailClosed,
 }
 
@@ -2849,9 +2896,6 @@ pub fn classify_closeout_block_dispatch(
     }
     if let Some(head) = facts.active_queue_head {
         return CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head };
-    }
-    if facts.plain_trigger_without_prompt {
-        return CloseoutBlockDispatchDecision::CoalescePlainTriggerBehindCloseoutOwner;
     }
     CloseoutBlockDispatchDecision::FailClosed
 }
@@ -5836,7 +5880,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
                 recovery_queues_prompt_for_after_closeout: true,
                 active_queue_head: Some("existing-head".to_string()),
-                plain_trigger_without_prompt: true,
             }),
             CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout
         );
@@ -5848,7 +5891,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
                 recovery_queues_prompt_for_after_closeout: false,
                 active_queue_head: Some("queue-head".to_string()),
-                plain_trigger_without_prompt: true,
             }),
             CloseoutBlockDispatchDecision::WaitForActiveQueueHead {
                 head: "queue-head".to_string(),
@@ -5862,21 +5904,59 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
                 recovery_queues_prompt_for_after_closeout: false,
                 active_queue_head: None,
-                plain_trigger_without_prompt: false,
             }),
             CloseoutBlockDispatchDecision::FailClosed
         );
     }
 
     #[test]
-    fn closeout_block_dispatch_coalesces_a_plain_trigger_behind_the_owner() {
+    fn closeout_drain_policy_passes_through_plain_editor_trigger() {
         assert_eq!(
-            classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
-                recovery_queues_prompt_for_after_closeout: false,
-                active_queue_head: None,
-                plain_trigger_without_prompt: true,
-            }),
-            CloseoutBlockDispatchDecision::CoalescePlainTriggerBehindCloseoutOwner,
+            classify_route_closeout_drain_policy(
+                ReopenMode::DispatchOnly,
+                AuthoritativeActorDispatchIntent::PlainTrigger,
+            ),
+            RouteCloseoutDrainPolicy::PassThroughPlainTrigger,
+        );
+    }
+
+    #[test]
+    fn closeout_drain_policy_keeps_managed_prompt_recovery() {
+        assert_eq!(
+            classify_route_closeout_drain_policy(
+                ReopenMode::Managed,
+                AuthoritativeActorDispatchIntent::PromptAware,
+            ),
+            RouteCloseoutDrainPolicy::DrainBeforeDispatch,
+        );
+    }
+
+    #[test]
+    fn direct_pane_submit_policy_passes_plain_trigger_through_once() {
+        assert_eq!(
+            classify_direct_pane_submit_policy(AuthoritativeActorDispatchIntent::PlainTrigger),
+            DirectPaneSubmitPolicy::PassThroughSingleSubmit,
+        );
+    }
+
+    #[test]
+    fn direct_pane_submit_policy_keeps_prompt_acceptance_proof() {
+        assert_eq!(
+            classify_direct_pane_submit_policy(AuthoritativeActorDispatchIntent::PromptAware),
+            DirectPaneSubmitPolicy::ObserveHarnessAcceptance,
+        );
+    }
+
+    #[test]
+    fn plain_trigger_transport_proof_does_not_claim_harness_acceptance() {
+        let proof = RoutedDispatchStartProof::TransportSubmittedOnly;
+        assert_eq!(proof.dispatch_stage_label(), "transport_submitted");
+        assert_eq!(proof.proof_scope_label(), "transport_only");
+        assert!(!proof.confirms_dispatch_start());
+        assert_eq!(
+            decide_dispatch_start_proof(proof, true),
+            DispatchStartProofDecision::FailClosedAcceptedOnly,
+            "only the explicit plain-trigger policy may terminate at transport submission"
         );
     }
 

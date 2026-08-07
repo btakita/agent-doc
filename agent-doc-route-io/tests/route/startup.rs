@@ -674,6 +674,42 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let status = send_command_checked(&iso, &pane, "test.md", &HarnessConfig::codex()).unwrap();
         assert_eq!(status.status, CommandDispatchStatus::Accepted);
     }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn send_command_once_checked_returns_without_waiting_for_consumption() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join("test.md"), "# test\n").unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-send-once-checked");
+        let pane = iso.auto_start("test", &test_cwd()).unwrap();
+        let window = iso.pane_window(&pane).unwrap();
+        sessions::register_full_with_cwd_in(
+            dir.path(),
+            "route-test-send-once-checked",
+            &pane,
+            "test.md",
+            1234,
+            &window,
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            r#"exec /bin/sh -c 'printf "READY\n"; sleep 10'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
+
+        let started = std::time::Instant::now();
+        send_command_once_checked(&iso, &pane, "test.md", &HarnessConfig::codex()).unwrap();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "single-submit pass-through must not enter the acceptance polling window"
+        );
+    }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn send_command_checked_codex_does_not_append_follow_up_lines() {

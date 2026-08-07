@@ -5,9 +5,10 @@ use std::path::Path;
 use std::time::Duration;
 
 use agent_doc_controller::dispatch::{
-    CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts, CloseoutDrainProjection,
-    CloseoutProjectionChange, RouteCloseoutDrainOutcome, classify_closeout_block_dispatch,
-    project_closeout_drain,
+    AuthoritativeActorDispatchIntent, CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts,
+    CloseoutDrainProjection, CloseoutProjectionChange, ReopenMode, RouteCloseoutDrainOutcome,
+    RouteCloseoutDrainPolicy, classify_closeout_block_dispatch,
+    classify_route_closeout_drain_policy, project_closeout_drain,
 };
 use agent_doc_controller_io::project_controller::CloseoutCycleWaitOutcome;
 use agent_doc_session_check_io::SessionCheckStatus;
@@ -167,11 +168,33 @@ pub fn drain_open_closeout_before_routed_dispatch(
     Ok(RouteCloseoutDrainOutcome::Blocked(last_reason))
 }
 
+pub fn apply_routed_dispatch_closeout_policy(
+    file: &Path,
+    mode: ReopenMode,
+    intent: AuthoritativeActorDispatchIntent,
+    effects: RouteCloseoutDrainEffects,
+) -> Result<RouteCloseoutDrainOutcome> {
+    match classify_route_closeout_drain_policy(mode, intent) {
+        RouteCloseoutDrainPolicy::DrainBeforeDispatch => {
+            drain_open_closeout_before_routed_dispatch(file, effects)
+        }
+        RouteCloseoutDrainPolicy::PassThroughPlainTrigger => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_dispatch_drain_plain_trigger_pass_through file={}",
+                    file.display()
+                ),
+            );
+            Ok(RouteCloseoutDrainOutcome::PlainTriggerPassThrough)
+        }
+    }
+}
+
 pub fn classify_route_closeout_block(
     file: &Path,
     reason: String,
     has_prompt_context: bool,
-    plain_trigger_without_prompt: bool,
     effects: RouteCloseoutDrainEffects,
 ) -> (CloseoutRecoveryDecision, CloseoutBlockDispatchDecision) {
     let recovery_decision = (effects.decide_closeout_recovery)(
@@ -199,7 +222,6 @@ pub fn classify_route_closeout_block(
     let dispatch_decision = classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
         recovery_queues_prompt_for_after_closeout,
         active_queue_head,
-        plain_trigger_without_prompt,
     });
     (recovery_decision, dispatch_decision)
 }

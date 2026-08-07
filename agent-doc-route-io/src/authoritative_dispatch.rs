@@ -35,13 +35,11 @@ use crate::authoritative_actor::{
     wait_for_authoritative_actor_ready,
 };
 use crate::closeout_drain::{
-    RouteCloseoutDrainEffects, classify_route_closeout_block,
-    drain_open_closeout_before_routed_dispatch,
+    RouteCloseoutDrainEffects, apply_routed_dispatch_closeout_policy, classify_route_closeout_block,
 };
 use crate::dispatch::{RouteDispatchEffects, dispatch_via_supervisor_ipc};
 use crate::dispatch_only::{
-    DispatchOnlyActiveTurnPolicy, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
-    dispatch_only_send_reopen,
+    DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions, dispatch_only_send_reopen,
 };
 use crate::dispatch_target::register_dispatch_target;
 use crate::pane_resolution::{
@@ -169,15 +167,41 @@ pub fn route_via_authoritative_actor(
     let mut actor = actor;
     let mut dispatch_pane = actor.record.pane_id.clone();
     let mut actor_state = actor.actor_state();
+    let reopen_mode = if dispatch_only {
+        ReopenMode::DispatchOnly
+    } else {
+        ReopenMode::Managed
+    };
+    let dispatch_intent = if plain_trigger {
+        AuthoritativeActorDispatchIntent::PlainTrigger
+    } else {
+        AuthoritativeActorDispatchIntent::PromptAware
+    };
+    // A plain editor trigger is a pass-through steering signal. It never
+    // inherits prompt-bearing work derived before this authoritative boundary.
+    let prompt_context = if matches!(
+        dispatch_intent,
+        AuthoritativeActorDispatchIntent::PlainTrigger
+    ) {
+        None
+    } else {
+        prompt_context
+    };
     let prompt_bearing_marker = prompt_context.map(|context| context.marker.as_str());
     if let Some(pending) = actor.pending_harness_switch.as_ref() {
         return accept_pending_harness_switch(tmux, file, &actor, pending);
     }
     let closeout_drain = agent_doc_tmux_io::with_current_pane_id_override(&dispatch_pane, || {
-        drain_open_closeout_before_routed_dispatch(file, effects.closeout_drain_effects)
+        apply_routed_dispatch_closeout_policy(
+            file,
+            reopen_mode,
+            dispatch_intent,
+            effects.closeout_drain_effects,
+        )
     })?;
     match closeout_drain {
-        RouteCloseoutDrainOutcome::NoOpenCycle => {}
+        RouteCloseoutDrainOutcome::NoOpenCycle
+        | RouteCloseoutDrainOutcome::PlainTriggerPassThrough => {}
         RouteCloseoutDrainOutcome::Recovered(outcome) => {
             eprintln!(
                 "[route] drained open closeout for {} before reroute ({})",
@@ -200,7 +224,6 @@ pub fn route_via_authoritative_actor(
                 file,
                 reason,
                 prompt_context.is_some(),
-                plain_trigger && prompt_context.is_none(),
                 effects.closeout_drain_effects,
             );
             match dispatch_decision {
@@ -255,23 +278,6 @@ pub fn route_via_authoritative_actor(
                         route_closeout_user_outcome_fields(
                             blocked_closeout_recovery_command(&decision).as_deref(),
                         )
-                    );
-                    return Ok(dispatch_pane);
-                }
-                CloseoutBlockDispatchDecision::CoalescePlainTriggerBehindCloseoutOwner => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "route_dispatch_drain_closeout_plain_trigger_coalesced file={} pane={}",
-                            file.display(),
-                            dispatch_pane
-                        ),
-                    );
-                    eprintln!(
-                        "[route] active closeout for {} already owns pane {}; accepted the plain Run Agent Doc trigger behind that owner {}",
-                        file.display(),
-                        dispatch_pane,
-                        route_closeout_user_outcome_fields(None),
                     );
                     return Ok(dispatch_pane);
                 }
@@ -733,11 +739,6 @@ pub fn route_via_authoritative_actor(
         actor_state = agent_doc_controller::actor::ActorState::Ready;
     }
 
-    let reopen_mode = if dispatch_only {
-        ReopenMode::DispatchOnly
-    } else {
-        ReopenMode::Managed
-    };
     let actor_dispatch_state = actor_dispatch_state(actor_state);
     let reopen_outcome = decide_authoritative_reopen(RoutedReopenFacts {
         actor_state: actor_dispatch_state,
@@ -753,11 +754,7 @@ pub fn route_via_authoritative_actor(
             actor_state: actor_dispatch_state,
             has_prompt_bearing_work: prompt_bearing_marker.is_some(),
             reopen_decision: reopen_outcome.decision,
-            intent: if plain_trigger {
-                AuthoritativeActorDispatchIntent::PlainTrigger
-            } else {
-                AuthoritativeActorDispatchIntent::PromptAware
-            },
+            intent: dispatch_intent,
         });
 
     if actor_dispatch_blocker_reason(actor_dispatch_state).is_some()
@@ -1202,11 +1199,7 @@ pub fn route_via_authoritative_actor(
                 DispatchOnlySendReopenOptions {
                     delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
                     queue_prompt_text: queue_prompt.as_deref(),
-                    active_turn_policy: if plain_trigger {
-                        DispatchOnlyActiveTurnPolicy::SubmitPlainTrigger
-                    } else {
-                        DispatchOnlyActiveTurnPolicy::QueueOrRefuse
-                    },
+                    intent: dispatch_intent,
                     effects: effects.dispatch_only_route_effects,
                 },
             )?;

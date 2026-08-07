@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.160
+
+- **Run Agent Doc is a true pass-through steering action.** The editor's plain
+  `route --dispatch-only --plain-trigger` path now bypasses open-closeout drain
+  recovery instead of waiting or reporting a false-success coalesce behind the
+  closeout owner. The authoritative boundary also drops any accidentally
+  derived prompt context, preserving bare-trigger delivery to live ready, busy,
+  and waiting-input actors for real-time steering. Direct-pane delivery now sends
+  that trigger plus one submit key exactly once and returns on successful tmux
+  transport, instead of spending the acceptance window pane-polling and repeatedly
+  submitting Enter. Prompt-aware dispatches retain acceptance and dispatch-start
+  proof.
+
 ## 0.35.159
 
 - **Editor tab-switch cross-root pane resolves through the owning controller, not a `/proc` walk (`#tmuxautosyncreactive`).** A two-column editor surface with a cross-root document (e.g. a submodule doc in column 2) made every tab switch take **0.7–1.9 s**: the editor automatic path runs with `auto_start_mode=Full` (`exact_visible_projection=true`), so `skip_autostart_diagnostics` is false, the cross-root reactive branch at the top of the per-file loop (`skip_autostart_diagnostics && is_cross_root`) did not fire, and the walk-skip gate (`exact_visible_projection && !is_cross_root`) excluded the cross-root file — sending it to the exhaustive `project_authoritative_actor_binding` `/proc` ownership walk (`ownership_per_file_loop sa_ms` measured 670–1299 ms per cross-root file). For `exact_visible_projection && is_cross_root`, the per-file loop now resolves the pane from the owning controller's reactive actor store via `resolve_cross_root_document_pane` (the same call the SafePassive cross-root path already uses), skipping the `/proc` walk entirely. The owning controller's binding is the authority (`#lazily-hot-path`); a missing/dead binding falls through to the registry fallback, same as a failed walk. `/tmp/agent-doc-sync.log` shows the fast case (`reactive_actor_bindings` already populated, `ownership_per_file_loop=0 ms`) was the exception, not the rule — this makes it the rule for cross-root editor layouts. New live-tmux regression `exact_visible_cross_root_full_mode_resolves_via_owning_controller`.

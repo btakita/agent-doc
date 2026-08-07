@@ -12,8 +12,7 @@ use std::time::Duration;
 use crate::admission_projection::{RouteAdmissionEffects, wait_for_start_projection};
 use crate::dispatch::{RouteDispatchEffects, dispatch_routed_reopen};
 use crate::dispatch_only::{
-    DispatchOnlyActiveTurnPolicy, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
-    dispatch_only_send_reopen,
+    DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions, dispatch_only_send_reopen,
 };
 use crate::dispatch_recovery::resolve_fresh_dispatch_target_after_ready_wait;
 use crate::dispatch_target::register_dispatch_target;
@@ -840,7 +839,7 @@ pub fn auto_start_in_session_with_lock_mode(
                     DispatchOnlySendReopenOptions {
                         delivery: DispatchOnlyReopenDelivery::SupervisorIpcOnce,
                         queue_prompt_text: None,
-                        active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+                        intent: agent_doc_controller::dispatch::AuthoritativeActorDispatchIntent::PromptAware,
                         effects: effects.dispatch_only_route_effects,
                     },
                 )?;
@@ -885,7 +884,7 @@ pub fn auto_start_in_session_with_lock_mode(
                     DispatchOnlySendReopenOptions {
                         delivery: DispatchOnlyReopenDelivery::SupervisorIpcOnce,
                         queue_prompt_text: None,
-                        active_turn_policy: DispatchOnlyActiveTurnPolicy::QueueOrRefuse,
+                        intent: agent_doc_controller::dispatch::AuthoritativeActorDispatchIntent::PromptAware,
                         effects: effects.dispatch_only_route_effects,
                     },
                 )

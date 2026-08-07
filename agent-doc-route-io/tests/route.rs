@@ -68,10 +68,10 @@
 //!   including tracked Codex/OpenCode `/clear` restarts, remain prompt-gated and fail closed
 //!   before sending input while the harness is redrawing or busy.
 //!   Hook-visible Codex and pane-state OpenCode proof remain stronger telemetry, but
-//!   dispatch-only success is the shared tmux text+`Enter` acceptance path for all harnesses.
-//!   Once that acceptance is observed, editor dispatch-only returns immediately instead of
-//!   paying the optional Codex/OpenCode dispatch-start proof timeout; unobserved acceptance
-//!   may still wait for stronger proof before failing closed.
+//!   plain editor dispatch-only success is the shared single tmux text+`Enter` transport path
+//!   for all harnesses. It returns immediately after that operation succeeds, without pane
+//!   acceptance polling, dispatch-start proof, or Enter resubmission. Prompt-aware routes keep
+//!   the stronger acceptance and dispatch-start proof behavior.
 //! - **`await_idle(file, debounce)`**: Polls Lazily's current-document authority every
 //!   100ms. Detached documents dispatch immediately; attached documents wait for the
 //!   canonical delivery frontier to converge. The first retained delivery observation
@@ -169,8 +169,8 @@ use std::time::Instant;
 use agent_doc_controller::dispatch::dispatch_only_starting_pane_ready_timeout_for_binary;
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
-    ActorDispatchState, CloseoutBlockDispatchDecision, StartingTimeoutActorFacts,
-    actor_blocked_by_starting_timeout,
+    ActorDispatchState, AuthoritativeActorDispatchIntent, CloseoutBlockDispatchDecision,
+    ReopenMode, StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
@@ -206,7 +206,8 @@ use agent_doc_route_io::authoritative_actor::{
 };
 #[cfg(test)]
 use agent_doc_route_io::closeout_drain::{
-    classify_route_closeout_block, drain_open_closeout_before_routed_dispatch,
+    apply_routed_dispatch_closeout_policy, classify_route_closeout_block,
+    drain_open_closeout_before_routed_dispatch,
 };
 #[cfg(test)]
 use agent_doc_route_io::command::RouteCommandEffects;
@@ -222,7 +223,7 @@ use agent_doc_route_io::direct_pane_dispatch::editor_route_attempt_id;
 #[cfg(test)]
 use agent_doc_route_io::dispatch::RouteDispatchBugReportFacts;
 #[cfg(test)]
-use agent_doc_route_io::dispatch::send_command_checked;
+use agent_doc_route_io::dispatch::{send_command_checked, send_command_once_checked};
 #[cfg(test)]
 use agent_doc_route_io::dispatch_recovery::resolve_fresh_dispatch_target_after_ready_wait;
 #[cfg(test)]
@@ -2440,7 +2441,6 @@ mod tests {
             &doc,
             low_level_reason.to_string(),
             true,
-            false,
             super::route_closeout_drain_effects(super::route_repair_closeout),
         );
         match dispatch_decision {
@@ -2473,7 +2473,6 @@ mod tests {
         let (decision, dispatch_decision) = super::classify_route_closeout_block(
             &doc,
             low_level_reason.to_string(),
-            false,
             false,
             super::route_closeout_drain_effects(super::route_repair_closeout),
         );
@@ -2508,7 +2507,6 @@ mod tests {
             &doc,
             low_level_reason.to_string(),
             false,
-            false,
             super::route_closeout_drain_effects(super::route_repair_closeout),
         );
         match dispatch_decision {
@@ -2530,22 +2528,27 @@ mod tests {
     }
 
     #[test]
-    fn closeout_block_decision_coalesces_plain_run_trigger_behind_owner() {
+    fn plain_run_trigger_passes_through_an_open_closeout() {
+        use agent_doc_controller::dispatch::RouteCloseoutDrainOutcome as DrainOutcome;
+
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("route-block.md");
         let content = "---\nagent_doc_session: test\n---\n\n";
         write_open_cycle_route_doc(&doc, content);
 
-        let (_, dispatch_decision) = super::classify_route_closeout_block(
+        let outcome = super::apply_routed_dispatch_closeout_policy(
             &doc,
-            "active response has not been captured yet".to_string(),
-            false,
-            true,
+            ReopenMode::DispatchOnly,
+            AuthoritativeActorDispatchIntent::PlainTrigger,
             super::route_closeout_drain_effects(super::route_repair_closeout),
-        );
-        assert_eq!(
-            dispatch_decision,
-            CloseoutBlockDispatchDecision::CoalescePlainTriggerBehindCloseoutOwner
+        )
+        .unwrap();
+        assert_eq!(outcome, DrainOutcome::PlainTriggerPassThrough);
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open()
         );
     }
 

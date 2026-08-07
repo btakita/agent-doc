@@ -172,6 +172,12 @@ No legacy layout file is imported or emitted.
   issue=prompt_not_submitted`; when Codex hook tracking or OpenCode pane-state
   tracking requires dispatch proof but only acceptance is observed, it logs
   `route_submit_issue issue=accepted_without_dispatch_start_proof`.
+- The explicit editor `--dispatch-only --plain-trigger` path is the transport-only
+  exception to prompt acceptance proof. It performs one normalized
+  text-plus-submit tmux operation and returns immediately on transport success so
+  a busy actor can receive real-time steering. It never pane-polls, waits for
+  dispatch-start proof, or re-sends the submit key. This exception does not apply
+  to prompt-aware reruns, fresh-start recovery, or queued document work.
 - Direct-pane submit profiles get bounded bare submit-key re-submits
 (`#jbcodexsubmit` / `#jbclaudesubmit`). Codex, Claude, OpenCode, and default
 tmux submits send normalized text plus a named `Enter` key in one

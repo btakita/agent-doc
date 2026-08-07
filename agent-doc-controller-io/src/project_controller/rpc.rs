@@ -17319,12 +17319,41 @@ fn tmux_layout_sync_state_for_invocation(
     )
 }
 
+/// Logs the wall-clock cost of a layout drift survey across every return path
+/// (`#tmuxautosyncreactive`). The survey was unmetered, so its share of the
+/// worker convergence latency was invisible in `sync_latency` phase logs.
+struct PaneLayoutSurveyTimingGuard {
+    project_root: PathBuf,
+    start: Instant,
+}
+
+impl Drop for PaneLayoutSurveyTimingGuard {
+    fn drop(&mut self) {
+        agent_doc_ops_log_io::log_op(
+            &self.project_root,
+            &format!(
+                "pane_layout_survey_timing elapsed_ms={} phase=tmux_layout_sync_state",
+                self.start.elapsed().as_millis(),
+            ),
+        );
+    }
+}
+
 fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     invocation: &ControllerTmuxLayoutSyncStateInvocation,
     effect_file_panes: &[(String, String)],
 ) -> Result<ControllerTmuxLayoutSyncStateReport> {
+    let _survey_timing = PaneLayoutSurveyTimingGuard {
+        project_root: bootstrap.project_root.clone(),
+        start: Instant::now(),
+    };
+    // `#tmuxautosyncreactive`: the survey's per-pane `active_pane_process_owner_document`
+    // resolves via the process-owner `/proc` graph. Without a scope each new pane
+    // root pid took a fresh full `/proc` walk; opening the scope here lets every
+    // pane in this survey share ONE memoized walk (see `owner_graph::children_handle`).
+    let _process_observation = agent_doc_process_owner_io::begin_process_observation_scope();
     let expected_documents =
         layout_sync_state_expected_documents(&bootstrap.project_root, invocation);
     let focus = invocation.focus.clone();

@@ -47,7 +47,9 @@ use agent_doc_controller::command_line::{
 use agent_doc_state_scope::LocalReadScope;
 use lazily::{Computed, Source, SourceMap};
 
-use crate::proc_table::{TreeProcess, observe_proc_children, observe_process_tree, tree_cmdlines};
+use crate::proc_table::{
+    ProcChildren, TreeProcess, observe_proc_children, observe_process_tree, tree_cmdlines,
+};
 
 /// A pane's observed process tree, shared by every derived cell that reads it.
 type TreeObservation = Rc<Vec<TreeProcess>>;
@@ -59,6 +61,11 @@ struct ProcessObservationState {
     /// Pane root pid -> observed process tree. `Source`, because a process tree is
     /// observed from outside the graph.
     trees: SourceMap<String, TreeObservation>,
+    /// The shared `/proc` parent→children map for this scope. The first root
+    /// pid sighting computes it once and every later sighting reuses it, so the
+    /// cold first pass over `P` panes costs ONE `/proc` walk instead of `P`.
+    /// `refresh()` replaces it with a fresh snapshot.
+    children: Option<Rc<ProcChildren>>,
     /// (root pid, claimed document) -> the *other* document this pane owns, if any.
     other_document: HashMap<(String, String), Computed<Option<String>>>,
     /// Root pid -> the document this pane's first agent-doc owner process binds.
@@ -77,6 +84,7 @@ impl ProcessObservationState {
         Self {
             scope,
             trees,
+            children: None,
             other_document: HashMap::new(),
             owner_document: HashMap::new(),
             unmanaged_harness: HashMap::new(),
@@ -86,14 +94,24 @@ impl ProcessObservationState {
         }
     }
 
+    /// The shared `/proc` parent→children map for this scope, computed once on
+    /// first use and reused for every subsequent root pid. Mirrors what
+    /// [`Self::refresh`] already does for re-observation, so the cold first pass
+    /// over many panes is one walk, not one per pane.
+    fn children_handle(&mut self) -> Rc<ProcChildren> {
+        self.children
+            .get_or_insert_with(|| Rc::new(observe_proc_children()))
+            .clone()
+    }
+
     /// The `Source` holding `root_pid`'s tree, observing it on first request.
     fn tree_source(&mut self, root_pid: &str) -> Source<TreeObservation> {
         if let Some(handle) = self.trees.handle(&root_pid.to_string()) {
             return handle;
         }
         self.observations += 1;
-        let observed: TreeObservation =
-            Rc::new(observe_process_tree(&observe_proc_children(), root_pid));
+        let children = self.children_handle();
+        let observed: TreeObservation = Rc::new(observe_process_tree(&children, root_pid));
         self.trees
             .entry_with(self.scope.ctx(), root_pid.to_string(), || observed)
     }
@@ -168,7 +186,10 @@ impl ProcessObservationState {
         if roots.is_empty() {
             return;
         }
-        let children = observe_proc_children();
+        let children = Rc::new(observe_proc_children());
+        // Replace the cached snapshot so any root added after this refresh
+        // observes from the same fresh map instead of the pre-refresh one.
+        self.children = Some(Rc::clone(&children));
         for root in roots {
             self.observations += 1;
             let observed: TreeObservation = Rc::new(observe_process_tree(&children, &root));

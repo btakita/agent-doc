@@ -277,7 +277,7 @@ pub fn last_sync_run_report() -> SyncRunReport {
 }
 
 fn log_sync_latency(
-    focus: Option<&str>,
+    _focus: Option<&str>,
     phase: &str,
     elapsed: Duration,
     budget: Duration,
@@ -295,12 +295,13 @@ fn log_sync_latency(
             mode_label
         );
     }
-    if let Some(focus) = focus {
-        let path = Path::new(focus);
-        if path.exists() {
-            agent_doc_ops_log_io::log_op(path, &message);
-        }
-    }
+    // `#tmuxautosyncreactive`: do NOT mirror per-phase sync latency into the
+    // project `ops.log` from the structural-sync hot path. `ops.log` is on disk
+    // and contended by every controller thread (CRDT, RPC, idle-watch, editor
+    // traffic), so each `log_op` here cost ~100ms under load — the sync body's
+    // wall time was dominated by this logging, not by real sync work (measured:
+    // a 798ms `prune` phase whose actual prune work was 1ms). The latency data
+    // is still recorded by `sync_log` to the tmpfs `/tmp/agent-doc-sync.log`.
 }
 
 fn parse_frontmatter_for_sync<'a>(

@@ -78,6 +78,16 @@ fn noop_ops_logger(_: &Path, _: &str) {}
 /// apply window and could vote toward the de-wedge degrade latch, so keep this
 /// timeout high enough to distinguish a slow apply from a wedged listener.
 const IPC_RECEIPT_TIMEOUT_SECS: u64 = 6;
+/// Dedicated receipt budget for the `reload_library` generation handoff
+/// (`#replicarefusalstorm` / `#editorendpointzero`). The handoff drains in-flight
+/// native calls, unmaps the old cdylib, proves the mapping is gone, loads the
+/// replacement, and re-registers open projects — easily 10s+ under load, and the
+/// reason `reload-lib` reported endpoints "failed" while the editor listener was
+/// demonstrably alive: the generic 6s receipt timeout fired mid-handoff, so the
+/// reload was delivered but never acknowledged, leaving the editor stranded on the
+/// stale cdylib. This budget is independent of the generic receipt timeout so a
+/// slow generation swap is not misread as a wedged listener.
+const IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS: u64 = 90;
 /// Bound the blocking `connect_sync` (`#af88` F). interprocess `ConnectOptions`
 /// exposes no native connect deadline, so we run the connect on a watchdog thread
 /// and give up after this budget rather than parking the caller forever on a
@@ -853,7 +863,7 @@ pub fn send_reload_library_to_editor(
                 project_root,
                 editor_pid,
                 &message,
-                Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
+                Duration::from_secs(IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS),
             )
             .with_context(|| {
                 format!(
@@ -1639,6 +1649,56 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn reload_library_receipt_outlives_a_slow_generation_handoff() {
+        // Regression for `#replicarefusalstorm`: `reload-lib` reported endpoints
+        // "failed" while the editor listener was demonstrably alive because the
+        // native generation handoff (drain/unmap/load) exceeded the generic 6s
+        // receipt timeout, so the reload was delivered but never acknowledged and
+        // the editor stayed stranded on the stale cdylib. The reload_library
+        // receipt now uses a dedicated budget larger than the generic timeout,
+        // and `send_legacy_reload_to_pid` honors it against a slow-acking peer.
+        assert!(
+            IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS > IPC_RECEIPT_TIMEOUT_SECS,
+            "reload_library receipt budget must outlive the generic receipt timeout"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, move |msg| {
+                // Simulate a generation handoff that would exceed a tight timeout.
+                thread::sleep(Duration::from_millis(800));
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                Some(
+                    serde_json::json!({"type":"receipt","status":"applied","id":v["type"]})
+                        .to_string(),
+                )
+            })
+            .ok()
+        });
+        thread::sleep(Duration::from_millis(150));
+
+        let pid = u64::from(std::process::id());
+        let message = reload_lib_message("0.0.0-test");
+        // The handoff-budgeted timeout the production reload path uses must
+        // survive a slow handoff and return the terminal receipt (a generic
+        // sub-second receipt timeout would have timed out mid-handoff).
+        let result = send_legacy_reload_to_pid(
+            &root,
+            pid,
+            &message,
+            Duration::from_secs(IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS),
+        );
+        assert!(
+            result.is_ok(),
+            "handoff-budgeted reload receipt must survive the slow handoff: {result:?}"
+        );
         drop(server);
     }
 

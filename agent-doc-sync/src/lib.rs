@@ -23,8 +23,6 @@ pub const SYNC_OWNERSHIP_PROOF_BUDGET: Duration = Duration::from_millis(750);
 pub const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
 pub const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
 pub const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
-pub const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
-pub const STALE_SYNC_LOCK_OWNER_AGE: Duration = Duration::from_secs(300);
 /// Default stale bound for the cross-editor native sync guard.
 pub const DEFAULT_SYNC_LOCK_STALE_BOUND_MS: u64 = 45_000;
 
@@ -54,26 +52,6 @@ pub fn sync_lock_acquire_decision(
     } else {
         SyncLockDecision::Defer
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyncLockProcess {
-    pub pid: u32,
-    pub ppid: u32,
-    pub age: Duration,
-    pub cmdline: Vec<String>,
-    pub has_lock_fd: bool,
-}
-
-pub fn is_stale_orphaned_sync_lock_owner(process: &SyncLockProcess) -> bool {
-    process.ppid == 1
-        && process.age >= STALE_SYNC_LOCK_OWNER_AGE
-        && process.has_lock_fd
-        && process
-            .cmdline
-            .first()
-            .is_some_and(|bin| bin.ends_with("agent-doc"))
-        && process.cmdline.iter().any(|arg| arg == "sync")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -677,42 +655,6 @@ mod tests {
     fn auto_start_mode_reports_stable_log_labels() {
         assert_eq!(AutoStartMode::Full.log_label(), "full");
         assert_eq!(AutoStartMode::SafePassive.log_label(), "safe-passive");
-    }
-
-    #[test]
-    fn stale_orphaned_sync_lock_owner_requires_all_guards() {
-        let stale_owner = SyncLockProcess {
-            pid: 42,
-            ppid: 1,
-            age: STALE_SYNC_LOCK_OWNER_AGE + Duration::from_secs(1),
-            cmdline: vec!["/home/brian/.cargo/bin/agent-doc".into(), "sync".into()],
-            has_lock_fd: true,
-        };
-        assert!(is_stale_orphaned_sync_lock_owner(&stale_owner));
-
-        let live_parent = SyncLockProcess {
-            ppid: 100,
-            ..stale_owner.clone()
-        };
-        assert!(!is_stale_orphaned_sync_lock_owner(&live_parent));
-
-        let too_young = SyncLockProcess {
-            age: STALE_SYNC_LOCK_OWNER_AGE - Duration::from_secs(1),
-            ..stale_owner.clone()
-        };
-        assert!(!is_stale_orphaned_sync_lock_owner(&too_young));
-
-        let different_command = SyncLockProcess {
-            cmdline: vec!["/home/brian/.cargo/bin/agent-doc".into(), "route".into()],
-            ..stale_owner.clone()
-        };
-        assert!(!is_stale_orphaned_sync_lock_owner(&different_command));
-
-        let no_lock_fd = SyncLockProcess {
-            has_lock_fd: false,
-            ..stale_owner.clone()
-        };
-        assert!(!is_stale_orphaned_sync_lock_owner(&no_lock_fd));
     }
 
     #[test]

@@ -1,14 +1,13 @@
 //! Sync process-effect adapters.
 //!
-//! This crate owns lock-file acquisition, Linux `/proc` inspection, and sync
-//! status writeback. Pure sync decisions remain in `agent-doc-sync`.
+//! This crate owns lock-file acquisition and sync status writeback. Pure sync
+//! decisions remain in `agent-doc-sync`.
 
-use agent_doc_sync::{SYNC_LOCK_POLL_INTERVAL, SyncLockProcess, is_stale_orphaned_sync_lock_owner};
 use anyhow::{Context, Result};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub mod resync;
 pub mod sync;
@@ -135,28 +134,65 @@ pub fn acquire_sync_lock(
         }
     };
 
-    let started = Instant::now();
-    let mut stale_owner_cleanup_attempted = false;
-    loop {
-        use fs2::FileExt;
-        match file.try_lock_exclusive() {
-            Ok(()) => return SyncLockAcquire::Acquired(file),
-            Err(err) if started.elapsed() >= wait_budget => {
-                if !stale_owner_cleanup_attempted
-                    && reap_stale_orphaned_sync_lock_owners(lock_path, &mut log)
-                {
-                    stale_owner_cleanup_attempted = true;
-                    continue;
-                }
+    // Fast path: uncontended. The controller `pane_layout_effect_worker` is
+    // single-threaded, so two editor-fired syncs never contend here, and a
+    // standalone CLI usually runs alone — a single non-blocking attempt wins.
+    use fs2::FileExt;
+    if file.try_lock_exclusive().is_ok() {
+        return SyncLockAcquire::Acquired(file);
+    }
+
+    // Contended. `flock(2)` is released automatically when the holding process
+    // exits (fd close), so a dead owner cannot wedge the lock — the `/proc`
+    // orphan-reap that used to live here was compensating for a problem flock
+    // already solves. Block in the kernel until the holder releases, bounded by
+    // `wait_budget` with NO userspace polling: Linux/macOS flock has no native
+    // timeout, so the blocking acquire runs on a helper thread raced against
+    // `recv_timeout`. On timeout the helper is detached; whenever it does
+    // acquire, sending on the dropped channel fails and the file (with its
+    // lock) drops immediately, so a timed-out attempt never lingers.
+    if wait_budget.is_zero() {
+        log(format!(
+            "sync lock contention at {} (zero wait budget)",
+            lock_path.display(),
+        ));
+        return SyncLockAcquire::Contended;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("agent-doc-sync-lock-wait".into())
+        .spawn(move || {
+            if fs2::FileExt::lock_exclusive(&file).is_ok() {
+                // Lock ownership transfers to the receiver. If the receiver
+                // already gave up (rx dropped), this send fails and `file`
+                // drops here, releasing the lock at once.
+                let _ = tx.send(file);
+            }
+        });
+    match spawned {
+        Ok(_) => match rx.recv_timeout(wait_budget) {
+            Ok(file) => SyncLockAcquire::Acquired(file),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 log(format!(
-                    "sync lock contention exceeded {}ms at {}: {}",
+                    "sync lock contention exceeded {}ms at {}",
                     wait_budget.as_millis(),
                     lock_path.display(),
-                    err
                 ));
-                return SyncLockAcquire::Contended;
+                SyncLockAcquire::Contended
             }
-            Err(_) => std::thread::sleep(SYNC_LOCK_POLL_INTERVAL),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                log(format!(
+                    "sync lock acquire ended without lock at {}",
+                    lock_path.display(),
+                ));
+                SyncLockAcquire::Unavailable
+            }
+        },
+        Err(err) => {
+            log(format!(
+                "sync lock unavailable - wait thread spawn failed: {err}"
+            ));
+            SyncLockAcquire::Unavailable
         }
     }
 }
@@ -668,131 +704,6 @@ pub(crate) mod test_support {
             _guard: Some(guard),
         }
     }
-}
-
-#[cfg(target_os = "linux")]
-pub fn reap_stale_orphaned_sync_lock_owners(lock_path: &Path, mut log: impl FnMut(String)) -> bool {
-    let lock_path = lock_path
-        .canonicalize()
-        .unwrap_or_else(|_| lock_path.to_path_buf());
-    let current_pid = std::process::id();
-    let mut reaped_any = false;
-
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return false;
-    };
-
-    for entry in entries.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        if pid == current_pid {
-            continue;
-        }
-
-        let process = sync_lock_process_from_proc(pid, &lock_path);
-        if !is_stale_orphaned_sync_lock_owner(&process) {
-            continue;
-        }
-
-        let rc = unsafe { libc::kill(process.pid as libc::pid_t, libc::SIGTERM) };
-        if rc == 0 {
-            reaped_any = true;
-            log(format!(
-                "[sync] stale_sync_lock_owner_reaped pid={} age_ms={} cmd={}",
-                process.pid,
-                process.age.as_millis(),
-                process.cmdline.join(" ")
-            ));
-        }
-    }
-
-    reaped_any
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn reap_stale_orphaned_sync_lock_owners(_lock_path: &Path, _log: impl FnMut(String)) -> bool {
-    false
-}
-
-#[cfg(target_os = "linux")]
-pub fn sync_lock_process_from_proc(pid: u32, lock_path: &Path) -> SyncLockProcess {
-    let proc_dir = PathBuf::from("/proc").join(pid.to_string());
-    let ppid = read_proc_ppid(&proc_dir).unwrap_or(0);
-    let age = read_proc_age(&proc_dir).unwrap_or(Duration::ZERO);
-    let cmdline = read_proc_cmdline(&proc_dir);
-    let has_lock_fd = proc_has_fd_for_path(&proc_dir, lock_path);
-
-    SyncLockProcess {
-        pid,
-        ppid,
-        age,
-        cmdline,
-        has_lock_fd,
-    }
-}
-
-#[cfg(target_os = "linux")]
-pub fn read_proc_ppid(proc_dir: &Path) -> Option<u32> {
-    let status = std::fs::read_to_string(proc_dir.join("status")).ok()?;
-    status.lines().find_map(|line| {
-        let value = line.strip_prefix("PPid:")?.trim();
-        value.parse::<u32>().ok()
-    })
-}
-
-#[cfg(target_os = "linux")]
-pub fn read_proc_cmdline(proc_dir: &Path) -> Vec<String> {
-    std::fs::read(proc_dir.join("cmdline"))
-        .ok()
-        .map(|bytes| {
-            bytes
-                .split(|byte| *byte == 0)
-                .filter(|part| !part.is_empty())
-                .filter_map(|part| String::from_utf8(part.to_vec()).ok())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-#[cfg(target_os = "linux")]
-pub fn read_proc_age(proc_dir: &Path) -> Option<Duration> {
-    let stat = std::fs::read_to_string(proc_dir.join("stat")).ok()?;
-    let after_comm = stat.rsplit_once(") ")?.1;
-    let fields: Vec<&str> = after_comm.split_whitespace().collect();
-    let start_ticks = fields.get(19)?.parse::<u64>().ok()?;
-    let uptime_secs = std::fs::read_to_string("/proc/uptime")
-        .ok()?
-        .split_whitespace()
-        .next()?
-        .parse::<f64>()
-        .ok()?;
-    let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    if ticks_per_second <= 0 {
-        return None;
-    }
-    let start_secs = start_ticks as f64 / ticks_per_second as f64;
-    if uptime_secs < start_secs {
-        return Some(Duration::ZERO);
-    }
-    Some(Duration::from_secs_f64(uptime_secs - start_secs))
-}
-
-#[cfg(target_os = "linux")]
-pub fn proc_has_fd_for_path(proc_dir: &Path, target: &Path) -> bool {
-    let Ok(entries) = std::fs::read_dir(proc_dir.join("fd")) else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        std::fs::read_link(entry.path())
-            .ok()
-            .map(|path| path == target)
-            .unwrap_or(false)
-    })
 }
 
 #[cfg(test)]

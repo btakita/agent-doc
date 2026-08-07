@@ -2109,9 +2109,6 @@ fn run_with_options_internal_at_root(
     };
     let sync_lock_start = Instant::now();
     let lock_guard = acquire_sync_lock(lock_path, sync_lock_wait_budget, |message| {
-        if message.starts_with("[sync] stale_sync_lock_owner_reaped ") {
-            eprintln!("{}", message);
-        }
         sync_log(&message);
     });
     let sync_lock_elapsed = sync_lock_start.elapsed();

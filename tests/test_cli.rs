@@ -29696,8 +29696,6 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub const SYNC_ROUTER_BUDGET",
         "pub const SYNC_SAFE_PASSIVE_TOTAL_BUDGET",
         "pub const SYNC_LOCK_WAIT_BUDGET",
-        "pub const SYNC_LOCK_POLL_INTERVAL",
-        "pub const STALE_SYNC_LOCK_OWNER_AGE",
         "pub fn shared_sync_scope_root",
         "pub fn sync_scope_root",
         "pub fn layout_state_scope_root",
@@ -29758,7 +29756,7 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-sync-io/Cargo.toml")).unwrap();
     let sync_io: toml::Value = toml::from_str(&sync_io_manifest).unwrap();
     let sync_io_dependencies = sync_io["dependencies"].as_table().unwrap();
-    for required_dependency in ["agent-doc-project-root-io", "agent-doc-sync", "fs2", "libc"] {
+    for required_dependency in ["agent-doc-project-root-io", "agent-doc-sync", "fs2"] {
         assert!(
             sync_io_dependencies.contains_key(required_dependency),
             "agent-doc-sync-io should own sync lock/process effects dependency: {required_dependency}"
@@ -29781,13 +29779,6 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
     for required_snippet in [
         "pub enum SyncLockAcquire",
         "pub fn acquire_sync_lock(",
-        "pub fn reap_stale_orphaned_sync_lock_owners(",
-        "pub fn sync_lock_process_from_proc(",
-        "pub fn read_proc_ppid(",
-        "pub fn read_proc_cmdline(",
-        "pub fn read_proc_age(",
-        "pub fn proc_has_fd_for_path(",
-        "is_stale_orphaned_sync_lock_owner",
         "pub fn write_sync_status_with(",
         "pub fn surface_frontmatter_status_with(",
         "pub fn clear_frontmatter_status_with(",

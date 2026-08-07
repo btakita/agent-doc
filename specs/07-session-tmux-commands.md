@@ -348,13 +348,14 @@ tmux-router registry metadata only as a projection of that binding.
 - Sync serialization is bounded: a contended `.agent-doc/sync.lock` may delay a
   later editor-triggered sync only up to the lock wait budget, after which the
   later sync logs the contention and continues rather than starving selection,
-  ownership proof, or auto-start handling behind an orphaned process. Sync
-  latency logs must include the `sync_lock_wait` phase so contention is not
-  hidden inside the safe-passive total. Safe-passive contention diagnostics must
+  ownership proof, or auto-start handling behind a prior process. Sync latency
+  logs must include the `sync_lock_wait` phase so contention is not hidden
+  inside the safe-passive total. Safe-passive contention diagnostics must
   classify redundant editor selection churn with `coalesced=skipped_stale` while
-  preserving the retry marker consumed by editor plugins. When the lock is still
-  held by stale orphaned `agent-doc sync` processes for the same lock file, sync
-  reaps those lock owners and retries acquisition before reporting contention.
+  preserving the retry marker consumed by editor plugins. Acquisition blocks in
+  the kernel on `flock(2)` with no userspace polling; the lock is released
+  automatically when the holding process exits (fd close), so a dead or
+  orphaned owner can never wedge it and no `/proc` orphan reap is required.
 - In safe-passive editor mode, `sync --no-autostart --focus <file>` may perform
   a lock-free pre-lock handoff before acquiring the bounded
   `.agent-doc/sync.lock`: select a live local actor projection immediately, or

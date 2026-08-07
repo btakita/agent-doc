@@ -7556,6 +7556,44 @@ fn clear_replica_refusals(file: &Path) {
     refusal_ledger().lock().remove(file);
 }
 
+/// Whether `file` is an agent-doc document (carries `agent_doc_*` frontmatter or
+/// an `<!-- agent:` component marker). Plain markdown that is not an agent-doc
+/// session document (README, AGENTS, CONTRIBUTING, a draft, a plan note) has
+/// neither. Used to keep such files out of the CRDT replica refusal storm
+/// (`#replicarefusalstorm`): the editor registers a replica for every `.md` it
+/// opens, and a non-agent-doc file never attaches an editor authority, so
+/// without this gate it is refused as `detached_authority` on every retry.
+///
+/// Cached by `(path, mtime)` so a storming file that is not being edited is read
+/// once; the read is repeated only when the file actually changes.
+type AgentDocDocumentCache = BTreeMap<PathBuf, (Option<SystemTime>, bool)>;
+
+fn is_agent_doc_document(file: &Path) -> bool {
+    static CACHE: OnceLock<Mutex<AgentDocDocumentCache>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mtime = std::fs::metadata(file)
+        .and_then(|metadata| metadata.modified())
+        .ok();
+    {
+        let cache = cache.lock();
+        if let Some((cached_mtime, result)) = cache.get(file)
+            && *cached_mtime == mtime
+        {
+            return *result;
+        }
+    }
+    let content = std::fs::read_to_string(file).unwrap_or_default();
+    let result = content.contains("agent_doc_session")
+        || content.contains("agent_doc_format")
+        || content.contains("agent_doc_write")
+        || content.contains("<!-- agent:");
+    {
+        let mut cache = cache.lock();
+        cache.insert(file.to_path_buf(), (mtime, result));
+    }
+    result
+}
+
 fn handle_crdt_replica_rpc(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -7577,6 +7615,19 @@ fn handle_crdt_replica_rpc(
     let method = payload.method;
     let method_name = method.label();
     let authority = crdt_authority_for_file(&file_arg);
+    // `#replicarefusalstorm` / `#replicaendpointtakeover`: a non-agent-doc
+    // markdown file (README, AGENTS, CONTRIBUTING, a draft — no `agent_doc_*`
+    // frontmatter and no `<!-- agent:` markers) never attaches an editor
+    // authority, so the editor's retry loop drove thousands of `detached_authority`
+    // refusals, each with its own `log_op` contending the disk `ops.log` and
+    // loading the controller. Detect such files once (mtime-cached) and refuse
+    // cheaply + terminally as `not_agent_doc_document` — no refusal ledger, no
+    // `log_op`. The durable stop is the editor only registering agent-doc
+    // documents (the JB half); this keeps the controller off the contended disk
+    // path for the files that slip through.
+    if !authority.editor_attached() && !is_agent_doc_document(&canonical) {
+        return Ok(crdt_replica_refused_data("not_agent_doc_document"));
+    }
     if !authority.editor_attached() {
         // `#replicarefusalstorm`: the editor retries a refused registration
         // forever, so log the first few, then throttle, and raise one advisory

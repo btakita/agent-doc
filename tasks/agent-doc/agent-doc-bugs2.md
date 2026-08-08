@@ -80,11 +80,6 @@ Session note: exchange accretion is at `warn` (2 no-op closeouts in 30 min); que
 
 ### Re: loopsuperprojectjob — opus-5
 
-> **Queue prompt:**
->
-> do [#loopsuperprojectjob]
-
-
 Root-caused and fixed. It was never a code regression.
 
 **Diagnosis.** `collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped` linking `agent-doc-commit-io` test `"git"` and `agent-doc-stream-io` lib test. SIGBUS from a linker is the ENOSPC signature: `ld` mmaps its output file, and a write into a mapping that can't be backed raises SIGBUS rather than returning an error, so a full disk surfaces as a core dump instead of "no space left on device". Building the ~156-crate workspace with `--all-targets` while Cargo retains incremental state and full debug info for every test binary exceeds the ~14 GB free on `ubuntu-latest`.

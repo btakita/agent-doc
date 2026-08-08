@@ -2882,14 +2882,33 @@ pub struct PassThroughStrandedDraftLogFacts<'a> {
     pub capture_failed: bool,
 }
 
+/// (`#ptsubmitmetric`) Did this repair have to press a bare submit key?
+///
+/// The load-bearing question for `#passthroughsplitprofile` — "does the initial
+/// single-call text+Enter send actually drop for claude?" — has exactly one
+/// honest answer in the logs, and it is NOT `outcome=enter_resubmit`.
+/// `EnterResubmit` is a NON-terminal action: the repair loop `continue`s on it
+/// and only terminal actions reach `log_op`, so that label can never appear in a
+/// production ops.log and counting it always yields zero no matter how many
+/// submits drop. `enters_sent` is incremented only inside the `EnterResubmit`
+/// branch, so a nonzero count on a TERMINAL line is the real signal.
+///
+/// Deriving it still meant hand-parsing `enters_sent` out of every line and
+/// knowing that history, so the terminal line now states the conclusion
+/// directly.
+pub const fn pass_through_stranded_draft_resubmit_required(enters_sent: usize) -> bool {
+    enters_sent > 0
+}
+
 pub fn pass_through_stranded_draft_log_line(facts: PassThroughStrandedDraftLogFacts<'_>) -> String {
     format!(
-        "route_pass_through_submit_draft file={} pane={} harness={} outcome={} enters_sent={} elapsed_ms={} capture_failed={}",
+        "route_pass_through_submit_draft file={} pane={} harness={} outcome={} enters_sent={} resubmit_required={} elapsed_ms={} capture_failed={}",
         facts.file_display,
         facts.pane,
         facts.harness_binary,
         pass_through_stranded_draft_action_label(facts.action),
         facts.enters_sent,
+        pass_through_stranded_draft_resubmit_required(facts.enters_sent),
         facts.elapsed_ms,
         facts.capture_failed,
     )
@@ -6255,8 +6274,82 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         });
         assert_eq!(
             line,
-            "route_pass_through_submit_draft file=tasks/a.md pane=%25 harness=claude outcome=enter_resubmit enters_sent=1 elapsed_ms=312 capture_failed=false"
+            "route_pass_through_submit_draft file=tasks/a.md pane=%25 harness=claude outcome=enter_resubmit enters_sent=1 resubmit_required=true elapsed_ms=312 capture_failed=false"
         );
+    }
+
+    /// `#ptsubmitmetric`: the `#passthroughsplitprofile` criterion must be
+    /// readable off a TERMINAL line.
+    ///
+    /// `outcome=enter_resubmit` can never appear in a production ops.log —
+    /// `EnterResubmit` is non-terminal, the repair loop `continue`s on it, and
+    /// only terminal actions are logged. So a criterion phrased as "a nonzero
+    /// `outcome=enter_resubmit` rate" is structurally always zero and proves
+    /// nothing about how often the single-call send drops.
+    #[test]
+    fn terminal_repair_line_states_whether_a_resubmit_was_required() {
+        for action in [
+            PassThroughStrandedDraftAction::Cleared,
+            PassThroughStrandedDraftAction::DeferredPaneBusy,
+            PassThroughStrandedDraftAction::SettleAndReobserve,
+            PassThroughStrandedDraftAction::EnterResubmit,
+            PassThroughStrandedDraftAction::ExhaustedStillStranded,
+        ] {
+            assert_eq!(
+                pass_through_stranded_draft_action_is_terminal(action),
+                !matches!(
+                    action,
+                    PassThroughStrandedDraftAction::SettleAndReobserve
+                        | PassThroughStrandedDraftAction::EnterResubmit
+                ),
+                "the two non-terminal actions never reach log_op, which is why \
+                 counting outcome=enter_resubmit is structurally always zero"
+            );
+        }
+
+        // A repair that had to press a bare submit key: the shape the criterion
+        // is actually trying to count. It reports `outcome=cleared`, so only the
+        // new field distinguishes it from a clean first-try send.
+        let repaired = pass_through_stranded_draft_log_line(PassThroughStrandedDraftLogFacts {
+            file_display: "tasks/a.md",
+            pane: "%25",
+            harness_binary: "claude",
+            action: PassThroughStrandedDraftAction::Cleared,
+            enters_sent: 1,
+            elapsed_ms: 306,
+            capture_failed: false,
+        });
+        assert!(repaired.contains("outcome=cleared"), "{repaired}");
+        assert!(repaired.contains("resubmit_required=true"), "{repaired}");
+
+        // A clean send reports the same terminal outcome and must be
+        // distinguishable from the above.
+        let clean = pass_through_stranded_draft_log_line(PassThroughStrandedDraftLogFacts {
+            file_display: "tasks/a.md",
+            pane: "%25",
+            harness_binary: "claude",
+            action: PassThroughStrandedDraftAction::Cleared,
+            enters_sent: 0,
+            elapsed_ms: 153,
+            capture_failed: false,
+        });
+        assert!(clean.contains("outcome=cleared"), "{clean}");
+        assert!(clean.contains("resubmit_required=false"), "{clean}");
+
+        // Exhausting the budget is also a resubmit-required repair.
+        let exhausted = pass_through_stranded_draft_log_line(PassThroughStrandedDraftLogFacts {
+            file_display: "tasks/a.md",
+            pane: "%25",
+            harness_binary: "claude",
+            action: PassThroughStrandedDraftAction::ExhaustedStillStranded,
+            enters_sent: 3,
+            elapsed_ms: 1200,
+            capture_failed: false,
+        });
+        assert!(exhausted.contains("resubmit_required=true"), "{exhausted}");
+
+        assert!(!pass_through_stranded_draft_resubmit_required(0));
+        assert!(pass_through_stranded_draft_resubmit_required(1));
     }
 
     #[test]

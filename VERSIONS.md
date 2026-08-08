@@ -2,6 +2,30 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.181
+
+- **Fix (`#ptsubmitmetric`): the `#passthroughsplitprofile` unblock criterion
+  counted an event that can never be logged.** The old criterion was "a nonzero
+  `outcome=enter_resubmit` rate in ops.log". `EnterResubmit` is a NON-terminal
+  action — the repair loop `continue`s on it, and only terminal actions reach
+  `log_op` — so that counter is structurally always zero no matter how many
+  submits drop. It could never have unblocked the decision.
+
+  The signal that does exist is `enters_sent > 0` on a terminal line, because
+  `enters_sent` is incremented only inside the `EnterResubmit` branch. Reading it
+  meant hand-parsing every line and knowing that history, so the terminal
+  `route_pass_through_submit_draft` line now states the conclusion directly as
+  `resubmit_required=true|false`.
+
+- **New: `agent-doc ops submit-profile [--since <RFC3339 prefix>] [--json]`.**
+  Rolls up pass-through submit repairs per harness — repair count, how many
+  needed a bare submit key, the resulting rate, the outcome breakdown, and
+  `max_enters_sent` — so the `#claudesplitsubmit` sample can be read off one
+  command instead of grepping ops.log. Lines written before `resubmit_required`
+  existed are still counted from `enters_sent` and reported separately as
+  `legacy_lines_without_field`, so a mixed sample is declared rather than
+  silently folded in.
+
 ## 0.35.180
 
 - **Fix (`#clearsubmitlabel`): `session_clear` reported

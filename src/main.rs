@@ -3317,6 +3317,19 @@ enum OpsAction {
         #[arg(long)]
         json: bool,
     },
+    /// Roll up pass-through submit repairs per harness (`#ptsubmitmetric`):
+    /// how often the single-call text+Enter send needed a bare submit key
+    SubmitProfile {
+        /// Project root to inspect (defaults to nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Only count lines at or after this RFC3339 prefix, e.g. 2026-08-08
+        #[arg(long)]
+        since: Option<String>,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
     /// Gather cycle/write diagnostics from agent-doc logs and state.db
     Diagnose {
         /// Project root to inspect (defaults to --file root or nearest project from CWD)
@@ -4122,6 +4135,11 @@ fn try_main() -> anyhow::Result<()> {
                 limit,
                 json,
             } => ops_report::run_summary(project_root.as_deref(), limit, json),
+            OpsAction::SubmitProfile {
+                project_root,
+                since,
+                json,
+            } => ops_report::run_submit_profile(project_root.as_deref(), since.as_deref(), json),
             OpsAction::Diagnose {
                 project_root,
                 file,

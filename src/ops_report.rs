@@ -1618,3 +1618,249 @@ mod tests {
         assert_eq!(report.buckets[0].file, "new.md");
     }
 }
+
+/// (`#ptsubmitmetric`) Rollup of pass-through submit repairs, so the
+/// `#passthroughsplitprofile` / `#claudesplitsubmit` decision is readable from
+/// one command instead of hand-parsing `route_pass_through_submit_draft` lines.
+///
+/// The measured question is: how often does the initial single-call text+Enter
+/// send fail to submit, requiring a bare submit key? That is
+/// `resubmit_required=true` on a terminal repair line. Counting
+/// `outcome=enter_resubmit` instead — the criterion this replaces — is
+/// structurally always zero, because `EnterResubmit` is non-terminal and never
+/// reaches ops.log.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SubmitProfileReport {
+    pub log_path: PathBuf,
+    pub scanned_lines: usize,
+    /// Terminal repair lines that predate the `resubmit_required` field. They
+    /// are reported separately rather than silently folded in: `enters_sent` is
+    /// recoverable from them, but a reader must know the sample is mixed.
+    pub legacy_lines_without_field: usize,
+    pub since: Option<String>,
+    pub harnesses: Vec<SubmitProfileHarness>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SubmitProfileHarness {
+    pub harness: String,
+    pub repairs: usize,
+    pub resubmit_required: usize,
+    /// Percentage of repairs that needed at least one bare submit key.
+    pub resubmit_rate_pct: u32,
+    pub outcomes: BTreeMap<String, usize>,
+    pub max_enters_sent: usize,
+}
+
+pub fn summarize_submit_profile(
+    contents: &str,
+    log_path: PathBuf,
+    since: Option<&str>,
+) -> SubmitProfileReport {
+    let mut per_harness: BTreeMap<String, (usize, usize, BTreeMap<String, usize>, usize)> =
+        BTreeMap::new();
+    let mut scanned = 0usize;
+    let mut legacy = 0usize;
+
+    for line in contents.lines() {
+        if !line.contains("route_pass_through_submit_draft ") {
+            continue;
+        }
+        if let Some(since) = since
+            && submit_profile_line_timestamp(line).is_some_and(|ts| ts.as_str() < since)
+        {
+            continue;
+        }
+        scanned += 1;
+        let harness = submit_profile_field(line, "harness").unwrap_or_else(|| "unknown".to_string());
+        let outcome = submit_profile_field(line, "outcome").unwrap_or_else(|| "unknown".to_string());
+        let enters = submit_profile_field(line, "enters_sent")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0);
+        let required = match submit_profile_field(line, "resubmit_required") {
+            Some(value) => value == "true",
+            None => {
+                legacy += 1;
+                enters > 0
+            }
+        };
+
+        let entry = per_harness.entry(harness).or_insert_with(|| {
+            (
+                0,
+                0,
+                BTreeMap::new(),
+                0,
+            )
+        });
+        entry.0 += 1;
+        if required {
+            entry.1 += 1;
+        }
+        *entry.2.entry(outcome).or_insert(0) += 1;
+        entry.3 = entry.3.max(enters);
+    }
+
+    let harnesses = per_harness
+        .into_iter()
+        .map(
+            |(harness, (repairs, resubmit_required, outcomes, max_enters_sent))| {
+                let resubmit_rate_pct = (resubmit_required * 100)
+                    .checked_div(repairs)
+                    .and_then(|pct| u32::try_from(pct).ok())
+                    .unwrap_or(0);
+                SubmitProfileHarness {
+                    harness,
+                    repairs,
+                    resubmit_required,
+                    resubmit_rate_pct,
+                    outcomes,
+                    max_enters_sent,
+                }
+            },
+        )
+        .collect();
+
+    SubmitProfileReport {
+        log_path,
+        scanned_lines: scanned,
+        legacy_lines_without_field: legacy,
+        since: since.map(str::to_string),
+        harnesses,
+    }
+}
+
+fn submit_profile_field(line: &str, key: &str) -> Option<String> {
+    let needle = format!(" {key}=");
+    let start = line.find(&needle)? + needle.len();
+    let rest = &line[start..];
+    let end = rest.find(' ').unwrap_or(rest.len());
+    Some(rest[..end].to_string())
+}
+
+/// ops.log lines are prefixed `[RFC3339] `, which sorts lexicographically, so a
+/// `--since` prefix like `2026-08-08` filters correctly by string compare.
+fn submit_profile_line_timestamp(line: &str) -> Option<String> {
+    let rest = line.strip_prefix('[')?;
+    let end = rest.find(']')?;
+    Some(rest[..end].to_string())
+}
+
+pub fn run_submit_profile(
+    project_root: Option<&Path>,
+    since: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    let root = match project_root {
+        Some(root) => root.to_path_buf(),
+        None => agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd),
+    };
+    let log_path = root.join(".agent-doc/logs/ops.log");
+    let contents = std::fs::read_to_string(&log_path)
+        .with_context(|| format!("failed to read {}", log_path.display()))?;
+    let report = summarize_submit_profile(&contents, log_path, since);
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    println!("pass-through submit repairs — {}", report.log_path.display());
+    if let Some(since) = report.since.as_deref() {
+        println!("  since: {since}");
+    }
+    if report.scanned_lines == 0 {
+        println!("  no route_pass_through_submit_draft lines matched");
+        return Ok(());
+    }
+    for harness in &report.harnesses {
+        println!(
+            "  {}: {} repair(s), {} needed a bare submit key ({}%), max enters_sent={}",
+            harness.harness,
+            harness.repairs,
+            harness.resubmit_required,
+            harness.resubmit_rate_pct,
+            harness.max_enters_sent
+        );
+        for (outcome, count) in &harness.outcomes {
+            println!("      outcome={outcome}: {count}");
+        }
+    }
+    if report.legacy_lines_without_field > 0 {
+        println!(
+            "  note: {} line(s) predate `resubmit_required` and were counted from `enters_sent`",
+            report.legacy_lines_without_field
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod submit_profile_tests {
+    use super::*;
+
+    /// `#ptsubmitmetric`: the rollup must count the signal that actually exists
+    /// in a production log — `resubmit_required` on a TERMINAL line — not the
+    /// structurally-impossible `outcome=enter_resubmit`.
+    #[test]
+    fn submit_profile_counts_terminal_resubmits_per_harness() {
+        let log = concat!(
+            "[2026-08-07T10:00:00Z] route_pass_through_submit_draft file=a.md pane=%1 harness=claude outcome=cleared enters_sent=1 resubmit_required=true elapsed_ms=306 capture_failed=false\n",
+            "[2026-08-08T10:00:00Z] route_pass_through_submit_draft file=a.md pane=%1 harness=claude outcome=cleared enters_sent=0 resubmit_required=false elapsed_ms=153 capture_failed=false\n",
+            "[2026-08-08T10:01:00Z] route_pass_through_submit_draft file=a.md pane=%1 harness=claude outcome=exhausted_still_stranded enters_sent=3 resubmit_required=true elapsed_ms=1200 capture_failed=false\n",
+            "[2026-08-08T10:02:00Z] route_pass_through_submit_draft file=b.md pane=%2 harness=codex outcome=cleared enters_sent=0 resubmit_required=false elapsed_ms=90 capture_failed=false\n",
+            "[2026-08-08T10:03:00Z] some_other_event file=a.md\n",
+        );
+
+        let report = summarize_submit_profile(log, PathBuf::from("ops.log"), None);
+        assert_eq!(report.scanned_lines, 4, "the non-repair line must not count");
+        assert_eq!(report.legacy_lines_without_field, 0);
+
+        let claude = report
+            .harnesses
+            .iter()
+            .find(|h| h.harness == "claude")
+            .expect("claude rollup");
+        assert_eq!(claude.repairs, 3);
+        assert_eq!(claude.resubmit_required, 2);
+        assert_eq!(claude.resubmit_rate_pct, 66);
+        assert_eq!(claude.max_enters_sent, 3);
+        assert_eq!(claude.outcomes.get("cleared"), Some(&2));
+        assert_eq!(claude.outcomes.get("exhausted_still_stranded"), Some(&1));
+
+        let codex = report
+            .harnesses
+            .iter()
+            .find(|h| h.harness == "codex")
+            .expect("codex rollup");
+        assert_eq!(codex.repairs, 1);
+        assert_eq!(codex.resubmit_required, 0);
+
+        // `--since` is a lexicographic RFC3339 prefix compare, which is why the
+        // ops.log timestamp format can be filtered without date parsing.
+        let recent = summarize_submit_profile(log, PathBuf::from("ops.log"), Some("2026-08-08"));
+        let claude = recent
+            .harnesses
+            .iter()
+            .find(|h| h.harness == "claude")
+            .expect("claude rollup");
+        assert_eq!(claude.repairs, 2, "the 08-07 line must be excluded");
+        assert_eq!(claude.resubmit_required, 1);
+    }
+
+    /// Lines written before the field exists must still be countable, and the
+    /// mixed sample must be declared rather than silently folded in.
+    #[test]
+    fn submit_profile_recovers_legacy_lines_from_enters_sent_and_says_so() {
+        let log = concat!(
+            "[2026-08-08T10:00:00Z] route_pass_through_submit_draft file=a.md pane=%1 harness=claude outcome=cleared enters_sent=2 elapsed_ms=306 capture_failed=false\n",
+            "[2026-08-08T10:01:00Z] route_pass_through_submit_draft file=a.md pane=%1 harness=claude outcome=cleared enters_sent=0 elapsed_ms=100 capture_failed=false\n",
+        );
+        let report = summarize_submit_profile(log, PathBuf::from("ops.log"), None);
+        assert_eq!(report.legacy_lines_without_field, 2);
+        let claude = &report.harnesses[0];
+        assert_eq!(claude.repairs, 2);
+        assert_eq!(claude.resubmit_required, 1);
+    }
+}

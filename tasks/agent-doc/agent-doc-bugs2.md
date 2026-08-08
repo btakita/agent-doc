@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: f0e63870-952b-43fb-a47c-a6abdc6958dd
+resume: a1741f0d-a745-45cf-af24-98ffc5f9cecc
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -177,7 +177,7 @@ Both paths now go through `HarnessConfig::trigger_command`: Claude/OpenCode get 
 **Status correction on the previous item:** the superproject CI run `31249383368` from `#loopsuperprojectjob` came back **FAIL**, so that fix was not sufficient. `#confirmsuperprojectjob` is the next head and exists for exactly this — I'm leaving the diagnosis to that cycle rather than pre-empting it here.
 
 Filed one `[operator-verify]` follow-up: the live JetBrains pane render is the only part I can't verify from this side.
-<!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
+<!-- agent:boundary:f16db0e4 -->
 <!-- /agent:exchange -->
 ## Queue
 

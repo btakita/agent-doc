@@ -248,11 +248,64 @@ in flight; I am recording it rather than waiting on it.
 but frontmatter is not a patchable component, and rewriting it under a live
 editor is the disk-vs-authority divergence the write path exists to prevent. It
 is a one-word edit in the document when you want the drain to resume.
+
+### Re: typing into the haiven-dev.md Claude session prompt is periodically blocked — opus-5
+
+Found it, fixed it, released **0.35.168**. Your pane is healthy again.
+
+**What was happening.** The Claude child on pane `%20` died at 22:31 the previous
+evening and became a zombie — `[claude] <defunct>`, pid 1905542. Nobody was
+reading your keystrokes. `session doctor` was showing your own arrow keys echoed
+back as raw escape bytes:
+
+```
+live_pane: state=alive-busy current_command=agent-doc prompt_ready=false tail=^[[A^[[B
+supervisor: health=unreachable
+```
+
+**Root cause (`#zombiechild`).** `SupervisorShared::child_alive()` answered
+`Path::new("/proc/{pid}").exists()`. That entry survives for a zombie — a process
+that has exited but has not been reaped — and the supervisor is the parent that
+never reaped it. So the dead child read as alive forever:
+
+- `supervisor_restart_admission` deferred the restart indefinitely, because a
+  live child must never be replaced.
+- Every stale-supervisor recycle re-`execve`d with `via=execve_preserve_child`,
+  preserving a corpse.
+- Each pass opened a fresh PTY master (`master_fd` 72 → 75 → 80 …), minted a new
+  resume id, wrote the whole 70 KB document through the CRDT relay, found no
+  transcript for the id it had just minted, and recycled again.
+
+**68 recycles in 27 minutes** — ~700 full-document CRDT writes per two minutes on
+one document. The "periodic" in your report is that ~10-second cadence: each
+`execve` reset the terminal, so whatever you were typing went into a PTY whose
+reader was dead.
+
+**Fix.** Liveness now reads the process state from `/proc/<pid>/stat`. `Z`, `X`
+and `x` are exits; `R`/`S`/`D`/`T`/`t`/`I` are a live child that must not be
+replaced. `comm` can contain spaces and parentheses, so the state token is read
+after the last `)` — a test pins that. An unreadable `stat` under an existing
+entry keeps the historical fail-open answer, so this is a strict tightening.
+
+This is the same shape as `#idlerevisionreactive`, which AGENTS.md already
+records: a cheap probe that cannot distinguish "gone" from "present" answers
+"present", and the expensive repair it triggers cannot fix what it misread, so
+the loop feeds itself.
+
+**Be precise about the proof.** The live spin stopped on its own at 07:42, when
+the zombie was finally cleared and a fresh child (pid 3854683) took the pane —
+that was *before* 0.35.168 installed. So the fix is not what recovered your
+session; it is what stops the loop from re-forming. `session doctor` now reports
+`state=alive-idle prompt_ready=true`, `supervisor: health=healthy`, `no issues
+detected`.
+
+`make check` green, installed, tagged, pushed, controllers recycled.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#queuemirrororder]
 - do [#watchsighupwin]
 - do [#tmuxsyncslow]
 - do [#runpromptverbose]
@@ -266,6 +319,7 @@ is a one-word edit in the document when you want the drain to resume.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#queuemirrororder] agent:queue mirror ignores anchored backlog placement, and cannot be reordered afterwards. (1) --backlog-add-after X "[#y] ..." places #y after #X in agent:backlog but PREPENDS it to agent:queue, inverting the drain order relative to the backlog. SKILL.md states the mirror matches backlog order; that holds for --backlog-add (both prepend) but not for --backlog-add-after/--backlog-add-before, where backlog honours the anchor and the queue applies --backlog-queue-placement prepend independently. Reproduced in tasks/haiven-dev.md: backlog = [#reasoncoderegistry, #reasoncodeenum] (correct dependency order), queue = [#reasoncodeenum, #reasoncoderegistry]. The failure lands exactly when an anchor was chosen BECAUSE order matters. (2) There is no recovery: 'agent-doc queue sync' skips ids already present (reason: already_in_queue) so it is append-only, and --backlog-reorder does not cascade to the mirror. The only ways to move a queued id are --done / --backlog-gate, both of which assert something false about its state. Suggested fix: honour the anchor when projecting into agent:queue, and add a queue reorder (or make --backlog-reorder cascade). (3) Minor, same session: a metadata-only write (reorder, no code change) was rejected by the imperative-directive guard — 'requires concrete execution evidence or a concrete blocker; rejected status-only/meta response for do [#typeroutersponses]' — and left the cycle at response_captured. A pure reorder has no execution evidence to offer.
 - [ ] [#watchsighupwin] [recommended] Verify the 0.35.167 PyPI run built the x86_64-pc-windows-msvc wheel; the SIGHUP cfg-gate could not be cross-compiled locally (no MSVC toolchain). `gh run list --workflow PyPI --limit 1`
 - [ ] [#tmuxsyncslow] tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it. (restored from the queue after #qftnodoneeat deleted it; plan context: tasks/agent-doc/plan-tmux-auto-sync-reactive.md)
 - [ ] [#runpromptverbose] The prompt Run Agent Doc sends to Claude Code should simply be `/agent-doc .../file.md`. It currently sends a long multi-paragraph prompt ("Agent Doc queue state advanced for ... Continue this existing owner-pane session; do not invoke agent-doc recursively. Execute the current active queue head: ... Persist and finalize this cycle through the connected Agent Doc tools."). Restored from the queue after #qftnodoneeat deleted it.

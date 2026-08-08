@@ -10,10 +10,30 @@ on:
       - "20*/**"
   workflow_dispatch:
 
+# `#loopsuperprojectjob`: the hosted runner disk is the binding constraint, not
+# CPU. Building the ~156-crate workspace with `--all-targets` while Cargo keeps
+# incremental state and full debug info for every test binary fills the ~14 GB
+# free on `ubuntu-latest`, and the linker — which mmaps its output — dies with
+# `collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped`
+# rather than a legible ENOSPC. That is what reddened `check` for 8 consecutive
+# runs (31244299619 .. 31248484827) while `tmux-ci` and local `make check`
+# stayed green.
+#
+# agent-doc's own `.github/workflows/ci.yml` already carries this exact
+# mitigation and does not hit the failure; this workflow simply never inherited
+# it. Keep the two in sync — a divergence here reads as a code regression.
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
 jobs:
   check:
     name: check
     runs-on: ubuntu-latest
+    # Backstop for non-test hangs (compile, doc tests) that the per-test nextest
+    # guard cannot see. Well above a legitimate cold run, far below GitHub's 6h.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - name: Checkout agent-doc submodules
@@ -23,6 +43,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y tmux
+      # `#ci-per-test-timeout-guard`: `make test` takes the nextest path only
+      # when the binary is present, which is what activates the per-test
+      # slow-timeout deadlock guard in `.config/nextest.toml`. Without this the
+      # superproject silently falls back to plain `cargo test`, which has no
+      # per-test timeout — so a lock/IPC deadlock would hang to the job cap
+      # instead of failing fast with a named test and a backtrace.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       - name: make check
         working-directory: src/agent-doc
         run: make check
@@ -30,6 +60,7 @@ jobs:
   tmux-ci:
     name: tmux-ci
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - name: Checkout agent-doc submodules
@@ -39,6 +70,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y tmux
+      # `make tmux-ci` builds the same `--all-targets` graph, so it sits on the
+      # same disk cliff even though it has not tipped over yet. It uses plain
+      # `cargo test`, not nextest, so no runner install is needed here.
       - name: make tmux-ci
         working-directory: src/agent-doc
         run: make tmux-ci

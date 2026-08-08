@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.178
+
+- **Fix (`#qflood`): the idle-queue watch stacked `/agent-doc <FILE>` lines in
+  the composer until the pane filled.** Operator-reported on `tasks/sdk.md`. The
+  captured pane shows the payload repeated nine times, with
+  `idle_queue_dispatch_not_consumed reason=dispatch_start_unproven` followed by
+  `idle_queue_watch_resubmit key=Enter` every ~30s.
+
+  The `#idlequeuedraftinject` guard in 0.35.177 did not cover this shape: once
+  several payload lines pile up, the bottom-most carries no `❯` glyph, so
+  `is_prompt_line` is false and the projection is `Absent`, not `OperatorDraft`.
+  The watch therefore appended another copy and pressed Enter — which in a
+  multi-line composer inserts a newline instead of submitting, growing the draft
+  every cycle.
+
+  A bare `Absent` must stay dispatchable (a stale or partial renderer tail
+  carries no composer at all, and a ready actor legitimately wins there), so the
+  guard is discriminated by composer **chrome**: when the frame is rendered
+  (box rule, status line, permission footer) but the body is not an empty
+  prompt, the composer is occupied and is never injected into. Regression test
+  uses the pane text captured live from the reported session.
+
 ## 0.35.177
 
 - **Fix (`#idlequeuedraftinject`): the idle-queue watch injected `agent-doc

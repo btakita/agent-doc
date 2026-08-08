@@ -123,8 +123,7 @@ pub fn idle_queue_prompt_visibility(
     if harness.dispatch_blocker_reason(output).is_some() {
         return IdleQueuePromptVisibility::Hidden;
     }
-    // `#idlequeuedraftinject`: a composer holding operator text is never
-    // dispatchable, whatever the actor projection says.
+    // `#idlequeuedraftinject`: only a PROVABLY EMPTY composer is dispatchable.
     //
     // The busy cue above only covers an *active* turn. A completed-turn marker
     // (`✻ Brewed for 7m 59s`) raises no cue, so `actor_ready` used to win and
@@ -135,12 +134,34 @@ pub fn idle_queue_prompt_visibility(
     // that asks whether *this payload* is already pending, not whether the
     // composer is occupied at all.
     //
+    // Deliberately rejects `OperatorDraft` only, NOT "anything that is not
+    // `ReadyEmpty`". `Absent` is a legitimate stale/partial renderer tail that
+    // carries no composer at all, and
+    // `idle_queue_prompt_visibility_trusts_ready_actor_over_stale_renderer_tail`
+    // pins that a ready actor still wins there — tightening this to require
+    // `ReadyEmpty` stalls real drains.
+    //
     // Only explicit operator steering may add and submit a prompt, so this is
     // checked before the `actor_ready` short-circuit rather than after it.
-    if matches!(
-        project_pane_composer(output, harness),
-        PaneComposerProjection::OperatorDraft { .. }
-    ) {
+    let projection = project_pane_composer(output, harness);
+    if matches!(projection, PaneComposerProjection::OperatorDraft { .. }) {
+        return IdleQueuePromptVisibility::Hidden;
+    }
+    // `#qflood`: the stacked-draft shape is `Absent`, not `OperatorDraft`.
+    // Once several `/agent-doc <FILE>` lines pile up, the bottom-most carries no
+    // `❯` glyph, so `is_prompt_line` is false and no draft is projected. The
+    // watch then appended another copy and pressed Enter — which in a
+    // multi-line composer inserts a newline instead of submitting, so the draft
+    // grew every cycle (`dispatch_start_unproven` on a loop).
+    //
+    // Discriminated by composer CHROME, because a bare `Absent` must stay
+    // dispatchable: a stale/partial renderer tail carries no composer at all
+    // and a ready actor legitimately wins there. When the frame IS rendered
+    // (rule / status / permission footer) but the body is not an empty prompt,
+    // the composer is occupied and must never be injected into.
+    if composer_chrome_rendered(output, harness)
+        && !matches!(projection, PaneComposerProjection::ReadyEmpty { .. })
+    {
         return IdleQueuePromptVisibility::Hidden;
     }
     if actor_ready {
@@ -150,6 +171,21 @@ pub fn idle_queue_prompt_visibility(
         return IdleQueuePromptVisibility::Hidden;
     }
     IdleQueuePromptVisibility::NeedsLivePaneDispatchReady
+}
+
+/// True when the bottom of the capture shows the harness's rendered composer
+/// frame (box rule, status line, permission footer).
+///
+/// Distinguishes "the composer is on screen and occupied" from "this capture
+/// has no composer at all" — a stale or partial renderer tail, where a ready
+/// actor is still trusted.
+fn composer_chrome_rendered(output: &str, harness: &HarnessConfig) -> bool {
+    output
+        .lines()
+        .rev()
+        .take(8)
+        .filter(|line| !line.trim().is_empty())
+        .any(|line| harness.is_ignorable_output_line(line))
 }
 
 pub fn idle_queue_prompt_visible_after_live_pane_dispatch_ready(
@@ -239,6 +275,42 @@ mod tests {
             idle_queue_prompt_visibility(pane, &harness, false),
             IdleQueuePromptVisibility::Hidden,
             "and the non-ready path must agree"
+        );
+    }
+
+    /// `#qflood`: the observed flood shape — several `/agent-doc <FILE>` lines
+    /// stacked in the composer. The bottom-most carries no `❯` glyph, so
+    /// `is_prompt_line` is false and the projection is `Absent`, not
+    /// `OperatorDraft`. Rejecting only `OperatorDraft` would still inject here,
+    /// append another copy, and press Enter — which in a multi-line composer
+    /// inserts a newline instead of submitting, growing the draft every cycle.
+    ///
+    /// Captured live from `tasks/sdk.md` pane `%926`.
+    #[test]
+    fn idle_queue_does_not_inject_into_a_stacked_multiline_draft() {
+        let harness = HarnessConfig::claude();
+        let pane = concat!(
+            "❯ /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md\n",
+            "  /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md\n",
+            "  /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md\n",
+            "───────────────────────────────────────\n",
+            "  Opus 5 ctx:22% ~/…/src/haiven-dev docs/fpe brian@cachyos-x8664\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · PR #1\n",
+        );
+
+        assert_ne!(
+            project_pane_composer(pane, &harness),
+            PaneComposerProjection::ReadyEmpty {
+                evidence: agent_doc_harness::PaneComposerReadinessEvidence::Prompt {
+                    rendered: "❯".to_string()
+                }
+            },
+            "a stacked draft must not project as an empty composer"
+        );
+        assert_eq!(
+            idle_queue_prompt_visibility(pane, &harness, true),
+            IdleQueuePromptVisibility::Hidden,
+            "a stacked multi-line draft must never be dispatchable"
         );
     }
 

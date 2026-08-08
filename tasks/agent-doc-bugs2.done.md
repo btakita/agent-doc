@@ -1122,3 +1122,4 @@
 - 2026-08-08 [#idlequeuedraftinject] idle-queue watch must never inject over an occupied composer (operator draft or stacked multi-line draft)
 - 2026-08-08 [#startupmiss9row] Reproduce the 30s no_prompt startup-miss in a 9-row JB-layout pane where the status line is off-screen; use the new blocking_gate= diagnostic to attribute it (dead PTY relay vs stuck actor projection vs pane detector)
 - 2026-08-08 [#autotriggeradmissionstall] #agent-doc-bug Auto-trigger burned its full 25s turn_admission_projection budget before consulting the pane, reporting Sent 23-27s after the harness took the prompt. FIXED in 0.35.179 (565d67c77): the await runs on its own thread while the supervisor samples the pane busy cue every 500ms, accept-only.
+- 2026-08-08 [#clearsubmitlabel] session_clear reports result=command_still_visible while command_visible=false; TimedOut conflates 'still visible at deadline' with 'never observed'

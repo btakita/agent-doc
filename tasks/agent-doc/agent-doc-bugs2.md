@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: d1f0756d-a3bb-4e70-8dca-cd69b428629d
+resume: de9e715c-f01f-48f4-bfb2-d013e5d1e668
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -134,12 +134,43 @@ Verified live on the same rig, on the no-op-cycle shape that produced the stall:
 **Tests.** The 9-row shape is now a real fixture — the exact captured bytes at t=3.281 s, asserting no status line, a dispatch-ready composer, and cursor-scoped acceptance — so a future chrome-predicate change cannot regress a geometry whose only symptom is a 30 s production timeout. The stall fix has two behavioural tests over an injectable awaiter; mutation-checked by neutering the pane path, which makes the timing test burn the full budget and fail exactly as production did.
 
 **Shipped:** `make check` green (exit 0, 0 failed suites), `make install` → 0.35.179, committed and pushed (`565d67c77` + superproject `33b6a4ce60`), controller recycled. CI run `31276427011` was still in progress at closeout — recorded, not awaited. One note: `make install` again dropped the JetBrains package into 4 running IDEs ("Restart running IDEs to activate"), the replica-storm trigger from last cycle. The package version is unchanged at 0.2.350, but a restart is still the clean state.
+
+### Re: do [#clearsubmitlabel] — opus-5
+
+> **Queue prompt:**
+>
+> do [#clearsubmitlabel]
+
+
+Fixed and shipped in **0.35.180**. The decision you flagged last cycle turned out not to need loosening at all — the acceptance rule is untouched.
+
+**The conflation.** `ContextClearSubmitStatus::TimedOut` carried two unrelated deadlines:
+
+- the composer **still holding** the clear command at the last capture — delivered, not consumed, a wedged pane, and the only shape an Enter-resubmit may retry;
+- the window closing with **no evidence in either direction** — the command was never seen in the composer and the pane never changed, so whether the clear ran cannot be said.
+
+Only the first is "still visible". Both mapped to `command_still_visible`, which is how your line ended up reading `result=command_still_visible command_visible=false` — the label stating the opposite of the observation on the same line.
+
+**Split.**
+
+| | `result=` | `issue=` | `unblocker=` |
+|---|---|---|---|
+| `StillVisible` | `command_still_visible` | `prompt_not_submitted` | `clear_command_not_consumed` |
+| `Unobserved` | `submission_unobserved` | `submit_unobserved` | `clear_submission_unobserved` |
+
+The operator-facing message follows the same rule. "Restore an idle prompt and retry" is a guess when nothing was observed — the prompt may already be idle — so the unobserved case says the outcome is unknown and to check the pane, with `next_action=verify_pane_state_then_retry`.
+
+**Nothing was loosened, and that is the point.** Neither status is `Accepted`; both still fail closed through `require_context_clear_submit_accepted`, and only `StillVisible` may drive an Enter resubmit — an unobserved submit must not blind-resend into a pane whose state is unknown. A clear that may not have run must never be reported as done, so the acceptance rule was the wrong knob; the report was. That is what made this decidable without you.
+
+The regression test asserts both directions — distinct `result`/`issue`/`unblocker`, the remedy sentence matching the observation, and explicitly that `Unobserved` is still not `Accepted` and still not resubmittable. Mutation-checked by pointing `Unobserved` back at `command_still_visible`, which reproduces your exact line and fails the test.
+
+**Shipped:** `make check` green (exit 0, 0 failed suites), `make install` → 0.35.180, pushed (`175ccf251` + superproject `bd0ba23c02`), controller recycled. CI runs `31276427011` and `31277544182` were both still in progress at closeout — recorded, not awaited.
 <!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ do [#clearsubmitlabel]
+- ~~do [#clearsubmitlabel]~~
 - ~~do [#startupmiss9row]~~
 - do [#ptsubmitmetric]
 - do [#claudesplitsubmit]
@@ -155,7 +186,6 @@ Verified live on the same rig, on the no-op-cycle shape that produced the stall:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#clearsubmitlabel] session_clear reports result=command_still_visible while command_visible=false; TimedOut conflates 'still visible at deadline' with 'never observed'
 - [ ] [#ptsubmitmetric] #agent-doc-bug Fix the unmeasurable #passthroughsplitprofile criterion. `outcome=enter_resubmit` is a NON-terminal action (`pass_through_stranded_draft_action_is_terminal` admits only Cleared/DeferredPaneBusy/ExhaustedStillStranded), so production ops.log can never record it and that counter is structurally always zero no matter how many submits drop. The real signal is `enters_sent > 0` on a terminal `outcome=cleared` line — `enters_sent += 1` happens only inside the EnterResubmit branch (agent-doc-controller/src/dispatch.rs:6070). Emit an explicit terminal field (for example `resubmit_required=true|false`) or a rollup command so the decision is readable without hand-parsing ops.log, restate the unblock criterion in those terms on #passthroughsplitprofile, and add a regression test pinning that a repair which resubmitted logs the new field.
 - [ ] [#claudesplitsubmit] #agent-doc-bug Decide and implement whether claude joins `harness_uses_split_text_submit` (the split text+Enter profile codex/opencode use, `tmux_submit_profile_for_harness`, 80ms), reading the corrected counter from #ptsubmitmetric. Current reading: 6 post-0.35.164 harness=claude repairs (elapsed_ms >= 150), 5 of which needed at least one resubmit and one of which needed two — that is the stated single-call-send-is-the-cause condition, but on 6 samples rather than the ~20 sample floor. Gather to the floor with the corrected metric first, then either add claude to the split profile or record that the settle-gated repair alone is sufficient. Do not change the profile without the measurement.
 - [ ] [#compactstrandedheading] #agent-doc-bug Run `agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` and confirm it no longer fails on the historical stranded duplicate heading. Converted from the removed operator-verify item #operatorverifyresolve, whose premise (a live JetBrains File Cache Conflict awaiting a human Cancel / Keep-memory-changes) is stale: recent session-checks read `status=current authority=cp_model live_editors=1 delivery_converged=true` and the retained closeouts it was waiting on are committing. Only this half was ever untested, and it is agent-testable.

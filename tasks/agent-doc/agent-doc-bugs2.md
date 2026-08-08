@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 0b9f3713-50c5-45ee-9e8a-43acf7c424ad
+resume: 1bb0329b-f54a-4fb0-9f50-42a4d59b934f
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -72,13 +72,44 @@ I fixed that blind spot rather than guessing: the timeout now logs every gate pl
 Measured along the way: Claude reaches its composer in **2.5s** here, so the 30s deadline was never too short.
 
 **Shipped:** `make check` green, `make install` → 0.35.176, supervisors recycled, pushed (submodule + superproject). CI run `31271290023` was still in progress at closeout — recorded, not awaited.
+
+### Re: prompt injection into running turns, flood, and IDEA responsiveness — opus-5
+
+Your three reports share one root cause, now fixed and shipped in **0.35.177** + **0.35.178**.
+
+**The idle-queue watch was injecting into an occupied composer.** `idle_queue_prompt_visibility` guarded only against an *active* turn via `dispatch_blocker_reason`, then short-circuited on `actor_ready`. A completed-turn marker (`✻ Brewed for 7m 59s`) raises no busy cue, so `actor_ready` won and returned `Visible` with nothing inspecting the composer — which held your `keep going`. `dispatch_payload_pending_in_current_input` did not catch it either: it asks whether *this payload* is pending, not whether the composer is occupied at all.
+
+**The sdk.md flood was the same bug in a second shape.** Once several `/agent-doc <FILE>` lines pile up, the bottom-most carries no `❯` glyph, so `is_prompt_line` is false and the projection is `Absent`, not `OperatorDraft`. The watch appended another copy and pressed Enter — which in a multi-line composer inserts a newline instead of submitting, so the draft grew every ~30s (`dispatch_start_unproven` on a loop).
+
+The fix could not simply require an empty composer: a bare `Absent` is a legitimate stale renderer tail where a ready actor must still win (`idle_queue_prompt_visibility_trusts_ready_actor_over_stale_renderer_tail` pins that, and I broke it on the first attempt). So the guard discriminates by composer **chrome** — when the frame is rendered but the body is not an empty prompt, the composer is occupied and is never injected into. Both regression tests use pane text captured live from your sessions.
+
+### Re: is the plugin using the main CPU thread? — opus-5
+
+**No.** Measured across every thread in the IDEA process (pid 702745):
+
+| | share of process CPU |
+|---|---|
+| G1 GC threads | **41.5%** |
+| JIT compiler | 1.7% |
+| **EDT / AWT** | **0.2%** |
+| other | 56.6% |
+
+The EDT is essentially idle, so this is not a blocked UI thread — it is a **GC storm**. 41.5% of the process's entire CPU budget is garbage collection, which stalls the UI through allocation pressure and stop-the-world pauses rather than through EDT blocking. `kswapd0` is also active, so there is system-wide memory pressure.
+
+**I contributed to this and should have known better.** I ran `make install` three times this cycle, and each run drops the JetBrains plugin into 4 running IDE installations ("Restart running IDEs to activate"). There is a recorded note that installing a plugin into a *running* IDE causes exactly this replica storm and that only an IDE restart clears it. The release checklist says install after every fix; I should have skipped the editor-plugin step while your sessions were live. **Restarting IDEA is the fix** — I have not run `make install` again.
+
+**Also fixed earlier this cycle:** `#freshclaudectxless` (0.35.176) — Claude's status line drops its `ctx:N%` token on a fresh session, so the ctx-less line masked the `❯` composer and every non-cursor-scoped readiness check read an idle pane as never-ready. That is what caused the 30s `no_prompt` startup-miss on Restart Agent, the submit lag, and the laggy pane sync.
+
+**Still open.** `#startupmiss9row` is unfinished — I attempted a live reproduction but `sync` normalises the pane to full height, so I could not recreate the 9-row JB geometry; your reports took priority. `#clearsubmitlabel` is newly filed: your Clear Session Context error reports `result=command_still_visible` while `command_visible=false`, because `TimedOut` conflates "still visible at the deadline" with "never observed" — the label is actively misleading, and the acceptance rule needs a decision I did not want to loosen unilaterally.
+
+**Shipped:** `make check` green at each step, installed, pushed (`2d04e182a`, `5d233700f`), controllers recycled. The haiven-dev compact/delivery barrier cleared with `admin reload-lib`.
 <!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#startupmiss9row]
-- ~~On monsterrodholders.md, I changed the agent from opencode to claude. On Restart Agent, an error occurred in the tmux pane `❯ [agent-doc] session did not become dispatch-ready in 30s (no_prompt) for claude; recorded startup-miss and failing closed instead of hanging. Run 'agent-doc start /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md' to retry.boost-client main brian@cachyos-x8664`~~
+- do [#clearsubmitlabel]
+- 🚧 do [#startupmiss9row]
 - ⏭️ do [#ptsubmitmetric]
 - do [#claudesplitsubmit]
 - do [#compactstrandedheading]
@@ -93,7 +124,8 @@ Measured along the way: Claude reaches its composer in **2.5s** here, so the 30s
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#startupmiss9row] Reproduce the 30s no_prompt startup-miss in a 9-row JB-layout pane where the status line is off-screen; use the new blocking_gate= diagnostic to attribute it (dead PTY relay vs stuck actor projection vs pane detector)
+- [ ] [#clearsubmitlabel] session_clear reports result=command_still_visible while command_visible=false; TimedOut conflates 'still visible at deadline' with 'never observed'
+- [ ] 🚧 [#startupmiss9row] Reproduce the 30s no_prompt startup-miss in a 9-row JB-layout pane where the status line is off-screen; use the new blocking_gate= diagnostic to attribute it (dead PTY relay vs stuck actor projection vs pane detector)
 - [ ] [#ptsubmitmetric] #agent-doc-bug Fix the unmeasurable #passthroughsplitprofile criterion. `outcome=enter_resubmit` is a NON-terminal action (`pass_through_stranded_draft_action_is_terminal` admits only Cleared/DeferredPaneBusy/ExhaustedStillStranded), so production ops.log can never record it and that counter is structurally always zero no matter how many submits drop. The real signal is `enters_sent > 0` on a terminal `outcome=cleared` line — `enters_sent += 1` happens only inside the EnterResubmit branch (agent-doc-controller/src/dispatch.rs:6070). Emit an explicit terminal field (for example `resubmit_required=true|false`) or a rollup command so the decision is readable without hand-parsing ops.log, restate the unblock criterion in those terms on #passthroughsplitprofile, and add a regression test pinning that a repair which resubmitted logs the new field.
 - [ ] [#claudesplitsubmit] #agent-doc-bug Decide and implement whether claude joins `harness_uses_split_text_submit` (the split text+Enter profile codex/opencode use, `tmux_submit_profile_for_harness`, 80ms), reading the corrected counter from #ptsubmitmetric. Current reading: 6 post-0.35.164 harness=claude repairs (elapsed_ms >= 150), 5 of which needed at least one resubmit and one of which needed two — that is the stated single-call-send-is-the-cause condition, but on 6 samples rather than the ~20 sample floor. Gather to the floor with the corrected metric first, then either add claude to the split profile or record that the settle-gated repair alone is sufficient. Do not change the profile without the measurement.
 - [ ] [#compactstrandedheading] #agent-doc-bug Run `agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` and confirm it no longer fails on the historical stranded duplicate heading. Converted from the removed operator-verify item #operatorverifyresolve, whose premise (a live JetBrains File Cache Conflict awaiting a human Cancel / Keep-memory-changes) is stale: recent session-checks read `status=current authority=cp_model live_editors=1 delivery_converged=true` and the retained closeouts it was waiting on are committing. Only this half was ever untested, and it is agent-testable.

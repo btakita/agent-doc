@@ -1119,3 +1119,4 @@
 - 2026-08-08 [#boundaryprosecount] #agent-doc-bug The committed single-boundary invariant counted markers with a raw `matches(BOUNDARY_PREFIX)` substring scan, so an inline-code mention of the marker in prose counted as a real marker and every closeout on the document failed at `phase=post_commit_collapse` after the commit had already landed. Fixed in 0.35.175 via `boundary::count_markers` (code-range-aware, agrees with the collapse by construction).
 - 2026-08-08 [#freshclaudectxless] Claude chrome detection must handle the fresh-session (ctx-less) status line so a fresh pane reads dispatch-ready
 - 2026-08-08 [#startupmissgates] auto_trigger no_prompt timeout must name which readiness gate never opened
+- 2026-08-08 [#idlequeuedraftinject] idle-queue watch must never inject over an occupied composer (operator draft or stacked multi-line draft)

@@ -2,6 +2,36 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.180
+
+- **Fix (`#clearsubmitlabel`): `session_clear` reported
+  `result=command_still_visible` on lines that also carried
+  `command_visible=false`.** The label stated the opposite of the observation, so
+  it could not be used to tell the two failures apart.
+
+  `ContextClearSubmitStatus::TimedOut` carried two unrelated deadlines. The
+  composer still holding the clear command at the last capture is a wedged pane
+  — delivered, not consumed, and the only shape an Enter-resubmit may retry. The
+  window closing with no evidence in either direction is an unknown: the command
+  was never seen and the pane never changed, so whether the clear ran cannot be
+  said. Only the first is "still visible".
+
+  Split into `StillVisible` (`result=command_still_visible`,
+  `issue=prompt_not_submitted`, `unblocker=clear_command_not_consumed`) and
+  `Unobserved` (`result=submission_unobserved`, `issue=submit_unobserved`,
+  `unblocker=clear_submission_unobserved`,
+  `next_action=verify_pane_state_then_retry`). The operator-facing message now
+  matches what was observed too: "restore an idle prompt" is a guess when nothing
+  was observed, so the unobserved case says the outcome is unknown and to check
+  the pane.
+
+  **The acceptance rule is deliberately unchanged.** Neither status is
+  `Accepted`; both still fail closed through
+  `require_context_clear_submit_accepted`, and only `StillVisible` may drive an
+  Enter resubmit — an unobserved submit must not blind-resend into an unknown
+  pane. This is a reporting fix, not a loosening: a clear that may not have run
+  must never be reported as done.
+
 ## 0.35.179
 
 - **Fix (`#autotriggeradmissionstall`): a restart-fresh auto-trigger reported

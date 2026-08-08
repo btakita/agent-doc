@@ -2,10 +2,28 @@ use std::fmt::Display;
 use std::path::Path;
 use std::time::Duration;
 
+/// (`#clearsubmitlabel`) The deadline can expire for two unrelated reasons, and
+/// they need different operator actions:
+///
+/// - [`Self::StillVisible`] — the clear command was in the composer at the last
+///   capture. It was delivered and NOT consumed; the pane is wedged and the fix
+///   is to restore an idle prompt (this is also the only shape an Enter-resubmit
+///   may retry).
+/// - [`Self::Unobserved`] — the deadline expired with no evidence in EITHER
+///   direction: the command was never seen in the composer and the pane never
+///   changed. Whether the clear happened is unknown.
+///
+/// One `TimedOut` variant used to carry both, reporting
+/// `result=command_still_visible` alongside `command_visible=false` — a line
+/// that states the opposite of what was observed. The acceptance rule is
+/// deliberately unchanged: neither is `Accepted`, both still fail closed through
+/// `require_context_clear_submit_accepted`. Only the report is split, because a
+/// clear that may not have run must never be reported as done.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContextClearSubmitStatus {
     Accepted,
-    TimedOut,
+    StillVisible,
+    Unobserved,
     CaptureFailed,
 }
 
@@ -13,16 +31,38 @@ impl ContextClearSubmitStatus {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Accepted => "accepted",
-            Self::TimedOut => "command_still_visible",
+            Self::StillVisible => "command_still_visible",
+            Self::Unobserved => "submission_unobserved",
             Self::CaptureFailed => "capture_failed",
         }
     }
 
     pub const fn issue(self) -> Option<&'static str> {
         match self {
-            Self::TimedOut => Some("prompt_not_submitted"),
+            Self::StillVisible => Some("prompt_not_submitted"),
+            Self::Unobserved => Some("submit_unobserved"),
             Self::CaptureFailed => Some("submit_unverified_capture_failed"),
             Self::Accepted => None,
+        }
+    }
+
+    /// The exact unblocker for this outcome. `StillVisible` is a wedged composer;
+    /// `Unobserved` is an unknown, where telling the operator to "restore an idle
+    /// prompt" would be a guess — the prompt may already be idle.
+    pub const fn unblocker(self) -> &'static str {
+        match self {
+            Self::StillVisible => "clear_command_not_consumed",
+            Self::Unobserved => "clear_submission_unobserved",
+            Self::CaptureFailed => "clear_submit_capture_failed",
+            Self::Accepted => "none",
+        }
+    }
+
+    pub const fn next_action(self) -> &'static str {
+        match self {
+            Self::StillVisible => "restore_idle_prompt_and_retry",
+            Self::Unobserved | Self::CaptureFailed => "verify_pane_state_then_retry",
+            Self::Accepted => "none",
         }
     }
 }
@@ -98,7 +138,7 @@ pub fn context_clear_submit_needs_enter_resubmit(
     pending_draft_enter_resubmit: bool,
 ) -> bool {
     pending_draft_enter_resubmit
-        && observation.status == ContextClearSubmitStatus::TimedOut
+        && observation.status == ContextClearSubmitStatus::StillVisible
         && observation.command_visible
 }
 
@@ -160,7 +200,8 @@ pub fn context_clear_submit_resubmit_proof_line(
 ) -> String {
     let result = match observation.status {
         ContextClearSubmitStatus::Accepted => "accepted",
-        ContextClearSubmitStatus::TimedOut => "still_visible",
+        ContextClearSubmitStatus::StillVisible => "still_visible",
+        ContextClearSubmitStatus::Unobserved => "unobserved",
         ContextClearSubmitStatus::CaptureFailed => "capture_failed",
     };
     format!(
@@ -185,7 +226,7 @@ pub fn context_clear_submit_blocked_line(
     observation: ContextClearSubmitObservation,
 ) -> String {
     format!(
-        "session_clear_submit_blocked file={} pane={} harness={} phase={} command={} result={} elapsed_ms={} command_visible={} issue={} ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=restore_idle_prompt_and_retry unblocker=clear_command_not_consumed",
+        "session_clear_submit_blocked file={} pane={} harness={} phase={} command={} result={} elapsed_ms={} command_visible={} issue={} ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action={} unblocker={}",
         file,
         pane,
         harness,
@@ -194,7 +235,9 @@ pub fn context_clear_submit_blocked_line(
         observation.status.as_str(),
         observation.elapsed.as_millis(),
         observation.command_visible,
-        observation.status.issue().unwrap_or("submit_not_accepted")
+        observation.status.issue().unwrap_or("submit_not_accepted"),
+        observation.status.next_action(),
+        observation.status.unblocker()
     )
 }
 
@@ -206,11 +249,25 @@ pub fn context_clear_submit_blocked_message(
     phase: &str,
     observation: ContextClearSubmitObservation,
 ) -> String {
+    // `#clearsubmitlabel`: the remedy sentence must match what was actually
+    // observed. "Restore an idle prompt" is right for a composer still holding
+    // the command; for an unobserved submit the prompt may already be idle and
+    // the real question is whether the clear ran at all.
+    let remedy = match observation.status {
+        ContextClearSubmitStatus::Unobserved => format!(
+            "No submission evidence was seen in either direction, so whether the clear ran is unknown. Check the {harness} pane before retrying — run Clear Session Context again if the context is still there"
+        ),
+        _ => format!(
+            "Restore an idle {harness} prompt or restart the session, then run Clear Session Context again"
+        ),
+    };
     format!(
-        "session_clear {harness} command `{command}` for {} was not proven submitted in pane {pane} after {phase} (result={}, command_visible={}); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=restore_idle_prompt_and_retry unblocker=clear_command_not_consumed. Restore an idle {harness} prompt or restart the session, then run Clear Session Context again",
+        "session_clear {harness} command `{command}` for {} was not proven submitted in pane {pane} after {phase} (result={}, command_visible={}); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action={} unblocker={}. {remedy}",
         file,
         observation.status.as_str(),
-        observation.command_visible
+        observation.command_visible,
+        observation.status.next_action(),
+        observation.status.unblocker()
     )
 }
 
@@ -537,7 +594,7 @@ mod tests {
     #[test]
     fn context_clear_submit_retry_is_scoped_to_visible_enter_profile_drafts() {
         let visible_timeout = ContextClearSubmitObservation {
-            status: ContextClearSubmitStatus::TimedOut,
+            status: ContextClearSubmitStatus::StillVisible,
             elapsed: Duration::from_millis(250),
             command_visible: true,
         };
@@ -547,7 +604,7 @@ mod tests {
             command_visible: false,
         };
         let stale_or_empty_timeout = ContextClearSubmitObservation {
-            status: ContextClearSubmitStatus::TimedOut,
+            status: ContextClearSubmitStatus::Unobserved,
             elapsed: Duration::from_millis(250),
             command_visible: false,
         };
@@ -586,7 +643,7 @@ mod tests {
     #[test]
     fn context_clear_submit_proof_lines_report_prompt_issue_and_retry_outcome() {
         let observation = ContextClearSubmitObservation {
-            status: ContextClearSubmitStatus::TimedOut,
+            status: ContextClearSubmitStatus::StillVisible,
             elapsed: Duration::from_millis(5123),
             command_visible: true,
         };
@@ -629,7 +686,7 @@ mod tests {
     #[test]
     fn context_clear_submit_blocked_lines_name_command_and_unblocker() {
         let observation = ContextClearSubmitObservation {
-            status: ContextClearSubmitStatus::TimedOut,
+            status: ContextClearSubmitStatus::StillVisible,
             elapsed: Duration::from_millis(2001),
             command_visible: true,
         };
@@ -669,6 +726,101 @@ mod tests {
             message.contains("ui_outcome=blocked_with_exact_unblocker"),
             "{message}"
         );
+    }
+
+    /// `#clearsubmitlabel`: the operator's report was
+    /// `result=command_still_visible` on a line that also carried
+    /// `command_visible=false` — the label contradicted the observation, so it
+    /// could not be used to tell a wedged composer from an unproven submit.
+    #[test]
+    fn unobserved_clear_submit_is_not_reported_as_still_visible() {
+        let still_visible = ContextClearSubmitObservation {
+            status: ContextClearSubmitStatus::StillVisible,
+            elapsed: Duration::from_millis(2000),
+            command_visible: true,
+        };
+        let unobserved = ContextClearSubmitObservation {
+            status: ContextClearSubmitStatus::Unobserved,
+            elapsed: Duration::from_millis(2000),
+            command_visible: false,
+        };
+
+        // The contradiction itself: an unobserved submit must never claim the
+        // command is still visible.
+        assert_eq!(
+            ContextClearSubmitStatus::Unobserved.as_str(),
+            "submission_unobserved"
+        );
+        assert_ne!(
+            ContextClearSubmitStatus::Unobserved.as_str(),
+            ContextClearSubmitStatus::StillVisible.as_str(),
+            "the two deadlines must be distinguishable in ops.log"
+        );
+
+        for (observation, expect_result, expect_issue, expect_unblocker) in [
+            (
+                still_visible,
+                "command_still_visible",
+                "prompt_not_submitted",
+                "clear_command_not_consumed",
+            ),
+            (
+                unobserved,
+                "submission_unobserved",
+                "submit_unobserved",
+                "clear_submission_unobserved",
+            ),
+        ] {
+            let line = context_clear_submit_blocked_line(
+                "/tmp/doc.md",
+                "%12",
+                "claude",
+                "/clear",
+                "direct_pane_acceptance",
+                observation,
+            );
+            assert!(line.contains(&format!("result={expect_result}")), "{line}");
+            assert!(line.contains(&format!("issue={expect_issue}")), "{line}");
+            assert!(
+                line.contains(&format!("unblocker={expect_unblocker}")),
+                "{line}"
+            );
+            assert!(
+                line.contains(&format!("command_visible={}", observation.command_visible)),
+                "{line}"
+            );
+        }
+
+        // The remedy sentence must match the observation too: telling an operator
+        // to "restore an idle prompt" is a guess when nothing was observed.
+        let unobserved_message = context_clear_submit_blocked_message(
+            "/tmp/doc.md",
+            "%12",
+            "claude",
+            "/clear",
+            "direct_pane_acceptance",
+            unobserved,
+        );
+        assert!(
+            unobserved_message.contains("whether the clear ran is unknown"),
+            "{unobserved_message}"
+        );
+        assert!(
+            !unobserved_message.contains("Restore an idle"),
+            "{unobserved_message}"
+        );
+
+        // ACCEPTANCE IS UNCHANGED: splitting the label must not turn an
+        // unproven clear into a successful one.
+        assert_ne!(unobserved.status, ContextClearSubmitStatus::Accepted);
+        assert!(unobserved.status.issue().is_some());
+        // Only the wedged-composer shape may drive an Enter resubmit; an
+        // unobserved submit must not blind-resend into an unknown pane.
+        assert!(context_clear_submit_needs_enter_resubmit(
+            &still_visible,
+            true
+        ));
+        assert!(!context_clear_submit_needs_enter_resubmit(&unobserved, true));
     }
 
     #[test]

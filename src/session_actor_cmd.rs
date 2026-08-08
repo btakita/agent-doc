@@ -2267,18 +2267,22 @@ fn poll_context_clear_submit_acceptance(
     }
 
     let elapsed = start.elapsed();
+    // `#clearsubmitlabel`: report WHICH deadline this was. `StillVisible` means
+    // the command sat unconsumed in the composer; `Unobserved` means the window
+    // closed with no evidence either way. Both stay non-`Accepted` — the
+    // acceptance rule is unchanged, only the label stops lying.
     let (status, command_visible) = if let Some((visible, _, _)) = last_capture.as_ref() {
         if *visible {
-            (ContextClearSubmitStatus::TimedOut, true)
+            (ContextClearSubmitStatus::StillVisible, true)
         } else if poll_state.saw_submission_evidence() {
             (ContextClearSubmitStatus::Accepted, false)
         } else {
-            (ContextClearSubmitStatus::TimedOut, false)
+            (ContextClearSubmitStatus::Unobserved, false)
         }
     } else if capture_failed {
         (ContextClearSubmitStatus::CaptureFailed, false)
     } else {
-        (ContextClearSubmitStatus::TimedOut, false)
+        (ContextClearSubmitStatus::Unobserved, false)
     };
     let observation = ContextClearSubmitObservation {
         status,

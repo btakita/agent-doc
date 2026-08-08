@@ -108,12 +108,12 @@ Session note: exchange accretion is `warn` (6 cycles / 30 min); queue is active 
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#confirmsuperprojectjob]
+- do [#tmuxsyncslow]
 - ~~do [#loopsuperprojectjob]~~
 - ~~do [#queuemirrororder]~~
 - ~~do [#watchsighupwin]~~
-- do [#tmuxsyncslow]
 - do [#runpromptverbose]
+- do [#confirmsuperprojectjob]
 <!-- /agent:queue -->
 
 ## Notes
@@ -124,9 +124,9 @@ Session note: exchange accretion is `warn` (6 cycles / 30 min); queue is active 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#confirmsuperprojectjob] Confirm the superproject `Agent Doc` / `check` job went green after the runner-disk fix (commit 8b01b6fe50, run 31249383368): `gh run list --workflow "Agent Doc" --limit 2`. If the Bus error recurs, the disk reduction was insufficient — next levers are freeing runner disk (drop the preinstalled Android SDK / dotnet / GHC images), `-C debuginfo=0` via RUSTFLAGS, or splitting `--all-targets` across jobs.
 - [ ] [#tmuxsyncslow] tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it. (restored from the queue after #qftnodoneeat deleted it; plan context: tasks/agent-doc/plan-tmux-auto-sync-reactive.md)
 - [ ] [#runpromptverbose] The prompt Run Agent Doc sends to Claude Code should simply be `/agent-doc .../file.md`. It currently sends a long multi-paragraph prompt ("Agent Doc queue state advanced for ... Continue this existing owner-pane session; do not invoke agent-doc recursively. Execute the current active queue head: ... Persist and finalize this cycle through the connected Agent Doc tools."). Restored from the queue after #qftnodoneeat deleted it.
+- [ ] [#confirmsuperprojectjob] Confirm the superproject `Agent Doc` / `check` job went green after the runner-disk fix (commit 8b01b6fe50, run 31249383368): `gh run list --workflow "Agent Doc" --limit 2`. If the Bus error recurs, the disk reduction was insufficient — next levers are freeing runner disk (drop the preinstalled Android SDK / dotnet / GHC images), `-C debuginfo=0` via RUSTFLAGS, or splitting `--all-targets` across jobs.
 <!-- /agent:backlog -->
 
 ## Review

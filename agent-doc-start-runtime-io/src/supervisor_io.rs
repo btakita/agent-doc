@@ -2,6 +2,41 @@
 
 use super::*;
 
+/// `#zombiechild`: is the `/proc/<pid>/stat` line a *running* process?
+///
+/// `/proc/<pid>` exists for a **zombie** — a process that has exited but whose
+/// table entry survives until its parent reaps it. The supervisor is that
+/// parent, so a child it never reaps stays visible forever and a bare
+/// `Path::new("/proc/{pid}").exists()` answers "alive" for a corpse.
+///
+/// Observed 2026-08-08 on `src/haiven-dev/tasks/haiven-dev.md`: the Claude child
+/// (pid 1905542) died at 22:31 the previous evening and went `[claude]
+/// <defunct>`. `child_alive()` kept returning true, so
+/// `supervisor_restart_admission` deferred the restart forever and every
+/// stale-supervisor recycle re-`execve`d with `via=execve_preserve_child`,
+/// preserving a corpse. Each pass opened a fresh PTY master (fd 72 → 75 → 80 …),
+/// assigned a new resume id, wrote the whole 70 KB document through the CRDT
+/// relay, found no transcript for the id it had just minted, and recycled again
+/// — 68 recycles in 27 minutes. The operator, typing into that pane, saw input
+/// periodically swallowed and arrow keys echo raw as `^[[A^[[B`, because the
+/// process reading their PTY was dead and the terminal was reset every ~10s.
+///
+/// A pid in the process table is not a live process. `Z` (zombie) and `X`/`x`
+/// (dead) are exits; everything else — `R`, `S`, `D`, `T`, `t`, `I` — is a live
+/// child that must not be replaced.
+///
+/// `comm` may itself contain spaces and parentheses, so the state field is the
+/// first token after the LAST `)`.
+pub(crate) fn proc_stat_reports_live_process(stat: &str) -> bool {
+    let Some((_, after_comm)) = stat.rsplit_once(')') else {
+        return true;
+    };
+    !matches!(
+        after_comm.split_whitespace().next(),
+        Some("Z") | Some("X") | Some("x")
+    )
+}
+
 impl agent_doc_supervisor_process_io::SupervisorProcessIoState for SupervisorShared {
     fn transition_actor_ready_for_prompt(&self) {
         self.transition_actor_state(
@@ -131,7 +166,16 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
 
     fn child_alive(&self) -> bool {
         let pid = self.child_pid.load(Ordering::Relaxed);
-        pid != 0 && std::path::Path::new(&format!("/proc/{pid}")).exists()
+        if pid == 0 || !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            return false;
+        }
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => proc_stat_reports_live_process(&stat),
+            // The directory is there but its `stat` is unreadable: keep the
+            // historical "entry exists ⇒ alive" answer rather than declaring a
+            // running child dead on a transient read error.
+            Err(_) => true,
+        }
     }
 
     fn wake_restart_prompt(&self) -> Result<(), String> {
@@ -526,5 +570,38 @@ mod tests {
         );
         assert!(response.ok, "{response:?}");
         assert!(shared.stop_requested.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn zombie_child_is_not_alive() {
+        // #zombiechild: `/proc/<pid>` exists for a corpse the supervisor has not
+        // reaped, so the state field is the only liveness answer. A dead child
+        // read as alive pins `supervisor_restart_admission` and turns every
+        // stale-supervisor recycle into an `execve_preserve_child` over nothing.
+        assert!(!proc_stat_reports_live_process(
+            "1905542 (claude) Z 1809406 1809406 0 -1 4194304 0 0 0 0"
+        ));
+        assert!(!proc_stat_reports_live_process("42 (x) X 1 1 0"));
+        assert!(!proc_stat_reports_live_process("42 (x) x 1 1 0"));
+    }
+
+    #[test]
+    fn running_child_states_stay_alive() {
+        for state in ["R", "S", "D", "T", "t", "I"] {
+            assert!(
+                proc_stat_reports_live_process(&format!("1234 (claude) {state} 1 1 0 -1 4194304")),
+                "state {state} is a live child and must never be replaced"
+            );
+        }
+        // `comm` may contain spaces AND parentheses, so the state token is read
+        // after the LAST ')' -- keying off the first would read "code)" here.
+        assert!(!proc_stat_reports_live_process(
+            "77 (claude (code) run) Z 1 1 0"
+        ));
+        assert!(proc_stat_reports_live_process(
+            "77 (claude (code) run) S 1 1 0"
+        ));
+        // Unparseable input keeps the historical fail-open answer.
+        assert!(proc_stat_reports_live_process("garbage with no paren"));
     }
 }

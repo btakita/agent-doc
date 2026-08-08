@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.168
+
+- **A zombie harness child no longer pins the supervisor in an `execve` loop (`#zombiechild`).**
+  `SupervisorShared::child_alive()` answered `Path::new("/proc/{pid}").exists()`. That entry
+  survives for a **zombie** — a process that has exited but has not been reaped — and the
+  supervisor is the parent that never reaps it, so a dead child reads as alive forever. Observed
+  2026-08-08 on `src/haiven-dev/tasks/haiven-dev.md`: the Claude child (pid 1905542) died at 22:31
+  the previous evening and went `[claude] <defunct>`; `supervisor_restart_admission` then deferred
+  the restart indefinitely and every stale-supervisor recycle re-`execve`d with
+  `via=execve_preserve_child`, preserving a corpse. Each pass opened a fresh PTY master
+  (fd 72 → 75 → 80 …), minted a new resume id, wrote the whole 70 KB document through the CRDT
+  relay, found no transcript for the id it had just minted, and recycled again — **68 recycles in
+  27 minutes**, ~700 full-document CRDT writes per two minutes. The operator typing into that pane
+  saw input periodically swallowed and arrow keys echo raw as `^[[A^[[B`, because the process
+  reading their PTY was dead and the terminal was reset every ~10s. Liveness now reads the process
+  state from `/proc/<pid>/stat`: `Z`/`X`/`x` are exits, everything else is a live child. An
+  unreadable `stat` under an existing entry keeps the historical fail-open answer.
+
 ## 0.35.167
 
 - **The Windows wheel builds again (`#watchsighupwin`).** `agent-doc-watch-io`'s

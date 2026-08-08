@@ -174,6 +174,18 @@ This one needs your eyes: it is Kotlin, so it takes an IDE restart to load. File
 **Two things about the working tree you should know.** A concurrent session is mid-edit on `agent-doc-sync-io/src/sync.rs`, `sync/pane_repair.rs`, `agent-doc-watch-io/src/{daemon,lib}.rs` and an untracked `tasks/agent-doc/plan-sync-slow-path-latency.md` — that looks like the queued "tmux pane auto-sync is still extremely slow" item. I left all five uncommitted. But the `release-version` projection rewrites *every* manifest, so `agent-doc-watch-io/Cargo.toml` and `agent-doc-sync-io/Cargo.toml` had to go in, and `agent-doc-watch-io/Cargo.toml` carried that session's new `libc = "0.2"` line with it. Skipping those two manifests would have left HEAD declaring 0.35.162 crates against 0.35.163 requirements and unbuildable, so I took the one-line contamination over a broken HEAD. Their source still belongs to them.
 
 I also left the queue item that folded "tmux pane auto-sync is still extremely slow" and the long-prompt report into a single node untouched rather than striking it — striking would have consumed the auto-sync half, which is in flight elsewhere.
+
+### Re: CI went red on my own commit — opus-5
+
+Correcting the closeout above: CI run 31242159018 failed, and it was my fault, not the concurrent session's.
+
+`tests/test_cli.rs` is one shared architecture-guard file that every session appends to. I committed it wholesale, so it carried that session's in-progress `#stalewatchpid` assertions against `agent_doc_watch_io::{clear_stale_pid, clear_stale_pid_in, pid_is_agent_doc_watch}` and the fallible `remove_pid` signatures — all defined in their still-uncommitted `agent-doc-watch-io/src/lib.rs`. HEAD did not build (E0425 ×2, E0308 ×2).
+
+**`make check` could not have caught this.** It ran against *my* working tree, which has their `lib.rs`. 8689 tests passed locally on a HEAD that does not compile. Local green is not evidence about HEAD when another session has uncommitted source in the same tree.
+
+Reverted only their hunk at HEAD (`6d1c64167`, superproject `5778d3129c`) and restored it to the working tree uncommitted, so those assertions land with their source when they commit. `git diff a739c20b6 HEAD -- tests/test_cli.rs` is now exactly my two `#runfilesubmit` guard snippets and nothing else. CI run 31242298646 was pending at closeout.
+
+The manifests are different and had to stay: `make release-version` rewrites all 144 of them, so a version bump necessarily stages ones another session touched, and omitting them would leave HEAD declaring 0.35.162 crates against 0.35.163 path requirements — also unbuildable. The `libc = "0.2"` line rides along; their source does not.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue

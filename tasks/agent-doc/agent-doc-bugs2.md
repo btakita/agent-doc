@@ -104,11 +104,6 @@ The reasoning now lives on `harness_uses_split_text_submit` and in a test named 
 
 ### Re: do [#compactstrandedheading] — opus-5
 
-> **Queue prompt:**
->
-> do [#compactstrandedheading]
-
-
 Confirmed: `compact exchange` no longer fails on the stranded duplicate heading. No code change was needed — but the obvious way to check this gives a **false pass**, so the interesting part is how it was verified.
 
 **The vacuous check.** Running compact on this document worked (281 → 163 lines, 5 topics archived, queue and backlog untouched). That proves nothing: the document has **no duplicate headings** — 7 distinct `### Re:` topics, every one unique. An earlier compaction had already carried the historical shape away. A green run over input that lacks the defect is exactly the vacuity trap.

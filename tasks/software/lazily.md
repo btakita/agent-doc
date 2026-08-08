@@ -1,14 +1,14 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 019fc87a-beb7-7e03-a7a2-c5ca1dc04331
-agent: opencode
+resume: 1855b636-ba45-4153-962a-db90806765e6
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
+queue: go
 ---
 
 ## Status
@@ -39,6 +39,11 @@ Added `id` + short `label` to all 70 coverage.json rows; `sync-coverage.mjs` now
 
 ### Re: superproject pointers + verification — glm-5.2
 
+> **Queue prompt:**
+>
+> do [#lzcoveragefamily]
+
+
 The agent-loop superproject pointer bump is deferred: origin/main is under active multi-pane divergence (concurrent conformance pointer bumps on the same lazily submodules), so forcing a rebase would collide across 10+ commits. The substantive work is on every lazily repo's `main`; the pointer bump is workspace bookkeeping the normal sync flow reconciles (recorded as #lzsuperpointers). CI for the just-pushed commits is still pending on GitHub; locally `coverage-check` (all 12 targets) and `coverage-claims-check` are green. Phases 3–4 (an authored `family` field + family×language roll-up) are filed as #lzcoveragefamily — the plan's explicit follow-up, blocked on nothing.
 <!-- agent:boundary:e668c328:lazily -->
 <!-- /agent:exchange -->
@@ -46,14 +51,15 @@ The agent-loop superproject pointer bump is deferred: origin/main is under activ
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzcoveragefamily]
+- do [#lzcoveragereadmerollup]
+- ~~do [#lzcoveragefamily]~~
 - do [#lzsuperpointers]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzcoveragefamily] Author a `family` field across all 70 coverage.json rows, render per-family tables, and add a family×language roll-up with a STATED rule (✅ only when every row in the family is ✅, ~ when mixed, —/⊘ when none) — Phases 3-4 of tasks/software/plan-lazily-coverage-table-layout.md. The family CANNOT be inferred from feature text (54 distinct prefixes across 70 rows): it is a one-time reviewed pass, the same kind of judgment call the Phase-1 labels were. Put the roll-up rule in the legend, not just the generator. [recommended]
+- [ ] [#lzcoveragereadmerollup] Decide whether the 10 binding READMEs should carry only the family x language roll-up plus a link to lazily-spec/docs/coverage.md, instead of the full 70-row detail table -- the 'Related decision, separable' section of tasks/software/plan-lazily-coverage-table-layout.md, which Phase 4 has now unblocked. Cuts the sync surface from 12 copies of a 70-row table to 12 copies of a 29-row one while keeping a parity signal in every README at family resolution. Trade-off to accept explicitly: a binding README would no longer show ROW-level cross-binding parity, which is the drift-detection view check-conformance-coverage.sh exists to protect. [recommended]
 - [ ] [#lzsuperpointers] Reconcile the agent-loop superproject submodule pointers for the 11 lazily repos after the #lzcoveragelayout commits (Phase 1: 11 repos; Phase 2: lazily-spec + 9 siblings). Deferred because origin/main is under active multi-pane divergence — the substantive work is already on every lazily repo's main, so this is workspace bookkeeping the normal sync flow reconciles.
 - [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.

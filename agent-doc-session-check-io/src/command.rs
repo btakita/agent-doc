@@ -1756,6 +1756,35 @@ fn self_heal_response_replay_duplication(
     else {
         return Ok(false);
     };
+    // `#dedupnoopretain`: a "repair" byte-identical to current content is not a
+    // repair. Publishing it routes a write whose target already equals the
+    // authority, so there is no visible delta for an editor to acknowledge and
+    // the intent is retained forever — every later `session-check` re-reports a
+    // terminal failure and the document can never open a new cycle.
+    //
+    // Observed 2026-08-08 on `tasks/agent-doc/agent-doc-bugs2.md`: the normalizer
+    // logged `session_check_response_replay_dedup_crdt_relay_exact_noop`, the
+    // caller routed the write anyway (`write_authority ... len=25480
+    // hash=7d5b76e…`), an IDE restart registered mid-flight
+    // (`repair_projection_late_editor_retained`), and the disk content hash was
+    // *already* exactly the retained target. HEAD was correct throughout; only
+    // this self-heal was wedged, and it wedged the document with it.
+    //
+    // The normalizer returning `Some` means "a duplication shape was
+    // recognized", NOT "a change is required" — an unrepairable shape (two
+    // full-bodied copies, where only empty replay shells are removable)
+    // legitimately normalizes to itself. Nothing to publish, so say so.
+    if normalized == current {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "session_check_response_replay_dedup_noop_skipped file={} content_hash={} #dedupnoopretain note=normalized cut is byte-identical to current authority; skipping the write that would retain forever",
+                file.display(),
+                agent_doc_hash::content_hash(&current),
+            ),
+        );
+        return Ok(false);
+    }
     // Supersede the stale replay intent before publishing its normalized cut.
     // Otherwise a failed/late delivery can restore the duplicate immediately
     // after this repair and make every session-check repeat the same CRDT write.
@@ -3308,6 +3337,144 @@ mod terminal_convergence_tests {
         assert!(healed.contains("❯ operator prompt"));
         assert!(healed.contains("Retained response."));
         agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
+    }
+
+    /// `#dedupnoopretain`: a dedup cut identical to current content must not be
+    /// published.
+    ///
+    /// Publishing it routes a write whose target already equals the authority, so
+    /// there is no visible delta for an editor to acknowledge; the intent is
+    /// retained forever and every later `session-check` re-reports a terminal
+    /// failure. Observed 2026-08-08 on `tasks/agent-doc/agent-doc-bugs2.md`: the
+    /// normalizer logged
+    /// `session_check_response_replay_dedup_crdt_relay_exact_noop`, the caller
+    /// routed the write anyway, an IDE restart registered mid-flight
+    /// (`repair_projection_late_editor_retained`), and the disk hash was already
+    /// exactly the retained target (`len=25480 hash=7d5b76e…`). HEAD was correct
+    /// throughout; only the self-heal was wedged, and it wedged the document.
+    ///
+    /// HONEST LIMIT: this is a WIRING guard, not a behavioural one. The branch
+    /// that returns an identical cut is the CRDT-relay path, which needs a live
+    /// controller and editor registration — unreachable from a temp-file unit
+    /// test. A behavioural fixture was written first and **mutation-checked**:
+    /// it passed with the guard disabled, because two full-bodied copies make the
+    /// normalizer return `None` and never reach the guard at all. Rather than
+    /// ship a green test that proves nothing, the reachable half is asserted
+    /// behaviourally (nothing repairable => no write, no drift) and the guard
+    /// itself is pinned structurally.
+    #[test]
+    fn no_op_replay_dedup_is_guarded_before_any_write_is_published() {
+        let source = include_str!("command.rs");
+        let guard = source
+            .split_once("fn self_heal_response_replay_duplication(")
+            .map(|(_, tail)| tail)
+            .and_then(|tail| tail.split_once("reconcile_deferred_write_to_canonical_cut_if_needed"))
+            .map(|(head, _)| head)
+            .expect("the replay-dedup self-heal must remain discoverable");
+        assert!(
+            guard.contains("if normalized == current {"),
+            "the no-op guard must run BEFORE the reconcile/write pair, or an              identical cut is routed and retained forever (#dedupnoopretain)"
+        );
+        assert!(
+            guard.contains("session_check_response_replay_dedup_noop_skipped"),
+            "a skipped no-op must stay observable in ops.log"
+        );
+
+        // The reachable half, asserted for real: when there is nothing to
+        // repair, no write path may be entered and the document must not drift.
+        struct WriteIsAWedgeEffects;
+
+        impl SessionCheckEffects for WriteIsAWedgeEffects {
+            fn closeout_recovery_hint(&self, file: &Path) -> String {
+                TestEffects.closeout_recovery_hint(file)
+            }
+
+            fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+                panic!("#dedupnoopretain: a no-op dedup must not publish a write");
+            }
+
+            fn atomic_repair_write_if_current(
+                &self,
+                _file: &Path,
+                _content: &str,
+                _expected_current: &str,
+                _source: &str,
+            ) -> Result<String> {
+                panic!(
+                    "#dedupnoopretain: a repair identical to current content must never be \
+                     routed — that is the write that gets retained forever"
+                );
+            }
+
+            fn settle_committed_projection(
+                &self,
+                file: &Path,
+                committed_content: &str,
+                expected_current: &str,
+            ) -> Result<()> {
+                TestEffects.settle_committed_projection(file, committed_content, expected_current)
+            }
+
+            fn settle_retained_committed_projection(
+                &self,
+                file: &Path,
+                committed_content: &str,
+                expected_disk: &str,
+            ) -> Result<bool> {
+                TestEffects.settle_retained_committed_projection(
+                    file,
+                    committed_content,
+                    expected_disk,
+                )
+            }
+
+            fn repair_committed_historical_snapshot_drift(
+                &self,
+                file: &Path,
+            ) -> Result<Option<&'static str>> {
+                TestEffects.repair_committed_historical_snapshot_drift(file)
+            }
+
+            fn recover_missing_commit_boundary(
+                &self,
+                file: &Path,
+                event: &str,
+            ) -> Result<Option<&'static str>> {
+                TestEffects.recover_missing_commit_boundary(file, event)
+            }
+
+            fn resume_captured_finalize(&self, file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
+                TestEffects.resume_captured_finalize(file)
+            }
+        }
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        // Two full-bodied copies: only proven-empty replay shells are removable,
+        // so there is nothing this self-heal can fix.
+        let unrepairable = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "\u{276f} operator prompt\n\n",
+            "### Re: duplicated topic — gpt-5\n\nA complete body.\n\n",
+            "### Re: duplicated topic — gpt-5\n\nA complete body.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, unrepairable).unwrap();
+
+        let healed = self_heal_response_replay_duplication(&file, &WriteIsAWedgeEffects).unwrap();
+
+        assert!(
+            !healed,
+            "nothing was repaired, so the self-heal must report false rather than \
+             claiming a repair it did not make"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            unrepairable,
+            "the document must be byte-identical: no write, no drift"
+        );
     }
 
     #[test]

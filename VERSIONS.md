@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.183
+
+- **Fix (`#dedupnoopretain`): `session-check`'s response-replay dedup published a
+  no-op repair and retained it forever, wedging the document.**
+
+  `self_heal_response_replay_duplication` treated the normalizer returning `Some`
+  as "a change is required". It only means "a duplication shape was recognized" —
+  an *unrepairable* shape (two full-bodied copies, where only proven-empty replay
+  shells are removable) legitimately normalizes to itself. The caller then routed
+  a write whose target already equalled the authority. With no visible delta for
+  an editor to acknowledge, the intent was retained indefinitely, and every later
+  `session-check` re-reported a terminal failure and blocked the next cycle.
+
+  Observed 2026-08-08 on `tasks/agent-doc/agent-doc-bugs2.md`. The log states the
+  contradiction outright:
+
+  ```
+  session_check_response_replay_dedup_crdt_relay_exact_noop   <- recognized as a no-op
+  write_authority action=routed ... len=25480 hash=7d5b76e…   <- routed anyway
+  repair_projection_late_editor_retained                      <- retained forever
+  ```
+
+  The disk content hash was *already* byte-identical to the retained target, and
+  an IDE restart registering mid-flight made the wedge permanent. HEAD was
+  correct the whole time — only the self-heal was stuck, and it took the document
+  with it. The dedup now skips a cut identical to current content and logs
+  `session_check_response_replay_dedup_noop_skipped`.
+
+  **Test limits are stated, not papered over.** The branch that returns an
+  identical cut is the CRDT-relay path, which needs a live controller and editor
+  registration and is unreachable from a temp-file unit test. A behavioural
+  fixture was written first and mutation-checked: it passed with the guard
+  disabled, because two full-bodied copies make the normalizer return `None` and
+  never reach the guard. It was replaced by a wiring guard (mutation-checked: it
+  fails when the guard is removed) plus the reachable behavioural half — nothing
+  repairable means no write and no drift.
+
 ## 0.35.182
 
 - **Decided (`#claudesplitsubmit`): claude does NOT join the split text+Enter

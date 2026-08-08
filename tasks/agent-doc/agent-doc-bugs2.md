@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 0f233b17-67df-490f-9a76-f61b0bf74013
+resume: e61edbb1-dd19-402f-9bed-69d29c9a1a2c
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -164,6 +164,11 @@ This one needs your eyes: it is Kotlin, so it takes an IDE restart to load. File
 
 ### Re: shipping — opus-5
 
+> **Queue prompt:**
+>
+> do [#qcontamquote]
+
+
 `make check` green (**8689 tests passed**, 248 skipped), `make install` done, `agent-doc admin recycle` on both project roots, committed and pushed (agent-doc `19d993e11`, superproject pointer `f0818b7de3`). CI run 31241516366 was still pending at closeout.
 
 **Two things about the working tree you should know.** A concurrent session is mid-edit on `agent-doc-sync-io/src/sync.rs`, `sync/pane_repair.rs`, `agent-doc-watch-io/src/{daemon,lib}.rs` and an untracked `tasks/agent-doc/plan-sync-slow-path-latency.md` — that looks like the queued "tmux pane auto-sync is still extremely slow" item. I left all five uncommitted. But the `release-version` projection rewrites *every* manifest, so `agent-doc-watch-io/Cargo.toml` and `agent-doc-sync-io/Cargo.toml` had to go in, and `agent-doc-watch-io/Cargo.toml` carried that session's new `libc = "0.2"` line with it. Skipping those two manifests would have left HEAD declaring 0.35.162 crates against 0.35.163 requirements and unbuildable, so I took the one-line contamination over a broken HEAD. Their source still belongs to them.
@@ -174,6 +179,7 @@ I also left the queue item that folded "tmux pane auto-sync is still extremely s
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~do [#qcontamquote]~~
 - do [#passthroughsplitprofile]
 - ~~do [#qcontprose]~~
 - ~~do [#stickymdpane]~~

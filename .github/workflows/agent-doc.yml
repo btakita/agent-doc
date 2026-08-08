@@ -22,6 +22,13 @@ on:
 # agent-doc's own `.github/workflows/ci.yml` already carries this exact
 # mitigation and does not hit the failure; this workflow simply never inherited
 # it. Keep the two in sync — a divergence here reads as a code regression.
+# `#lzktemptydir`: `src/lazily-kt` and `src/lazily-spec` must be initialized too.
+# The JetBrains harness (`make dev-harness-test`) composite-builds lazily-kt, and
+# its guard in `editors/jetbrains/settings.gradle.kts` tests directory EXISTENCE —
+# but an uninitialized submodule is an existing EMPTY directory, so the guard
+# passed, `includeBuild` substituted `io.github.lazily:lazily` with a build that
+# has no projects, and Gradle failed with "No variants exist". agent-doc's own
+# `ci.yml` clones both siblings, which is why it stayed green.
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "0"
@@ -39,7 +46,8 @@ jobs:
       - name: Checkout agent-doc submodules
         run: |
           git -c url.https://github.com/.insteadOf=git@github.com: \
-            submodule update --init src/agent-doc src/agent-kit src/lazily-rs src/tagpath src/tmux-router
+            submodule update --init src/agent-doc src/agent-kit src/lazily-rs src/tagpath src/tmux-router \
+              src/lazily-kt src/lazily-spec
       - uses: dtolnay/rust-toolchain@stable
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y tmux
@@ -66,7 +74,8 @@ jobs:
       - name: Checkout agent-doc submodules
         run: |
           git -c url.https://github.com/.insteadOf=git@github.com: \
-            submodule update --init src/agent-doc src/agent-kit src/lazily-rs src/tagpath src/tmux-router
+            submodule update --init src/agent-doc src/agent-kit src/lazily-rs src/tagpath src/tmux-router \
+              src/lazily-kt src/lazily-spec
       - uses: dtolnay/rust-toolchain@stable
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y tmux

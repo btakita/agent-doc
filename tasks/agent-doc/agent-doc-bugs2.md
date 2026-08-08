@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: fc9b6f02-d703-42c6-97ab-8f1d5e6ea4a2
+resume: 431d629f-7432-4c2c-b56d-a7454c520458
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -35,128 +35,11 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260808-173725.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260808-233307.md`*
 
 Compacted content:
-- Archived 10 response topic(s): queuemirrororder; watchsighupwin; loopsuperprojectjob; 7 more
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): do [#runsubmitclaude]; closing out #runsubmitclaude; restoring...
-
-*5 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260808-214213.md`*
-
-### Re: do [#ptsubmitmetric] — opus-5
-
-Fixed and shipped in **0.35.181**. The criterion was worse than imprecise — it counted an event that cannot exist.
-
-**Why it was structurally zero.** `EnterResubmit` is a *non-terminal* action. The repair loop `continue`s on it and only terminal actions reach `log_op`, so `outcome=enter_resubmit` can never appear in a production ops.log. "Unblock when the `outcome=enter_resubmit` rate is nonzero" could not have been satisfied by any amount of real-world breakage.
-
-**The signal that does exist.** `enters_sent` is incremented only inside the `EnterResubmit` branch, so a nonzero count on a *terminal* line means the initial single-call text+Enter send did not submit. Reading that still meant hand-parsing every line and knowing the above, so the terminal line now states the conclusion:
-
-```
-route_pass_through_submit_draft ... outcome=cleared enters_sent=1 resubmit_required=true ...
-```
-
-Note the outcome is `cleared` in both the clean and the repaired case — `resubmit_required` is the only thing that separates them, which is exactly why hand-parsing was error-prone.
-
-**Rollup: `agent-doc ops submit-profile [--since <RFC3339 prefix>] [--json]`.** Per harness: repairs, how many needed a bare submit key, the rate, the outcome breakdown, `max_enters_sent`. Run against this project's live log just now:
-
-```
-claude: 11 repair(s), 8 needed a bare submit key (72%), max enters_sent=2
-    outcome=cleared: 11
-  note: 11 line(s) predate `resubmit_required` and were counted from `enters_sent`
-```
-
-Legacy lines are recovered from `enters_sent` but reported separately, so a mixed sample is declared rather than quietly folded in.
-
-**Restated criterion for `#passthroughsplitprofile` / `#claudesplitsubmit`:** unblock when `agent-doc ops submit-profile --since <first post-0.35.164 day>` reports **≥20 `harness=claude` repairs**; the call is then `resubmit_required` / `repairs`. Current reading is **11 repairs, 8 resubmit-required (72%)** — up from the 6 samples the review item recorded, still under the floor. The rate is high enough to be suggestive, but 11 samples is not the agreed floor, so `#claudesplitsubmit` stays measurement-blocked rather than decided. It is now one command to re-check instead of a grep session.
-
-Tests pin that the two non-terminal actions never reach the log (the reason the old counter was zero), that a repaired and a clean send both report `outcome=cleared` but differ on `resubmit_required`, and both rollup paths including the legacy recovery and `--since` filtering.
-
-**Shipped:** `make check` green (exit 0 — clippy caught a manual checked division on the first pass and it was fixed), `make install` → 0.35.181, pushed (`c62d36acd` + superproject `40801afe96`), controllers auto-recycled by `lib-install`. CI runs `31277544182` and `31278434421` still in progress at closeout — recorded, not awaited.
-
-### Re: do [#claudesplitsubmit] — opus-5
-
-> **Queue prompt:**
->
-> do [#claudesplitsubmit]
-
-
-Decided on measurement: **claude stays on the single-call submit.** No profile change. Shipped as **0.35.182**, which records the evidence rather than changing behavior.
-
-The item was blocked on reaching ~20 samples. Rather than leave it accruing, I gathered the rest under control with the metric that shipped an hour ago.
-
-**12 controlled dispatches into an idle, unloaded pane (0.35.182, 50-row): 12/12 submitted on the first send, 0 resubmits.**
-
-I did not trust that number on its own. Every line reported `elapsed_ms=305` — exactly the minimum two-settle path — which is also precisely the shape a *false* clear takes if the keystrokes have not rendered by the second look. That is the `#runsubmitclaude` ambiguity, so `outcome=cleared` is not self-validating. Pane scrollback cannot settle it either: Claude's TUI redraws in place, so `history_size` is **8 lines** and holds no transcript at all — counting trigger echoes there gave 6, which is just what happened to be on screen.
-
-The authoritative record is Claude's own session JSONL, and it has **exactly 12 submitted trigger prompts for 12 dispatches**, one per dispatch, 85 s apart. The 0% is real.
-
-**Against 11 production repairs from the same day under real load: 8 needed a bare submit key (72%), `max_enters_sent=2`.**
-
-**So the split is the interesting result, not the average.** The drop is *load-dependent*, not inherent to the single-call send — on a quiet pane the send never fails. And across all 23 samples every single line is `outcome=cleared` with **zero `exhausted_still_stranded`**: the settle-gated repair recovered every strand. No dispatch has ever been lost.
-
-Adding claude to the split profile would pay 80 ms on every submit to remove a retry that already succeeds 100% of the time. So the answer is the second branch the item allowed: **the settle-gated repair alone is sufficient.**
-
-Worth being explicit about the limits: 12 of the 23 samples are mine, sequential, on an idle scratch pane, and the 11 production ones are legacy lines counted from `enters_sent`. If the resubmit latency under load ever matters on its own, that is a separate optimization with its own measurement — and `agent-doc ops submit-profile --since <day>` re-checks it in one command instead of a grep session.
-
-The reasoning now lives on `harness_uses_split_text_submit` and in a test named for the decision, so a future change has to confront the measurement rather than re-derive the inference. `#passthroughsplitprofile` is resolved by this.
-
-**Shipped:** `make check` green (exit 0, 0 failed suites), `make install` → 0.35.182, pushed (`3b6ff4287` + superproject `ca42452ac3`). Scratch repro project and probe tmux session cleaned up.
-
-### Re: do [#compactstrandedheading] — opus-5
-
-Confirmed: `compact exchange` no longer fails on the stranded duplicate heading. No code change was needed — but the obvious way to check this gives a **false pass**, so the interesting part is how it was verified.
-
-**The vacuous check.** Running compact on this document worked (281 → 163 lines, 5 topics archived, queue and backlog untouched). That proves nothing: the document has **no duplicate headings** — 7 distinct `### Re:` topics, every one unique. An earlier compaction had already carried the historical shape away. A green run over input that lacks the defect is exactly the vacuity trap.
-
-**The real check.** I built the shape directly — an exchange with a body-bearing `### Re: first topic`, a second topic, an **empty** `### Re: first topic` shell, and a third topic — and compacted that:
-
-- `rc=0`, no failure
-- the empty duplicate shell removed, `first topic` now appears **zero** times in the document
-- the real bodies of the kept topics intact
-- the displaced topic archived **with its body**, not dropped
-- `agent:backlog` `#keepme` untouched
-- `--keep 2` counted topics *after* dedup: 4 headings → 3 real topics → archive 1, keep 2
-
-And the proof the repair path actually ran rather than the input being harmless: `compact_repaired_stranded_duplicate_response_heading` in ops.log, stamped at exactly the fixture's compact time.
-
-**Pinned.** The repair function itself was already covered in `agent-doc-turn`. What can silently regress is the **wiring** — compact dropping the call, or growing its own private normalization — so the new test in `agent-doc-compact-io` pins that plus the ops marker, alongside the behavioural assertion that the shell goes and both bodies stay.
-
-`make check` green (exit 0, 0 failed suites). Pushed (`e6e65dd6d` + superproject `4dc62ed3ed`). No version bump: this is test-only with no behaviour delta.
-
-One note on this document: the compact above was a real mutation — the exchange is now a session summary plus the two most recent topics, with 5 topics archived to `.agent-doc/archives/…-20260808-214213.md`.
-
-### Re: do [#hvw0publishproof] — opus-5
-
-> **Queue prompt:**
->
-> do [#hvw0publishproof]
-
-
-Verified statically. The publish step **does** propagate failure at HEAD, and the false green on v0.1.3 is now explained exactly rather than inferred.
-
-**The false green, pinned to a commit.** The v0.1.3 Release run (`29660061247`) ran at commit `17a2d3fcd`. Its publish step at that commit was, verbatim:
-
-```yaml
-- name: Publish to crates.io
-  run: cargo publish --allow-dirty || true
-```
-
-That `|| true` is the whole explanation for `Publish to crates.io -> success` alongside a 403 and a hand-published crate.
-
-**The fix could not have been in that run.** `32836ad` is the *direct child* of `17a2d3fcd`, committed `2026-07-18T20:41:09Z` — about three and a half minutes **after** the run started at `20:37:36Z`. So the sequencing is not ambiguous: the only run anyone can point at predates the fix by one commit.
-
-**HEAD propagates failure.** No `|| true` anywhere. The step is now:
-
-- `set -o pipefail` — **load-bearing**: without it, `cargo publish 2>&1 | tee publish.log` would return `tee`'s status, which always succeeds, and the `if` would take the success branch every time. That would have recreated the exact false green in a new disguise.
-- the pipeline is the `if` condition, so `bash -e` does not abort before the failure is inspected;
-- a failure that mentions an already-published version is tolerated (the idempotent tag re-run), everything else emits `::error::` and `exit 1`;
-- `--allow-dirty` is also gone, which is a separate tightening.
-
-**Still never executed, as the item said.** Tags are `v0.1.0` … `v0.1.3` and the newest Release run is still the 2026-07-18 v0.1.3 one. Nothing has tagged since, so the loud-failure path remains statically correct but never exercised. That half of `#hvw0` stays untested-in-practice, and only a real tag closes it.
-
-**One thing I could not verify from here.** The idempotent-tolerance branch greps `publish.log` for `"already exists"`. My recollection is that cargo/crates.io words a duplicate-version rejection as *already uploaded*, not *already exists* — in which case that branch never matches and a re-run of an existing tag fails loudly instead of being tolerated. That errs in the **safe** direction (a false red, never a false green), so it does not weaken the fix, but the documented idempotent case may not actually work. I did not want to assert cargo's exact wording from memory, so I have filed it rather than claimed it.
-
-No code change here — this repo is not `skill-harness`, and the verification was the deliverable.
+- Archived 4 response topic(s): do [#ptsubmitmetric]; do [#claudesplitsubmit]; do [#compactstrandedheading]; 1 more
+- Prior summary/context: prior compacted content: Archived 10 response topic(s): queuemirrororder; watchsighupwin; loopsuperprojectjob; 7 more
 <!-- agent:boundary:7ad810c1 -->
 <!-- /agent:exchange -->
 ## Queue

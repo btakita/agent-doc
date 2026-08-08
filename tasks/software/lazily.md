@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: ce9df7d1-46f7-4d21-aaf3-20736a291f3c
+resume: 926da2b0-b539-4f91-8b48-3f9a0f4db425
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -102,18 +102,47 @@ Verification. `docs/coverage.md` was **not rewritten** by the split — that is 
 Committed and pushed to all 11 repos, and I bumped the superproject pointers in the **same** cycle this time (`587192bb5e`) rather than letting them drift into another `#lzsuperpointers`. All 12 lazily submodules read clean.
 
 lazily-spec CI (run `31244856337`) is still in progress — recorded as pending, not waited on; local evidence above is what this closeout rests on.
+
+### Re: do [#lzgdbinding] — blocker resolved, Phase 0 landed — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzgdbinding]
+
+
+You picked the **Godot 4.4** floor, which unblocked Phase 0. I then settled the question the plan made contingent on it and built the scaffold.
+
+**gdUnit4 over GUT**, confirmed against 4.4 rather than assumed — v5.x+ lists 4.3/4.4/4.4.1 as supported. The plan's stated reason was "it has an existing CI action," but there's a much better one specific to this binding: gdUnit4 reports **orphan nodes per test**. The one novel problem here is that `RefCounted` has no cycle collector, so back-edges are `WeakRef` and `ctx.scope()` is the sole strong owner. Orphan detection turns "teardown actually frees" from an assertion nobody remembers to write into a property the harness checks on every run. GUT has no equivalent. Current suite: 4 cases, **0 orphans**.
+
+Two corrections worth having on the record. I first pinned gdUnit4 at **v6.2.1** because that is what `plugin.cfg` on `main` says — it is unreleased and 404s as a tag. Latest released is **v6.2.0**, which is what is pinned, and the plan now says to read the version from releases rather than the plugin manifest. Separately, I pinned CI to Godot **4.4.1**, not to your local 4.7.1: the floor is a promise to consumers, and running CI above it is exactly how a 4.5+ feature lands unnoticed and breaks only in someone else's project. The addon states the same thing in code — `Lazily.MIN_GODOT` is asserted by a test, so moving the floor requires editing a test.
+
+**The vacuity guard is the part I'd point at.** gdUnit4's CLI exits 0 when it runs zero test cases, so a misnamed directory or a suite that failed to parse reports OK over nothing at all — the `#lzvacuousrun` failure this family guards against everywhere else. `make check` reads the executed-test count and fails when it is zero or unreadable. That guard caught two real problems while I built it: the first regex never matched gdUnit4's actual summary format, and it failed closed rather than passing. I then drove it end-to-end — empty `tests/` exits 2 as *missing evidence*, a deliberately broken assertion exits 2, the restored suite exits 0 with 4 cases. A guard this family would not trust unmutated.
+
+Two smaller things the harness needed, both non-obvious: an import pass must run before the suite or every `class_name` fails to resolve — including gdUnit4's own CLI entrypoint, which dies as a parse error that reads like a broken framework rather than a missing step. And gdUnit4 refuses headless runs unless told to; our tests use no UI interaction, so `--ignoreHeadlessMode` is correct rather than a workaround.
+
+Layout keeps `addons/lazily/` as the entire shipping surface, with tests, the runner, and `project.godot` outside it. gdUnit4 installs to `addons/gdUnit4/` gitignored, so a consumer never receives a test framework. One test asserts the addon reads no `ProjectSettings` — that is the defect that works in this repo and breaks in every consumer project, so it is worth a test rather than a convention.
+
+**I did not add a `coverage.json` column.** A column of `—` marks would claim a binding that does not exist; per the plan that lands in Phase 1 with rows 0 and 15, once the runner replays real fixtures.
+
+**One thing I deliberately stopped short of.** The scaffold is committed locally (`3d8e90d`, 13 files) but has **no remote** — creating a public repo under the `lazily-hub` org is outward-facing and wasn't explicitly authorized, so I left it as `#lzgdremote` at the top of the backlog. Say the word and it's a minute's work, including the submodule wiring.
+
+Closing `#lzgdbinding` and replacing it with per-phase IDs — `#lzgdremote`, `#lzgdkernel` (Phase 1), `#lzgdrunner` (Phase 2) — rather than re-gating one parent through five phases. `#lzcppwasm` remains queued.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzgdbinding]~~
+- do [#lzcppwasm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgdbinding] Implement lazily-gd, a pure-GDScript binding, as the 10th coverage.json column per tasks/software/plan-lazily-gd.md. Staged entry copying lazily-cs: rows 0 (reactive graph) + 15 (stable-id) first, KNOWN_UNCOVERED populated and shrinking per phase. The one novel problem is that RefCounted has no cycle collector — no other binding faces this — so back-edges are WeakRef, which makes ctx.scope() the SOLE strong owner of effects and requires prune-on-propagate before any edge-count assertion and an edge index keyed on get_instance_id(). Port the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd) in the SAME phase as the runner, and mutation-check it before trusting green. Efficient loading is a Phase-1 exit criterion, not a late phase: a load-graph test asserting the kernel loads no other family, since preload() is eager+transitive and retrofitting layering after six families exist is the expensive order. Ship as addons/lazily/ with the runner and 134 fixtures export-excluded. BLOCKED on the operator choosing a minimum Godot 4.x version.
+- [ ] [#lzgdremote] [operator-action] Create the lazily-hub/lazily-gd GitHub remote, push the Phase 0 scaffold (local commit 3d8e90d in src/lazily-gd), and wire it into the agent-loop superproject as a submodule + .gitmodules entry. Held back deliberately: creating a public repo under the lazily-hub org is outward-facing and was not explicitly authorized. Everything else in Phase 0 is done and verified locally; this is one go-ahead away.
+- [ ] [#lzgdkernel] Phase 1 of tasks/software/plan-lazily-gd.md: the cell kernel (coverage row 0) plus the loading invariant. Source/Computed/Effect/Context with explicit ctx threading (no ambient, no signal/get_signal), WeakRef back-edges with ctx.scope() as the SOLE strong owner, edge index keyed on get_instance_id() with O(1) dedup and prune-on-propagate BEFORE any edge-count assertion, teardown in reverse creation order. An Effect created outside any scope must ERROR, not silently collect. Exit criteria include a load-graph test asserting the kernel loads no other family — preload() is eager and transitive, and retrofitting layering after six families exist is the expensive order. Remember 4.5's @abstract is unavailable at the 4.4 floor. Treat any nonzero gdUnit4 orphan count as a failure, not noise.
+- [ ] [#lzgdrunner] Phase 2 of tasks/software/plan-lazily-gd.md: the conformance fixture runner plus the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd), landed in the SAME phase as the runner per the plan. Mutation-check the guard before trusting green — lazily-cpp's queue tests were hand-transcribed rather than replayed, and a source grep cannot see that case. Only once the runner replays real fixtures does lazily-gd earn its coverage.json column (rows 0 and 15, KNOWN_UNCOVERED populated and shrinking); adding the column before then would claim a binding that does not exist.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 <!-- /agent:backlog -->
 

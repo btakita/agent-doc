@@ -698,16 +698,8 @@ fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
     for pair in blocks.windows(2) {
         let (s1, e1) = pair[0];
         let (s2, e2) = pair[1];
-        let block1 = lines[s1..e1]
-            .iter()
-            .filter_map(|line| normalize_response_block_line(line))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let block2 = lines[s2..e2]
-            .iter()
-            .filter_map(|line| normalize_response_block_line(line))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let block1 = normalized_response_block(&lines[s1..e1]);
+        let block2 = normalized_response_block(&lines[s2..e2]);
         if block1 == block2 {
             let b1_corrupt = block_has_prompt_prefixed_body(&lines[s1..e1]);
             let b2_corrupt = block_has_prompt_prefixed_body(&lines[s2..e2]);
@@ -739,6 +731,57 @@ fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
         result.push('\n');
     }
     (result, first_duplicate)
+}
+
+/// Compare-normalize one `### Re:` block.
+///
+/// `#dupereplayquote`: a replayed copy of a response is not byte-identical to the
+/// committed one, because closeout inserts artifacts the replay never carried.
+/// Two of them are load-bearing here:
+///
+/// * the `> **Queue prompt:**` blockquote (`#qdeferstrike`) that the drain quotes
+///   above the answer, and
+/// * blank-line spacing, which differs once that quote is inserted.
+///
+/// Observed live on `tasks/agent-doc/agent-doc-bugs2.md`: the working tree held
+/// the same `### Re: runpromptverbose` heading and body twice — the committed copy
+/// with the queue-prompt quote, the replay without it. Byte comparison said "not
+/// duplicates", so `dedupe` reported none and the replay survived. Session-check
+/// then diffed the surviving copy against the snapshot and, finding heading-less
+/// assistant prose, classified SEVEN lines of the agent's own response as
+/// concurrent operator steering directives and interrupted the closeout.
+///
+/// So the comparison ignores both, exactly as it already ignores
+/// `<!-- agent:boundary: -->` and the `(HEAD)` suffix: they are binary-inserted
+/// decoration, never response content. Blocks that differ in real prose still
+/// differ.
+fn normalized_response_block(block_lines: &[&str]) -> String {
+    let mut out: Vec<String> = Vec::with_capacity(block_lines.len());
+    let carries_queue_prompt_quote = block_lines
+        .iter()
+        .any(|line| is_queue_prompt_quote_marker(line));
+    for line in block_lines {
+        if carries_queue_prompt_quote && line.trim_start().starts_with('>') {
+            continue;
+        }
+        let Some(normalized) = normalize_response_block_line(line) else {
+            continue;
+        };
+        if normalized.is_empty() {
+            continue;
+        }
+        out.push(normalized);
+    }
+    out.join("\n")
+}
+
+/// The opening line of the drain's quoted queue prompt (`#qdeferstrike`).
+fn is_queue_prompt_quote_marker(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let Some(quoted) = trimmed.strip_prefix('>') else {
+        return false;
+    };
+    quoted.trim().eq_ignore_ascii_case("**Queue prompt:**")
 }
 
 fn normalize_response_block_line(line: &str) -> Option<String> {
@@ -1151,6 +1194,76 @@ mod tests {
         assert_eq!(
             first_duplicate_response_heading(content).as_deref(),
             Some("### Re: Foo")
+        );
+    }
+
+    /// `#dupereplayquote`: the live shape that slipped through byte comparison.
+    ///
+    /// The committed block carries the drain's `> **Queue prompt:**` quote; the
+    /// replay does not. They are the same response and must dedupe.
+    #[test]
+    fn dedupe_removes_replay_that_lacks_the_queue_prompt_quote() {
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: runpromptverbose — opus-5\n",
+            "\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#runpromptverbose]\n",
+            "\n",
+            "Fixed and released.\n",
+            "\n",
+            "**Verification:** all green.\n",
+            "\n",
+            "\n",
+            "### Re: runpromptverbose — opus-5\n",
+            "\n",
+            "Fixed and released.\n",
+            "\n",
+            "**Verification:** all green.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let deduped = dedupe_responses(content);
+        assert_eq!(
+            deduped.matches("### Re: runpromptverbose").count(),
+            1,
+            "the quote-less replay must collapse into the committed block:\n{deduped}"
+        );
+        assert!(
+            deduped.contains("> **Queue prompt:**"),
+            "the surviving block must be the one carrying the queue-prompt quote:\n{deduped}"
+        );
+        assert!(
+            deduped.contains("**Verification:** all green."),
+            "response content must survive:\n{deduped}"
+        );
+    }
+
+    /// The relaxation must not merge genuinely different answers to the same head.
+    #[test]
+    fn dedupe_keeps_blocks_whose_prose_actually_differs() {
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: topic — opus-5\n",
+            "\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#topic]\n",
+            "\n",
+            "First answer.\n",
+            "\n",
+            "### Re: topic — opus-5\n",
+            "\n",
+            "A materially different second answer.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let deduped = dedupe_responses(content);
+        assert_eq!(
+            deduped.matches("### Re: topic").count(),
+            2,
+            "different prose is not a duplicate, quote or no quote:\n{deduped}"
         );
     }
 

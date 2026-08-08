@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.172
+
+- **A response replay that lacks the queue-prompt quote is still a duplicate (`#dupereplayquote`).**
+  Hit live while closing `#runpromptverbose`. Response-block dedup compared blocks byte-for-byte
+  after normalizing only `<!-- agent:boundary: -->`, the `(HEAD)` suffix, and the `❯` prefix. But
+  closeout also inserts the `> **Queue prompt:**` blockquote (`#qdeferstrike`) above the answer, and
+  a replayed copy never carries it — so the committed block and its replay compared as *different*,
+  `agent-doc dedupe` reported "no duplicates found", and the replay survived in the working tree.
+  Blank-line spacing around the inserted quote diverged for the same reason.
+
+  The consequence was not a cosmetic double-post. Session-check diffed the surviving working tree
+  against the snapshot, found assistant prose it could not attribute to a `### Re:` block, and
+  classified **seven lines of the agent's own response** as concurrent operator steering directives
+  — interrupting an otherwise successful closeout (`INTERRUPTED: … 7 concurrent operator steering
+  directives`) after the mutations had already committed.
+
+  `normalized_response_block` now ignores the queue-prompt blockquote and blank-line spacing when
+  comparing two `### Re:` blocks, exactly as it already ignores the boundary marker and `(HEAD)` —
+  all binary-inserted decoration, never response content. Blocks whose prose actually differs still
+  compare as distinct (regression-tested both ways). Verified against the live document that
+  produced the bug: `dedupe` removed 3675 bytes of duplicate content, kept the copy carrying the
+  queue-prompt quote, and session-check went from `INTERRUPTED` to `ok`.
+
 ## 0.35.171
 
 - **Queue reopen triggers are harness-native again, on both dispatch paths (`#runpromptverbose`).**

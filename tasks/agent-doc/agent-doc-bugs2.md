@@ -198,10 +198,12 @@ Worth naming: the duplication was the cosmetic part. The damage was a **committe
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#lzktemptydir]
+- do [#operatorverifyeyeball]
 - ~~do [#syncdupespelling]~~
 - ~~do [#tmuxsyncslow]~~
 - ~~do [#runpromptverbose]~~
-- do [#confirmsuperprojectjob]
+- ⏭️ do [#confirmsuperprojectjob]
 <!-- /agent:queue -->
 
 ## Notes
@@ -212,6 +214,7 @@ Worth naming: the duplication was the cosmetic part. The damage was a **committe
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzktemptydir] The JetBrains composite-build guard in editors/jetbrains/settings.gradle.kts tested directory EXISTENCE for the lazily-kt sibling, but an uninitialized git submodule is an existing EMPTY directory — so includeBuild substituted io.github.lazily:lazily with a project-less build and Gradle failed with 'No variants exist'. Hit in agent-loop superproject CI, whose submodule init omitted src/lazily-kt. Guard now keys on the settings file; superproject CI also inits src/lazily-kt + src/lazily-spec.
 - [ ] [#operatorverifyeyeball] [operator-verify] Eyeball a real JetBrains `Run Agent Doc` against a Claude Code pane and confirm the injected trigger now reads `/agent-doc /abs/path.md` (was bare `agent-doc /abs/path.md`), and that a freshly-`/clear`ed pane picks up the skill from it. Shipped in 0.35.171 (#runpromptverbose) with unit coverage on both dispatch paths; only the live-pane render is unverifiable from the agent side.
 - [ ] [#confirmsuperprojectjob] Confirm the superproject `Agent Doc` / `check` job went green after the runner-disk fix (commit 8b01b6fe50, run 31249383368): `gh run list --workflow "Agent Doc" --limit 2`. If the Bus error recurs, the disk reduction was insufficient — next levers are freeing runner disk (drop the preinstalled Android SDK / dotnet / GHC images), `-C debuginfo=0` via RUSTFLAGS, or splitting `--all-targets` across jobs.
 <!-- /agent:backlog -->

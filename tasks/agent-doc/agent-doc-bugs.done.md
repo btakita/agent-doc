@@ -1,0 +1,3 @@
+# Agent Doc Completed Work
+
+- 2026-08-08 [#needsoperatorstateedge] Supervisor captured-finalize resume: a NeedsOperator verdict latched process-locally and suppressed the controller's document-state edge, so a fully-settled retained capture could never be committed (open cycle, unmet=committed) until an install/recycle reexec reset the latch. Fixed: observe_state_edge retires the verdict; the orchestration's retry_cooldown gate retires with it; the diagnostic gained a bounded redacted reason_head; the stand-down message now names the recovery. Observed 2026-08-08 on src/haiven-dev/tasks/haiven-dev.md.

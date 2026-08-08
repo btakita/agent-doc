@@ -142,12 +142,33 @@ pub fn consume_free_text_queue_prompts_with_outcome(
     consume_queue_prompts_with_options(file, &[], count.max(1), skip_visible_guard, None, effects)
 }
 
+/// Free-text budget for a closeout consume driven by `done_ids`.
+///
+/// `#qftnodoneeat`: **0 once any id is named.** A `do [#id]` head is matched by
+/// id; a free-text head carries no id, so a closeout naming ids can never prove
+/// one of those ids resolved the free-text head. With a budget of 1 the planner
+/// fell through to "consume the leading free-text prompt" and silently deleted
+/// an unrelated operator queue line. Observed 2026-08-08 on
+/// `agent-doc-bugs2.md`: a `--done qheadnest` — an id that was never in the
+/// queue — ate ``tmux pane auto-sync is still extremely slow ...``, which was
+/// the last head, so the queue also drained and flipped `queue: stop`.
+///
+/// An empty `done_ids` is the generic response closeout, whose callers already
+/// established free-text proof, so it keeps its budget of 1. Either way a
+/// genuinely answered free-text head is still struck by the proof-bearing site
+/// (`project_answered_free_text_strike`), which requires the response to quote
+/// the head.
+fn done_ids_free_text_budget(done_ids: &[String]) -> usize {
+    if done_ids.is_empty() { 1 } else { 0 }
+}
+
 pub fn consume_queue_prompts_for_done_ids_with_outcome(
     file: &Path,
     done_ids: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, done_ids, 1, false, None, effects)
+    let budget = done_ids_free_text_budget(done_ids);
+    consume_queue_prompts_with_options(file, done_ids, budget, false, None, effects)
 }
 
 pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
@@ -155,7 +176,8 @@ pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
     done_ids: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, done_ids, 1, true, None, effects)
+    let budget = done_ids_free_text_budget(done_ids);
+    consume_queue_prompts_with_options(file, done_ids, budget, true, None, effects)
 }
 
 /// Strike the active queue head, **skipping the visible-write idle guard**, for
@@ -1316,12 +1338,34 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
         }
     }
 
-    let requested_free_text_count = requested_free_text_count.max(1);
     let requested_texts = first_n_queue_prompt_texts(&entries, requested_free_text_count);
     let free_text_prefix_count = requested_texts
         .iter()
         .take_while(|text| queue_prompt_text_is_free_text(content, text))
         .count();
+    // `#qftnodoneeat`: a caller that asked for no free-text budget (the done-id
+    // closeout) proved nothing about a free-text head. Consuming one anyway
+    // deletes operator work that was never addressed, so stop here instead of
+    // falling through to the `.max(1)` floor below.
+    if requested_free_text_count == 0
+        && leading_done_consume_count == 0
+        && entries.iter().any(|entry| {
+            matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Prompt(_)
+            )
+        })
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_consume_refused_unproven_free_text_head file={} done_ids={:?} reason=done_ids_prove_nothing_about_free_text_head (#qftnodoneeat)",
+                file.display(),
+                done_ids
+            ),
+        );
+        return Ok(None);
+    }
     // Preserve the fail-closed active-queue guard: an active component with no
     // prompt is malformed, while a first id-backed prompt is classified below
     // and left untouched without an explicit done/ack signal.
@@ -2068,6 +2112,75 @@ mod core_tests {
             "bare do[#id] head needs an explicit completion flag"
         );
     }
+    #[test]
+    fn done_id_closeout_never_eats_an_unrelated_free_text_head() {
+        // #qftnodoneeat: `--done <id>` proves nothing about a free-text head --
+        // a free-text head carries no id, so it can never be the head that id
+        // resolved. Consuming it anyway silently deleted operator work; when it
+        // was the last head the queue also drained and flipped `queue: stop`.
+        assert_eq!(done_ids_free_text_budget(&["qheadnest".to_string()]), 0);
+        assert_eq!(done_ids_free_text_budget(&[]), 1);
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- tmux pane auto-sync is still extremely slow when switching documents. Fix it.\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert!(
+            plan_queue_prompt_consumption_with_snapshot_and_count(
+                &doc,
+                content,
+                None,
+                &["qheadnest".to_string()],
+                0,
+            )
+            .unwrap()
+            .is_none(),
+            "a done-id closeout must leave an unrelated free-text head queued"
+        );
+
+        // A caller that DOES carry free-text proof (the response path) still
+        // consumes it — the budget, not the head shape, is what changed.
+        let planned = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            content,
+            None,
+            &[],
+            1,
+        )
+        .unwrap()
+        .expect("a proof-bearing free-text budget still consumes the head");
+        assert!(planned.consumed_text.starts_with("tmux pane auto-sync"));
+
+        // And the id-backed head a `--done` really did resolve is still consumed,
+        // without touching the free-text head behind it.
+        let mixed = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#foo] head work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#foo]\n",
+            "- tmux pane auto-sync is still extremely slow when switching documents. Fix it.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let planned =
+            plan_queue_prompt_consumption_with_snapshot_and_count(
+                &doc,
+                mixed,
+                None,
+                &["foo".to_string()],
+                0,
+            )
+            .unwrap()
+            .expect("the matching id-backed head is still consumed");
+        assert_eq!(planned.consumed_texts, vec!["do [#foo]".to_string()]);
+        assert_eq!(planned.remaining, 1, "the free-text head must survive");
+    }
+
     #[test]
     fn done_id_marks_later_queue_prompt_completed_without_consuming_head() {
         let dir = tempfile::tempdir().unwrap();

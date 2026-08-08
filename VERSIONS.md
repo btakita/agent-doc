@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.166
+
+- **A `--done <id>` closeout no longer eats an unrelated free-text queue head (`#qftnodoneeat`).**
+  `consume_queue_prompts_for_done_ids_*` asked the consume planner for a free-text budget of 1
+  unconditionally. A `do [#id]` head is matched by id; a free-text head carries no id, so
+  `leading_done_consume_count` was 0 and the planner fell straight through to "consume the leading
+  free-text prompt" — with no proof of any kind that the cycle addressed it. Observed 2026-08-08 on
+  `agent-doc-bugs2.md`: a `--done qheadnest` for an id that had never been in the queue consumed
+  ``tmux pane auto-sync is still extremely slow when switching from lazily.md to
+  agent-doc-bugs2.md. Fix it.``, and because that was the last head the queue also drained and
+  flipped `queue: stop` — operator work deleted with no diagnostic. The budget is now 0 as soon as
+  any id is named; an empty `done_ids` (the generic response closeout, whose callers already
+  establish proof) keeps its budget of 1. A genuinely answered free-text head is still struck by
+  the proof-bearing site (`project_answered_free_text_strike`), which requires the response to
+  quote it. The refusal is logged as `queue_consume_refused_unproven_free_text_head`.
+
 ## 0.35.165
 
 - **A queue head cited inside another prompt no longer counts as answered (`#qheadnest`).**

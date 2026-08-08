@@ -1,6 +1,7 @@
 # Plan: `lazily-gd` — GDScript binding (`#lzgdbinding`)
 
-**Status:** Design — approved direction, not started.
+**Status:** Phase 0 landed 2026-08-08 (harness, engine floor, CI) — local commit
+`3d8e90d` in `src/lazily-gd`, not yet pushed to a remote. Phases 1+ open.
 **Created:** 2026-07-30
 **Session:** `tasks/software/lazily.md`
 **Backlog:** `#lzgdbinding`
@@ -122,10 +123,25 @@ dependency discipline, two enforcement mechanisms.
 - `AGENTS.md` canonical, `CLAUDE.md` symlink to it (matches `lazily-cs`).
 - `Makefile` with `check` (every binding has one).
 - CI: `godot --headless` under GitHub Actions with a pinned Godot download.
-  Test framework: gdUnit4 preferred over GUT for its existing CI action —
-  **confirm against the chosen Godot floor before committing.**
-- **Decide and document the minimum Godot 4.x version.** Gates `class_name`
-  behavior, typed collections, and the web story. Open question, needs operator input.
+- **Minimum Godot version: 4.4** — DECIDED 2026-08-08 (operator). The floor is
+  set at typed dictionaries (`Dictionary[K, V]`, landed in 4.4), which is where
+  the edge index keyed on `get_instance_id()` and the keyed-collections family
+  read as declared types rather than untyped `Dictionary` with runtime key
+  discipline. Deliberately several releases behind the 4.7.1 the operator runs
+  locally: an addon's floor decides who can consume it, not what its author runs.
+  Consequence to hold to throughout — 4.5's `@abstract` is NOT available, so the
+  base kind that `Source`/`Computed`/`Effect` share is a conventional base class
+  with erroring stubs, not an abstract one.
+- **Test framework: gdUnit4** — DECIDED 2026-08-08, confirmed against the 4.4
+  floor as the plan required rather than assumed: gdUnit4 v5.x+ lists Godot
+  v4.3/v4.4/v4.4.1 as supported. Pinned at the latest RELEASED tag, **v6.2.0** —
+  `plugin.cfg` on `main` reads `6.2.1`, which is unreleased and 404s as a tag, so
+  read the version from releases, not from the plugin manifest. The deciding
+  argument for gdUnit4 is stronger than "it has a CI action":
+  gdUnit4 reports **orphan nodes** per test, and this binding's one novel problem
+  is that `RefCounted` has no cycle collector. Orphan detection turns "`ctx.scope()`
+  is the sole strong owner and teardown actually frees" from an assertion nobody
+  writes into a property the harness checks on every test. GUT has no equivalent.
 
 ### Phase 1 — Cell kernel (coverage row 0) + the loading invariant
 
@@ -198,8 +214,13 @@ Each phase: shrink `KNOWN_UNCOVERED`, extend the load-graph test, flip the
 - Interpreted performance is expected; per-binding thresholds already differ across
   the 9, so calibrate rather than inherit.
 
-## Open questions
+## Resolved questions
 
-1. **Minimum Godot 4.x version** — blocks Phase 0.
-2. gdUnit4 vs GUT, contingent on (1).
-3. Whether the thread-safe family is in scope at all for a first release.
+1. **Minimum Godot 4.x version — 4.4.** Decided 2026-08-08 by the operator. Was
+   the blocker on Phase 0; see Phase 0 for the reasoning and its consequences.
+2. **gdUnit4 vs GUT — gdUnit4.** Decided 2026-08-08, contingent on (1) and
+   confirmed against it. See Phase 0.
+3. **Thread-safe family — out of scope for a first release.** It was already
+   being treated as parked elsewhere: `#lzcoveragelayout` Phase 2 introduced the
+   `⊘` not-applicable mark specifically noting it "waits for GDScript's parked
+   thread-safe family". Recorded here so the plan stops carrying it as open.

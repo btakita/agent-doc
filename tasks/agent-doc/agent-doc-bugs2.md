@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -124,17 +124,45 @@ And the proof the repair path actually ran rather than the input being harmless:
 `make check` green (exit 0, 0 failed suites). Pushed (`e6e65dd6d` + superproject `4dc62ed3ed`). No version bump: this is test-only with no behaviour delta.
 
 One note on this document: the compact above was a real mutation — the exchange is now a session summary plus the two most recent topics, with 5 topics archived to `.agent-doc/archives/…-20260808-214213.md`.
+
+### Re: do [#hvw0publishproof] — opus-5
+
+> **Queue prompt:**
+>
+> do [#hvw0publishproof]
+
+
+Verified statically. The publish step **does** propagate failure at HEAD, and the false green on v0.1.3 is now explained exactly rather than inferred.
+
+**The false green, pinned to a commit.** The v0.1.3 Release run (`29660061247`) ran at commit `17a2d3fcd`. Its publish step at that commit was, verbatim:
+
+```yaml
+- name: Publish to crates.io
+  run: cargo publish --allow-dirty || true
+```
+
+That `|| true` is the whole explanation for `Publish to crates.io -> success` alongside a 403 and a hand-published crate.
+
+**The fix could not have been in that run.** `32836ad` is the *direct child* of `17a2d3fcd`, committed `2026-07-18T20:41:09Z` — about three and a half minutes **after** the run started at `20:37:36Z`. So the sequencing is not ambiguous: the only run anyone can point at predates the fix by one commit.
+
+**HEAD propagates failure.** No `|| true` anywhere. The step is now:
+
+- `set -o pipefail` — **load-bearing**: without it, `cargo publish 2>&1 | tee publish.log` would return `tee`'s status, which always succeeds, and the `if` would take the success branch every time. That would have recreated the exact false green in a new disguise.
+- the pipeline is the `if` condition, so `bash -e` does not abort before the failure is inspected;
+- a failure that mentions an already-published version is tolerated (the idempotent tag re-run), everything else emits `::error::` and `exit 1`;
+- `--allow-dirty` is also gone, which is a separate tightening.
+
+**Still never executed, as the item said.** Tags are `v0.1.0` … `v0.1.3` and the newest Release run is still the 2026-07-18 v0.1.3 one. Nothing has tagged since, so the loud-failure path remains statically correct but never exercised. That half of `#hvw0` stays untested-in-practice, and only a real tag closes it.
+
+**One thing I could not verify from here.** The idempotent-tolerance branch greps `publish.log` for `"already exists"`. My recollection is that cargo/crates.io words a duplicate-version rejection as *already uploaded*, not *already exists* — in which case that branch never matches and a re-run of an existing tag fails loudly instead of being tolerated. That errs in the **safe** direction (a false red, never a false green), so it does not weaken the fix, but the documented idempotent case may not actually work. I did not want to assert cargo's exact wording from memory, so I have filed it rather than claimed it.
+
+No code change here — this repo is not `skill-harness`, and the verification was the deliverable.
 <!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#clearsubmitlabel]~~
-- ~~do [#startupmiss9row]~~
-- ~~do [#ptsubmitmetric]~~
-- ~~do [#claudesplitsubmit]~~
-- ~~do [#compactstrandedheading]~~
-- do [#hvw0publishproof]
+- do [#hvw0publishgrep]
 <!-- /agent:queue -->
 
 ## Notes
@@ -145,7 +173,7 @@ One note on this document: the compact above was a real mutation — the exchang
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#hvw0publishproof] #agent-doc-bug Verify statically (read the release workflow on github.com/btakita/skill-harness) that the crates.io publish step propagates failure after 32836ad. The loud-failure behavior has never actually executed: the newest Release run is v0.1.3 from 2026-07-18 and its `Publish to crates.io` step reports SUCCESS even though the CARGO_REGISTRY_TOKEN 403s and v0.1.3 was published by hand — that success line is the false green 32836ad was meant to kill. Until a tag runs, the every-tagged-release-now-fails-loudly claim on #hvw0 is untested.
+- [ ] [#hvw0publishgrep] #agent-doc-bug On github.com/btakita/skill-harness, the release workflow's publish step tolerates an idempotent re-publish by grepping publish.log for 'already exists'. cargo/crates.io likely words a duplicate-version rejection as 'already uploaded', in which case that branch never matches and re-running an existing tag fails loudly instead of being tolerated. Errs safe (false red, never a false green) so it does not weaken 32836ad, but the documented idempotent case may not work. Confirm cargo's exact duplicate-version message and widen the grep (or match on the crates.io error code) if it is wrong.
 <!-- /agent:backlog -->
 
 ## Review

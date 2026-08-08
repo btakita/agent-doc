@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -40,6 +40,10 @@ completed
 Compacted content:
 - Archived 4 response topic(s): do [#ptsubmitmetric]; do [#claudesplitsubmit]; do [#compactstrandedheading]; 1 more
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): queuemirrororder; watchsighupwin; loopsuperprojectjob; 7 more
+Compact Exchange on haiven-dev.md error"
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: waiting for the pre-write editor delivery barrier for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md: visible document write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md is retained by the lazy delivery projection because the editor state projection has not converged; no secondary snapshot/commit or forced disk write was attempted
+```
 <!-- agent:boundary:7ad810c1 -->
 <!-- /agent:exchange -->
 ## Queue

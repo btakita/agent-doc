@@ -268,16 +268,40 @@ pub fn collect_backlog_execution_contexts(
 
 /// Active backlog ids, lowercased, that are not drainable by the in-session loop.
 pub fn deferred_backlog_ids(content: &str) -> HashSet<String> {
-    deferred_backlog_ids_scoped(content, DrainScope::InSessionLoop)
+    deferred_backlog_ids_split(content, DrainScope::InSessionLoop).all
 }
 
 /// Active backlog ids, lowercased, that are not drainable by the supervisor.
 pub fn supervisor_deferred_backlog_ids(content: &str) -> HashSet<String> {
-    deferred_backlog_ids_scoped(content, DrainScope::Supervisor)
+    deferred_backlog_ids_split(content, DrainScope::Supervisor).all
 }
 
-fn deferred_backlog_ids_scoped(content: &str, scope: DrainScope) -> HashSet<String> {
-    let mut deferred = HashSet::new();
+/// Deferred backlog ids for a drain scope, split by whether an operator's inline
+/// verdict on the queue head can satisfy the deferral (`#opverifyanswered`).
+#[derive(Debug, Clone, Default)]
+pub struct DeferredBacklogIds {
+    /// Every id deferred in this scope.
+    pub all: HashSet<String>,
+    /// Ids whose deferral an operator verdict cannot satisfy: `[focused-cycle]`
+    /// asks for a fresh cycle, which no amount of human confirmation supplies.
+    pub operator_verdict_immune: HashSet<String>,
+}
+
+impl DeferredBacklogIds {
+    /// Whether `id` is still deferred, given whether its head carries an
+    /// operator verdict.
+    pub fn defers(&self, id: &str, operator_answered: bool) -> bool {
+        if operator_answered {
+            self.operator_verdict_immune.contains(id)
+        } else {
+            self.all.contains(id)
+        }
+    }
+}
+
+/// Build the scoped deferral sets from tracked-work components.
+pub fn deferred_backlog_ids_split(content: &str, scope: DrainScope) -> DeferredBacklogIds {
+    let mut deferred = DeferredBacklogIds::default();
     let Ok(components) = element::parse(content) else {
         return deferred;
     };
@@ -291,9 +315,20 @@ fn deferred_backlog_ids_scoped(content: &str, scope: DrainScope) -> HashSet<Stri
                 DrainScope::InSessionLoop => ctx.loop_undrainable(),
                 DrainScope::Supervisor => ctx.supervisor_undrainable(),
             };
-            if undrainable {
-                deferred.insert(id.to_ascii_lowercase());
+            if !undrainable {
+                continue;
             }
+            let key = id.to_ascii_lowercase();
+            let immune = match scope {
+                DrainScope::InSessionLoop => {
+                    ctx.loop_undrainable_with_operator_verdict(true)
+                }
+                DrainScope::Supervisor => ctx.supervisor_undrainable_with_operator_verdict(true),
+            };
+            if immune {
+                deferred.operator_verdict_immune.insert(key.clone());
+            }
+            deferred.all.insert(key);
         }
     }
     deferred
@@ -368,6 +403,20 @@ fn head_id_in_set(head: &str, ids: &HashSet<String>) -> bool {
     ids.contains(&id)
 }
 
+/// Lowercased ids of active queue heads carrying an operator verdict
+/// (`#opverifyanswered`).
+pub fn operator_answered_head_ids(content: &str) -> HashSet<String> {
+    let Some((_, entries)) = queue_component_entries(content) else {
+        return HashSet::new();
+    };
+    document_queue::prompts(&entries)
+        .into_iter()
+        .filter(|prompt| head_carries_operator_verdict(&prompt.text))
+        .filter_map(|prompt| extract_head_id(&prompt.text))
+        .map(|id| id.to_ascii_lowercase())
+        .collect()
+}
+
 /// Count active queue prompt heads whose backlog id is deferred in-session.
 pub fn deferred_head_count(content: &str) -> usize {
     let Some((_, entries)) = queue_component_entries(content) else {
@@ -393,10 +442,7 @@ pub fn drainable_head_prompt_for_scope(content: &str, scope: DrainScope) -> Opti
     let (queue_facts, activation) =
         active_queue_for_supervisor_start(content, matches!(scope, DrainScope::Supervisor))?;
     let open_backlog = open_backlog_ids_from_content(content);
-    let deferred_ids = match scope {
-        DrainScope::InSessionLoop => deferred_backlog_ids(content),
-        DrainScope::Supervisor => supervisor_deferred_backlog_ids(content),
-    };
+    let deferred_ids = deferred_backlog_ids_split(content, scope);
     first_drainable_head(
         &activation.entries_after,
         open_backlog.as_ref(),
@@ -421,7 +467,7 @@ pub fn drainable_head_count(content: &str) -> usize {
         return 0;
     };
     let open_backlog = open_backlog_ids_from_content(content);
-    let deferred_ids = deferred_backlog_ids(content);
+    let deferred_ids = deferred_backlog_ids_split(content, DrainScope::InSessionLoop);
     let after_deps = after_deps_from_content(content);
     document_queue::prompts(&activation.entries_after)
         .into_iter()
@@ -548,7 +594,7 @@ fn explicit_go_mode(
 fn first_drainable_head<'a>(
     entries_after: &'a [QueueEntry],
     open_backlog_ids: Option<&HashSet<String>>,
-    deferred_ids: &HashSet<String>,
+    deferred_ids: &DeferredBacklogIds,
     after_deps: &HashMap<String, Vec<String>>,
     preset_supplies_directive: bool,
     scope: DrainScope,
@@ -570,7 +616,7 @@ fn first_drainable_head<'a>(
 fn head_is_drainable(
     text: &str,
     open_backlog_ids: Option<&HashSet<String>>,
-    deferred_ids: &HashSet<String>,
+    deferred_ids: &DeferredBacklogIds,
     after_deps: &HashMap<String, Vec<String>>,
     preset_supplies_directive: bool,
     scope: DrainScope,
@@ -583,6 +629,10 @@ fn head_is_drainable(
     if !drainable {
         return false;
     }
+    // `#opverifyanswered`: an `[operator-verify]` head the operator has answered
+    // inline (`do [#id]: verified. looks good`) has the human input it was
+    // waiting for, so the gate is met and the head drains.
+    let operator_answered = head_carries_operator_verdict(text);
     // `#ftimmediate`: free-text heads have no backlog id through which to
     // inherit execution context. Parse the same inline tags directly from the
     // queue text so `[focused-cycle]` yields the in-session loop but remains
@@ -591,8 +641,12 @@ fn head_is_drainable(
     // existing tag vocabulary, not a synthesized tracked-work record.
     let inline_context = backlog::item_execution_context(text);
     let inline_undrainable = match scope {
-        DrainScope::InSessionLoop => inline_context.loop_undrainable(),
-        DrainScope::Supervisor => inline_context.supervisor_undrainable(),
+        DrainScope::InSessionLoop => {
+            inline_context.loop_undrainable_with_operator_verdict(operator_answered)
+        }
+        DrainScope::Supervisor => {
+            inline_context.supervisor_undrainable_with_operator_verdict(operator_answered)
+        }
     };
     if inline_undrainable {
         return false;
@@ -600,7 +654,7 @@ fn head_is_drainable(
     match extract_head_id(text) {
         Some(id) => {
             let norm = id.to_ascii_lowercase();
-            if deferred_ids.contains(&norm) {
+            if deferred_ids.defers(&norm, operator_answered) {
                 return false;
             }
             match open_backlog_ids {
@@ -932,18 +986,73 @@ fn multiline_head_has_prose_lead(text: &str) -> bool {
         })
 }
 
+/// Replace inline-code span contents with spaces so a QUOTED id cannot be
+/// mistaken for the head's own directive id (`#ftquotedid`).
+///
+/// An operator bug report that quotes a queue head — ``"`do [#foo]` was in the
+/// queue but nothing ran"`` — is a fresh free-text prompt *about* `#foo`, not a
+/// directive to run `#foo`. Scanning the raw text made such a line inherit
+/// `#foo`'s backlog gating: when `#foo` was `[operator-verify]`-deferred, the
+/// operator's brand-new prompt was itself classified undrainable, so the queue
+/// reported `drainable_head_count: 0` while a live operator prompt sat at its
+/// head and the agent answered "nothing to do".
+///
+/// Only balanced backtick runs are masked; an unbalanced backtick is ordinary
+/// prose, so the remainder stays visible to id extraction.
+fn mask_inline_code(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '`' {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let fence = chars[i..].iter().take_while(|c| **c == '`').count();
+        let mut j = i + fence;
+        let mut close = None;
+        while j < chars.len() {
+            if chars[j] == '`' {
+                let run = chars[j..].iter().take_while(|c| **c == '`').count();
+                if run == fence {
+                    close = Some(j);
+                    break;
+                }
+                j += run;
+                continue;
+            }
+            j += 1;
+        }
+        match close {
+            Some(end) => {
+                for _ in i..end + fence {
+                    out.push(' ');
+                }
+                i = end + fence;
+            }
+            None => {
+                out.push(chars[i]);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 /// Extract the backlog id from a queue prompt like `do [#id]` or `#id`.
 pub fn extract_head_id(prompt: &str) -> Option<String> {
-    if let Some(start) = prompt.find("[#")
-        && let Some(end) = prompt[start + 2..].find(']')
+    let scan = mask_inline_code(prompt);
+    let scan = scan.as_str();
+    if let Some(start) = scan.find("[#")
+        && let Some(end) = scan[start + 2..].find(']')
     {
-        let id = prompt[start + 2..start + 2 + end].trim();
+        let id = scan[start + 2..start + 2 + end].trim();
         if !id.is_empty() {
             return Some(id.to_string());
         }
     }
-    prompt
-        .split_whitespace()
+    scan.split_whitespace()
         .find_map(|token| {
             token.strip_prefix('#').map(|rest| {
                 rest.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
@@ -951,6 +1060,37 @@ pub fn extract_head_id(prompt: &str) -> Option<String> {
             })
         })
         .filter(|id| !id.is_empty())
+}
+
+/// True when a queue head carries the operator's inline verdict on its own id
+/// (`#opverifyanswered`).
+///
+/// The shape is `do [#id]: <operator text>` — the directive, then a colon, then
+/// something the operator typed. Deliberately shape-based rather than
+/// sentiment-based: "still broken" is as actionable as "verified. looks good",
+/// and both mean a human has now looked. Agent-written heads are bare
+/// `do [#id]`, so a trailing annotation is operator-authored by construction.
+pub fn head_carries_operator_verdict(text: &str) -> bool {
+    let scan = mask_inline_code(text);
+    let rest = if let Some(start) = scan.find("[#") {
+        let after = &scan[start + 2..];
+        match after.find(']') {
+            Some(end) => &after[end + 1..],
+            None => return false,
+        }
+    } else {
+        let Some(start) = scan.find('#') else {
+            return false;
+        };
+        let after = &scan[start + 1..];
+        let end = after
+            .find(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+            .unwrap_or(after.len());
+        &after[end..]
+    };
+    rest.trim_start()
+        .strip_prefix(':')
+        .is_some_and(|annotation| !annotation.trim().is_empty())
 }
 
 #[cfg(test)]
@@ -1277,6 +1417,103 @@ mod tests {
         );
         assert_eq!(drainable_head_count(&content), 0);
         assert!(!head_requires_context_reset_in(&content, head));
+    }
+
+    /// `#opverifyanswered`: an `[operator-verify]` head the operator answered
+    /// inline is drainable — the verdict IS the human proof the tag waited for.
+    /// Live repro on `tasks/agent-doc/agent-doc-bugs2.md` 2026-08-08: the
+    /// operator wrote `do [#operatorverifyeyeball]: verified. looks good` and
+    /// the queue still reported `drainable_head_count: 0`, so every following
+    /// turn answered "nothing to do" and the verdict was never read.
+    #[test]
+    fn operator_answered_verify_head_becomes_drainable() {
+        let head = "do [#eyeball]: verified. looks good";
+        let content = doc_with_backlog(
+            &[head],
+            &["- [ ] [#eyeball] [operator-verify] Eyeball the live pane"],
+        );
+
+        assert!(head_carries_operator_verdict(head));
+        assert_eq!(drainable_head_count(&content), 1);
+        assert_eq!(
+            live_drainable_continuation_head(&content, DrainScope::InSessionLoop).as_deref(),
+            Some("eyeball")
+        );
+        assert_eq!(
+            live_drainable_continuation_head(&content, DrainScope::Supervisor).as_deref(),
+            Some("eyeball")
+        );
+    }
+
+    /// The unanswered form must keep deferring, or the tag means nothing.
+    #[test]
+    fn unanswered_verify_head_stays_deferred() {
+        let content = doc_with_backlog(
+            &["do [#eyeball]"],
+            &["- [ ] [#eyeball] [operator-verify] Eyeball the live pane"],
+        );
+
+        assert!(!head_carries_operator_verdict("do [#eyeball]"));
+        assert_eq!(drainable_head_count(&content), 0);
+    }
+
+    /// A verdict does not supply a fresh cycle, so `[focused-cycle]` still
+    /// yields the in-session loop and still drains under the supervisor.
+    #[test]
+    fn operator_verdict_does_not_satisfy_focused_cycle() {
+        let content = doc_with_backlog(
+            &["do [#merge]: looks fine to me"],
+            &["- [ ] [#merge] [focused-cycle] merge-core rework"],
+        );
+
+        assert_eq!(drainable_head_count(&content), 0);
+        assert_eq!(
+            live_drainable_continuation_head(&content, DrainScope::Supervisor).as_deref(),
+            Some("merge")
+        );
+    }
+
+    /// `#ftquotedid`: a free-text operator prompt that QUOTES a deferred head
+    /// must not inherit that head's id or its deferral. Live repro on
+    /// `tasks/agent-doc/agent-doc-bugs2.md` 2026-08-08: an operator bug report
+    /// containing `` `do [#operatorverifyeyeball]: ...` `` in backticks was
+    /// classified as that operator-verify head and reported undrainable, so the
+    /// bug report itself stalled the queue it was reporting on.
+    #[test]
+    fn quoted_id_in_free_text_head_is_not_the_head_id() {
+        let head = "the queue stalled even though `do [#eyeball]: verified` was in it";
+        let content = doc_with_backlog(
+            &[head],
+            &["- [ ] [#eyeball] [operator-verify] Eyeball the live pane"],
+        );
+
+        assert_eq!(extract_head_id(head), None);
+        assert!(!head_carries_operator_verdict(head));
+        assert_eq!(drainable_head_count(&content), 1);
+        assert_eq!(
+            live_drainable_continuation_head(&content, DrainScope::InSessionLoop).as_deref(),
+            Some(head)
+        );
+    }
+
+    /// Masking is scoped to balanced code spans: an unquoted directive id still
+    /// resolves, and a stray backtick is prose, not an unterminated span.
+    #[test]
+    fn inline_code_masking_leaves_real_directives_intact() {
+        assert_eq!(
+            extract_head_id("do [#real] and mention `[#quoted]`").as_deref(),
+            Some("real")
+        );
+        assert_eq!(
+            extract_head_id("run ```[#fenced]``` then do [#real]").as_deref(),
+            Some("real")
+        );
+        assert_eq!(
+            extract_head_id("do [#real] with a stray ` tick").as_deref(),
+            Some("real")
+        );
+        assert_eq!(extract_head_id("do [#plain]").as_deref(), Some("plain"));
+        assert_eq!(extract_head_id("#bare form").as_deref(), Some("bare"));
     }
 
     #[test]

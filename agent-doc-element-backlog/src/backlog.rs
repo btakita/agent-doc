@@ -2495,6 +2495,29 @@ impl ExecutionContext {
     pub fn supervisor_undrainable(&self) -> bool {
         self.operator_verify_required
     }
+
+    /// [`Self::loop_undrainable`] with the `[operator-verify]` gate treated as
+    /// satisfied when the operator answered the queue head inline
+    /// (`#opverifyanswered`).
+    ///
+    /// `[operator-verify]` defers a head because it needs a human to look at
+    /// something the agent cannot. Once the operator writes that verdict into
+    /// the head itself (`do [#id]: verified. looks good`), the human input has
+    /// arrived and the gate is met. `[focused-cycle]` is deliberately NOT
+    /// satisfied by a verdict — it asks for a fresh cycle, not an opinion.
+    pub fn loop_undrainable_with_operator_verdict(&self, operator_answered: bool) -> bool {
+        if operator_answered {
+            self.focused_cycle_required
+        } else {
+            self.loop_undrainable()
+        }
+    }
+
+    /// [`Self::supervisor_undrainable`] with an operator's inline verdict
+    /// satisfying the `[operator-verify]` gate (`#opverifyanswered`).
+    pub fn supervisor_undrainable_with_operator_verdict(&self, operator_answered: bool) -> bool {
+        !operator_answered && self.supervisor_undrainable()
+    }
 }
 
 /// True when the item text carries a `[clean-session]` tag token

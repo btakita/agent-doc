@@ -47,7 +47,10 @@ pub fn queue_entry_do_id(entry: &QueueEntry) -> Option<String> {
 }
 
 pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Vec<QueuePromptRow> {
-    let deferred_ids = crate::queue_continuation::deferred_backlog_ids(content);
+    let deferred_ids = crate::queue_continuation::deferred_backlog_ids_split(
+        content,
+        crate::queue_continuation::DrainScope::InSessionLoop,
+    );
     let preset_supplies_directive = agent_doc_element::element::parse(content)
         .ok()
         .and_then(|components| {
@@ -67,7 +70,14 @@ pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Ve
                     !crate::queue_continuation::is_noise_queue_head(
                         &text,
                         preset_supplies_directive,
-                    ) && !id.as_ref().is_some_and(|id| deferred_ids.contains(id));
+                    ) && !id.as_ref().is_some_and(|id| {
+                        // `#opverifyanswered`: an answered operator-verify head is
+                        // live work again, so it stays projectable.
+                        deferred_ids.defers(
+                            id,
+                            crate::queue_continuation::head_carries_operator_verdict(&text),
+                        )
+                    });
                 Some(QueuePromptRow::new(
                     prompt.text.clone(),
                     id,

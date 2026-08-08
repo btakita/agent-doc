@@ -2,6 +2,39 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.174
+
+- **An answered `[operator-verify]` head stayed deferred forever (`#opverifyanswered`).**
+  The tag defers a queue head because it needs a human to look at something. When the operator
+  supplied that verdict in the head itself — `do [#id]: verified. looks good` — nothing consumed it:
+  `drainable_head_count` stayed `0`, `queue_continuation_required` stayed `false`, and every
+  following turn reported "nothing to do" while the operator's answer sat at the head of an active
+  queue. The verdict IS the proof the tag was waiting for, so a head carrying one is drainable in
+  both the in-session loop and the supervisor drain. Shape-based, not sentiment-based: `still broken`
+  is as actionable as `verified`, and agent-written heads are bare `do [#id]`, so a trailing
+  annotation is operator-authored by construction. `[focused-cycle]` is deliberately unaffected — it
+  asks for a fresh cycle, which no amount of human confirmation supplies.
+
+- **A queue head that QUOTED an id inherited that id's gating (`#ftquotedid`).**
+  `extract_head_id` scanned the raw head text, so an operator bug report containing
+  ``​`do [#foo]: ...`​`` in backticks was classified as the `#foo` directive. When `#foo` was
+  `[operator-verify]`-deferred, the operator's brand-new free-text prompt was itself reported
+  undrainable — the bug report stalled the queue it was reporting on. Id extraction now masks
+  balanced inline-code spans first; an unbalanced backtick is prose and stays visible, so real
+  directives (`do [#real] and mention `[#quoted]``) still resolve.
+
+- **One settle window was still not proof that a pass-through trigger submitted (`#runsubmitclaude`,
+  second pass).** 0.35.164 gated the `cleared` verdict on a 150ms settle window instead of reading a
+  1ms capture. 150ms lands on the render boundary: observed 2026-08-08 16:23:39Z on
+  `tasks/agent-doc/agent-doc-bugs2.md` pane `%25`, the repair logged
+  `outcome=cleared enters_sent=0 elapsed_ms=153` and the operator then watched the trigger sit
+  unsubmitted in the composer — the same pane at 16:22:28Z had seen the draft on its first look and
+  repaired it. An IDLE pane showing no draft is ambiguous between "the turn already finished" and
+  "the keystrokes have not rendered", so that verdict now needs a second consecutive idle-and-empty
+  observation. A BUSY pane showing no draft needs none — the harness working is positive evidence
+  the trigger crossed — so the fast success path is unchanged and only the genuinely ambiguous case
+  pays one extra window.
+
 ## 0.35.173
 
 - **A composite-build guard could not tell "absent" from "present but empty" (`#lzktemptydir`).**

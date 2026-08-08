@@ -2774,6 +2774,17 @@ pub struct PassThroughStrandedDraftFacts {
     pub settled: bool,
     pub enters_sent: usize,
     pub max_enters: usize,
+    /// Consecutive settled observations that found an IDLE composer holding no
+    /// draft, BEFORE this one (`#runsubmitclaude`).
+    pub clear_observations: usize,
+    /// How many such observations a `Cleared` verdict needs from an idle pane.
+    pub required_clear_observations: usize,
+}
+
+/// `#runsubmitclaude`: consecutive idle-and-empty observations required before
+/// an idle pane may be called cleared.
+pub const fn pass_through_stranded_draft_required_clear_observations() -> usize {
+    2
 }
 
 /// `#runfilesubmit`: the pass-through single-submit path sends text and the
@@ -2795,19 +2806,44 @@ pub struct PassThroughStrandedDraftFacts {
 /// trigger was still sitting unsubmitted in the composer 44 seconds later.
 /// Nothing a pane shows within a millisecond of the send is about that send, so
 /// the first observation always waits.
+/// `#runsubmitclaude` (second pass): ONE settle window is still not proof. An
+/// idle pane showing no draft is ambiguous between "the trigger was submitted
+/// and the turn already finished" and "the keystrokes have not rendered yet",
+/// and 150ms lands squarely on that boundary — the same
+/// `#idlerevisionreactive` collapse, one window later. Observed 2026-08-08
+/// 16:23:39Z on `tasks/agent-doc/agent-doc-bugs2.md` pane `%25`:
+/// `outcome=cleared enters_sent=0 elapsed_ms=153` while the operator watched
+/// the trigger sit unsubmitted in the composer; the same pane at 16:22:28Z saw
+/// the draft on its first observation and repaired it (`enters_sent=1
+/// elapsed_ms=306`). So an IDLE-and-empty verdict must be confirmed by a second
+/// observation before it counts as cleared.
+///
+/// A BUSY pane showing no draft needs no confirmation: the harness working is
+/// positive evidence that the trigger crossed the composer and started a turn.
+/// That keeps the fast success path free — only the genuinely ambiguous
+/// idle-and-empty case pays one extra settle window.
 pub const fn classify_pass_through_stranded_draft_action(
     facts: PassThroughStrandedDraftFacts,
 ) -> PassThroughStrandedDraftAction {
     if !facts.settled {
         PassThroughStrandedDraftAction::SettleAndReobserve
-    } else if !facts.draft_visible {
+    } else if facts.draft_visible {
+        if facts.pane_busy {
+            PassThroughStrandedDraftAction::DeferredPaneBusy
+        } else if facts.enters_sent < facts.max_enters {
+            PassThroughStrandedDraftAction::EnterResubmit
+        } else {
+            PassThroughStrandedDraftAction::ExhaustedStillStranded
+        }
+    } else if facts.pane_busy
+        // A working harness is positive evidence the trigger crossed the
+        // composer, so a busy pane clears on the first settled look. An IDLE
+        // empty composer proves nothing on its own and must be confirmed.
+        || facts.clear_observations + 1 >= facts.required_clear_observations
+    {
         PassThroughStrandedDraftAction::Cleared
-    } else if facts.pane_busy {
-        PassThroughStrandedDraftAction::DeferredPaneBusy
-    } else if facts.enters_sent < facts.max_enters {
-        PassThroughStrandedDraftAction::EnterResubmit
     } else {
-        PassThroughStrandedDraftAction::ExhaustedStillStranded
+        PassThroughStrandedDraftAction::SettleAndReobserve
     }
 }
 
@@ -6005,6 +6041,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     ) -> (Vec<&'static str>, usize) {
         let mut actions = Vec::new();
         let mut enters_sent = 0usize;
+        let mut clear_observations = 0usize;
         let mut settled = false;
         for (draft_visible, pane_busy) in pane.iter().copied() {
             let action =
@@ -6014,14 +6051,25 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                     settled,
                     enters_sent,
                     max_enters,
+                    clear_observations,
+                    required_clear_observations:
+                        pass_through_stranded_draft_required_clear_observations(),
                 });
             actions.push(pass_through_stranded_draft_action_label(action));
             if pass_through_stranded_draft_action_is_terminal(action) {
                 return (actions, enters_sent);
             }
             match action {
-                PassThroughStrandedDraftAction::SettleAndReobserve => settled = true,
-                PassThroughStrandedDraftAction::EnterResubmit => enters_sent += 1,
+                PassThroughStrandedDraftAction::SettleAndReobserve => {
+                    if settled && !draft_visible && !pane_busy {
+                        clear_observations += 1;
+                    }
+                    settled = true;
+                }
+                PassThroughStrandedDraftAction::EnterResubmit => {
+                    enters_sent += 1;
+                    clear_observations = 0;
+                }
                 _ => unreachable!("non-terminal actions are settle and resubmit"),
             }
         }
@@ -6029,13 +6077,57 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
-    fn pass_through_repair_costs_one_settle_window_when_the_submit_crossed() {
-        // The common case pays exactly one settle window and nothing more —
-        // still orders of magnitude under the dispatch-start proof budget the
-        // pass-through path exists to avoid.
-        let (actions, enters) = replay_pass_through_repair(&[(false, false), (false, false)], 3);
+    fn pass_through_repair_clears_immediately_once_the_pane_is_working() {
+        // The fast success path: the harness picked the trigger up and started a
+        // turn. A busy pane is positive evidence the submit crossed, so it needs
+        // no confirming observation and the repair ends on the first settled
+        // look (`#runsubmitclaude`).
+        let (actions, enters) = replay_pass_through_repair(&[(false, false), (false, true)], 3);
         assert_eq!(actions, vec!["settle_and_reobserve", "cleared"]);
         assert_eq!(enters, 0);
+    }
+
+    #[test]
+    fn pass_through_repair_confirms_an_idle_empty_composer_before_calling_it_cleared() {
+        // #runsubmitclaude (second pass): an IDLE pane showing no draft is
+        // ambiguous — the turn may already be over, or the keystrokes may not
+        // have rendered. One 150ms window is not proof, so the verdict waits for
+        // a second consecutive idle-and-empty look.
+        let (actions, enters) =
+            replay_pass_through_repair(&[(false, false), (false, false), (false, false)], 3);
+        assert_eq!(
+            actions,
+            vec!["settle_and_reobserve", "settle_and_reobserve", "cleared"]
+        );
+        assert_eq!(enters, 0);
+    }
+
+    #[test]
+    fn pass_through_repair_catches_a_draft_that_renders_after_the_first_window() {
+        // The live repro. Observed 2026-08-08 16:23:39Z on
+        // `tasks/agent-doc/agent-doc-bugs2.md` pane `%25`: the repair logged
+        // `outcome=cleared enters_sent=0 elapsed_ms=153` on a single settled
+        // look, and the operator then watched the trigger sit unsubmitted in the
+        // composer. The confirming observation sees the render and repairs it.
+        let (actions, enters) = replay_pass_through_repair(
+            &[
+                (false, false), // pre-settle: nothing observed yet
+                (false, false), // 153ms: render still has not landed
+                (true, false),  // it lands — the strand the old verdict missed
+                (false, true),  // the bare submit key started the turn
+            ],
+            3,
+        );
+        assert_eq!(
+            actions,
+            vec![
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "enter_resubmit",
+                "cleared"
+            ]
+        );
+        assert_eq!(enters, 1);
     }
 
     #[test]
@@ -6050,7 +6142,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             &[
                 (false, false), // capture beat the harness render
                 (true, false),  // trigger now visible, still unsent
-                (false, false), // bare submit key crossed
+                (false, true),  // bare submit key crossed; the turn is running
             ],
             3,
         );
@@ -6070,7 +6162,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         // on an idle pane, the settle window does not clear it, and one bare
         // submit key lands it.
         let (actions, enters) =
-            replay_pass_through_repair(&[(true, false), (true, false), (false, false)], 3);
+            replay_pass_through_repair(&[(true, false), (true, false), (false, true)], 3);
         assert_eq!(
             actions,
             vec!["settle_and_reobserve", "enter_resubmit", "cleared"]
@@ -6083,8 +6175,12 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         // A draft sighted before the settle window and gone after it was render
         // lag behind a submit that already crossed — never press a key for it.
         // The window gates both verdicts, so neither pre-settle frame decides.
-        let (actions, enters) = replay_pass_through_repair(&[(true, false), (false, false)], 3);
-        assert_eq!(actions, vec!["settle_and_reobserve", "cleared"]);
+        let (actions, enters) =
+            replay_pass_through_repair(&[(true, false), (false, false), (false, false)], 3);
+        assert_eq!(
+            actions,
+            vec!["settle_and_reobserve", "settle_and_reobserve", "cleared"]
+        );
         assert_eq!(enters, 0);
     }
 

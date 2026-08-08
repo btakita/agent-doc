@@ -104,6 +104,12 @@ pub fn no_response_live_queue_head_ids(
         .into_iter()
         .map(|id| normalize_id(&id))
         .collect();
+    // `#opverifyanswered`: once the operator answers an `[operator-verify]` head
+    // inline, it is live unresponded work again rather than a deferred head.
+    let operator_answered: HashSet<String> = queue_continuation::operator_answered_head_ids(content)
+        .into_iter()
+        .map(|id| normalize_id(&id))
+        .collect();
 
     let mut live = Vec::new();
     for id in recorded_ids {
@@ -114,7 +120,9 @@ pub fn no_response_live_queue_head_ids(
         if !current_head_ids.contains(&norm) || !open_backlog_ids.contains(&norm) {
             continue;
         }
-        if resolved_ids.contains(&norm) || deferred.contains(&norm) {
+        if resolved_ids.contains(&norm)
+            || (deferred.contains(&norm) && !operator_answered.contains(&norm))
+        {
             continue;
         }
         if !live.iter().any(|existing| existing == &norm) {

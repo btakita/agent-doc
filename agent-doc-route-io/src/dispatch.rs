@@ -25,6 +25,7 @@ use agent_doc_controller::dispatch::{
     direct_pane_submit_acceptance_budget, direct_pane_submit_outcome,
     dispatch_start_busy_probe_timeout, dispatch_start_early_resubmit_probe_timeout,
     pass_through_stranded_draft_log_line, pass_through_stranded_draft_max_enter_resubmits,
+    pass_through_stranded_draft_required_clear_observations,
     route_trigger_visible_in_current_draft, routed_dispatch_start_timeout_for_binary,
     routed_trigger_payload_rejection,
 };
@@ -533,7 +534,9 @@ fn repair_pass_through_stranded_draft(
 ) {
     let start = Instant::now();
     let max_enters = pass_through_stranded_draft_max_enter_resubmits();
+    let required_clear_observations = pass_through_stranded_draft_required_clear_observations();
     let mut enters_sent = 0usize;
+    let mut clear_observations = 0usize;
     let mut settled = false;
     let mut capture_failed = false;
     loop {
@@ -560,15 +563,24 @@ fn repair_pass_through_stranded_draft(
                 settled,
                 enters_sent,
                 max_enters,
+                clear_observations,
+                required_clear_observations,
             });
         match action {
             PassThroughStrandedDraftAction::SettleAndReobserve => {
+                // Only a SETTLED idle-and-empty look counts toward the
+                // confirmation; the pre-settle look observed nothing about this
+                // submit at all (`#runsubmitclaude`).
+                if settled && !draft_visible && !pane_busy {
+                    clear_observations += 1;
+                }
                 settled = true;
                 std::thread::sleep(PASS_THROUGH_STRANDED_DRAFT_SETTLE);
                 continue;
             }
             PassThroughStrandedDraftAction::EnterResubmit => {
                 enters_sent += 1;
+                clear_observations = 0;
                 send_pass_through_stranded_draft_enter(tmux, file, pane, harness);
                 std::thread::sleep(PASS_THROUGH_STRANDED_DRAFT_SETTLE);
                 continue;

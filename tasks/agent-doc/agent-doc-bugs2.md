@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 598f30d7-3643-4e65-9e79-ec7e9d656770
+resume: 09d97843-0be8-4349-9109-45567ee9909e
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -103,13 +103,57 @@ The superproject workflow simply never inherited it. (The one red run in agent-d
 **Verification:** `make check` with all three env vars set locally — **8707 passed, 0 failed, 248 skipped**. That proves the flags don't red the suite; it can't prove the disk headroom, which is runner-specific. Pushed; run `31249383368` is in progress, observed once and not awaited (`#ci-no-closeout-wait`). Filed an actionable follow-up to confirm it went green, with the next escalation levers if the reduction turns out to be insufficient.
 
 Session note: exchange accretion is `warn` (6 cycles / 30 min); queue is active so I'm not stalling to compact.
+
+### Re: tmuxsyncslow — opus-5
+
+> **Queue prompt:**
+>
+> do [#syncdupespelling]
+>
+> do [#tmuxsyncslow]
+
+
+Fixed and released as **0.35.170**. The cause was not in the reactive plane at all, which is why items 1-5 of the plan all shipped and the switch was still slow.
+
+**I measured instead of continuing down the plan.** `agent-doc sync --col A,B --focus …` reproduces the tab switch, and the binary indicts itself:
+
+```
+[sync] auto-start check: /home/brian/…/tasks/agent-doc/agent-doc-bugs2.md   ← absolute
+[sync] auto-start check: tasks/software/lazily.md
+[sync] auto-start check: tasks/agent-doc/agent-doc-bugs2.md                  ← relative, SAME doc
+[sync] latency budget exceeded: phase ownership_per_file_loop took 4120ms (budget 750ms)
+[sync] … unresolved files remain blocked: /home/brian/…/agent-doc-bugs2.md, tasks/agent-doc/agent-doc-bugs2.md
+```
+
+Three ownership passes for two documents, and one document listed twice as blocked under two spellings.
+
+**Root cause.** `auto_start_candidate_files` (`agent-doc-tmux/src/lib.rs`) deduped on the raw `PathBuf`. The column set is a merge of the caller's `--col` arguments with remembered column memory, and the two disagree on spelling — memory retains absolute paths, the editor/CLI passes root-relative ones. So `/abs/root/tasks/x.md` and `tasks/x.md` keyed as two candidates, and the second pass ran the full stale-binding fallback (`alive but no longer proves ownership` → supervisor process-tree recovery), which costs seconds.
+
+The sibling `projected_sync_pane_count`, fifteen lines below, already did `path.canonicalize().unwrap_or(path)` for exactly this reason. The codebase knew the right key; this function just never got it.
+
+**Fix.** Key dedup on the canonical path. The *emitted* path stays the first-seen spelling — session ids and operator-facing output derive from it — so only the dedup identity changed. An uncanonicalizable path falls back to itself, leaving the not-yet-created auto-start case untouched.
+
+**Before → after**, same command, same layout:
+
+| | passes | budget | worst switch | steady state |
+|---|---|---|---|---|
+| before | 3 for 2 docs | **4120ms** / 750ms exceeded | 2829ms | ~550ms |
+| after | 2 for 2 docs | no violation | 802ms | ~450ms |
+
+The `unresolved files remain blocked` line is gone too — that document was only "blocked" because its duplicate twin failed the ownership proof.
+
+**Verification:** `make check` — 8709 passed, 0 failed (2 new tests: absolute/relative collapse, and uncanonicalizable paths staying distinct so auto-start still works). Built, installed, recycled. Commits `88b33fe65` (fix) and `6dea99840b` (plan record), tagged `v0.35.170`. CI `31250556000` in progress, observed once, not awaited.
+
+I recorded the finding as item 7 in `tasks/agent-doc/plan-tmux-auto-sync-reactive.md` with the lesson attached: items 1-5 were genuine reactive improvements, but the duplicated work sat *upstream* of the reactive graph, in how the candidate set was keyed — no amount of further conversion would have found it. Plan item 4 (`ThreadSafeDependencyMap`) remains open and is still correctly marked lower priority.
+
+Also filed and closed `#syncdupespelling` so the marker in the shipped code and `VERSIONS.md` resolves to a real tracked item — the coined-id guard caught that I'd have left it dangling.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#syncdupespelling]
-- 🚧 do [#tmuxsyncslow]
+- ~~do [#syncdupespelling]~~
+- ~~do [#tmuxsyncslow]~~
 - do [#runpromptverbose]
 - do [#confirmsuperprojectjob]
 <!-- /agent:queue -->
@@ -122,8 +166,6 @@ Session note: exchange accretion is `warn` (6 cycles / 30 min); queue is active 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#syncdupespelling] tmux sync deduped auto-start candidates by raw PathBuf, so remembered-memory absolute paths and editor-relative paths keyed one document as two candidates and the ownership loop resolved it twice. Fixed in 0.35.170 by keying on the canonical path (agent-doc-tmux/src/lib.rs); marker referenced from that code and VERSIONS.md.
-- [ ] 🚧 [#tmuxsyncslow] tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it. (restored from the queue after #qftnodoneeat deleted it; plan context: tasks/agent-doc/plan-tmux-auto-sync-reactive.md)
 - [ ] [#runpromptverbose] The prompt Run Agent Doc sends to Claude Code should simply be `/agent-doc .../file.md`. It currently sends a long multi-paragraph prompt ("Agent Doc queue state advanced for ... Continue this existing owner-pane session; do not invoke agent-doc recursively. Execute the current active queue head: ... Persist and finalize this cycle through the connected Agent Doc tools."). Restored from the queue after #qftnodoneeat deleted it.
 - [ ] [#confirmsuperprojectjob] Confirm the superproject `Agent Doc` / `check` job went green after the runner-disk fix (commit 8b01b6fe50, run 31249383368): `gh run list --workflow "Agent Doc" --limit 2`. If the Bus error recurs, the disk reduction was insufficient — next levers are freeing runner disk (drop the preinstalled Android SDK / dotnet / GHC images), `-C debuginfo=0` via RUSTFLAGS, or splitting `--all-targets` across jobs.
 <!-- /agent:backlog -->

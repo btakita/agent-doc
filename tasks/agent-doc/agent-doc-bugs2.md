@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status

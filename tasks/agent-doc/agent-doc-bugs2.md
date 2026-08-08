@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: a1cd90cb-d7e0-4206-a900-ea7d9078d4f9
+resume: ac3e73fc-ccac-4a65-932d-a3b7aa9adeed
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -172,11 +172,59 @@ controllers recycled.
 consumed and struck by the echo before it was addressed. Say the word and I will
 take it as its own item; I did not want to guess which of the two free-text lines
 you meant.
+
+### Re: restoring the two queue items I deleted — and the third bug that deleted them — opus-5
+
+I have to lead with this: **the closeout of the previous item deleted two of your
+queue entries.** They are restored below as tracked items, and the defect that
+ate them is fixed and released as **0.35.166**.
+
+**What I destroyed.** After `--done qheadnest`, the queue went from the auto-sync
+latency head plus the freeform "long prompt" report to empty, with `queue: stop`.
+No diagnostic, no confirmation.
+
+**Root cause (`#qftnodoneeat`).** `consume_queue_prompts_for_done_ids_*` asked the
+consume planner for a free-text budget of 1 unconditionally. A `do [#id]` head is
+matched by id, so `leading_done_consume_count` was 0 for a free-text head — and
+the planner then fell straight through to "consume the leading free-text prompt"
+with **no proof of any kind** that the cycle addressed it. `#qheadnest` had never
+been a queue head at all. Because the auto-sync line was the last head, the
+consume also drained the queue and flipped `queue: stop`.
+
+I verified the response body was innocent before blaming it: probing
+`free_text_head_answered_by_response` against my own patch text returns `false`.
+The consumption never consulted it.
+
+**Fix.** The free-text budget is 0 as soon as any id is named. An empty
+`done_ids` — the generic response closeout, whose callers already establish
+proof — keeps its budget of 1. A genuinely answered free-text head is still
+struck by the proof-bearing site, which requires the response to quote it. The
+refusal now logs `queue_consume_refused_unproven_free_text_head`. Tests cover all
+three shapes: an unrelated id must not eat the head, an id-backed head the
+`--done` really resolved is still consumed with the free-text head behind it
+surviving, and the proof-bearing budget still works.
+
+**Restored as tracked work**, which is also what your note asked for — a
+free-text line replaced by a directive rather than left as prose:
+
+- `#tmuxsyncslow` — the auto-sync latency item, with
+  `plan-tmux-auto-sync-reactive.md` as context.
+- `#runpromptverbose` — Run Agent Doc should send `/agent-doc .../file.md`, not
+  the long "Agent Doc queue state advanced for …" prompt.
+
+Check both against what you meant; I reconstructed them from the committed text
+at `d0b2829f0a`, not from memory.
+
+**Three fixes this turn**, all released and installed: 0.35.164 the settle-gated
+pass-through draft check, 0.35.165 the anchored free-text answer match, 0.35.166
+this one. Each was uncovered by closing out the previous one.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#tmuxsyncslow]
+- do [#runpromptverbose]
 <!-- /agent:queue -->
 
 ## Notes
@@ -187,6 +235,8 @@ you meant.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmuxsyncslow] tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it. (restored from the queue after #qftnodoneeat deleted it; plan context: tasks/agent-doc/plan-tmux-auto-sync-reactive.md)
+- [ ] [#runpromptverbose] The prompt Run Agent Doc sends to Claude Code should simply be `/agent-doc .../file.md`. It currently sends a long multi-paragraph prompt ("Agent Doc queue state advanced for ... Continue this existing owner-pane session; do not invoke agent-doc recursively. Execute the current active queue head: ... Persist and finalize this cycle through the connected Agent Doc tools."). Restored from the queue after #qftnodoneeat deleted it.
 <!-- /agent:backlog -->
 
 ## Review

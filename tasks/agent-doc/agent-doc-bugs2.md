@@ -287,6 +287,28 @@ Six samples is not the ~20 the item asks for, so I did not touch the submit prof
 Review is 10 → 9, and what remains is real operator work: live IDE/pane proofs (#stickymdpaneverify, #operatorverifyrestart, #rebootselfhealverify, #c8tb, #operatorverifylive, #mtds, #falsetyping-guard), one repo-secret rotation (#hvw0), and #passthroughsplitprofile pending its corrected measurement. The single highest-leverage operator action is one JetBrains restart onto 0.2.350 — it unblocks four of them.
 
 Backlog and queue now hold four items, topmost first: `#ptsubmitmetric`, `#claudesplitsubmit`, `#compactstrandedheading`, `#hvw0publishproof`.
+
+### Re: the closeout that failed on its own bug report — opus-5
+
+The triage above committed cleanly (`a02d8913e9`), then `respond` died on the way out:
+
+```
+boundary_invariant_violation phase=post_commit_collapse committed_boundaries=2 collapsed_boundaries=2
+```
+
+Fixed and shipped in **0.35.175** (`#boundaryprosecount`).
+
+**This document broke agent-doc by describing it.** The post-commit invariant counts boundary markers with a raw substring scan — `head_blob.matches(BOUNDARY_PREFIX).count()`. Line 187 of this very document is a sentence I wrote in an earlier turn: "Response-block dedup normalizes `` `<!-- agent:boundary: -->` ``, the `(HEAD)` suffix and the `❯` prefix." That inline-code mention carries the prefix, so the count read **2**.
+
+The self-heal then asked `reposition_boundary_to_end_clean` to collapse the accretion — and that function is *correct*: it masks code ranges (`find_code_ranges` covers inline `Event::Code` spans, not just fences), so it preserved the prose exactly as it should. The recount came back 2 again, `collapsed == 2 != 1` tripped the bail, and the command exited 1. Every closeout on this document would have failed the same way, permanently, with no state a retry could reach — the collapse can never satisfy a counter that is counting something the collapse must not touch.
+
+The counter and the collapse disagreed about what a marker *is*. Now they cannot: `boundary::count_markers` masks the same code ranges `remove_all` preserves, and all three invariant counts plus `agent-doc boundary`'s stale-marker diagnostic go through it. Four regression tests, including one that pins the raw substring count at 2 so the next reader can see exactly what regressed.
+
+Worth noting what this failure mode is: agent-doc's bug-tracking sessions are documents *about* agent-doc, so they quote its markers constantly. A self-referential corpus finds this class of defect and nothing else will.
+
+**Shipped.** `make check` green (exit 0). `make install` + `agent-doc admin recycle` on both roots; binary is 0.35.175. Committed `2b5c8c68d`, pushed, tagged `v0.35.175` — Release and PyPI workflows are queued, recorded not waited on. The latest CI run is queued as of this write.
+
+Queue drained: the four backlog items from the triage (`#ptsubmitmetric`, `#claudesplitsubmit`, `#compactstrandedheading`, `#hvw0publishproof`) are queued behind it.
 <!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue

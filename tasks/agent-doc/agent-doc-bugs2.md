@@ -225,12 +225,44 @@ Belt and braces on purpose: CI gets the composite build it intends, and the guar
 **On `#operatorverifyeyeball`, the head I was handed:** I am deliberately not closing it. It requires a human watching a real JetBrains pane confirm the injected trigger renders as `/agent-doc /abs/path.md`; `--done` from here would assert something I did not do. The binary already agrees — it tagged the item `[operator-verify]` and excluded it from `queue_drainable_head_count`, which is why preflight handed me no `selected_queue_prompts` this turn. With the two drainable items now closed, only that operator-gated head remains, so the drain should report `deferred_for_operator_proof` and stop rather than churn.
 
 Session note: exchange is at 161 lines / 6 sections (`warn`); queue is active so I have not stalled to compact.
+
+### Re: the queue head that was never recognized, and Run Agent Doc not submitting — opus-5
+
+> **Queue prompt:**
+>
+> In the last turn, the queue item was not recognized and agent-doc turn resulted in `Nothing to respond to this cycle — preflight reports no_changes: true.` even though `do [#operatorverifyeyeball]: verified. looks good` was in the queue. Also, Run Agent Doc added the prompt to Claude Code but did not submit.
+
+
+Both are real defects. Diagnosed, fixed, and shipped in **0.35.174** this cycle.
+
+**1. An answered `[operator-verify]` head stayed deferred forever (`#opverifyanswered`).**
+`[operator-verify]` defers a head because it needs a human to look at something. When you supplied that verdict in the head itself — `do [#operatorverifyeyeball]: verified. looks good` — nothing consumed it. `deferred_backlog_ids` still held the id, `head_is_drainable` still refused it, so `queue_drainable_head_count` stayed `0` and `queue_continuation_required` stayed `false`. Every following turn correctly reported "no drainable work" against a queue whose head was your answer. The verdict is the proof the tag was waiting for, so a head carrying one now drains in both the in-session loop and the supervisor drain. The rule is shape-based, not sentiment-based — `still broken` is as actionable as `verified`, and agent-written heads are bare `do [#id]`, so a trailing annotation is operator-authored by construction. `[focused-cycle]` is deliberately unaffected: it asks for a fresh cycle, which no amount of human confirmation supplies.
+
+**2. Your bug report inherited the gating of the head it quoted (`#ftquotedid`).**
+`extract_head_id` scanned raw head text, so the free-text line containing `` `do [#operatorverifyeyeball]: verified. looks good` `` in backticks was classified as *that* head — and inherited its operator-verify deferral. The bug report stalled the queue it was reporting on. Id extraction now masks balanced inline-code spans first; an unbalanced backtick stays prose, so real directives still resolve.
+
+That pair is why the `no_changes: true` turn produced nothing: preflight reported the document unchanged relative to the snapshot, and the queue that *was* active had zero heads it would admit.
+
+**3. "Run Agent Doc added the prompt but did not submit" (`#runsubmitclaude`, second pass).**
+Found it in `ops.log`, not by inference. Pane `%25`, two clicks 71 seconds apart:
+
+- `16:22:28Z` — `route_pass_through_submit_draft outcome=cleared enters_sent=1 elapsed_ms=306`. The draft was visible on the first settled look, one bare submit key landed it, the turn ran.
+- `16:23:39Z` — `route_pass_through_submit_draft outcome=cleared enters_sent=0 elapsed_ms=153`. One settled look, nothing visible, verdict `cleared`, repair over. That is the click you watched sit unsubmitted.
+
+0.35.164 fixed the 1ms version of this by gating the verdict on a 150ms settle window. 150ms lands *on* the render boundary — same pane, same harness, two different answers a minute apart. It is the `#idlerevisionreactive` collapse again: "I looked and saw nothing" was still being read as "there is nothing." An **idle** pane showing no draft is ambiguous between "the turn already finished" and "the keystrokes have not rendered", so that verdict now requires a second consecutive idle-and-empty observation. A **busy** pane showing no draft needs none — a working harness is positive evidence the trigger crossed — so the successful path costs nothing extra and only the genuinely ambiguous case pays one more window.
+
+**Verification.** Nine new regression tests (three drainability, two id-extraction, four replaying the whole pass-through repair against a scripted pane including the 16:23:39 frame sequence). `make check` green. `make install` + `agent-doc admin recycle` done on both roots; binary is 0.35.174. Pushed, tagged `v0.35.174`; the Release and PyPI workflows are queued — recorded, not waited on.
+
+One caveat worth naming: fix 3 makes the repair *see* the strand it was missing. Whether Claude Code's composer can also swallow the submit key in a way no bare Enter recovers is not settled — `#passthroughsplitprofile` is the open review item for that, and it now has real post-0.35.164 measurements to read, including one `enter_resubmit` at 16:22:28Z. That is evidence the single-call text+Enter send *is* dropping submits, which is the item's stated unblock condition.
+
+Session note: exchange is at 193 lines / 7 sections (`warn`); queue is active, so I did not stall to compact.
 <!-- agent:boundary:f16db0e4 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#operatorverifyeyeball]
+- ~~In the last turn, the queue item was not recognized and agent-doc turn resulted in `Nothing to respond to this cycle — preflight reports no_changes: true.` even though `do [#operatorverifyeyeball]: verified. looks good` was in the queue. Also, Run Agent Doc added the prompt to Claude Code but did not submit.~~
+- do [#operatorverifyeyeball]: verified. looks good
 <!-- /agent:queue -->
 
 ## Notes

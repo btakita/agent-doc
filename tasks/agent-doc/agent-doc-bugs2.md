@@ -230,12 +230,7 @@ Session note: exchange is at 161 lines / 6 sections (`warn`); queue is active so
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#lzktemptydir]~~
 - do [#operatorverifyeyeball]
-- ~~do [#syncdupespelling]~~
-- ~~do [#tmuxsyncslow]~~
-- ~~do [#runpromptverbose]~~
-- ~~⏭️ do [#confirmsuperprojectjob]~~
 <!-- /agent:queue -->
 
 ## Notes

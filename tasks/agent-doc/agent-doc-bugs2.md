@@ -85,11 +85,12 @@ Your read on severity holds: the old grep could only produce a false red, never 
 **Not spread elsewhere.** I checked the sibling release workflows for the same pattern: `src/agent-doc` uses "already exists" for a `gh release view` check (unrelated), and `src/tsift` pre-checks the index itself via `crate_version_exists` (also unrelated). No second instance of this bug.
 
 Still operator-gated and unchanged by this work: `#hvw0` — the `CARGO_REGISTRY_TOKEN` on that repo returns 403, so no tagged release has exercised the publish step since 32836ad. This turn proves the classifier statically; the live path stays unproven until the token is rotated and a tag runs.
-<!-- agent:boundary:7ad810c1 -->
+<!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#dedupepresettle]
 <!-- /agent:queue -->
 
 ## Notes
@@ -100,6 +101,7 @@ Still operator-gated and unchanged by this work: `#hvw0` — the `CARGO_REGISTRY
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dedupepresettle] #agent-doc-bug Closeout write path reports success before CRDT/disk convergence under CAS contention, producing a duplicate response section. Observed 2026-08-08 on cycle-1786232060198: `respond --stream` logged `compare_and_swap_raced` twice, wrote the response cell twice, and failed session-check with `found consecutive duplicate response patchback`; `agent-doc dedupe` then printed `removed 3313 bytes` and exited 0 while the duplicate was STILL on disk, needing a second identical run to converge; session-check's own `self_heal_response_replay_duplication` failed terminally with `session_check_response_replay_dedup: successful repair write did not converge exactly before settling deferred lineage`. One bug, not three: repair/dedupe/respond writes return success on the pre-settle path instead of awaiting convergence. Fix: make dedupe and the self-heal repair await settle and re-verify the post-write content hash before returning success, and add a SimWorld case that races a replica CAS against the response patchback and asserts exactly one response section. Also: the last dedupe run dropped the `<!-- agent:boundary:... -->` marker from the working copy while HEAD kept it.
 <!-- /agent:backlog -->
 
 ## Review

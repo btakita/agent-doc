@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.173
+
+- **A composite-build guard could not tell "absent" from "present but empty" (`#lzktemptydir`).**
+  `editors/jetbrains/settings.gradle.kts` conditionally `includeBuild`s the sibling `lazily-kt` so
+  monorepo checkouts exercise local edits, falling back to the published
+  `io.github.lazily:lazily` when the sibling is absent. The guard tested directory *existence* — but
+  an uninitialized git submodule is an existing **empty** directory, so the guard passed,
+  `includeBuild` substituted the dependency with a build that has no projects, and Gradle failed
+  with the opaque `No matching variant of project :lazily-kt was found ... No variants exist.`
+  A standalone checkout has no directory at all, which is why only a PARTIAL monorepo checkout hit
+  it. The guard now keys on the sibling's `settings.gradle{,.kts}`, making the fallback identical
+  for "absent" and "present but uninitialized".
+
+  Surfaced by the agent-loop superproject `check` job, whose submodule init listed every sibling
+  except `src/lazily-kt` and `src/lazily-spec` (agent-doc's own `ci.yml` clones both, which is why
+  it stayed green). Both are now initialized there as well — belt and braces: CI gets the composite
+  build it intends, and any other partial checkout degrades to the published artifact instead of a
+  confusing variant error.
+
+  This was masked until now: the runner-disk Bus error (0.35.170's `#loopsuperprojectjob` fix) was
+  killing the job before it ever reached `dev-harness-test`.
+
 ## 0.35.172
 
 - **A response replay that lacks the queue-prompt quote is still a duplicate (`#dupereplayquote`).**

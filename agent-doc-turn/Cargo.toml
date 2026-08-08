@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-turn"
-version = "0.35.172"
+version = "0.35.173"
 edition = "2024"
 description = "Pure turn lifecycle and operation-scope models for agent-doc"
 license = "MIT"
@@ -11,17 +11,17 @@ publish = false
 name = "agent_doc_turn"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.172" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.172" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.172" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.172" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.172" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.172" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.172" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.172" }
-agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.172" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.172" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.172" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.173" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.173" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.173" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.173" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.173" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.173" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.173" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.173" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.173" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.173" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.173" }
 lazily = { version = "0.56.0", features = ["thread-safe"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }

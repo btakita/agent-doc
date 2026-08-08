@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: de9e715c-f01f-48f4-bfb2-d013e5d1e668
+resume: 27d915fd-ca4e-4f22-b7ce-82f01cadc27b
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -160,6 +160,36 @@ The operator-facing message follows the same rule. "Restore an idle prompt and r
 The regression test asserts both directions — distinct `result`/`issue`/`unblocker`, the remedy sentence matching the observation, and explicitly that `Unobserved` is still not `Accepted` and still not resubmittable. Mutation-checked by pointing `Unobserved` back at `command_still_visible`, which reproduces your exact line and fails the test.
 
 **Shipped:** `make check` green (exit 0, 0 failed suites), `make install` → 0.35.180, pushed (`175ccf251` + superproject `bd0ba23c02`), controller recycled. CI runs `31276427011` and `31277544182` were both still in progress at closeout — recorded, not awaited.
+
+### Re: do [#ptsubmitmetric] — opus-5
+
+Fixed and shipped in **0.35.181**. The criterion was worse than imprecise — it counted an event that cannot exist.
+
+**Why it was structurally zero.** `EnterResubmit` is a *non-terminal* action. The repair loop `continue`s on it and only terminal actions reach `log_op`, so `outcome=enter_resubmit` can never appear in a production ops.log. "Unblock when the `outcome=enter_resubmit` rate is nonzero" could not have been satisfied by any amount of real-world breakage.
+
+**The signal that does exist.** `enters_sent` is incremented only inside the `EnterResubmit` branch, so a nonzero count on a *terminal* line means the initial single-call text+Enter send did not submit. Reading that still meant hand-parsing every line and knowing the above, so the terminal line now states the conclusion:
+
+```
+route_pass_through_submit_draft ... outcome=cleared enters_sent=1 resubmit_required=true ...
+```
+
+Note the outcome is `cleared` in both the clean and the repaired case — `resubmit_required` is the only thing that separates them, which is exactly why hand-parsing was error-prone.
+
+**Rollup: `agent-doc ops submit-profile [--since <RFC3339 prefix>] [--json]`.** Per harness: repairs, how many needed a bare submit key, the rate, the outcome breakdown, `max_enters_sent`. Run against this project's live log just now:
+
+```
+claude: 11 repair(s), 8 needed a bare submit key (72%), max enters_sent=2
+    outcome=cleared: 11
+  note: 11 line(s) predate `resubmit_required` and were counted from `enters_sent`
+```
+
+Legacy lines are recovered from `enters_sent` but reported separately, so a mixed sample is declared rather than quietly folded in.
+
+**Restated criterion for `#passthroughsplitprofile` / `#claudesplitsubmit`:** unblock when `agent-doc ops submit-profile --since <first post-0.35.164 day>` reports **≥20 `harness=claude` repairs**; the call is then `resubmit_required` / `repairs`. Current reading is **11 repairs, 8 resubmit-required (72%)** — up from the 6 samples the review item recorded, still under the floor. The rate is high enough to be suggestive, but 11 samples is not the agreed floor, so `#claudesplitsubmit` stays measurement-blocked rather than decided. It is now one command to re-check instead of a grep session.
+
+Tests pin that the two non-terminal actions never reach the log (the reason the old counter was zero), that a repaired and a clean send both report `outcome=cleared` but differ on `resubmit_required`, and both rollup paths including the legacy recovery and `--since` filtering.
+
+**Shipped:** `make check` green (exit 0 — clippy caught a manual checked division on the first pass and it was fixed), `make install` → 0.35.181, pushed (`c62d36acd` + superproject `40801afe96`), controllers auto-recycled by `lib-install`. CI runs `31277544182` and `31278434421` still in progress at closeout — recorded, not awaited.
 <!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -167,7 +197,7 @@ The regression test asserts both directions — distinct `result`/`issue`/`unblo
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#clearsubmitlabel]~~
 - ~~do [#startupmiss9row]~~
-- do [#ptsubmitmetric]
+- ~~do [#ptsubmitmetric]~~
 - do [#claudesplitsubmit]
 - do [#compactstrandedheading]
 - do [#hvw0publishproof]
@@ -181,7 +211,6 @@ The regression test asserts both directions — distinct `result`/`issue`/`unblo
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ptsubmitmetric] #agent-doc-bug Fix the unmeasurable #passthroughsplitprofile criterion. `outcome=enter_resubmit` is a NON-terminal action (`pass_through_stranded_draft_action_is_terminal` admits only Cleared/DeferredPaneBusy/ExhaustedStillStranded), so production ops.log can never record it and that counter is structurally always zero no matter how many submits drop. The real signal is `enters_sent > 0` on a terminal `outcome=cleared` line — `enters_sent += 1` happens only inside the EnterResubmit branch (agent-doc-controller/src/dispatch.rs:6070). Emit an explicit terminal field (for example `resubmit_required=true|false`) or a rollup command so the decision is readable without hand-parsing ops.log, restate the unblock criterion in those terms on #passthroughsplitprofile, and add a regression test pinning that a repair which resubmitted logs the new field.
 - [ ] [#claudesplitsubmit] #agent-doc-bug Decide and implement whether claude joins `harness_uses_split_text_submit` (the split text+Enter profile codex/opencode use, `tmux_submit_profile_for_harness`, 80ms), reading the corrected counter from #ptsubmitmetric. Current reading: 6 post-0.35.164 harness=claude repairs (elapsed_ms >= 150), 5 of which needed at least one resubmit and one of which needed two — that is the stated single-call-send-is-the-cause condition, but on 6 samples rather than the ~20 sample floor. Gather to the floor with the corrected metric first, then either add claude to the split profile or record that the settle-gated repair alone is sufficient. Do not change the profile without the measurement.
 - [ ] [#compactstrandedheading] #agent-doc-bug Run `agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` and confirm it no longer fails on the historical stranded duplicate heading. Converted from the removed operator-verify item #operatorverifyresolve, whose premise (a live JetBrains File Cache Conflict awaiting a human Cancel / Keep-memory-changes) is stale: recent session-checks read `status=current authority=cp_model live_editors=1 delivery_converged=true` and the retained closeouts it was waiting on are committing. Only this half was ever untested, and it is agent-testable.
 - [ ] [#hvw0publishproof] #agent-doc-bug Verify statically (read the release workflow on github.com/btakita/skill-harness) that the crates.io publish step propagates failure after 32836ad. The loud-failure behavior has never actually executed: the newest Release run is v0.1.3 from 2026-07-18 and its `Publish to crates.io` step reports SUCCESS even though the CARGO_REGISTRY_TOKEN 403s and v0.1.3 was published by hand — that success line is the false green 32836ad was meant to kill. Until a tag runs, the every-tagged-release-now-fails-loudly claim on #hvw0 is untested.
@@ -190,7 +219,7 @@ The regression test asserts both directions — distinct `result`/`issue`/`unblo
 ## Review
  
 <!-- agent:review -->
-- [/] [#passthroughsplitprofile] #agent-doc-bug [blocked-on-evidence] Decide from evidence whether Claude also needs the split text+Enter submit profile that codex/opencode use (`tmux_submit_profile_for_harness`, 80ms). CRITERION CORRECTED 2026-08-08: the old unblock condition (a nonzero `outcome=enter_resubmit` rate in ops.log) is UNMEASURABLE — EnterResubmit is a non-terminal action and production logs only terminal outcomes, so the counter is structurally always zero. The load-bearing signal is `enters_sent > 0` on a terminal `outcome=cleared` line (dispatch.rs:6070 increments only in the EnterResubmit branch), which means the draft was still visible after the initial send. Current reading: 6 post-0.35.164 harness=claude lines, 5 with enters_sent>0 (one with 2). UNBLOCKED when the corrected counter (#ptsubmitmetric) reaches ~20 post-0.35.164 harness=claude repairs; #claudesplitsubmit then makes the call. Do not change the submit profile without the measurement — the mechanism is inferred, not proven.
+- [/] [#passthroughsplitprofile] #agent-doc-bug [blocked-on-evidence] Decide from evidence whether Claude also needs the split text+Enter submit profile that codex/opencode use (`tmux_submit_profile_for_harness`, 80ms). CRITERION RESTATED 2026-08-08 (#ptsubmitmetric, 0.35.181): the old condition (a nonzero `outcome=enter_resubmit` rate) was UNMEASURABLE — EnterResubmit is non-terminal and never reaches ops.log, so that counter is structurally always zero. Terminal lines now carry `resubmit_required=true|false`, and `agent-doc ops submit-profile --since <first post-0.35.164 day> [--json]` rolls it up per harness. UNBLOCKED when that command reports >=20 harness=claude repairs; the call is then resubmit_required/repairs, made by #claudesplitsubmit. Current reading 2026-08-08: 11 repairs, 8 resubmit-required (72%) — suggestive but under the 20-sample floor. Do not change the submit profile without the measurement; the mechanism is inferred, not proven.
 - [/] [#stickymdpaneverify] [operator-verify] #stickymdpane live proof: restart a JetBrains IDE — plugin 0.2.350 is ALREADY INSTALLED in all four IDE configs, so only the restart is missing, and that one restart also satisfies the install precondition for #operatorverifyrestart, #rebootselfhealverify and #falsetyping-guard — then open a two-column split with an agent-doc document in each and switch ONE column to a source file. Expect tmux to keep both panes with that column still showing its last document, instead of collapsing to one pane. Then close that split entirely and confirm tmux DOES collapse — the fallback must be memory, not invention. Unit tests pin the pure resolution but cannot prove the live IDE wiring.
 - [/] [#operatorverifyrestart] [operator-verify] Restart a running JetBrains IDE (installed plugin is 0.2.350; this item originally named 0.2.340, long superseded — the single restart in #stickymdpaneverify covers it), then move from fpe-service-topology.md in a one-pane surface to agent-doc-bugs2.md in its two-column surface and confirm the first selection restores two tmux panes without a second navigation.
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE (installed plugin is 0.2.350; this item originally named 0.2.339 — reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is still required, and the restart in #stickymdpaneverify covers it). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the `pane-layout state projection publish failed ... Connection refused` notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.

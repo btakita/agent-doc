@@ -202,3 +202,6 @@
 [submodule "src/lazily-cs"]
 	path = src/lazily-cs
 	url = git@github.com:lazily-hub/lazily-cs.git
+[submodule "src/lazily-gd"]
+	path = src/lazily-gd
+	url = git@github.com:lazily-hub/lazily-gd.git

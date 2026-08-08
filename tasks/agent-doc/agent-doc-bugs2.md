@@ -186,6 +186,25 @@ Correcting the closeout above: CI run 31242159018 failed, and it was my fault, n
 Reverted only their hunk at HEAD (`6d1c64167`, superproject `5778d3129c`) and restored it to the working tree uncommitted, so those assertions land with their source when they commit. `git diff a739c20b6 HEAD -- tests/test_cli.rs` is now exactly my two `#runfilesubmit` guard snippets and nothing else. CI run 31242298646 was pending at closeout.
 
 The manifests are different and had to stay: `make release-version` rewrites all 144 of them, so a version bump necessarily stages ones another session touched, and omitting them would leave HEAD declaring 0.35.162 crates against 0.35.163 path requirements — also unbuildable. The `libc = "0.2"` line rides along; their source does not.
+
+### Re: do [#syncdoctorverify] — opus-5
+
+**Confirmed from the live log. Both claims hold; closing.**
+
+`/tmp/agent-doc-sync.log`, every sample since the 0.35.162 meter landed:
+
+| phase | n | median | max | over 250ms budget |
+|---|---|---|---|---|
+| `doctor_repair_pre` | 61 | 29ms | 140ms | **0** |
+| `doctor_repair_post` | 57 | 49ms | 131ms | **0** |
+
+Window `02:06:07Z .. 05:39:02Z`. Every sample is post-fix by construction — the meter did not exist before `#syncdoctorconverged`.
+
+**The unconditional repair claim is gone.** The pre-fix window showed 2764 pre-sync and 2761 post-sync `Repaired \`agent-doc\`/\`stash\` layout` notes — essentially one per sync, forever, with zero convergence. Since the fix: **3 claims across 61 syncs**, at `04:51:08Z`, `04:57:03Z`, `05:39:02Z`. `repair_layout` now returns `AlreadyConverged` and issues no tmux command on the ~95% of syncs where the layout was already correct, and the note appears only for a repair that actually mutated tmux.
+
+The item's fallback branch does not apply: neither pass is over budget, so there is no remaining cost to chase in `repair_file_state_with_tmux`'s own file read, frontmatter parse, or `detect_jb_cache_conflict_cancel_recoverable` call.
+
+This was read-only log analysis — no source touched, so it does not collide with the concurrent session rewriting `agent-doc-sync-io/src/sync.rs`.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -196,7 +215,7 @@ The manifests are different and had to stay: `make release-version` rewrites all
 - ~~do [#qcontprose]~~
 - ~~do [#stickymdpane]~~
 - ~~do [#runfilesubmit]~~
-- do [#syncdoctorverify]
+- ~~do [#syncdoctorverify]~~
 - tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.
 ---
 The prompt for Claude Code should simply be `/agent-doc .../file.md`. There is a long prompt instead:
@@ -217,7 +236,6 @@ The prompt for Claude Code should simply be `/agent-doc .../file.md`. There is a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#syncdoctorverify] #agent-doc-bug Confirm the #syncdoctorconverged win from /tmp/agent-doc-sync.log after several live editor tab-switch syncs on 0.35.162: doctor_repair_pre and doctor_repair_post should stay under their 250ms budget, and 'Repaired `agent-doc`/`stash` layout' should no longer appear on every sync (2764 pre + 2761 post claims with zero convergence in the pre-fix window). If either pass is still over budget, the remaining cost is repair_file_state_with_tmux's own file read, frontmatter parse, and detect_jb_cache_conflict_cancel_recoverable call rather than repair_layout.
 <!-- /agent:backlog -->
 
 ## Review

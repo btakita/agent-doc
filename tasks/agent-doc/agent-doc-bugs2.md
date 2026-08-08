@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 09d97843-0be8-4349-9109-45567ee9909e
+resume: f0e63870-952b-43fb-a47c-a6abdc6958dd
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -147,6 +147,36 @@ The `unresolved files remain blocked` line is gone too — that document was onl
 I recorded the finding as item 7 in `tasks/agent-doc/plan-tmux-auto-sync-reactive.md` with the lesson attached: items 1-5 were genuine reactive improvements, but the duplicated work sat *upstream* of the reactive graph, in how the candidate set was keyed — no amount of further conversion would have found it. Plan item 4 (`ThreadSafeDependencyMap`) remains open and is still correctly marked lower priority.
 
 Also filed and closed `#syncdupespelling` so the marker in the shipped code and `VERSIONS.md` resolves to a real tracked item — the coined-id guard caught that I'd have left it dangling.
+
+### Re: runpromptverbose — opus-5
+
+> **Queue prompt:**
+>
+> do [#runpromptverbose]
+
+
+Fixed and released as **0.35.171** — though the report was half-stale, and the half that remained was worse than described.
+
+**The paragraph was already gone.** `#qcontprose` removed it; the quoted text ("Agent Doc queue state advanced for … do not invoke agent-doc recursively … Persist and finalize this cycle") now survives only in a doc comment explaining what it used to be. Nothing to do there.
+
+**What was actually still wrong:** the one-line trigger that replaced it was hardcoded to the bare `agent-doc <file>` form for *every* harness, on **both** dispatch paths:
+
+1. `owned_pane_queue_continuation_prompt` (supervisor idle drain) ignored the harness and returned `format!("agent-doc {}", …)`. That silently violated this project's own spec — `specs/07-session-tmux-commands.md`: *"Claude/OpenCode drains inject the normal slash-command harness reopen, and Codex drains inject the bare `agent-doc <FILE>` reopen"* — and contradicted an existing test, `idle_queue_drain_payload_keeps_trigger_for_non_codex_harnesses`, which asserts exactly that split against `HarnessConfig::trigger_command`. The pure helper was harness-aware and correctly tested; the production caller handed it a hardcoded string, so the test passed while the behavior was wrong.
+2. The editor route (`Run Agent Doc`) called `apply_plain_trigger_override` whenever `plain_trigger` was set, rewriting Claude's and OpenCode's `/agent-doc {file}` template to the bare form.
+
+**Root of it:** `plain_trigger` was carrying two meanings — "attach no prompt-bearing context" (correct, still in force) and "use a different trigger than this harness's own" (wrong). That conflation is precisely what let the two dispatch paths disagree for the same harness, which is the divergence `#qcontprose` set out to eliminate in the first place.
+
+Both paths now go through `HarnessConfig::trigger_command`: Claude/OpenCode get `/agent-doc <file>`, Codex keeps the bare form that *is* its harness-native entrypoint. Absolutization (`#qcontabspath`) is unchanged.
+
+**Why this is more than tidiness.** The bare form *is* admitted by the `UserPromptSubmit` hook — which is exactly why the divergence never failed loudly and survived a spec that said otherwise. But only `/agent-doc <file>` also loads the skill deterministically, and the drain re-dispatches into panes the supervisor has just `/clear`ed, where the agent has no prior workflow context. I hit the mirror image of this myself earlier in this drain: a wakeup carrying the wrong prompt shape produced a turn with no cycle contract at all.
+
+`apply_plain_trigger_override` now has no production caller. I left it (shared static-guard tests in `tests/test_cli.rs` assert its shape, and churning that file risks cross-session contamination) but documented at its definition why adding a caller needs a reason. Spec updated so line 65 and line 69 agree.
+
+**Verification:** `make check` — 8710 passed, 0 failed (new: all three harnesses asserted on the continuation, plus the Claude/OpenCode/Codex trigger split). Built, installed, recycled, commit `c95cb6559`, tagged `v0.35.171`. CI `31251470362` in progress, observed once.
+
+**Status correction on the previous item:** the superproject CI run `31249383368` from `#loopsuperprojectjob` came back **FAIL**, so that fix was not sufficient. `#confirmsuperprojectjob` is the next head and exists for exactly this — I'm leaving the diagnosis to that cycle rather than pre-empting it here.
+
+Filed one `[operator-verify]` follow-up: the live JetBrains pane render is the only part I can't verify from this side.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -154,7 +184,7 @@ Also filed and closed `#syncdupespelling` so the marker in the shipped code and 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#syncdupespelling]~~
 - ~~do [#tmuxsyncslow]~~
-- do [#runpromptverbose]
+- ~~do [#runpromptverbose]~~
 - do [#confirmsuperprojectjob]
 <!-- /agent:queue -->
 
@@ -166,7 +196,7 @@ Also filed and closed `#syncdupespelling` so the marker in the shipped code and 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#runpromptverbose] The prompt Run Agent Doc sends to Claude Code should simply be `/agent-doc .../file.md`. It currently sends a long multi-paragraph prompt ("Agent Doc queue state advanced for ... Continue this existing owner-pane session; do not invoke agent-doc recursively. Execute the current active queue head: ... Persist and finalize this cycle through the connected Agent Doc tools."). Restored from the queue after #qftnodoneeat deleted it.
+- [ ] [#operatorverifyeyeball] [operator-verify] Eyeball a real JetBrains `Run Agent Doc` against a Claude Code pane and confirm the injected trigger now reads `/agent-doc /abs/path.md` (was bare `agent-doc /abs/path.md`), and that a freshly-`/clear`ed pane picks up the skill from it. Shipped in 0.35.171 (#runpromptverbose) with unit coverage on both dispatch paths; only the live-pane render is unverifiable from the agent side.
 - [ ] [#confirmsuperprojectjob] Confirm the superproject `Agent Doc` / `check` job went green after the runner-disk fix (commit 8b01b6fe50, run 31249383368): `gh run list --workflow "Agent Doc" --limit 2`. If the Bus error recurs, the disk reduction was insufficient — next levers are freeing runner disk (drop the preinstalled Android SDK / dotnet / GHC images), `-C debuginfo=0` via RUSTFLAGS, or splitting `--all-targets` across jobs.
 <!-- /agent:backlog -->
 

@@ -2,6 +2,26 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.170
+
+- **tmux tab-switch latency: one document was entering the ownership loop twice (`#syncdupespelling`).**
+  `auto_start_candidate_files` deduped on the raw `PathBuf`. The column set is a merge of the
+  caller's `--col` arguments with remembered column memory, and the two disagree on spelling —
+  memory retains absolute paths while the editor/CLI passes root-relative ones — so
+  `/abs/root/tasks/x.md` and `tasks/x.md` keyed as two distinct candidates and the per-file
+  ownership loop resolved the SAME document twice. Each extra pass runs the full stale-binding
+  fallback (`alive but no longer proves ownership` → supervisor process-tree recovery), which costs
+  seconds. Measured on a two-document layout: **three** `auto-start check` passes,
+  `ownership_per_file_loop took 4120ms` against a 750ms budget, and one document listed twice in
+  `unresolved files remain blocked`. Now keyed on the canonical path, matching the sibling
+  `projected_sync_pane_count`, which already canonicalized for this exact reason. The emitted path
+  stays the first-seen spelling (session ids and operator output derive from it) and an
+  uncanonicalizable path falls back to itself, so the not-yet-created auto-start case is unchanged.
+  After: two passes, **no latency-budget violation**, no blocked files; worst-case switch
+  2829ms → 802ms, steady state ~550ms → ~450ms.
+  This is the remaining wedge after items 1-5 of `tasks/agent-doc/plan-tmux-auto-sync-reactive.md`
+  shipped — it was never a reactive-plane problem, so none of those conversions could have caught it.
+
 ## 0.35.169
 
 - **The `agent:queue` mirror honours the backlog anchor, and `--backlog-reorder` cascades into it (`#queuemirrororder`).**

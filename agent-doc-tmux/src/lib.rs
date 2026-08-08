@@ -106,6 +106,25 @@ pub fn is_first_column(file: &Path, col_args: &[String]) -> bool {
         .is_some_and(|first_col| first_col.split(',').any(|f| f.trim() == file_str.as_ref()))
 }
 
+/// Distinct documents to consider for auto-start, in first-seen order.
+///
+/// `#syncdupespelling`: dedup keys on the CANONICAL path, not the raw one. The
+/// column set is a merge of the caller's `--col` arguments with remembered column
+/// memory, and the two disagree on spelling — memory retains absolute paths while
+/// the editor/CLI passes root-relative ones. Keyed on the raw `PathBuf`,
+/// `/abs/root/tasks/x.md` and `tasks/x.md` are two entries, so the caller's
+/// per-file ownership loop resolves the SAME document twice. That loop is the bulk
+/// of the `ownership_proof` phase, and each pass through the stale-binding fallback
+/// costs ~2s, so one duplicated document doubles a tab switch (measured: a
+/// two-document layout reported three `auto-start check` passes and a 4120ms
+/// `ownership_per_file_loop` against a 750ms budget, and listed one document twice
+/// in `unresolved files remain blocked`).
+///
+/// [`projected_sync_pane_count`] already canonicalizes for exactly this reason;
+/// this keeps the two consistent. The EMITTED path stays the first-seen spelling —
+/// downstream derives session ids and operator-facing output from it — so only the
+/// identity used for dedup changes. A path that cannot be canonicalized (not yet
+/// created) falls back to itself, matching the sibling.
 pub fn auto_start_candidate_files(col_args: &[String]) -> Vec<PathBuf> {
     let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut out: Vec<PathBuf> = Vec::new();
@@ -114,7 +133,8 @@ pub fn auto_start_candidate_files(col_args: &[String]) -> Vec<PathBuf> {
         .flat_map(|arg| arg.split(','))
         .map(|s| PathBuf::from(s.trim()))
     {
-        if seen.insert(path.clone()) {
+        let key = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if seen.insert(key) {
             out.push(path);
         }
     }
@@ -1133,6 +1153,54 @@ mod tests {
                 PathBuf::from("c.md"),
             ],
             "distinct documents must each remain an auto-start candidate"
+        );
+    }
+
+    /// `#syncdupespelling`: the reported tab-switch latency. Remembered column
+    /// memory holds absolute paths while the editor passes root-relative ones, so a
+    /// raw-path dedup key let one document enter the ownership loop twice.
+    #[test]
+    fn auto_start_candidate_files_dedupes_absolute_and_relative_spellings() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("bugs.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let other = tmp.path().join("other.md");
+        std::fs::write(&other, "# other\n").unwrap();
+
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let files = auto_start_candidate_files(&[
+            "bugs.md".to_string(),
+            doc.to_string_lossy().to_string(),
+            "other.md".to_string(),
+        ]);
+        std::env::set_current_dir(previous).unwrap();
+
+        assert_eq!(
+            files,
+            vec![PathBuf::from("bugs.md"), PathBuf::from("other.md")],
+            "an absolute and a relative spelling of one document must collapse to a \
+single first-seen candidate so the ownership loop resolves it once"
+        );
+    }
+
+    /// A path that does not exist yet cannot be canonicalized; it must still be a
+    /// candidate (that is the auto-start case) and must not collapse into a peer.
+    #[test]
+    fn auto_start_candidate_files_keeps_uncanonicalizable_paths_distinct() {
+        let files = auto_start_candidate_files(&[
+            "does-not-exist-a.md".to_string(),
+            "does-not-exist-b.md".to_string(),
+            "does-not-exist-a.md".to_string(),
+        ]);
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from("does-not-exist-a.md"),
+                PathBuf::from("does-not-exist-b.md"),
+            ],
+            "uncanonicalizable paths fall back to themselves: distinct ones stay \
+distinct, identical ones still dedupe"
         );
     }
 

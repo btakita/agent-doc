@@ -1,7 +1,7 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019fabf0-9af0-7f73-a25c-6a43fd6470c5
-agent: opencode
+resume: bcf94438-6b4f-41f9-9635-ad74063a30bc
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -61,11 +61,52 @@ Compacted content:
 **Closed `#dc0c`** as a duplicate of the shipped `#jb-tsift-pane-sync` (semantic match 0.883) — same "navigation did not surface the pane; manual Sync Tmux Layout did" class, already fixed.
 
 **Remaining (low priority).** Item 4 (`ControllerEditorSurfaceGraph` `Mutex<BTreeMap>` → `ThreadSafeDependencyMap`) is now low-value since item 1 main moved the consequence off the editor-observe path, so the mutex is no longer held across expensive work. Left in the plan, deprioritized.
+
+### Re: do [#opencodeharnessswitch] — opus-5
+
+**Reproduced, root-caused, fixed, shipped as 0.35.162.** The backlog item asked for a fresh reproduction with pane-capture evidence to decide between "TUI init exceeds 30s" and "the composer projection returns `Absent`/`Busy` instead of `ReadyEmpty`". It is the second one, and the pane reached that state in about 3 seconds — the 30s deadline was never the constraint.
+
+**Evidence.** I ran OpenCode 1.18.14 in an isolated tmux server and captured the idle cold-start splash. Two properties of the real screen were absent from the hand-written 1.14.x fixtures in the test suite:
+
+1. The renderer leaves **~16 blank rows** between the composer box and the bottom `<cwd>:<branch> … <version>` status line. `is_bottom_idle_chrome` bounded its window with `.lines().rev().take(12)` over **raw** rows, so the whole window went to padding and exactly **one** chrome line survived — under the OpenCode `min_chrome` floor of 4. The sibling `recent_normalized_bottom_lines` already pops trailing blanks for the busy-cue window; this path never got that treatment.
+2. The `opencode` wordmark is drawn with `█` (U+2588), which was missing from the box-art glyph set. Those rows were therefore non-ignorable, so the all-lines `is_idle_chrome_only_output` scan also failed and `last_prompt_candidate` resolved to a wordmark row.
+
+With both paths failing, `project_pane_composer` fell through to `Absent`, `pane_ready_prompt_candidate` returned `None`, and the auto-trigger logged `auto_trigger_timeout harness=opencode reason=no_prompt_after_30s`.
+
+**Fixes.** The window is now bounded in *meaningful* rows, and one shared `scan_bottom_idle_chrome` serves both the readiness consumer and the stale-busy-cue consumer so the two window definitions cannot drift (they were duplicated, and both carried the bug). `█` joined the box-art set, which still requires *every* non-whitespace character to be an art glyph.
+
+**A hazard the widening introduced, caught by capturing a drafted composer too.** OpenCode renders its idle chrome — box rule, `Build ·` plan line, keybinding hints, cwd/version status — *below* the composer. So chrome alone reaches `min_chrome` before the scan ever reaches the composer row. Once padding stopped truncating the window, a composer holding `┃  hello` reported **idle**, and route would have injected a trigger over unsent operator text. A composer row carrying operator text is now an explicit reject. Only the padding bug had been hiding this.
+
+Verified against four live captures — cold-start splash (plain and ANSI), focused-idle, and drafted — through all three consumers (`output_prompt_visible`, `project_pane_composer`, `ready_prompt_candidate_at_cursor`): the three idle states are dispatch-ready, the drafted one fails closed.
+
+**Historical note.** The `no_prompt` entries in `src/boost-client/.agent-doc/logs/` also show an *older*, separate cause: the capability proof ran the **Codex** probe shape against opencode, which printed opencode's help screen and exited nonzero. That one is already fixed — `prove_managed_session_capabilities` now branches to `prove_opencode_child_network_access`.
+
+### Re: tmux pane auto-sync excessive lag — opus-5
+
+> **Queue prompt:**
+>
+> do [#opencodeharnessswitch]
+
+
+**Measured first.** From `/tmp/agent-doc-sync.log`, since 0.35.158 the editor path is median **1.0s** wall, p90 2.0s — but the metered phases only account for ~520ms of it. The gap was two **unconditional** full layout-repair passes, one before and one after the reconciler, and they were invisible to the phase meter because they sat *between* measured phases.
+
+The log proves they never converged: **2764** pre-sync and **2761** post-sync `Repaired \`agent-doc\`/\`stash\` layout` claims, on essentially every sync, forever. `repair_file_state_with_tmux` pushed that note unconditionally, so it was indistinguishable from a repair that genuinely never settles.
+
+`repair_layout` already had a fast path for phases 1+2, but phases 3+4 were marked "always runs" — and each one re-lists the session's windows: `consolidate_duplicate_target_windows` (1), the stash index plan (1), plus one more *inside every* `normalize_window_to_index` call. An editor tab switch was paying roughly a dozen redundant tmux round-trips per gesture to rediscover a layout that was already correct.
+
+**Fix.** A pure predicate, `session_layout_normalization_converged`, evaluates the entire phases-3+4 plan against **one** window observation. That is exact for the converged case, because a converged layout is precisely one where no phase moves anything and therefore no index shifts under the later phases. When it holds, `repair_layout` returns `AlreadyConverged` and issues no further tmux command; otherwise it falls through to the existing code and returns `Repaired`. Callers report a note only for a real repair.
+
+Both passes are now metered as `doctor_repair_pre` / `doctor_repair_post` against a 250ms budget, so the next live syncs will show the improvement rather than me asserting it — that is a backlog item, and it needs no human eyeball.
+
+**What I did not change.** `ownership_per_file_loop` still averages 345ms with a 13.3s max, but the log shows that cost belongs to **manual/CLI full syncs** where `exact_visible_projection=false` (1231ms) — not to editor tab switches, which reuse the reactive actor binding and land at ~90ms. That matches the prior cycle's finding and stays deprioritized.
+
+**Shipped.** `make check` green, `make install` done, `agent-doc admin recycle` on both project roots, committed and pushed (agent-doc `2e8ce91b6`, superproject pointer `3729245e64`). CI run 31234381764 was still queued at closeout.
 <!-- agent:boundary:2463ea63:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#syncdoctorverify]
 <!-- /agent:queue -->
 
 ## Notes
@@ -76,7 +117,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#opencodeharnessswitch] #agent-doc-bug Switching a document from codex to opencode and restarting: session did not become dispatch-ready in 30s (no_prompt) for opencode. The dispatch-ready chain (startup_ready::auto_start_dispatch_ready_block -> pane_ready_prompt_candidate -> project_pane_composer_at_cursor) has OpenCode-specific handling but the bare prompt check (is_dispatch_ready_prompt_line: matches '>' | '>') may miss OpenCode's full-screen Bubbletea TUI idle state. Needs fresh reproduction with pane capture evidence to pinpoint whether the TUI initialization exceeds 30s or the composer projection returns Absent/Busy instead of ReadyEmpty. Reported on monsterrodholders.md (boost-client).
+- [ ] [#syncdoctorverify] #agent-doc-bug Confirm the #syncdoctorconverged win from /tmp/agent-doc-sync.log after several live editor tab-switch syncs on 0.35.162: doctor_repair_pre and doctor_repair_post should stay under their 250ms budget, and 'Repaired `agent-doc`/`stash` layout' should no longer appear on every sync (2764 pre + 2761 post claims with zero convergence in the pre-fix window). If either pass is still over budget, the remaining cost is repair_file_state_with_tmux's own file read, frontmatter parse, and detect_jb_cache_conflict_cancel_recoverable call rather than repair_layout.
 <!-- /agent:backlog -->
 
 ## Review

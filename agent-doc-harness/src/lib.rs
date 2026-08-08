@@ -3808,6 +3808,63 @@ Working (21s - esc to interrupt)
         );
     }
 
+    /// `#freshclaudebusyinject`: a **busy** fresh Claude pane must stay blocked.
+    ///
+    /// `satisfies` short-circuits on `has_dispatch_ready_prompt`, and Claude
+    /// renders its `❯` composer during an active turn too. Once the ctx-less
+    /// status line became ignorable chrome (`#freshclaudectxless`), the
+    /// bottom-up scan could walk *past* it, reach that composer, and report an
+    /// idle footer — which cancels the live busy cue in
+    /// `dispatch_blocker_reason` and lets the idle-queue watch inject
+    /// `agent-doc <FILE>` into a pane whose turn is still running.
+    ///
+    /// The pre-existing active-turn guard covers OpenCode only, so nothing
+    /// caught this for Claude.
+    #[test]
+    fn busy_fresh_claude_pane_is_not_dispatchable() {
+        let h = HarnessConfig::claude();
+        let busy = concat!(
+            "✶ Deciphering… (15s · ↓ 865 tokens)\n",
+            "────────────────────────────────────────\n",
+            "❯ \n",
+            "────────────────────────────────────────\n",
+            "  Opus 5 ~/…/src/boost-client main brian@cachyos-x8664\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent\n",
+        );
+
+        assert!(
+            h.has_busy_cue(busy),
+            "a live Claude spinner must register as busy"
+        );
+        assert!(
+            h.dispatch_blocker_reason(busy).is_some(),
+            "a running turn must block dispatch on a fresh (ctx-less) Claude pane"
+        );
+        assert_eq!(
+            project_pane_composer(busy, &h),
+            PaneComposerProjection::Busy,
+            "the composer projection must be Busy, not ReadyEmpty"
+        );
+    }
+
+    /// The established-session counterpart, to prove the guard is not merely
+    /// keyed on the absence of `ctx:`.
+    #[test]
+    fn busy_established_claude_pane_is_not_dispatchable() {
+        let h = HarnessConfig::claude();
+        let busy = concat!(
+            "✶ Deciphering… (15s · ↓ 865 tokens)\n",
+            "────────────────────────────────────────\n",
+            "❯ \n",
+            "────────────────────────────────────────\n",
+            "  Opus 5 ctx:20% ~/…/src/boost-client main brian@cachyos-x8664\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent\n",
+        );
+
+        assert!(h.dispatch_blocker_reason(busy).is_some());
+        assert_eq!(project_pane_composer(busy, &h), PaneComposerProjection::Busy);
+    }
+
     #[test]
     fn bottom_idle_chrome_suffix_present_rejects_active_turn() {
         let h = HarnessConfig::opencode();

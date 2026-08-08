@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.177
+
+- **Fix (`#idlequeuedraftinject`): the idle-queue watch injected `agent-doc
+  <FILE>` on top of text the operator was still typing.** Operator-reported on
+  `tasks/haiven-dev.md`: an unsubmitted `/agent-doc …` prompt kept appearing in
+  the Claude composer, then logged `idle_queue_dispatch_not_consumed
+  reason=dispatch_start_unproven` on a loop.
+
+  `idle_queue_prompt_visibility` guarded only against an *active* turn via
+  `dispatch_blocker_reason`, then short-circuited on `actor_ready`. A
+  completed-turn marker (`✻ Brewed for 7m 59s`) raises no busy cue, so
+  `actor_ready` won and returned `Visible` without anything inspecting the
+  composer — which at the time held the operator's own `keep going`.
+  `dispatch_payload_pending_in_current_input` did not catch it either: that asks
+  whether *this payload* is already pending, not whether the composer is
+  occupied at all.
+
+  The composer projection is now consulted before the `actor_ready`
+  short-circuit, so a `PaneComposerProjection::OperatorDraft` is never
+  dispatchable. Only explicit operator steering adds and submits a prompt. An
+  empty composer on a ready actor still dispatches, so the queue does not stall.
+  Regression tests use the pane text captured live from the reported session.
+
 ## 0.35.176
 
 - **Fix (`#freshclaudectxless`): a freshly started Claude pane read as

@@ -4,7 +4,7 @@
 //! This module does not capture panes, read shared buffers, lock actor state,
 //! mutate latch state, or dispatch work.
 
-use agent_doc_harness::HarnessConfig;
+use agent_doc_harness::{HarnessConfig, PaneComposerProjection, project_pane_composer};
 use lazily::ReadinessCore;
 
 use crate::idle_reconcile::recoverable_ready_busy_blocker_reason;
@@ -123,6 +123,26 @@ pub fn idle_queue_prompt_visibility(
     if harness.dispatch_blocker_reason(output).is_some() {
         return IdleQueuePromptVisibility::Hidden;
     }
+    // `#idlequeuedraftinject`: a composer holding operator text is never
+    // dispatchable, whatever the actor projection says.
+    //
+    // The busy cue above only covers an *active* turn. A completed-turn marker
+    // (`✻ Brewed for 7m 59s`) raises no cue, so `actor_ready` used to win and
+    // return `Visible` without anyone looking at the composer — and the watch
+    // injected `agent-doc <FILE>` on top of the operator's own unsent text. The
+    // payload then sat unsubmitted and logged `dispatch_start_unproven` on a
+    // loop. `dispatch_payload_pending_in_current_input` did not catch it either:
+    // that asks whether *this payload* is already pending, not whether the
+    // composer is occupied at all.
+    //
+    // Only explicit operator steering may add and submit a prompt, so this is
+    // checked before the `actor_ready` short-circuit rather than after it.
+    if matches!(
+        project_pane_composer(output, harness),
+        PaneComposerProjection::OperatorDraft { .. }
+    ) {
+        return IdleQueuePromptVisibility::Hidden;
+    }
     if actor_ready {
         return IdleQueuePromptVisibility::Visible;
     }
@@ -179,6 +199,69 @@ mod tests {
 
     /// `#startupmissgates`: each unmet precondition must be named distinctly,
     /// and the reported gate must agree with the decision actually taken.
+    /// `#idlequeuedraftinject`: the idle-queue watch must never inject over a
+    /// composer that already holds operator text.
+    ///
+    /// Captured live from `tasks/haiven-dev.md` pane `%20`: a completed-turn
+    /// marker (`✻ Brewed for 7m 59s`, which is past tense and so raises no busy
+    /// cue) above a composer holding the operator's own `keep going`. Because
+    /// `idle_queue_prompt_visibility` short-circuits on `actor_ready`, it never
+    /// consulted the composer projection and reported the pane dispatchable —
+    /// so the watch injected `agent-doc <FILE>` on top of that text, which then
+    /// sat unsubmitted and logged `dispatch_start_unproven` every cycle.
+    ///
+    /// Only explicit operator steering may add and submit a prompt.
+    #[test]
+    fn idle_queue_does_not_inject_over_an_operator_draft() {
+        let harness = HarnessConfig::claude();
+        let pane = concat!(
+            "● Loop armed. Interrupt any time to stop or redirect.\n",
+            "✻ Brewed for 7m 59s\n",
+            "───────────────────────────────────────\n",
+            "❯ keep going\n",
+            "───────────────────────────────────────\n",
+            "  Opus 5 ctx:26% ~/…/src/haiven-dev docs/fpe brian@cachyos-x8664\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · PR #20 · ← 1 agent\n",
+        );
+
+        // The precondition that made this reachable: no busy cue on a completed turn.
+        assert!(
+            harness.dispatch_blocker_reason(pane).is_none(),
+            "completed-turn marker must not raise a busy cue (that is why actor_ready wins)"
+        );
+
+        assert_eq!(
+            idle_queue_prompt_visibility(pane, &harness, true),
+            IdleQueuePromptVisibility::Hidden,
+            "a composer holding operator text must never be dispatchable"
+        );
+        assert_eq!(
+            idle_queue_prompt_visibility(pane, &harness, false),
+            IdleQueuePromptVisibility::Hidden,
+            "and the non-ready path must agree"
+        );
+    }
+
+    /// The guard must not block a genuinely empty composer, or the queue stalls.
+    #[test]
+    fn idle_queue_still_dispatches_into_an_empty_composer() {
+        let harness = HarnessConfig::claude();
+        let pane = concat!(
+            "✻ Brewed for 7m 59s\n",
+            "───────────────────────────────────────\n",
+            "❯ \n",
+            "───────────────────────────────────────\n",
+            "  Opus 5 ctx:26% ~/…/src/haiven-dev docs/fpe brian@cachyos-x8664\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · PR #20 · ← 1 agent\n",
+        );
+
+        assert_eq!(
+            idle_queue_prompt_visibility(pane, &harness, true),
+            IdleQueuePromptVisibility::Visible,
+            "an empty composer on a ready actor must stay dispatchable"
+        );
+    }
+
     #[test]
     fn auto_trigger_blocking_gate_names_the_unmet_precondition() {
         assert_eq!(

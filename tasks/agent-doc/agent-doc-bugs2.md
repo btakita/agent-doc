@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -106,7 +106,21 @@ Both passes are now metered as `doctor_repair_pre` / `doctor_repair_post` agains
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#passthroughsplitprofile]
+- do [#qcontprose]
+- do [#stickymdpane]
+- 🚧 do [#runfilesubmit]
 - do [#syncdoctorverify]
+- tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.
+---
+The prompt for Claude Code should simply be `/agent-doc .../file.md`. There is a long prompt instead:
+```
+❯ Agent Doc queue state advanced for `tasks/software/lazily.md`. Continue this existing owner-pane session; do not
+  invoke `agent-doc` recursively.
+  Execute the current active queue head:
+  lzcoveragefamily
+  Persist and finalize this cycle through the connected Agent Doc tools.
+```
 <!-- /agent:queue -->
 
 ## Notes

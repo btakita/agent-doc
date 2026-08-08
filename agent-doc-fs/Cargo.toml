@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-fs"
-version = "0.35.181"
+version = "0.35.182"
 edition = "2024"
 description = "Filesystem helpers for agent-doc"
 license = "MIT"
@@ -16,7 +16,7 @@ name = "agent_doc_fs"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.181" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.182" }
 anyhow = "1"
 
 [dev-dependencies]

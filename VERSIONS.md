@@ -2,6 +2,35 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.182
+
+- **Decided (`#claudesplitsubmit`): claude does NOT join the split text+Enter
+  submit profile.** No behavior change — this records a measurement that was
+  previously an inference, so the question stops being reopened.
+
+  Measured with the corrected metric from 0.35.181 (`agent-doc ops
+  submit-profile`) over 23 post-0.35.164 `harness=claude` repairs:
+
+  - **12 controlled dispatches into an idle, unloaded pane: 12/12 submitted on
+    the first send, 0 resubmits.** Verified independently against Claude's own
+    session JSONL — 12 recorded trigger prompts for 12 dispatches — because
+    `outcome=cleared` alone could be an unrendered-pane false clear, and every
+    line reported `elapsed_ms=305`, the minimum two-settle path. (Pane scrollback
+    cannot be used for this: Claude's TUI redraws in place, so `history_size` is
+    8 lines and holds no transcript.)
+  - **11 production repairs from the same day under real load: 8 needed at least
+    one bare submit key (72%), `max_enters_sent=2`.**
+
+  So the drop is **load-dependent, not inherent to the single-call send**, and in
+  all 23 samples the settle-gated repair recovered the dispatch — every line is
+  `outcome=cleared` with zero `exhausted_still_stranded`. No dispatch was ever
+  lost. Adding claude to the split profile would pay 80ms on every submit to
+  remove a retry that already succeeds 100% of the time.
+
+  The reasoning now lives on `harness_uses_split_text_submit` and in a test that
+  states the measurement, so a future change has to confront the evidence rather
+  than re-derive the inference.
+
 ## 0.35.181
 
 - **Fix (`#ptsubmitmetric`): the `#passthroughsplitprofile` unblock criterion

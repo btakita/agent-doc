@@ -197,6 +197,31 @@ impl Default for TmuxSubmitProfile {
 /// Codex/OpenCode need the split text+Enter send because their slash-command
 /// palettes can open on `/` and swallow a same-call Enter. This is
 /// `const fn`-safe byte compare because `str` equality is not const.
+///
+/// **claude is deliberately NOT in this list (`#claudesplitsubmit`, measured
+/// 2026-08-08 on 0.35.181).** The open question was whether Claude's single-call
+/// text+Enter send drops often enough to need the same 80ms split. Measured with
+/// the corrected metric (`#ptsubmitmetric`, `agent-doc ops submit-profile`) over
+/// 23 post-0.35.164 `harness=claude` repairs:
+///
+/// - 12 controlled dispatches into an idle, unloaded pane: **12/12 submitted on
+///   the first send, 0 resubmits.** Confirmed independently against Claude's own
+///   session JSONL — 12 recorded trigger prompts for 12 dispatches — because
+///   `outcome=cleared` alone could in principle be an unrendered-pane false
+///   clear, and `elapsed_ms=305` on every line is the minimum two-settle path.
+/// - 11 production repairs from the same day under real editor/CPU load: 8
+///   needed at least one bare submit key (72%), `max_enters_sent=2`.
+///
+/// So the drop is **load-dependent, not inherent to the single-call send** — and
+/// in all 23 samples the settle-gated repair recovered the dispatch: every line
+/// is `outcome=cleared`, with zero `exhausted_still_stranded`. No dispatch was
+/// ever lost. Adding claude to the split profile would pay 80ms on every submit
+/// to remove a retry that already succeeds 100% of the time, so the decision is
+/// to leave the profile alone.
+///
+/// If the resubmit latency under load later matters on its own, that is a
+/// separate optimization with its own measurement — `agent-doc ops
+/// submit-profile --since <day>` re-checks the rate in one command.
 const fn harness_uses_split_text_submit(harness: &str) -> bool {
     let b = harness.as_bytes();
     let opencode = b.len() == 8
@@ -1057,6 +1082,40 @@ mod tests {
                 profile.split_text_and_submit_delay_ms(),
                 0,
                 "{non_split:?} must keep the single-call text+Enter send (no split)"
+            );
+        }
+    }
+
+    /// `#claudesplitsubmit`, decided 2026-08-08 on measurement, not inference.
+    ///
+    /// Over 23 post-0.35.164 `harness=claude` repairs read with the corrected
+    /// metric (`agent-doc ops submit-profile`): 12 controlled dispatches into an
+    /// idle pane submitted 12/12 on the first send with 0 resubmits (verified
+    /// against Claude's own session JSONL, since `outcome=cleared` alone could be
+    /// an unrendered-pane false clear), while 11 production repairs under real
+    /// load needed a bare submit key 8 times. The drop is load-dependent, not
+    /// inherent to the single-call send — and every one of the 23 ended
+    /// `outcome=cleared` with zero `exhausted_still_stranded`, so the
+    /// settle-gated repair never lost a dispatch.
+    ///
+    /// Adding claude here would pay 80ms on every submit to remove a retry that
+    /// already succeeds 100% of the time. If you are about to change this,
+    /// re-run the measurement first.
+    #[test]
+    fn claude_stays_on_the_single_call_submit_because_the_repair_never_loses_a_dispatch() {
+        assert_eq!(
+            tmux_submit_profile_for_harness("claude").split_text_and_submit_delay_ms(),
+            0,
+            "claude keeps the single-call send: measured 12/12 first-try submits on an idle \
+             pane, and under load the settle-gated repair recovered 8/8 strands with zero \
+             exhausted_still_stranded (#claudesplitsubmit)"
+        );
+        // The harnesses that DO split have a real mechanism behind it — a slash
+        // palette that swallows a same-call Enter — not a latency measurement.
+        for split in ["codex", "opencode"] {
+            assert!(
+                tmux_submit_profile_for_harness(split).split_text_and_submit_delay_ms() > 0,
+                "{split} splits for the slash-palette reason, which claude does not share"
             );
         }
     }

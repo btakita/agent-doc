@@ -45,6 +45,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   answers with an in-binary preflight — the same session continues. Naming the head was redundant
   too; preflight already selects it and hands it over as `selected_queue_prompts`. Two dispatch
   paths that disagreed about what a queue continuation looks like are now one.
+- **A response that discusses its own queue no longer interrupts its own closeout
+  (`#qcontamquote`).** The `#jb-run-agent-doc-response-queue-contamination` guard flagged any
+  free-text queue prompt whose first 40 normalized characters appeared *anywhere* in the assistant
+  response body. Contamination is a queue entry that **is** a response line — the original repro
+  enqueued `- Yes. I drove the already-authenticated Google Ads browser session …` verbatim — but a
+  response that merely mentions a queue item mid-sentence is the opposite thing, and it is what
+  `SKILL.md` asks for: reconcile and quote the queue prompts. An unanchored `contains` could not
+  tell those apart, so this cycle's own closeout INTERRUPTED and named the **operator's** queue line
+  as contamination. The match is now anchored to the start of a response line; blockquote echoes
+  were already excluded upstream. A response paragraph that begins with the queue text is still
+  flagged, so the anchoring is not a loophole.
 - **An editor column that detours into source keeps its tmux pane (`#stickymdpane`, JetBrains
   plugin 0.2.350).** Both surface reporters answered "which document is this editor window showing?"
   with `window.selectedFile?.takeIf { it.name.endsWith(".md") }`. Open a source file in one half of a

@@ -473,6 +473,19 @@ pub fn queue_response_contamination_guard_result(contaminated: &[String]) -> Gua
 
 /// Free-text queue prompt candidates that appear copied from assistant response
 /// prose in the same exchange body.
+///
+/// `#qcontamquote`: the match is anchored to the **start of a response line**,
+/// not to a substring anywhere in the body. Contamination is a queue entry that
+/// *is* a response line — the live repro enqueued
+/// `- Yes. I drove the already-authenticated Google Ads browser session ...`
+/// verbatim. A response that merely *mentions* a queue item mid-sentence is
+/// the opposite thing, and it is what a good response does: `SKILL.md` tells
+/// the agent to reconcile and quote its queue prompts. An unanchored
+/// `contains` could not tell those apart, so a closeout that discussed its own
+/// queue interrupted itself and named the operator's own line as
+/// contamination — turning a correct response into a failed turn.
+/// Blockquote echoes are already excluded upstream by
+/// [`assistant_response_text`], which drops `>` lines.
 pub fn queue_response_contamination_candidates(
     queue_body: &str,
     exchange_body: &str,
@@ -499,7 +512,10 @@ pub fn queue_response_contamination_candidates(
             continue;
         }
         let needle: String = normalized.chars().take(40).collect();
-        if response_text.contains(&needle) {
+        if response_text
+            .lines()
+            .any(|line| line.trim_start().starts_with(&needle))
+        {
             contaminated.push(text.chars().take(80).collect::<String>());
         }
     }
@@ -892,6 +908,43 @@ mod tests {
                 "Yes. I drove the already-authenticated Google Ads browser session with chromium-"
                     .to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn queue_response_contamination_ignores_a_response_that_discusses_its_queue() {
+        // #qcontamquote: this is the operator's OWN queue line, and the
+        // response says what is happening to it. Reconciling and naming queue
+        // prompts is what SKILL.md asks for; it must not read as the agent
+        // having enqueued its own prose. Live false positive, 2026-08-08.
+        let operator_line =
+            "tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.";
+        let queue = format!("- do [#runfilesubmit]\n- {operator_line}\n");
+        let exchange = concat!(
+            "### Re: shipping\n",
+            "\n",
+            "A concurrent session is mid-edit on the sync path — that looks like the queued ",
+            "\"tmux pane auto-sync is still extremely slow when switching from lazily.md to ",
+            "agent-doc-bugs2.md\" item, so I left it alone.\n",
+        );
+
+        assert!(
+            queue_response_contamination_candidates(&queue, exchange).is_empty(),
+            "a mid-sentence mention of a queue item is not contamination"
+        );
+    }
+
+    #[test]
+    fn queue_response_contamination_still_flags_a_leading_copy_of_a_queue_line() {
+        // The anchoring must not become a loophole: a response *paragraph*
+        // that begins with the queue text is still the copied-prose shape.
+        let prose = "The supervisor kept reinjecting the trigger until the pane wedged completely.";
+        let queue = format!("- {prose}\n");
+        let exchange = format!("### Re: something\n\n{prose} I fixed it.\n");
+
+        assert_eq!(
+            queue_response_contamination_candidates(&queue, &exchange),
+            vec![prose.chars().take(80).collect::<String>()]
         );
     }
 

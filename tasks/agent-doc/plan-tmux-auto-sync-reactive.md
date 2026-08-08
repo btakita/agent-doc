@@ -21,6 +21,26 @@ conversion. The items below are the larger hot-path conversions, sequenced.
 
 ### 1. `controller_tmux_layout_for_surface` — synchronous per-observation tmux probe (PRIMARY wedge + imperative-state violation)
 
+> **0.35.146 update:** the contained sub-fix (sequencing item 2) LANDED —
+> `pane_session` now reads from the shared `list-panes -a` snapshot
+> (`#panesessionsnapshot`), and the controller drift survey opens a
+> `begin_pane_snapshot_scope()`, collapsing the N per-pane `display-message`
+> spawns to one listing. Item 1 main's scope is **larger than the original fix
+> shape below**: the Sync intent effect is **eager** —
+> `ControllerEditorSurfaceGraph` constructs with `run_controller_editor_intent`,
+> which on `SurfaceIntent::Sync` calls `sync_tmux_layout` synchronously inside
+> the `on_intent` effect during `observe` (rpc.rs:21214 asserts the effect ran
+> within the `observe` call). So the editor socket request blocks on BOTH the
+> survey AND the structural sync. True decoupling therefore requires changing
+> the **consequence model** for automatic editor Sync from eager to deferred:
+> the intent runner must feed the `pane_layout_graph` (scheduling the existing
+> background `pane_layout_effect_worker`) and return immediately, and the
+> worker must publish the actual `TmuxLayout` back via a new
+> `observe_tmux_for_project` so the surface graph's `tmux` `Source` refreshes
+> without the editor request waiting for it. The editor-facing receipt's
+> synchronous `outcome` becomes `None` for the deferred path (a contract
+> change), and the drift-detection tests in rpc.rs (~21200+) must reconcile.
+
 `agent-doc-controller-io/src/project_controller/rpc.rs:17198` (called from
 `handle_editor_surface_observe` at `rpc.rs:16985`), inside the
 `editor_surface_graph.observe` mutex (`rpc.rs:248-330`).
@@ -114,10 +134,52 @@ expensive).
 ## Sequencing
 
 1. (DONE 0.35.145) `ProcessObservationScope` in the sync run.
-2. Item 1 sub-fix: `pane_session` snapshot batching + controller snapshot scope.
-3. Item 1 main: retained tmux observation fed by the effect worker.
-4. Item 2: editor poll → state-plane subscription.
-5. Item 3: blocking flock.
-6. Item 4: `ThreadSafeDependencyMap`.
+2. (DONE 0.35.146) Item 1 sub-fix: `pane_session` snapshot batching + controller snapshot scope (`#panesessionsnapshot`).
+3. (DONE 0.35.147–0.35.153) Item 1 main: retained tmux observation fed by the effect worker. Editor `Sync`/`Focus` intents are now resolved IN-PROCESS (`handle_editor_surface_observe` folds against the retained tmux `Source` at `rpc.rs:17059` and publishes the desired layout through the background `pane_layout_effect_worker`; both intents return immediately and the worker refreshes the `tmux` `Source` via `observe_tmux_for_project`). The editor socket request no longer blocks on a tmux survey or a structural sync.
+4. (DONE 0.35.158) `handle_tmux_focus_state` reads the active pane's document from the runtime's reactive actor store (`actor_store_snapshot`) instead of reopening SQLite on every 500 ms JetBrains reverse-mirror poll (`#lazily-hot-path`). Cold start (no runtime) still hydrates from SQLite; the lookup rule is unified in the pure `actor_record_for_active_pane` helper. The tmux active-pane probe itself stays (tmux has no push event for arbitrary pane-focus changes, so the reverse mirror cannot be pure-subscription).
+5. (DONE 0.35.157) Item 3: kernel-blocked `flock` — no sleep-poll, no `/proc` reap, `libc` dep removed (`#tmuxautosyncreactive`). Note: this is hygiene only; the editor tab-switch path is uncontended (the `pane_layout_effect_worker` already serializes it), so it does not by itself fix the reported latency — item 1 main does.
+6. Item 4: `ThreadSafeDependencyMap`. Lower priority now: the `ControllerEditorSurfaceGraph` mutex is no longer held across expensive work once item 1 main moved the consequence off the editor-observe path.
 
-Items 2–6 are independently shippable. Item 1 is the headline latency win.
+7. (DONE 0.35.170) **The actual remaining wedge, and it was not reactive at all
+   (`#syncdupespelling`).** After items 1–5 shipped, a tab switch was still slow.
+   Measuring instead of assuming: `agent-doc sync --col A,B --focus …` reported
+   **three** `auto-start check` passes for **two** documents, `latency budget
+   exceeded: phase ownership_per_file_loop took 4120ms (budget 750ms)`, and one
+   document listed **twice** in `unresolved files remain blocked` — once absolute,
+   once relative.
+
+   Cause: `auto_start_candidate_files` (`agent-doc-tmux/src/lib.rs`) deduped on the
+   raw `PathBuf`. The column set merges the caller's `--col` args with remembered
+   column memory, and the two disagree on spelling — memory retains absolute paths,
+   the editor/CLI passes root-relative ones — so one document keyed as two
+   candidates and paid the expensive stale-binding fallback (`alive but no longer
+   proves ownership` → supervisor process-tree recovery) twice. The sibling
+   `projected_sync_pane_count` already canonicalized for exactly this reason.
+
+   Fixed by keying dedup on the canonical path while emitting the first-seen
+   spelling. After: two passes, **no budget violation**, no blocked files;
+   worst-case switch 2829ms → 802ms, steady state ~550ms → ~450ms.
+
+   **Lesson for this plan:** items 1–5 were all real reactive-plane improvements,
+   but none of them could have caught this — the duplicated work was upstream of
+   the reactive graph, in how the candidate set was keyed. Measure the reported
+   path before converting more of it.
+
+Items 2–6 are independently shippable. Item 1 was the headline *reactive* win;
+item 7 was the headline *latency* win.
+
+## Note on Item 2 (editor fixed-delay poll)
+
+The original Item 2 framed the JetBrains `TmuxPaneFocusSync.kt` 500 ms poll as
+replaceable by an editor-surface state-plane subscription. That projection
+carries the editor→tmux `intent`, not the tmux-active document, so it cannot
+drive the *reverse* mirror (`selectEditorDocument`), which fundamentally needs
+the tmux-active pane and therefore a tmux probe (tmux exposes no push event for
+arbitrary pane-focus changes). The achievable, high-confidence reactive
+conversion for the reverse mirror is step 4 above: serve the poll from the
+controller's reactive actor store instead of SQLite. A pure-subscription
+replacement remains out of reach until a tmux focus-change hook exists.
+
+## Follow-ups (out of plan scope)
+
+- **`#replicarefusalstorm` fallback: a "take over wedged endpoint" operation (`#replicaendpointtakeover`).** When `reload-lib` genuinely cannot reach a live editor endpoint (e.g. the endpoint's native listener is wedged beyond the reload-compat path), the controller refuses `replica_register` as `detached_authority` forever — the editor can't re-attach through the very RPC that would attach it. Add a controller operation that, for a proven-live editor PID, accepts a `replica_register` as the attach trigger (flipping the doc to `MultiReplica`) instead of refusing it for not being attached, with the existing `#replica-structure-guard` + `#qdelauth` backstops catching dangerous stale content. This is the fallback for the case the 0.35.157 reload-receipt fix (`IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS`) does not cover (a listener that won't accept the reload at all). Lower priority than the latency work.

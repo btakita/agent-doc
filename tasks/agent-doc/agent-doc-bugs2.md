@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: d78a0945-4fc1-47c5-ba65-e96f651570d5
+resume: 0b9f3713-50c5-45ee-9e8a-43acf7c424ad
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -40,13 +40,46 @@ completed
 Compacted content:
 - Archived 10 response topic(s): queuemirrororder; watchsighupwin; loopsuperprojectjob; 7 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): do [#runsubmitclaude]; closing out #runsubmitclaude; restoring...
+
+### Re: fresh-Claude restart startup-miss, submit lag, laggy pane sync — opus-5
+
+> **Queue prompt:**
+>
+> On monsterrodholders.md, I changed the agent from opencode to claude. On Restart Agent, an error occurred in the tmux pane `❯ [agent-doc] session did not become dispatch-ready in 30s (no_prompt) for claude; recorded startup-miss and failing closed instead of hanging. Run 'agent-doc start /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md' to retry.boost-client main brian@cachyos-x8664`
+
+
+> **Queue prompt:** On monsterrodholders.md, I changed the agent from opencode to claude. On Restart Agent, an error occurred in the tmux pane `❯ [agent-doc] session did not become dispatch-ready in 30s (no_prompt) for claude; recorded startup-miss and failing closed instead of hanging.`
+
+One root cause explains most of this, and it is now fixed and shipped in **0.35.176**.
+
+**Claude's status line loses its `ctx:N%` token on a fresh session.** `is_claude_status_chrome_line` keyed the entire chrome test on that token:
+
+- established: `Opus 5 ctx:20% ~/…/src/boost-client main brian@cachyos-x8664` → chrome
+- **fresh: `Opus 5 ~/…/src/boost-client main brian@cachyos-x8664` → not chrome**
+
+Because that line renders *below* the composer, it won `last_prompt_candidate` and masked the `❯` prompt above it. Every non-cursor-scoped readiness check — `output_prompt_visible`, and through it `current_child_prompt_visible` and `idle_queue_prompt_visibility` — then reported a genuinely idle, dispatch-ready pane as never-ready, until the session accrued enough context for `ctx:N%` to appear.
+
+That is exactly why it only bites on a **fresh spawn**. Restart Agent with an `agent:` change takes the `agent_restart_performed … action=spawn_fresh_harness` path, so context starts at zero every time. Your own log shows all three timeouts were harness switches (codex→opencode, opencode→claude), never an established session. It also explains the tail of the text you pasted: `…to retry.boost-client main brian@cachyos-x8664` is that very status line.
+
+It answers your other two symptoms too. `readiness_source` in your session log is `stable_owned_pane` on **every** successful trigger and never `current_child_pty` — the child-PTY signal was permanently false. **Submit lag** is route burning its readiness-wait before falling through to the cursor-scoped path, and **laggy pane auto-sync** is the idle-queue watch failing to confirm an idle prompt via the same `output_prompt_visible` call.
+
+The chrome test now matches the ctx-less form structurally — trailing `user@host` plus a filesystem-path token, never a `❯`/`⏵` row — so ordinary prose like `ssh brian@host` is untouched. Tests use pane bytes captured live from a real fresh Claude session (red before, green after).
+
+**What I could not prove.** Your `%915` is only **9 rows**, so the status line is scrolled off entirely and this fix cannot be the whole story for that specific 30s miss. The pane fallback needs `current_child_output` ∧ `actor_ready` ∧ `owned_pane_dispatch_ready`; your log shows `actor_ready` at 17:34:03, and I measured a fresh Claude reaching a bare `❯` at the cursor row in 5s in that exact geometry. So one of the other two gates stayed shut, and the log could not say which — `auto_trigger_timeout` recorded only `reason=no_prompt_after_30s`, which is identical for a dead PTY relay, a stuck actor projection, and an unrecognized prompt.
+
+I fixed that blind spot rather than guessing: the timeout now logs every gate plus `blocking_gate=`. The next occurrence names its own cause instead of costing a forensic session. That item is at the top of the backlog.
+
+Measured along the way: Claude reaches its composer in **2.5s** here, so the 30s deadline was never too short.
+
+**Shipped:** `make check` green, `make install` → 0.35.176, supervisors recycled, pushed (submodule + superproject). CI run `31271290023` was still in progress at closeout — recorded, not awaited.
 <!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- On monsterrodholders.md, I changed the agent from opencode to claude. On Restart Agent, an error occurred in the tmux pane `❯ [agent-doc] session did not become dispatch-ready in 30s (no_prompt) for claude; recorded startup-miss and failing closed instead of hanging. Run 'agent-doc start /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md' to retry.boost-client main brian@cachyos-x8664`
-- do [#ptsubmitmetric]
+- do [#startupmiss9row]
+- ~~On monsterrodholders.md, I changed the agent from opencode to claude. On Restart Agent, an error occurred in the tmux pane `❯ [agent-doc] session did not become dispatch-ready in 30s (no_prompt) for claude; recorded startup-miss and failing closed instead of hanging. Run 'agent-doc start /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md' to retry.boost-client main brian@cachyos-x8664`~~
+- ⏭️ do [#ptsubmitmetric]
 - do [#claudesplitsubmit]
 - do [#compactstrandedheading]
 - do [#hvw0publishproof]
@@ -60,6 +93,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#startupmiss9row] Reproduce the 30s no_prompt startup-miss in a 9-row JB-layout pane where the status line is off-screen; use the new blocking_gate= diagnostic to attribute it (dead PTY relay vs stuck actor projection vs pane detector)
 - [ ] [#ptsubmitmetric] #agent-doc-bug Fix the unmeasurable #passthroughsplitprofile criterion. `outcome=enter_resubmit` is a NON-terminal action (`pass_through_stranded_draft_action_is_terminal` admits only Cleared/DeferredPaneBusy/ExhaustedStillStranded), so production ops.log can never record it and that counter is structurally always zero no matter how many submits drop. The real signal is `enters_sent > 0` on a terminal `outcome=cleared` line — `enters_sent += 1` happens only inside the EnterResubmit branch (agent-doc-controller/src/dispatch.rs:6070). Emit an explicit terminal field (for example `resubmit_required=true|false`) or a rollup command so the decision is readable without hand-parsing ops.log, restate the unblock criterion in those terms on #passthroughsplitprofile, and add a regression test pinning that a repair which resubmitted logs the new field.
 - [ ] [#claudesplitsubmit] #agent-doc-bug Decide and implement whether claude joins `harness_uses_split_text_submit` (the split text+Enter profile codex/opencode use, `tmux_submit_profile_for_harness`, 80ms), reading the corrected counter from #ptsubmitmetric. Current reading: 6 post-0.35.164 harness=claude repairs (elapsed_ms >= 150), 5 of which needed at least one resubmit and one of which needed two — that is the stated single-call-send-is-the-cause condition, but on 6 samples rather than the ~20 sample floor. Gather to the floor with the corrected metric first, then either add claude to the split profile or record that the settle-gated repair alone is sufficient. Do not change the profile without the measurement.
 - [ ] [#compactstrandedheading] #agent-doc-bug Run `agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` and confirm it no longer fails on the historical stranded duplicate heading. Converted from the removed operator-verify item #operatorverifyresolve, whose premise (a live JetBrains File Cache Conflict awaiting a human Cancel / Keep-memory-changes) is stale: recent session-checks read `status=current authority=cp_model live_editors=1 delivery_converged=true` and the retained closeouts it was waiting on are committing. Only this half was ever untested, and it is agent-testable.

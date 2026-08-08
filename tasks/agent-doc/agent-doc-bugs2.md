@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 27d915fd-ca4e-4f22-b7ce-82f01cadc27b
+resume: fc9b6f02-d703-42c6-97ab-8f1d5e6ea4a2
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -190,6 +190,35 @@ Legacy lines are recovered from `enters_sent` but reported separately, so a mixe
 Tests pin that the two non-terminal actions never reach the log (the reason the old counter was zero), that a repaired and a clean send both report `outcome=cleared` but differ on `resubmit_required`, and both rollup paths including the legacy recovery and `--since` filtering.
 
 **Shipped:** `make check` green (exit 0 — clippy caught a manual checked division on the first pass and it was fixed), `make install` → 0.35.181, pushed (`c62d36acd` + superproject `40801afe96`), controllers auto-recycled by `lib-install`. CI runs `31277544182` and `31278434421` still in progress at closeout — recorded, not awaited.
+
+### Re: do [#claudesplitsubmit] — opus-5
+
+> **Queue prompt:**
+>
+> do [#claudesplitsubmit]
+
+
+Decided on measurement: **claude stays on the single-call submit.** No profile change. Shipped as **0.35.182**, which records the evidence rather than changing behavior.
+
+The item was blocked on reaching ~20 samples. Rather than leave it accruing, I gathered the rest under control with the metric that shipped an hour ago.
+
+**12 controlled dispatches into an idle, unloaded pane (0.35.182, 50-row): 12/12 submitted on the first send, 0 resubmits.**
+
+I did not trust that number on its own. Every line reported `elapsed_ms=305` — exactly the minimum two-settle path — which is also precisely the shape a *false* clear takes if the keystrokes have not rendered by the second look. That is the `#runsubmitclaude` ambiguity, so `outcome=cleared` is not self-validating. Pane scrollback cannot settle it either: Claude's TUI redraws in place, so `history_size` is **8 lines** and holds no transcript at all — counting trigger echoes there gave 6, which is just what happened to be on screen.
+
+The authoritative record is Claude's own session JSONL, and it has **exactly 12 submitted trigger prompts for 12 dispatches**, one per dispatch, 85 s apart. The 0% is real.
+
+**Against 11 production repairs from the same day under real load: 8 needed a bare submit key (72%), `max_enters_sent=2`.**
+
+**So the split is the interesting result, not the average.** The drop is *load-dependent*, not inherent to the single-call send — on a quiet pane the send never fails. And across all 23 samples every single line is `outcome=cleared` with **zero `exhausted_still_stranded`**: the settle-gated repair recovered every strand. No dispatch has ever been lost.
+
+Adding claude to the split profile would pay 80 ms on every submit to remove a retry that already succeeds 100% of the time. So the answer is the second branch the item allowed: **the settle-gated repair alone is sufficient.**
+
+Worth being explicit about the limits: 12 of the 23 samples are mine, sequential, on an idle scratch pane, and the 11 production ones are legacy lines counted from `enters_sent`. If the resubmit latency under load ever matters on its own, that is a separate optimization with its own measurement — and `agent-doc ops submit-profile --since <day>` re-checks it in one command instead of a grep session.
+
+The reasoning now lives on `harness_uses_split_text_submit` and in a test named for the decision, so a future change has to confront the measurement rather than re-derive the inference. `#passthroughsplitprofile` is resolved by this.
+
+**Shipped:** `make check` green (exit 0, 0 failed suites), `make install` → 0.35.182, pushed (`3b6ff4287` + superproject `ca42452ac3`). Scratch repro project and probe tmux session cleaned up.
 <!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -198,7 +227,7 @@ Tests pin that the two non-terminal actions never reach the log (the reason the 
 - ~~do [#clearsubmitlabel]~~
 - ~~do [#startupmiss9row]~~
 - ~~do [#ptsubmitmetric]~~
-- do [#claudesplitsubmit]
+- ~~do [#claudesplitsubmit]~~
 - do [#compactstrandedheading]
 - do [#hvw0publishproof]
 <!-- /agent:queue -->
@@ -211,7 +240,6 @@ Tests pin that the two non-terminal actions never reach the log (the reason the 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#claudesplitsubmit] #agent-doc-bug Decide and implement whether claude joins `harness_uses_split_text_submit` (the split text+Enter profile codex/opencode use, `tmux_submit_profile_for_harness`, 80ms), reading the corrected counter from #ptsubmitmetric. Current reading: 6 post-0.35.164 harness=claude repairs (elapsed_ms >= 150), 5 of which needed at least one resubmit and one of which needed two — that is the stated single-call-send-is-the-cause condition, but on 6 samples rather than the ~20 sample floor. Gather to the floor with the corrected metric first, then either add claude to the split profile or record that the settle-gated repair alone is sufficient. Do not change the profile without the measurement.
 - [ ] [#compactstrandedheading] #agent-doc-bug Run `agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` and confirm it no longer fails on the historical stranded duplicate heading. Converted from the removed operator-verify item #operatorverifyresolve, whose premise (a live JetBrains File Cache Conflict awaiting a human Cancel / Keep-memory-changes) is stale: recent session-checks read `status=current authority=cp_model live_editors=1 delivery_converged=true` and the retained closeouts it was waiting on are committing. Only this half was ever untested, and it is agent-testable.
 - [ ] [#hvw0publishproof] #agent-doc-bug Verify statically (read the release workflow on github.com/btakita/skill-harness) that the crates.io publish step propagates failure after 32836ad. The loud-failure behavior has never actually executed: the newest Release run is v0.1.3 from 2026-07-18 and its `Publish to crates.io` step reports SUCCESS even though the CARGO_REGISTRY_TOKEN 403s and v0.1.3 was published by hand — that success line is the false green 32836ad was meant to kill. Until a tag runs, the every-tagged-release-now-fails-loudly claim on #hvw0 is untested.
 <!-- /agent:backlog -->
@@ -219,7 +247,6 @@ Tests pin that the two non-terminal actions never reach the log (the reason the 
 ## Review
  
 <!-- agent:review -->
-- [/] [#passthroughsplitprofile] #agent-doc-bug [blocked-on-evidence] Decide from evidence whether Claude also needs the split text+Enter submit profile that codex/opencode use (`tmux_submit_profile_for_harness`, 80ms). CRITERION RESTATED 2026-08-08 (#ptsubmitmetric, 0.35.181): the old condition (a nonzero `outcome=enter_resubmit` rate) was UNMEASURABLE — EnterResubmit is non-terminal and never reaches ops.log, so that counter is structurally always zero. Terminal lines now carry `resubmit_required=true|false`, and `agent-doc ops submit-profile --since <first post-0.35.164 day> [--json]` rolls it up per harness. UNBLOCKED when that command reports >=20 harness=claude repairs; the call is then resubmit_required/repairs, made by #claudesplitsubmit. Current reading 2026-08-08: 11 repairs, 8 resubmit-required (72%) — suggestive but under the 20-sample floor. Do not change the submit profile without the measurement; the mechanism is inferred, not proven.
 - [/] [#stickymdpaneverify] [operator-verify] #stickymdpane live proof: restart a JetBrains IDE — plugin 0.2.350 is ALREADY INSTALLED in all four IDE configs, so only the restart is missing, and that one restart also satisfies the install precondition for #operatorverifyrestart, #rebootselfhealverify and #falsetyping-guard — then open a two-column split with an agent-doc document in each and switch ONE column to a source file. Expect tmux to keep both panes with that column still showing its last document, instead of collapsing to one pane. Then close that split entirely and confirm tmux DOES collapse — the fallback must be memory, not invention. Unit tests pin the pure resolution but cannot prove the live IDE wiring.
 - [/] [#operatorverifyrestart] [operator-verify] Restart a running JetBrains IDE (installed plugin is 0.2.350; this item originally named 0.2.340, long superseded — the single restart in #stickymdpaneverify covers it), then move from fpe-service-topology.md in a one-pane surface to agent-doc-bugs2.md in its two-column surface and confirm the first selection restores two tmux panes without a second navigation.
 - [/] [#rebootselfhealverify] [operator-verify] Live proof for #rebootselfheal after restarting the IDE (installed plugin is 0.2.350; this item originally named 0.2.339 — reload-lib swaps the cdylib but NOT the Kotlin package, so a restart is still required, and the restart in #stickymdpaneverify covers it). Reboot the host (or stop the controller and leave a stale .agent-doc/controller.sock behind), then run Sync Tmux Layout and Run Agent Doc from the IDE and confirm both succeed without the `pane-layout state projection publish failed ... Connection refused` notification and without a human deleting the socket. Then confirm the passive lane is still free: click between editor tabs with NO controller running and verify no controller is launched (editors/SPEC.md requires the surface-observation lane to never launch one) - grep ops.log for a controller bootstrap around the tab clicks. Both reboot states are already proven end-to-end against the installed cdylib; only the in-IDE path needs a human eyeball.

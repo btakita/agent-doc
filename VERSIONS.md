@@ -2,6 +2,36 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.176
+
+- **Fix (`#freshclaudectxless`): a freshly started Claude pane read as
+  never-dispatch-ready, so restarts hit the 30s startup deadline and idle/route
+  readiness checks stalled.** Claude's built-in status line carries a `ctx:N%`
+  context-usage token, and `is_claude_status_chrome_line` keyed the whole chrome
+  test on it. A **fresh** session has no meaningful context usage, so Claude
+  omits that token entirely and renders
+  `Opus 5 ~/…/src/boost-client main brian@cachyos-x8664`. That line was
+  therefore classified as ordinary output, and because it sits *below* the
+  composer it won `last_prompt_candidate` and masked the `❯` prompt above it.
+  Every non-cursor-scoped readiness check — `output_prompt_visible`, and through
+  it `current_child_prompt_visible` and `idle_queue_prompt_visibility` — then
+  reported a genuinely idle pane as never-ready, until the session accumulated
+  enough context for `ctx:N%` to appear. That is why the defect reproduced only
+  on freshly spawned harnesses (`agent_restart_performed`, i.e. Restart Agent /
+  an `agent:` harness switch) and never on an established session. The chrome
+  test now also matches the ctx-less form structurally — a trailing `user@host`
+  token plus a filesystem-path token, and never a `❯`/`⏵` composer row — so
+  ordinary prose that merely mentions a host (`ssh brian@host`) is left alone.
+
+- **Diagnostic (`#startupmissgates`): `no_prompt` startup misses now name the
+  gate that never opened.** The auto-trigger's pane fallback requires
+  `current_child_output`, `actor_ready`, and `owned_pane_dispatch_ready`, but the
+  deadline logged only `reason=no_prompt_after_30s` — indistinguishable between a
+  dead PTY relay, a stuck actor projection, and an unrecognized prompt, which are
+  three different defects with three different fixes. `auto_trigger_timeout` now
+  records each gate value plus a `blocking_gate=` summary from the new pure
+  `auto_trigger_blocking_gate`.
+
 ## 0.35.175
 
 - **Fix (`#boundaryprosecount`): a session document that *describes* the boundary

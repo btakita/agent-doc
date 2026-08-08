@@ -165,7 +165,8 @@ use agent_doc_supervisor::crash_policy::{
     supervisor_policy_exit_code, supervisor_resume_handoff_failed,
 };
 use agent_doc_supervisor::detection::{
-    AutoTriggerPromptDecision, AutoTriggerPromptSource, auto_trigger_prompt_decision,
+    AutoTriggerPromptDecision, AutoTriggerPromptSource, auto_trigger_blocking_gate,
+    auto_trigger_prompt_decision,
 };
 use agent_doc_supervisor::input::prompt_input_summary;
 use agent_doc_supervisor::ipc_protocol::submit_bytes;
@@ -1125,11 +1126,24 @@ fn spawn_auto_trigger_thread(
                         }
                     }
                 }
+                // `#startupmissgates`: keep the individual readiness gates so a
+                // `no_prompt` deadline can name which one never opened. The
+                // timeout used to log only `reason=no_prompt_after_30s`, which
+                // is indistinguishable between "the child never rendered", "the
+                // actor never reconciled to ready", and "the pane never read as
+                // dispatch-ready" — three different defects with three different
+                // fixes. Reconstructing that from ops/session logs after the
+                // fact took an entire forensic session; recording it at the
+                // deadline makes the next occurrence self-diagnosing.
+                let child_prompt_visible = current_child_prompt_visible(&shared, &harness);
+                let child_output_observed = current_child_output_observed(&shared);
+                let actor_ready = actor_state_is_ready(&shared);
+                let pane_dispatch_ready = supervisor_pane_dispatch_ready(&shared, &harness);
                 let prompt_decision = auto_trigger_prompt_decision(
-                    current_child_prompt_visible(&shared, &harness),
-                    current_child_output_observed(&shared),
-                    actor_state_is_ready(&shared),
-                    supervisor_pane_dispatch_ready(&shared, &harness),
+                    child_prompt_visible,
+                    child_output_observed,
+                    actor_ready,
+                    pane_dispatch_ready,
                     live_pane_ready_ticks,
                     AUTO_TRIGGER_LIVE_PANE_READY_CONFIRM_TICKS,
                     is_help_screen_visible(&shared, &harness),
@@ -1235,8 +1249,23 @@ fn spawn_auto_trigger_thread(
                         log_event(
                             &mut session_log,
                             &format!(
-                                "auto_trigger_timeout harness={} reason=no_prompt_after_{}s",
-                                harness.binary, AUTO_TRIGGER_TIMEOUT.as_secs()
+                                "auto_trigger_timeout harness={} reason=no_prompt_after_{}s \
+                                 child_prompt_visible={} child_output_observed={} \
+                                 actor_ready={} pane_dispatch_ready={} live_pane_ready_ticks={} \
+                                 blocking_gate={}",
+                                harness.binary,
+                                AUTO_TRIGGER_TIMEOUT.as_secs(),
+                                child_prompt_visible,
+                                child_output_observed,
+                                actor_ready,
+                                pane_dispatch_ready
+                                    .map_or("unavailable".to_string(), |ready| ready.to_string()),
+                                live_pane_ready_ticks,
+                                auto_trigger_blocking_gate(
+                                    child_output_observed,
+                                    actor_ready,
+                                    pane_dispatch_ready,
+                                ),
                             ),
                         );
                         // Hard deadline: record startup-miss + fail closed instead of

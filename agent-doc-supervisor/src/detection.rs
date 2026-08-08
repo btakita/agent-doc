@@ -79,6 +79,35 @@ pub fn auto_trigger_prompt_decision(
     }
 }
 
+/// Name the first fallback-readiness gate that never opened, for the
+/// `no_prompt` startup-miss diagnostic (`#startupmissgates`).
+///
+/// [`auto_trigger_prompt_decision`]'s pane fallback requires all three of
+/// `current_child_output`, `actor_ready`, and `owned_pane_dispatch_ready`.
+/// When the deadline expires, the operator needs to know *which* one stayed
+/// shut: they point at a dead PTY relay, a stuck actor projection, and a prompt
+/// the pane detector cannot recognize respectively. Reported in gate order so
+/// the earliest unmet precondition is the one named.
+pub fn auto_trigger_blocking_gate(
+    current_child_output_observed: bool,
+    actor_ready: bool,
+    live_pane_dispatch_ready: Option<bool>,
+) -> &'static str {
+    if !current_child_output_observed {
+        return "current_child_output";
+    }
+    if !actor_ready {
+        return "actor_ready";
+    }
+    match live_pane_dispatch_ready {
+        None => "owned_pane_unavailable",
+        Some(false) => "owned_pane_dispatch_ready",
+        // All gates open: the deadline expired while coalescing consecutive
+        // stable-pane ticks, not because a precondition was unmet.
+        Some(true) => "none_coalescing",
+    }
+}
+
 pub fn prompt_visible_requires_ready_transition(
     first_prompt_for_child: bool,
     actor_known_non_ready: bool,
@@ -146,6 +175,62 @@ mod tests {
         assert!(prompt_visible_requires_ready_transition(true, true));
         assert!(prompt_visible_requires_ready_transition(false, true));
         assert!(!prompt_visible_requires_ready_transition(false, false));
+    }
+
+    /// `#startupmissgates`: each unmet precondition must be named distinctly,
+    /// and the reported gate must agree with the decision actually taken.
+    #[test]
+    fn auto_trigger_blocking_gate_names_the_unmet_precondition() {
+        assert_eq!(
+            auto_trigger_blocking_gate(false, true, Some(true)),
+            "current_child_output"
+        );
+        assert_eq!(
+            auto_trigger_blocking_gate(true, false, Some(true)),
+            "actor_ready"
+        );
+        assert_eq!(
+            auto_trigger_blocking_gate(true, true, None),
+            "owned_pane_unavailable"
+        );
+        assert_eq!(
+            auto_trigger_blocking_gate(true, true, Some(false)),
+            "owned_pane_dispatch_ready"
+        );
+        assert_eq!(
+            auto_trigger_blocking_gate(true, true, Some(true)),
+            "none_coalescing"
+        );
+    }
+
+    /// A named gate is only useful if it explains the decision. Whenever the
+    /// gate says a precondition is unmet, the decision must be `Wait` with the
+    /// tick counter reset; whenever it says `none_coalescing`, the fallback is
+    /// genuinely progressing toward dispatch.
+    #[test]
+    fn auto_trigger_blocking_gate_agrees_with_the_prompt_decision() {
+        for (output, ready, pane) in [
+            (false, true, Some(true)),
+            (true, false, Some(true)),
+            (true, true, None),
+            (true, true, Some(false)),
+        ] {
+            let gate = auto_trigger_blocking_gate(output, ready, pane);
+            assert_ne!(gate, "none_coalescing", "expected a blocked gate");
+            assert_eq!(
+                auto_trigger_prompt_decision(false, output, ready, pane, 0, 2, false),
+                AutoTriggerPromptDecision::Wait {
+                    live_pane_ready_ticks: 0
+                },
+                "gate {gate} must correspond to a reset Wait"
+            );
+        }
+
+        assert_eq!(auto_trigger_blocking_gate(true, true, Some(true)), "none_coalescing");
+        assert_eq!(
+            auto_trigger_prompt_decision(false, true, true, Some(true), 1, 2, false),
+            AutoTriggerPromptDecision::Dispatch(AutoTriggerPromptSource::StableOwnedPane)
+        );
     }
 
     #[test]

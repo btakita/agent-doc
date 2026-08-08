@@ -1580,6 +1580,15 @@ fn is_claude_composer_rule_line(trimmed: &str) -> bool {
 }
 
 fn is_claude_status_chrome_line(trimmed: &str) -> bool {
+    // A composer row is never chrome, whatever the operator typed into it.
+    if trimmed.starts_with('❯') || trimmed.starts_with('⏵') {
+        return false;
+    }
+    claude_ctx_usage_token_present(trimmed) || is_claude_status_chrome_line_without_ctx(trimmed)
+}
+
+/// True when the line carries Claude's `ctx:N%` context-usage token.
+fn claude_ctx_usage_token_present(trimmed: &str) -> bool {
     let lower = trimmed.to_ascii_lowercase();
     let Some(pos) = lower.find("ctx:") else {
         return false;
@@ -1590,6 +1599,67 @@ fn is_claude_status_chrome_line(trimmed: &str) -> bool {
         j += 1;
     }
     j > 0 && j < rest.len() && rest[j] == b'%'
+}
+
+/// True for Claude's built-in status line when the `ctx:N%` segment is absent
+/// (`#freshclaudectxless`).
+///
+/// A **fresh** session has no meaningful context usage, so Claude omits that
+/// token entirely and renders `Opus 5 ~/…/src/boost-client main brian@host`.
+/// Keying the chrome test on `ctx:` alone therefore classified the fresh-session
+/// status line as ordinary output. Because it sits *below* the composer, it then
+/// won `last_prompt_candidate` and masked the `❯` prompt above it, so every
+/// non-cursor-scoped readiness check (`output_prompt_visible`, and through it
+/// `current_child_prompt_visible` / `idle_queue_prompt_visibility`) reported a
+/// genuinely idle, dispatch-ready pane as never-ready — until the session
+/// accumulated enough context for `ctx:N%` to appear. That is why the defect
+/// reproduced only on freshly spawned harnesses (`agent_restart_performed`)
+/// and never on an established session.
+///
+/// Matched structurally rather than by model name, because the leading segment
+/// varies with model and effort: the line must end in a `user@host` token and
+/// carry a filesystem-path token, and must not be a composer row (checked by the
+/// caller). Ordinary prose that merely mentions a host (`ssh brian@host`) lacks
+/// the path token and is left alone. A false positive here is bounded — it only
+/// skips one line while scanning upward for the prompt candidate, and busy cues
+/// are classified separately by `has_busy_cue` over the whole capture.
+fn is_claude_status_chrome_line_without_ctx(trimmed: &str) -> bool {
+    let mut tokens = trimmed.split_whitespace();
+    let Some(first) = tokens.next() else {
+        return false;
+    };
+    let rest: Vec<&str> = tokens.collect();
+    // `<model…> <path> [branch] <user@host>` — at least a model, a path and a host.
+    if rest.len() < 2 {
+        return false;
+    }
+    let Some(last) = rest.last() else {
+        return false;
+    };
+    if !is_user_at_host_token(last) {
+        return false;
+    }
+    // The path segment never leads the line (the model name does).
+    std::iter::once(first)
+        .chain(rest.iter().copied())
+        .skip(1)
+        .any(is_filesystem_path_token)
+}
+
+/// `user@host` with exactly one `@`, non-empty on both sides, and no path
+/// separator (which would make it a URL or an scp-style remote path).
+fn is_user_at_host_token(token: &str) -> bool {
+    let mut parts = token.split('@');
+    let (Some(user), Some(host), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    !user.is_empty() && !host.is_empty() && !token.contains('/') && !token.contains(':')
+}
+
+/// A displayed working-directory token: absolute, `~`-relative, or elided
+/// (`~/…/src/boost-client`).
+fn is_filesystem_path_token(token: &str) -> bool {
+    token.starts_with('/') || token == "~" || token.starts_with("~/")
 }
 
 /// True when any of the recent (already lower-cased, trimmed) OpenCode pane
@@ -2680,6 +2750,79 @@ mod tests {
         assert!(!h.is_ignorable_output_line(
             "· Roosting… (14s · ↓ 487 tokens · thinking with high effort)"
         ));
+    }
+
+    #[test]
+    /// `#freshclaudectxless`: a FRESH Claude session renders its built-in status
+    /// line WITHOUT the `ctx:N%` segment (0% context is omitted), e.g.
+    /// `Opus 5 ~/…/src/boost-client main brian@cachyos-x8664`. Keying the chrome
+    /// test on `ctx:` alone left that line non-ignorable, so it became the last
+    /// prompt candidate and masked the `❯` composer directly above it — a
+    /// genuinely idle, dispatch-ready fresh pane read as never-ready.
+    ///
+    /// Captured live from `claude --dangerously-skip-permissions` in a 50-row
+    /// pane at t=10s; the established-session counterpart carries `ctx:20%`.
+    #[test]
+    fn fresh_claude_status_line_without_ctx_is_chrome_not_a_prompt_candidate() {
+        let h = HarnessConfig::claude();
+        let fresh = "  Opus 5 ~/…/src/boost-client main brian@cachyos-x8664";
+        let established = "  Opus 5 ctx:20% ~/…/src/boost-client main brian@cachyos-x8664";
+
+        assert!(
+            h.is_ignorable_output_line(established),
+            "established status line must stay chrome"
+        );
+        assert!(
+            h.is_ignorable_output_line(fresh),
+            "fresh (ctx-less) status line must also be chrome: {fresh:?}"
+        );
+    }
+
+    /// The whole point of the above: the composer must win over the status line.
+    /// This is the exact bottom-of-pane shape captured from a fresh Claude pane.
+    #[test]
+    fn fresh_claude_pane_composer_is_dispatch_ready_without_cursor_scoping() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "                    ● high · /effort\n",
+            "────────────────────────────────────────\n",
+            "❯ \n",
+            "────────────────────────────────────────\n",
+            "  Opus 5 ~/…/src/boost-client main brian@cachyos-x8664\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent\n",
+        );
+
+        let candidate = h
+            .last_prompt_candidate(pane)
+            .expect("a fresh Claude pane must yield a prompt candidate");
+        assert!(
+            h.is_dispatch_ready_prompt_line(&candidate),
+            "fresh Claude composer must be dispatch-ready, got {candidate:?}"
+        );
+        assert!(
+            h.output_prompt_visible(pane),
+            "a fresh, idle Claude pane must read as prompt-visible"
+        );
+    }
+
+    /// Guard the widened rule: it must not swallow a real composer, a busy cue,
+    /// or ordinary agent output that merely mentions a `user@host`.
+    #[test]
+    fn claude_status_chrome_rule_does_not_swallow_prompts_or_output() {
+        let h = HarnessConfig::claude();
+        for line in [
+            "❯ Opus 5 ~/…/src/boost-client main brian@cachyos-x8664",
+            "⏵ deploy ~/src main brian@host",
+            "✻ Cooked for 8m 45s",
+            "· Roosting… (14s · ↓ 487 tokens)",
+            "ssh brian@cachyos-x8664",
+            "Connected to brian@cachyos-x8664",
+        ] {
+            assert!(
+                !h.is_ignorable_output_line(line),
+                "must not be treated as status chrome: {line:?}"
+            );
+        }
     }
 
     #[test]

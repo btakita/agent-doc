@@ -101,6 +101,34 @@ Worth being explicit about the limits: 12 of the 23 samples are mine, sequential
 The reasoning now lives on `harness_uses_split_text_submit` and in a test named for the decision, so a future change has to confront the measurement rather than re-derive the inference. `#passthroughsplitprofile` is resolved by this.
 
 **Shipped:** `make check` green (exit 0, 0 failed suites), `make install` → 0.35.182, pushed (`3b6ff4287` + superproject `ca42452ac3`). Scratch repro project and probe tmux session cleaned up.
+
+### Re: do [#compactstrandedheading] — opus-5
+
+> **Queue prompt:**
+>
+> do [#compactstrandedheading]
+
+
+Confirmed: `compact exchange` no longer fails on the stranded duplicate heading. No code change was needed — but the obvious way to check this gives a **false pass**, so the interesting part is how it was verified.
+
+**The vacuous check.** Running compact on this document worked (281 → 163 lines, 5 topics archived, queue and backlog untouched). That proves nothing: the document has **no duplicate headings** — 7 distinct `### Re:` topics, every one unique. An earlier compaction had already carried the historical shape away. A green run over input that lacks the defect is exactly the vacuity trap.
+
+**The real check.** I built the shape directly — an exchange with a body-bearing `### Re: first topic`, a second topic, an **empty** `### Re: first topic` shell, and a third topic — and compacted that:
+
+- `rc=0`, no failure
+- the empty duplicate shell removed, `first topic` now appears **zero** times in the document
+- the real bodies of the kept topics intact
+- the displaced topic archived **with its body**, not dropped
+- `agent:backlog` `#keepme` untouched
+- `--keep 2` counted topics *after* dedup: 4 headings → 3 real topics → archive 1, keep 2
+
+And the proof the repair path actually ran rather than the input being harmless: `compact_repaired_stranded_duplicate_response_heading` in ops.log, stamped at exactly the fixture's compact time.
+
+**Pinned.** The repair function itself was already covered in `agent-doc-turn`. What can silently regress is the **wiring** — compact dropping the call, or growing its own private normalization — so the new test in `agent-doc-compact-io` pins that plus the ops marker, alongside the behavioural assertion that the shell goes and both bodies stay.
+
+`make check` green (exit 0, 0 failed suites). Pushed (`e6e65dd6d` + superproject `4dc62ed3ed`). No version bump: this is test-only with no behaviour delta.
+
+One note on this document: the compact above was a real mutation — the exchange is now a session summary plus the two most recent topics, with 5 topics archived to `.agent-doc/archives/…-20260808-214213.md`.
 <!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -110,7 +138,7 @@ The reasoning now lives on `harness_uses_split_text_submit` and in a test named 
 - ~~do [#startupmiss9row]~~
 - ~~do [#ptsubmitmetric]~~
 - ~~do [#claudesplitsubmit]~~
-- 🚧 do [#compactstrandedheading]
+- ~~do [#compactstrandedheading]~~
 - do [#hvw0publishproof]
 <!-- /agent:queue -->
 
@@ -122,7 +150,6 @@ The reasoning now lives on `harness_uses_split_text_submit` and in a test named 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#compactstrandedheading] #agent-doc-bug Run `agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` and confirm it no longer fails on the historical stranded duplicate heading. Converted from the removed operator-verify item #operatorverifyresolve, whose premise (a live JetBrains File Cache Conflict awaiting a human Cancel / Keep-memory-changes) is stale: recent session-checks read `status=current authority=cp_model live_editors=1 delivery_converged=true` and the retained closeouts it was waiting on are committing. Only this half was ever untested, and it is agent-testable.
 - [ ] [#hvw0publishproof] #agent-doc-bug Verify statically (read the release workflow on github.com/btakita/skill-harness) that the crates.io publish step propagates failure after 32836ad. The loud-failure behavior has never actually executed: the newest Release run is v0.1.3 from 2026-07-18 and its `Publish to crates.io` step reports SUCCESS even though the CARGO_REGISTRY_TOKEN 403s and v0.1.3 was published by hand — that success line is the false green 32836ad was meant to kill. Until a tag runs, the every-tagged-release-now-fails-loudly claim on #hvw0 is untested.
 <!-- /agent:backlog -->
 

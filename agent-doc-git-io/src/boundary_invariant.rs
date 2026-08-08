@@ -27,9 +27,7 @@ pub fn enforce_committed_single_boundary_invariant(
     else {
         return Ok(());
     };
-    let boundary_count = head_blob
-        .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
-        .count();
+    let boundary_count = agent_doc_element_boundary::boundary::count_markers(&head_blob);
     if boundary_count <= 1 {
         return Ok(());
     }
@@ -46,9 +44,7 @@ pub fn enforce_committed_single_boundary_invariant(
         ),
     );
     let collapsed = agent_doc_template::reposition_boundary_to_end_clean(&head_blob);
-    let collapsed_count = collapsed
-        .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
-        .count();
+    let collapsed_count = agent_doc_element_boundary::boundary::count_markers(&collapsed);
     if collapsed == head_blob || collapsed_count != 1 {
         anyhow::bail!(
             "boundary_invariant_violation phase=post_commit_collapse file={} \
@@ -90,9 +86,7 @@ pub fn enforce_committed_single_boundary_invariant(
                 file.display()
             )
         })?;
-    let verified_count = verified
-        .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
-        .count();
+    let verified_count = agent_doc_element_boundary::boundary::count_markers(&verified);
     anyhow::ensure!(
         verified_count == 1,
         "boundary_invariant_violation phase=post_commit_verify file={} \
@@ -213,6 +207,75 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|line| line.contains("verified_boundaries=1"))
+        );
+    }
+
+    /// `#boundaryprosecount` — a session document that *describes* the boundary
+    /// marker in inline code carries one real marker, not two. The raw substring
+    /// count read the prose as an accreted marker and demanded a collapse that
+    /// could never succeed (the collapse preserves code spans), so every healthy
+    /// closeout on such a document failed at `phase=post_commit_collapse`.
+    #[test]
+    fn prose_that_quotes_the_marker_is_not_an_accreted_boundary() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Agent Doc Test"],
+        ] {
+            assert!(
+                Command::new("git")
+                    .current_dir(root)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let file = root.join("session.md");
+        std::fs::write(
+            &file,
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: boundary accretion\n\n",
+                "Response-block dedup normalizes `<!-- agent:boundary: -->` and `(HEAD)`.\n",
+                "<!-- agent:boundary:real-one -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+        for args in [
+            vec!["add", "session.md"],
+            vec!["commit", "-m", "documented marker", "--no-verify"],
+        ] {
+            assert!(
+                Command::new("git")
+                    .current_dir(root)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let head_before = crate::revision::show_head(&file).unwrap().unwrap();
+        let effects = RecordingEffects::default();
+
+        enforce_committed_single_boundary_invariant(&effects, &file, root, &file).unwrap();
+
+        assert_eq!(
+            crate::revision::show_head(&file).unwrap().unwrap(),
+            head_before,
+            "a documented marker must not trigger a self-heal collapse commit"
+        );
+        assert!(
+            effects.snapshot.lock().unwrap().is_none(),
+            "no snapshot rewrite belongs on a healthy single-boundary commit"
+        );
+        assert!(
+            effects.logs.lock().unwrap().is_empty(),
+            "no violation should be reported: {:?}",
+            effects.logs.lock().unwrap()
         );
     }
 

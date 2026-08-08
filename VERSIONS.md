@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.175
+
+- **Fix (`#boundaryprosecount`): a session document that *describes* the boundary
+  marker in prose could never close out.** The committed single-boundary invariant
+  counted markers with a raw `matches(BOUNDARY_PREFIX)` substring scan, so an
+  inline-code mention like `` `<!-- agent:boundary: -->` `` — which agent-doc's own
+  bug-tracking sessions write constantly — counted as a second marker. The
+  self-heal then demanded a collapse that could never succeed: the collapse masks
+  code ranges (`remove_all`) and correctly preserves that prose, so the recount
+  stayed at 2 and every closeout on the document failed at
+  `boundary_invariant_violation phase=post_commit_collapse`, after the commit had
+  already landed. Counting now goes through `boundary::count_markers`, which masks
+  the same code ranges the collapse preserves, so the counter and the collapse
+  agree by construction. `agent-doc boundary`'s stale-marker diagnostic uses it
+  too, and no longer over-reports quoted markers.
+
 ## 0.35.174
 
 - **An answered `[operator-verify]` head stayed deferred forever (`#opverifyanswered`).**

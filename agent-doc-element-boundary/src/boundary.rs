@@ -227,9 +227,110 @@ pub fn remove_all(doc: &str) -> String {
     result
 }
 
+/// Count the real boundary markers in a document (`#boundaryprosecount`).
+///
+/// A raw `doc.matches(BOUNDARY_PREFIX).count()` cannot tell a marker from a
+/// document that *describes* one. agent-doc's own bug-tracking sessions quote
+/// the marker in inline code — `` `<!-- agent:boundary: -->` `` — so the
+/// single-boundary invariant read a documented marker as an accreted one and
+/// failed a healthy closeout that no collapse could ever repair: the collapse
+/// masks code ranges (see [`remove_all`]) and correctly preserves that prose,
+/// so the count never dropped and the self-heal bailed every time.
+///
+/// This masks the same code ranges [`remove_all`] preserves, so counting and
+/// collapsing agree by construction. Prefer it over a substring count anywhere
+/// the number of markers gates behavior.
+pub fn count_markers(doc: &str) -> usize {
+    let code_ranges = element::find_code_ranges(doc);
+    let mut count = 0usize;
+    let mut absolute_line_start = 0;
+
+    for line in doc.split_inclusive('\n') {
+        let mut cursor = 0;
+
+        while let Some(relative_start) = line[cursor..].find(BOUNDARY_PREFIX) {
+            let marker_start = cursor + relative_start;
+            let prefix_end = marker_start + BOUNDARY_PREFIX.len();
+            let absolute_marker_start = absolute_line_start + marker_start;
+            if code_ranges
+                .iter()
+                .any(|&(start, end)| absolute_marker_start >= start && absolute_marker_start < end)
+            {
+                cursor = prefix_end;
+                continue;
+            }
+
+            let Some(relative_end) = line[prefix_end..].find(BOUNDARY_SUFFIX) else {
+                break;
+            };
+            count += 1;
+            cursor = prefix_end + relative_end + BOUNDARY_SUFFIX.len();
+        }
+
+        absolute_line_start += line.len();
+    }
+
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn count_markers_ignores_prose_that_quotes_the_marker() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: one\n\n",
+            "Response-block dedup normalizes `<!-- agent:boundary: -->`, the `(HEAD)` suffix.\n",
+            "<!-- agent:boundary:real-one -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            doc.matches(BOUNDARY_PREFIX).count(),
+            2,
+            "the raw substring count is what regressed the invariant"
+        );
+        assert_eq!(count_markers(doc), 1);
+    }
+
+    #[test]
+    fn count_markers_agrees_with_remove_all_on_accreted_markers() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prose about `<!-- agent:boundary: -->` markers.\n",
+            "<!-- agent:boundary:stale-one -->\n",
+            "### Re: two\n\n",
+            "<!-- agent:boundary:stale-two -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(count_markers(doc), 2);
+        assert_eq!(
+            count_markers(&remove_all(doc)),
+            0,
+            "collapse and count must see the same marker set"
+        );
+        assert!(
+            remove_all(doc).contains("`<!-- agent:boundary: -->`"),
+            "collapse preserves the quoted prose the count now ignores"
+        );
+    }
+
+    #[test]
+    fn count_markers_ignores_fenced_marker_text() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "```markdown\n",
+            "<!-- agent:boundary:example -->\n",
+            "```\n",
+            "<!-- agent:boundary:real-one -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(count_markers(doc), 1);
+    }
 
     #[test]
     fn format_and_extract() {

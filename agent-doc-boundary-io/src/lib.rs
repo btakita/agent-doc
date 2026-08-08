@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_doc_element_boundary::boundary::{BOUNDARY_PREFIX, insert};
+use agent_doc_element_boundary::boundary::{count_markers, insert};
 
 /// CLI entry point: insert a boundary marker and print the UUID.
 pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
@@ -11,7 +11,9 @@ pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
         file,
         "boundary_insert",
     )?;
-    let stale_count = content.matches(BOUNDARY_PREFIX).count();
+    // Count only real markers — `insert` collapses via `remove_all`, which
+    // preserves marker text quoted in code spans (`#boundaryprosecount`).
+    let stale_count = count_markers(&content);
 
     let (id, updated) = insert(&content, component_name)?;
 

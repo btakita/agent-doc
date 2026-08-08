@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -44,12 +44,52 @@ Compact Exchange on haiven-dev.md error"
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: waiting for the pre-write editor delivery barrier for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md: visible document write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/haiven-dev.md is retained by the lazy delivery projection because the editor state projection has not converged; no secondary snapshot/commit or forced disk write was attempted
 ```
+
+### Re: do [#hvw0publishgrep] — opus-5
+
+> **Queue prompt:**
+>
+> do [#hvw0publishgrep]
+
+
+The suspicion was right, and it is now proven rather than argued.
+
+**crates.io does not say "already exists".** Its publish controller builds the duplicate-version rejection in `duplicate_version_error`:
+
+```rust
+fn duplicate_version_error(version: &str) -> BoxedAppError {
+    bad_request(format!("crate version `{version}` is already uploaded"))
+}
+```
+
+So the `grep -q "already exists" publish.log` branch added in 32836ad never matched that message, and a re-run of an existing tag fell straight through to `::error::cargo publish failed`.
+
+**But there is a second wording, and it does contain the phrase.** Modern cargo pre-checks the registry index before uploading (`verify_unpublished` in `src/ops/registry/cargo_publish.rs`) and bails with `crate <name>@<version> already exists on <registry>`. On a fresh runner with a current sparse index that check fires first, so the old grep would have matched — which is why the defect was latent rather than obviously broken. It falls through to the server message whenever the index the runner sees has not caught up, and on cargo versions predating that pre-check.
+
+Fix: match both.
+
+**Red first.** I moved the step into `.github/scripts/cargo-publish.sh` verbatim (old grep intact) and added `tests/release_publish.rs`, which drives it with a fake `cargo` on `CARGO`. The server-wording case failed exactly as predicted:
+
+```
+thread 'publish_tolerates_server_duplicate_version' panicked
+  the remote server responded with an error (status 200 OK): crate version `0.1.3` is already uploaded
+  ::error::cargo publish failed
+```
+
+**Green after widening to `grep -Eq "is already uploaded|already exists on "`.** Five cases now pinned: clean success passes through with no `::notice::`; both duplicate-version phrasings are tolerated; a `403 authentication failed` still fails the job (the regression 32836ad exists to prevent); an unrelated build failure still fails the job. The trailing space in `already exists on ` keeps the tolerance anchored to the registry sentence rather than any log line containing those words.
+
+Your read on severity holds: the old grep could only produce a false red, never a false green, so 32836ad's guarantee was never weakened — only its documented idempotent path was broken.
+
+**Verification:** `cargo clippy --all-features --all-targets -- -D warnings` clean; full suite 53 passed / 0 failed (exit 0, run through `rtk proxy` so the exit code is real). Committed as `081d52c` and pushed to `btakita/skill-harness` main; superproject pointer bumped in `b78c9b1`. CI run `31284439630` on that exact SHA is still in progress at closeout — recorded, not waited on.
+
+**Not spread elsewhere.** I checked the sibling release workflows for the same pattern: `src/agent-doc` uses "already exists" for a `gh release view` check (unrelated), and `src/tsift` pre-checks the index itself via `crate_version_exists` (also unrelated). No second instance of this bug.
+
+Still operator-gated and unchanged by this work: `#hvw0` — the `CARGO_REGISTRY_TOKEN` on that repo returns 403, so no tagged release has exercised the publish step since 32836ad. This turn proves the classifier statically; the live path stays unproven until the token is rotated and a tag runs.
 <!-- agent:boundary:7ad810c1 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#hvw0publishgrep]
 <!-- /agent:queue -->
 
 ## Notes
@@ -60,7 +100,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#hvw0publishgrep] #agent-doc-bug On github.com/btakita/skill-harness, the release workflow's publish step tolerates an idempotent re-publish by grepping publish.log for 'already exists'. cargo/crates.io likely words a duplicate-version rejection as 'already uploaded', in which case that branch never matches and re-running an existing tag fails loudly instead of being tolerated. Errs safe (false red, never a false green) so it does not weaken 32836ad, but the documented idempotent case may not work. Confirm cargo's exact duplicate-version message and widen the grep (or match on the crates.io error code) if it is wrong.
 <!-- /agent:backlog -->
 
 ## Review

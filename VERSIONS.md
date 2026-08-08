@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.165
+
+- **A queue head cited inside another prompt no longer counts as answered (`#qheadnest`).**
+  `free_text_head_answered_by_response` fell back to searching one flattened blob of every `>`
+  blockquote line in the response. An operator bug report about the queue is normally written by
+  citing the queue line it is about, so echoing that report as a `> **Queue prompt:**` quote made
+  the cited head look answered. Live on 2026-08-08 on `agent-doc-bugs2.md`: an operator note whose
+  body quoted ``tmux pane auto-sync is still extremely slow …`` was consumed and echoed, and
+  `session-check` then INTERRUPTED the closeout — "completed free-text agent:queue head(s) … are
+  still active in the committed queue" — over a head nobody had touched, with the only offered
+  repairs being to strike real work or disable the guard document-wide. The same blob match also
+  drives `#ftstrike`, so it could silently strike an unaddressed operator report. The fallback is
+  now anchored to where a quoted entry *starts*: candidates are each blockquote block joined from
+  each of its lines to the end, so a head spanning several quoted lines still matches at any entry
+  position while text buried mid-entry never does.
+
 ## 0.35.164
 
 - **The `#runfilesubmit` draft check verified nothing, so "Run Agent Doc" still stranded its

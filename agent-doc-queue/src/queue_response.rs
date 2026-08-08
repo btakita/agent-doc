@@ -269,21 +269,55 @@ pub fn normalize_for_answer_match(s: &str) -> String {
     out.trim().to_string()
 }
 
-/// The concatenated, normalized text of every `>` blockquote line in the response.
+/// Normalized candidates for the weak blockquote answer-match.
+///
 /// The skill quotes the prompt it is answering as a blockquote (`> **Queue
 /// prompt:**` / `> <text>`), so a free-text head is "answered" only when its text
 /// appears in this quoted region -- prose that merely *mentions* a head (without
 /// quoting it as a prompt) does NOT count, which keeps an unaddressed operator
 /// report from being silently struck (#ftstrike false-strike guard).
-fn response_blockquote_text(response_body: &str) -> String {
-    let joined = response_body
-        .lines()
-        .map(str::trim_start)
-        .filter(|line| line.starts_with('>'))
-        .map(|line| line.trim_start_matches('>'))
-        .collect::<Vec<_>>()
-        .join(" ");
-    normalize_for_answer_match(&joined)
+///
+/// `#qheadnest`: the match must be anchored to where a quoted entry *starts*,
+/// not to "appears anywhere in the quoted region". One operator prompt commonly
+/// quotes another head's text inside itself -- a bug report about the queue is
+/// usually written by citing the queue line it is about. Searching one flattened
+/// blob then reads the echo of prompt A as proof that head B was answered, and
+/// the residue guard fails the closeout over a head nobody touched. Observed
+/// 2026-08-08 on `agent-doc-bugs2.md`: an operator note whose body cited
+/// ``tmux pane auto-sync is still extremely slow ...`` was echoed verbatim, and
+/// that citation "answered" the still-queued auto-sync head.
+///
+/// Each candidate is a blockquote block joined from one of its lines to the end,
+/// so a head spanning several quoted lines still matches at whatever entry
+/// position it occupies, while text buried mid-entry never does.
+fn response_blockquote_entry_candidates(response_body: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut block: Vec<String> = Vec::new();
+    fn flush(block: &mut Vec<String>, candidates: &mut Vec<String>) {
+        for start in 0..block.len() {
+            let normalized = normalize_for_answer_match(&block[start..].join(" "));
+            if !normalized.is_empty() {
+                candidates.push(normalized);
+            }
+        }
+        block.clear();
+    }
+    for line in response_body.lines() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('>') {
+            flush(&mut block, &mut candidates);
+            continue;
+        }
+        let quoted = trimmed.trim_start_matches('>').trim_start();
+        let quoted = quoted
+            .strip_prefix("**Queue prompt:**")
+            .or_else(|| quoted.strip_prefix("**Queue prompts:**"))
+            .unwrap_or(quoted)
+            .trim_start();
+        block.push(strip_echo_presence_list_marker(quoted).to_string());
+    }
+    flush(&mut block, &mut candidates);
+    candidates
 }
 
 fn strip_echo_presence_list_marker(line: &str) -> &str {
@@ -580,7 +614,12 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
     if head_norm.split(' ').filter(|w| !w.is_empty()).count() < 4 {
         return false;
     }
-    response_blockquote_text(response_body).contains(&head_norm)
+    // `#qheadnest`: anchored to a quoted entry's start, never "anywhere in the
+    // quoted region" -- one prompt citing another head's text is not an answer
+    // to that head.
+    response_blockquote_entry_candidates(response_body)
+        .iter()
+        .any(|entry| entry.starts_with(&head_norm))
 }
 
 /// Phrases with which a response states that a head it quoted was NOT actually
@@ -934,6 +973,62 @@ mod tests {
             FTSTRIKE_RESPONSE,
             ":pushpin: JB Run Agent Doc is stalled on this document when I tried to start the queue run. No notification."
         ));
+    }
+
+    #[test]
+    fn free_text_head_answered_by_response_ignores_a_head_cited_inside_another_prompt() {
+        // #qheadnest FALSE-STRIKE GUARD: an operator bug report about the queue
+        // is normally written by citing the queue line it is about. Echoing that
+        // report must not count as answering the head it cites -- flattening every
+        // blockquote line into one blob did exactly that, and the residue guard
+        // then INTERRUPTED the closeout over a head nobody touched.
+        let cited = concat!(
+            "tmux pane auto-sync is still extremely slow when switching from ",
+            "lazily.md to agent-doc-bugs2.md. Fix it."
+        );
+        let response = format!(
+            concat!(
+                "### Re: do [#runsubmitclaude] -- opus-5\n\n",
+                "> **Queue prompt:**\n",
+                ">\n",
+                "> do [#runsubmitclaude]\n",
+                ">\n",
+                "> The free-text `{cited}` was kept when you added ",
+                "`do [#runsubmitclaude]` into the queue. The free-text should have ",
+                "been replaced (deleted) by `do [#runsubmitclaude]`.\n\n",
+                "Fixed and released.\n",
+            ),
+            cited = cited
+        );
+        assert!(
+            !free_text_head_answered_by_response(&response, cited),
+            "a head quoted inside another prompt's body is cited, not answered"
+        );
+
+        // The citing prompt itself IS answered by that same echo.
+        let citing = format!(
+            "The free-text `{cited}` was kept when you added `do [#runsubmitclaude]` into the queue."
+        );
+        assert!(
+            free_text_head_answered_by_response(&response, &citing),
+            "the echoed entry still answers its own head"
+        );
+    }
+
+    #[test]
+    fn free_text_head_answered_by_response_matches_a_multi_line_head_at_any_entry_position() {
+        // The anchor is the start of a quoted entry, not the start of the block,
+        // so a head spanning two quoted lines still matches in second position.
+        let head = "the sync pane collapses to one column\nafter the second navigation";
+        let response = concat!(
+            "### Re: two reports -- opus\n\n",
+            "> **Queue prompts:**\n",
+            "> - deploy the release build\n",
+            "> - the sync pane collapses to one column\n",
+            "> after the second navigation\n\n",
+            "Both handled.\n",
+        );
+        assert!(free_text_head_answered_by_response(response, head));
     }
 
     #[test]

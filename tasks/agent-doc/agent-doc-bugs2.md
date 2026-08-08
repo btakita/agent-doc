@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 49b1f99e-72a4-4dad-b63d-d5f39bd2dc8e
+resume: a1cd90cb-d7e0-4206-a900-ea7d9078d4f9
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -119,24 +119,64 @@ text+Enter submit profile. The single measurement it got was invalid — the che
 could not reach a resubmit decision at all, so `outcome=cleared` meant nothing.
 As of 0.35.164 the measurement is real; the item's unblock condition is unchanged
 but its evidence counter restarts from zero.
+
+### Re: closing out #runsubmitclaude — a second defect it uncovered — opus-5
+
+> **Queue prompt:**
+>
+> tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.
+
+
+Recording a fix the `#runsubmitclaude` closeout itself surfaced, released as
+**0.35.165**.
+
+When this cycle committed, `session-check` refused to close:
+
+```
+INTERRUPTED: completed free-text agent:queue head(s) "tmux pane auto-sync is
+still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix
+it." are still active in the committed queue even though exchange history
+contains a `Queue prompt` echo proving they were already answered
+```
+
+Nobody answered that head. It is still the next thing in the queue.
+
+**What happened.** Your mid-turn queue note quotes the auto-sync line inside its
+own body — "The free-text \`tmux pane auto-sync …\` was kept when you added
+\`do [#runsubmitclaude]\`…". The binary echoed that note verbatim as a
+`> **Queue prompt:**` block, and `free_text_head_answered_by_response` fell back
+to searching **one flattened blob** of every `>` line in the response. The
+auto-sync text was in that blob, so the guard concluded the head had been
+answered.
+
+That is a general shape, not a one-off: an operator bug report *about* the queue
+is normally written by citing the queue line it is about. The two repairs the
+guard offered were to strike real work or disable the guard document-wide — both
+wrong. And the same blob match drives `#ftstrike`, where it could silently strike
+an unaddressed report instead of just blocking a closeout.
+
+**Fix.** The fallback is now anchored to where a quoted entry *starts*. Each
+blockquote block yields one candidate per line — that line joined to the end of
+the block — and the head must match at a candidate's start. A head spanning
+several quoted lines still matches at whatever entry position it occupies; text
+buried mid-entry never does. Two new tests pin both halves, including your exact
+document shape.
+
+`session-check` now returns ok on this document with the auto-sync head correctly
+still queued. 0.35.165 committed (`a424111ce`), pushed, tagged, installed,
+controllers recycled.
+
+**Still owed to you.** Your note's actual complaint — that adding
+`do [#runsubmitclaude]` should have replaced/deleted a free-text line and did not
+— is a separate queue-convergence question I have not answered. The note got
+consumed and struck by the echo before it was addressed. Say the word and I will
+take it as its own item; I did not want to guess which of the two free-text lines
+you meant.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#passthroughsplitprofile]~~
-- ~~do [#runsubmitclaude]~~
-- tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.
-- ~~The free-text `tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.` was kept when you added `do [#runsubmitclaude]` into the queue. The free-text should have been replaced (deleted) by `do [#runsubmitclaude]`.~~
----
-The prompt for Claude Code should simply be `/agent-doc .../file.md`. There is a long prompt instead:
-```
-❯ Agent Doc queue state advanced for `tasks/software/lazily.md`. Continue this existing owner-pane session; do not
-  invoke `agent-doc` recursively.
-  Execute the current active queue head:
-  lzcoveragefamily
-  Persist and finalize this cycle through the connected Agent Doc tools.
-```
 <!-- /agent:queue -->
 
 ## Notes

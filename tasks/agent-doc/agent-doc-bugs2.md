@@ -219,11 +219,38 @@ This dispatch produced **no `[agent-doc] cycle contract` marker**, so there was 
 `make check` green (8692 tests), installed, recycled on both roots, pushed (agent-doc `34a3f4c62`, superproject `89f43e146d`).
 
 **Note on the class.** A dispatch that produces no cycle contract is invisible from inside the document — nothing records that a continuation was attempted and lost. The queue simply stops draining and looks idle. That is worth a detector, but it needs an owner on the admission side; not filed as work I could complete this turn.
+
+### Re: commit + push the uncommitted agent-doc files — opus-5
+
+> **Queue prompt:**
+>
+> do [#ownershipbindingfirst]
+>
+> do [#stalewatchpid]
+
+
+Done. The stopped session's work is adopted, verified, and pushed — agent-doc `e4ece200e`, superproject `465bff36ae`.
+
+**Verified, not inherited on trust.** `make check` green with those files in the tree: **8692 tests passed**, 248 skipped. This also closes the split I created earlier: HEAD now matches the tree I have been verifying against all evening, so `#stalewatchpid`'s test assertions — which I reverted in `6d1c64167` to unbreak CI while their source was still uncommitted — land together with the source that defines them.
+
+**What was in it.**
+
+`#ownershipbindingfirst` (`agent-doc-sync-io`, 572 lines): the sync ownership proof resolves the authoritative actor binding from the document path *before* falling back to content-authority resolution, so a tab-switch routes off the controller's file→actor projection instead of re-deriving it. Adds `project_authoritative_actor_binding_by_file`, `load_live_authoritative_actor_record_for_file_cached`, and a durable-registry refresh, and moves the by-session actor lookup ahead of content resolution in `resolve_actor_pane_after_content`.
+
+`#stalewatchpid` (`agent-doc-watch-io`): the no-argument pid helpers used the raw process working directory, so `watch --stop` / `--status` run from a subdirectory read and removed a *different* path than the daemon wrote — and the removal discarded its result (`let _ =`), so the real pid file survived as an immortal stale record. The observed haiven-dev file named a pid that had been dead three days. Pid operations now resolve the project root, `remove_pid`/`remove_pid_in` are fallible and report, and `clear_stale_pid[_in]` prunes a dead record from the read side. Identity-verified rather than a bare liveness check, so pid reuse cannot delete a live daemon's file.
+
+Plus `tasks/agent-doc/plan-sync-slow-path-latency.md` (166 lines), which is that session's plan for the still-queued auto-sync latency item.
+
+**Worth noting:** this is the same failure shape as `#qcontabspath` an hour ago and my own CI break before that — work that exists only in a working tree is invisible to everything that reads HEAD. Three of tonight's incidents were that. Both ids are now tracked so they resolve from the commit messages.
+
+The auto-sync latency item is still queued and now unblocked — its plan file is committed and no other session holds those files.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~do [#ownershipbindingfirst]~~
+- ~~do [#stalewatchpid]~~
 - ~~do [#qcontamquote]~~
 - do [#passthroughsplitprofile]
 - ~~do [#qcontprose]~~

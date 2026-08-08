@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 939940b3-dce4-46c8-b494-33b70ad08fca
+resume: 23bd00ef-f697-4a06-9474-0ca5f5c967cc
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -173,23 +173,51 @@ Edge index keys on `get_instance_id()` for O(1) dedup, which is safe specificall
 **My own bug, caught by my own test:** `.eager()` scheduled a recompute but nothing flushed it, so an eager cell sat stale until some unrelated write happened to flush. Eager now settles immediately outside a batch, and with the batch inside one.
 
 Still deliberately **not** a `coverage.json` column. A mark has to be backed by a fixture the binding replays, and the runner is Phase 2 — claiming a column now is exactly what `check-coverage-claims.mjs` exists to catch. Queue: `#lzgdrunner`, then `#lzcppwasm`.
+
+### Re: do [#lzgdrunner] — Phase 2 runner landed; the corpus found four kernel bugs — opus-5
+
+The runner replays **9 of the 21 canonical `reactive-graph` fixtures** — every one whose ops the Phase 1 vocabulary covers. 25 tests, 0 orphans, green on 4.4.1 and 4.7.1. CI green (`a2155ba`), superproject bumped (`62e9d55975`).
+
+**The corpus found four kernel bugs my own tests missed.** This is the argument for replaying fixtures rather than writing more unit tests, so it's worth being specific:
+
+- **Disposal never invalidated dependents.** A computed kept serving a value derived from a disposed cell, so the read *succeeded* instead of reporting `read_after_dispose`. Disposal looked like it worked.
+- **Disposal and writes used the same invalidation path.** They are not the same: a write is a value change and must re-run effects; a dispose must invalidate caches *without* making surviving effects fire. `disposal_does_not_run_surviving_effects` is exactly that distinction, and I'd collapsed it.
+- **`disarm()` deferred releasing ownership to teardown.** The fixture asserts owned-count is zero *at the disarm*, with members still live and wired. Mine dropped them later.
+- **`_flush()` had no re-entrancy guard.** An effect that wrote started a nested drain which consumed the queue the outer loop was bounding, so a non-settling graph spun instead of reporting exhaustion.
+
+I also had to make read failures observable through the context. `push_error` is invisible to a caller, so `expect.error` had nothing real to assert against.
+
+**Two of my own mistakes, both caught by driving the thing:**
+
+The guard's first version listed families to *exclude*, and it was already wrong — it missed 40 fixtures because I guessed directory names instead of deriving them. Rewrote it to name what the binding **implements**; everything else is excused automatically. An exclusion list needs editing every time the corpus grows, and the edit that never happens is the one that turns a gap green.
+
+And the Phase 2 commit **failed CI** — the workflow checked out `lazily-gd` alone, with no `lazily-spec` sibling. That failure was the guard working: it hard-fails under CI on a missing corpus precisely so "replayed zero fixtures" can't report OK. Fixed by checking out both repos side by side.
+
+**Verification worth naming.** The guard is mutation-checked in four branches (empty manifest → missing evidence; a manifest entry naming no real file → corrupt evidence channel; a dropped replayed fixture → unexcused; restored → passes). More importantly the *replay* is perturbation-checked: making invalidation one-level-only reddens `transitive_invalidation_reaches_depth` at depth 2 and beyond while depth 1 stays correct. A replay that survives that perturbation isn't replaying anything.
+
+**One thing I deliberately did not do, and it's a blocker rather than remaining work.** I did not add the `coverage.json` column, even though my own backlog item scoped it here. `check-coverage-claims.mjs` treats *absence* from a binding's `KNOWN_UNCOVERED` as "replayed", while this guard excuses 128 fixtures by family — so the column would let lazily-gd carry marks it hasn't earned, inside a CI-gated shared repo. Filed as `#lzgdcoveragecolumn` with the fix stated. Shipping a known-unsound claim into shared CI is the one thing this whole family of guards exists to prevent.
+
+Queue: `#lzgdcoveragecolumn`, `#lzgdvocab`, `#lzcppwasm`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lzgdcoveragecolumn]
+- do [#lzgdvocab]
 - ~~do [#lzgdremote]~~
 - ~~do [#lzgdkernel]~~
-- do [#lzgdrunner]
+- ~~do [#lzgdrunner]~~
 - ~~do [#lzgdbinding]~~
-- ⏭️ do [#lzcppwasm]
+- do [#lzcppwasm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgdrunner] Phase 2 of tasks/software/plan-lazily-gd.md: the conformance fixture runner plus the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd), landed in the SAME phase as the runner per the plan. Mutation-check the guard before trusting green — lazily-cpp's queue tests were hand-transcribed rather than replayed, and a source grep cannot see that case. Only once the runner replays real fixtures does lazily-gd earn its coverage.json column (rows 0 and 15, KNOWN_UNCOVERED populated and shrinking); adding the column before then would claim a binding that does not exist.
+- [ ] [#lzgdcoveragecolumn] Add lazily-gd as the 10th coverage.json column (rows 0 and 15). BLOCKED on a ledger-format mismatch found while landing #lzgdrunner: lazily-spec's check-coverage-claims.mjs parses each binding's KNOWN_UNCOVERED and treats ABSENCE from it as 'replayed', but lazily-gd's check-conformance-coverage.sh excuses 128 fixtures by unimplemented FAMILY rather than naming each one. Adding the column as-is would let lazily-gd carry marks it has not earned inside a CI-gated shared repo. Fix the contract first: either have the gd guard emit a complete not-replayed list for the spec-side parser, or teach check-coverage-claims.mjs about family excuses. Only then add the column, and only for rows the runner actually replays.
+- [ ] [#lzgdvocab] Extend the lazily-gd conformance runner to the 12 reactive-graph fixtures it cannot yet replay, one op family per step: merge_cell (5 fixtures, needs the multi-write ingress mechanism), signal/dispose_signal materialization (3), fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2), fail_next injectable compute failure (1), and shape=scenarios support (1). Each is named in KNOWN_UNCOVERED with its reason. Removing an entry there is the definition of done for that group.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 <!-- /agent:backlog -->
 

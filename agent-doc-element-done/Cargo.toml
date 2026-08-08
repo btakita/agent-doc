@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-done"
-version = "0.35.163"
+version = "0.35.164"
 edition = "2024"
 description = "Done/archive element descriptor for agent-doc"
 license = "MIT"
@@ -11,5 +11,5 @@ publish = false
 name = "agent_doc_element_done"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.163" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.163" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.164" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.164" }

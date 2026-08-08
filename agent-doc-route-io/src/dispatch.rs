@@ -510,13 +510,18 @@ pub fn dispatch_routed_reopen(
 /// the trigger sitting unsent in the composer forever: route logged
 /// `exit_code=0` / `pass_through_single_submit` while no cycle ever started.
 ///
-/// This keeps the fast path fast — the first probe is a single `capture-pane`
-/// and the common case returns in a few milliseconds — and only pays the settle
-/// window when the trigger is still the visible draft. A capture failure is
-/// never read as "stranded": unknown pane state must not authorize pressing
-/// keys. This is a one-shot transport boundary inside a single route call with
-/// no long-lived state relationship, so it stays a direct command rather than a
-/// lifecycle-scoped `Effect` (`#lazily-reactive-first`), matching the sibling
+/// `#runsubmitclaude`: the common case pays exactly one
+/// `PASS_THROUGH_STRANDED_DRAFT_SETTLE` window before the first verdict.
+/// `tmux send-keys` returns once the bytes reach the pty, so a capture taken
+/// immediately after it shows the pane *before* the trigger arrived; reading
+/// that empty composer as `Cleared` ended the repair in a millisecond and left
+/// the operator's real strand unrepaired. 150ms is still two orders of
+/// magnitude under the dispatch-start proof budget this path exists to skip.
+/// A capture failure is never read as "stranded": unknown pane state must not
+/// authorize pressing keys. This is a one-shot transport boundary inside a
+/// single route call with no long-lived state relationship, so it stays a
+/// direct command rather than a lifecycle-scoped `Effect`
+/// (`#lazily-reactive-first`), matching the sibling
 /// `send_direct_pane_enter_resubmit_until_stable` on the observed-acceptance
 /// path.
 fn repair_pass_through_stranded_draft(

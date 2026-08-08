@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.164
+
+- **The `#runfilesubmit` draft check verified nothing, so "Run Agent Doc" still stranded its
+  trigger (`#runsubmitclaude`).** 0.35.163 added `repair_pass_through_stranded_draft`, but its
+  first pane observation ran with no settle window, and an empty composer was classified
+  `Cleared` — terminal. `tmux send-keys` returns once the bytes reach the pty, long before the
+  harness TUI has read and rendered them, so that first capture shows the pane *before* the
+  trigger arrived. Live on 2026-08-08 at `06:15:08Z`, pane `%25`:
+  `route_pass_through_submit_draft … outcome=cleared enters_sent=0 elapsed_ms=1` — one
+  millisecond after the send — while the pane snapshot taken 44 seconds later still showed
+  `❯ agent-doc …/agent-doc-bugs2.md` drafted on an idle pane. The repair reported success on
+  exactly the strand it exists to fix. `classify_pass_through_stranded_draft_action` now gates
+  the `Cleared` verdict on the settle window too: "I have not looked yet" and "I looked and the
+  composer is empty" are different observations, and collapsing them inverted the check
+  (`#idlerevisionreactive`, applied to a pane instead of a controller probe). The common case now
+  pays one 150ms window — still two orders of magnitude under the dispatch-start proof budget
+  this path exists to skip — and a genuinely stranded trigger gets its bare submit key.
+
 ## 0.35.163
 
 - **"Run Agent Doc" no longer strands its trigger in the composer (`#runfilesubmit`).** The

@@ -2715,10 +2715,17 @@ pub fn direct_pane_max_enter_resubmits() -> usize {
     direct_pane_max_enter_resubmits_from_env_value(value.as_deref())
 }
 
-/// Settle window between observing a stranded pass-through draft and acting on
-/// it. One frame of TUI render lag can show the trigger text after the harness
-/// has already consumed the submit, so the draft must survive this window
-/// before any bare `Enter` is pressed.
+/// Settle window the pass-through draft check waits out before *any* pane
+/// observation counts.
+///
+/// It is load-bearing in both directions. `tmux send-keys` returns as soon as
+/// the bytes reach the pty, long before the harness TUI has read and rendered
+/// them, so a capture taken immediately after the send shows the pane as it was
+/// *before* the trigger arrived — not the pane after the submit crossed. And
+/// once the trigger is drafted, one frame of render lag can still show it after
+/// the harness consumed the submit. So the window must elapse before an empty
+/// composer may be read as `Cleared` and before a visible draft may be read as
+/// stranded.
 pub const PASS_THROUGH_STRANDED_DRAFT_SETTLE: Duration = Duration::from_millis(150);
 pub const PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS_DEFAULT: usize = 3;
 
@@ -2745,9 +2752,8 @@ pub enum PassThroughStrandedDraftAction {
     /// trigger is queued behind that turn rather than stranded. Pressing a
     /// submit key into an active turn is never the repair.
     DeferredPaneBusy,
-    /// First sighting of a drafted trigger on an idle pane. One frame of TUI
-    /// render lag can still show the trigger after the harness consumed it, so
-    /// the sighting must survive a settle window before anything is pressed.
+    /// The pane has not been observed after a settle window yet, so nothing it
+    /// shows is evidence about this submit. Sleep and look again.
     SettleAndReobserve,
     /// The trigger is still sitting unsent in an idle composer and a bare
     /// submit key is still available within budget.
@@ -2761,8 +2767,10 @@ pub enum PassThroughStrandedDraftAction {
 pub struct PassThroughStrandedDraftFacts {
     pub draft_visible: bool,
     pub pane_busy: bool,
-    /// Whether a settle window has already elapsed since the draft was first
-    /// sighted on this pane.
+    /// Whether a settle window has already elapsed since the last thing this
+    /// repair did to the pane — the original text+submit send, or a bare submit
+    /// key it pressed. Until it has, the pane shows pre-send state and answers
+    /// nothing about this submit.
     pub settled: bool,
     pub enters_sent: usize,
     pub max_enters: usize,
@@ -2775,15 +2783,27 @@ pub struct PassThroughStrandedDraftFacts {
 /// composer and no document cycle ever starts — the operator sees "Run Agent
 /// Doc did not submit". Absence of proof is not proof of a stranded draft, so
 /// only an exact visible draft authorizes a bare submit key.
+///
+/// `#runsubmitclaude`: the settle window gates the `Cleared` verdict too, not
+/// just the resubmit. "I did not look yet" and "I looked and the composer is
+/// empty" are different observations, and collapsing them made the check report
+/// success on a strand (`#idlerevisionreactive`, applied to a pane instead of a
+/// controller probe). Observed 2026-08-08 06:15:08Z on
+/// `tasks/agent-doc/agent-doc-bugs2.md` pane `%25`: the check logged
+/// `outcome=cleared enters_sent=0 elapsed_ms=1` — one millisecond after
+/// `send-keys`, before Claude Code could have rendered a keystroke — and the
+/// trigger was still sitting unsubmitted in the composer 44 seconds later.
+/// Nothing a pane shows within a millisecond of the send is about that send, so
+/// the first observation always waits.
 pub const fn classify_pass_through_stranded_draft_action(
     facts: PassThroughStrandedDraftFacts,
 ) -> PassThroughStrandedDraftAction {
-    if !facts.draft_visible {
+    if !facts.settled {
+        PassThroughStrandedDraftAction::SettleAndReobserve
+    } else if !facts.draft_visible {
         PassThroughStrandedDraftAction::Cleared
     } else if facts.pane_busy {
         PassThroughStrandedDraftAction::DeferredPaneBusy
-    } else if !facts.settled {
-        PassThroughStrandedDraftAction::SettleAndReobserve
     } else if facts.enters_sent < facts.max_enters {
         PassThroughStrandedDraftAction::EnterResubmit
     } else {
@@ -6009,12 +6029,39 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
-    fn pass_through_repair_costs_one_observation_when_the_submit_crossed() {
-        // The whole point of PassThroughSingleSubmit is latency: the common
-        // case must not pay a settle window.
-        let (actions, enters) = replay_pass_through_repair(&[(false, false)], 3);
-        assert_eq!(actions, vec!["cleared"]);
+    fn pass_through_repair_costs_one_settle_window_when_the_submit_crossed() {
+        // The common case pays exactly one settle window and nothing more —
+        // still orders of magnitude under the dispatch-start proof budget the
+        // pass-through path exists to avoid.
+        let (actions, enters) = replay_pass_through_repair(&[(false, false), (false, false)], 3);
+        assert_eq!(actions, vec!["settle_and_reobserve", "cleared"]);
         assert_eq!(enters, 0);
+    }
+
+    #[test]
+    fn pass_through_repair_does_not_read_an_unrendered_pane_as_cleared() {
+        // #runsubmitclaude: the operator-visible regression. `tmux send-keys`
+        // returns before the harness TUI has read the bytes, so the first
+        // capture shows the pane as it was *before* the trigger arrived. Read
+        // as "cleared" that ends the repair in ~1ms and the trigger sits
+        // unsubmitted forever. The draft appears on the next observation and
+        // one bare submit key lands it.
+        let (actions, enters) = replay_pass_through_repair(
+            &[
+                (false, false), // capture beat the harness render
+                (true, false),  // trigger now visible, still unsent
+                (false, false), // bare submit key crossed
+            ],
+            3,
+        );
+        assert_eq!(
+            actions,
+            vec!["settle_and_reobserve", "enter_resubmit", "cleared"]
+        );
+        assert_eq!(
+            enters, 1,
+            "an unrendered pane is 'not looked at yet', never proof the submit crossed"
+        );
     }
 
     #[test]
@@ -6033,8 +6080,9 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     #[test]
     fn pass_through_repair_treats_a_settling_render_frame_as_success() {
-        // A draft sighted once and gone after the settle window was render lag
-        // behind a submit that already crossed — never press a key for it.
+        // A draft sighted before the settle window and gone after it was render
+        // lag behind a submit that already crossed — never press a key for it.
+        // The window gates both verdicts, so neither pre-settle frame decides.
         let (actions, enters) = replay_pass_through_repair(&[(true, false), (false, false)], 3);
         assert_eq!(actions, vec!["settle_and_reobserve", "cleared"]);
         assert_eq!(enters, 0);
@@ -6044,8 +6092,8 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     fn pass_through_repair_never_presses_enter_into_an_active_turn() {
         // A drafted trigger on a mid-turn pane is queued behind that turn, not
         // stranded; a submit key there is input into someone else's turn.
-        let (actions, enters) = replay_pass_through_repair(&[(true, true)], 3);
-        assert_eq!(actions, vec!["deferred_pane_busy"]);
+        let (actions, enters) = replay_pass_through_repair(&[(true, true), (true, true)], 3);
+        assert_eq!(actions, vec!["settle_and_reobserve", "deferred_pane_busy"]);
         assert_eq!(enters, 0);
 
         // Busy arriving mid-repair also stops it.

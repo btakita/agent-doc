@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: d587087e-840d-414a-9da8-3eb7f1e1614d
+resume: 598f30d7-3643-4e65-9e79-ec7e9d656770
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -40,13 +40,33 @@ completed
 Compacted content:
 - Archived 5 response topic(s): do [#runsubmitclaude]; closing out #runsubmitclaude; restoring the two queue items I deleted; 2 more
 - Prior summary/context: prior compacted content: Archived 11 response topic(s): tmux auto-sync reactive conversion; do [#opencodeharnessswitc...
+
+### Re: queuemirrororder — opus-5
+
+All three parts fixed and released as **0.35.169**.
+
+**(1) The mirror now honours the anchor.** `enqueue_actionable_ids_in_content_with_anchors` splices an anchored id directly after its anchor's live queue head instead of at the placement edge.
+
+The anchored set is **recorded at the mutation site** (`CycleState::pending_anchored_ids`, written by the `--backlog-add-after` / `--backlog-add-before` arms in `agent-doc-write-runtime-io`), not inferred from backlog position. My first cut inferred it — "any fresh id sitting below an already-queued id is anchored" — and it reddened `closeout_sync_prepends_same_cycle_pending_add_in_go_mode`, correctly: `--backlog-add-back` produces exactly that shape and explicitly did *not* ask for the slot. Position is not evidence of intent, so the intent is recorded. Unanchored ids keep the `#queueatcreate` head default unchanged; an anchor with no live slot (struck, or completed-only) falls back to `placement` rather than vanishing. The splice stays insert-only, so operator free-text lines survive byte-for-byte.
+
+**(2) Recovery exists.** `backlog_cmd::reorder` cascades into the mirror via `reorder_queue_mirror_in_content`, which permutes **only the named live heads among the slots they already occupy** — every other queue line keeps its exact byte offset, so `#qauthorder` holds for anything the reorder did not name. You no longer need `--done` / `--backlog-gate` to move a queued id. `queue sync` stays append-only as designed.
+
+**(3) The metadata-only rejection is gone.** `WriteOptions::has_metadata_only_mutation` (reorder / text-metadata edits) flows into `enforce_imperative_response_contract_with_mutation_evidence`. A pure reorder has no command output, no code diff, and no commit hash to cite, so the prose heuristics rejected every honest response it could write. The binary applied the mutation, which is stronger evidence than any prose scan, so the guard defers to it.
+
+**Changed paths:** `agent-doc-queue/src/backlog_sync.rs`, `agent-doc-element-backlog-io/src/backlog_cmd.rs`, `agent-doc-cycle-state-io/src/lib.rs`, `agent-doc-write-runtime-io/src/{lib,run_entry}.rs`, `agent-doc-write-command-io/src/lib.rs`, `agent-doc-template-io/src/{lib,write_normalize}.rs`, `agent-doc-preflight-io/src/lib.rs`, `agent-doc-start-runtime-io/src/lib.rs`, `tests/pending_integration.rs`, `SKILL.md`, `runbooks/pending-ops.md`, `VERSIONS.md`.
+
+**Coverage added:** anchor honoured over placement; two ids sharing an anchor keep backlog order behind it; unanchored id below a queued one still takes the head; non-live anchor falls back; reorder permutes only named heads (free-text line asserted at a fixed slot); reorder is a no-op when already ordered; end-to-end `closeout_sync_places_anchored_same_cycle_add_after_its_anchor`; CLI-level `backlog_reorder_cascades_to_queue_mirror`; guard defers to the mutation but still rejects the same prose without it.
+
+**Verification:** `make check` — 8707 passed, 0 failed, 248 skipped. `make install` + `agent-doc admin recycle` (binary now reports 0.35.169). Committed `eefc45681`, pushed, tagged `v0.35.169`.
+
+**CI:** run `31248836014` was still queued at closeout — not awaited per `#ci-no-closeout-wait`.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#queuemirrororder]
-- do [#watchsighupwin]
+- ~~do [#queuemirrororder]~~
+- ⏭️ do [#watchsighupwin]
 - do [#tmuxsyncslow]
 - do [#runpromptverbose]
 <!-- /agent:queue -->
@@ -59,7 +79,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#queuemirrororder] agent:queue mirror ignores anchored backlog placement, and cannot be reordered afterwards. (1) --backlog-add-after X "[#y] ..." places #y after #X in agent:backlog but PREPENDS it to agent:queue, inverting the drain order relative to the backlog. SKILL.md states the mirror matches backlog order; that holds for --backlog-add (both prepend) but not for --backlog-add-after/--backlog-add-before, where backlog honours the anchor and the queue applies --backlog-queue-placement prepend independently. Reproduced in tasks/haiven-dev.md: backlog = [#reasoncoderegistry, #reasoncodeenum] (correct dependency order), queue = [#reasoncodeenum, #reasoncoderegistry]. The failure lands exactly when an anchor was chosen BECAUSE order matters. (2) There is no recovery: 'agent-doc queue sync' skips ids already present (reason: already_in_queue) so it is append-only, and --backlog-reorder does not cascade to the mirror. The only ways to move a queued id are --done / --backlog-gate, both of which assert something false about its state. Suggested fix: honour the anchor when projecting into agent:queue, and add a queue reorder (or make --backlog-reorder cascade). (3) Minor, same session: a metadata-only write (reorder, no code change) was rejected by the imperative-directive guard — 'requires concrete execution evidence or a concrete blocker; rejected status-only/meta response for do [#typeroutersponses]' — and left the cycle at response_captured. A pure reorder has no execution evidence to offer.
 - [ ] [#watchsighupwin] [recommended] Verify the 0.35.167 PyPI run built the x86_64-pc-windows-msvc wheel; the SIGHUP cfg-gate could not be cross-compiled locally (no MSVC toolchain). `gh run list --workflow PyPI --limit 1`
 - [ ] [#tmuxsyncslow] tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it. (restored from the queue after #qftnodoneeat deleted it; plan context: tasks/agent-doc/plan-tmux-auto-sync-reactive.md)
 - [ ] [#runpromptverbose] The prompt Run Agent Doc sends to Claude Code should simply be `/agent-doc .../file.md`. It currently sends a long multi-paragraph prompt ("Agent Doc queue state advanced for ... Continue this existing owner-pane session; do not invoke agent-doc recursively. Execute the current active queue head: ... Persist and finalize this cycle through the connected Agent Doc tools."). Restored from the queue after #qftnodoneeat deleted it.

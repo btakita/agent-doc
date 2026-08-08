@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 926da2b0-b539-4f91-8b48-3f9a0f4db425
+resume: 939940b3-dce4-46c8-b494-33b70ad08fca
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -150,6 +150,29 @@ Two lessons went into the code rather than just this message: verify a framework
 I also bounded both Godot invocations in `timeout`. A hang is a distinct failure mode from a red test, and an unbounded CI job reports nothing at all. Guard driven: `TEST_TIMEOUT=0.1` exits 2, normal run stays green. My first attempt at that check used `TEST_TIMEOUT=1` and passed — the whole run takes 0.83s, so the test was inconclusive rather than the guard being sound.
 
 Queue head is now `#lzgdkernel` (Phase 1 kernel), then `#lzgdrunner`, then `#lzcppwasm`.
+
+### Re: do [#lzgdkernel] — Phase 1 cell kernel landed — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzgdkernel]
+
+
+`Source` / `Computed` / `Effect` / `Context` / `Scope` are implemented under `addons/lazily/cell/`. 23 tests, 0 orphans, green on **both** Godot 4.4.1 (the CI floor) and 4.7.1. CI green: `59a6f94`, superproject bumped at `2094c945a4`.
+
+**The ownership model is the whole design here.** Back-edges are `WeakRef`, forward edges strong, because `RefCounted` has no cycle collector and a bidirectional strong graph would leak every graph ever built. That has a consequence I made structural rather than documentary: since a `Scope` is the *only* strong owner of an Effect, `ctx.effect()` refuses outright and tells you to use `ctx.scope().effect()`. An unowned Effect wouldn't error — it would be collected and silently stop running, which is the worst failure shape available.
+
+Edge index keys on `get_instance_id()` for O(1) dedup, which is safe specifically because Godot ids are monotonic and never alias. Dead refs are pruned inside `_live_dependents()` before any count is read; GDScript has no finalizer hook, so an unpruned count reads high — that's why `dependent_count()` is the only sanctioned way to ask.
+
+**One test earns its place over the obvious one.** The four-deep chain test reads each level on the way down, which can *mask* a one-level-mark defect by refreshing the chain as it goes. So there's a second test that reads only the deepest node after a write. That's the one that would actually catch the hybrid-staleness failure where writes vanish at depth 2.
+
+**A deviation worth flagging:** the tracked read is `read()`, not `get()`. `Object.get(property)` is a Godot builtin, and shadowing it would break `obj.get("prop")` for every consumer holding a lazily handle. `read()` is already the reference binding's name for the tracked read, so this costs nothing cross-binding — but it *is* a deviation from the plan's wording and I'd rather you see it than find it.
+
+**The load-graph check needed rethinking mid-build.** I first reached for `ResourceLoader.get_dependencies()` and it returns `[]` for GDScript — it models `.import`-style resource deps, not `class_name`/`extends`/`preload` edges. Grepping source for `preload(` proves only what's written. So it now *measures*: a dedicated headless process loads the kernel entry and asserts via `has_cached()` that no non-kernel file became resident. Running it outside the suite is load-bearing — inside, everything is already resident and the check would describe the harness instead of the kernel. It also refuses to pass vacuously when there's nothing outside the closure to assert against. Driven both ways: a cross-family `preload()` fails it, removing it passes.
+
+**My own bug, caught by my own test:** `.eager()` scheduled a recompute but nothing flushed it, so an eager cell sat stale until some unrelated write happened to flush. Eager now settles immediately outside a batch, and with the batch inside one.
+
+Still deliberately **not** a `coverage.json` column. A mark has to be backed by a fixture the binding replays, and the runner is Phase 2 — claiming a column now is exactly what `check-coverage-claims.mjs` exists to catch. Queue: `#lzgdrunner`, then `#lzcppwasm`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
@@ -157,16 +180,15 @@ Queue head is now `#lzgdkernel` (Phase 1 kernel), then `#lzgdrunner`, then `#lzc
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzgdremote]~~
-- do [#lzgdkernel]
+- ~~do [#lzgdkernel]~~
 - do [#lzgdrunner]
 - ~~do [#lzgdbinding]~~
-- do [#lzcppwasm]
+- ⏭️ do [#lzcppwasm]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgdkernel] Phase 1 of tasks/software/plan-lazily-gd.md: the cell kernel (coverage row 0) plus the loading invariant. Source/Computed/Effect/Context with explicit ctx threading (no ambient, no signal/get_signal), WeakRef back-edges with ctx.scope() as the SOLE strong owner, edge index keyed on get_instance_id() with O(1) dedup and prune-on-propagate BEFORE any edge-count assertion, teardown in reverse creation order. An Effect created outside any scope must ERROR, not silently collect. Exit criteria include a load-graph test asserting the kernel loads no other family — preload() is eager and transitive, and retrofitting layering after six families exist is the expensive order. Remember 4.5's @abstract is unavailable at the 4.4 floor. Treat any nonzero gdUnit4 orphan count as a failure, not noise.
 - [ ] [#lzgdrunner] Phase 2 of tasks/software/plan-lazily-gd.md: the conformance fixture runner plus the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd), landed in the SAME phase as the runner per the plan. Mutation-check the guard before trusting green — lazily-cpp's queue tests were hand-transcribed rather than replayed, and a source grep cannot see that case. Only once the runner replays real fixtures does lazily-gd earn its coverage.json column (rows 0 and 15, KNOWN_UNCOVERED populated and shrinking); adding the column before then would claim a binding that does not exist.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 <!-- /agent:backlog -->

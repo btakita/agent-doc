@@ -366,8 +366,26 @@ impl QueueContinuationTriggers {
 /// `selected_queue_prompts`. Its only effects were a ~280-byte injection into
 /// the operator's console and two dispatch paths that disagreed about what a
 /// queue continuation looks like.
+/// `#qcontabspath`: the path is absolutized because this string is now
+/// **executed**, not merely read.
+///
+/// The paragraph this replaced embedded the same path descriptively, so a
+/// relative one was harmless. As a trigger it is resolved against the **pane's**
+/// working directory, which is not guaranteed to equal the supervisor's — the
+/// pane's shell can be anywhere, including inside a submodule. Observed
+/// immediately after `#qcontprose` shipped: the supervisor dispatched
+/// `agent-doc tasks/agent-doc/agent-doc-bugs2.md`, the pane's cwd had moved to
+/// `src/agent-doc`, the path did not resolve, and the harness admission hook
+/// produced no cycle contract at all — a silently dead queue continuation.
+///
+/// `std::path::absolute` is lexical plus the supervisor's cwd, which is exactly
+/// the directory the relative `file` was expressed against. Doing it here rather
+/// than at the call site makes the guarantee unconditional: a caller cannot
+/// forget it, and every dispatch path emits the same absolute form the route
+/// path already sends.
 pub fn owned_pane_queue_continuation_prompt(file: &Path) -> String {
-    format!("agent-doc {}", file.display())
+    let path = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+    format!("agent-doc {}", path.display())
 }
 
 /// Exponential retry capped at one attempt per 30 seconds. Transient editor or
@@ -665,9 +683,9 @@ mod tests {
         // #qcontprose: the operator sees this text in their console. It must be
         // the same one-line trigger the route path dispatches, not a paragraph
         // restating what preflight already selects.
-        let prompt = owned_pane_queue_continuation_prompt(Path::new("tasks/sampleorders.md"));
+        let prompt = owned_pane_queue_continuation_prompt(Path::new("/repo/tasks/sampleorders.md"));
 
-        assert_eq!(prompt, "agent-doc tasks/sampleorders.md");
+        assert_eq!(prompt, "agent-doc /repo/tasks/sampleorders.md");
         assert!(!prompt.contains('\n'), "a queue continuation is one line");
         for prose in [
             "queue state advanced",
@@ -681,6 +699,26 @@ mod tests {
                 "queue continuation must not carry prose: {prose}"
             );
         }
+    }
+
+    #[test]
+    fn owner_pane_continuation_absolutizes_the_trigger_path() {
+        // #qcontabspath: this string is executed in the pane, whose cwd is not
+        // guaranteed to be the supervisor's. A relative path silently produced
+        // no cycle contract at all — the continuation just died.
+        let prompt = owned_pane_queue_continuation_prompt(Path::new("tasks/sampleorders.md"));
+        let dispatched = prompt
+            .strip_prefix("agent-doc ")
+            .expect("continuation is the bare trigger");
+
+        assert!(
+            Path::new(dispatched).is_absolute(),
+            "a dispatched trigger path must not depend on the pane's cwd: {prompt}"
+        );
+        assert!(
+            dispatched.ends_with("tasks/sampleorders.md"),
+            "absolutizing must preserve the document: {prompt}"
+        );
     }
 
     #[test]

@@ -45,6 +45,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   answers with an in-binary preflight — the same session continues. Naming the head was redundant
   too; preflight already selects it and hands it over as `selected_queue_prompts`. Two dispatch
   paths that disagreed about what a queue continuation looks like are now one.
+- **The queue continuation dispatches an absolute path (`#qcontabspath`).** Follow-up to
+  `#qcontprose` in this same release: the paragraph it replaced embedded the document path
+  *descriptively*, so a relative one was harmless. As a trigger the string is **executed**, and it
+  resolves against the **pane's** working directory — which is not guaranteed to equal the
+  supervisor's. Observed within the hour: the supervisor dispatched
+  `agent-doc tasks/agent-doc/agent-doc-bugs2.md`, the pane's cwd had moved into `src/agent-doc`, the
+  path did not resolve, and the harness admission hook produced **no cycle contract at all** — a
+  silently dead continuation with no error anywhere. `owned_pane_queue_continuation_prompt` now
+  absolutizes via `std::path::absolute` (lexical plus the supervisor's cwd, the directory the
+  relative path was expressed against). Doing it inside the function rather than at the call site
+  makes the guarantee unconditional, and matches the absolute form the route path already sends.
 - **A response that discusses its own queue no longer interrupts its own closeout
   (`#qcontamquote`).** The `#jb-run-agent-doc-response-queue-contamination` guard flagged any
   free-text queue prompt whose first 40 normalized characters appeared *anywhere* in the assistant

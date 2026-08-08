@@ -157,7 +157,7 @@ That `|| true` is the whole explanation for `Publish to crates.io -> success` al
 **One thing I could not verify from here.** The idempotent-tolerance branch greps `publish.log` for `"already exists"`. My recollection is that cargo/crates.io words a duplicate-version rejection as *already uploaded*, not *already exists* — in which case that branch never matches and a re-run of an existing tag fails loudly instead of being tolerated. That errs in the **safe** direction (a false red, never a false green), so it does not weaken the fix, but the documented idempotent case may not actually work. I did not want to assert cargo's exact wording from memory, so I have filed it rather than claimed it.
 
 No code change here — this repo is not `skill-harness`, and the verification was the deliverable.
-<!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
+<!-- agent:boundary:7ad810c1 -->
 <!-- /agent:exchange -->
 ## Queue
 

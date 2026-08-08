@@ -1327,6 +1327,30 @@ pub(super) fn spawn_idle_queue_watch_thread(
             observed
         }) {
             resume_triggers.observe_state_edge();
+            // `#needsoperatorstateedge`: the trigger graph retires the
+            // operator-required verdict on a document transition, so the
+            // orchestration's own copy of that latch must retire with it.
+            // `retry_cooldown_elapsed && !needs_operator` below is a second,
+            // independent gate — leaving it set would keep
+            // `captured_finalize_resume_should_start` false and reproduce the
+            // deadlock the trigger fix removes.
+            if let Some(retry) = resume_retry.as_mut()
+                && retry.needs_operator
+            {
+                retry.needs_operator = false;
+                retry.retry_at = now;
+                // The state edge IS the trigger; do not also publish a backoff edge.
+                retry.trigger_published = true;
+                let event = format!(
+                    "captured_finalize_resume_operator_gate_cleared file={} cycle_id={} capture_id={} response_sha256={} reason=controller_document_state_edge (#needsoperatorstateedge)",
+                    path.display(),
+                    retry.key.cycle_id,
+                    retry.key.capture_id,
+                    retry.key.response_sha256,
+                );
+                log_event(&mut session_log, &event);
+                agent_doc_ops_log_io::log_op(&path, &event);
+            }
             resume_key_refresh_pending = true;
             last_quiescent_maintenance = None;
         }
@@ -1431,8 +1455,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         trigger_published: true,
                     });
                     resume_triggers.require_operator();
+                    // `#needsoperatorstateedge`: carry a bounded, redacted head
+                    // of the reason. A `reason_sha256` alone identifies the
+                    // failure without ever explaining it, which is why the
+                    // 2026-08-08 `haiven-dev.md` latch could not be diagnosed
+                    // from 27 logged occurrences.
+                    let reason_head =
+                        agent_doc_supervisor::idle_watch::captured_finalize_resume_reason_head(
+                            &reason,
+                        );
                             let event = format!(
-                                "captured_finalize_resume_needs_operator file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=retain_without_mutation",
+                                "captured_finalize_resume_needs_operator file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=retain_without_mutation retry_on=controller_document_state_edge reason_head=\"{reason_head}\"",
                                 path.display(),
                                 key.cycle_id,
                                 key.capture_id,
@@ -1443,8 +1476,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             log_event(&mut session_log, &event);
                             agent_doc_ops_log_io::log_op(&path, &event);
                             eprintln!(
-                                "[agent-doc] captured finalize for {} needs operator resolution; response retained without mutation",
-                                path.display()
+                                "{}",
+                                agent_doc_supervisor::idle_watch::captured_finalize_resume_operator_message(
+                                    &path,
+                                    &reason_head,
+                                )
                             );
                         }
                     }

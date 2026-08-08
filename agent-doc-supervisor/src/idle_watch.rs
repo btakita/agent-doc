@@ -38,6 +38,70 @@ pub fn captured_finalize_resume_should_start(facts: CapturedFinalizeResumeFacts)
         && !facts.urgent_supervisor_maintenance
 }
 
+/// Longest reason prefix a `needs_operator` diagnostic may carry.
+///
+/// The classifier reads an `anyhow` chain formatted with `{err:#}`, whose head is
+/// code-authored context. The tail can quote document text, so the diagnostic
+/// keeps the head and drops the rest — the full chain stays identified by its
+/// `reason_sha256`.
+const CAPTURED_FINALIZE_REASON_HEAD_CHARS: usize = 220;
+
+/// A bounded, single-line, secret-redacted prefix of a resume failure reason.
+///
+/// Until 0.35.163 the `needs_operator` diagnostic logged only `reason_bytes` and
+/// `reason_sha256` (`#needsoperatorstateedge`). That is enough to tell two
+/// failures apart and nothing else: when the 2026-08-08 `haiven-dev.md` deadlock
+/// was investigated, the reason that latched the closeout 27 times was
+/// unrecoverable from any log, `state.db` row, or playback record. A hash is an
+/// identity, not a diagnosis.
+///
+/// The prefix is the classifier's own input, so a reason that keeps landing in
+/// [`crate::idle_watch`]'s default arm can be read directly and given a real
+/// classification instead of the operator-required fallback.
+pub fn captured_finalize_resume_reason_head(reason: &str) -> String {
+    let redacted = agent_doc_secret_redact::redact(reason);
+    let flattened = redacted
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || ch == '"' {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect::<String>();
+    let mut head = flattened.split_whitespace().collect::<Vec<_>>().join(" ");
+    if head.chars().count() > CAPTURED_FINALIZE_REASON_HEAD_CHARS {
+        head = head
+            .chars()
+            .take(CAPTURED_FINALIZE_REASON_HEAD_CHARS)
+            .collect::<String>()
+            + "…";
+    }
+    head
+}
+
+/// The operator-facing message for a latched captured-finalize resume.
+///
+/// `write_ownership`'s rule applies here too: a site that stands down must name
+/// the recovery rather than only announce that it stood down. The previous text
+/// ("needs operator resolution; response retained without mutation") told the
+/// operator a decision had been made and gave them no command to run, while
+/// `session-check` was concurrently telling the agent that the controller owned
+/// the next closeout. Neither side named an action, so neither side took one.
+pub fn captured_finalize_resume_operator_message(file: &Path, reason_head: &str) -> String {
+    format!(
+        "[agent-doc] captured finalize for {} needs operator resolution; response retained without mutation. \
+         Reason: {reason_head}. A later controller document-state edge retries this automatically; \
+         if none arrives, recover from the pane that OWNS this session with `agent-doc write --commit {}` \
+         (or `agent-doc commit {}` when the response body is already written). Do NOT use `--force-disk` \
+         while an editor holds authority.",
+        file.display(),
+        file.display(),
+        file.display(),
+    )
+}
+
 /// Reactive trigger for one captured-finalize attempt.
 ///
 /// State convergence is an input edge, not an error to retry. After an attempt
@@ -110,9 +174,34 @@ impl CapturedFinalizeResumeTriggers {
     }
 
     /// Publish a controller-owned document-state edge.
+    ///
+    /// A state edge **retires** a prior `needs_operator` verdict
+    /// (`#needsoperatorstateedge`). That verdict means "this effect failed on the
+    /// document state as it was", not "this capture is unrecoverable forever":
+    /// the classifier's default arm produces it for any error string it does not
+    /// recognize, so an unfamiliar transient failure latched exactly like a real
+    /// operator conflict. Because `needs_operator` also suppressed the state
+    /// edge, no later controller transition could ever re-arm the attempt, and
+    /// the only thing that clears the flag otherwise is a *different* operation
+    /// key — which a retained capture never gets.
+    ///
+    /// Observed 2026-08-08 on `src/haiven-dev/tasks/haiven-dev.md`: the resume
+    /// latched at 03:51:25, the controller published `ResumeSettledDelivery` with
+    /// `proof=exact_target` at 03:55:48 (`delivery_converged=true`,
+    /// `editor_converged=true`, `inflight=0`, `actor_idle=true`), and the
+    /// supervisor ignored it. The cycle stayed open with `unmet=committed`
+    /// forever while `session-check` told the agent the controller owned the next
+    /// closeout — a deadlock by mutual deferral.
+    ///
+    /// This does not reintroduce blind retries: `observe_effect_retry_due` is
+    /// still gated on `!needs_operator` by the caller, so only a real
+    /// controller-published document transition can re-arm the attempt, and
+    /// obeying that edge feeds the same observation stream that clears it
+    /// (`#idlerevisionreactive`).
     pub fn observe_state_edge(&self) {
         let mut projection = self.scope.ctx().get(&self.projection);
         projection.state_epoch = projection.state_epoch.saturating_add(1);
+        projection.needs_operator = false;
         self.scope.ctx().set(&self.projection, projection);
     }
 
@@ -131,10 +220,19 @@ impl CapturedFinalizeResumeTriggers {
         self.scope.ctx().set(&self.projection, projection);
     }
 
+    /// Record that the last attempt failed on evidence a blind retry cannot
+    /// change. Suppresses the effect-retry edge only; see
+    /// [`Self::observe_state_edge`] for why a document transition retires it.
     pub fn require_operator(&self) {
         let mut projection = self.scope.ctx().get(&self.projection);
         projection.needs_operator = true;
         self.scope.ctx().set(&self.projection, projection);
+    }
+
+    /// Whether the last attempt latched an operator-required verdict that no
+    /// document-state edge has retired yet.
+    pub fn needs_operator(&self) -> bool {
+        self.scope.ctx().get(&self.projection).needs_operator
     }
 
     pub fn ready(&self) -> bool {
@@ -430,6 +528,84 @@ mod tests {
         assert!(
             triggers.ready(),
             "effect failure backoff is an explicit, separate trigger"
+        );
+    }
+
+    /// `#needsoperatorstateedge` — the 2026-08-08 `haiven-dev.md` deadlock.
+    ///
+    /// An operator-required verdict must suppress the blind effect-retry timer
+    /// and nothing else. A controller-published document transition is new
+    /// evidence, so it retires the verdict and re-arms the attempt; otherwise the
+    /// only thing that ever clears the flag is a different operation key, which a
+    /// retained capture never gets, and the cycle stays open forever.
+    #[test]
+    fn a_state_edge_retires_an_operator_required_verdict() {
+        let triggers = CapturedFinalizeResumeTriggers::new();
+        triggers.observe_operation(Some("cycle:capture:response".to_string()));
+        triggers.consume_attempt();
+
+        triggers.require_operator();
+        assert!(triggers.needs_operator());
+        triggers.observe_effect_retry_due();
+        assert!(
+            !triggers.ready(),
+            "a blind backoff must not retry an operator-required verdict"
+        );
+
+        triggers.observe_state_edge();
+        assert!(
+            !triggers.needs_operator(),
+            "a document transition is new evidence and retires the verdict"
+        );
+        assert!(
+            triggers.ready(),
+            "the controller's settled-delivery edge must re-arm the resume"
+        );
+    }
+
+    /// A hash identifies a failure; it never explains one. The diagnostic must
+    /// carry readable, bounded, single-line evidence (`#needsoperatorstateedge`).
+    #[test]
+    fn the_reason_head_is_bounded_single_line_and_readable() {
+        let head = captured_finalize_resume_reason_head(
+            "closeout blocked\n  by: visible user-authored content diverged\tfrom the \"captured\" baseline",
+        );
+
+        assert!(head.contains("closeout blocked by: visible user-authored content diverged"));
+        assert!(
+            !head.contains('\n') && !head.contains('\t') && !head.contains('"'),
+            "must stay one unquoted ops-log field: {head}"
+        );
+
+        let long = captured_finalize_resume_reason_head(&"é".repeat(4096));
+        assert_eq!(
+            long.chars().count(),
+            CAPTURED_FINALIZE_REASON_HEAD_CHARS + 1,
+            "truncation must land on a char boundary and mark the elision"
+        );
+    }
+
+    /// The stand-down message must name the recovery, exactly like
+    /// `agent_doc_turn::write_ownership`'s unowned remedy. Announcing a decision
+    /// without an action is what let both sides of the 2026-08-08 deadlock wait
+    /// on each other.
+    #[test]
+    fn the_operator_message_names_the_recovery_and_the_automatic_retry() {
+        let message = captured_finalize_resume_operator_message(
+            Path::new("tasks/haiven-dev.md"),
+            "editor authority conflict",
+        );
+
+        assert!(message.contains("editor authority conflict"));
+        assert!(message.contains("agent-doc write --commit tasks/haiven-dev.md"));
+        assert!(message.contains("agent-doc commit tasks/haiven-dev.md"));
+        assert!(
+            message.contains("controller document-state edge retries this automatically"),
+            "the operator must know a state edge re-arms it: {message}"
+        );
+        assert!(
+            message.contains("Do NOT use `--force-disk`"),
+            "the live-editor guard stays: {message}"
         );
     }
 

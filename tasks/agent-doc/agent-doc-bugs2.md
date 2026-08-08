@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: a2685a65-4918-4fa7-8661-b664588a379e
+resume: cf1a45ef-58b5-4b9f-958a-df004499ecec
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -193,17 +193,49 @@ Worth naming: the duplication was the cosmetic part. The damage was a **committe
 **Proof on the live document that produced it:** `dedupe` removed 3675 bytes, kept the copy carrying the queue-prompt quote, and session-check went `INTERRUPTED` → `ok`. Remaining working-tree delta was a `resume:` id and a transient boundary marker — zero content lines absent from HEAD, which is what made the recovery provably lossless.
 
 `make check` — 8712 passed, 0 failed. Commit `6037ab4f7`, tagged `v0.35.172`, installed and recycled.
+
+### Re: confirmsuperprojectjob / lzktemptydir — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzktemptydir]
+>
+> do [#confirmsuperprojectjob]
+
+
+**The disk fix worked.** `#confirmsuperprojectjob` asked whether the Bus error recurred after `8b01b6fe50`. It did not: run `31249383368` shows **no `signal 7` and no `Bus error`** anywhere in its log. The Rust build and full test suite ran to completion and `version-sync` passed — the job got further than it had in eight previous attempts.
+
+**It failed later, on something the crash had been hiding.** `make dev-harness-test`:
+
+```
+Could not resolve io.github.lazily:lazily:0.39.0
+  > No matching variant of project :lazily-kt ... No variants exist.
+```
+
+**Root cause — the same defect shape as everything else in this drain: a check that cannot distinguish "absent" from "present but empty."** `editors/jetbrains/settings.gradle.kts` composite-builds the sibling `lazily-kt` when present, falling back to the published `io.github.lazily:lazily` when absent. The guard tested directory *existence* — and an uninitialized git submodule **is an existing empty directory**. So the guard passed, `includeBuild` substituted the dependency with a build containing no projects, and Gradle emitted that opaque variant error. A standalone checkout has no directory at all, which is exactly why only a *partial* monorepo checkout could hit it.
+
+Fixed on both sides:
+- **The guard** (`agent-doc 0.35.173`) now keys on the sibling's `settings.gradle{,.kts}`, so "absent" and "present but uninitialized" take the identical fallback. Any partial checkout now degrades to the published artifact instead of that error.
+- **The superproject CI** now initializes `src/lazily-kt` and `src/lazily-spec`. Its submodule list had every sibling except those two; agent-doc's own `ci.yml` clones both, which is why that workflow stayed green while this one did not.
+
+Belt and braces on purpose: CI gets the composite build it intends, and the guard stops being a trap for everyone else.
+
+**Verification:** `make dev-harness-test` green with the composite present; guard verified to reject an empty directory (`isFile` on the settings file → false where `exists()` on the directory → true). `make check` — 8712 passed, 0 failed. Commits `ea5e80085` (agent-doc) and `372f52aed5` (superproject), tagged `v0.35.173`, installed and recycled. Run `31253205086` in flight, observed once, not awaited (`#ci-no-closeout-wait`).
+
+**On `#operatorverifyeyeball`, the head I was handed:** I am deliberately not closing it. It requires a human watching a real JetBrains pane confirm the injected trigger renders as `/agent-doc /abs/path.md`; `--done` from here would assert something I did not do. The binary already agrees — it tagged the item `[operator-verify]` and excluded it from `queue_drainable_head_count`, which is why preflight handed me no `selected_queue_prompts` this turn. With the two drainable items now closed, only that operator-gated head remains, so the drain should report `deferred_for_operator_proof` and stop rather than churn.
+
+Session note: exchange is at 161 lines / 6 sections (`warn`); queue is active so I have not stalled to compact.
 <!-- agent:boundary:f16db0e4 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#lzktemptydir]
+- ~~do [#lzktemptydir]~~
 - do [#operatorverifyeyeball]
 - ~~do [#syncdupespelling]~~
 - ~~do [#tmuxsyncslow]~~
 - ~~do [#runpromptverbose]~~
-- ⏭️ do [#confirmsuperprojectjob]
+- ~~⏭️ do [#confirmsuperprojectjob]~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -214,9 +246,7 @@ Worth naming: the duplication was the cosmetic part. The damage was a **committe
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzktemptydir] The JetBrains composite-build guard in editors/jetbrains/settings.gradle.kts tested directory EXISTENCE for the lazily-kt sibling, but an uninitialized git submodule is an existing EMPTY directory — so includeBuild substituted io.github.lazily:lazily with a project-less build and Gradle failed with 'No variants exist'. Hit in agent-loop superproject CI, whose submodule init omitted src/lazily-kt. Guard now keys on the settings file; superproject CI also inits src/lazily-kt + src/lazily-spec.
 - [ ] [#operatorverifyeyeball] [operator-verify] Eyeball a real JetBrains `Run Agent Doc` against a Claude Code pane and confirm the injected trigger now reads `/agent-doc /abs/path.md` (was bare `agent-doc /abs/path.md`), and that a freshly-`/clear`ed pane picks up the skill from it. Shipped in 0.35.171 (#runpromptverbose) with unit coverage on both dispatch paths; only the live-pane render is unverifiable from the agent side.
-- [ ] [#confirmsuperprojectjob] Confirm the superproject `Agent Doc` / `check` job went green after the runner-disk fix (commit 8b01b6fe50, run 31249383368): `gh run list --workflow "Agent Doc" --limit 2`. If the Bus error recurs, the disk reduction was insufficient — next levers are freeing runner disk (drop the preinstalled Android SDK / dotnet / GHC images), `-C debuginfo=0` via RUSTFLAGS, or splitting `--all-targets` across jobs.
 <!-- /agent:backlog -->
 
 ## Review

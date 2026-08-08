@@ -43,6 +43,13 @@ Compacted content:
 
 ### Re: do [#runsubmitclaude] — opus-5
 
+> **Queue prompt:**
+>
+> do [#runsubmitclaude]
+>
+> The free-text `tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.` was kept when you added `do [#runsubmitclaude]` into the queue. The free-text should have been replaced (deleted) by `do [#runsubmitclaude]`.
+
+
 Fixed and released in **0.35.164**. The repair that was supposed to catch this
 existed already — it just never looked at the pane in time to see anything.
 
@@ -118,9 +125,9 @@ but its evidence counter restarts from zero.
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#passthroughsplitprofile]~~
-- 🚧 do [#runsubmitclaude]
+- ~~do [#runsubmitclaude]~~
 - tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.
-- The free-text `tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.` was kept when you added `do [#runsubmitclaude]` into the queue. The free-text should have been replaced (deleted) by `do [#runsubmitclaude]`.
+- ~~The free-text `tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.` was kept when you added `do [#runsubmitclaude]` into the queue. The free-text should have been replaced (deleted) by `do [#runsubmitclaude]`.~~
 ---
 The prompt for Claude Code should simply be `/agent-doc .../file.md`. There is a long prompt instead:
 ```
@@ -140,13 +147,12 @@ The prompt for Claude Code should simply be `/agent-doc .../file.md`. There is a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#runsubmitclaude] Run Agent Doc does not submit to Claude Code. The prompt is written but not submitted.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
-- [/] [#passthroughsplitprofile] #agent-doc-bug [blocked-on-evidence] Decide from evidence whether Claude also needs the split text+Enter submit profile that codex/opencode use (`tmux_submit_profile_for_harness`, 80ms). BLOCKED: 0.35.163 added the measurement (`route_pass_through_submit_draft ... outcome=... enters_sent=N`) minutes ago and ops.log has 0 such lines — no route dispatch has crossed the new binary yet. UNBLOCKED when ops.log holds ~20+ of those lines with harness=claude: `grep route_pass_through_submit_draft .agent-doc/logs/ops.log`. A nonzero outcome=enter_resubmit rate means the single-call send is the cause and claude should join `harness_uses_split_text_submit` (prevention); an all-cleared rate means the 2026-08-08 strand had another cause and the bounded repair is the right and only fix. Do not change the submit profile without the measurement — the mechanism is inferred, not proven.
+- [/] [#passthroughsplitprofile] #agent-doc-bug [blocked-on-evidence] Decide from evidence whether Claude also needs the split text+Enter submit profile that codex/opencode use (`tmux_submit_profile_for_harness`, 80ms). BLOCKED: the only measurement so far was invalid — 0.35.163's draft check classified an unrendered pane as `outcome=cleared enters_sent=0 elapsed_ms=1` and could never reach a resubmit decision, so its verdict carried no information. 0.35.164 (#runsubmitclaude) gates that verdict on the settle window, so the counter is real from now and restarts at zero. UNBLOCKED when ops.log holds ~20+ post-0.35.164 lines with harness=claude: `grep route_pass_through_submit_draft .agent-doc/logs/ops.log`. A nonzero outcome=enter_resubmit rate means the single-call send is the cause and claude should join `harness_uses_split_text_submit` (prevention on top of the repair); an all-cleared rate means the settle-gated repair is sufficient and the submit profile should not change. Do not change the submit profile without the measurement — the mechanism is inferred, not proven.
 - [/] [#stickymdpaneverify] [operator-verify] #stickymdpane live proof: restart a JetBrains IDE onto plugin 0.2.350 (Kotlin change, reload-lib is not enough), open a two-column split with an agent-doc document in each, then switch ONE column to a source file. Expect tmux to keep both panes with that column still showing its last document, instead of collapsing to one pane. Then close that split entirely and confirm tmux DOES collapse — the fallback must be memory, not invention. Unit tests pin the pure resolution but cannot prove the live IDE wiring.
 - [/] [#operatorverifyresolve] [operator-verify] Resolve the current JetBrains File Cache Conflict with Cancel / Keep memory changes, then save or make one editor mutation so the plugin publishes the current editor cut; confirm the retained closeout commits and a later Compact Exchange no longer fails on the historical stranded duplicate heading.
 - [/] [#operatorverifyrestart] [operator-verify] Restart a running JetBrains IDE to activate plugin 0.2.340, then move from fpe-service-topology.md in a one-pane surface to agent-doc-bugs2.md in its two-column surface and confirm the first selection restores two tmux panes without a second navigation.

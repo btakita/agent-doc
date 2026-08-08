@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: ddfcfcb8-90a1-4500-8c99-9089bd1928a3
+resume: 49b1f99e-72a4-4dad-b63d-d5f39bd2dc8e
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -40,13 +40,87 @@ completed
 Compacted content:
 - Archived 11 response topic(s): tmux auto-sync reactive conversion; do [#opencodeharnessswitch]; tmux pane auto-sync excessive lag; 8 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): tmux auto-sync delay; do [#tmuxautosyncreactive]; do [#tmuxaut...
+
+### Re: do [#runsubmitclaude] — opus-5
+
+Fixed and released in **0.35.164**. The repair that was supposed to catch this
+existed already — it just never looked at the pane in time to see anything.
+
+**What actually happened.** 0.35.163 added `repair_pass_through_stranded_draft`:
+after the plain-trigger single `send-keys`, capture the pane, and if the trigger
+is still drafted on an idle pane, press a bare `Enter`. Your 06:15 dispatch ran
+it and logged this:
+
+```
+06:15:08Z route_pass_through_submit_draft pane=%25 harness=claude
+          outcome=cleared enters_sent=0 elapsed_ms=1 capture_failed=false
+```
+
+`elapsed_ms=1`. `tmux send-keys` returns as soon as the bytes reach the pty, so
+one millisecond later Claude Code had not read a single keystroke, let alone
+rendered one. The capture showed the pane as it was *before* the trigger
+arrived — an empty composer — which `classify_pass_through_stranded_draft_action`
+read as `Cleared`, a terminal verdict. Repair over, `exit_code=0`. The pane
+snapshot 44 seconds later still showed
+`❯ agent-doc …/agent-doc-bugs2.md` drafted on an idle pane, which is when you hit
+Enter yourself.
+
+So the check reported success on precisely the strand it exists to repair.
+
+**Root cause.** "I have not looked yet" and "I looked and the composer is empty"
+were collapsed into `!draft_visible`. That is `#idlerevisionreactive` — absence
+of evidence read as evidence — applied to a pane instead of a controller probe,
+and it inverts the check at the worst moment. The settle window existed but only
+gated the *resubmit* side; the `Cleared` side could fire on the first frame.
+
+**Fix.** The settle window now gates both verdicts: any unsettled observation
+returns `SettleAndReobserve`, so nothing the pane shows before the window
+elapses decides anything.
+
+```rust
+if !facts.settled {
+    SettleAndReobserve          // <- new first arm
+} else if !facts.draft_visible {
+    Cleared
+} else if facts.pane_busy {
+    DeferredPaneBusy
+} else if facts.enters_sent < facts.max_enters {
+    EnterResubmit
+} else {
+    ExhaustedStillStranded
+}
+```
+
+The common case now pays one 150ms window before returning — two orders of
+magnitude under the dispatch-start proof budget the pass-through path exists to
+skip, so the latency reason for that path survives intact. A genuinely stranded
+trigger gets its bare submit key, up to 3 tries, and never into a busy pane.
+
+**Coverage.** New `pass_through_repair_does_not_read_an_unrendered_pane_as_cleared`
+replays your exact sequence (capture beats the render → draft appears → one
+`Enter` clears it) and fails on the old ordering. The existing five replay tests
+were updated for the extra leading observation; `make check` green, exit 0.
+
+**Shipped:** 0.35.164 committed (`5bcbba512`), pushed, tagged `v0.35.164`,
+`make install` done (binary + cdylib + JB 0.2.350), both controllers marked for
+idle-boundary recycle. CI / Release / PyPI runs are in progress — recorded, not
+awaited.
+
+**One correction to `#passthroughsplitprofile`.** That review item was waiting on
+the `enter_resubmit` rate to decide whether Claude also needs the split
+text+Enter submit profile. The single measurement it got was invalid — the check
+could not reach a resubmit decision at all, so `outcome=cleared` meant nothing.
+As of 0.35.164 the measurement is real; the item's unblock condition is unchanged
+but its evidence counter restarts from zero.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#passthroughsplitprofile]
+- ~~do [#passthroughsplitprofile]~~
+- 🚧 do [#runsubmitclaude]
 - tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.
+- The free-text `tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.` was kept when you added `do [#runsubmitclaude]` into the queue. The free-text should have been replaced (deleted) by `do [#runsubmitclaude]`.
 ---
 The prompt for Claude Code should simply be `/agent-doc .../file.md`. There is a long prompt instead:
 ```
@@ -66,6 +140,7 @@ The prompt for Claude Code should simply be `/agent-doc .../file.md`. There is a
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#runsubmitclaude] Run Agent Doc does not submit to Claude Code. The prompt is written but not submitted.
 <!-- /agent:backlog -->
 
 ## Review

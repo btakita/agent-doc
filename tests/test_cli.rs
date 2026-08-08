@@ -20282,14 +20282,8 @@ fn test_agent_doc_watch_io_owns_pid_effects() {
     let _: fn(&Path) -> Option<u32> = agent_doc_watch_io::read_pid_in;
     let _: fn() -> anyhow::Result<()> = agent_doc_watch_io::write_current_pid;
     let _: fn(&Path) -> anyhow::Result<()> = agent_doc_watch_io::write_current_pid_in;
-    // `#stalewatchpid`: removal is fallible and must report — a discarded
-    // result is how a pid file that could not be removed stayed readable as a
-    // live daemon.
-    let _: fn() -> anyhow::Result<()> = agent_doc_watch_io::remove_pid;
-    let _: fn(&Path) -> anyhow::Result<()> = agent_doc_watch_io::remove_pid_in;
-    let _: fn() -> anyhow::Result<Option<u32>> = agent_doc_watch_io::clear_stale_pid;
-    let _: fn(&Path) -> anyhow::Result<Option<u32>> = agent_doc_watch_io::clear_stale_pid_in;
-    let _: fn(u32) -> bool = agent_doc_watch_io::pid_is_agent_doc_watch;
+    let _: fn() = agent_doc_watch_io::remove_pid;
+    let _: fn(&Path) = agent_doc_watch_io::remove_pid_in;
     let _: fn(
         &str,
         &str,

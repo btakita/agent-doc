@@ -77,12 +77,44 @@ Verified. The Windows wheel built and shipped for 0.35.167 — nothing to fix.
 **Separate finding, filed not fixed.** While checking runs I found the **agent-loop superproject** `Agent Doc` workflow's `check` job red for 8 consecutive runs: `collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped` linking `agent-doc-commit-io` test `"git"` and `agent-doc-stream-io` lib test. `tmux-ci` passes in the same runs and local `make check` is green (8707/8707), so this is the runner exhausting memory/disk linking a 144-crate workspace's test targets — a CI-infra class, not a code regression, and a different repo's workflow from the one this head asked about. Filed at the top of `agent:backlog` rather than landing a speculative runner-tuning change mid-drain.
 
 Session note: exchange accretion is at `warn` (2 no-op closeouts in 30 min); queue is active so I'm not stalling to compact.
+
+### Re: loopsuperprojectjob — opus-5
+
+> **Queue prompt:**
+>
+> do [#loopsuperprojectjob]
+
+
+Root-caused and fixed. It was never a code regression.
+
+**Diagnosis.** `collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped` linking `agent-doc-commit-io` test `"git"` and `agent-doc-stream-io` lib test. SIGBUS from a linker is the ENOSPC signature: `ld` mmaps its output file, and a write into a mapping that can't be backed raises SIGBUS rather than returning an error, so a full disk surfaces as a core dump instead of "no space left on device". Building the ~156-crate workspace with `--all-targets` while Cargo retains incremental state and full debug info for every test binary exceeds the ~14 GB free on `ubuntu-latest`.
+
+**The controlled comparison made it conclusive.** agent-doc's own `.github/workflows/ci.yml` runs the *same* `make check` on the *same* runner image and has never produced this failure — because it already carries the mitigation, with a comment naming this exact cause:
+
+```yaml
+CARGO_INCREMENTAL: "0"
+CARGO_PROFILE_DEV_DEBUG: "0"
+CARGO_PROFILE_TEST_DEBUG: "0"
+```
+
+The superproject workflow simply never inherited it. (The one red run in agent-doc's own CI, `31245808892`, was a transient `install-action` failure — a different signature.)
+
+**Fix** — `.github/workflows/agent-doc.yml`, commit `8b01b6fe50`:
+- All three env vars at **workflow scope**, so `tmux-ci` gets them too. It builds the same `--all-targets` graph and is sitting on the same cliff; it just hasn't tipped yet.
+- `cargo-nextest` install on `check`. Without it `make test` silently falls back to plain `cargo test`, so the superproject was running with **no per-test deadlock guard** — `.config/nextest.toml`'s 60s x 3 timeout was inactive there. A lock/IPC deadlock would have hung to the job cap instead of failing fast with a named test.
+- `timeout-minutes: 60` on both jobs as the backstop for non-test hangs.
+- A comment tying the two workflows together, since a divergence here reads as a code regression.
+
+**Verification:** `make check` with all three env vars set locally — **8707 passed, 0 failed, 248 skipped**. That proves the flags don't red the suite; it can't prove the disk headroom, which is runner-specific. Pushed; run `31249383368` is in progress, observed once and not awaited (`#ci-no-closeout-wait`). Filed an actionable follow-up to confirm it went green, with the next escalation levers if the reduction turns out to be insufficient.
+
+Session note: exchange accretion is `warn` (6 cycles / 30 min); queue is active so I'm not stalling to compact.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#loopsuperprojectjob]
+- do [#confirmsuperprojectjob]
+- ~~do [#loopsuperprojectjob]~~
 - ~~do [#queuemirrororder]~~
 - ~~do [#watchsighupwin]~~
 - do [#tmuxsyncslow]
@@ -97,7 +129,7 @@ Session note: exchange accretion is at `warn` (2 no-op closeouts in 30 min); que
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#loopsuperprojectjob] agent-loop superproject CI `check` job has failed 8 consecutive runs with `collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped` while linking agent-doc test binaries (e.g. run 31248484827, targets `agent-doc-commit-io` test "git" and `agent-doc-stream-io` lib test). `tmux-ci` passes in the same runs, and local `make check` is green — this is the GitHub runner exhausting memory/disk linking a 144-crate workspace's test targets, not a code regression. Investigate reducing link concurrency/debuginfo for CI (`CARGO_BUILD_JOBS`, `debug=0`/`debug=line-tables-only` in a CI profile, or `cargo nextest` archive splitting).
+- [ ] [#confirmsuperprojectjob] Confirm the superproject `Agent Doc` / `check` job went green after the runner-disk fix (commit 8b01b6fe50, run 31249383368): `gh run list --workflow "Agent Doc" --limit 2`. If the Bus error recurs, the disk reduction was insufficient — next levers are freeing runner disk (drop the preinstalled Android SDK / dotnet / GHC images), `-C debuginfo=0` via RUSTFLAGS, or splitting `--all-targets` across jobs.
 - [ ] [#tmuxsyncslow] tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it. (restored from the queue after #qftnodoneeat deleted it; plan context: tasks/agent-doc/plan-tmux-auto-sync-reactive.md)
 - [ ] [#runpromptverbose] The prompt Run Agent Doc sends to Claude Code should simply be `/agent-doc .../file.md`. It currently sends a long multi-paragraph prompt ("Agent Doc queue state advanced for ... Continue this existing owner-pane session; do not invoke agent-doc recursively. Execute the current active queue head: ... Persist and finalize this cycle through the connected Agent Doc tools."). Restored from the queue after #qftnodoneeat deleted it.
 <!-- /agent:backlog -->

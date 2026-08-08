@@ -2395,6 +2395,57 @@ mod tests {
         assert!(!msg.contains("interrupt-clear"), "message: {msg}");
     }
 
+    /// `#compactstrandedheading`: compact must survive an exchange whose replay
+    /// left an EMPTY `### Re:` shell duplicating an already-answered topic, and
+    /// it must reach that shape through the shared repair rather than a private
+    /// copy.
+    ///
+    /// Verified end-to-end 2026-08-08 against a constructed fixture (the live
+    /// document no longer contained the shape, so compacting *it* proved
+    /// nothing): compact returned 0, dropped the empty shell, kept the real
+    /// bodies, archived the displaced topic with its body intact, left
+    /// `agent:backlog` untouched, and logged
+    /// `compact_repaired_stranded_duplicate_response_heading`.
+    ///
+    /// The repair itself is covered by `agent-doc-turn`'s
+    /// `materialize_response_repairs_stranded_duplicate_heading_after_complete_copy`.
+    /// What can silently regress is the WIRING — compact dropping the call, or
+    /// growing its own normalization — so that is what this pins.
+    #[test]
+    fn compact_repairs_stranded_duplicate_headings_through_the_shared_repair() {
+        let source = include_str!("lib.rs");
+        let call = "agent_doc_turn::response_replay::repair_stranded_duplicate_response_headings(";
+        assert!(
+            source.contains(call),
+            "compact must route stranded-duplicate-heading repair through agent-doc-turn"
+        );
+        assert!(
+            source.contains("compact_repaired_stranded_duplicate_response_heading"),
+            "a repair that fires must stay observable in ops.log"
+        );
+
+        // The shared repair is what compact leans on: an empty shell whose
+        // answered twin has a body is removed, and every real body survives.
+        let exchange = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: first topic\n\n",
+            "Real body.\n\n",
+            "### Re: second topic\n\n",
+            "Another body.\n\n",
+            "### Re: first topic\n\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let repaired =
+            agent_doc_turn::response_replay::repair_stranded_duplicate_response_headings(exchange);
+        assert_eq!(
+            repaired.matches("### Re: first topic").count(),
+            1,
+            "the empty duplicate shell must be removed: {repaired}"
+        );
+        assert!(repaired.contains("Real body."), "{repaired}");
+        assert!(repaired.contains("Another body."), "{repaired}");
+    }
+
     #[test]
     fn compact_targets_rebase_onto_concurrent_sibling_queue_deletions() {
         // #compact-independent-cells: Compact Exchange owns only the exchange

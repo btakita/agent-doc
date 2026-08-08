@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 23bd00ef-f697-4a06-9474-0ca5f5c967cc
+resume: 33dbfc87-363b-43cf-a5cf-69f80803bb82
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -198,27 +198,46 @@ And the Phase 2 commit **failed CI** — the workflow checked out `lazily-gd` al
 **One thing I deliberately did not do, and it's a blocker rather than remaining work.** I did not add the `coverage.json` column, even though my own backlog item scoped it here. `check-coverage-claims.mjs` treats *absence* from a binding's `KNOWN_UNCOVERED` as "replayed", while this guard excuses 128 fixtures by family — so the column would let lazily-gd carry marks it hasn't earned, inside a CI-gated shared repo. Filed as `#lzgdcoveragecolumn` with the fix stated. Shipping a known-unsound claim into shared CI is the one thing this whole family of guards exists to prevent.
 
 Queue: `#lzgdcoveragecolumn`, `#lzgdvocab`, `#lzcppwasm`.
+
+### Re: do [#lzgdcoveragecolumn] — the contract first, then the column — opus-5
+
+`GDScript` is the 10th column in `coverage.json`: **`~` on Reactive graph, `—` on the other 28 families**. `make check` green in both repos, CI green in both (`8afbc27` spec, `d88243d` gd), superproject bumped at `e5d85bbce3`.
+
+**The blocker was real, and it was worse than "the formats don't line up."** `check-coverage-claims.mjs` knew two ledgers — `KNOWN_UNCOVERED` and `REQUIRED_AREAS` — and lazily-gd declares a third. To a parser that never read `IMPLEMENTED_FAMILY_PREFIXES`, this binding looked like *"audits the whole corpus, declares 12 gaps"*, so all **128 family-excused fixtures counted as replayed**. An unread scoping ledger doesn't weaken the audit visibly; it silently **inverts** it for one binding.
+
+I proved that rather than asserting it, in a scratch tree with only the gd sibling present: a GDScript `✅` on the `codec/frame_roundtrip_json.json` row **passes** the pre-fix parser and **fails** after. Also driven both ways — an in-family *replayed* fixture still passes, an in-family fixture named in `KNOWN_UNCOVERED` still fails. Four branches, not one.
+
+**The more useful half of the fix is the one that isn't about lazily-gd.** Reading one more array name would leave the next binding free to invent a fourth narrowing mechanism and have it ignored the same way. So an **unrecognized ledger array in any binding guard is now a hard failure**: `SCOPING_ARRAYS` / `NON_SCOPING_ARRAYS` classify the eight that exist across the ten guards, and anything else stops the build with instructions. Driven by adding a bogus `SOME_NEW_SCOPE=(...)` to the gd guard and confirming red. Violation messages now also name *which* ledger excluded the fixture — three different files fix the three cases, and "does not replay X" sent you to the wrong one.
+
+**Why `~` and not `✅` on row 0.** The runner replays 9 of 21 `reactive-graph` fixtures. Row 0's own prose says "all cells guarded", and `failed_compute_is_never_cached.json` — the fixture that proves a failed compute isn't cached — is one of the 12 it doesn't replay. `signal_materializes_*` (that's `computed().eager()`) and `churn`/`recycled_id` are also row-0 semantics and also unreplayed. `~` is documented as the visibly-qualified mark the guard leaves unverified by design; it's the honest cell here, and `✅` would have been exactly the unearned claim this whole guard family exists to stop.
+
+**Two things worth flagging.**
+
+Thread-safe rows are `—`, not `⊘`. The plan resolved them as "parked / out of scope for a first release" and pointed at `#lzcoveragelayout`'s not-applicable mark — but `⊘` means *structurally cannot*, requires a recorded `na` reason, and Godot does have threads. "Has not" and "cannot" are the distinction that mark exists to preserve, so I didn't blur it.
+
+And a real gap I found while doing this, filed at the **bottom** of the backlog as `#lzcoveragerowfixtures` so it doesn't preempt the drain: **only 11 of 70 rows cite fixtures at all.** The claim guard checked 84 shipped marks — the other several hundred have nothing to verify against, including row 0. The guard is sound; it just has almost nothing to read. That's its own cycle because closing it will redden bindings whose marks are currently unbacked, which is the point.
+
+Column churn hit 12 repos (the language axis is in every README roll-up). Each got a `git commit --only -- README.md`, so the concurrent session's uncommitted `AGENTS.md` edits are still uncommitted and still theirs in all ten siblings.
+
+Queue: `#lzgdvocab`, then `#lzcppwasm`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzgdcoveragecolumn]
+- ~~do [#lzgdcoveragecolumn]~~
 - do [#lzgdvocab]
-- ~~do [#lzgdremote]~~
-- ~~do [#lzgdkernel]~~
-- ~~do [#lzgdrunner]~~
-- ~~do [#lzgdbinding]~~
 - do [#lzcppwasm]
+- do [#lzcoveragerowfixtures]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgdcoveragecolumn] Add lazily-gd as the 10th coverage.json column (rows 0 and 15). BLOCKED on a ledger-format mismatch found while landing #lzgdrunner: lazily-spec's check-coverage-claims.mjs parses each binding's KNOWN_UNCOVERED and treats ABSENCE from it as 'replayed', but lazily-gd's check-conformance-coverage.sh excuses 128 fixtures by unimplemented FAMILY rather than naming each one. Adding the column as-is would let lazily-gd carry marks it has not earned inside a CI-gated shared repo. Fix the contract first: either have the gd guard emit a complete not-replayed list for the spec-side parser, or teach check-coverage-claims.mjs about family excuses. Only then add the column, and only for rows the runner actually replays.
 - [ ] [#lzgdvocab] Extend the lazily-gd conformance runner to the 12 reactive-graph fixtures it cannot yet replay, one op family per step: merge_cell (5 fixtures, needs the multi-write ingress mechanism), signal/dispose_signal materialization (3), fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2), fail_next injectable compute failure (1), and shape=scenarios support (1). Each is named in KNOWN_UNCOVERED with its reason. Removing an entry there is the definition of done for that group.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
+- [ ] [#lzcoveragerowfixtures] Only 11 of coverage.json's 70 rows carry a `fixtures` citation, so check-coverage-claims.mjs verifies 84 shipped marks and leaves every other mark structurally unverifiable — including row 0 (reactive-graph), the one row lazily-gd is scored on. The guard is sound; it just has almost nothing to read. Add `fixtures` to the reactive-graph, materialization, statechart, collections, queue, topic, work-queue, crdt, lossless-tree, egress, and stdlib rows, citing the canonical fixtures that actually back each row's normative prose. Expect this to redden bindings whose marks are currently unbacked — that is the point, and it is why this is its own cycle rather than a rider on the GDScript column. Do NOT weaken a mark to make the guard pass without first checking whether the binding replays the fixture.
 <!-- /agent:backlog -->
 
 ## Review

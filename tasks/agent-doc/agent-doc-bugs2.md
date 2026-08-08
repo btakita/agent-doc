@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -230,6 +230,11 @@ Session note: exchange is at 161 lines / 6 sections (`warn`); queue is active so
 
 > **Queue prompt:**
 >
+> do [#operatorverifyeyeball]: verified. looks good
+
+
+> **Queue prompt:**
+>
 > In the last turn, the queue item was not recognized and agent-doc turn resulted in `Nothing to respond to this cycle — preflight reports no_changes: true.` even though `do [#operatorverifyeyeball]: verified. looks good` was in the queue. Also, Run Agent Doc added the prompt to Claude Code but did not submit.
 
 
@@ -261,8 +266,6 @@ Session note: exchange is at 193 lines / 7 sections (`warn`); queue is active, s
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~In the last turn, the queue item was not recognized and agent-doc turn resulted in `Nothing to respond to this cycle — preflight reports no_changes: true.` even though `do [#operatorverifyeyeball]: verified. looks good` was in the queue. Also, Run Agent Doc added the prompt to Claude Code but did not submit.~~
-- do [#operatorverifyeyeball]: verified. looks good
 <!-- /agent:queue -->
 
 ## Notes
@@ -273,7 +276,6 @@ Session note: exchange is at 193 lines / 7 sections (`warn`); queue is active, s
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#operatorverifyeyeball] [operator-verify] Eyeball a real JetBrains `Run Agent Doc` against a Claude Code pane and confirm the injected trigger now reads `/agent-doc /abs/path.md` (was bare `agent-doc /abs/path.md`), and that a freshly-`/clear`ed pane picks up the skill from it. Shipped in 0.35.171 (#runpromptverbose) with unit coverage on both dispatch paths; only the live-pane render is unverifiable from the agent side.
 <!-- /agent:backlog -->
 
 ## Review

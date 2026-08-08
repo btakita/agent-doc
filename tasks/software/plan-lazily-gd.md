@@ -133,11 +133,17 @@ dependency discipline, two enforcement mechanisms.
   base kind that `Source`/`Computed`/`Effect` share is a conventional base class
   with erroring stubs, not an abstract one.
 - **Test framework: gdUnit4** — DECIDED 2026-08-08, confirmed against the 4.4
-  floor as the plan required rather than assumed: gdUnit4 v5.x+ lists Godot
-  v4.3/v4.4/v4.4.1 as supported. Pinned at the latest RELEASED tag, **v6.2.0** —
-  `plugin.cfg` on `main` reads `6.2.1`, which is unreleased and 404s as a tag, so
-  read the version from releases, not from the plugin manifest. The deciding
-  argument for gdUnit4 is stronger than "it has a CI action":
+  floor — and the confirmation had to be done twice, because the first pass got
+  it wrong. **Pinned at v5.1.1.** Upstream's compatibility row listing
+  `v4.3, v4.4, v4.4.1` covers the **v5.x** line; pinning v6.2.0 off that row
+  produced a build that fails to resolve its own classes on 4.4.1 and then HANGS
+  rather than exiting, burning the CI job limit. Two lessons worth keeping: read
+  the released tag rather than `plugin.cfg` on `main` (which reads `6.2.1`,
+  unreleased, 404s), and verify a framework pin against the FLOOR engine, not the
+  engine you happen to run — 4.7.1 hid this completely. v5.1.1 verified passing on
+  both 4.4.1 and 4.7.1. Raising the Godot floor is what unlocks v6, not a
+  framework bump alone. The deciding argument for gdUnit4 over GUT is stronger
+  than "it has a CI action":
   gdUnit4 reports **orphan nodes** per test, and this binding's one novel problem
   is that `RefCounted` has no cycle collector. Orphan detection turns "`ctx.scope()`
   is the sole strong owner and teardown actually frees" from an assertion nobody

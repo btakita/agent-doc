@@ -2,6 +2,35 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.169
+
+- **The `agent:queue` mirror honours the backlog anchor, and `--backlog-reorder` cascades into it (`#queuemirrororder`).**
+  `--backlog-add-after #X "[#y] ..."` placed `#y` after `#X` in `agent:backlog` but PREPENDED it to
+  `agent:queue`: the backlog honoured the anchor while the queue applied
+  `--backlog-queue-placement` independently, so the pair inverted exactly when the anchor was chosen
+  BECAUSE order matters (observed in `tasks/haiven-dev.md`: backlog
+  `[#reasoncoderegistry, #reasoncodeenum]`, queue `[#reasoncodeenum, #reasoncoderegistry]`).
+  `enqueue_actionable_ids_in_content` now splices an anchored id directly after its anchor's live
+  queue head and keeps `placement` (the `#queueatcreate` head default) only for ids with no
+  already-queued backlog predecessor — every plain `--backlog-add`, which prepends to the backlog
+  head, is unchanged. An anchor with no live slot (struck or completed-only) falls back to
+  `placement` instead of vanishing, and the splice stays insert-only, so operator free-text lines
+  survive byte-for-byte.
+- **Recovery exists now.** There was previously no way to move an already-queued id:
+  `agent-doc queue sync` skips ids already present (`reason: already_in_queue`, so it is
+  append-only) and `--backlog-reorder` stopped at `agent:backlog`; the only remaining levers were
+  `--done` / `--backlog-gate`, both of which assert something false about the item's state.
+  `backlog_cmd::reorder` now cascades through `reorder_queue_mirror_in_content`, which permutes only
+  the named live heads among the slots they already occupy — every other queue line keeps its exact
+  byte offset, preserving `#qauthorder`.
+- **A metadata-only write no longer trips the imperative-directive guard.** A pure reorder has no
+  command output, no code diff, and no commit hash to cite, so the prose heuristics rejected every
+  honest response it could produce (`rejected status-only/meta response for do [#typeroutersponses]`)
+  and left the cycle stranded at `response_captured`. `WriteOptions::has_metadata_only_mutation`
+  (reorder / text-metadata edits) now flows into
+  `enforce_imperative_response_contract_with_mutation_evidence`: the binary applied the mutation,
+  which is stronger evidence than any prose scan, so the guard defers to it.
+
 ## 0.35.168
 
 - **A zombie harness child no longer pins the supervisor in an `execve` loop (`#zombiechild`).**

@@ -1150,8 +1150,25 @@ fn reorder_list(file: &Path, list: backlog::TrackedWorkList, ids: &[String]) -> 
 }
 
 /// Reorder backlog items by id (comma-separated). Missing ids keep their relative order.
+///
+/// `#queuemirrororder`: the reorder cascades to the `agent:queue` mirror. Without
+/// it there was no way to move an already-queued id at all — `agent-doc queue sync`
+/// skips ids already present (`reason: already_in_queue`, so it is append-only),
+/// and the only remaining levers were `--done` / `--backlog-gate`, both of which
+/// assert something false about the item's state. The cascade permutes only the
+/// live heads named in `ids`, among the slots they already occupy, so every other
+/// queue line keeps its operator-authored position (`#qauthorder`).
 pub fn reorder(file: &Path, ids: &[String]) -> Result<()> {
-    reorder_list(file, backlog::TrackedWorkList::Backlog, ids)
+    reorder_list(file, backlog::TrackedWorkList::Backlog, ids)?;
+    let content = read_command_document(file, "backlog_reorder_queue_mirror")?;
+    match agent_doc_queue::backlog_sync::reorder_queue_mirror_in_content(&content, ids) {
+        Ok(Some(updated)) => persist_pending_write(file, &content, &updated),
+        Ok(None) => Ok(()),
+        Err(e) => {
+            eprintln!("[queue] warning: backlog reorder did not cascade to the queue mirror: {e}");
+            Ok(())
+        }
+    }
 }
 
 pub fn icebox_reorder(file: &Path, ids: &[String]) -> Result<()> {

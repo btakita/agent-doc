@@ -4604,11 +4604,19 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     // the primary path too. Besides preserving every pre-existing queue byte,
     // this is the single place that orders a newly actionable block by hard
     // `after=#id` dependencies and then priority.
-    let Some(current_content) = agent_doc_queue::backlog_sync::enqueue_actionable_ids_in_content(
-        &content,
-        &backlog_ids,
-        placement,
-    )?
+    // `#queuemirrororder`: ids filed with an explicit `--backlog-add-after` /
+    // `--backlog-add-before` anchor follow that anchor into the mirror; everything
+    // else keeps `placement` (the `#queueatcreate` head default).
+    let anchored_ids: Vec<String> = agent_doc_cycle_state_io::pending_anchored_ids(file)
+        .into_iter()
+        .collect();
+    let Some(current_content) =
+        agent_doc_queue::backlog_sync::enqueue_actionable_ids_in_content_with_anchors(
+            &content,
+            &backlog_ids,
+            placement,
+            &anchored_ids,
+        )?
     else {
         return Ok(Vec::new());
     };
@@ -7444,6 +7452,62 @@ mod tests {
             state.synced_queue_ids
         );
     }
+    /// `#queuemirrororder`: an id recorded as anchored follows its anchor into the
+    /// mirror instead of taking the `#queueatcreate` head default.
+    #[test]
+    fn closeout_sync_places_anchored_same_cycle_add_after_its_anchor() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#registry]\n",
+            "- do [#tail]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#registry] phase 1\n",
+            "- [ ] [#reasonenum] phase 2, filed after phase 1 on purpose\n",
+            "- [ ] [#tail] unrelated\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_pending_actionable_ids(&doc, &["reasonenum".to_string()])
+            .unwrap();
+        agent_doc_cycle_state_io::record_pending_anchored_ids(&doc, &["reasonenum".to_string()])
+            .unwrap();
+
+        let synced = sync_same_cycle_actionable_backlog_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
+        )
+        .unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(synced, vec!["reasonenum".to_string()]);
+        let registry = updated.find("do [#registry]").unwrap();
+        let reasonenum = updated.find("do [#reasonenum]").unwrap();
+        let tail = updated.find("do [#tail]").unwrap();
+        assert!(
+            registry < reasonenum && reasonenum < tail,
+            "an anchored follow-up must land after its anchor, not at the head:\n{updated}"
+        );
+    }
+
     #[test]
     fn closeout_sync_prepends_same_cycle_pending_add_in_go_mode() {
         // #pendingaddqueuesync: pending-add writes happen after preflight queue

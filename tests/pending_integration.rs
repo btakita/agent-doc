@@ -294,6 +294,62 @@ fn pending_reorder_by_id() {
     assert!(cccc < aaaa && aaaa < bbbb);
 }
 
+/// `#queuemirrororder` (2): the only recovery for a mis-ordered mirror.
+///
+/// `agent-doc queue sync` skips ids already present (`already_in_queue`), so it is
+/// append-only; before this cascade the only way to move a queued id was `--done`
+/// or `--backlog-gate`, both of which assert something false about its state.
+#[test]
+fn backlog_reorder_cascades_to_queue_mirror() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#bbbb]\n",
+            "- /goal keep me exactly here\n",
+            "- do [#aaaa]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue -->\n",
+            "- [ ] [#bbbb] second\n",
+            "- [ ] [#aaaa] first\n",
+            "<!-- /agent:backlog -->\n",
+        ),
+    )
+    .unwrap();
+
+    agent_doc()
+        .args([
+            "backlog",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "reorder",
+            "aaaa,bbbb",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let queue_start = content.find("<!-- agent:queue").unwrap();
+    let queue_end = content.find("<!-- /agent:queue -->").unwrap();
+    let queue = &content[queue_start..queue_end];
+    let aaaa = queue.find("- do [#aaaa]").expect("aaaa still queued");
+    let bbbb = queue.find("- do [#bbbb]").expect("bbbb still queued");
+    assert!(
+        aaaa < bbbb,
+        "the queue mirror must follow the reordered backlog:\n{queue}"
+    );
+    assert_eq!(
+        queue.lines().nth(2),
+        Some("- /goal keep me exactly here"),
+        "the operator free-text line keeps its exact slot (#qauthorder):\n{queue}"
+    );
+}
+
 #[test]
 fn pending_reap_removes_checked_items() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] keep\n- [x] [#bbbb] drop\n- [ ] [#cccc] keep2");

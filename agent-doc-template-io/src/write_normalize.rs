@@ -16,6 +16,35 @@ pub fn enforce_imperative_response_contract(
     current_content: &str,
     response: &str,
 ) -> Result<()> {
+    enforce_imperative_response_contract_with_mutation_evidence(
+        file,
+        baseline,
+        current_content,
+        response,
+        false,
+    )
+}
+
+/// `#queuemirrororder`: same contract, but the caller can assert that the write
+/// itself carries a concrete tracked-work mutation (a reorder or a text/metadata
+/// edit) whose only possible deliverable is the document change.
+///
+/// Such a write has no command output, no code diff, and no commit to cite, so the
+/// prose heuristics below reject every honest response it can produce — observed
+/// live, where a pure `--backlog-reorder` answering `do [#typeroutersponses]` was
+/// rejected as "status-only/meta" and left the cycle stranded at
+/// `response_captured` with no way forward. The binary applied the mutation, which
+/// is stronger evidence than any prose scan, so the guard defers to it.
+pub fn enforce_imperative_response_contract_with_mutation_evidence(
+    file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+    response: &str,
+    mutation_evidence: bool,
+) -> Result<()> {
+    if mutation_evidence {
+        return Ok(());
+    }
     let baseline_owned = baseline.map(ToOwned::to_owned).or_else(|| {
         agent_doc_snapshot_io::load_document_baseline(file)
             .ok()
@@ -131,6 +160,33 @@ mod imperative_contract_tests {
         assert!(
             err.to_string().contains("imperative document directive requires concrete execution evidence or a concrete blocker"),
             "unexpected error: {err}"
+        );
+    }
+
+    /// `#queuemirrororder` (3): a pure `--backlog-reorder` has no execution
+    /// evidence to offer — no command output, no code diff, no commit hash. The
+    /// prose heuristics rejected every honest response it could write and stranded
+    /// the cycle at `response_captured`; the applied mutation is the evidence.
+    #[test]
+    fn imperative_contract_defers_to_applied_metadata_mutation() {
+        let file = Path::new("session.md");
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do [#typeroutersponses]\n";
+        let response = "### Re: typeroutersponses — gpt-5\nReordered the backlog so the registry runs first.";
+        enforce_imperative_response_contract_with_mutation_evidence(
+            file,
+            Some("ctx\n"),
+            "ctx\ndo [#typeroutersponses]\n",
+            response,
+            true,
+        )
+        .expect("an applied metadata mutation satisfies the contract");
+
+        let err = enforce_imperative_response_contract_for_diff(file, diff, response).unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "imperative document directive requires concrete execution evidence or a concrete blocker"
+            ),
+            "without the mutation the same response is still rejected: {err}"
         );
     }
 

@@ -32,6 +32,7 @@ pub use response_materialization_io::{
 };
 pub use write_normalize::{
     enforce_imperative_response_contract, enforce_imperative_response_contract_for_diff,
+    enforce_imperative_response_contract_with_mutation_evidence,
     normalize_user_prompts_in_exchange_safe, template_mode_overrides_for_current_doc,
 };
 

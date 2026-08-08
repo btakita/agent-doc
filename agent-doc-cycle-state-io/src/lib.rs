@@ -206,6 +206,16 @@ pub struct CycleState {
     /// transitions, and unrelated operator queue deletions do not.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_actionable_ids: Vec<String>,
+    /// `#queuemirrororder`: the subset of `pending_actionable_ids` filed with an
+    /// EXPLICIT backlog anchor (`--backlog-add-after` / `--backlog-add-before`).
+    ///
+    /// Position cannot be inferred after the fact: a `--backlog-add-back` item and
+    /// an anchored item both end up below an already-queued id, and only the
+    /// anchored one asked for that placement. Recording the intent at the mutation
+    /// site keeps the queue mirror following the anchor while leaving the
+    /// `#queueatcreate` head default intact for everything else.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_anchored_ids: Vec<String>,
     /// True when the preflight-current document already had completed tracked
     /// work that closeout pending maintenance should reap. This lets closeout
     /// distinguish status-only cycles from tracked-work cycles without reading
@@ -1168,6 +1178,7 @@ pub fn start_preflight_with_task(
         pending_added_this_cycle: false,
         pending_added_ids: Vec::new(),
         pending_actionable_ids: Vec::new(),
+        pending_anchored_ids: Vec::new(),
         tracked_work_maintenance_required_at_preflight: file_content
             .map(agent_doc_document::tracked_work_projection::tracked_work_maintenance_required),
         ipc_snapshot_adoption_blocked: false,
@@ -1768,6 +1779,46 @@ pub fn pending_actionable_ids(file: &Path) -> std::collections::HashSet<String> 
         .ok()
         .flatten()
         .map(|state| state.pending_actionable_ids.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// `#queuemirrororder`: record ids filed against an explicit backlog anchor, so
+/// the queue mirror can follow that anchor instead of the placement edge.
+pub fn record_pending_anchored_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+
+    let mut changed = false;
+    for id in ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if !state
+            .pending_anchored_ids
+            .iter()
+            .any(|existing| existing == &id)
+        {
+            state.pending_anchored_ids.push(id);
+            changed = true;
+        }
+    }
+
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#queuemirrororder`: ids filed with an explicit `--backlog-add-after` /
+/// `--backlog-add-before` anchor this cycle. Empty when no cycle state exists.
+pub fn pending_anchored_ids(file: &Path) -> std::collections::HashSet<String> {
+    load(file)
+        .ok()
+        .flatten()
+        .map(|state| state.pending_anchored_ids.into_iter().collect())
         .unwrap_or_default()
 }
 
@@ -3057,6 +3108,7 @@ fn synthetic_state_with_id(
         pending_added_this_cycle: false,
         pending_added_ids: Vec::new(),
         pending_actionable_ids: Vec::new(),
+        pending_anchored_ids: Vec::new(),
         // A synthetic cycle did not observe a preflight document. Preserve
         // that distinction instead of asserting a false preflight fact that
         // the state projection cannot reproduce.

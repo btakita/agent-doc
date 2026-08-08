@@ -412,6 +412,10 @@ pub(crate) struct WriteFlags {
     pub(crate) has_pending_add: bool,
     pub(crate) has_pending_done: bool,
     pub(crate) has_pending_mutation: bool,
+    /// `#queuemirrororder`: this write's deliverable is a metadata/ordering
+    /// mutation the binary applied, which the imperative-directive guard accepts
+    /// in place of prose execution evidence.
+    pub(crate) has_metadata_only_mutation: bool,
     pub(crate) pending_done_ids: Vec<String>,
     pub(crate) queue_completion_ids: Vec<String>,
     pub(crate) pending_kept_open_ids: Vec<String>,
@@ -1274,6 +1278,11 @@ fn apply_pending_and_status_mutations(
                         // ops-proof auto-completion never reaps a brand-new same-cycle add.
                         let mut same_cycle_added_ids: Vec<String> =
                             backlog_cmd::add_many(file, &options.pending_add, false)?;
+                        // `#queuemirrororder`: ids filed against an EXPLICIT anchor. The
+                        // queue mirror follows the anchor for exactly these; position
+                        // cannot be inferred later, because `--backlog-add-back` produces
+                        // the same below-a-queued-id shape without asking for it.
+                        let mut anchored_added_ids: Vec<String> = Vec::new();
                         let pending_add_targets =
                             group_pending_add_targets(&options.pending_add_to)?;
                         for (target, items) in &pending_add_targets {
@@ -1297,6 +1306,7 @@ fn apply_pending_and_status_mutations(
                                 let id = backlog_cmd::add_after(file, anchor, text).with_context(
                                     || format!("failed to apply --backlog-add-after {anchor}"),
                                 )?;
+                                anchored_added_ids.push(id.clone());
                                 same_cycle_added_ids.push(id);
                             } else {
                                 anyhow::bail!("--backlog-add-after expects repeated ID TEXT pairs");
@@ -1307,6 +1317,7 @@ fn apply_pending_and_status_mutations(
                                 let id = backlog_cmd::add_before(file, anchor, text).with_context(
                                     || format!("failed to apply --backlog-add-before {anchor}"),
                                 )?;
+                                anchored_added_ids.push(id.clone());
                                 same_cycle_added_ids.push(id);
                             } else {
                                 anyhow::bail!(
@@ -1436,11 +1447,15 @@ fn apply_pending_and_status_mutations(
                             let ids = parse_id_order(order);
                             backlog_cmd::icebox_reorder(file, &ids)?;
                         }
-                        added_ids.replace(Some((same_cycle_added_ids, review_added_ids)));
+                        added_ids.replace(Some((
+                            same_cycle_added_ids,
+                            review_added_ids,
+                            anchored_added_ids,
+                        )));
                         Ok(())
                     })?;
 
-                    let (same_cycle_added_ids, review_added_ids) =
+                    let (same_cycle_added_ids, review_added_ids, anchored_added_ids) =
                         added_ids.into_inner().unwrap_or_default();
                     if !review_added_ids.is_empty() {
                         agent_doc_cycle_state_io::record_pending_added_ids(
@@ -1465,6 +1480,12 @@ fn apply_pending_and_status_mutations(
                         &same_cycle_added_ids,
                         &options.pending_ungate,
                     )?;
+                    if !anchored_added_ids.is_empty() {
+                        agent_doc_cycle_state_io::record_pending_anchored_ids(
+                            file,
+                            &anchored_added_ids,
+                        )?;
+                    }
                     if let Some((plan, completed_count)) = composed_queue_completion.into_inner() {
                         queue_completion_projected.set(true);
                         if let Some(plan) = plan {
@@ -1845,6 +1866,7 @@ fn run_command_inner(
             || !options.review_add.is_empty(),
         has_pending_done: !options.pending_done.is_empty(),
         has_pending_mutation: has_pending_ops,
+        has_metadata_only_mutation: options.has_metadata_only_mutation(),
         pending_done_ids: options.pending_done.clone(),
         queue_completion_ids: options.queue_completion_ids.clone(),
         pending_kept_open_ids: pending_kept_open_ids.clone(),

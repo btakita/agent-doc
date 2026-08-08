@@ -424,9 +424,32 @@ pub fn enqueue_actionable_ids_in_content(
     actionable_ids: &[String],
     placement: FollowUpQueuePlacement,
 ) -> anyhow::Result<Option<String>> {
+    enqueue_actionable_ids_in_content_with_anchors(content, actionable_ids, placement, &[])
+}
+
+/// `#queuemirrororder`: [`enqueue_actionable_ids_in_content`] plus the ids the
+/// caller filed against an EXPLICIT backlog anchor (`--backlog-add-after` /
+/// `--backlog-add-before`).
+///
+/// Those ids splice in directly after their anchor's live queue head instead of at
+/// the `placement` edge. Everything else keeps the `#queueatcreate` head default,
+/// which is why the anchored set must be passed in rather than inferred from
+/// backlog position: `--backlog-add-back` lands below an already-queued id too, and
+/// only the anchored item asked for that slot.
+pub fn enqueue_actionable_ids_in_content_with_anchors(
+    content: &str,
+    actionable_ids: &[String],
+    placement: FollowUpQueuePlacement,
+    anchored_ids: &[String],
+) -> anyhow::Result<Option<String>> {
     if actionable_ids.is_empty() {
         return Ok(None);
     }
+    let anchored: HashSet<String> = anchored_ids
+        .iter()
+        .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
+        .filter(|id| !id.is_empty())
+        .collect();
     let components = element::parse(content)?;
 
     let backlog_opts_in = components
@@ -443,12 +466,16 @@ pub fn enqueue_actionable_ids_in_content(
 
     // Only ids that are actually open BACKLOG items may be queued: an icebox id,
     // or an id that deduped into an existing item, must not become a queue head.
-    let open_backlog: HashSet<String> = components
+    //
+    // `#queuemirrororder`: keep the ORDER too, not just membership. The backlog's
+    // document order is the anchor evidence the projection below needs.
+    let backlog_order: Vec<String> = components
         .iter()
         .filter(|comp| matches!(comp.name.as_str(), "backlog" | "pending"))
         .flat_map(|comp| backlog::active_item_ids(&content[comp.open_end..comp.close_start]))
         .map(|id| id.trim().to_ascii_lowercase())
         .collect();
+    let open_backlog: HashSet<String> = backlog_order.iter().cloned().collect();
     let queueable: Vec<String> = actionable_ids
         .iter()
         .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
@@ -533,34 +560,216 @@ pub fn enqueue_actionable_ids_in_content(
         }
     }
 
-    let new_lines: Vec<String> = ordered.iter().map(|id| format!("- do [#{id}]")).collect();
-    if new_lines.is_empty() {
+    if ordered.is_empty() {
         return Ok(None);
     }
-    let block = new_lines.join("\n");
 
-    // Strictly insert-only: splice the block at the boundary and copy the
-    // existing body through byte-for-byte.
+    // `#queuemirrororder`: honour the backlog ANCHOR when projecting into the
+    // queue. `--backlog-add-after #X "[#y] ..."` places `#y` directly after `#X`
+    // in `agent:backlog`, and the documented contract is that the `agent:queue`
+    // mirror matches backlog order — but placement used to be applied to the whole
+    // block unconditionally, so the anchored item was PREPENDED, landing before the
+    // very id it was filed after. That inverts the pair exactly when the anchor was
+    // chosen BECAUSE order matters (observed: backlog `[#reasoncoderegistry,
+    // #reasoncodeenum]`, queue `[#reasoncodeenum, #reasoncoderegistry]`).
     //
-    // The component body does NOT carry a leading newline — `open_end` sits past
-    // it. An earlier version prefixed one, which produced exactly the reported
-    // regression: a blank first line in the queue, and the spliced block running
-    // straight into the first existing entry. Trimming the body instead (an even
-    // earlier version used `trim_matches('\n')`) silently normalized the
-    // operator's own blank lines — the same class of damage as the `- /goal`
-    // marker regression this splice exists to avoid. So: touch nothing, insert
-    // at the edge.
-    let new_body = if body.trim().is_empty() {
-        format!("{block}\n")
-    } else {
-        match placement {
-            FollowUpQueuePlacement::Prepend => format!("{block}\n{body}"),
-            FollowUpQueuePlacement::Append => {
-                let sep = if body.ends_with('\n') { "" } else { "\n" };
-                format!("{body}{sep}{block}\n")
-            }
+    // Only ids in `anchored` take this path, and only when some EARLIER open
+    // backlog id is already a live queue head — that head is the splice point.
+    // Everything else keeps `placement` and the priority/dependency ordering above,
+    // so the `#queueatcreate` head default is untouched. The anchored set is passed
+    // in rather than inferred: `--backlog-add-back` also lands below a queued id,
+    // and it explicitly did NOT ask for that slot.
+    let fresh_set: HashSet<&str> = ordered.iter().map(String::as_str).collect();
+    let mut anchor_of: HashMap<&str, &str> = HashMap::new();
+    for (idx, id) in backlog_order.iter().enumerate() {
+        if !fresh_set.contains(id.as_str()) || !anchored.contains(id) {
+            continue;
         }
+        if let Some(anchor) = backlog_order[..idx]
+            .iter()
+            .rev()
+            .find(|prev| existing.contains(*prev))
+        {
+            anchor_of.insert(id.as_str(), anchor.as_str());
+        }
+    }
+
+    let line_for = |id: &str| format!("- do [#{id}]");
+
+    if anchor_of.is_empty() {
+        let block = ordered
+            .iter()
+            .map(|id| line_for(id))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Strictly insert-only: splice the block at the boundary and copy the
+        // existing body through byte-for-byte.
+        //
+        // The component body does NOT carry a leading newline — `open_end` sits past
+        // it. An earlier version prefixed one, which produced exactly the reported
+        // regression: a blank first line in the queue, and the spliced block running
+        // straight into the first existing entry. Trimming the body instead (an even
+        // earlier version used `trim_matches('\n')`) silently normalized the
+        // operator's own blank lines — the same class of damage as the `- /goal`
+        // marker regression this splice exists to avoid. So: touch nothing, insert
+        // at the edge.
+        let new_body = if body.trim().is_empty() {
+            format!("{block}\n")
+        } else {
+            match placement {
+                FollowUpQueuePlacement::Prepend => format!("{block}\n{body}"),
+                FollowUpQueuePlacement::Append => {
+                    let sep = if body.ends_with('\n') { "" } else { "\n" };
+                    format!("{body}{sep}{block}\n")
+                }
+            }
+        };
+        return Ok(Some(queue_comp.replace_content(content, &new_body)));
+    }
+
+    // Mixed block: insert each anchored id after its anchor's live head (in backlog
+    // order within a shared anchor), and splice the remaining unanchored ids at the
+    // placement edge. Still insert-only — every existing byte is copied through.
+    let spans = document_queue::parse_spans(body)?;
+    let wanted_anchors: HashSet<&str> = anchor_of.values().copied().collect();
+    // The LAST live head wins, so a re-emitted anchor anchors to its current slot.
+    let mut anchor_end: HashMap<String, usize> = HashMap::new();
+    for (entry, range) in &spans {
+        if !matches!(entry, QueueEntry::Prompt(_)) {
+            continue;
+        }
+        let Some(id) = crate::queue_projection::queue_entry_do_id(entry) else {
+            continue;
+        };
+        if wanted_anchors.contains(id.as_str()) {
+            anchor_end.insert(id, range.end);
+        }
+    }
+
+    // Group by insertion offset, preserving backlog order inside each group.
+    let mut inserts: Vec<(usize, Vec<String>)> = Vec::new();
+    let mut unanchored: Vec<String> = Vec::new();
+    let mut anchored_placed: HashSet<&str> = HashSet::new();
+    for id in &backlog_order {
+        let Some(anchor) = anchor_of.get(id.as_str()) else {
+            continue;
+        };
+        let Some(offset) = anchor_end.get(*anchor).copied() else {
+            continue;
+        };
+        anchored_placed.insert(id.as_str());
+        match inserts.iter_mut().find(|(at, _)| *at == offset) {
+            Some((_, lines)) => lines.push(line_for(id)),
+            None => inserts.push((offset, vec![line_for(id)])),
+        }
+    }
+    // An anchor whose live head could not be located (struck, or reachable only as
+    // a completed entry) falls back to the placement block rather than vanishing.
+    for id in &ordered {
+        if !anchored_placed.contains(id.as_str()) {
+            unanchored.push(line_for(id));
+        }
+    }
+
+    inserts.sort_by_key(|(at, _)| *at);
+    let mut new_body = String::with_capacity(body.len() + 32 * ordered.len());
+    let mut cursor = 0usize;
+    for (at, lines) in &inserts {
+        new_body.push_str(&body[cursor..*at]);
+        for line in lines {
+            new_body.push_str(line);
+            new_body.push('\n');
+        }
+        cursor = *at;
+    }
+    new_body.push_str(&body[cursor..]);
+
+    if !unanchored.is_empty() {
+        let block = unanchored.join("\n");
+        new_body = match placement {
+            FollowUpQueuePlacement::Prepend => format!("{block}\n{new_body}"),
+            FollowUpQueuePlacement::Append => {
+                let sep = if new_body.ends_with('\n') { "" } else { "\n" };
+                format!("{new_body}{sep}{block}\n")
+            }
+        };
+    }
+
+    Ok(Some(queue_comp.replace_content(content, &new_body)))
+}
+
+/// `#queuemirrororder`: project the backlog's declared order onto the queue mirror.
+///
+/// The recovery half of anchored projection. Once an id is queued there is no way
+/// to move it: `agent-doc queue sync` skips ids already present
+/// (`reason: already_in_queue`, so it is append-only) and `--backlog-reorder` used
+/// to stop at `agent:backlog`. The only remaining levers were `--done` /
+/// `--backlog-gate`, both of which assert something false about the item's state.
+///
+/// This permutes the live `do [#id]` heads for `ids` **among the slots they already
+/// occupy**, leaving every other queue line — operator free-text, struck entries,
+/// skipped entries, prose — at its exact byte offset. Nothing is added or removed,
+/// so `#qauthorder` (operator-authored order is authoritative) is preserved for
+/// every line the reorder did not name.
+///
+/// Returns `None` when there is no queue component, fewer than two of `ids` are
+/// live heads, or the order is already correct.
+pub fn reorder_queue_mirror_in_content(content: &str, ids: &[String]) -> anyhow::Result<Option<String>> {
+    let wanted: Vec<String> = ids
+        .iter()
+        .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
+        .filter(|id| !id.is_empty())
+        .collect();
+    if wanted.len() < 2 {
+        return Ok(None);
+    }
+
+    let components = element::parse(content)?;
+    let Some(queue_comp) = components.iter().find(|comp| comp.name == "queue") else {
+        return Ok(None);
     };
+    let body = &content[queue_comp.open_end..queue_comp.close_start];
+    let spans = document_queue::parse_spans(body)?;
+
+    // Slots: the ranges currently held by live heads named in `ids`, in document
+    // order. Their contents are what gets permuted.
+    let mut slots: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    for (entry, range) in &spans {
+        if !matches!(entry, QueueEntry::Prompt(_)) {
+            continue;
+        }
+        let Some(id) = crate::queue_projection::queue_entry_do_id(entry) else {
+            continue;
+        };
+        if wanted.contains(&id) {
+            slots.push((range.clone(), id));
+        }
+    }
+    if slots.len() < 2 {
+        return Ok(None);
+    }
+
+    let rank = |id: &str| wanted.iter().position(|want| want == id).unwrap_or(usize::MAX);
+    let mut reordered: Vec<&(std::ops::Range<usize>, String)> = slots.iter().collect();
+    // Stable sort: a duplicate id keeps its relative document order.
+    reordered.sort_by_key(|(_, id)| rank(id));
+    if reordered
+        .iter()
+        .zip(slots.iter())
+        .all(|(next, current)| next.0 == current.0)
+    {
+        return Ok(None);
+    }
+
+    let mut new_body = String::with_capacity(body.len());
+    let mut cursor = 0usize;
+    for (slot, source) in slots.iter().zip(reordered.iter()) {
+        new_body.push_str(&body[cursor..slot.0.start]);
+        new_body.push_str(&body[source.0.clone()]);
+        cursor = slot.0.end;
+    }
+    new_body.push_str(&body[cursor..]);
+
     Ok(Some(queue_comp.replace_content(content, &new_body)))
 }
 
@@ -1226,6 +1435,228 @@ priority= rank and the filed order:\n{updated}"
         }
     }
 
+    /// `#queuemirrororder` (1): `--backlog-add-after #X` must not invert the pair.
+    ///
+    /// The reported repro: `#reasoncodeenum` was filed after `#reasoncoderegistry`
+    /// precisely because the registry is its prerequisite, and the queue mirror
+    /// prepended it — putting the dependent first.
+    #[test]
+    fn enqueue_honours_backlog_anchor_instead_of_prepending() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#reasoncoderegistry]\n",
+            "- do [#unrelated]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#reasoncoderegistry] phase 1\n",
+            "- [ ] [#reasoncodeenum] phase 2\n",
+            "- [ ] [#unrelated] other\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let updated = enqueue_actionable_ids_in_content_with_anchors(
+            content,
+            &["reasoncodeenum".into()],
+            FollowUpQueuePlacement::Prepend,
+            &["reasoncodeenum".into()],
+        )
+        .unwrap()
+        .expect("the anchored id must enqueue");
+
+        let registry = updated.find("- do [#reasoncoderegistry]").unwrap();
+        let enum_head = updated.find("- do [#reasoncodeenum]").unwrap();
+        let unrelated = updated.find("- do [#unrelated]").unwrap();
+        assert!(
+            registry < enum_head && enum_head < unrelated,
+            "the queue mirror must follow the backlog anchor, not the placement edge:\n{updated}"
+        );
+    }
+
+    /// Two ids sharing one anchor keep their backlog order behind it, and an
+    /// unanchored id in the same batch still honours `placement`.
+    #[test]
+    fn enqueue_splits_anchored_and_unanchored_ids() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- /goal drain everything\n",
+            "- do [#anchor]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#top] filed at the head\n",
+            "- [ ] [#anchor] already queued\n",
+            "- [ ] [#after1] first after the anchor\n",
+            "- [ ] [#after2] second after the anchor\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let updated = enqueue_actionable_ids_in_content_with_anchors(
+            content,
+            &["top".into(), "after1".into(), "after2".into()],
+            FollowUpQueuePlacement::Prepend,
+            &["after1".into(), "after2".into()],
+        )
+        .unwrap()
+        .expect("all three enqueue");
+
+        let top = updated.find("- do [#top]").unwrap();
+        let goal = updated.find("- /goal").unwrap();
+        let anchor = updated.find("- do [#anchor]").unwrap();
+        let after1 = updated.find("- do [#after1]").unwrap();
+        let after2 = updated.find("- do [#after2]").unwrap();
+        assert!(
+            top < goal,
+            "an unanchored follow-up still goes to the head:\n{updated}"
+        );
+        assert!(
+            anchor < after1 && after1 < after2,
+            "ids sharing an anchor keep backlog order behind it:\n{updated}"
+        );
+        assert!(
+            updated.contains("- /goal drain everything"),
+            "operator-authored lines survive byte-for-byte:\n{updated}"
+        );
+    }
+
+    /// The anchored set is explicit for a reason: `--backlog-add-back` produces the
+    /// same below-a-queued-id backlog shape without asking for that slot, so an
+    /// unanchored id keeps the `#queueatcreate` head default.
+    #[test]
+    fn enqueue_keeps_head_default_for_unanchored_id_below_a_queued_one() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#head] already running\n",
+            "- [ ] [#fresh] same-cycle follow-up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let updated = enqueue_actionable_ids_in_content(
+            content,
+            &["fresh".into()],
+            FollowUpQueuePlacement::Prepend,
+        )
+        .unwrap()
+        .expect("the fresh id must enqueue");
+
+        let fresh = updated.find("- do [#fresh]").unwrap();
+        let head = updated.find("- do [#head]").unwrap();
+        assert!(
+            fresh < head,
+            "with no declared anchor the follow-up still lands at the head:\n{updated}"
+        );
+    }
+
+    /// An anchor that is present only as a struck/completed entry has no live slot,
+    /// so the id falls back to `placement` rather than vanishing.
+    #[test]
+    fn enqueue_falls_back_to_placement_when_anchor_head_is_not_live() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- ~~do [#anchor]~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#anchor] drained already\n",
+            "- [ ] [#fresh] filed after it\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let updated = enqueue_actionable_ids_in_content_with_anchors(
+            content,
+            &["fresh".into()],
+            FollowUpQueuePlacement::Prepend,
+            &["fresh".into()],
+        )
+        .unwrap()
+        .expect("the fresh id must still enqueue");
+
+        let fresh = updated.find("- do [#fresh]").unwrap();
+        let struck = updated.find("- ~~do [#anchor]~~").unwrap();
+        assert!(
+            fresh < struck,
+            "with no live anchor slot the placement edge applies:\n{updated}"
+        );
+    }
+
+    /// `#queuemirrororder` (2): recovery. `--backlog-reorder` cascades into the
+    /// mirror by permuting only the named live heads among their own slots.
+    #[test]
+    fn reorder_queue_mirror_permutes_only_named_heads() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#enum]\n",
+            "- /goal keep me exactly here\n",
+            "- do [#registry]\n",
+            "- ~~do [#struck]~~\n",
+            "- do [#untouched]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#registry] phase 1\n",
+            "- [ ] [#enum] phase 2\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let updated =
+            reorder_queue_mirror_in_content(content, &["registry".into(), "enum".into()])
+                .unwrap()
+                .expect("the mirror order changed");
+
+        let registry = updated.find("- do [#registry]").unwrap();
+        let enum_head = updated.find("- do [#enum]").unwrap();
+        assert!(
+            registry < enum_head,
+            "the named heads must swap into backlog order:\n{updated}"
+        );
+        let goal_line = updated
+            .lines()
+            .position(|line| line == "- /goal keep me exactly here")
+            .unwrap();
+        let queue_open = updated
+            .lines()
+            .position(|line| line.starts_with("<!-- agent:queue"))
+            .unwrap();
+        assert_eq!(
+            goal_line - queue_open,
+            2,
+            "an operator free-text line keeps its exact slot (#qauthorder):\n{updated}"
+        );
+        for preserved in ["- ~~do [#struck]~~", "- do [#untouched]"] {
+            assert!(
+                updated.contains(preserved),
+                "unnamed lines survive byte-for-byte: {preserved:?}\n{updated}"
+            );
+        }
+    }
+
+    #[test]
+    fn reorder_queue_mirror_is_a_no_op_when_already_ordered() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#registry]\n",
+            "- do [#enum]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            reorder_queue_mirror_in_content(content, &["registry".into(), "enum".into()])
+                .unwrap()
+                .is_none(),
+            "an already-correct mirror must not be rewritten"
+        );
+        assert!(
+            reorder_queue_mirror_in_content(content, &["registry".into()])
+                .unwrap()
+                .is_none(),
+            "a single-id reorder has nothing to permute"
+        );
+    }
+
     #[test]
     fn placement_parses_operator_spellings() {
         assert_eq!(
@@ -1247,3 +1678,4 @@ priority= rank and the filed order:\n{updated}"
         );
     }
 }
+

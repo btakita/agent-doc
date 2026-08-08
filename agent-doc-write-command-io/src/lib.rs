@@ -285,6 +285,25 @@ impl CommandOptions {
             || !self.review_remove.is_empty()
             || !self.review_resolve.is_empty()
     }
+
+    /// `#queuemirrororder`: the write carries a tracked-work mutation whose only
+    /// deliverable IS the document mutation — ordering and text/metadata edits.
+    ///
+    /// These have no command output, no code diff, and no commit hash to cite, so
+    /// the prose-heuristic imperative-directive guard rejects every honest response
+    /// they can produce (observed: a pure `--backlog-reorder` answering
+    /// `do [#typeroutersponses]` was rejected as "status-only/meta" and left the
+    /// cycle stranded at `response_captured`). The binary applied the mutation, so
+    /// it has stronger evidence than any prose scan — the guard defers to it.
+    pub fn has_metadata_only_mutation(&self) -> bool {
+        self.pending_reorder.is_some()
+            || self.icebox_reorder.is_some()
+            || !self.pending_edit.is_empty()
+            || !self.icebox_edit.is_empty()
+            || !self.review_edit.is_empty()
+            || !self.pending_set_verify.is_empty()
+            || !self.pending_set_gate_type.is_empty()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

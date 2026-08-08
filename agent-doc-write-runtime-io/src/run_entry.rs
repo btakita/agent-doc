@@ -15,7 +15,7 @@ use agent_doc_template::response_materialization::sanitize_template_patchback_re
 use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;
 use agent_doc_template_io as template_io;
 use agent_doc_template_io::{
-    enforce_imperative_response_contract, lift_pending_from_exchange_safe,
+    enforce_imperative_response_contract_with_mutation_evidence, lift_pending_from_exchange_safe,
     normalize_template_structure_or_fail_preserving, normalize_user_prompts_in_exchange_safe,
     template_mode_overrides_for_current_doc,
 };
@@ -464,7 +464,13 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
         "write_append_force_disk_current_content",
     )
     .with_context(|| format!("failed to read {}", file.display()))?;
-    enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
+    enforce_imperative_response_contract_with_mutation_evidence(
+        file,
+        baseline,
+        &current_content,
+        &response,
+        flags.has_metadata_only_mutation,
+    )?;
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
     let mut response = agent_doc_turn::response_text::strip_assistant_heading(&response);
@@ -679,7 +685,13 @@ pub(crate) fn run_template(
         "template write",
     );
     sanitize_template_patchback_response(&mut response)?;
-    enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
+    enforce_imperative_response_contract_with_mutation_evidence(
+        file,
+        baseline,
+        &current_content,
+        &response,
+        flags.has_metadata_only_mutation,
+    )?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     // Parse and validate patchback shape before any visible document mutation.
@@ -1059,7 +1071,13 @@ pub(crate) fn run_stream(
             .ok()
             .flatten();
     }
-    enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
+    enforce_imperative_response_contract_with_mutation_evidence(
+        file,
+        baseline,
+        &current_content,
+        &response,
+        flags.has_metadata_only_mutation,
+    )?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     if let Some(signal) =
@@ -1949,7 +1967,13 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         "IPC write",
     );
     sanitize_template_patchback_response(&mut response)?;
-    enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
+    enforce_imperative_response_contract_with_mutation_evidence(
+        file,
+        baseline,
+        &current_content,
+        &response,
+        flags.has_metadata_only_mutation,
+    )?;
 
     // Parse and validate patchback shape before any visible document mutation.
     let parsed = agent_doc_template_io::parse_template_patchback(
@@ -2679,6 +2703,7 @@ mod tests {
             has_pending_add: true,
             has_pending_done: false,
             has_pending_mutation: true,
+            has_metadata_only_mutation: true,
             pending_done_ids: Vec::new(),
             queue_completion_ids: Vec::new(),
             pending_kept_open_ids: Vec::new(),

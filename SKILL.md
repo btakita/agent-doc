@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.168"
+agent-doc-version: "0.35.169"
 ---
 
 # agent-doc
@@ -94,7 +94,7 @@ Full detail (session-accretion anchors, streaming checkpoints, `#agent-doc-bug` 
 
 Mutate `<!-- agent:backlog -->` only through granular `agent-doc write` flags (`--backlog-add`, `--done <id>`, `--backlog-edit "id=text"`, `--backlog-gate`, `--backlog-ungate`, `--backlog-reorder`, `--review-add`/`--review-edit`, `--icebox-add*`); full-replace via `patch:backlog`/`patch:review` is rejected.
 
-**Backlog capture rule:** if the response creates concrete follow-up work, add it to `agent:backlog` in the same cycle. Put new items at the beginning of `agent:backlog`. When one `agent-doc write` carries several `--backlog-add` flags, they land in flag order top-down — the first flag is topmost ("what you read is what you get") — and the `agent:queue` backlog mirror matches that order; for a specific interleave with existing items use `--backlog-add-after`/`--backlog-add-before`. If you are extending an ordered batch already in backlog, insert the new item adjacent to its predecessor. If the item is only a recommendation, include `[recommended]`.
+**Backlog capture rule:** if the response creates concrete follow-up work, add it to `agent:backlog` in the same cycle. Put new items at the beginning of `agent:backlog`. When one `agent-doc write` carries several `--backlog-add` flags, they land in flag order top-down — the first flag is topmost ("what you read is what you get") — and the `agent:queue` backlog mirror matches that order; for a specific interleave with existing items use `--backlog-add-after`/`--backlog-add-before`, which the queue mirror honours too — an anchored item lands directly after its anchor's queue head rather than at the top (`#queuemirrororder`). If you are extending an ordered batch already in backlog, insert the new item adjacent to its predecessor. To fix an already-queued order, use `--backlog-reorder`: it cascades into the `agent:queue` mirror, permuting only the named live heads among the slots they already occupy (`agent-doc queue sync` cannot — it skips ids already present). If the item is only a recommendation, include `[recommended]`.
 
 **Plan-backed backlog items:** create the plan file first and include that exact plan file path in the backlog text. For multi-phase implementation work, prefer one backlog ID per actionable phase (for example `#crdtrespfx1`, `#crdtrespfx2`) instead of one parent ID that gets repeatedly `--backlog-gate`d after partial progress; keep the parent plan file as context, but queue and close out concrete phase IDs.
 

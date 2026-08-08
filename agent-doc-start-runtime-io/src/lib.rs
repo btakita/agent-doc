@@ -2401,6 +2401,7 @@ mod th {
             pending_added_this_cycle: false,
             pending_added_ids: Vec::new(),
             pending_actionable_ids: Vec::new(),
+            pending_anchored_ids: Vec::new(),
             tracked_work_maintenance_required_at_preflight: Some(false),
             ipc_snapshot_adoption_blocked: false,
             dropped_exchange_prompts: Vec::new(),

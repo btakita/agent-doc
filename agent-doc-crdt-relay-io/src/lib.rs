@@ -2016,8 +2016,9 @@ pub fn relay_replica_update_for_file(
                 let introduced_parse_failure = matches!(
                     agent_doc_element::element::structural_corruption_reason(&after_text),
                     Some(reason) if reason.starts_with("parse_error:")
-                ) && agent_doc_element::element::structural_corruption_reason(&before_text)
-                    .is_none();
+                )
+                    && agent_doc_element::element::structural_corruption_reason(&before_text)
+                        .is_none();
                 if introduced_parse_failure
                     && let Some(reason) =
                         agent_doc_element::element::structural_corruption_reason(&after_text)
@@ -2034,7 +2035,12 @@ pub fn relay_replica_update_for_file(
                     corruption_restored = Some(reason);
                 }
             }
-            Ok((packet, reattached, canonical_projection_pending, corruption_restored))
+            Ok((
+                packet,
+                reattached,
+                canonical_projection_pending,
+                corruption_restored,
+            ))
         })??;
     if let Some(reason) = corruption_restored {
         agent_doc_ops_log_io::log_op(
@@ -5075,10 +5081,10 @@ mod tests {
                 .expect("editor replica should attach");
         // The canonical is structurally clean before the corrupting push.
         with_hub(&doc, |hub| {
-            assert!(agent_doc_element::element::structural_corruption_reason(
-                &hub.canonical_text()
-            )
-            .is_none());
+            assert!(
+                agent_doc_element::element::structural_corruption_reason(&hub.canonical_text())
+                    .is_none()
+            );
         })
         .unwrap();
 

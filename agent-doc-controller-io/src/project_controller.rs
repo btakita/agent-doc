@@ -504,11 +504,12 @@ pub(crate) fn derive_pane_layout_projection(
     // heartbeats, unrelated document events) cannot invalidate a settled layout
     // and trap the worker in a ~1Hz re-sync loop. A genuine layout change
     // arrives as a NEW desired generation, which naturally re-derives.
-    let layout_settled = observed
-        .as_ref()
-        .is_some_and(|observed| observed.generation == desired.generation && observed.report.synced);
+    let layout_settled = observed.as_ref().is_some_and(|observed| {
+        observed.generation == desired.generation && observed.report.synced
+    });
     let operator_owned_settled = observed.as_ref().is_some_and(|observed| {
-        observed.generation == desired.generation && !observed.report.operator_owned_documents.is_empty()
+        observed.generation == desired.generation
+            && !observed.report.operator_owned_documents.is_empty()
     });
     let focus_settled = desired.invocation.focus.is_none()
         || (receipt.generation == desired.generation
@@ -870,7 +871,8 @@ impl ControllerPaneLayoutGraph {
         let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
         // Publish the new generation so an in-flight structural effect for an
         // older generation can detect supersession and bail early.
-        self.published_generation.store(generation, Ordering::SeqCst);
+        self.published_generation
+            .store(generation, Ordering::SeqCst);
         let desired = PaneLayoutDesired {
             generation,
             source_plane_version,
@@ -4300,15 +4302,14 @@ impl ControllerRuntime {
             actor_graph.live_bindings_handle(),
         );
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
-        let editor_surface_graph = rpc::ControllerEditorSurfaceGraph::new(Arc::new(
-            |project_root, intent| match intent {
+        let editor_surface_graph =
+            rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
                 agent_doc_editor_surface::SurfaceIntent::Sync { .. }
                 | agent_doc_editor_surface::SurfaceIntent::Focus { .. } => {
                     Ok("deferred_in_process".to_string())
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
-            },
-        ));
+            }));
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         for (document_hash, projection) in &memory.state_projection.documents {
@@ -11786,15 +11787,14 @@ agent:queue\n\
             actor_graph.live_bindings_handle(),
         );
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
-        let editor_surface_graph = rpc::ControllerEditorSurfaceGraph::new(Arc::new(
-            |project_root, intent| match intent {
+        let editor_surface_graph =
+            rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
                 agent_doc_editor_surface::SurfaceIntent::Sync { .. }
                 | agent_doc_editor_surface::SurfaceIntent::Focus { .. } => {
                     Ok("deferred_in_process".to_string())
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
-            },
-        ));
+            }));
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         ControllerRuntime {
@@ -14405,12 +14405,8 @@ revised operator request
         let receipt = lane_converged_receipt(10, &bindings);
         let new_desired = lane_desired(11);
 
-        let proj = derive_pane_layout_projection(
-            Some(new_desired),
-            bindings,
-            Some(observation),
-            receipt,
-        );
+        let proj =
+            derive_pane_layout_projection(Some(new_desired), bindings, Some(observation), receipt);
         assert!(
             matches!(proj, PaneLayoutProjection::NeedsEffect(_)),
             "a new desired generation must re-derive, not stay Converged (got {proj:?})"

@@ -27,8 +27,8 @@ use agent_doc_controller::supervisor_replacement::{
 use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_document_realtime::watch_authority::{DiskChangeSignal, WatchAction, WatchDelivery};
 use agent_doc_editor_surface::{
-    EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
-    SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
+    EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState, SurfaceColumn,
+    SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use std::collections::BTreeSet;
@@ -17079,7 +17079,8 @@ fn handle_editor_surface_observe(
         match &receipt.intent {
             SurfaceIntent::Sync { columns, document } => {
                 let invocation = automatic_editor_surface_sync_invocation(columns, document);
-                let _ = publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None);
+                let _ =
+                    publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None);
             }
             // A tab switch within the same layout resolves + `select-pane`s the
             // target pane directly — a single tmux command, no socket round-trip.
@@ -18830,14 +18831,14 @@ fn actor_record_for_active_pane<'a>(
     store: &'a ControllerActorStore,
     pane_id: &str,
 ) -> Option<&'a agent_doc_controller::actor::ActorRecord> {
-    store
-        .values()
-        .find(|record| record.pane_id == pane_id
+    store.values().find(|record| {
+        record.pane_id == pane_id
             && !matches!(
                 record.state,
                 agent_doc_controller::actor::ActorState::Blocked
                     | agent_doc_controller::actor::ActorState::Closed
-            ))
+            )
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21358,8 +21359,12 @@ mod tests {
         let foreign_root = Path::new("/other");
 
         let columns = vec![
-            SurfaceColumn { files: vec!["/project/a.md".to_string()] },
-            SurfaceColumn { files: vec!["/project/b.md".to_string()] },
+            SurfaceColumn {
+                files: vec!["/project/a.md".to_string()],
+            },
+            SurfaceColumn {
+                files: vec!["/project/b.md".to_string()],
+            },
         ];
         let surface = agent_doc_editor_surface::EditorSurface {
             focused: "/project/a.md".to_string(),
@@ -23104,7 +23109,10 @@ mod tests {
         }
 
         let mut store: BTreeMap<String, ActorRecord> = BTreeMap::new();
-        store.insert("a".to_string(), record("tasks/a.md", "%11", ActorState::Ready));
+        store.insert(
+            "a".to_string(),
+            record("tasks/a.md", "%11", ActorState::Ready),
+        );
         store.insert(
             "b".to_string(),
             record("tasks/b.md", "%22", ActorState::Blocked),

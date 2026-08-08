@@ -2787,6 +2787,70 @@ fn run_with_options_internal_at_root(
             }
 
             let is_cross_root = !document_belongs_to_sync_root(file_path, &sync_project_root);
+            // `#tmuxautosyncreactive` / `#lazily-hot-path`: an exact-visible
+            // editor sync is a pane-only projection — arrange existing panes,
+            // don't re-derive ownership from editor content. The fallback below
+            // calls `resolve_current_document`, a per-file editor IPC
+            // round-trip measured at 300-860ms each, only to parse frontmatter
+            // for a session_id. For a file whose pane the controller already
+            // reconciled, reuse that binding and skip the editor IPC entirely.
+            // The reactive fast path above covers the populated-binding case;
+            // this covers the registry (same-root) / owning controller
+            // (cross-root) when the in-memory binding was evicted but the pane
+            // is still registered. `skip_autostart_diagnostics` keeps its own
+            // dedicated branch below.
+            if exact_visible_projection && !skip_autostart_diagnostics {
+                let reused: Option<(String, String, u64, &'static str)> = if is_cross_root {
+                    agent_doc_project_root_io::project_root_containing(file_path)
+                        .and_then(|owner_root| match crate::runtime_effects() {
+                            Ok(effects) => effects
+                                .resolve_cross_root_document_pane(&owner_root, file_path)
+                                .ok()
+                                .flatten(),
+                            Err(_) => None,
+                        })
+                        .filter(|binding| tmux.pane_alive(&binding.pane_id))
+                        .map(|binding| {
+                            (
+                                binding.session_id,
+                                binding.pane_id,
+                                binding.generation,
+                                "cross_root_controller",
+                            )
+                        })
+                } else {
+                    agent_doc_session_registry_io::lookup_file_entry_in(
+                        &sync_project_root,
+                        file_path,
+                    )
+                    .ok()
+                    .flatten()
+                    .filter(|entry| tmux.pane_alive(&entry.pane))
+                    .map(|entry| (entry.session_id, entry.pane, 0, "registry"))
+                };
+                if let Some((session_id, pane_id, generation, source)) = reused {
+                    sync_log(&format!(
+                        "exact_visible_pane_reused_before_ipc file={} pane={} generation={} source={}",
+                        file_path.display(),
+                        pane_id,
+                        generation,
+                        source,
+                    ));
+                    safe_passive_managed_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                    safe_passive_resolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                    session_files
+                        .borrow_mut()
+                        .push((session_id, file_path.to_path_buf()));
+                    pre_resolved_panes.insert(file_path.to_path_buf(), pane_id.clone());
+                    reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
+                    sa += seg_mark.elapsed();
+                    continue;
+                }
+            }
             if skip_autostart_diagnostics && is_cross_root {
                 // A mixed-root exact-visible layout is a pane-only projection.
                 // Ask the owning controller for its existing actor binding before

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 1bb0329b-f54a-4fb0-9f50-42a4d59b934f
+resume: d1f0756d-a3bb-4e70-8dca-cd69b428629d
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -103,14 +103,45 @@ The EDT is essentially idle, so this is not a blocked UI thread — it is a **GC
 **Still open.** `#startupmiss9row` is unfinished — I attempted a live reproduction but `sync` normalises the pane to full height, so I could not recreate the 9-row JB geometry; your reports took priority. `#clearsubmitlabel` is newly filed: your Clear Session Context error reports `result=command_still_visible` while `command_visible=false`, because `TimedOut` conflates "still visible at the deadline" with "never observed" — the label is actively misleading, and the acceptance rule needs a decision I did not want to loosen unilaterally.
 
 **Shipped:** `make check` green at each step, installed, pushed (`2d04e182a`, `5d233700f`), controllers recycled. The haiven-dev compact/delivery barrier cleared with `admin reload-lib`.
+
+### Re: do [#startupmiss9row] — opus-5
+
+The 9-row startup-miss **does not reproduce**, and the reason it looked like `#freshclaudectxless` is that the log line everyone was reading is stamped ~25 s late. That stall is real, is the operator-visible submit lag, and is now fixed and shipped in **0.35.179**.
+
+**Setup.** The previous cycle stalled because `sync` normalises a pane to full height. So I never called `sync`: a throwaway git project at `/tmp/adm9r` (short path — the scratchpad path blows the 108-byte `sun_path` limit and the controller silently never boots), a tmux window split to leave a real 9-row pane, and `agent-doc start` run inside it so the child PTY inherits 9 rows. Four fresh spawns through the exact operator sequence (`agent:` change → Restart Agent → `action=spawn_fresh_harness`): opencode→claude once, codex→claude three times, at both 213 and 106 columns.
+
+**Result: dispatch-ready in 2.5–3.3 s, every time,** via `readiness_source=current_child_pty` — the child-PTY signal that was permanently false before 0.35.176. Nothing timed out, so no `blocking_gate=` was ever emitted.
+
+**Why `#freshclaudectxless` was never this geometry's mechanism.** That fix is about the ctx-less status line masking the `❯` composer. **Claude Code suppresses the status line entirely at 9 rows** — 0 of 237 sampled captures contained it. There is nothing to mask. Your doubt in the last cycle was right; the theory just could not be checked without the geometry.
+
+**What the 30 s actually bought.** Sampling the pane every 250 ms against the session log:
+
+| | |
+|---|---|
+| child attach | 19:40:52 |
+| composer `❯` rendered | 19:40:53 |
+| trigger submitted, Claude working | 19:40:55 |
+| `auto_trigger_sent` logged | **19:41:19** |
+
+`verify_auto_trigger_submitted` waits on one blocking `turn_admission_projection` RPC for its **entire 25 s budget** before it looks at the pane at all. A turn that admits no *new* document cycle — the ordinary `no_changes` preflight outcome, which is exactly what a restart-fresh trigger usually hits — never projects an admission, so the controller answers `{"ok":true,"data":null}` only at the deadline. `controller_response_missing_data command=turn_admission_projection` landed at the 25 s mark on all three runs (23 s / 25 s / 27 s send→`Sent`). For that whole window the actor is pinned `Busy` by `auto_trigger_inject` and `auto_trigger_outcome` stays `Pending`.
+
+That is why the forensic reading of your log put the startup path at 17–27 s: it was reading `auto_trigger_sent` timestamps carrying this stall, not readiness latency.
+
+**Fix (`#autotriggeradmissionstall`).** The admission await moves to its own thread — still one RPC, so a null projection cannot spam `controller_response_missing_data` once per poll — while the supervisor samples the pane's busy cue every 500 ms. The pane check is **accept-only**: it can end the wait early with proof but never declares the trigger stranded, so the resubmit decision still happens only after the full admission window and cannot race a composer that has not finished rendering. A busy cue is the safe signal because auto-trigger only ever dispatches from an idle, dispatch-ready prompt decision.
+
+Verified live on the same rig, on the no-op-cycle shape that produced the stall: `auto_trigger_admission_accepted_from_pane` fired and the send→`Sent` gap went **25 s → 16 s**. Honest caveat: that is a 9 s win, not the ~2 s ideal — the busy cue itself took ~16 s to appear on that `--continue` resume, and I did not isolate whether that is Claude's own render or something else. A run where the projection did resolve normally accepted at 13 s through the projection, unchanged.
+
+**Tests.** The 9-row shape is now a real fixture — the exact captured bytes at t=3.281 s, asserting no status line, a dispatch-ready composer, and cursor-scoped acceptance — so a future chrome-predicate change cannot regress a geometry whose only symptom is a 30 s production timeout. The stall fix has two behavioural tests over an injectable awaiter; mutation-checked by neutering the pane path, which makes the timing test burn the full budget and fail exactly as production did.
+
+**Shipped:** `make check` green (exit 0, 0 failed suites), `make install` → 0.35.179, committed and pushed (`565d67c77` + superproject `33b6a4ce60`), controller recycled. CI run `31276427011` was still in progress at closeout — recorded, not awaited. One note: `make install` again dropped the JetBrains package into 4 running IDEs ("Restart running IDEs to activate"), the replica-storm trigger from last cycle. The package version is unchanged at 0.2.350, but a restart is still the clean state.
 <!-- agent:boundary:22e8b690:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#clearsubmitlabel]
-- 🚧 do [#startupmiss9row]
-- ⏭️ do [#ptsubmitmetric]
+- ⏭️ do [#clearsubmitlabel]
+- ~~do [#startupmiss9row]~~
+- do [#ptsubmitmetric]
 - do [#claudesplitsubmit]
 - do [#compactstrandedheading]
 - do [#hvw0publishproof]
@@ -125,7 +156,6 @@ The EDT is essentially idle, so this is not a blocked UI thread — it is a **GC
 
 <!-- agent:backlog priority queue -->
 - [ ] [#clearsubmitlabel] session_clear reports result=command_still_visible while command_visible=false; TimedOut conflates 'still visible at deadline' with 'never observed'
-- [ ] 🚧 [#startupmiss9row] Reproduce the 30s no_prompt startup-miss in a 9-row JB-layout pane where the status line is off-screen; use the new blocking_gate= diagnostic to attribute it (dead PTY relay vs stuck actor projection vs pane detector)
 - [ ] [#ptsubmitmetric] #agent-doc-bug Fix the unmeasurable #passthroughsplitprofile criterion. `outcome=enter_resubmit` is a NON-terminal action (`pass_through_stranded_draft_action_is_terminal` admits only Cleared/DeferredPaneBusy/ExhaustedStillStranded), so production ops.log can never record it and that counter is structurally always zero no matter how many submits drop. The real signal is `enters_sent > 0` on a terminal `outcome=cleared` line — `enters_sent += 1` happens only inside the EnterResubmit branch (agent-doc-controller/src/dispatch.rs:6070). Emit an explicit terminal field (for example `resubmit_required=true|false`) or a rollup command so the decision is readable without hand-parsing ops.log, restate the unblock criterion in those terms on #passthroughsplitprofile, and add a regression test pinning that a repair which resubmitted logs the new field.
 - [ ] [#claudesplitsubmit] #agent-doc-bug Decide and implement whether claude joins `harness_uses_split_text_submit` (the split text+Enter profile codex/opencode use, `tmux_submit_profile_for_harness`, 80ms), reading the corrected counter from #ptsubmitmetric. Current reading: 6 post-0.35.164 harness=claude repairs (elapsed_ms >= 150), 5 of which needed at least one resubmit and one of which needed two — that is the stated single-call-send-is-the-cause condition, but on 6 samples rather than the ~20 sample floor. Gather to the floor with the corrected metric first, then either add claude to the split profile or record that the settle-gated repair alone is sufficient. Do not change the profile without the measurement.
 - [ ] [#compactstrandedheading] #agent-doc-bug Run `agent-doc compact exchange tasks/agent-doc/agent-doc-bugs2.md` and confirm it no longer fails on the historical stranded duplicate heading. Converted from the removed operator-verify item #operatorverifyresolve, whose premise (a live JetBrains File Cache Conflict awaiting a human Cancel / Keep-memory-changes) is stale: recent session-checks read `status=current authority=cp_model live_editors=1 delivery_converged=true` and the retained closeouts it was waiting on are committing. Only this half was ever untested, and it is agent-testable.

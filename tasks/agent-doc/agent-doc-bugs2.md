@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: a1741f0d-a745-45cf-af24-98ffc5f9cecc
+resume: a2685a65-4918-4fa7-8661-b664588a379e
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -177,6 +177,22 @@ Both paths now go through `HarnessConfig::trigger_command`: Claude/OpenCode get 
 **Status correction on the previous item:** the superproject CI run `31249383368` from `#loopsuperprojectjob` came back **FAIL**, so that fix was not sufficient. `#confirmsuperprojectjob` is the next head and exists for exactly this — I'm leaving the diagnosis to that cycle rather than pre-empting it here.
 
 Filed one `[operator-verify]` follow-up: the live JetBrains pane render is the only part I can't verify from this side.
+
+### Re: runpromptverbose — closeout addendum — opus-5
+
+The closeout of the response above was **interrupted by an agent-doc defect**, which I fixed rather than retried. Released as **0.35.172**.
+
+**What happened.** `respond` committed the mutations and the response reached HEAD, then session-check failed with `INTERRUPTED: … 7 concurrent operator steering directives` — quoting seven lines of *my own response body* back at me as operator prompts.
+
+**Why.** The working tree held the `### Re: runpromptverbose` block **twice**: the committed copy carrying the drain's `> **Queue prompt:**` blockquote, and a replay without it. Response-block dedup normalizes `<!-- agent:boundary: -->`, the `(HEAD)` suffix and the `❯` prefix, then compares byte-for-byte — so the inserted quote (and the blank-line spacing around it) made the two copies compare as *different* blocks. `agent-doc dedupe` reported "no duplicates found" and the replay survived. Session-check then diffed the working tree, found assistant prose it could not attribute to a `### Re:` heading, and applied the plain-prose steering heuristic to it.
+
+Worth naming: the duplication was the cosmetic part. The damage was a **committed, successful cycle reported as interrupted** — the closeout equivalent of a false alarm that costs a recovery cycle every time it fires.
+
+**Fix.** `normalized_response_block` now ignores the queue-prompt blockquote and blank-line spacing when comparing two blocks — the same treatment the boundary marker and `(HEAD)` already get, since all three are binary-inserted decoration rather than response content. Blocks whose prose genuinely differs still compare as distinct; both directions are regression-tested.
+
+**Proof on the live document that produced it:** `dedupe` removed 3675 bytes, kept the copy carrying the queue-prompt quote, and session-check went `INTERRUPTED` → `ok`. Remaining working-tree delta was a `resume:` id and a transient boundary marker — zero content lines absent from HEAD, which is what made the recovery provably lossless.
+
+`make check` — 8712 passed, 0 failed. Commit `6037ab4f7`, tagged `v0.35.172`, installed and recycled.
 <!-- agent:boundary:f16db0e4 -->
 <!-- /agent:exchange -->
 ## Queue

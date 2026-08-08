@@ -1,7 +1,17 @@
 # Plan: `lazily-gd` — GDScript binding (`#lzgdbinding`)
 
-**Status:** Phase 0 landed 2026-08-08 (harness, engine floor, CI) — local commit
-`3d8e90d` in `src/lazily-gd`, not yet pushed to a remote. Phases 1+ open.
+**Status:** Phases 0–2 landed 2026-08-08 (harness + engine floor + CI; cell
+kernel; conformance runner replaying 9/21 `reactive-graph` fixtures), and the
+`GDScript` column is in `lazily-spec/coverage.json` — `~` on Reactive graph, `—`
+on the other 28 families. Adding it required fixing the spec-side claim guard
+first: it read `KNOWN_UNCOVERED`/`REQUIRED_AREAS` but not this binding's
+`IMPLEMENTED_FAMILY_PREFIXES`, so 128 family-excused fixtures counted as
+replayed. Phase 3 (row 16, stable-id alignment) is next.
+
+**Note on row numbering.** This plan says "rows 0 and 15"; in the current
+`coverage.json` stable-id alignment is row **16** (row 15 is `SemTree`). Rows
+shift as the matrix grows — go by row `id` (`reactive-graph`,
+`stable-id-alignment`), not by index.
 **Created:** 2026-07-30
 **Session:** `tasks/software/lazily.md`
 **Backlog:** `#lzgdbinding`

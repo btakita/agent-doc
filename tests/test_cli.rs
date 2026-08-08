@@ -16240,6 +16240,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "agent_doc_supervisor_io::ipc::send_command(",
         "agent_doc_controller_io::project_controller::begin_route_submit(",
         "agent_doc_tmux_io::input_diag::log_text_submit(",
+        // #runfilesubmit: the pass-through single-submit branch must keep
+        // verifying the trigger left the composer. Without it a submit key
+        // absorbed by the harness TUI strands the trigger and route still
+        // reports exit_code=0.
+        "repair_pass_through_stranded_draft(tmux, file, pane, harness, &trigger)",
+        "classify_pass_through_stranded_draft_action(PassThroughStrandedDraftFacts",
         "busy_dispatch_start_outcome(true, probe_proof)",
         "routed_dispatch_start_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test))",
         "(effects.file_route_dispatch_bug_report)(RouteDispatchBugReportFacts",
@@ -20276,8 +20282,14 @@ fn test_agent_doc_watch_io_owns_pid_effects() {
     let _: fn(&Path) -> Option<u32> = agent_doc_watch_io::read_pid_in;
     let _: fn() -> anyhow::Result<()> = agent_doc_watch_io::write_current_pid;
     let _: fn(&Path) -> anyhow::Result<()> = agent_doc_watch_io::write_current_pid_in;
-    let _: fn() = agent_doc_watch_io::remove_pid;
-    let _: fn(&Path) = agent_doc_watch_io::remove_pid_in;
+    // `#stalewatchpid`: removal is fallible and must report — a discarded
+    // result is how a pid file that could not be removed stayed readable as a
+    // live daemon.
+    let _: fn() -> anyhow::Result<()> = agent_doc_watch_io::remove_pid;
+    let _: fn(&Path) -> anyhow::Result<()> = agent_doc_watch_io::remove_pid_in;
+    let _: fn() -> anyhow::Result<Option<u32>> = agent_doc_watch_io::clear_stale_pid;
+    let _: fn(&Path) -> anyhow::Result<Option<u32>> = agent_doc_watch_io::clear_stale_pid_in;
+    let _: fn(u32) -> bool = agent_doc_watch_io::pid_is_agent_doc_watch;
     let _: fn(
         &str,
         &str,

@@ -313,12 +313,24 @@ private data class CapturedSurface(
         fun restoredEditorWindowsReady(selectedWindowFiles: List<String?>): Boolean =
             selectedWindowFiles.isNotEmpty() && selectedWindowFiles.all { it != null }
 
+        /**
+         * `#stickymdpane`: `stickyWindowFallbacks[i]` is the last document
+         * window `i` showed, used when that window's current tab is a source
+         * file. Dropping such a window collapsed the mirrored tmux layout to a
+         * single pane the moment the operator opened source next to their
+         * session document. A window that never held a document contributes
+         * nothing, so closing a split still collapses the layout.
+         */
         fun visibleMarkdownFilesFromRestoredWindows(
             selectedWindowFiles: List<String?>,
+            stickyWindowFallbacks: List<String?> = emptyList(),
         ): List<String> =
             selectedWindowFiles
+                .mapIndexed { index, selected ->
+                    selected?.takeIf { it.endsWith(".md") }
+                        ?: stickyWindowFallbacks.getOrNull(index)?.takeIf { it.endsWith(".md") }
+                }
                 .filterNotNull()
-                .filter { it.endsWith(".md") }
                 .distinct()
 
         fun resolveActiveFilePath(
@@ -606,6 +618,18 @@ private data class CapturedSurface(
         val rawVisibleMdFiles =
             SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
                 selectedWindowFiles.map { it?.path },
+                // `#stickymdpane`: keep a window that has switched to a source
+                // file standing for the last document it showed.
+                managerEx.windows.map { window ->
+                    LayoutDetector.stickyMarkdownForWindow(
+                        selectedPath = window.selectedFile?.path,
+                        windowMarkdownTabsMruLast =
+                            LayoutDetector.markdownTabsMruLast(
+                                project,
+                                window.fileList.map { it.path },
+                            ),
+                    )
+                },
             )
         val rawEditorLayout =
             project.basePath?.let { basePath ->

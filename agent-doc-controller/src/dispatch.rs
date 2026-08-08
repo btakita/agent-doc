@@ -413,10 +413,25 @@ pub fn route_trigger_visible_in_current_draft(
         let later_has_prompt = lines
             .iter()
             .skip(start + 1)
-            .any(|line| is_prompt_line(line));
+            .any(|line| !is_persistent_status_footer_line(line) && is_prompt_line(line));
         return !later_has_prompt;
     }
     false
+}
+
+/// Claude Code renders a persistent permission-mode footer *below* the
+/// composer (`⏵⏵ bypass permissions on (shift+tab to cycle)`,
+/// `⏵⏵ accept edits on · …`). `HarnessConfig::is_prompt_line` matches that
+/// line on purpose — elsewhere it is a legitimate idle/readiness cue — but it
+/// is chrome, not a composer prompt: it renders identically under a drafted
+/// composer and an empty one.
+///
+/// `#runfilesubmit`: counting it as "a later prompt line" made
+/// [`route_trigger_visible_in_current_draft`] return `false` for *every*
+/// stranded Claude draft, which silently disabled the visible-draft `Enter`
+/// recovery on the one harness that needed it.
+pub fn is_persistent_status_footer_line(line: &str) -> bool {
+    strip_ansi(line).trim().starts_with("\u{23f5}\u{23f5} ")
 }
 
 fn line_contains_equivalent_agent_doc_path_trigger(line: &str, trigger: &str) -> bool {
@@ -2698,6 +2713,130 @@ pub fn direct_pane_max_enter_resubmits_from_env_value(value: Option<&str>) -> us
 pub fn direct_pane_max_enter_resubmits() -> usize {
     let value = std::env::var("AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS").ok();
     direct_pane_max_enter_resubmits_from_env_value(value.as_deref())
+}
+
+/// Settle window between observing a stranded pass-through draft and acting on
+/// it. One frame of TUI render lag can show the trigger text after the harness
+/// has already consumed the submit, so the draft must survive this window
+/// before any bare `Enter` is pressed.
+pub const PASS_THROUGH_STRANDED_DRAFT_SETTLE: Duration = Duration::from_millis(150);
+pub const PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS_DEFAULT: usize = 3;
+
+pub fn pass_through_stranded_draft_max_enter_resubmits_from_env_value(
+    value: Option<&str>,
+) -> usize {
+    value
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS_DEFAULT)
+}
+
+pub fn pass_through_stranded_draft_max_enter_resubmits() -> usize {
+    let value = std::env::var("AGENT_DOC_PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS").ok();
+    pass_through_stranded_draft_max_enter_resubmits_from_env_value(value.as_deref())
+}
+
+/// What a pass-through submit should do after observing the pane once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassThroughStrandedDraftAction {
+    /// The trigger is no longer the visible draft — the submit crossed.
+    Cleared,
+    /// The trigger is still drafted but the harness is mid-turn, so the
+    /// trigger is queued behind that turn rather than stranded. Pressing a
+    /// submit key into an active turn is never the repair.
+    DeferredPaneBusy,
+    /// First sighting of a drafted trigger on an idle pane. One frame of TUI
+    /// render lag can still show the trigger after the harness consumed it, so
+    /// the sighting must survive a settle window before anything is pressed.
+    SettleAndReobserve,
+    /// The trigger is still sitting unsent in an idle composer and a bare
+    /// submit key is still available within budget.
+    EnterResubmit,
+    /// Still stranded with the resubmit budget spent; report rather than
+    /// keep pressing keys into a pane that is not consuming them.
+    ExhaustedStillStranded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PassThroughStrandedDraftFacts {
+    pub draft_visible: bool,
+    pub pane_busy: bool,
+    /// Whether a settle window has already elapsed since the draft was first
+    /// sighted on this pane.
+    pub settled: bool,
+    pub enters_sent: usize,
+    pub max_enters: usize,
+}
+
+/// `#runfilesubmit`: the pass-through single-submit path sends text and the
+/// submit key in one `tmux send-keys` call and returns transport-only proof
+/// without ever looking at the pane. When the harness TUI absorbs that
+/// trailing `Enter` into the same input burst, the trigger is left in the
+/// composer and no document cycle ever starts — the operator sees "Run Agent
+/// Doc did not submit". Absence of proof is not proof of a stranded draft, so
+/// only an exact visible draft authorizes a bare submit key.
+pub const fn classify_pass_through_stranded_draft_action(
+    facts: PassThroughStrandedDraftFacts,
+) -> PassThroughStrandedDraftAction {
+    if !facts.draft_visible {
+        PassThroughStrandedDraftAction::Cleared
+    } else if facts.pane_busy {
+        PassThroughStrandedDraftAction::DeferredPaneBusy
+    } else if !facts.settled {
+        PassThroughStrandedDraftAction::SettleAndReobserve
+    } else if facts.enters_sent < facts.max_enters {
+        PassThroughStrandedDraftAction::EnterResubmit
+    } else {
+        PassThroughStrandedDraftAction::ExhaustedStillStranded
+    }
+}
+
+/// Terminal actions end the repair; the others ask for another observation.
+pub const fn pass_through_stranded_draft_action_is_terminal(
+    action: PassThroughStrandedDraftAction,
+) -> bool {
+    matches!(
+        action,
+        PassThroughStrandedDraftAction::Cleared
+            | PassThroughStrandedDraftAction::DeferredPaneBusy
+            | PassThroughStrandedDraftAction::ExhaustedStillStranded
+    )
+}
+
+pub const fn pass_through_stranded_draft_action_label(
+    action: PassThroughStrandedDraftAction,
+) -> &'static str {
+    match action {
+        PassThroughStrandedDraftAction::Cleared => "cleared",
+        PassThroughStrandedDraftAction::DeferredPaneBusy => "deferred_pane_busy",
+        PassThroughStrandedDraftAction::SettleAndReobserve => "settle_and_reobserve",
+        PassThroughStrandedDraftAction::EnterResubmit => "enter_resubmit",
+        PassThroughStrandedDraftAction::ExhaustedStillStranded => "exhausted_still_stranded",
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PassThroughStrandedDraftLogFacts<'a> {
+    pub file_display: &'a str,
+    pub pane: &'a str,
+    pub harness_binary: &'a str,
+    pub action: PassThroughStrandedDraftAction,
+    pub enters_sent: usize,
+    pub elapsed_ms: u128,
+    pub capture_failed: bool,
+}
+
+pub fn pass_through_stranded_draft_log_line(facts: PassThroughStrandedDraftLogFacts<'_>) -> String {
+    format!(
+        "route_pass_through_submit_draft file={} pane={} harness={} outcome={} enters_sent={} elapsed_ms={} capture_failed={}",
+        facts.file_display,
+        facts.pane,
+        facts.harness_binary,
+        pass_through_stranded_draft_action_label(facts.action),
+        facts.enters_sent,
+        facts.elapsed_ms,
+        facts.capture_failed,
+    )
 }
 
 pub fn direct_pane_submit_acceptance_timeout() -> Duration {
@@ -5836,6 +5975,146 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         );
     }
 
+    /// Replays the whole pass-through repair against a scripted pane, exactly
+    /// as `repair_pass_through_stranded_draft` drives it: observe, classify,
+    /// act, re-observe. `pane[i]` is `(draft_visible, pane_busy)` for the i-th
+    /// observation. Returns `(action labels in order, submit keys pressed)`.
+    fn replay_pass_through_repair(
+        pane: &[(bool, bool)],
+        max_enters: usize,
+    ) -> (Vec<&'static str>, usize) {
+        let mut actions = Vec::new();
+        let mut enters_sent = 0usize;
+        let mut settled = false;
+        for (draft_visible, pane_busy) in pane.iter().copied() {
+            let action =
+                classify_pass_through_stranded_draft_action(PassThroughStrandedDraftFacts {
+                    draft_visible,
+                    pane_busy,
+                    settled,
+                    enters_sent,
+                    max_enters,
+                });
+            actions.push(pass_through_stranded_draft_action_label(action));
+            if pass_through_stranded_draft_action_is_terminal(action) {
+                return (actions, enters_sent);
+            }
+            match action {
+                PassThroughStrandedDraftAction::SettleAndReobserve => settled = true,
+                PassThroughStrandedDraftAction::EnterResubmit => enters_sent += 1,
+                _ => unreachable!("non-terminal actions are settle and resubmit"),
+            }
+        }
+        panic!("repair never reached a terminal action over {} observations", pane.len());
+    }
+
+    #[test]
+    fn pass_through_repair_costs_one_observation_when_the_submit_crossed() {
+        // The whole point of PassThroughSingleSubmit is latency: the common
+        // case must not pay a settle window.
+        let (actions, enters) = replay_pass_through_repair(&[(false, false)], 3);
+        assert_eq!(actions, vec!["cleared"]);
+        assert_eq!(enters, 0);
+    }
+
+    #[test]
+    fn pass_through_repair_resubmits_a_trigger_stranded_on_an_idle_pane() {
+        // #runfilesubmit: the operator-visible bug. The trigger stays drafted
+        // on an idle pane, the settle window does not clear it, and one bare
+        // submit key lands it.
+        let (actions, enters) =
+            replay_pass_through_repair(&[(true, false), (true, false), (false, false)], 3);
+        assert_eq!(
+            actions,
+            vec!["settle_and_reobserve", "enter_resubmit", "cleared"]
+        );
+        assert_eq!(enters, 1);
+    }
+
+    #[test]
+    fn pass_through_repair_treats_a_settling_render_frame_as_success() {
+        // A draft sighted once and gone after the settle window was render lag
+        // behind a submit that already crossed — never press a key for it.
+        let (actions, enters) = replay_pass_through_repair(&[(true, false), (false, false)], 3);
+        assert_eq!(actions, vec!["settle_and_reobserve", "cleared"]);
+        assert_eq!(enters, 0);
+    }
+
+    #[test]
+    fn pass_through_repair_never_presses_enter_into_an_active_turn() {
+        // A drafted trigger on a mid-turn pane is queued behind that turn, not
+        // stranded; a submit key there is input into someone else's turn.
+        let (actions, enters) = replay_pass_through_repair(&[(true, true)], 3);
+        assert_eq!(actions, vec!["deferred_pane_busy"]);
+        assert_eq!(enters, 0);
+
+        // Busy arriving mid-repair also stops it.
+        let (actions, enters) =
+            replay_pass_through_repair(&[(true, false), (true, false), (true, true)], 3);
+        assert_eq!(
+            actions,
+            vec!["settle_and_reobserve", "enter_resubmit", "deferred_pane_busy"]
+        );
+        assert_eq!(enters, 1);
+    }
+
+    #[test]
+    fn pass_through_repair_stops_pressing_keys_at_the_budget() {
+        let stuck = [(true, false); 6];
+        let (actions, enters) = replay_pass_through_repair(&stuck, 3);
+        assert_eq!(
+            actions,
+            vec![
+                "settle_and_reobserve",
+                "enter_resubmit",
+                "enter_resubmit",
+                "enter_resubmit",
+                "exhausted_still_stranded",
+            ]
+        );
+        assert_eq!(
+            enters, 3,
+            "a pane that never consumes input must not be typed into forever"
+        );
+    }
+
+    #[test]
+    fn pass_through_stranded_draft_max_enter_resubmits_parses_env_value() {
+        assert_eq!(
+            pass_through_stranded_draft_max_enter_resubmits_from_env_value(Some("5")),
+            5
+        );
+        assert_eq!(
+            pass_through_stranded_draft_max_enter_resubmits_from_env_value(Some(" 2 ")),
+            2
+        );
+        assert_eq!(
+            pass_through_stranded_draft_max_enter_resubmits_from_env_value(Some("0")),
+            PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS_DEFAULT
+        );
+        assert_eq!(
+            pass_through_stranded_draft_max_enter_resubmits_from_env_value(None),
+            PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS_DEFAULT
+        );
+    }
+
+    #[test]
+    fn pass_through_stranded_draft_log_line_is_structured() {
+        let line = pass_through_stranded_draft_log_line(PassThroughStrandedDraftLogFacts {
+            file_display: "tasks/a.md",
+            pane: "%25",
+            harness_binary: "claude",
+            action: PassThroughStrandedDraftAction::EnterResubmit,
+            enters_sent: 1,
+            elapsed_ms: 312,
+            capture_failed: false,
+        });
+        assert_eq!(
+            line,
+            "route_pass_through_submit_draft file=tasks/a.md pane=%25 harness=claude outcome=enter_resubmit enters_sent=1 elapsed_ms=312 capture_failed=false"
+        );
+    }
+
     #[test]
     fn direct_pane_enter_resubmit_retries_at_least_once_per_second() {
         let timeout = direct_pane_submit_acceptance_timeout();
@@ -6103,6 +6382,66 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     fn codex_prompt_line(line: &str) -> bool {
         line.trim_start().starts_with('\u{203a}')
+    }
+
+    /// Mirrors `HarnessConfig::claude().is_prompt_line` — including the
+    /// permission-mode footer clause, which is the part this test is about.
+    fn claude_prompt_line(line: &str) -> bool {
+        let trimmed = strip_ansi(line);
+        let trimmed = trimmed.trim();
+        matches!(trimmed, "\u{276f}" | "\u{23f5}")
+            || (trimmed.starts_with("\u{23f5}\u{23f5} ")
+                && trimmed.contains("(shift+tab to cycle)"))
+    }
+
+    #[test]
+    fn route_trigger_visible_in_current_draft_sees_a_stranded_claude_draft() {
+        // #runfilesubmit: verbatim tail of the real pane capture preserved at
+        // .agent-doc/logs/route-submit/1786163221429-idle_queue_payload_observation-claude-_25-4b7d177d1f91.txt,
+        // taken 429ms after route logged `pass_through_single_submit` +
+        // `exit_code=0` for this trigger. The trigger never submitted; it sat
+        // in the composer until the operator pressed Enter by hand.
+        //
+        // Claude separates its prompt glyph from the draft with U+00A0, and
+        // always renders the permission-mode footer BELOW the composer. That
+        // footer matches `is_prompt_line`, so reading it as "a later prompt"
+        // made every stranded Claude draft invisible to this predicate.
+        let trigger =
+            "agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md";
+        let stranded = "\
+     View Observations Live @ http://localhost:37777
+
+\u{276f} /clear
+
+────────────────────────────────────────────────────────
+\u{276f}\u{a0}agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+
+────────────────────────────────────────────────────────
+  Opus 5 ~/work/btakita/agent-loop main brian@cachyos-x8664
+  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)
+";
+        assert!(
+            route_trigger_visible_in_current_draft(stranded, trigger, claude_prompt_line),
+            "a Claude trigger still sitting in the composer must be recognized as the current draft"
+        );
+
+        // The discrimination this predicate exists for must survive: a fresh
+        // empty composer below the trigger still means consumed scrollback.
+        let consumed = "\
+\u{276f}\u{a0}agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+
+  ⎿  preflight complete
+
+────────────────────────────────────────────────────────
+\u{276f}
+────────────────────────────────────────────────────────
+  Opus 5 ~/work/btakita/agent-loop main brian@cachyos-x8664
+  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)
+";
+        assert!(
+            !route_trigger_visible_in_current_draft(consumed, trigger, claude_prompt_line),
+            "an empty composer below the trigger means it was consumed, not stranded"
+        );
     }
 
     #[test]

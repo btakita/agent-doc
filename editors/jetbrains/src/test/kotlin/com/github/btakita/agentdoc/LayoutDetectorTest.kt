@@ -55,4 +55,48 @@ class LayoutDetectorTest {
             columns,
         )
     }
+
+    @Test
+    fun `stickyMarkdownForWindow prefers the live selection`() {
+        assertEquals(
+            "/repo/tasks/now.md",
+            LayoutDetector.stickyMarkdownForWindow(
+                selectedPath = "/repo/tasks/now.md",
+                windowMarkdownTabsMruLast = listOf("/repo/tasks/stale.md"),
+            ),
+        )
+    }
+
+    @Test
+    fun `stickyMarkdownForWindow falls back to the last document when source is selected`() {
+        // #stickymdpane: the operator opened source in this column. The column
+        // still stands for the document it was showing, so the tmux mirror
+        // keeps that pane instead of collapsing.
+        assertEquals(
+            "/repo/tasks/recent.md",
+            LayoutDetector.stickyMarkdownForWindow(
+                selectedPath = "/repo/src/Thing.kt",
+                windowMarkdownTabsMruLast =
+                    listOf("/repo/tasks/older.md", "/repo/tasks/recent.md"),
+            ),
+        )
+    }
+
+    @Test
+    fun `stickyMarkdownForWindow invents nothing for a source-only window`() {
+        assertEquals(
+            null,
+            LayoutDetector.stickyMarkdownForWindow(
+                selectedPath = "/repo/src/Thing.kt",
+                windowMarkdownTabsMruLast = emptyList(),
+            ),
+        )
+        assertEquals(
+            null,
+            LayoutDetector.stickyMarkdownForWindow(
+                selectedPath = null,
+                windowMarkdownTabsMruLast = emptyList(),
+            ),
+        )
+    }
 }

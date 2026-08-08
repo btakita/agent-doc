@@ -2,6 +2,64 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.163
+
+- **"Run Agent Doc" no longer strands its trigger in the composer (`#runfilesubmit`).** The
+  plain-trigger route path (`DirectPaneSubmitPolicy::PassThroughSingleSubmit` — what the JetBrains
+  *Run Agent Doc* action and closeout drain use) sent text and the submit key in one
+  `tmux send-keys` call and returned `TransportSubmittedOnly` **without ever looking at the pane**.
+  When the harness TUI absorbed that trailing `Enter` into the same input burst, the trigger sat
+  unsent in the composer forever while route logged `pass_through_single_submit`, `status=ok`, and
+  `exit_code=0`. Captured live on 2026-08-08 at `04:27:01Z`: `route_latency … elapsed_ms=4
+  outcome=pass_through_single_submit`, and the pane snapshot taken 429ms later still showed
+  `❯ agent-doc …/agent-doc-bugs2.md` drafted on an idle pane. The pass-through branch now verifies
+  the draft cleared and repairs it with a bounded bare submit key.
+- **The stranded-draft predicate was blind to every Claude draft.**
+  `route_trigger_visible_in_current_draft` treats "a prompt line appears after the trigger" as proof
+  the trigger is consumed scrollback. Claude Code renders its permission-mode footer
+  (`⏵⏵ bypass permissions on (shift+tab to cycle)`) *below* the composer and
+  `HarnessConfig::is_prompt_line` matches it on purpose, so that footer terminated the scan on every
+  capture — the predicate returned `false` for a trigger sitting in plain sight. That silently
+  disabled the visible-draft `Enter` recovery on `try_late_direct_pane_enter_resubmit_after_unproven_dispatch`
+  and `direct_pane_can_enter_existing_draft` too, not just the new path. Persistent status-footer
+  chrome is now excluded from the later-prompt scan; a real composer prompt below the trigger still
+  ends it, so consumed scrollback is still distinguished. Regression-tested against the verbatim
+  captured pane.
+- **The repair cannot type into someone else's turn.** It presses a submit key only when the trigger
+  is the visible draft on an **idle** pane, only after the sighting survives a settle window (one
+  frame of render lag is not a stranded draft), and at most
+  `AGENT_DOC_PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS` times (default 3). A pane-capture
+  failure is never read as "stranded" — unknown pane state authorizes nothing. The common case
+  where the submit crossed costs a single `capture-pane` and no settle, so the fast path stays fast.
+- **The supervisor queue continuation is the plain trigger again, not a paragraph
+  (`#qcontprose`).** When the idle-queue watch advanced the head on an already-owned pane it typed a
+  five-line message into the operator's console — "Agent Doc queue state advanced for `…`. Continue
+  this existing owner-pane session; do not invoke `agent-doc` recursively. / Execute the current
+  active queue head: / `<head>` / Persist and finalize this cycle through the connected Agent Doc
+  tools." — roughly 280 bytes per dispatch. It now sends the same portable bare `agent-doc <file>`
+  trigger the route path has always dispatched into live owned panes
+  (`route_dispatch_drain_plain_trigger_pass_through`), which is also what
+  `agent_doc_queue::idle_drain`'s own contract test already asserted the payload should be.
+  The recursion the paragraph warded against does not exist: in an owned pane the harness is the
+  process reading input, so `agent-doc <file>` is a prompt its `UserPromptSubmit` hook admits and
+  answers with an in-binary preflight — the same session continues. Naming the head was redundant
+  too; preflight already selects it and hands it over as `selected_queue_prompts`. Two dispatch
+  paths that disagreed about what a queue continuation looks like are now one.
+- **An editor column that detours into source keeps its tmux pane (`#stickymdpane`, JetBrains
+  plugin 0.2.350).** Both surface reporters answered "which document is this editor window showing?"
+  with `window.selectedFile?.takeIf { it.name.endsWith(".md") }`. Open a source file in one half of a
+  two-column split and that window reported *nothing* — so the mirrored layout collapsed to a single
+  tmux pane and the session pane the operator was working next to was gone until they navigated back
+  to the document. A window that has shown a document now keeps standing for the last one it showed,
+  resolved from that window's own `.md` tabs in `EditorHistoryManager` most-recently-used order (no
+  plugin-side per-window bookkeeping, so it survives restarts and splits). A live `.md` selection
+  always wins, and a window that never held a document still contributes no pane — closing a split,
+  or opening a fresh source-only one, collapses the layout exactly as before.
+- **Every pass-through submit now records its outcome.** `route_pass_through_submit_draft
+  file=… pane=… harness=… outcome=cleared|deferred_pane_busy|enter_resubmit|exhausted_still_stranded
+  enters_sent=N elapsed_ms=M capture_failed=…` makes the stranding rate measurable instead of
+  invisible.
+
 ## 0.35.162
 
 - **An OpenCode pane can become dispatch-ready again (`#opencodeharnessswitch`).** Switching a

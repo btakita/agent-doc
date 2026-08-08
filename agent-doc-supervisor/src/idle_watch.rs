@@ -344,16 +344,30 @@ impl QueueContinuationTriggers {
     }
 }
 
-/// Render the state-derived continuation delivered to an already-owned pane.
+/// Render the continuation delivered to an already-owned pane.
 ///
-/// This is deliberately not `agent-doc <file>`: that imperative entrypoint
-/// would recurse into the session that already owns the document.
-pub fn owned_pane_queue_continuation_prompt(file: &Path, active_head: &str) -> String {
-    format!(
-        "Agent Doc queue state advanced for `{}`. Continue this existing owner-pane session; do not invoke `agent-doc` recursively.\n\nExecute the current active queue head:\n\n{}\n\nPersist and finalize this cycle through the connected Agent Doc tools.",
-        file.display(),
-        active_head.trim(),
-    )
+/// `#qcontprose`: this is the same portable bare `agent-doc <file>` trigger the
+/// route path sends (`HarnessConfig::apply_plain_trigger_override`), not prose.
+///
+/// It used to render a five-line paragraph ("Agent Doc queue state advanced for
+/// … do not invoke `agent-doc` recursively … Execute the current active queue
+/// head: …"), on the theory that the bare trigger would recurse into the
+/// session that already owns the document. It does not: in an owned pane the
+/// harness is the process reading input, so `agent-doc <file>` is a *prompt*
+/// that the harness `UserPromptSubmit` hook admits and answers with an
+/// in-binary preflight — the same session continues. The route path has always
+/// dispatched exactly this trigger into live owned panes
+/// (`route_dispatch_drain_plain_trigger_pass_through`), and
+/// `agent_doc_queue::idle_drain`'s own contract test already asserted the
+/// payload is `agent-doc <file>`.
+///
+/// The paragraph was also redundant: naming the active head told the agent
+/// nothing preflight does not already select and hand it as
+/// `selected_queue_prompts`. Its only effects were a ~280-byte injection into
+/// the operator's console and two dispatch paths that disagreed about what a
+/// queue continuation looks like.
+pub fn owned_pane_queue_continuation_prompt(file: &Path) -> String {
+    format!("agent-doc {}", file.display())
 }
 
 /// Exponential retry capped at one attempt per 30 seconds. Transient editor or
@@ -647,16 +661,26 @@ mod tests {
     }
 
     #[test]
-    fn owner_pane_continuation_is_state_derived_not_recursive_cli() {
-        let prompt = owned_pane_queue_continuation_prompt(
-            Path::new("tasks/sampleorders.md"),
-            "Update sample-service-topology.md.",
-        );
+    fn owner_pane_continuation_is_the_plain_trigger_not_prose() {
+        // #qcontprose: the operator sees this text in their console. It must be
+        // the same one-line trigger the route path dispatches, not a paragraph
+        // restating what preflight already selects.
+        let prompt = owned_pane_queue_continuation_prompt(Path::new("tasks/sampleorders.md"));
 
-        assert!(prompt.contains("queue state advanced"));
-        assert!(prompt.contains("Update sample-service-topology.md."));
-        assert!(prompt.contains("do not invoke `agent-doc` recursively"));
-        assert!(!prompt.contains("agent-doc tasks/sampleorders.md"));
+        assert_eq!(prompt, "agent-doc tasks/sampleorders.md");
+        assert!(!prompt.contains('\n'), "a queue continuation is one line");
+        for prose in [
+            "queue state advanced",
+            "do not invoke",
+            "recursively",
+            "Execute the current active queue head",
+            "Persist and finalize",
+        ] {
+            assert!(
+                !prompt.contains(prose),
+                "queue continuation must not carry prose: {prose}"
+            );
+        }
     }
 
     #[test]

@@ -17,11 +17,15 @@ use crate::dispatch_start::{
 };
 use crate::supervisor_runtime::supervisor_socket_path;
 use agent_doc_controller::dispatch::{
-    DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy, RouteSubmitObservation,
+    DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy,
+    PASS_THROUGH_STRANDED_DRAFT_SETTLE, PassThroughStrandedDraftAction,
+    PassThroughStrandedDraftFacts, PassThroughStrandedDraftLogFacts, RouteSubmitObservation,
     RoutedDispatchStartProof, RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
-    direct_pane_should_await_dispatch_start_proof, direct_pane_submit_acceptance_budget,
-    direct_pane_submit_outcome, dispatch_start_busy_probe_timeout,
-    dispatch_start_early_resubmit_probe_timeout, routed_dispatch_start_timeout_for_binary,
+    classify_pass_through_stranded_draft_action, direct_pane_should_await_dispatch_start_proof,
+    direct_pane_submit_acceptance_budget, direct_pane_submit_outcome,
+    dispatch_start_busy_probe_timeout, dispatch_start_early_resubmit_probe_timeout,
+    pass_through_stranded_draft_log_line, pass_through_stranded_draft_max_enter_resubmits,
+    route_trigger_visible_in_current_draft, routed_dispatch_start_timeout_for_binary,
     routed_trigger_payload_rejection,
 };
 use agent_doc_harness::HarnessConfig;
@@ -496,6 +500,132 @@ pub fn dispatch_routed_reopen(
     )
 }
 
+/// `#runfilesubmit`: verify the pass-through single submit actually crossed the
+/// composer, and repair it when it did not.
+///
+/// `PassThroughSingleSubmit` exists so a plain `agent-doc <FILE>` trigger (the
+/// JetBrains "Run Agent Doc" action) returns immediately instead of paying the
+/// dispatch-start proof budget. It returned `TransportSubmittedOnly` without
+/// ever looking at the pane, so a submit key absorbed by the harness TUI left
+/// the trigger sitting unsent in the composer forever: route logged
+/// `exit_code=0` / `pass_through_single_submit` while no cycle ever started.
+///
+/// This keeps the fast path fast — the first probe is a single `capture-pane`
+/// and the common case returns in a few milliseconds — and only pays the settle
+/// window when the trigger is still the visible draft. A capture failure is
+/// never read as "stranded": unknown pane state must not authorize pressing
+/// keys. This is a one-shot transport boundary inside a single route call with
+/// no long-lived state relationship, so it stays a direct command rather than a
+/// lifecycle-scoped `Effect` (`#lazily-reactive-first`), matching the sibling
+/// `send_direct_pane_enter_resubmit_until_stable` on the observed-acceptance
+/// path.
+fn repair_pass_through_stranded_draft(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    trigger: &str,
+) {
+    let start = Instant::now();
+    let max_enters = pass_through_stranded_draft_max_enter_resubmits();
+    let mut enters_sent = 0usize;
+    let mut settled = false;
+    let mut capture_failed = false;
+    loop {
+        let (draft_visible, pane_busy) = match agent_doc_tmux_io::capture_pane(tmux, pane) {
+            Ok(content) => (
+                route_trigger_visible_in_current_draft(&content, trigger, |line| {
+                    harness.is_prompt_line(line)
+                }),
+                harness.has_busy_cue(&content),
+            ),
+            Err(e) => {
+                capture_failed = true;
+                eprintln!(
+                    "[route] warning: pass-through draft check could not capture pane {}: {}",
+                    pane, e
+                );
+                (false, false)
+            }
+        };
+        let action =
+            classify_pass_through_stranded_draft_action(PassThroughStrandedDraftFacts {
+                draft_visible,
+                pane_busy,
+                settled,
+                enters_sent,
+                max_enters,
+            });
+        match action {
+            PassThroughStrandedDraftAction::SettleAndReobserve => {
+                settled = true;
+                std::thread::sleep(PASS_THROUGH_STRANDED_DRAFT_SETTLE);
+                continue;
+            }
+            PassThroughStrandedDraftAction::EnterResubmit => {
+                enters_sent += 1;
+                send_pass_through_stranded_draft_enter(tmux, file, pane, harness);
+                std::thread::sleep(PASS_THROUGH_STRANDED_DRAFT_SETTLE);
+                continue;
+            }
+            _ => {}
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &pass_through_stranded_draft_log_line(PassThroughStrandedDraftLogFacts {
+                file_display: &file.display().to_string(),
+                pane,
+                harness_binary: &harness.binary,
+                action,
+                enters_sent,
+                elapsed_ms: start.elapsed().as_millis(),
+                capture_failed,
+            }),
+        );
+        if action == PassThroughStrandedDraftAction::ExhaustedStillStranded {
+            eprintln!(
+                "[route] warning: {} trigger is still unsent in pane {} for {} after {} submit-key retries",
+                harness.binary,
+                pane,
+                file.display(),
+                enters_sent
+            );
+        }
+        return;
+    }
+}
+
+fn send_pass_through_stranded_draft_enter(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+) {
+    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
+        "route.pass_through_draft_resubmit",
+        &format!("pane:{pane}"),
+        "",
+        Some(&harness.binary),
+        "pass_through_stranded_draft_submit_key",
+        submit_key,
+    );
+    if let Err(e) = agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+        tmux,
+        pane,
+        "",
+        &harness.binary,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
+        "sessions.send_submitted_text_for_harness",
+    ) {
+        eprintln!(
+            "[route] warning: {} stranded-draft {} resubmit failed for pane {}: {}",
+            harness.binary, submit_key, pane, e
+        );
+    }
+}
+
 pub fn dispatch_routed_reopen_with_mode(
     tmux: &Tmux,
     file: &Path,
@@ -512,7 +642,8 @@ pub fn dispatch_routed_reopen_with_mode(
     )?;
     if options.submit_policy == DirectPaneSubmitPolicy::PassThroughSingleSubmit {
         let submit_start = Instant::now();
-        send_command_once_checked(tmux, pane, file_path, harness)?;
+        let trigger = send_command_once_checked(tmux, pane, file_path, harness)?;
+        repair_pass_through_stranded_draft(tmux, file, pane, harness, &trigger);
         let elapsed = submit_start.elapsed();
         log_route_latency(
             file,

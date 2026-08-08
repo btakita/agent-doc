@@ -404,6 +404,55 @@ object LayoutDetector {
     )
 
     /**
+     * `#stickymdpane`: which agent-doc document an editor window stands for.
+     *
+     * A window's selected tab is the answer whenever it is one. When the
+     * operator switches that window to a source file, the window has not gone
+     * away — it is still on screen, still part of a two-column layout — so
+     * reporting "no document here" collapsed the mirrored tmux layout to a
+     * single pane and threw away the session pane the operator was working
+     * next to. Getting it back required navigating to the document again.
+     *
+     * A window that has shown a document therefore keeps standing for the last
+     * one it showed, taken from that window's own tabs in most-recently-used
+     * order. A window that never held a document still contributes nothing,
+     * so closing a split (or opening a fresh source-only split) still
+     * collapses the layout as before.
+     */
+    internal fun stickyMarkdownForWindow(
+        selectedPath: String?,
+        windowMarkdownTabsMruLast: List<String>,
+    ): String? =
+        selectedPath?.takeIf { it.endsWith(".md") }
+            ?: windowMarkdownTabsMruLast.lastOrNull { it.endsWith(".md") }
+
+    /**
+     * That window's `.md` tabs, ordered so the most recently used is last.
+     *
+     * `EditorHistoryManager` is the IDE's own selection history, so this needs
+     * no plugin-side per-window bookkeeping to survive restarts or splits.
+     * Tabs the history has never seen keep their tab order, ahead of any tab
+     * it has, because "never selected" is older than "selected once".
+     */
+    internal fun markdownTabsMruLast(
+        project: com.intellij.openapi.project.Project,
+        windowTabPaths: List<String>,
+    ): List<String> {
+        val history = try {
+            com.intellij.openapi.fileEditor.impl.EditorHistoryManager
+                .getInstance(project)
+                .fileList
+                .map { it.path }
+        } catch (e: Exception) {
+            LOG.debug("[layout-detect] editor history unavailable: ${e.message}")
+            emptyList()
+        }
+        return windowTabPaths
+            .filter { it.endsWith(".md") }
+            .sortedBy { history.indexOf(it) }
+    }
+
+    /**
      * Detect the editor layout as a list of columns, each containing stacked files.
      * Returns null if detection fails or there's only one editor window.
      */
@@ -424,9 +473,19 @@ object LayoutDetector {
             }
 
             val snapshots = windows.map { window ->
-                val file = window.selectedFile?.takeIf { it.name.endsWith(".md") }?.let {
-                    TerminalUtil.relativePath(project, it)
-                }
+                // `#stickymdpane`: a window showing a source file still stands
+                // for the last document it showed, so the mirrored column
+                // survives a detour into source.
+                val stickyPath = stickyMarkdownForWindow(
+                    selectedPath = window.selectedFile?.path,
+                    windowMarkdownTabsMruLast = markdownTabsMruLast(
+                        project,
+                        window.fileList.map { it.path },
+                    ),
+                )
+                val file = stickyPath
+                    ?.let { path -> window.fileList.firstOrNull { it.path == path } }
+                    ?.let { TerminalUtil.relativePath(project, it) }
                 val component = window.tabbedPane.component
                 val bounds = component.parent?.let { parent ->
                     SwingUtilities.convertRectangle(parent, component.bounds, splittersComponent)

@@ -273,6 +273,51 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `a window switched to source keeps standing for its last agent-doc file`() {
+        // #stickymdpane: two editor columns, the right one detoured to source.
+        // The mirrored tmux layout must stay two panes with the last document
+        // still selected, not collapse to one.
+        assertEquals(
+            listOf("/repo/tasks/left.md", "/repo/tasks/right.md"),
+            EditorTabSyncListener.SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
+                listOf("/repo/tasks/left.md", "/repo/src/Thing.kt"),
+                listOf("/repo/tasks/left.md", "/repo/tasks/right.md"),
+            ),
+        )
+    }
+
+    @Test
+    fun `a window that never showed a document still contributes no pane`() {
+        // Closing a split, or opening a fresh source-only one, must still
+        // collapse the layout — the fallback is memory, not invention.
+        assertEquals(
+            listOf("/repo/tasks/left.md"),
+            EditorTabSyncListener.SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
+                listOf("/repo/tasks/left.md", "/repo/src/Thing.kt"),
+                listOf("/repo/tasks/left.md", null),
+            ),
+        )
+        assertEquals(
+            listOf("/repo/tasks/left.md"),
+            EditorTabSyncListener.SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
+                listOf("/repo/tasks/left.md", "/repo/src/Thing.kt"),
+                listOf("/repo/tasks/left.md", "/repo/src/Other.kt"),
+            ),
+        )
+    }
+
+    @Test
+    fun `a live selection always beats the remembered document`() {
+        assertEquals(
+            listOf("/repo/tasks/left.md", "/repo/tasks/now.md"),
+            EditorTabSyncListener.SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
+                listOf("/repo/tasks/left.md", "/repo/tasks/now.md"),
+                listOf("/repo/tasks/left.md", "/repo/tasks/stale.md"),
+            ),
+        )
+    }
+
+    @Test
     fun `stale selected-files projection is reread on later EDT turns`() {
         assertTrue(
             EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(

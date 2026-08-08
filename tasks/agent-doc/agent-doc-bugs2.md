@@ -137,11 +137,6 @@ Verified live on the same rig, on the no-op-cycle shape that produced the stall:
 
 ### Re: do [#clearsubmitlabel] — opus-5
 
-> **Queue prompt:**
->
-> do [#clearsubmitlabel]
-
-
 Fixed and shipped in **0.35.180**. The decision you flagged last cycle turned out not to need loosening at all — the acceptance rule is untouched.
 
 **The conflation.** `ContextClearSubmitStatus::TimedOut` carried two unrelated deadlines:

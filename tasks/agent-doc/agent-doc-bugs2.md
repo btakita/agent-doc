@@ -60,13 +60,31 @@ The anchored set is **recorded at the mutation site** (`CycleState::pending_anch
 **Verification:** `make check` — 8707 passed, 0 failed, 248 skipped. `make install` + `agent-doc admin recycle` (binary now reports 0.35.169). Committed `eefc45681`, pushed, tagged `v0.35.169`.
 
 **CI:** run `31248836014` was still queued at closeout — not awaited per `#ci-no-closeout-wait`.
+
+### Re: watchsighupwin — opus-5
+
+Verified. The Windows wheel built and shipped for 0.35.167 — nothing to fix.
+
+**The gate is real and correct.** `agent-doc-watch-io/src/daemon.rs:347-353` — `install_shutdown_signal_handlers()` has a `#[cfg(unix)]` body installing `SIGTERM`/`SIGINT`/`SIGHUP` handlers and a `#[cfg(not(unix))]` no-op, because `libc::SIGHUP` does not exist on `*-pc-windows-msvc`.
+
+**Artifact proof, not a green job.** A green publish leg proves nothing on its own, so I checked the published artifact:
+
+- PyPI run `31246515464` (tag `v0.35.167`) succeeded, and `build (x86_64-pc-windows-msvc, windows-latest)` is `success` in its job matrix.
+- PyPI serves `agent_doc-0.35.167-py3-none-win_amd64.whl` (17,446,595 B) alongside the three unix wheels.
+- Downloaded it: it contains `agent_doc-0.35.167.data/scripts/agent-doc.exe`, 47,143,424 B, header `MZ` / `PE\0\0`, COFF machine `0x8664` (`IMAGE_FILE_MACHINE_AMD64`). So the cfg-gated code compiled *and linked* into a real AMD64 Windows binary — an empty or stub wheel would not.
+- No regression since: 0.35.168 also publishes `win_amd64`. 0.35.169's PyPI run (`31248835628`) is still in progress, not awaited (`#ci-no-closeout-wait`).
+
+**Separate finding, filed not fixed.** While checking runs I found the **agent-loop superproject** `Agent Doc` workflow's `check` job red for 8 consecutive runs: `collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped` linking `agent-doc-commit-io` test `"git"` and `agent-doc-stream-io` lib test. `tmux-ci` passes in the same runs and local `make check` is green (8707/8707), so this is the runner exhausting memory/disk linking a 144-crate workspace's test targets — a CI-infra class, not a code regression, and a different repo's workflow from the one this head asked about. Filed at the top of `agent:backlog` rather than landing a speculative runner-tuning change mid-drain.
+
+Session note: exchange accretion is at `warn` (2 no-op closeouts in 30 min); queue is active so I'm not stalling to compact.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#loopsuperprojectjob]
 - ~~do [#queuemirrororder]~~
-- ⏭️ do [#watchsighupwin]
+- ~~do [#watchsighupwin]~~
 - do [#tmuxsyncslow]
 - do [#runpromptverbose]
 <!-- /agent:queue -->
@@ -79,7 +97,7 @@ The anchored set is **recorded at the mutation site** (`CycleState::pending_anch
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#watchsighupwin] [recommended] Verify the 0.35.167 PyPI run built the x86_64-pc-windows-msvc wheel; the SIGHUP cfg-gate could not be cross-compiled locally (no MSVC toolchain). `gh run list --workflow PyPI --limit 1`
+- [ ] [#loopsuperprojectjob] agent-loop superproject CI `check` job has failed 8 consecutive runs with `collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped` while linking agent-doc test binaries (e.g. run 31248484827, targets `agent-doc-commit-io` test "git" and `agent-doc-stream-io` lib test). `tmux-ci` passes in the same runs, and local `make check` is green — this is the GitHub runner exhausting memory/disk linking a 144-crate workspace's test targets, not a code regression. Investigate reducing link concurrency/debuginfo for CI (`CARGO_BUILD_JOBS`, `debug=0`/`debug=line-tables-only` in a CI profile, or `cargo nextest` archive splitting).
 - [ ] [#tmuxsyncslow] tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it. (restored from the queue after #qftnodoneeat deleted it; plan context: tasks/agent-doc/plan-tmux-auto-sync-reactive.md)
 - [ ] [#runpromptverbose] The prompt Run Agent Doc sends to Claude Code should simply be `/agent-doc .../file.md`. It currently sends a long multi-paragraph prompt ("Agent Doc queue state advanced for ... Continue this existing owner-pane session; do not invoke agent-doc recursively. Execute the current active queue head: ... Persist and finalize this cycle through the connected Agent Doc tools."). Restored from the queue after #qftnodoneeat deleted it.
 <!-- /agent:backlog -->

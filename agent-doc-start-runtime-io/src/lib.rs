@@ -942,6 +942,117 @@ fn auto_trigger_admission_projected(
     .is_some()
 }
 
+/// How often the admission wait re-reads the pane for independent proof that the
+/// harness consumed the trigger (`#autotriggeradmissionstall`).
+const AUTO_TRIGGER_ADMISSION_PANE_POLL: Duration = Duration::from_millis(500);
+
+/// Wait for EITHER the controller's turn-admission projection OR live pane proof
+/// that the harness took the trigger (`#autotriggeradmissionstall`).
+///
+/// A triggered turn that legitimately admits no NEW document cycle — the common
+/// `no_changes` preflight outcome on a restart-fresh dispatch — never projects an
+/// admission, so the single blocking await answers `{"ok":true,"data":null}` only
+/// after burning its whole budget. Measured on 2026-08-08 across three
+/// restart-fresh Claude spawns in a 9-row pane: the pane showed the trigger
+/// submitted and the harness working within ~1.5s of the send, yet
+/// `auto_trigger_sent` was not recorded for another 23-27s, with
+/// `controller_response_missing_data command=turn_admission_projection` landing at
+/// exactly the 25s mark. For that whole window the actor stays pinned `Busy` by
+/// `auto_trigger_inject` and `auto_trigger_outcome` stays `Pending` — the
+/// operator-visible submit lag, and the reason the startup path's own logs read
+/// ~25s later than the events they describe.
+///
+/// The pane check is ACCEPT-ONLY. It can end the wait early with proof, never
+/// declare the trigger stranded: strandedness is still decided by the caller's
+/// follow-up loop after the full admission window, so no resubmit can race a
+/// composer that has not finished rendering. A busy cue is the safe accept signal
+/// because auto-trigger only dispatches from an idle, dispatch-ready prompt
+/// decision — a pane that is busy right after our send is running our turn.
+///
+/// The await stays ONE controller RPC on its own thread rather than a chunked
+/// poll, so a null projection cannot spam `controller_response_missing_data` once
+/// per slice. If the pane wins the race, that thread is detached and finishes on
+/// its own inside the same budget.
+fn auto_trigger_admission_or_pane_accept(
+    file: &Path,
+    baseline_cycle_id: Option<&str>,
+    timeout: Duration,
+    pane_id: &str,
+    harness_cfg: &agent_doc_harness::HarnessConfig,
+) -> bool {
+    let awaited_file = file.to_path_buf();
+    let awaited_baseline = baseline_cycle_id.map(str::to_string);
+    let tmux = tmux_router::Tmux::default_server();
+    let accepted_from_pane = &mut false;
+    let projected = auto_trigger_admission_or_pane_accept_with(
+        timeout,
+        AUTO_TRIGGER_ADMISSION_PANE_POLL,
+        move || {
+            auto_trigger_admission_projected(&awaited_file, awaited_baseline.as_deref(), timeout)
+        },
+        || {
+            agent_doc_tmux_io::capture_pane_with_ansi(&tmux, pane_id)
+                .is_ok_and(|content| harness_cfg.has_busy_cue(&content))
+        },
+        accepted_from_pane,
+    );
+    if *accepted_from_pane {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "auto_trigger_admission_accepted_from_pane file={} pane={} harness={} #autotriggeradmissionstall note=harness busy cue proved the trigger was consumed before the admission projection resolved",
+                file.display(),
+                pane_id,
+                harness_cfg.binary
+            ),
+        );
+    }
+    projected
+}
+
+/// Effect-free core of [`auto_trigger_admission_or_pane_accept`], so the race it
+/// exists to win is testable without a live controller or tmux server.
+fn auto_trigger_admission_or_pane_accept_with(
+    timeout: Duration,
+    poll: Duration,
+    await_admission: impl FnOnce() -> bool + Send + 'static,
+    mut pane_accepts: impl FnMut() -> bool,
+    accepted_from_pane: &mut bool,
+) -> bool {
+    let (tx, rx) = std::sync::mpsc::channel();
+    if std::thread::Builder::new()
+        .name("auto-trigger-admission".into())
+        .spawn(move || {
+            // The receiver may already be gone when the pane won the race.
+            let _ = tx.send(await_admission());
+        })
+        .is_err()
+    {
+        // Could not offload the await, so the pane can never be consulted while
+        // it runs. Report not-admitted rather than accepting without proof; the
+        // caller's follow-up loop still inspects the composer.
+        return false;
+    }
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        match rx.recv_timeout(remaining.min(poll)) {
+            Ok(projected) => return projected,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return false,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if pane_accepts() {
+                    *accepted_from_pane = true;
+                    return true;
+                }
+            }
+        }
+    }
+}
+
 /// (`#restartfreshtriggerstranded`) Prove that a supervisor auto-trigger inject was
 /// actually SUBMITTED, not just typed.
 ///
@@ -970,7 +1081,13 @@ fn verify_auto_trigger_submitted(
     };
     let file = runtime.file.clone();
     let timeout = auto_trigger_admission_timeout();
-    if auto_trigger_admission_projected(&file, admission_baseline.as_deref(), timeout) {
+    if auto_trigger_admission_or_pane_accept(
+        &file,
+        admission_baseline.as_deref(),
+        timeout,
+        pane_id,
+        harness_cfg,
+    ) {
         return AutoTriggerOutcome::Sent;
     }
 
@@ -3337,6 +3454,92 @@ mod tests {
         // defer, with a stale-record negative control) by the SimWorld scenario
         // `route_sim_harness_switch_persists_record_so_post_restart_dispatch_does_not_defer`.
     }
+    /// `#autotriggeradmissionstall`: live pane proof must be able to end the
+    /// admission wait early.
+    ///
+    /// Measured 2026-08-08 on three restart-fresh Claude spawns: the pane showed
+    /// the trigger submitted and the harness working within ~1.5s of the send,
+    /// but a turn that admits no NEW document cycle (the common `no_changes`
+    /// preflight outcome) never projects an admission, so the single blocking
+    /// await burned its full 25s budget — pinning the actor `Busy` and reporting
+    /// `Sent` 23-27s late — before the composer was consulted at all.
+    #[test]
+    fn admission_wait_accepts_early_on_pane_proof_instead_of_burning_the_budget() {
+        let timeout = Duration::from_secs(5);
+        let poll = Duration::from_millis(25);
+        // The projection never resolves inside the budget: exactly the no-op
+        // cycle shape that produced the 25s stall.
+        let await_admission = move || {
+            std::thread::sleep(timeout);
+            false
+        };
+        let observations = Arc::new(AtomicU32::new(0));
+        let pane_observations = observations.clone();
+        let pane_accepts = move || pane_observations.fetch_add(1, Ordering::Relaxed) >= 2;
+
+        let mut accepted_from_pane = false;
+        let started = Instant::now();
+        let accepted = auto_trigger_admission_or_pane_accept_with(
+            timeout,
+            poll,
+            await_admission,
+            pane_accepts,
+            &mut accepted_from_pane,
+        );
+        let elapsed = started.elapsed();
+
+        assert!(accepted, "busy pane proof must accept the submitted trigger");
+        assert!(
+            accepted_from_pane,
+            "the accept must be attributed to the pane so it is logged as such"
+        );
+        assert!(
+            elapsed < timeout / 2,
+            "pane proof must not wait out the admission budget, took {elapsed:?}"
+        );
+    }
+
+    /// The pane check is ACCEPT-ONLY. A pane that never proves anything must
+    /// still yield the admission projection's own verdict, so a real admission
+    /// is never dropped and a genuinely stranded trigger still reaches the
+    /// caller's follow-up/resubmit loop instead of being accepted here.
+    #[test]
+    fn admission_wait_still_honors_the_projection_when_the_pane_proves_nothing() {
+        let poll = Duration::from_millis(25);
+
+        let mut accepted_from_pane = false;
+        assert!(
+            auto_trigger_admission_or_pane_accept_with(
+                Duration::from_secs(5),
+                poll,
+                || {
+                    std::thread::sleep(Duration::from_millis(120));
+                    true
+                },
+                || false,
+                &mut accepted_from_pane,
+            ),
+            "a projected admission must still be reported as admitted"
+        );
+        assert!(!accepted_from_pane);
+
+        let mut accepted_from_pane = false;
+        assert!(
+            !auto_trigger_admission_or_pane_accept_with(
+                Duration::from_millis(300),
+                poll,
+                || {
+                    std::thread::sleep(Duration::from_millis(120));
+                    false
+                },
+                || false,
+                &mut accepted_from_pane,
+            ),
+            "no admission and no pane proof must stay unaccepted for the follow-up loop"
+        );
+        assert!(!accepted_from_pane);
+    }
+
     #[test]
     fn auto_trigger_thread_cancels_cleanly_before_prompt_poll() {
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));

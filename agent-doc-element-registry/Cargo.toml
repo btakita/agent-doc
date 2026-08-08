@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-registry"
-version = "0.35.178"
+version = "0.35.179"
 edition = "2024"
 description = "Built-in element registry for agent-doc document components"
 license = "MIT"
@@ -11,14 +11,14 @@ publish = false
 name = "agent_doc_element_registry"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.178" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.178" }
-agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.35.178" }
-agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.35.178" }
-agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.178" }
-agent-doc-element-icebox = { path = "../agent-doc-element-icebox", version = "0.35.178" }
-agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.35.178" }
-agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.35.178" }
-agent-doc-element-signals = { path = "../agent-doc-element-signals", version = "0.35.178" }
-agent-doc-element-status = { path = "../agent-doc-element-status", version = "0.35.178" }
-agent-doc-element-unknown = { path = "../agent-doc-element-unknown", version = "0.35.178" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.179" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.179" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.35.179" }
+agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.35.179" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.179" }
+agent-doc-element-icebox = { path = "../agent-doc-element-icebox", version = "0.35.179" }
+agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.35.179" }
+agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.35.179" }
+agent-doc-element-signals = { path = "../agent-doc-element-signals", version = "0.35.179" }
+agent-doc-element-status = { path = "../agent-doc-element-status", version = "0.35.179" }
+agent-doc-element-unknown = { path = "../agent-doc-element-unknown", version = "0.35.179" }

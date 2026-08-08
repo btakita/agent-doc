@@ -2805,6 +2805,64 @@ mod tests {
         );
     }
 
+    /// `#startupmiss9row`: the SHORT-pane fresh-Claude geometry, which
+    /// `#freshclaudectxless` never covered and could not explain.
+    ///
+    /// The operator's 30s `no_prompt` startup-miss happened in a 9-row JB-layout
+    /// pane. The `#freshclaudectxless` fix keys on the status line masking the
+    /// composer — but at 9 rows Claude Code suppresses the custom status line
+    /// entirely, so there is nothing to mask and that mechanism cannot apply.
+    /// Verified 2026-08-08 by sampling a live restart-fresh Claude spawn every
+    /// 250ms in a real 9-row pane: 0 of 237 captures contained the status line,
+    /// and the composer was dispatch-ready 3.3s after spawn.
+    ///
+    /// These are the exact bytes of that capture at t=3.281s (9 rows x 106 cols,
+    /// composer trailing U+00A0 as Claude renders it). Pinning them keeps the
+    /// short-pane shape covered by a real fixture, so a future chrome-predicate
+    /// change cannot regress the geometry whose only symptom is a 30s startup
+    /// timeout in production.
+    #[test]
+    fn fresh_claude_nine_row_pane_has_no_status_line_and_stays_dispatch_ready() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "│       brian.takita@gmail.com's Organization        │ /release-notes for more     │\n",
+            "│                     /tmp/adm9r                     │                             │\n",
+            "╰──────────────────────────────────────────────────────────────────────────────────╯\n",
+            "\n",
+            " ⚠ 1 MCP server needs authentication · run /mcp\n",
+            "                                                            ● high · /effort\n",
+            "────────────────────────────────────────────────────────────────────────────────────\n",
+            "❯\u{a0}\n",
+            "────────────────────────────────────────────────────────────────────────────────────\n",
+        );
+
+        assert!(
+            !pane.lines().any(|line| line.contains("ctx:")),
+            "the 9-row geometry must stay status-line-free — that is what makes \
+             #freshclaudectxless inapplicable here"
+        );
+        assert!(
+            !h.has_busy_cue(pane),
+            "a freshly rendered composer is not an active turn"
+        );
+
+        let candidate = h
+            .last_prompt_candidate(pane)
+            .expect("the 9-row fresh Claude pane must yield a prompt candidate");
+        assert!(
+            h.is_dispatch_ready_prompt_line(&candidate),
+            "9-row fresh Claude composer must be dispatch-ready, got {candidate:?}"
+        );
+        assert!(
+            h.output_prompt_visible(pane),
+            "a 9-row fresh, idle Claude pane must read as prompt-visible"
+        );
+        assert!(
+            ready_prompt_candidate_at_cursor(pane, &h, Some(7)).is_some(),
+            "the cursor-scoped path must also accept the 9-row composer row"
+        );
+    }
+
     /// Guard the widened rule: it must not swallow a real composer, a busy cue,
     /// or ordinary agent output that merely mentions a `user@host`.
     #[test]

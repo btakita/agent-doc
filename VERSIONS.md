@@ -2,6 +2,47 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.179
+
+- **Fix (`#autotriggeradmissionstall`): a restart-fresh auto-trigger reported
+  `Sent` 23-27s after the harness had already taken the prompt.**
+  `verify_auto_trigger_submitted` waited on ONE blocking
+  `turn_admission_projection` RPC for its whole 25s budget before it looked at
+  the pane. A triggered turn that legitimately admits no NEW document cycle —
+  the common `no_changes` preflight outcome on a restart-fresh dispatch — never
+  projects an admission, so the controller answered `{"ok":true,"data":null}`
+  only at the 25s mark. For that entire window the actor stayed pinned `Busy` by
+  `auto_trigger_inject` and `auto_trigger_outcome` stayed `Pending`.
+
+  Measured live on 2026-08-08 across three restart-fresh Claude spawns in a real
+  9-row pane, sampling the pane every 250ms: the composer rendered at ~3.3s, the
+  trigger was visibly submitted and the harness working by ~5s, and
+  `auto_trigger_sent` was not recorded until 23-27s after attach — with
+  `controller_response_missing_data command=turn_admission_projection` landing at
+  exactly 25s every time.
+
+  The admission await now runs on its own thread (still one RPC, so a null
+  projection cannot spam `controller_response_missing_data` once per poll) while
+  the supervisor samples the pane's busy cue every 500ms. The pane check is
+  ACCEPT-ONLY: it can end the wait early with proof but never declares the
+  trigger stranded, so the resubmit decision still happens only after the full
+  admission window and cannot race a composer that has not finished rendering.
+  An accept taken from the pane logs
+  `auto_trigger_admission_accepted_from_pane`.
+
+- **Diagnostic (`#startupmiss9row`): the 9-row startup-miss does NOT reproduce,
+  and `#freshclaudectxless` was never its mechanism.** Four live restart-fresh
+  spawns (opencode→claude, codex→claude ×3) in real 9-row panes at both 213 and
+  106 columns reached dispatch-ready in 2.5-3.3s via `readiness_source=
+  current_child_pty` and dispatched every time, well inside the 30s deadline.
+  Claude Code suppresses its custom status line entirely at 9 rows — 0 of 237
+  sampled captures contained it — so the status line cannot mask the composer in
+  that geometry and the 0.35.176 fix does not apply to it. The earlier reading
+  that put the startup path at 17-27s was measuring `auto_trigger_sent` log
+  times, which carried the 25s stall above. The short-pane shape is now pinned by
+  a real captured fixture
+  (`fresh_claude_nine_row_pane_has_no_status_line_and_stays_dispatch_ready`).
+
 ## 0.35.178
 
 - **Fix (`#qflood`): the idle-queue watch stacked `/agent-doc <FILE>` lines in

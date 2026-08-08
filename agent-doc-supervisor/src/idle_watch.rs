@@ -346,8 +346,20 @@ impl QueueContinuationTriggers {
 
 /// Render the continuation delivered to an already-owned pane.
 ///
-/// `#qcontprose`: this is the same portable bare `agent-doc <file>` trigger the
-/// route path sends (`HarnessConfig::apply_plain_trigger_override`), not prose.
+/// `#qcontprose`: this is the harness's own reopen trigger, not prose.
+///
+/// `#runpromptverbose`: it is the *harness-native* trigger, not a hardcoded bare
+/// one. `specs/07-session-tmux-commands.md` has always specified the split —
+/// "Claude/OpenCode drains inject the normal slash-command harness reopen, and
+/// Codex drains inject the bare `agent-doc <FILE>` reopen" — and
+/// `idle_queue_drain_payload_keeps_trigger_for_non_codex_harnesses` asserts
+/// exactly that against `HarnessConfig::trigger_command`. This function ignored
+/// the harness and hardcoded the bare form, so every Claude/OpenCode drain
+/// silently violated both. `agent-doc <file>` does get admitted by the
+/// `UserPromptSubmit` hook, which is why the divergence was invisible — but only
+/// `/agent-doc <file>` also loads the skill deterministically, which matters in a
+/// freshly-`/clear`ed pane where the agent has no prior workflow context. Codex
+/// keeps the bare form because that is its harness-native entrypoint.
 ///
 /// It used to render a five-line paragraph ("Agent Doc queue state advanced for
 /// … do not invoke `agent-doc` recursively … Execute the current active queue
@@ -383,9 +395,12 @@ impl QueueContinuationTriggers {
 /// than at the call site makes the guarantee unconditional: a caller cannot
 /// forget it, and every dispatch path emits the same absolute form the route
 /// path already sends.
-pub fn owned_pane_queue_continuation_prompt(file: &Path) -> String {
+pub fn owned_pane_queue_continuation_prompt(
+    file: &Path,
+    harness: &agent_doc_harness::HarnessConfig,
+) -> String {
     let path = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
-    format!("agent-doc {}", path.display())
+    harness.trigger_command(&path.to_string_lossy())
 }
 
 /// Exponential retry capped at one attempt per 30 seconds. Transient editor or
@@ -683,22 +698,71 @@ mod tests {
         // #qcontprose: the operator sees this text in their console. It must be
         // the same one-line trigger the route path dispatches, not a paragraph
         // restating what preflight already selects.
-        let prompt = owned_pane_queue_continuation_prompt(Path::new("/repo/tasks/sampleorders.md"));
-
-        assert_eq!(prompt, "agent-doc /repo/tasks/sampleorders.md");
-        assert!(!prompt.contains('\n'), "a queue continuation is one line");
-        for prose in [
-            "queue state advanced",
-            "do not invoke",
-            "recursively",
-            "Execute the current active queue head",
-            "Persist and finalize",
+        for harness in [
+            agent_doc_harness::HarnessConfig::claude(),
+            agent_doc_harness::HarnessConfig::codex(),
+            agent_doc_harness::HarnessConfig::opencode(),
         ] {
-            assert!(
-                !prompt.contains(prose),
-                "queue continuation must not carry prose: {prose}"
+            let prompt = owned_pane_queue_continuation_prompt(
+                Path::new("/repo/tasks/sampleorders.md"),
+                &harness,
             );
+
+            assert!(!prompt.contains('\n'), "a queue continuation is one line");
+            assert!(
+                prompt.ends_with(" /repo/tasks/sampleorders.md"),
+                "the continuation dispatches the document: {prompt}"
+            );
+            for prose in [
+                "queue state advanced",
+                "do not invoke",
+                "recursively",
+                "Execute the current active queue head",
+                "Persist and finalize",
+            ] {
+                assert!(
+                    !prompt.contains(prose),
+                    "queue continuation must not carry prose: {prose}"
+                );
+            }
         }
+    }
+
+    /// `#runpromptverbose`: the continuation is the HARNESS-NATIVE trigger.
+    ///
+    /// `specs/07-session-tmux-commands.md` specifies "Claude/OpenCode drains
+    /// inject the normal slash-command harness reopen, and Codex drains inject the
+    /// bare `agent-doc <FILE>` reopen". This function used to hardcode the bare
+    /// form for every harness, silently violating that split — and the bare form
+    /// is admitted by the hook, so nothing failed loudly.
+    #[test]
+    fn owner_pane_continuation_uses_the_harness_native_trigger() {
+        let doc = Path::new("/repo/tasks/sampleorders.md");
+
+        assert_eq!(
+            owned_pane_queue_continuation_prompt(
+                doc,
+                &agent_doc_harness::HarnessConfig::claude()
+            ),
+            "/agent-doc /repo/tasks/sampleorders.md",
+            "Claude Code takes the slash-command reopen so a cleared pane loads the skill"
+        );
+        assert_eq!(
+            owned_pane_queue_continuation_prompt(
+                doc,
+                &agent_doc_harness::HarnessConfig::opencode()
+            ),
+            "/agent-doc /repo/tasks/sampleorders.md",
+            "OpenCode takes the slash-command reopen too"
+        );
+        assert_eq!(
+            owned_pane_queue_continuation_prompt(
+                doc,
+                &agent_doc_harness::HarnessConfig::codex()
+            ),
+            "agent-doc /repo/tasks/sampleorders.md",
+            "Codex's harness-native entrypoint IS the bare trigger"
+        );
     }
 
     #[test]
@@ -706,10 +770,13 @@ mod tests {
         // #qcontabspath: this string is executed in the pane, whose cwd is not
         // guaranteed to be the supervisor's. A relative path silently produced
         // no cycle contract at all — the continuation just died.
-        let prompt = owned_pane_queue_continuation_prompt(Path::new("tasks/sampleorders.md"));
+        let prompt = owned_pane_queue_continuation_prompt(
+            Path::new("tasks/sampleorders.md"),
+            &agent_doc_harness::HarnessConfig::claude(),
+        );
         let dispatched = prompt
-            .strip_prefix("agent-doc ")
-            .expect("continuation is the bare trigger");
+            .strip_prefix("/agent-doc ")
+            .expect("continuation is the harness trigger");
 
         assert!(
             Path::new(dispatched).is_absolute(),

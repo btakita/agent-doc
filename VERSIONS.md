@@ -2,6 +2,33 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.171
+
+- **Queue reopen triggers are harness-native again, on both dispatch paths (`#runpromptverbose`).**
+  Reported as "`Run Agent Doc` sends a long multi-paragraph prompt; it should simply be
+  `/agent-doc <file>`". The paragraph itself was already gone (`#qcontprose`), but the one-line
+  trigger that replaced it was hardcoded to the bare `agent-doc <file>` form for *every* harness:
+  - `owned_pane_queue_continuation_prompt` (supervisor idle drain) ignored the harness entirely.
+    This silently violated `specs/07-session-tmux-commands.md` — "Claude/OpenCode drains inject the
+    normal slash-command harness reopen, and Codex drains inject the bare `agent-doc <FILE>` reopen"
+    — and contradicted `idle_queue_drain_payload_keeps_trigger_for_non_codex_harnesses`, which
+    asserts that split against `HarnessConfig::trigger_command`. The pure helper was harness-aware;
+    the production caller passed it a hardcoded string.
+  - The editor route (`Run Agent Doc`) called `apply_plain_trigger_override` whenever
+    `plain_trigger` was set, rewriting Claude's and OpenCode's `/agent-doc {file}` template to the
+    bare form.
+
+  Both now use `HarnessConfig::trigger_command`, so Claude/OpenCode get `/agent-doc <file>` and
+  Codex keeps the bare form that is its harness-native entrypoint. `plain_trigger` retains its real
+  meaning — attach no prompt-bearing context — and no longer doubles as a trigger rewrite; that
+  conflation is what let the two dispatch paths disagree for the same harness, the exact divergence
+  `#qcontprose` set out to remove. Path absolutization (`#qcontabspath`) is unchanged.
+
+  Why it matters beyond tidiness: the bare form *is* admitted by the `UserPromptSubmit` hook, which
+  is why the divergence never failed loudly — but only `/agent-doc <file>` also loads the skill
+  deterministically, which is what a freshly-`/clear`ed pane needs. `apply_plain_trigger_override`
+  now has no production caller and documents why adding one needs a reason. Spec updated to match.
+
 ## 0.35.170
 
 - **tmux tab-switch latency: one document was entering the ownership loop twice (`#syncdupespelling`).**

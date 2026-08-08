@@ -135,10 +135,21 @@ pub fn run_with_tmux_with_options(
     )
     .map(|(f, _)| f)?;
     let global_config = rc.global_config();
-    let mut harness = HarnessConfig::from_context(&fm, &global_config);
-    if plain_trigger {
-        harness.apply_plain_trigger_override();
-    }
+    // `#runpromptverbose`: `plain_trigger` means "dispatch the bare reopen trigger
+    // with no prompt-bearing context attached" (see `pane_resolution`, which uses
+    // it to suppress `pending_prompt_bearing_context_for_route`). It does NOT mean
+    // "use a different trigger than this harness's own".
+    //
+    // It used to also force `apply_plain_trigger_override`, which rewrote Claude's
+    // and OpenCode's `/agent-doc {file}` template to the bare Codex form. That made
+    // the editor `Run Agent Doc` route and the supervisor idle drain disagree about
+    // what a reopen looks like for the same harness — the exact divergence
+    // `#qcontprose` set out to remove — and cost the slash command's one real
+    // advantage: in a freshly-`/clear`ed pane, `/agent-doc <file>` loads the skill
+    // deterministically, while the bare form relies on the agent inferring the
+    // workflow from ambient instructions. Codex is unaffected: its native
+    // `trigger_command` is already the bare form.
+    let harness = HarnessConfig::from_context(&fm, &global_config);
 
     // Use absolute path for trigger commands to avoid CWD-dependent resolution
     // when the pane's CWD differs from the invoker's (e.g., narrowed to a

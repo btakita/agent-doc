@@ -4019,7 +4019,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     let head = active_head.expect("dispatch implies an active head");
                     let continuation_prompt =
                         agent_doc_supervisor::idle_watch::owned_pane_queue_continuation_prompt(
-                            &path,
+                            &path, &harness,
                         );
                     let drain_payload = idle_queue_drain_payload(&head, continuation_prompt);
                         let payload_kind = idle_queue_drain_payload_kind(&head);

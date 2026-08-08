@@ -639,6 +639,20 @@ impl HarnessConfig {
     }
 
     /// Force route reopen triggers to the portable bare `agent-doc <file>` form.
+    ///
+    /// `#runpromptverbose`: **no production caller, and adding one needs a reason.**
+    /// The editor route used to call this whenever `plain_trigger` was set, which
+    /// rewrote Claude's and OpenCode's `/agent-doc {file}` template to the bare
+    /// form. That made the route and the supervisor idle drain disagree about what
+    /// a reopen looks like for the same harness, and dropped the slash command's
+    /// one real advantage: in a freshly-`/clear`ed pane `/agent-doc <file>` loads
+    /// the skill deterministically, while the bare form relies on the agent
+    /// inferring the workflow from ambient instructions.
+    ///
+    /// `plain_trigger` means "attach no prompt-bearing context", not "use a
+    /// different trigger than this harness's own" — use
+    /// [`HarnessConfig::trigger_command`] for any reopen. This stays only for a
+    /// caller that genuinely needs the bare form from a non-Codex harness.
     pub fn apply_plain_trigger_override(&mut self) {
         self.trigger_command_template = "agent-doc {file}".to_string();
     }

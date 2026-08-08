@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: ac3e73fc-ccac-4a65-932d-a3b7aa9adeed
+resume: 4beeec3c-6d12-4fcb-ac30-64ae46f05e1f
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -218,11 +218,42 @@ at `d0b2829f0a`, not from memory.
 **Three fixes this turn**, all released and installed: 0.35.164 the settle-gated
 pass-through draft check, 0.35.165 the anchored free-text answer match, 0.35.166
 this one. Each was uncovered by closing out the previous one.
+
+### Re: the release stream was red on Windows — opus-5
+
+Checking CI after pushing 0.35.166 turned up a fourth defect, fixed and released
+as **0.35.167**.
+
+Every tagged release has been failing its PyPI job:
+
+```
+error[E0425]: cannot find value `SIGHUP` in crate `libc`
+ --> agent-doc-watch-io\src\daemon.rs:333:55
+```
+
+`install_shutdown_signal_handlers` (the `#stalewatchpid` pid-file fix) listed
+`libc::SIGHUP` unconditionally. That constant does not exist on
+`x86_64-pc-windows-msvc`, so the Windows wheel never built — the only red leg in
+the publish, on 0.35.164, 0.35.165 and 0.35.166 alike. Handler installation is
+now `#[cfg(unix)]` with a no-op elsewhere; the pid-file lifecycle it protects is
+a unix daemon concern. `SHUTDOWN_REQUESTED` stays shared because `signal_wait`
+reads it on every platform.
+
+I could not verify the Windows leg locally — cross-compiling needs an MSVC
+toolchain this host does not have — so the 0.35.167 PyPI run is the proof. It is
+in flight; I am recording it rather than waiting on it.
+
+**One thing I could not restore.** The bad consume also flipped frontmatter
+`queue: stop`. The queue component still carries `go` and both restored heads,
+but frontmatter is not a patchable component, and rewriting it under a live
+editor is the disk-vs-authority divergence the write path exists to prevent. It
+is a one-word edit in the document when you want the drain to resume.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#watchsighupwin]
 - do [#tmuxsyncslow]
 - do [#runpromptverbose]
 <!-- /agent:queue -->
@@ -235,6 +266,7 @@ this one. Each was uncovered by closing out the previous one.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#watchsighupwin] [recommended] Verify the 0.35.167 PyPI run built the x86_64-pc-windows-msvc wheel; the SIGHUP cfg-gate could not be cross-compiled locally (no MSVC toolchain). `gh run list --workflow PyPI --limit 1`
 - [ ] [#tmuxsyncslow] tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it. (restored from the queue after #qftnodoneeat deleted it; plan context: tasks/agent-doc/plan-tmux-auto-sync-reactive.md)
 - [ ] [#runpromptverbose] The prompt Run Agent Doc sends to Claude Code should simply be `/agent-doc .../file.md`. It currently sends a long multi-paragraph prompt ("Agent Doc queue state advanced for ... Continue this existing owner-pane session; do not invoke agent-doc recursively. Execute the current active queue head: ... Persist and finalize this cycle through the connected Agent Doc tools."). Restored from the queue after #qftnodoneeat deleted it.
 <!-- /agent:backlog -->

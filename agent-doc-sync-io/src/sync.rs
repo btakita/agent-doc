@@ -205,7 +205,8 @@ use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_supervisor::startup_miss::unresolved_startup_miss_blocks_autostart;
 use agent_doc_sync::{
     AutoStartMode, RENAME_DEBOUNCE_TTL_SECS, SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
-    SYNC_LOCK_WAIT_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET, SYNC_OWNERSHIP_PROOF_BUDGET,
+    SYNC_DOCTOR_REPAIR_BUDGET, SYNC_LOCK_WAIT_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET,
+    SYNC_OWNERSHIP_PROOF_BUDGET,
     SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET, SYNC_PRUNE_SUBPHASE_BUDGET,
     SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET, SYNC_WINDOW_RESOLUTION_BUDGET,
     WindowIndexNormalizationPlan, auto_started_panes_summary,
@@ -389,8 +390,13 @@ pub fn repair_file_state_with_tmux(tmux: &Tmux, file: &Path) -> Result<Vec<Strin
     let mut actions = Vec::new();
 
     let columns = vec![canonical.to_string_lossy().to_string()];
-    if let Some(session_name) = resolve_sync_target_session(tmux, None, &columns, None) {
-        repair_layout(tmux, &session_name, "agent-doc")?;
+    if let Some(session_name) = resolve_sync_target_session(tmux, None, &columns, None)
+        && repair_layout(tmux, &session_name, "agent-doc")?.repaired()
+    {
+        // `#syncdoctorconverged`: report the action only when the pass actually
+        // moved something. An unconditional note made the sync log claim a
+        // repair on every sync, which is indistinguishable from a repair that
+        // never converges.
         actions.push(format!(
             "Repaired `agent-doc`/`stash` layout in tmux session `{session_name}`."
         ));
@@ -1100,7 +1106,29 @@ fn rescue_missing_agent_doc_window_from_candidates(
 /// stash windows as `1:stash`, `2:stash`, and so on.
 const STASH_JOIN_TEMP_HEIGHT: &str = "1000";
 
-pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) -> Result<()> {
+/// Whether a layout repair pass actually issued mutating tmux commands.
+///
+/// `#syncdoctorconverged`: the pre- and post-reconcile doctor passes used to
+/// report `Repaired ... layout` unconditionally, so the sync log claimed a
+/// repair on every single sync and the message could never be used to tell a
+/// real repair from a no-op. Callers now report only what happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutRepairOutcome {
+    AlreadyConverged,
+    Repaired,
+}
+
+impl LayoutRepairOutcome {
+    pub fn repaired(self) -> bool {
+        matches!(self, Self::Repaired)
+    }
+}
+
+pub fn repair_layout(
+    tmux: &Tmux,
+    session_name: &str,
+    target_window_name: &str,
+) -> Result<LayoutRepairOutcome> {
     tracing::debug!(
         session_name,
         target_window_name,
@@ -1120,9 +1148,10 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                 "[repair] failed to list windows for session {}: {}",
                 session_name, e
             );
-            return Ok(());
+            return Ok(LayoutRepairOutcome::AlreadyConverged);
         }
     };
+    let mut mutated = false;
 
     // Parse windows into (id, pane_count, height, name).
     struct WinInfo {
@@ -1158,10 +1187,13 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
             window.name == target_window_name || is_stash_window_name(&window.name);
         if agent_doc_owned && window.height == STASH_JOIN_TEMP_HEIGHT {
             match agent_doc_tmux_io::resize_window_to_clients(tmux, &window.id) {
-                Ok(()) => sync_log(&format!(
-                    "layout_repair_unpinned_window window={} name={} stale_height={}",
-                    window.id, window.name, window.height
-                )),
+                Ok(()) => {
+                    mutated = true;
+                    sync_log(&format!(
+                        "layout_repair_unpinned_window window={} name={} stale_height={}",
+                        window.id, window.name, window.height
+                    ))
+                }
                 Err(err) => eprintln!(
                     "[repair] warning: could not unpin stale 1000-row window {} ({}): {}",
                     window.id, window.name, err
@@ -1183,8 +1215,25 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
     let skip_phase_1_2 =
         agent_doc_tmux::repair_layout_skips_rescue_phase(has_target, stash_count, has_exact_stash);
     if skip_phase_1_2 {
-        // Target exists and stash is consolidated. Skip Phases 1+2,
-        // but still run target consolidation and index normalization below.
+        // Target exists and stash is consolidated. Skip Phases 1+2, and — when
+        // one window observation proves the always-run phases below would not
+        // move anything either — return without issuing any tmux command at
+        // all (`#syncdoctorconverged`). The steady state is by far the common
+        // case: this pass runs twice per full sync, so an editor tab switch was
+        // paying a dozen redundant tmux round-trips per gesture to rediscover a
+        // layout that was already correct.
+        if !mutated
+            && agent_doc_sync::session_layout_normalization_converged(
+                &list_session_windows(tmux, session_name),
+                target_window_name,
+                is_stash_window_name,
+            )
+        {
+            sync_log(&format!(
+                "layout_repair_already_converged session={session_name} target={target_window_name} #syncdoctorconverged"
+            ));
+            return Ok(LayoutRepairOutcome::AlreadyConverged);
+        }
     } else {
         eprintln!(
             "[repair] layout needs repair: target={} stash_count={}",
@@ -1216,7 +1265,7 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                 Ok(id) => eprintln!("[repair] created missing stash window {}", id),
                 Err(e) => {
                     eprintln!("[repair] failed to create stash window: {}", e);
-                    return Ok(());
+                    return Ok(LayoutRepairOutcome::Repaired);
                 }
             }
         }
@@ -1234,7 +1283,7 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                     }
                     Err(e) => {
                         eprintln!("[repair] failed to create stash window: {}", e);
-                        return Ok(());
+                        return Ok(LayoutRepairOutcome::Repaired);
                     }
                 }
             };
@@ -1431,7 +1480,7 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
         );
     }
 
-    Ok(())
+    Ok(LayoutRepairOutcome::Repaired)
 }
 
 fn consolidate_duplicate_target_windows(tmux: &Tmux, session_name: &str, target_window_name: &str) {
@@ -2332,6 +2381,12 @@ fn run_with_options_internal_at_root(
         false
     };
     if run_doctor_repair {
+        // `#syncdoctorconverged`: the pre-reconcile doctor pass sat between two
+        // measured phases and was invisible to the phase meter, which is how a
+        // pair of unconditional full layout-repair passes hid inside every
+        // editor-triggered sync. Meter it like every other phase so its cost
+        // stays attributable.
+        let doctor_repair_start = Instant::now();
         if let Some(file) = doctor_repair_candidate.as_deref() {
             let notes = repair_file_state_with_tmux(tmux, file)?;
             for note in notes {
@@ -2344,6 +2399,13 @@ fn run_with_options_internal_at_root(
         {
             repair_layout(tmux, session_name, "agent-doc")?;
         }
+        log_sync_latency(
+            focus,
+            "doctor_repair_pre",
+            doctor_repair_start.elapsed(),
+            SYNC_DOCTOR_REPAIR_BUDGET,
+            auto_start_mode,
+        );
     }
     let mut effective_window = match (window, target_session.as_deref()) {
         (Some(w), _) => Some(w.to_string()),
@@ -4201,6 +4263,7 @@ fn run_with_options_internal_at_root(
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
     }
     if run_doctor_repair {
+        let doctor_repair_start = Instant::now();
         if let Some(file) = doctor_repair_candidate.as_deref() {
             let notes = repair_file_state_with_tmux(tmux, file)?;
             for note in notes {
@@ -4213,6 +4276,13 @@ fn run_with_options_internal_at_root(
         {
             repair_layout(tmux, session_name, "agent-doc")?;
         }
+        log_sync_latency(
+            focus,
+            "doctor_repair_post",
+            doctor_repair_start.elapsed(),
+            SYNC_DOCTOR_REPAIR_BUDGET,
+            auto_start_mode,
+        );
     }
 
     if matches!(auto_start_mode, AutoStartMode::SafePassive) {
@@ -6798,12 +6868,59 @@ mod tests {
         let windows_before = list_windows(&iso, "test");
 
         // repair_layout should succeed and not change anything
-        repair_layout(&iso, "test", "agent-doc").unwrap();
+        let outcome = repair_layout(&iso, "test", "agent-doc").unwrap();
 
         let windows_after = list_windows(&iso, "test");
         assert_eq!(
             windows_before, windows_after,
             "layout was already correct — nothing should change"
+        );
+        // `#syncdoctorconverged`: a correct layout must also *report* that it
+        // changed nothing, so the doctor pass stops claiming a repair on every
+        // sync and the caller can skip the note.
+        assert_eq!(
+            outcome,
+            LayoutRepairOutcome::AlreadyConverged,
+            "an already-correct layout must report AlreadyConverged, not a repair"
+        );
+    }
+
+    /// `#syncdoctorconverged`: the converged fast path must skip the always-run
+    /// consolidation/index-normalization phases entirely — a drifted layout
+    /// still has to report a real repair, so the outcome distinguishes the two.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_reports_repair_only_when_it_moves_windows() {
+        let iso = IsolatedTmux::new("sync-repair-outcome-honest");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let _pane = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let _ = iso.ensure_stash_window("test");
+
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::AlreadyConverged
+        );
+
+        // A stash alias is exactly the drift Phase 4 renames back to `stash`.
+        let stash_window = list_session_windows(&iso, "test")
+            .into_iter()
+            .find(|(_, _, name)| is_stash_window_name(name))
+            .map(|(_, id, _)| id)
+            .expect("stash window");
+        iso.raw_cmd(&["rename-window", "-t", &stash_window, "stash-2"])
+            .unwrap();
+
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::Repaired,
+            "a stash alias awaiting rename must still draw a real repair"
+        );
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::AlreadyConverged,
+            "the repair must converge — a second pass has nothing left to do"
         );
     }
 

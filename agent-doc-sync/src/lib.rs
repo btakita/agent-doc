@@ -20,6 +20,10 @@ pub const SYNC_PRELOCK_ACTOR_FOCUS_BUDGET: Duration = Duration::from_millis(300)
 pub const SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET: Duration = Duration::from_millis(250);
 pub const SYNC_PROJECTION_REFRESH_BUDGET: Duration = Duration::from_millis(250);
 pub const SYNC_OWNERSHIP_PROOF_BUDGET: Duration = Duration::from_millis(750);
+/// `#syncdoctorconverged`: the pre- and post-reconcile doctor repair passes.
+/// A converged layout must cost one window listing, so anything past this
+/// budget means the pass is doing destructive work on the editor hot path.
+pub const SYNC_DOCTOR_REPAIR_BUDGET: Duration = Duration::from_millis(250);
 pub const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
 pub const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
 pub const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
@@ -474,6 +478,62 @@ pub fn planned_stash_window_indices(
         .enumerate()
         .map(|(offset, (_, id, _))| (id.clone(), offset + 1))
         .collect()
+}
+
+/// True when one observed session window list already satisfies the invariant
+/// that `repair_layout`'s always-run consolidation and index-normalization
+/// phases would produce, so those phases can be skipped without issuing a
+/// single tmux command.
+///
+/// `#syncdoctorconverged`: those phases used to run unconditionally on every
+/// full sync — twice, once before and once after the reconciler — even when the
+/// layout was already correct. Each pass re-listed the session's windows three
+/// or more times (`consolidate_duplicate_target_windows`, the target
+/// `normalize_window_to_index`, the stash index plan, then one more list inside
+/// every per-window `normalize_window_to_index`), so an editor tab switch paid
+/// a dozen redundant tmux round-trips to discover that nothing had changed.
+/// Evaluating the whole plan against a single snapshot is exact for the
+/// converged case, because a converged layout is one where no phase moves
+/// anything and therefore no index shifts under the later phases.
+///
+/// The observation is deliberately the same shape the mutating phases consume —
+/// `(window_index, window_id, window_name)` — so the predicate cannot drift from
+/// what they would actually do.
+pub fn session_layout_normalization_converged(
+    windows: &[(String, String, String)],
+    target_window_name: &str,
+    is_stash_window_name: fn(&str) -> bool,
+) -> bool {
+    let targets: Vec<&(String, String, String)> = windows
+        .iter()
+        .filter(|(_, _, name)| name == target_window_name)
+        .collect();
+
+    // Phase 3 joins the panes of every duplicate target window into the first.
+    if targets.len() > 1 {
+        return false;
+    }
+    // Phase 4 moves the target window to index 0. A session with no target
+    // window at all leaves both of those a no-op, so only the stash plan below
+    // decides convergence.
+    if let Some((index, _, _)) = targets.first()
+        && index != "0"
+    {
+        return false;
+    }
+
+    // Phase 4 also renames `stash-*` aliases back to `stash` and packs the
+    // stash windows into the indices directly after the target window.
+    for (window_id, desired_index) in planned_stash_window_indices(windows, is_stash_window_name) {
+        let Some((index, _, name)) = windows.iter().find(|(_, id, _)| *id == window_id) else {
+            return false;
+        };
+        if name != "stash" || index != &desired_index.to_string() {
+            return false;
+        }
+    }
+
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1014,6 +1074,114 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
                 basis: SyntheticRegistryDuplicateBasis::LiveOwner,
             }]
         );
+    }
+
+    fn win(index: &str, id: &str, name: &str) -> (String, String, String) {
+        (index.to_string(), id.to_string(), name.to_string())
+    }
+
+    fn test_is_stash_window_name(name: &str) -> bool {
+        name == "stash" || name.starts_with("stash-")
+    }
+
+    #[test]
+    fn session_layout_converged_for_normalized_agent_doc_and_stash_windows() {
+        let windows = vec![
+            win("0", "@10", "agent-doc"),
+            win("1", "@11", "stash"),
+            win("2", "@12", "stash"),
+            win("3", "@13", "work"),
+        ];
+
+        assert!(session_layout_normalization_converged(
+            &windows,
+            "agent-doc",
+            test_is_stash_window_name
+        ));
+    }
+
+    #[test]
+    fn session_layout_not_converged_when_normalization_would_act() {
+        let drifted: Vec<(&str, Vec<(String, String, String)>)> = vec![
+            (
+                "target window off index 0",
+                vec![win("1", "@10", "agent-doc"), win("2", "@11", "stash")],
+            ),
+            (
+                "duplicate target windows",
+                vec![
+                    win("0", "@10", "agent-doc"),
+                    win("1", "@11", "agent-doc"),
+                    win("2", "@12", "stash"),
+                ],
+            ),
+            (
+                "stash alias awaiting rename",
+                vec![win("0", "@10", "agent-doc"), win("1", "@11", "stash-2")],
+            ),
+            (
+                "stash window off its packed index",
+                vec![
+                    win("0", "@10", "agent-doc"),
+                    win("1", "@11", "work"),
+                    win("2", "@12", "stash"),
+                ],
+            ),
+        ];
+
+        for (label, windows) in drifted {
+            assert!(
+                !session_layout_normalization_converged(
+                    &windows,
+                    "agent-doc",
+                    test_is_stash_window_name
+                ),
+                "{label} must not report a converged layout"
+            );
+        }
+    }
+
+    /// A session agent-doc has not claimed yet leaves both target phases inert,
+    /// so it is converged and must not draw destructive repair work.
+    #[test]
+    fn session_layout_converged_without_a_target_window() {
+        let windows = vec![win("0", "@10", "work"), win("1", "@11", "notes")];
+
+        assert!(session_layout_normalization_converged(
+            &windows,
+            "agent-doc",
+            test_is_stash_window_name
+        ));
+    }
+
+    /// The predicate must agree with the planners it stands in for: whenever it
+    /// reports convergence, every plan the mutating phases would build is inert.
+    #[test]
+    fn session_layout_convergence_agrees_with_the_normalization_planners() {
+        let windows = vec![
+            win("0", "@10", "agent-doc"),
+            win("1", "@11", "stash"),
+            win("2", "@12", "stash"),
+        ];
+
+        assert!(session_layout_normalization_converged(
+            &windows,
+            "agent-doc",
+            test_is_stash_window_name
+        ));
+        assert_eq!(
+            plan_window_index_normalization(&windows, "@10", 0),
+            WindowIndexNormalizationPlan::AlreadyAtIndex
+        );
+        for (window_id, desired_index) in
+            planned_stash_window_indices(&windows, test_is_stash_window_name)
+        {
+            assert_eq!(
+                plan_window_index_normalization(&windows, &window_id, desired_index),
+                WindowIndexNormalizationPlan::AlreadyAtIndex,
+                "{window_id} must already sit at its packed index"
+            );
+        }
     }
 
     #[test]

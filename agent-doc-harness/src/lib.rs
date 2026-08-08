@@ -789,22 +789,59 @@ impl HarnessConfig {
             return false;
         }
 
+        let Some(scan) = self.scan_bottom_idle_chrome(output, bottom_n) else {
+            return false;
+        };
+
+        let min_chrome = if self.binary == "opencode" {
+            if is_opencode_footer_version_line(&scan.recent[0]) {
+                1
+            } else {
+                4
+            }
+        } else {
+            1
+        };
+        scan.satisfies(min_chrome)
+    }
+
+    /// One bounded bottom-of-pane idle-chrome observation, shared by
+    /// [`Self::is_bottom_idle_chrome`] and
+    /// [`Self::bottom_idle_chrome_suffix_present`] so the window definition
+    /// cannot drift between the readiness and stale-busy-cue consumers.
+    ///
+    /// `#opencodeharnessswitch`: the window is bounded in *meaningful* rows,
+    /// not raw terminal rows. tmux captures the full pane height, and OpenCode
+    /// pads the gap between its composer box and the bottom
+    /// `<cwd>:<branch> … <version>` status line with blank rows. Taking raw rows
+    /// first spent the whole window on that padding and left a single chrome
+    /// line — under `min_chrome` — so a genuinely idle cold-start pane never
+    /// became dispatch-ready and the auto-trigger recorded `no_prompt_after_30s`
+    /// after 30s. Filtering before `take` mirrors
+    /// [`recent_normalized_bottom_lines`], which already normalizes trailing
+    /// blank rows away for the busy-cue window.
+    fn scan_bottom_idle_chrome(
+        &self,
+        output: &str,
+        bottom_n: usize,
+    ) -> Option<BottomIdleChromeScan> {
         let recent: Vec<String> = output
             .lines()
             .rev()
-            .take(bottom_n)
             .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
             .map(|line| line.trim().to_string())
             .filter(|line| !line.is_empty())
+            .take(bottom_n)
             .collect();
 
         if recent.is_empty() {
-            return false;
+            return None;
         }
 
         let mut chrome_count = 0usize;
         let mut has_status = false;
         let mut has_dispatch_ready_prompt = false;
+        let mut composer_holds_draft = false;
         for line in &recent {
             if !self.is_ignorable_output_line(line) {
                 if self.is_dispatch_ready_prompt_line(line) {
@@ -812,6 +849,15 @@ impl HarnessConfig {
                     chrome_count += 1;
                     continue;
                 }
+                // OpenCode's idle chrome sits *below* the composer — the box
+                // rule, the build-plan line, the keybinding hints, and the
+                // cwd/version status all render underneath it. Counting chrome
+                // alone therefore reaches `min_chrome` before the scan ever sees
+                // the composer, so a composer holding operator text would report
+                // idle and route would inject over it. Only the padding-bounded
+                // window hid that before; reject it explicitly instead.
+                composer_holds_draft =
+                    self.binary == "opencode" && is_opencode_composer_draft_line(line);
                 break;
             }
             chrome_count += 1;
@@ -820,16 +866,13 @@ impl HarnessConfig {
             }
         }
 
-        let min_chrome = if self.binary == "opencode" {
-            if !recent.is_empty() && is_opencode_footer_version_line(&recent[0]) {
-                1
-            } else {
-                4
-            }
-        } else {
-            1
-        };
-        (chrome_count >= min_chrome && has_status) || has_dispatch_ready_prompt
+        Some(BottomIdleChromeScan {
+            recent,
+            chrome_count,
+            has_status,
+            has_dispatch_ready_prompt,
+            composer_holds_draft,
+        })
     }
 
     /// Return true when a captured child transcript shows an idle harness
@@ -877,39 +920,12 @@ impl HarnessConfig {
             return false;
         }
 
-        let recent: Vec<String> = output
-            .lines()
-            .rev()
-            .take(bottom_n)
-            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty())
-            .collect();
-
-        if recent.is_empty() {
+        let Some(scan) = self.scan_bottom_idle_chrome(output, bottom_n) else {
             return false;
-        }
-
-        let mut chrome_count = 0usize;
-        let mut has_status = false;
-        let mut has_dispatch_ready_prompt = false;
-        for line in &recent {
-            if !self.is_ignorable_output_line(line) {
-                if self.is_dispatch_ready_prompt_line(line) {
-                    has_dispatch_ready_prompt = true;
-                    chrome_count += 1;
-                    continue;
-                }
-                break;
-            }
-            chrome_count += 1;
-            if self.is_idle_status_line(line) || is_opencode_idle_splash_anchor_line(line) {
-                has_status = true;
-            }
-        }
+        };
 
         let min_chrome = if self.binary == "opencode" { 4 } else { 2 };
-        (chrome_count >= min_chrome && has_status) || has_dispatch_ready_prompt
+        scan.satisfies(min_chrome)
     }
 
     /// Return true when recent pane output indicates the harness is present but
@@ -1206,6 +1222,30 @@ impl HarnessConfig {
     #[allow(dead_code)]
     pub fn cmdline_is_agent(&self, cmdline: &str) -> bool {
         self.process_names.iter().any(|name| cmdline.contains(name))
+    }
+}
+
+/// Result of one bounded bottom-of-pane idle-chrome scan.
+///
+/// `recent` is guaranteed non-empty (the scan returns `None` otherwise), so
+/// callers may index `recent[0]` — the bottom-most meaningful row — when their
+/// `min_chrome` policy depends on which footer shape the harness rendered.
+struct BottomIdleChromeScan {
+    recent: Vec<String>,
+    chrome_count: usize,
+    has_status: bool,
+    has_dispatch_ready_prompt: bool,
+    /// The scan stopped on an OpenCode composer row carrying operator text.
+    /// Idle chrome below a drafted composer is not proof of an empty composer.
+    composer_holds_draft: bool,
+}
+
+impl BottomIdleChromeScan {
+    fn satisfies(&self, min_chrome: usize) -> bool {
+        if self.composer_holds_draft {
+            return false;
+        }
+        (self.chrome_count >= min_chrome && self.has_status) || self.has_dispatch_ready_prompt
     }
 }
 
@@ -1712,6 +1752,19 @@ fn is_opencode_idle_splash_anchor_line(trimmed: &str) -> bool {
     trimmed.contains("Ask anything")
 }
 
+/// True for an OpenCode composer row (`┃ …`) that carries operator text rather
+/// than a rendered placeholder or the box's own chrome.
+///
+/// Rows whose content is chrome — the `Ask anything...` placeholder, the
+/// `Build · <model>` plan line, a `● Tip` hint — are already ignorable and never
+/// reach this check; only a row the operator typed into does.
+fn is_opencode_composer_draft_line(trimmed: &str) -> bool {
+    let Some(rest) = trimmed.strip_prefix('┃') else {
+        return false;
+    };
+    !rest.trim().is_empty()
+}
+
 /// True for the combined OpenCode footer line that bundles the idle keybinding
 /// hints and version number, e.g. `⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13`.
 fn is_opencode_footer_version_line(trimmed: &str) -> bool {
@@ -1788,6 +1841,15 @@ fn is_opencode_context_bar_line(trimmed: &str) -> bool {
     saw_bar
 }
 
+/// True for a line drawn entirely from OpenCode's box/block glyph set: the
+/// composer box rules, the splash separator, and the `opencode` wordmark.
+///
+/// `#opencodeharnessswitch`: `█` (U+2588 FULL BLOCK) is part of the wordmark
+/// OpenCode 1.18.x renders on its cold-start splash. Omitting it left those rows
+/// non-ignorable, so the all-lines idle scan rejected an unused splash and
+/// `last_prompt_candidate` resolved to a wordmark row. Requiring *every*
+/// non-whitespace character to be an art glyph keeps this from swallowing real
+/// output.
 fn is_opencode_box_art_line(trimmed: &str) -> bool {
     let mut saw_art = false;
     for ch in trimmed.chars() {
@@ -1799,6 +1861,7 @@ fn is_opencode_box_art_line(trimmed: &str) -> bool {
             '┃' | '╹'
                 | '▀'
                 | '▄'
+                | '█'
                 | '─'
                 | '│'
                 | '┌'
@@ -2998,6 +3061,199 @@ cargo install — installed agent-doc 0.34.0
             !h.is_idle_chrome_only_output(output),
             "same output must fail the all-lines scan (scrollback is non-ignorable)"
         );
+    }
+
+    /// Verbatim shape of the OpenCode 1.18.x cold-start splash captured from a
+    /// live tmux pane (`#opencodeharnessswitch`). Two properties of the real
+    /// screen are load-bearing and were absent from the older hand-written
+    /// 1.14.x fixtures: the wordmark is drawn with `█` full blocks, and the
+    /// renderer leaves a tall run of blank rows between the composer box and
+    /// the bottom `<cwd>:<branch> … <version>` status line.
+    const OPENCODE_1_18_COLD_START_SPLASH: &str = "\
+\n\n\n\n
+                                                                                                  ▄
+                                                                 █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+                                                                 █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+                                                                 ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+
+                                               ┃
+                                               ┃  Ask anything... \"Fix a TODO in the codebase\"
+                                               ┃
+                                               ┃  Build · GLM-5.2 Z.AI Coding Plan
+                                               ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                               tab agents  ctrl+p commands
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  /home/brian/work/btakita/agent-loop/src/boost-client:main                                                                      1.18.14
+
+
+";
+
+    /// `#opencodeharnessswitch`: the bounded bottom window must be measured in
+    /// meaningful rows, not raw terminal rows. OpenCode pads the gap between
+    /// its composer box and the bottom status line with blank rows, so a
+    /// `take(bottom_n)` over raw lines consumed the whole window on padding and
+    /// left a single chrome line — below `min_chrome` — making a genuinely idle
+    /// cold-start pane look like it never reached a prompt. That is the
+    /// `auto_trigger_timeout harness=opencode reason=no_prompt_after_30s`
+    /// startup miss seen after switching a document from codex to opencode.
+    #[test]
+    fn is_bottom_idle_chrome_accepts_opencode_cold_start_splash_padded_with_blank_rows() {
+        let h = HarnessConfig::opencode();
+        let output = OPENCODE_1_18_COLD_START_SPLASH;
+
+        assert!(
+            output
+                .lines()
+                .rev()
+                .take(12)
+                .filter(|line| !line.trim().is_empty())
+                .count()
+                < 4,
+            "fixture must keep the blank-row padding that collapses a raw-row bottom window"
+        );
+        assert!(
+            h.is_bottom_idle_chrome(output, 12),
+            "blank renderer padding must not push OpenCode idle chrome outside the bounded bottom window"
+        );
+    }
+
+    /// The same capture must reach `ReadyEmpty` through every consumer of the
+    /// dispatch-ready chain that route/startup and the supervisor auto-trigger
+    /// use, or the pane still never becomes dispatch-ready.
+    #[test]
+    fn opencode_cold_start_splash_projects_ready_empty_composer() {
+        let h = HarnessConfig::opencode();
+        let output = OPENCODE_1_18_COLD_START_SPLASH;
+
+        assert!(
+            h.output_prompt_visible(output),
+            "supervisor child-PTY readiness must see the OpenCode cold-start splash as an idle prompt"
+        );
+        assert!(
+            matches!(
+                project_pane_composer(output, &h),
+                PaneComposerProjection::ReadyEmpty { .. }
+            ),
+            "pane composer projection must classify the cold-start splash as an empty composer"
+        );
+        assert!(
+            ready_prompt_candidate_at_cursor(output, &h, None).is_some(),
+            "pane_ready_prompt_candidate must accept the cold-start splash"
+        );
+    }
+
+    /// The `█` full block is part of the OpenCode wordmark. Leaving it out of
+    /// the box-art glyph set made the wordmark rows non-ignorable, so the
+    /// all-lines idle scan failed and `last_prompt_candidate` resolved to a
+    /// wordmark row instead of reporting no prompt.
+    #[test]
+    fn opencode_wordmark_rows_are_idle_box_art_chrome() {
+        let h = HarnessConfig::opencode();
+        let output = OPENCODE_1_18_COLD_START_SPLASH;
+
+        assert!(h.is_ignorable_output_line("█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█"));
+        assert!(
+            h.is_idle_chrome_only_output(output),
+            "an unused cold-start splash contains only chrome, so the all-lines scan must accept it"
+        );
+        assert!(
+            h.last_prompt_candidate(output).is_none(),
+            "the wordmark must not be reported as the latest prompt candidate"
+        );
+    }
+
+    /// Guard the widened window. OpenCode renders its idle chrome — box rule,
+    /// build-plan line, keybinding hints, cwd/version status — *below* the
+    /// composer, so chrome alone reaches `min_chrome` before the scan ever sees
+    /// the composer. Once blank padding no longer truncates the window, a
+    /// composer holding operator text would report idle and route would inject
+    /// over it. Captured verbatim from a live pane after typing `hello`.
+    #[test]
+    fn is_bottom_idle_chrome_rejects_opencode_composer_holding_operator_text() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+\n\n\n\n
+                                                                                                  ▄
+                                                                 █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+                                                                 █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+                                                                 ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+
+                                               ┃
+                                               ┃  hello
+                                               ┃
+                                               ┃  Build · GLM-5.2 Z.AI Coding Plan
+                                               ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                               tab agents  ctrl+p commands
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  /home/brian/work/btakita/agent-loop/src/boost-client:main                                                                      1.18.14
+
+
+";
+
+        assert!(
+            !h.is_bottom_idle_chrome(output, 12),
+            "a composer holding unsent operator text must never report idle chrome"
+        );
+        assert!(
+            !h.output_prompt_visible(output),
+            "a drafted composer must not satisfy child-PTY prompt visibility"
+        );
+        assert!(
+            !matches!(
+                project_pane_composer(output, &h),
+                PaneComposerProjection::ReadyEmpty { .. }
+            ),
+            "a drafted composer must not project as an empty composer"
+        );
+        assert!(
+            ready_prompt_candidate_at_cursor(output, &h, None).is_none(),
+            "route must not accept a drafted composer as dispatch-ready"
+        );
+    }
+
+    /// The composer-draft reject is scoped to composer rows: post-turn
+    /// scrollback above the composer box is ordinary output and must keep the
+    /// existing bottom-N idle proof working.
+    #[test]
+    fn opencode_composer_draft_line_only_matches_composer_rows() {
+        assert!(is_opencode_composer_draft_line("┃  investigate this"));
+        assert!(!is_opencode_composer_draft_line("┃"));
+        assert!(!is_opencode_composer_draft_line("┃   "));
+        assert!(!is_opencode_composer_draft_line(
+            "The change is complete and all tests pass."
+        ));
     }
 
     #[test]

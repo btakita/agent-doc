@@ -2,6 +2,39 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.162
+
+- **An OpenCode pane can become dispatch-ready again (`#opencodeharnessswitch`).** Switching a
+  document from codex to opencode and restarting failed with
+  `auto_trigger_timeout harness=opencode reason=no_prompt_after_30s`, because a genuinely idle
+  OpenCode cold-start splash never satisfied any dispatch-ready predicate. Two causes, both
+  reproduced from a live pane capture of OpenCode 1.18.14. First, the bounded bottom-of-pane
+  idle-chrome window was measured in raw terminal rows: OpenCode pads the gap between its composer
+  box and the bottom `<cwd>:<branch> … <version>` status line with roughly sixteen blank rows, so
+  `take(12)` spent the whole window on padding and left one chrome line — under the `min_chrome`
+  floor. The window is now bounded in *meaningful* rows, matching the normalization
+  `recent_normalized_bottom_lines` already applied to the busy-cue window, and one shared scan
+  serves both the readiness and stale-busy-cue consumers so they cannot drift. Second, the
+  `opencode` wordmark is drawn with `█` full blocks, which were missing from the box-art glyph set,
+  so the wordmark rows were non-ignorable and `last_prompt_candidate` resolved to one of them.
+- **A drafted OpenCode composer fails closed.** OpenCode renders its idle chrome *below* the
+  composer, so chrome alone reaches `min_chrome` before the scan sees the composer; only the
+  padding-bounded window had been hiding that. A composer row carrying operator text is now an
+  explicit reject, so route cannot inject a trigger over unsent input.
+- **Editor-triggered sync stops paying for two unconditional layout repairs
+  (`#syncdoctorconverged`).** `repair_layout`'s consolidation and index-normalization phases ran on
+  every full sync — twice, once before and once after the reconciler — even when the layout was
+  already correct, and each pass re-listed the session's windows three or more times (once more
+  inside every per-window `normalize_window_to_index`). `repair_layout` now returns
+  `AlreadyConverged` when one window observation proves those phases would move nothing, and issues
+  no further tmux command; it returns `Repaired` only when it actually mutated tmux. Callers report
+  a repair note only for `Repaired` — the unconditional note made the sync log claim a repair on
+  every sync (2764 pre- and 2761 post-sync claims with zero convergence in the measured window),
+  which is indistinguishable from a repair that never converges.
+- **Both doctor-repair passes are metered.** `doctor_repair_pre` and `doctor_repair_post` join the
+  sync phase log against a 250ms budget. They previously sat between measured phases and were
+  invisible to the phase meter, which is how that cost hid on the editor hot path.
+
 ## 0.35.161
 
 - **Codex harness-native entry now performs binary-owned admission and tracking in one hook.**

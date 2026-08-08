@@ -450,6 +450,22 @@ markdown file, sync must expand that one-column projection from the project
   without invoking doctor repair; if stash/window drift is detected, sync
   warns and leaves the destructive or heuristic layout repair for an explicit
   repair command.
+- `repair_layout` converges, and reports whether it converged
+  (`#syncdoctorconverged`). It returns `AlreadyConverged` when one window
+  observation proves the always-run consolidation and index-normalization phases
+  would move nothing, and `Repaired` only when it issued mutating tmux commands.
+  Callers report a repair note only for `Repaired`; an unconditional note made
+  the sync log claim a repair on every sync, which is indistinguishable from a
+  repair that never converges. The converged path must issue **no** tmux command
+  beyond that single window listing: full sync runs this pass twice per
+  invocation (pre- and post-reconcile), and the always-run phases otherwise
+  re-list the session's windows once per `normalize_window_to_index` call, so an
+  editor tab switch paid roughly a dozen redundant tmux round-trips per gesture
+  to rediscover a layout that was already correct.
+- Both doctor-repair passes are metered as `doctor_repair_pre` and
+  `doctor_repair_post` in the sync phase log. They previously sat between
+  measured phases and were invisible to the phase meter, which is how that cost
+  hid on the editor hot path.
 
 ## session
 

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 33dbfc87-363b-43cf-a5cf-69f80803bb82
+resume: 9843b994-078f-4b9a-af5a-16e2a0f73c04
 agent: claude
 claude_model: opus
 agent_doc_format: template

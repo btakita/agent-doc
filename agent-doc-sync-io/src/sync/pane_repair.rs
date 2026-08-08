@@ -7,6 +7,12 @@ use agent_doc_run_context_io::AgentDocContextExt;
 pub(crate) struct SyncProofCache {
     pub(crate) actor_records:
         RefCell<HashMap<(PathBuf, String), Option<agent_doc_controller::actor::ActorRecord>>>,
+    /// `#ownershipbindingfirst`: the same actor lookup keyed by document path
+    /// alone, for callers that have not yet paid the content RPC that would
+    /// tell them the session id. The record carries the session id, so this is
+    /// the cache the binding-first ownership path reads.
+    pub(crate) actor_records_by_file:
+        RefCell<HashMap<PathBuf, Option<agent_doc_controller::actor::ActorRecord>>>,
     pub(crate) live_owner_matches: RefCell<HashMap<(PathBuf, String, String), bool>>,
     pub(crate) skip_authoritative_actor_lookup: bool,
 }
@@ -525,16 +531,20 @@ mod tests {
         .unwrap();
 
         let proof_cache = SyncProofCache::default();
-        let resolved = project_authoritative_actor_binding(
+        // `#ownershipbindingfirst`: resolution no longer takes a `session_id`
+        // argument — obtaining one is what cost the content RPC this reorder
+        // removes. The record carries it, so assert it comes back correct.
+        let resolved = project_authoritative_actor_binding_by_file(
             &iso,
             &doc,
-            "local-projection",
             Some(&doc.to_string_lossy()),
             AutoStartMode::SafePassive,
             &proof_cache,
         );
 
-        assert_eq!(resolved.as_deref(), Some(pane.as_str()));
+        let resolved = resolved.expect("live local actor projection should bind the document");
+        assert_eq!(resolved.pane_id, pane);
+        assert_eq!(resolved.session_id, "local-projection");
     }
     #[test]
     fn repair_missing_registered_pane_records_loss_and_closes_stale_preflight() {

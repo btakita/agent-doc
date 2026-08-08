@@ -108,6 +108,21 @@ pub fn pid_path(base_dir: &Path) -> PathBuf {
     base_dir.join(PID_FILE)
 }
 
+/// The directory the no-argument pid helpers resolve `.agent-doc/watch.pid`
+/// against.
+///
+/// `#stalewatchpid`: these used to use the raw process working directory, so a
+/// `watch --stop` / `--status` invoked from a subdirectory read and removed a
+/// *different* path than the daemon wrote — the removal silently did nothing
+/// (`let _ =`) and the real pid file survived as a stale record. Resolving the
+/// project root makes every pid operation name one file no matter where the
+/// operator stands. Falls back to the working directory when the caller is
+/// outside an agent-doc project, which keeps the old behavior for that case.
+fn watch_pid_base_dir() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    Some(agent_doc_project_root_io::project_root_containing(&cwd).unwrap_or(cwd))
+}
+
 /// Check whether a PID is alive using the same `/proc` probe as the watcher.
 pub fn pid_alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
@@ -134,7 +149,7 @@ pub fn pid_is_agent_doc_watch(pid: u32) -> bool {
 }
 
 pub fn read_pid() -> Option<u32> {
-    read_pid_in(&std::env::current_dir().ok()?)
+    read_pid_in(&watch_pid_base_dir()?)
 }
 
 /// Check whether the watch daemon recorded in the current directory is alive.
@@ -149,8 +164,38 @@ pub fn read_pid_in(base_dir: &Path) -> Option<u32> {
     content.trim().parse().ok()
 }
 
+/// `#stalewatchpid`: delete a pid file that provably does not describe a live
+/// watch daemon, returning the pruned pid.
+///
+/// A daemon that exits cleanly removes its own pid file, but `SIGKILL`, an OOM
+/// kill, and a reboot cannot run cleanup — so the file must also be reclaimable
+/// from the read side. Without this the record is immortal: the observed
+/// haiven-dev file named a pid dead for three days. Identity-verified, never a
+/// bare liveness check, so this cannot delete a live daemon's file after pid
+/// reuse.
+pub fn clear_stale_pid_in(base_dir: &Path) -> Result<Option<u32>> {
+    let Some(pid) = read_pid_in(base_dir) else {
+        return Ok(None);
+    };
+    if pid_is_agent_doc_watch(pid) {
+        return Ok(None);
+    }
+    remove_pid_in(base_dir)?;
+    Ok(Some(pid))
+}
+
+/// [`clear_stale_pid_in`] against the resolved project root.
+pub fn clear_stale_pid() -> Result<Option<u32>> {
+    match watch_pid_base_dir() {
+        Some(base_dir) => clear_stale_pid_in(&base_dir),
+        None => Ok(None),
+    }
+}
+
 pub fn write_current_pid() -> Result<()> {
-    write_current_pid_in(&std::env::current_dir()?)
+    let base_dir = watch_pid_base_dir()
+        .ok_or_else(|| anyhow::anyhow!("could not resolve a base directory for watch.pid"))?;
+    write_current_pid_in(&base_dir)
 }
 
 pub fn write_current_pid_in(base_dir: &Path) -> Result<()> {
@@ -162,12 +207,29 @@ pub fn write_current_pid_in(base_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn remove_pid() {
-    let _ = std::fs::remove_file(PID_FILE);
+/// Remove the watch pid file, resolved against the project root.
+///
+/// `#stalewatchpid`: this used to remove the bare relative `PID_FILE` and
+/// discard the result. Two failure modes followed — a caller whose working
+/// directory was not the project root removed nothing, and *every* failure was
+/// invisible, so a pid file that could not be removed still read as a live
+/// daemon forever. A missing file is success; anything else is reported.
+pub fn remove_pid() -> Result<()> {
+    match watch_pid_base_dir() {
+        Some(base_dir) => remove_pid_in(&base_dir),
+        None => Ok(()),
+    }
 }
 
-pub fn remove_pid_in(base_dir: &Path) {
-    let _ = std::fs::remove_file(pid_path(base_dir));
+pub fn remove_pid_in(base_dir: &Path) -> Result<()> {
+    let path = pid_path(base_dir);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => {
+            Err(anyhow::Error::from(err).context(format!("failed to remove {}", path.display())))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -198,8 +260,71 @@ mod tests {
         let pid = read_pid_in(dir.path()).unwrap();
         assert_eq!(pid, std::process::id());
 
-        remove_pid_in(dir.path());
+        remove_pid_in(dir.path()).unwrap();
         assert!(read_pid_in(dir.path()).is_none());
+    }
+
+    /// `#stalewatchpid` cause 4: a daemon killed by `SIGKILL` or lost to a
+    /// reboot cannot run its own cleanup, so the read side must reclaim the
+    /// record. Without this the file is immortal — the observed haiven-dev one
+    /// named a pid dead for three days.
+    #[test]
+    fn clear_stale_pid_reclaims_a_dead_daemon_record() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(pid_path(dir.path()), "4294967294").unwrap();
+
+        let pruned = clear_stale_pid_in(dir.path()).unwrap();
+
+        assert_eq!(pruned, Some(4_294_967_294));
+        assert!(
+            read_pid_in(dir.path()).is_none(),
+            "a pid that is not a live watch daemon must not survive as a record"
+        );
+    }
+
+    /// The prune is identity-verified, so it must not delete the record of a
+    /// process that is merely alive under a reused pid — nor, symmetrically,
+    /// keep one that is.
+    #[test]
+    fn clear_stale_pid_keeps_a_live_daemon_record() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        // pid 1 is always alive but is not `agent-doc watch`, which is exactly
+        // the reused-pid shape. It must still be pruned...
+        std::fs::write(pid_path(dir.path()), "1").unwrap();
+        assert_eq!(clear_stale_pid_in(dir.path()).unwrap(), Some(1));
+
+        // ...while a pid that IS a live agent-doc watch daemon is retained.
+        // This test binary's own cmdline contains both tokens.
+        let self_pid = std::process::id();
+        if pid_is_agent_doc_watch(self_pid) {
+            std::fs::write(pid_path(dir.path()), self_pid.to_string()).unwrap();
+            assert_eq!(clear_stale_pid_in(dir.path()).unwrap(), None);
+            assert_eq!(read_pid_in(dir.path()), Some(self_pid));
+        }
+    }
+
+    /// `#stalewatchpid` cause 2: removal used the bare relative `PID_FILE` and
+    /// discarded its result, so a caller standing anywhere but the project root
+    /// removed nothing and reported success anyway.
+    #[test]
+    fn remove_pid_in_is_path_scoped_and_reports() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let other = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(other.path().join(".agent-doc")).unwrap();
+        std::fs::write(pid_path(dir.path()), "12345").unwrap();
+
+        // Removing against an unrelated root must not touch this file.
+        remove_pid_in(other.path()).unwrap();
+        assert_eq!(read_pid_in(dir.path()), Some(12345));
+
+        remove_pid_in(dir.path()).unwrap();
+        assert!(read_pid_in(dir.path()).is_none());
+
+        // A already-absent file is success, not an error — cleanup is idempotent.
+        remove_pid_in(dir.path()).unwrap();
     }
 
     #[test]

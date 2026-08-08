@@ -204,6 +204,14 @@ pub fn ensure_running() -> Result<bool> {
     if crate::is_running() {
         return Ok(false);
     }
+    // `#stalewatchpid`: `is_running` already proved any recorded pid is not a
+    // live daemon, so reclaim the file here rather than leaving a dead record on
+    // disk for the next reader to re-diagnose. This is the lazy-start path every
+    // claim/preflight goes through, which makes it the reliable place to
+    // self-heal after a SIGKILL or a reboot.
+    if let Some(pid) = crate::clear_stale_pid()? {
+        eprintln!("Cleared stale watch PID file (PID {pid} is not a live watch daemon)");
+    }
 
     // Resolve project root (where .agent-doc/ lives)
     let cwd = std::env::current_dir().unwrap_or_default();
@@ -267,13 +275,19 @@ pub fn start<E: WatchDaemonEffects>(
         eprintln!("Resolved project root: {}", root.display());
     }
 
-    // Check if already running
+    // Check if already running. `#stalewatchpid`: identity-verified, not a bare
+    // `/proc/{pid}` probe. A dead daemon whose pid the OS later reassigns to an
+    // unrelated process made this `bail!` permanent — a fresh daemon could never
+    // start, so nothing ever rewrote the pid file and the stale record became
+    // self-perpetuating. `lib.rs` documents the same trap for `is_running`.
     if let Some(pid) = crate::read_pid() {
-        if crate::pid_alive(pid) {
+        if crate::pid_is_agent_doc_watch(pid) {
             bail!("watch daemon already running (PID {})", pid);
         }
         // Stale PID file — clean up
-        crate::remove_pid();
+        if let Err(err) = crate::remove_pid() {
+            eprintln!("Warning: could not clear stale watch PID file: {err:#}");
+        }
     }
 
     crate::write_current_pid()?;
@@ -290,25 +304,62 @@ pub fn start<E: WatchDaemonEffects>(
 
     let result = run_event_loop(config, &watch_config, &running, effects);
 
-    crate::remove_pid();
+    if let Err(err) = crate::remove_pid() {
+        eprintln!("Warning: could not remove watch PID file on shutdown: {err:#}");
+    }
     eprintln!("Watch daemon stopped.");
     result
 }
 
+/// Set by the signal handler when the daemon is asked to terminate.
+///
+/// Only an atomic store happens in handler context, which is async-signal-safe.
+static SHUTDOWN_REQUESTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn handle_shutdown_signal(_signal: libc::c_int) {
+    SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Install handlers for the signals that terminate this daemon in practice.
+///
+/// `#stalewatchpid`: without these, the default disposition for `SIGTERM` /
+/// `SIGINT` / `SIGHUP` is to kill the process immediately — so `start()`'s
+/// `remove_pid()` after the event loop was unreachable on every ordinary
+/// shutdown, and each one leaked a pid file. `SIGHUP` matters because a
+/// daemon spawned from a terminal that later closes is one of the common ways
+/// this process dies.
+fn install_shutdown_signal_handlers() {
+    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+        // SAFETY: `handle_shutdown_signal` only performs an atomic store, which
+        // is async-signal-safe.
+        unsafe {
+            libc::signal(
+                signal,
+                handle_shutdown_signal as *const () as libc::sighandler_t,
+            );
+        }
+    }
+}
+
 /// Simple signal handler registration (best-effort).
 fn ctrlc_handler<F: Fn() + Send + 'static>(f: F) {
+    install_shutdown_signal_handlers();
     std::thread::spawn(move || {
         signal_wait();
         f();
     });
 }
 
-/// Wait for SIGTERM or SIGINT (Linux-specific, best-effort).
+/// Wait until a shutdown signal is observed (Linux-specific, best-effort).
 fn signal_wait() {
-    loop {
-        std::thread::sleep(Duration::from_secs(3600));
+    while !SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
+        std::thread::sleep(SHUTDOWN_POLL_INTERVAL);
     }
 }
+
+/// How often the shutdown watcher thread samples [`SHUTDOWN_REQUESTED`].
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// The main event loop.
 fn run_event_loop(
@@ -786,14 +837,17 @@ fn discover_entries_in(base_dir: &Path) -> Result<Vec<WatchEntry>> {
 }
 
 /// Stop the watch daemon by removing the PID file.
+///
+/// `#stalewatchpid`: liveness is identity-verified and the removal is no longer
+/// discarded, so `stop` cannot report a cleanup it did not perform.
 pub fn stop() -> Result<()> {
     match crate::read_pid() {
         Some(pid) => {
-            if crate::pid_alive(pid) {
-                crate::remove_pid();
+            let live = crate::pid_is_agent_doc_watch(pid);
+            crate::remove_pid()?;
+            if live {
                 eprintln!("Signaled watch daemon (PID {}) to stop.", pid);
             } else {
-                crate::remove_pid();
                 eprintln!(
                     "Watch daemon (PID {}) was not running. Cleaned up PID file.",
                     pid
@@ -808,13 +862,21 @@ pub fn stop() -> Result<()> {
 }
 
 /// Check the status of the watch daemon.
+///
+/// `#stalewatchpid`: reporting a stale pid file is also the moment to reclaim
+/// it. A `SIGKILL`ed or rebooted-away daemon leaves a record no exit path can
+/// clean, so the read side prunes it once identity proves it dead.
 pub fn status() -> Result<()> {
     match crate::read_pid() {
         Some(pid) => {
-            if crate::pid_alive(pid) {
+            if crate::pid_is_agent_doc_watch(pid) {
                 println!("Watch daemon running (PID {})", pid);
             } else {
-                println!("Watch daemon not running (stale PID file: {})", pid);
+                crate::remove_pid()?;
+                println!(
+                    "Watch daemon not running (cleared stale PID file: {})",
+                    pid
+                );
             }
         }
         None => {
@@ -899,8 +961,50 @@ mod tests {
         let pid = crate::read_pid_in(dir.path()).unwrap();
         assert_eq!(pid, std::process::id());
 
-        crate::remove_pid_in(dir.path());
+        crate::remove_pid_in(dir.path()).unwrap();
         assert!(crate::read_pid_in(dir.path()).is_none());
+    }
+
+    /// `#stalewatchpid` cause 1 — the one that leaked a pid file on *every*
+    /// ordinary shutdown.
+    ///
+    /// `signal_wait` used to be `loop { sleep(3600s) }`: it installed no handler
+    /// and never returned, so the default disposition for SIGTERM killed the
+    /// process outright and `start()`'s `remove_pid()` after the event loop was
+    /// unreachable. Prove the handler is installed and that the shutdown watcher
+    /// actually observes a real signal.
+    #[test]
+    fn shutdown_signal_releases_the_watcher_so_cleanup_can_run() {
+        use std::sync::atomic::Ordering;
+        use std::sync::mpsc;
+
+        SHUTDOWN_REQUESTED.store(false, Ordering::SeqCst);
+        let (tx, rx) = mpsc::channel();
+        ctrlc_handler(move || {
+            let _ = tx.send(());
+        });
+
+        // Deliver a real SIGTERM to this process. With the default disposition
+        // this call would terminate the test binary; surviving it is itself
+        // proof that a handler is installed.
+        // SAFETY: the installed handler only performs an atomic store.
+        unsafe {
+            libc::raise(libc::SIGTERM);
+        }
+
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("shutdown watcher must wake on SIGTERM so the pid file can be removed");
+        assert!(SHUTDOWN_REQUESTED.load(Ordering::SeqCst));
+
+        // Restore the default disposition so one test cannot mask a real
+        // termination signal for the rest of the suite.
+        for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+            // SAFETY: restoring the default handler is always valid.
+            unsafe {
+                libc::signal(signal, libc::SIG_DFL);
+            }
+        }
+        SHUTDOWN_REQUESTED.store(false, Ordering::SeqCst);
     }
 
     #[test]

@@ -790,6 +790,34 @@ fn load_live_authoritative_actor_record_for_file_uncached(
     Some(record)
 }
 
+/// `#ownershipbindingfirst`: resolve the actor record from the document path
+/// alone, memoized for the run.
+///
+/// The by-session variant below cannot serve the ownership hot path, because
+/// obtaining its `session_id` argument is exactly what costs the ~540-620ms
+/// `resolve_current_document` round-trip. The binding already carries the
+/// session id, so keying the cache by file removes that ordering constraint.
+fn load_live_authoritative_actor_record_for_file_cached(
+    tmux: &Tmux,
+    file: &Path,
+    proof_cache: &SyncProofCache,
+) -> Option<agent_doc_controller::actor::ActorRecord> {
+    if proof_cache.skip_authoritative_actor_lookup {
+        return None;
+    }
+    let key = sync_proof_file_key(file);
+    if let Some(record) = proof_cache.actor_records_by_file.borrow().get(&key) {
+        return record.clone();
+    }
+
+    let record = load_live_authoritative_actor_record_for_file_uncached(tmux, file);
+    proof_cache
+        .actor_records_by_file
+        .borrow_mut()
+        .insert(key, record.clone());
+    record
+}
+
 fn load_live_authoritative_actor_record_cached(
     tmux: &Tmux,
     file: &Path,
@@ -831,14 +859,177 @@ fn authoritative_actor_pane_for_document_cached(
         .map(|record| record.pane_id)
 }
 
-fn project_authoritative_actor_binding(
+/// Bring the durable registry back in line with the authoritative actor record.
+fn refresh_durable_registry_for_actor_record(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
+    record: &agent_doc_controller::actor::ActorRecord,
+    focus: Option<&str>,
+    auto_start_mode: AutoStartMode,
+) {
+    let actor_pane = record.pane_id.as_str();
+    if lookup_registry_entry_for_file_session(file, session_id)
+        .as_ref()
+        .map(|entry| entry.pane.as_str())
+        == Some(actor_pane)
+    {
+        return;
+    }
+    let registry_refresh_start = Instant::now();
+    eprintln!(
+        "[sync] authoritative actor generation {} keeps {} on pane {} — refreshing durable registry metadata",
+        record.generation,
+        file.display(),
+        actor_pane
+    );
+    sync_log(&format!(
+        "actor_registry_refresh file={} pane={} generation={}",
+        file.display(),
+        actor_pane,
+        record.generation
+    ));
+    if let Err(err) = reregister_recovered_owner(tmux, file, session_id, actor_pane) {
+        eprintln!(
+            "[sync] warning: failed to refresh authoritative actor pane {} for {} in durable registry: {}",
+            actor_pane,
+            file.display(),
+            err
+        );
+        sync_log(&format!(
+            "warning: actor_registry_refresh_failed file={} pane={} err={}",
+            file.display(),
+            actor_pane,
+            err
+        ));
+    }
+    log_sync_latency(
+        focus,
+        "registry_refresh",
+        registry_refresh_start.elapsed(),
+        SYNC_PROJECTION_REFRESH_BUDGET,
+        auto_start_mode,
+    );
+}
+
+/// Resolve the actor pane on the paths that still need document content first.
+///
+/// `#ownershipbindingfirst` moved the by-session actor lookup ahead of the
+/// content RPC, so by the time this runs the binding has already been consulted
+/// and missed (or was deliberately skipped). What remains are the two
+/// exact-visible shapes, which are keyed off the editor projection rather than
+/// the actor store.
+fn resolve_actor_pane_after_content(
+    tmux: &Tmux,
+    file_path: &Path,
+    exact_visible_projection: bool,
+    is_cross_root: bool,
+) -> Result<Option<String>> {
+    if !exact_visible_projection {
+        // `#ownershipbindingfirst`: the binding-first lookup above already
+        // asked the controller for this document and got nothing back. Asking
+        // again would repeat the same RPC — including its 5s timeout — for a
+        // miss we have already observed this run.
+        sync_log(&format!(
+            "ownership_binding_first_miss file={} source=controller_actor_lookup",
+            file_path.display(),
+        ));
+        return Ok(None);
+    }
+    if !is_cross_root {
+        // `#tmuxautosyncreactive` / `#lazily-hot-path`: the editor projection is
+        // the controller's domain. The reactive bindings (actor store +
+        // structural receipt) already named every pane the controller created;
+        // if none matched, no controller-managed pane exists. Skip the
+        // exhaustive `/proc` ownership walk (measured at ~4.4s for a single
+        // cold-start file) and go straight to provisioning. The walk only
+        // prevents duplicate panes — but the controller knows it hasn't created
+        // one.
+        sync_log(&format!(
+            "exact_visible_ownership_walk_skipped file={} reason=no_reactive_binding",
+            file_path.display(),
+        ));
+        return Ok(None);
+    }
+    // `#tmuxautosyncreactive` / `#lazily-hot-path`: a cross-root file's pane is
+    // owned by its nested controller's reactive actor store. Ask that controller
+    // for the binding instead of the exhaustive `/proc` ownership walk. The
+    // editor tab-switch path runs with `auto_start_mode=Full`
+    // (`skip_autostart_diagnostics` is false), so the earlier
+    // `skip_autostart_diagnostics && is_cross_root` reactive branch does not
+    // fire, and the walk below measured 670ms-1.3s per cross-root file on this
+    // path. The owning controller's binding is the authority; a missing or dead
+    // binding falls through to the registry fallback, same as a failed walk.
+    let owner_root = agent_doc_project_root_io::project_root_containing(file_path);
+    let observed = match owner_root {
+        Some(owner_root) => {
+            crate::runtime_effects()?.resolve_cross_root_document_pane(&owner_root, file_path)
+        }
+        None => Ok(None),
+    };
+    Ok(match observed {
+        Ok(Some(binding)) if tmux.pane_alive(&binding.pane_id) => {
+            sync_log(&format!(
+                "exact_visible_cross_root_actor_projection_reused file={} pane={} generation={}",
+                file_path.display(),
+                binding.pane_id,
+                binding.generation,
+            ));
+            Some(binding.pane_id)
+        }
+        Ok(Some(binding)) => {
+            sync_log(&format!(
+                "exact_visible_cross_root_actor_projection_dead file={} pane={} generation={}",
+                file_path.display(),
+                binding.pane_id,
+                binding.generation,
+            ));
+            None
+        }
+        Ok(None) => {
+            sync_log(&format!(
+                "exact_visible_cross_root_actor_projection_missing file={}",
+                file_path.display(),
+            ));
+            None
+        }
+        Err(error) => {
+            eprintln!(
+                "[sync] warning: owning-controller actor projection unavailable for {}: {}",
+                file_path.display(),
+                error,
+            );
+            sync_log(&format!(
+                "exact_visible_cross_root_actor_projection_failed file={} error={}",
+                file_path.display(),
+                error,
+            ));
+            None
+        }
+    })
+}
+
+/// `#ownershipbindingfirst`: resolve the authoritative actor binding for a
+/// document *before* its content has been fetched.
+///
+/// Identical to [`project_authoritative_actor_binding`] except that it does not
+/// take a `session_id` — it returns the whole record, whose `session_id` is the
+/// value the caller would otherwise have paid an editor content RPC to
+/// rediscover from frontmatter. `rpc.rs::authoritative_actor_binding` states the
+/// rule this implements: the binding is keyed by canonical document path and
+/// already carries the session id, and making a caller rediscover that id first
+/// "would invert editor authority for unsaved buffers and add an avoidable
+/// content RPC".
+///
+/// Ownership remains fail-closed: the underlying loader returns `None` unless
+/// the bound pane is alive, so a stale binding can never route a document.
+fn project_authoritative_actor_binding_by_file(
+    tmux: &Tmux,
+    file: &Path,
     focus: Option<&str>,
     auto_start_mode: AutoStartMode,
     proof_cache: &SyncProofCache,
-) -> Option<String> {
+) -> Option<agent_doc_controller::actor::ActorRecord> {
     if matches!(auto_start_mode, AutoStartMode::SafePassive)
         && proof_cache.skip_authoritative_actor_lookup
     {
@@ -855,9 +1046,14 @@ fn project_authoritative_actor_binding(
         ));
         return None;
     }
+    // `specs/07-session-tmux-commands.md`: safe-passive document binding must
+    // use the live local actor projection instead of a controller RPC on the
+    // editor fast path, logging `source=local_projection` plus an immediate
+    // `controller_actor_lookup` success sample. Like the pre-reorder path, this
+    // shortcut returns before the durable registry refresh.
     if matches!(auto_start_mode, AutoStartMode::SafePassive)
-        && let Some(pane_id) =
-            authoritative_actor_pane_for_document_cached(tmux, file, session_id, proof_cache)
+        && let Some(record) =
+            load_live_authoritative_actor_record_for_file_cached(tmux, file, proof_cache)
     {
         log_sync_latency(
             focus,
@@ -869,13 +1065,13 @@ fn project_authoritative_actor_binding(
         sync_log(&format!(
             "controller_actor_lookup_skipped file={} pane={} source=local_projection",
             file.display(),
-            pane_id
+            record.pane_id
         ));
-        return Some(pane_id);
+        return Some(record);
     }
 
     let lookup_start = Instant::now();
-    let record = load_live_authoritative_actor_record_cached(tmux, file, session_id, proof_cache);
+    let record = load_live_authoritative_actor_record_for_file_cached(tmux, file, proof_cache);
     log_sync_latency(
         focus,
         "controller_actor_lookup",
@@ -884,48 +1080,15 @@ fn project_authoritative_actor_binding(
         auto_start_mode,
     );
     let record = record?;
-    let actor_pane = record.pane_id.clone();
-    if lookup_registry_entry_for_file_session(file, session_id)
-        .as_ref()
-        .map(|entry| entry.pane.as_str())
-        != Some(actor_pane.as_str())
-    {
-        let registry_refresh_start = Instant::now();
-        eprintln!(
-            "[sync] authoritative actor generation {} keeps {} on pane {} — refreshing durable registry metadata",
-            record.generation,
-            file.display(),
-            actor_pane
-        );
-        sync_log(&format!(
-            "actor_registry_refresh file={} pane={} generation={}",
-            file.display(),
-            actor_pane,
-            record.generation
-        ));
-        if let Err(err) = reregister_recovered_owner(tmux, file, session_id, &actor_pane) {
-            eprintln!(
-                "[sync] warning: failed to refresh authoritative actor pane {} for {} in durable registry: {}",
-                actor_pane,
-                file.display(),
-                err
-            );
-            sync_log(&format!(
-                "warning: actor_registry_refresh_failed file={} pane={} err={}",
-                file.display(),
-                actor_pane,
-                err
-            ));
-        }
-        log_sync_latency(
-            focus,
-            "registry_refresh",
-            registry_refresh_start.elapsed(),
-            SYNC_PROJECTION_REFRESH_BUDGET,
-            auto_start_mode,
-        );
-    }
-    Some(actor_pane)
+    refresh_durable_registry_for_actor_record(
+        tmux,
+        file,
+        &record.session_id.clone(),
+        &record,
+        focus,
+        auto_start_mode,
+    );
+    Some(record)
 }
 
 #[cfg(test)]
@@ -2979,136 +3142,117 @@ fn run_with_options_internal_at_root(
                     .insert(file_path.to_path_buf());
                 continue;
             }
-            let content = match crate::runtime_effects().and_then(|effects| {
-                effects.resolve_current_document(file_path, "sync_ownership_authority")
-            }) {
-                Ok(content) => content,
-                Err(error) => {
-                    eprintln!(
-                        "[sync] warning: current editor-authoritative content unavailable for {}: {}",
-                        file_path.display(),
-                        error
-                    );
-                    continue;
-                }
-            };
-            let (fm, _) = match parse_frontmatter_for_sync(&content, file_path, "auto-start") {
-                Ok(r) => r,
-                Err(e) => {
-                    let warning = format!("[sync] warning: {}", e);
-                    eprintln!("{}", warning);
-                    sync_log(&warning);
-                    if !skip_sync_status_updates {
-                        crate::surface_frontmatter_status_with(
-                            file_path,
-                            "auto-start",
-                            &e,
-                            save_sync_status_snapshot,
-                            log_sync_status,
-                        );
-                    }
-                    continue;
-                }
-            };
-            if !skip_sync_status_updates {
-                crate::clear_frontmatter_status_with(
+            // `#ownershipbindingfirst`: consult the controller's file→actor
+            // binding BEFORE fetching document content.
+            //
+            // The slow ownership path used to fetch the whole document over
+            // editor IPC (`resolve_current_document`, measured at ~540-620ms per
+            // file on this path — 2 files x ~600ms is the bulk of every
+            // 1330-1474ms `ownership_proof` in the field log) purely to read one
+            // frontmatter field, `session:`, and then hand that value to the
+            // actor lookup. The binding is keyed by canonical document path and
+            // already carries the session id, so the content RPC bought nothing
+            // that the ~95ms lookup does not already return. Ask the binding
+            // first; only a binding miss pays for content.
+            //
+            // This narrows, never widens, what may own a document: the loader
+            // still requires a live bound pane, so ownership stays fail-closed.
+            // It does change which side wins a session-id disagreement — the
+            // live actor now beats the document's declared `session:` instead of
+            // being filtered out by it. That is the direction `#lazily-hot-path`
+            // and `rpc.rs::authoritative_actor_binding` both prescribe: the
+            // actor is the hot-path authority and frontmatter may lag a reroute.
+            let binding_first = if exact_visible_projection {
+                // Neither exact-visible branch below wants this lookup. The
+                // same-root case deliberately goes straight to provisioning, and
+                // the cross-root case already asked the owning controller at the
+                // pre-IPC reuse branch above — repeating it here would just buy a
+                // second round-trip to the same miss.
+                None
+            } else {
+                project_authoritative_actor_binding_by_file(
+                    tmux,
                     file_path,
-                    save_sync_status_snapshot,
-                    log_sync_status,
-                );
-            }
-            let session_id = match fm.session {
-                Some(ref id) => id.clone(),
-                None => continue,
+                    hot_latency_focus,
+                    auto_start_mode,
+                    &proof_cache,
+                )
+            };
+
+            let (session_id, authoritative_actor_pane) = if let Some(record) = binding_first {
+                sync_log(&format!(
+                    "ownership_binding_first_hit file={} pane={} generation={} skipped=content_rpc",
+                    file_path.display(),
+                    record.pane_id,
+                    record.generation,
+                ));
+                // The proven binding is the resolution tmux-router needs, so
+                // publish it as a pre-resolved pane. Otherwise the router calls
+                // `resolve_file`, which crosses the same editor-authority
+                // boundary this reorder just avoided — a SECOND content RPC per
+                // file, timed under `tmux_router` (539-825ms in the same slow
+                // runs whose `ownership_proof` was 1330-1474ms). tmux-router's
+                // own comment gives the identical rationale for the short
+                // circuit: a caller-proven live binding is already the
+                // resolution.
+                pre_resolved_panes.insert(file_path.to_path_buf(), record.pane_id.clone());
+                (record.session_id.clone(), Some(record.pane_id.clone()))
+            } else {
+                let content = match crate::runtime_effects().and_then(|effects| {
+                    effects.resolve_current_document(file_path, "sync_ownership_authority")
+                }) {
+                    Ok(content) => content,
+                    Err(error) => {
+                        eprintln!(
+                            "[sync] warning: current editor-authoritative content unavailable for {}: {}",
+                            file_path.display(),
+                            error
+                        );
+                        continue;
+                    }
+                };
+                let (fm, _) = match parse_frontmatter_for_sync(&content, file_path, "auto-start") {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let warning = format!("[sync] warning: {}", e);
+                        eprintln!("{}", warning);
+                        sync_log(&warning);
+                        if !skip_sync_status_updates {
+                            crate::surface_frontmatter_status_with(
+                                file_path,
+                                "auto-start",
+                                &e,
+                                save_sync_status_snapshot,
+                                log_sync_status,
+                            );
+                        }
+                        continue;
+                    }
+                };
+                if !skip_sync_status_updates {
+                    crate::clear_frontmatter_status_with(
+                        file_path,
+                        save_sync_status_snapshot,
+                        log_sync_status,
+                    );
+                }
+                let session_id = match fm.session {
+                    Some(ref id) => id.clone(),
+                    None => continue,
+                };
+                let pane = resolve_actor_pane_after_content(
+                    tmux,
+                    file_path,
+                    exact_visible_projection,
+                    is_cross_root,
+                )?;
+                (session_id, pane)
             };
             if matches!(auto_start_mode, AutoStartMode::SafePassive) {
                 safe_passive_managed_files
                     .borrow_mut()
                     .insert(file_path.to_path_buf());
             }
-
-            let authoritative_actor_pane = if exact_visible_projection && !is_cross_root {
-                // `#tmuxautosyncreactive` / `#lazily-hot-path`: the editor
-                // projection is the controller's domain. The reactive bindings
-                // (actor store + structural receipt) already named every pane
-                // the controller created; if none matched, no controller-
-                // managed pane exists. Skip the exhaustive `/proc` ownership
-                // walk (measured at ~4.4s for a single cold-start file) and go
-                // straight to provisioning. The walk only prevents duplicate
-                // panes — but the controller knows it hasn't created one.
-                sync_log(&format!(
-                    "exact_visible_ownership_walk_skipped file={} reason=no_reactive_binding",
-                    file_path.display(),
-                ));
-                None
-            } else if exact_visible_projection && is_cross_root {
-                // `#tmuxautosyncreactive` / `#lazily-hot-path`: a cross-root
-                // file's pane is owned by its nested controller's reactive actor
-                // store. Ask that controller for the binding instead of the
-                // exhaustive `/proc` ownership walk. The editor tab-switch path
-                // runs with `auto_start_mode=Full` (`skip_autostart_diagnostics`
-                // is false), so the earlier `skip_autostart_diagnostics &&
-                // is_cross_root` reactive branch does not fire, and the walk
-                // below measured 670ms-1.3s per cross-root file on this path.
-                // The owning controller's binding is the authority; a missing or
-                // dead binding falls through to the registry fallback below,
-                // same as a failed walk.
-                let owner_root = agent_doc_project_root_io::project_root_containing(file_path);
-                let observed = match owner_root {
-                    Some(owner_root) => crate::runtime_effects()?
-                        .resolve_cross_root_document_pane(&owner_root, file_path),
-                    None => Ok(None),
-                };
-                match observed {
-                    Ok(Some(binding)) if tmux.pane_alive(&binding.pane_id) => {
-                        sync_log(&format!(
-                            "exact_visible_cross_root_actor_projection_reused file={} pane={} generation={}",
-                            file_path.display(),
-                            binding.pane_id,
-                            binding.generation,
-                        ));
-                        Some(binding.pane_id)
-                    }
-                    Ok(Some(binding)) => {
-                        sync_log(&format!(
-                            "exact_visible_cross_root_actor_projection_dead file={} pane={} generation={}",
-                            file_path.display(),
-                            binding.pane_id,
-                            binding.generation,
-                        ));
-                        None
-                    }
-                    Ok(None) => {
-                        sync_log(&format!(
-                            "exact_visible_cross_root_actor_projection_missing file={}",
-                            file_path.display(),
-                        ));
-                        None
-                    }
-                    Err(error) => {
-                        eprintln!(
-                            "[sync] warning: owning-controller actor projection unavailable for {}: {}",
-                            file_path.display(),
-                            error,
-                        );
-                        sync_log(&format!(
-                            "exact_visible_cross_root_actor_projection_failed file={} error={}",
-                            file_path.display(),
-                            error,
-                        ));
-                        None
-                    }
-                }
-            } else {
-                project_authoritative_actor_binding(
-                    tmux,
-                    file_path,
-                    &session_id,
-                    hot_latency_focus,
-                    auto_start_mode,
-                    &proof_cache,
-                )
-            };
             sa += seg_mark.elapsed();
             seg_mark = Instant::now();
             let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);
@@ -5889,6 +6033,106 @@ mod tests {
 
         assert_eq!(preserved, saved_layout);
         assert!(dropped.is_empty());
+    }
+
+    /// `#ownershipbindingfirst`: the ownership proof consults the controller's
+    /// file→actor binding before fetching document content, so a document whose
+    /// content is unavailable still routes when a live binding names its pane.
+    ///
+    /// This is the discriminating shape for the reorder. Before it, the loop
+    /// fetched content first purely to read `session:` out of frontmatter, so an
+    /// unreadable document made the whole file `continue` and its pane stayed
+    /// stashed — even though the binding already knew the session and the pane.
+    /// The content RPC costs ~540-620ms per file on this path; a binding hit
+    /// costs ~95ms and now short-circuits it.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn ownership_binding_first_routes_without_content_authority() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let doc = root.join("tasks/binding-first.md");
+        std::fs::write(&doc, "---\nagent_doc_session: bound-session\n---\n\n# Doc\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-ownership-binding-first");
+        let anchor_pane = iso.new_session("test", &root).unwrap();
+        let target_window = iso.pane_window(&anchor_pane).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &target_window, "agent-doc"])
+            .unwrap();
+        let doc_pane = iso.new_window("test", &root).unwrap();
+        let doc_window = iso.pane_window(&doc_pane).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &doc_window, "stash"])
+            .unwrap();
+
+        sessions::register_full_with_cwd_in(
+            &root,
+            "bound-session",
+            &doc_pane,
+            &doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &doc_pane).unwrap(),
+            &doc_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        // The live actor binding is the ownership fact under test: it carries
+        // both the pane and the session id, which is exactly what the removed
+        // content round-trip used to rediscover.
+        agent_doc_session_actor_io::project_binding_in(
+            &root,
+            &doc.to_string_lossy(),
+            "bound-session",
+            &doc_pane,
+            &doc_window,
+            "sync",
+            "ownership_binding_first",
+        )
+        .unwrap();
+
+        // Make document content unavailable. Any implementation that reads
+        // content before consulting the binding cannot resolve ownership here.
+        std::fs::remove_file(&doc).unwrap();
+        std::fs::create_dir(&doc).unwrap();
+
+        let columns = vec![doc.to_string_lossy().to_string()];
+        let _cwd = ScopedCurrentDir::set(&root);
+
+        run_with_options_internal_at_root(
+            &root,
+            &columns,
+            Some(&target_window),
+            Some(doc.to_string_lossy().as_ref()),
+            AutoStartMode::SafePassive,
+            // `exact_visible_projection=false` is the measured slow shape: no
+            // reactive bindings are carried in, so every editor fast path above
+            // the ownership loop is disabled and the loop must resolve ownership
+            // itself.
+            false,
+            false,
+            &[],
+            &iso,
+        )
+        .unwrap();
+
+        // The anchor pane holds no requested document, so sync stashes it and
+        // the single requested column is the bound pane. Before the reorder the
+        // unreadable document made ownership unresolvable, the file was skipped
+        // (`resolved=0`), and `%1` stayed in the stash window.
+        assert_eq!(
+            iso.list_panes_ordered(&target_window).unwrap(),
+            vec![doc_pane],
+            "a live actor binding should resolve ownership and route the pane without any document content read"
+        );
+        assert!(
+            !anchor_pane.is_empty(),
+            "anchor pane id should have been captured"
+        );
     }
 
     #[test]

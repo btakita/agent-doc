@@ -51,6 +51,18 @@ fn init_git_repo(root: &Path, tracked: &Path) {
         .unwrap();
 }
 
+fn track_codex_session(root: &Path, doc: &Path) {
+    agent_doc_codex_hook_io::apply_user_prompt_submit(
+        &agent_doc_codex_hook_io::UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: root.display().to_string(),
+            prompt: format!("agent-doc {}", doc.display()),
+        },
+    )
+    .unwrap();
+}
+
 fn auto_queue_doc_content_with_prompts(prompts: &[&str]) -> String {
     let queue = prompts
         .iter()
@@ -116,19 +128,10 @@ fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
     .unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    let submit_payload = json!({
-        "session_id": "codex-session",
-        "turn_id": "turn-1",
-        "cwd": tmp.path().display().to_string(),
-        "prompt": format!("agent-doc {}", doc.display()),
-    });
-
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["hook", "codex-user-prompt-submit"])
-        .write_stdin(submit_payload.to_string())
-        .assert()
-        .success();
+    // This fixture exercises repeated Stop recovery from an already-clean
+    // queue document, so bind the session without starting a new admission
+    // cycle. Codex entrypoint admission is covered separately below.
+    track_codex_session(tmp.path(), &doc);
 
     let first_stop = json!({
         "session_id": "codex-session",
@@ -194,19 +197,6 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
     let (tmp, doc) = setup_template_doc();
     init_git_repo(tmp.path(), &doc);
 
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["preflight", doc.to_str().unwrap()])
-        .assert()
-        .success();
-
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["session-check", doc.to_str().unwrap()])
-        .assert()
-        .failure()
-        .stdout(predicate::str::contains("INTERRUPTED"));
-
     let submit_payload = json!({
         "session_id": "codex-session",
         "turn_id": "turn-1",
@@ -219,7 +209,19 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
         .args(["hook", "codex-user-prompt-submit"])
         .write_stdin(submit_payload.to_string())
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains(
+            "[agent-doc] cycle contract (preflight already ran in the binary;",
+        ));
+
+    // The same hook invocation must also have opened the cycle. This proves
+    // Codex admission is not merely an injected marker or tracking-only state.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("INTERRUPTED"));
 
     let stop_payload = json!({
         "session_id": "codex-session",
@@ -293,18 +295,9 @@ fn codex_hook_cli_resumes_original_capture_over_editor_convergence_block() {
     )
     .unwrap();
 
-    let submit_payload = json!({
-        "session_id": "codex-session",
-        "turn_id": "turn-1",
-        "cwd": tmp.path().display().to_string(),
-        "prompt": format!("agent-doc {}", doc.display()),
-    });
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["hook", "codex-user-prompt-submit"])
-        .write_stdin(submit_payload.to_string())
-        .assert()
-        .success();
+    // Preserve the deliberately staged convergence state while binding it to
+    // Codex; the combined entrypoint's admission behavior is tested above.
+    track_codex_session(tmp.path(), &doc);
 
     let stop_payload = json!({
         "session_id": "codex-session",

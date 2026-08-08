@@ -1047,7 +1047,7 @@ fn merge_codex_hooks_json(path: &Path) -> Result<()> {
         hooks_map,
         "UserPromptSubmit",
         CODEX_USER_PROMPT_COMMAND,
-        Some("Tracking active agent-doc session"),
+        Some("Preparing agent-doc cycle"),
     );
     ensure_codex_hook_command(
         hooks_map,
@@ -1293,14 +1293,20 @@ fn ensure_codex_hook_command(
         return ensure_codex_hook_command(hooks_map, event, command, status_message);
     };
 
-    let already_present = entry_array.iter().any(|entry| {
+    let already_present = entry_array.iter_mut().any(|entry| {
         entry
-            .get("hooks")
-            .and_then(|hooks| hooks.as_array())
+            .get_mut("hooks")
+            .and_then(|hooks| hooks.as_array_mut())
             .map(|hooks| {
-                hooks.iter().any(|hook| {
-                    hook.get("type").and_then(|v| v.as_str()) == Some("command")
-                        && hook.get("command").and_then(|v| v.as_str()) == Some(command)
+                hooks.iter_mut().any(|hook| {
+                    let matches = hook.get("type").and_then(|v| v.as_str()) == Some("command")
+                        && hook.get("command").and_then(|v| v.as_str()) == Some(command);
+                    if matches
+                        && let (Some(status), Some(hook)) = (status_message, hook.as_object_mut())
+                    {
+                        hook.insert("statusMessage".to_string(), serde_json::json!(status));
+                    }
+                    matches
                 })
             })
             .unwrap_or(false)
@@ -2257,11 +2263,10 @@ mod tests {
         let submit_hooks = hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
             .as_array()
             .unwrap();
-        assert!(
-            submit_hooks
-                .iter()
-                .any(|hook| hook["command"].as_str() == Some(CODEX_USER_PROMPT_COMMAND))
-        );
+        assert!(submit_hooks.iter().any(|hook| {
+            hook["command"].as_str() == Some(CODEX_USER_PROMPT_COMMAND)
+                && hook["statusMessage"].as_str() == Some("Preparing agent-doc cycle")
+        }));
 
         let config: toml::Value =
             toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
@@ -2382,14 +2387,25 @@ mod tests {
             dir.path().join(".codex/hooks.json"),
             serde_json::json!({
                 "hooks": {
-                    "Stop": [
-                        {
-                            "hooks": [
-                                { "type": "command", "command": "echo existing-stop" }
-                            ]
-                        }
-                    ]
-                }
+                "Stop": [
+                    {
+                        "hooks": [
+                            { "type": "command", "command": "echo existing-stop" }
+                        ]
+                    }
+                ],
+                "UserPromptSubmit": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": CODEX_USER_PROMPT_COMMAND,
+                                "statusMessage": "Tracking active agent-doc session"
+                            }
+                        ]
+                    }
+                ]
+            }
             })
             .to_string(),
         )
@@ -2421,6 +2437,14 @@ mod tests {
                 .iter()
                 .any(|hook| hook["command"].as_str() == Some(CODEX_STOP_COMMAND))
         }));
+        let submit_hooks = hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
+            .as_array()
+            .unwrap();
+        assert_eq!(submit_hooks.len(), 1, "managed hook must not be duplicated");
+        assert_eq!(
+            submit_hooks[0]["statusMessage"].as_str(),
+            Some("Preparing agent-doc cycle")
+        );
 
         let config: toml::Value = toml::from_str(
             &std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap(),

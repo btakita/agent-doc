@@ -3392,11 +3392,18 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
         "codex_hook.rs should call focused Codex hook IO directly"
     );
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let preflight_hook_source =
+        fs::read_to_string(manifest_dir.join("src/preflight_hook.rs")).unwrap();
     assert!(
-        main_source.contains("agent_doc_codex_hook_io::handle_user_prompt_submit()")
+        main_source.contains("preflight_hook::handle_codex_user_prompt_submit()")
             && !main_source
                 .contains("agent_doc_orchestration::codex_hook::handle_user_prompt_submit()"),
-        "Codex UserPromptSubmit hook should route directly to focused Codex hook IO"
+        "Codex UserPromptSubmit should route to the binary-owned combined admission hook"
+    );
+    assert!(
+        preflight_hook_source.contains("agent_doc_codex_hook_io::apply_user_prompt_submit(&input)")
+            && preflight_hook_source.contains("run_preflight_for_prompt(&input.prompt"),
+        "combined Codex admission must use focused tracking IO before binary preflight"
     );
 }
 

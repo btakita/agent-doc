@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.161
+
+- **Codex harness-native entry now performs binary-owned admission and tracking in one hook.**
+  `agent-doc hook codex-user-prompt-submit` durably binds the active document before running
+  preflight, emits the cycle contract as Codex turn context, and appends the contract marker only
+  after preflight succeeds. Ordinary prompts remain context-free, while malformed payloads and
+  tracking/preflight failures emit no marker so the skill fails admission closed. Installer
+  upgrades preserve the existing hook command and refresh its status label, and end-to-end
+  coverage proves the same invocation opens a cycle that the Codex Stop hook can close and commit.
+
 ## 0.35.160
 
 - **Run Agent Doc is a true pass-through steering action.** The editor's plain

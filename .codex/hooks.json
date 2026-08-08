@@ -32,7 +32,7 @@
         "hooks": [
           {
             "command": "agent-doc hook codex-user-prompt-submit",
-            "statusMessage": "Tracking active agent-doc session",
+            "statusMessage": "Preparing agent-doc cycle",
             "type": "command"
           }
         ]

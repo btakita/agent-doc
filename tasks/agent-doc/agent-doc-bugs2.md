@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: e61edbb1-dd19-402f-9bed-69d29c9a1a2c
+resume: ddfcfcb8-90a1-4500-8c99-9089bd1928a3
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -205,6 +205,20 @@ Window `02:06:07Z .. 05:39:02Z`. Every sample is post-fix by construction — th
 The item's fallback branch does not apply: neither pass is over budget, so there is no remaining cost to chase in `repair_file_state_with_tmux`'s own file read, frontmatter parse, or `detect_jb_cache_conflict_cancel_recoverable` call.
 
 This was read-only log analysis — no source touched, so it does not collide with the concurrent session rewriting `agent-doc-sync-io/src/sync.rs`.
+
+### Re: agent-doc tasks/agent-doc/agent-doc-bugs2.md (no cycle contract) — opus-5
+
+This dispatch produced **no `[agent-doc] cycle contract` marker**, so there was no admitted cycle to answer. That is fail-closed by design, and the cause was a defect I shipped an hour ago.
+
+**What happened.** The trigger arrived as `agent-doc tasks/agent-doc/agent-doc-bugs2.md` — a **relative** path. Compare the first dispatch of this session, which came from the route path: `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, absolute. The pane's working directory had moved into `src/agent-doc` during the release work, so `tasks/agent-doc/agent-doc-bugs2.md` did not resolve there, preflight could not run, and the admission hook emitted nothing at all. No error, no warning — the continuation simply died.
+
+**Why `#qcontprose` introduced it.** The paragraph I replaced embedded the same path, but only *descriptively* — the agent read it. Turning it into the trigger made the string **executed**, and an executed relative path is resolved against the **pane's** cwd, which nothing guarantees equals the supervisor's. I changed the path's role without changing its form.
+
+**Fixed as `#qcontabspath` (0.35.163).** `owned_pane_queue_continuation_prompt` now absolutizes with `std::path::absolute` — lexical plus the supervisor's cwd, which is exactly the directory the relative path was expressed against. It lives inside the function rather than at the call site so the guarantee is unconditional: a caller cannot forget it, and every dispatch path now emits the same absolute form the route path always sent. Test asserts a relative input dispatches an absolute path that still ends in the document.
+
+`make check` green (8692 tests), installed, recycled on both roots, pushed (agent-doc `34a3f4c62`, superproject `89f43e146d`).
+
+**Note on the class.** A dispatch that produces no cycle contract is invisible from inside the document — nothing records that a continuation was attempted and lost. The queue simply stops draining and looks idle. That is worth a detector, but it needs an owner on the admission side; not filed as work I could complete this turn.
 <!-- agent:boundary:9a949f6b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue

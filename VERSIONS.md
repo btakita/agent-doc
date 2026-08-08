@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.167
+
+- **The Windows wheel builds again (`#watchsighupwin`).** `agent-doc-watch-io`'s
+  `install_shutdown_signal_handlers` (`#stalewatchpid`) listed `libc::SIGHUP` unconditionally, and
+  that constant does not exist on `x86_64-pc-windows-msvc` — so every tagged release failed its
+  PyPI job with `error[E0425]: cannot find value SIGHUP in crate libc`, the only red leg in the
+  publish. The handler installation is now `#[cfg(unix)]` with a no-op elsewhere: the pid-file
+  lifecycle it protects is a unix daemon concern.
+
 ## 0.35.166
 
 - **A `--done <id>` closeout no longer eats an unrelated free-text queue head (`#qftnodoneeat`).**

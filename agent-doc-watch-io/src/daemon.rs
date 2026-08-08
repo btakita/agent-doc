@@ -317,6 +317,7 @@ pub fn start<E: WatchDaemonEffects>(
 static SHUTDOWN_REQUESTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+#[cfg(unix)]
 extern "C" fn handle_shutdown_signal(_signal: libc::c_int) {
     SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
 }
@@ -329,6 +330,7 @@ extern "C" fn handle_shutdown_signal(_signal: libc::c_int) {
 /// shutdown, and each one leaked a pid file. `SIGHUP` matters because a
 /// daemon spawned from a terminal that later closes is one of the common ways
 /// this process dies.
+#[cfg(unix)]
 fn install_shutdown_signal_handlers() {
     for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         // SAFETY: `handle_shutdown_signal` only performs an atomic store, which
@@ -341,6 +343,14 @@ fn install_shutdown_signal_handlers() {
         }
     }
 }
+
+/// `#watchsighupwin`: `libc::SIGHUP` does not exist on `*-pc-windows-msvc`, so
+/// the unconditional handler list broke the Windows wheel build for every
+/// release (`cannot find value SIGHUP in crate libc`) — the PyPI job's only red
+/// leg. The pid-file lifecycle this exists to protect is a unix daemon concern;
+/// on Windows there is nothing to install.
+#[cfg(not(unix))]
+fn install_shutdown_signal_handlers() {}
 
 /// Simple signal handler registration (best-effort).
 fn ctrlc_handler<F: Fn() + Send + 'static>(f: F) {

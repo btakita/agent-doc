@@ -127,12 +127,38 @@ Layout keeps `addons/lazily/` as the entire shipping surface, with tests, the ru
 **One thing I deliberately stopped short of.** The scaffold is committed locally (`3d8e90d`, 13 files) but has **no remote** — creating a public repo under the `lazily-hub` org is outward-facing and wasn't explicitly authorized, so I left it as `#lzgdremote` at the top of the backlog. Say the word and it's a minute's work, including the submodule wiring.
 
 Closing `#lzgdbinding` and replacing it with per-phase IDs — `#lzgdremote`, `#lzgdkernel` (Phase 1), `#lzgdrunner` (Phase 2) — rather than re-gating one parent through five phases. `#lzcppwasm` remains queued.
+
+### Re: do [#lzgdremote] — repo created, CI green on the floor — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzgdremote]
+
+
+`github.com/lazily-hub/lazily-gd` is public, `main` is pushed, and it's wired into the superproject as a submodule (`5e11ace633`). CI is **green on Godot 4.4.1**: 4 test cases executed, 0 orphans.
+
+**Wiring `.gitmodules` needed care.** It already had an uncommitted `src/haiven-dev` stanza from another pane — and `src/haiven-dev` is a committed gitlink in HEAD with *no* `.gitmodules` entry, so that pane is mid-repair of a genuinely broken state. Committing the file wholesale would have taken their fix. I committed HEAD's content plus only my `lazily-gd` stanza, then restored the full working-tree version, so their edit is still sitting uncommitted and still theirs. Verified after the fact: the committed `.gitmodules` has zero `haiven-dev` lines, the working tree has them back.
+
+**Then CI failed twice, and both failures were worth having.**
+
+The first was `set: Illegal option -o pipefail` — make invokes `/bin/sh`, which is dash on Ubuntu. This wasn't cosmetic: the suite pipes Godot through `tee`, so without `pipefail` the recipe reports *tee's* exit code and a failing test run reads as success. That's the same false-green the vacuity guard exists to stop, arriving by another route. Fixed with `SHELL := /bin/bash` and proven by forcing the run to fail (`make test GODOT=false` now exits 2). Invisible locally because Arch's `/bin/sh` is bash.
+
+The second was mine, and it's the more useful correction. **I pinned gdUnit4 wrong.** I told you last cycle I'd confirmed gdUnit4 against the 4.4 floor — that check was real but I then pinned v6.2.0, and upstream's compatibility row listing `v4.3/v4.4/v4.4.1` covers the **v5.x** line. On 4.4.1, v6.2.0 fails to resolve its own classes and then *hangs instead of exiting*, so the job ran 3+ minutes with nothing to show. I cancelled it rather than let it burn the limit, downloaded 4.4.1 locally, and reproduced the hang exactly — then verified **v5.1.1** passes on both 4.4.1 and 4.7.1. That's the pin now.
+
+Two lessons went into the code rather than just this message: verify a framework pin against the **floor** engine, not the one you happen to run (4.7.1 hid this completely), and read the released tag rather than `plugin.cfg` on `main` — which says `6.2.1`, unreleased, and 404s. Both are comments at the pin.
+
+I also bounded both Godot invocations in `timeout`. A hang is a distinct failure mode from a red test, and an unbounded CI job reports nothing at all. Guard driven: `TEST_TIMEOUT=0.1` exits 2, normal run stays green. My first attempt at that check used `TEST_TIMEOUT=1` and passed — the whole run takes 0.83s, so the test was inconclusive rather than the guard being sound.
+
+Queue head is now `#lzgdkernel` (Phase 1 kernel), then `#lzgdrunner`, then `#lzcppwasm`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzgdremote]~~
+- do [#lzgdkernel]
+- do [#lzgdrunner]
 - ~~do [#lzgdbinding]~~
 - do [#lzcppwasm]
 <!-- /agent:queue -->
@@ -140,7 +166,6 @@ Closing `#lzgdbinding` and replacing it with per-phase IDs — `#lzgdremote`, `#
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgdremote] [operator-action] Create the lazily-hub/lazily-gd GitHub remote, push the Phase 0 scaffold (local commit 3d8e90d in src/lazily-gd), and wire it into the agent-loop superproject as a submodule + .gitmodules entry. Held back deliberately: creating a public repo under the lazily-hub org is outward-facing and was not explicitly authorized. Everything else in Phase 0 is done and verified locally; this is one go-ahead away.
 - [ ] [#lzgdkernel] Phase 1 of tasks/software/plan-lazily-gd.md: the cell kernel (coverage row 0) plus the loading invariant. Source/Computed/Effect/Context with explicit ctx threading (no ambient, no signal/get_signal), WeakRef back-edges with ctx.scope() as the SOLE strong owner, edge index keyed on get_instance_id() with O(1) dedup and prune-on-propagate BEFORE any edge-count assertion, teardown in reverse creation order. An Effect created outside any scope must ERROR, not silently collect. Exit criteria include a load-graph test asserting the kernel loads no other family — preload() is eager and transitive, and retrofitting layering after six families exist is the expensive order. Remember 4.5's @abstract is unavailable at the 4.4 floor. Treat any nonzero gdUnit4 orphan count as a failure, not noise.
 - [ ] [#lzgdrunner] Phase 2 of tasks/software/plan-lazily-gd.md: the conformance fixture runner plus the runtime-manifest guard (build/conformance-fixtures-loaded.txt + check-conformance-coverage.sh with EXTS=.gd), landed in the SAME phase as the runner per the plan. Mutation-check the guard before trusting green — lazily-cpp's queue tests were hand-transcribed rather than replayed, and a source grep cannot see that case. Only once the runner replays real fixtures does lazily-gd earn its coverage.json column (rows 0 and 15, KNOWN_UNCOVERED populated and shrinking); adding the column before then would claim a binding that does not exist.
 - [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.

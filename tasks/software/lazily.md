@@ -423,7 +423,7 @@ lazily-zig now replays all **nine canonical lossless-tree fixtures** from the co
 `make check` green in lazily-zig: **129 of 149 canonical fixtures opened (up from 120), 20 known-uncovered (down from 29), 128/128 scenarios replayed (up from 114)**. CI is running (`31296905681`) and recorded pending. One note on the local suite: bare `zig build test` prints the scenario-identity guard's own self-test to stderr and the build runner reports that as a failed command — the Makefile's `test` target is what tolerates it. I checked that against HEAD before touching anything, since a red-looking suite I did not cause is exactly the thing to verify rather than assume.
 
 Queue: `#lzregistersfixture`.
-<!-- agent:boundary:eb7fd869 -->
+<!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
